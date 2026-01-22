@@ -9,18 +9,38 @@ I'll handle the rest.
 
 ---
 
-## Your Goal
+## CRITICAL RULES
 
-Create a complete GitHub issue with:
-- Clear title
-- TL;DR of what this is about
-- Current state vs expected outcome
-- Relevant files that need touching
-- Risk/notes if applicable
-- Proper type/priority/effort labels
+1. **ASK 2-3 QUESTIONS FIRST** - Never create the issue immediately
+2. **Keep issues SHORT** - Max 10-15 lines total
+3. **NO implementation details** - No code, no file paths, no technical approach
+4. **NO solution design** - That's what /explore and /create-plan are for
+5. **Capture the WHAT, not the HOW**
 
-## How to Get There
+## Questions to Ask
 
-**Ask questions** to fill gaps - be concise, respect the user's time. They're mid-flow and want to capture this quickly.
+- Bug, feature, or improvement?
+- Priority? (high/medium/low)
+- Any context I should know?
 
-**Keep it fast** - Get what you need, create the issue format, done.
+## Issue Format (Keep It Tight)
+```
+## TL;DR
+[1-2 sentences max]
+
+## Current State
+[What happens now - 1-2 sentences]
+
+## Desired State
+[What should happen - 1-2 sentences]
+
+## Labels
+- Type: [bug/feature/improvement]
+- Priority: [high/medium/low]
+```
+
+## REMEMBER
+- This is a QUICK capture tool, not a planning doc
+- User is mid-flow - be fast and concise
+- Implementation details belong in /explore and /create-plan
+- Ask questions first, then create a SHORT issue

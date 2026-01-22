@@ -2,6 +2,12 @@
 
 Perform comprehensive code review. Be thorough but concise.
 
+## CRITICAL RULES
+
+1. **REPORT ONLY** - Do NOT make any changes or edits to files
+2. **Wait for approval** - Only fix things after I say "fix it"
+3. **Explain simply** - I'm a PM learning to code, use plain English
+
 ## Check For
 
 - **Logging** - No console.log statements, uses proper logger with context
@@ -33,3 +39,5 @@ Perform comprehensive code review. Be thorough but concise.
 - **HIGH** - Bugs, performance issues, bad UX
 - **MEDIUM** - Code quality, maintainability
 - **LOW** - Style, minor improvements
+
+## REMEMBER: Report issues only. Do NOT edit any files until I approve.
