@@ -89,7 +89,7 @@ We follow this flow for features:
 **Examples:**
 - `Add git workflow guidance to CLAUDE.md`
 - `Remove Next.js web app (out of scope for v1)`
-- `Fix broken reference in dev-lead-1 command`
+- `Fix broken reference in dev-lead command`
 
 **Simple rule:** For solo learning projects, working on main is fine. Branch when you want to experiment safely.
 
