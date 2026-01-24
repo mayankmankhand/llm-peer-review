@@ -21,10 +21,11 @@
     "developer-tools"
   ],
   "scripts": {
-    "dev-lead": "node scripts/dev-lead.js"
+    "dev-lead-gpt": "node scripts/dev-lead-gpt.js",
+    "dev-lead-gemini": "node scripts/dev-lead-gemini.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "@google/generative-ai": "^0.24.1",
     "openai": "^6.16.0"
   }
 }

@@ -13,7 +13,8 @@ A portable set of Cursor slash commands for "PM learning to code" workflows.
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (asks questions first, keeps them short) |
-| `/dev-lead-1` | AI peer review with ChatGPT debate (3 rounds) |
+| `/dev-lead-gpt` | AI peer review with ChatGPT debate (3 rounds) |
+| `/dev-lead-gemini` | AI peer review with Gemini debate (3 rounds) |
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
 
@@ -26,23 +27,24 @@ A portable set of Cursor slash commands for "PM learning to code" workflows.
 
 2. **Copy CLAUDE.md** to your project root (customize as needed)
 
-3. **For `/dev-lead-1`** (optional - requires OpenAI API and Node.js 16+):
+3. **For `/dev-lead-gpt` or `/dev-lead-gemini`** (optional - requires API keys and Node.js 16+):
    ```bash
    npm install
    cp .env.local.example .env.local
-   # Add your OPENAI_API_KEY to .env.local
+   # Add your OPENAI_API_KEY for /dev-lead-gpt
+   # Add your GEMINI_API_KEY for /dev-lead-gemini
    ```
 
 4. **Use in Cursor** - Type `/` followed by the command name
 
-## How `/dev-lead-1` Works
+## How Dev Lead Commands Work
 
-The `/dev-lead-1` command automates AI peer review by having Claude and ChatGPT debate your code or plan. Instead of manually copying code to ChatGPT, this command orchestrates everything automatically.
+The `/dev-lead-gpt` and `/dev-lead-gemini` commands automate AI peer review by having Claude debate with another AI (ChatGPT or Gemini) about your code or plan. Instead of manually copying code to another AI, these commands orchestrate everything automatically.
 
 ### Example Session
 
 ```
-You: /dev-lead-1
+You: /dev-lead-gpt
 
 Claude: What would you like me to review?
         1. Plan    2. Code    3. Branch    4. Feature    5. Other
@@ -67,13 +69,13 @@ You: Yes
 Claude: [Makes the changes]
 ```
 
-Not satisfied? Run it again for another round of review.
+Not satisfied? Run it again for another round of review. Try `/dev-lead-gemini` for a different perspective.
 
 ## Project Structure
 
 ```
 .claude/commands/    # The slash command definitions
-scripts/             # Node.js scripts for /dev-lead-1
+scripts/             # Node.js scripts for dev-lead commands
 CLAUDE.md            # AI assistant instructions (portable)
 README.md            # This file
 ```

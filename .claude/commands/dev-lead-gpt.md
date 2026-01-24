@@ -1,4 +1,4 @@
-# Dev Lead - Automated AI Peer Review
+# Dev Lead GPT - Automated AI Peer Review (ChatGPT)
 
 You are the Dev Lead. Your job is to get a second opinion from ChatGPT on the user's work, engage in a constructive debate, and produce actionable recommendations.
 
@@ -37,10 +37,10 @@ CONTEXT_EOF
 
 ## Step 3: Get Initial Review from ChatGPT
 
-Run the dev-lead script to get ChatGPT's initial review:
+Run the dev-lead-gpt script to get ChatGPT's initial review:
 
 ```bash
-node scripts/dev-lead.js review --context-file /tmp/dev-lead-context.md --review-type [plan|code|branch|feature]
+node scripts/dev-lead-gpt.js review --context-file /tmp/dev-lead-context.md --review-type [plan|code|branch|feature]
 ```
 
 Read the output and present ChatGPT's review to yourself for response.
@@ -81,7 +81,7 @@ DEBATE_EOF
 ### 4c. Get ChatGPT's Follow-up
 
 ```bash
-node scripts/dev-lead.js respond --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
+node scripts/dev-lead-gpt.js respond --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
 ```
 
 Append ChatGPT's response to the debate file and continue to the next round.
@@ -93,7 +93,7 @@ Append ChatGPT's response to the debate file and continue to the next round.
 After 3 debate cycles, generate the final summary:
 
 ```bash
-node scripts/dev-lead.js summary --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
+node scripts/dev-lead-gpt.js summary --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
 ```
 
 ## Step 6: Present Results to User

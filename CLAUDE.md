@@ -40,7 +40,8 @@ We follow this flow for features:
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |
-| `/dev-lead-1` | AI peer review with ChatGPT debate (3 rounds) |
+| `/dev-lead-gpt` | AI peer review with ChatGPT debate (3 rounds) |
+| `/dev-lead-gemini` | AI peer review with Gemini debate (3 rounds) |
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
 

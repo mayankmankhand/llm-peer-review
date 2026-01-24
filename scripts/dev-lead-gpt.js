@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Dev Lead - Automated AI Peer Review Script
+ * Dev Lead GPT - Automated AI Peer Review Script
  * 
  * Handles ChatGPT API calls for the peer review debate.
  * Claude (in Cursor) orchestrates the flow and provides responses.
+ * 
+ * NOTE: This script is intentionally kept separate from its counterpart
+ * (dev-lead-gemini.js) to maintain simplicity and clarity for learning purposes,
+ * avoiding abstractions like a shared provider module.
  * 
  * Commands:
  *   review   - Get initial review from ChatGPT
@@ -12,25 +16,48 @@
  *   summary  - Generate final debate summary
  * 
  * Usage:
- *   node scripts/dev-lead.js review --context-file <path> [--review-type <type>]
- *   node scripts/dev-lead.js respond --context-file <path> --debate-file <path>
- *   node scripts/dev-lead.js summary --context-file <path> --debate-file <path>
+ *   node scripts/dev-lead-gpt.js review --context-file <path> [--review-type <type>]
+ *   node scripts/dev-lead-gpt.js respond --context-file <path> --debate-file <path>
+ *   node scripts/dev-lead-gpt.js summary --context-file <path> --debate-file <path>
  * 
  * Environment:
  *   OPENAI_API_KEY   Required for ChatGPT API calls
+ *   GPT_MODEL        Optional model override (default: gpt-5.2)
+ * 
+ * Scope & Assumptions:
+ *   - Designed for Linux/WSL environments
+ *   - Expects simple .env.local format (KEY=value, no quotes needed)
+ *   - Fail-fast philosophy with one transparent retry on transient errors
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Load environment variables from .env.local
+/**
+ * Load environment variables from .env.local
+ * 
+ * This is a simple implementation for learning purposes.
+ * For production use, consider the 'dotenv' package which handles
+ * more edge cases (quoted values, multiline, variable expansion).
+ */
 const envPath = path.join(__dirname, '..', '.env.local');
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf-8');
   envContent.split('\n').forEach(line => {
-    const match = line.match(/^([^=]+)=(.*)$/);
-    if (match && !process.env[match[1]]) {
-      process.env[match[1]] = match[2].trim();
+    // Skip empty lines and comments
+    const trimmedLine = line.trim();
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      return;
+    }
+    
+    const match = trimmedLine.match(/^([^=]+)=(.*)$/);
+    if (match) {
+      const key = match[1].trim();
+      const value = match[2].trim();
+      // Only set if not already in environment
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
     }
   });
 }
@@ -39,7 +66,7 @@ if (fs.existsSync(envPath)) {
 const CONFIG = {
   model: process.env.GPT_MODEL || 'gpt-5.2',
   maxTokens: 4096,
-  timeout: 120000, // 2 minutes
+  retryDelayMs: 1000,
 };
 
 // Error messages
@@ -124,6 +151,20 @@ Notable observations from the debate worth remembering`,
 };
 
 /**
+ * Check if an error is transient and worth retrying.
+ * Covers: timeouts, rate limits (429), server errors (5xx).
+ */
+function isTransientError(errorMsg) {
+  const transientPatterns = [
+    /timeout|timed out|ETIMEDOUT|aborted/i,
+    /429|rate.?limit|too.?many.?requests/i,
+    /50[0-9]|internal.?server|service.?unavailable|bad.?gateway/i,
+    /ECONNRESET|ECONNREFUSED|ENOTFOUND/i,
+  ];
+  return transientPatterns.some(pattern => pattern.test(errorMsg));
+}
+
+/**
  * Parse command line arguments.
  */
 function parseArgs() {
@@ -161,7 +202,7 @@ function parseArgs() {
  */
 function printHelp() {
   console.log(`
-Dev Lead - Automated AI Peer Review
+Dev Lead GPT - Automated AI Peer Review
 
 Commands:
   review    Get initial review from ChatGPT
@@ -169,9 +210,9 @@ Commands:
   summary   Generate final debate summary
 
 Usage:
-  node scripts/dev-lead.js review --context-file <path> [--review-type <type>]
-  node scripts/dev-lead.js respond --context-file <path> --debate-file <path>
-  node scripts/dev-lead.js summary --context-file <path> --debate-file <path>
+  node scripts/dev-lead-gpt.js review --context-file <path> [--review-type <type>]
+  node scripts/dev-lead-gpt.js respond --context-file <path> --debate-file <path>
+  node scripts/dev-lead-gpt.js summary --context-file <path> --debate-file <path>
 
 Options:
   --context-file   Path to file with content to review (required)
@@ -181,16 +222,17 @@ Options:
 
 Environment:
   OPENAI_API_KEY   Required for ChatGPT API calls
+  GPT_MODEL        Model to use (default: gpt-5.2)
 
 Examples:
   # Initial review
-  node scripts/dev-lead.js review --context-file context.md --review-type plan
+  node scripts/dev-lead-gpt.js review --context-file context.md --review-type plan
 
   # After Claude responds, get ChatGPT's follow-up
-  node scripts/dev-lead.js respond --context-file context.md --debate-file debate.md
+  node scripts/dev-lead-gpt.js respond --context-file context.md --debate-file debate.md
 
   # Generate final summary
-  node scripts/dev-lead.js summary --context-file context.md --debate-file debate.md
+  node scripts/dev-lead-gpt.js summary --context-file context.md --debate-file debate.md
   `);
 }
 
@@ -226,33 +268,56 @@ function initOpenAI() {
 }
 
 /**
+ * Sleep for specified milliseconds.
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
  * Call ChatGPT with the given prompts.
+ * Includes one transparent retry on transient errors.
  */
 async function callChatGPT(client, system, user) {
-  try {
-    // Using max_completion_tokens (not max_tokens) as required by newer OpenAI models (gpt-4+)
-    // See: https://platform.openai.com/docs/api-reference/chat/create
-    const response = await client.chat.completions.create(
-      {
+  let lastError;
+  
+  // Try up to 2 times (initial + 1 retry)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      // Using max_completion_tokens (not max_tokens) as required by newer OpenAI models (gpt-4+)
+      // See: https://platform.openai.com/docs/api-reference/chat/create
+      const response = await client.chat.completions.create({
         model: CONFIG.model,
         max_completion_tokens: CONFIG.maxTokens,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-      },
-      { timeout: CONFIG.timeout }
-    );
+      });
 
-    const text = response.choices[0]?.message?.content;
-    return typeof text === 'string' ? text.trim() : '';
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (/timeout|timed out|ETIMEDOUT|aborted/i.test(msg)) {
-      throw new Error('Request timed out. Try again.');
+      const text = response.choices[0]?.message?.content;
+      return typeof text === 'string' ? text.trim() : '';
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      lastError = msg;
+      
+      // Check if this is a transient error worth retrying
+      if (attempt === 1 && isTransientError(msg)) {
+        console.log(`⚠️  Transient error detected, retrying in ${CONFIG.retryDelayMs}ms...`);
+        await sleep(CONFIG.retryDelayMs);
+        continue;
+      }
+      
+      // Non-transient error or second attempt failed
+      if (/timeout|timed out|ETIMEDOUT|aborted/i.test(msg)) {
+        throw new Error('Request timed out. Try again.');
+      }
+      throw new Error(ERR.API_ERROR(msg));
     }
-    throw new Error(ERR.API_ERROR(msg));
   }
+  
+  // Should not reach here, but just in case
+  throw new Error(ERR.API_ERROR(lastError));
 }
 
 /**
