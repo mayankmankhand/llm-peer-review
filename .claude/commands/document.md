@@ -2,6 +2,13 @@
 
 You are updating documentation after code changes.
 
+## Primary Documentation Files
+
+- **CLAUDE.md** - AI assistant instructions (portable across projects)
+- **README.md** - Project overview for humans
+
+Keep these in sync and non-contradictory.
+
 ## 1. Identify Changes
 - Check git diff or recent commits for modified files
 - Identify which features/modules were changed
@@ -17,10 +24,11 @@ For each changed file:
 
 ## 3. Update Relevant Documentation
 
-Update README.md and any other relevant docs with:
+Update README.md and CLAUDE.md with:
 - New features or changed behavior
 - Updated setup instructions if needed
 - New environment variables or dependencies
+- New or updated slash commands
 
 ## 4. Documentation Style Rules
 
@@ -28,10 +36,12 @@ Update README.md and any other relevant docs with:
 ✅ **Practical** - Examples over theory
 ✅ **Accurate** - Code verified, not assumed
 ✅ **Current** - Matches actual implementation
+✅ **Portable** - CLAUDE.md should work across projects
 
 ❌ No enterprise fluff
 ❌ No outdated information
 ❌ No assumptions without verification
+❌ No project-specific paths in portable docs
 
 ## 5. Ask if Uncertain
 

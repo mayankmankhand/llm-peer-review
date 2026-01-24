@@ -1,35 +1,22 @@
-# Code Review Task
+A different team lead within the company has reviewed the current code/implementation and provided findings below. Important context:
 
-Perform comprehensive code review. Be thorough but concise.
+- **They have less context than you** on this project's history and decisions
+- **You are the team lead** - don't accept findings at face value
+- Your job is to critically evaluate each finding
 
-## Check For
+Findings from peer review:
 
-- **Logging** - No console.log statements, uses proper logger with context
-- **Error Handling** - Try-catch for async, centralized handlers, helpful messages
-- **TypeScript** - No `any` types, proper interfaces, no @ts-ignore
-- **Production Readiness** - No debug statements, no TODOs, no hardcoded secrets
-- **React/Hooks** - Effects have cleanup, dependencies complete, no infinite loops
-- **Performance** - No unnecessary re-renders, expensive calcs memoized
-- **Security** - Auth checked, inputs validated
-- **Architecture** - Follows existing patterns, code in correct directory
+[PASTE FEEDBACK FROM OTHER MODEL]
 
-## Output Format
+---
 
-### ✅ Looks Good
-- [Item 1]
-- [Item 2]
+For EACH finding above:
 
-### ⚠️ Issues Found
-- **[Severity]** [File:line] - [Issue description]
-  - Fix: [Suggested fix]
+1. **Verify it exists** - Actually check the code. Does this issue/bug really exist?
+2. **If it doesn't exist** - Explain clearly why (maybe it's already handled, or they misunderstood the architecture)
+3. **If it does exist** - Assess severity and add to your fix plan
 
-### 📊 Summary
-- Files reviewed: X
-- Critical issues: X
-- Warnings: X
-
-## Severity Levels
-- **CRITICAL** - Security, data loss, crashes
-- **HIGH** - Bugs, performance issues, bad UX
-- **MEDIUM** - Code quality, maintainability
-- **LOW** - Style, minor improvements
+After analysis, provide:
+- Summary of valid findings (confirmed issues)
+- Summary of invalid findings (with explanations)
+- Prioritized action plan for confirmed issues

@@ -24,9 +24,9 @@ I'll handle the rest.
 
 ## After Getting Answers
 
-Create the issue using this terminal command:
+Create the issue using this terminal command (from the project directory):
 ```bash
-gh issue create --repo mayankmankhand/llm-peer-review --title "TITLE HERE" --body "BODY HERE" --label "LABEL"
+gh issue create --title "TITLE HERE" --body "BODY HERE" --label "LABEL"
 ```
 
 ## Issue Body Format (Keep It Short)

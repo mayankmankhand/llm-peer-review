@@ -2,9 +2,7 @@
 
 ## About This Project
 
-**LLM Peer Review** - A tool to get multiple LLMs to critique each other's responses.
-
-**Tech Stack**: Next.js 14, TypeScript, Tailwind CSS, Vercel
+**Cursor Slash Command Toolkit** - A portable set of commands for "PM learning to code" workflows.
 
 **Who I Am**: I'm a PM learning to code using AI tools. Explain things simply.
 
@@ -29,29 +27,70 @@ We follow this flow for features:
 5. `/peer-review` - Evaluate feedback from other AI models
 6. `/document` - Update documentation
 
-### When Running /review
+---
 
-- **Output a written report** using the format in `.claude/commands/review.md`
-- **Do NOT modify any files**
-- **Wait for me to say "fix it"** before making changes
+## Slash Commands
 
-### When Running /create-issue
+| Command | Purpose |
+|---------|---------|
+| `/explore` | Understand the problem, ask clarifying questions before implementation |
+| `/create-plan` | Create a step-by-step implementation plan with status tracking |
+| `/execute` | Build the feature, updating the plan as you go |
+| `/review` | Review code - report issues only, don't fix |
+| `/peer-review` | Evaluate feedback from other AI models |
+| `/document` | Update documentation after changes |
+| `/create-issue` | Create GitHub issues (ask questions first, keep short) |
+| `/dev-lead-1` | AI peer review with ChatGPT debate (3 rounds) |
+| `/package-review` | Review a package/codebase |
+| `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
 
-- **Ask 2-3 clarifying questions first**
-- **Keep issues short** (10-15 lines max)
-- **No implementation details** - that's for /explore and /create-plan
+### Command-Specific Rules
+
+**When Running /review:**
+- Output a written report using the format in `.claude/commands/review.md`
+- Do NOT modify any files
+- Wait for me to say "fix it" before making changes
+
+**When Running /create-issue:**
+- Ask 2-3 clarifying questions first
+- Keep issues short (10-15 lines max)
+- No implementation details - that's for /explore and /create-plan
 
 ---
 
-## Project Structure
-```
-llm-peer-review/
-├── .claude/commands/    # Slash command prompts
-├── app/                 # Next.js app (pages, API routes)
-├── lib/                 # Shared utilities
-├── CLAUDE.md           # This file (project instructions)
-└── README.md           # Project overview
-```
+## Git Workflow
+
+### When to Branch
+- New features that might break things
+- Experimental changes you're not sure about
+- When collaborating with others
+
+### When to Work on Main
+- Documentation updates
+- Small fixes
+- Cleanup work
+
+### When to Commit
+- After completing a logical unit of work
+- Before switching to a different task
+- When you want a checkpoint you can return to
+
+### When to Push
+- After commits you want to keep (backup)
+- When you're done for the day
+- Before asking for feedback
+
+### Commit Messages
+- Start with a verb: "Add", "Fix", "Update", "Remove", "Refactor"
+- Keep the first line under 50 characters
+- Describe what changed, not how
+
+**Examples:**
+- `Add git workflow guidance to CLAUDE.md`
+- `Remove Next.js web app (out of scope for v1)`
+- `Fix broken reference in dev-lead-1 command`
+
+**Simple rule:** For solo learning projects, working on main is fine. Branch when you want to experiment safely.
 
 ---
 
