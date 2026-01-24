@@ -230,10 +230,12 @@ function initOpenAI() {
  */
 async function callChatGPT(client, system, user) {
   try {
+    // Using max_completion_tokens (not max_tokens) as required by newer OpenAI models (gpt-4+)
+    // See: https://platform.openai.com/docs/api-reference/chat/create
     const response = await client.chat.completions.create(
       {
         model: CONFIG.model,
-        max_tokens: CONFIG.maxTokens,
+        max_completion_tokens: CONFIG.maxTokens,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },

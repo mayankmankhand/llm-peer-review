@@ -2,7 +2,24 @@
   "name": "llm-peer-review",
   "version": "1.0.0",
   "description": "Cursor slash command toolkit for PM learning to code",
-  "private": true,
+  "author": "Mayank Mankhand",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayankmankhand/llm-peer-review.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mayankmankhand/llm-peer-review/issues"
+  },
+  "homepage": "https://github.com/mayankmankhand/llm-peer-review#readme",
+  "keywords": [
+    "cursor-ide",
+    "ai-tools",
+    "code-review",
+    "chatgpt",
+    "claude",
+    "developer-tools"
+  ],
   "scripts": {
     "dev-lead": "node scripts/dev-lead.js"
   },

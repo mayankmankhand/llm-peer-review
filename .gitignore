@@ -18,3 +18,7 @@ npm-debug.log*
 
 # Temporary files
 /tmp/
+/_tmp/
+
+# IDE (local Cursor settings - shared commands are in .claude/commands/)
+.cursor/
