@@ -39,88 +39,35 @@ A portable set of Cursor slash commands for "PM learning to code" workflows.
 
 The `/dev-lead-1` command automates AI peer review by having Claude and ChatGPT debate your code or plan. Instead of manually copying code to ChatGPT, this command orchestrates everything automatically.
 
-> **Privacy Note:** This command sends your code/diffs to OpenAI's API for review. To use it safely:
-> - Don't include secrets, API keys, or `.env` files in the review scope
-> - Prefer reviewing `git diff` or specific files over entire directories
-> - Avoid including lockfiles or large generated files
-> - Review what's being sent before confirming
-
-### What Happens When You Run It (v1.0)
-
-1. **Claude asks what to review** - You choose: a plan file, specific code, a branch, or a feature
-2. **Claude gathers context** - Reads the files or runs `git diff` to collect what needs review
-3. **ChatGPT reviews** - The script calls OpenAI's API and ChatGPT provides initial feedback
-4. **3 rounds of debate** - Claude responds to ChatGPT's feedback, ChatGPT responds back (currently fixed at 3 rounds)
-5. **Summary generated** - Final summary shows agreed points, disagreements, and recommended actions
-6. **You decide** - Claude asks if you want to implement the recommendations
-
 ### Example Session
 
 ```
 You: /dev-lead-1
 
 Claude: What would you like me to review?
-        1. Plan - A PLAN*.md file or implementation approach
-        2. Code - Specific files or recent changes
-        3. Branch - All changes on current branch vs main
-        4. Feature - A complete feature across multiple files
-        5. Other - Describe what you want reviewed
+        1. Plan    2. Code    3. Branch    4. Feature    5. Other
 
-You: 2. Code - review the auth middleware I just wrote
+You: Review the auth middleware
 
-Claude: I'll review src/middleware/auth.ts. Let me gather the context
-        and get ChatGPT's review...
-
-        (Under the hood, Claude runs: node scripts/dev-lead.js review ...)
-        (You don't need to run this manually—Claude handles it for you)
-
-        --- ChatGPT Review ---
-        ## Summary
-        The auth middleware has good structure but has a potential 
-        security issue with token validation...
-
-        ## Issues Found
-        - **[CRITICAL]** Token not validated against expiry
-        - **[MAJOR]** Missing rate limiting
-        - **[MINOR]** Consider extracting magic numbers
-
-        ## Strengths
-        - Clean separation of concerns
-        - Good error messages
-        ---
-
-        As the author, here's my response to ChatGPT:
-
-        ## Accepted
-        - Token expiry check - valid point, I'll add this
-
-        ## Discussing
-        - Rate limiting - this is handled at the API gateway level...
-
-        [Continues for 3 rounds...]
-
-        --- Final Summary ---
-        ## Agreed Points
-        - Add token expiry validation
-        - Extract magic numbers to constants
-
-        ## Recommended Actions
-        - [ ] [CRITICAL] Add token expiry check
-        - [ ] [MINOR] Move 3600 to TOKEN_EXPIRY_SECONDS constant
-
-        Would you like me to implement these recommendations?
+Claude: [Gathers context, sends to ChatGPT]
+        [ChatGPT reviews, finds issues]
+        [Claude responds, they debate for 3 rounds]
+        
+        --- Summary ---
+        Agreed: Add token expiry check, extract magic numbers
+        
+        Recommended Actions:
+        - [ ] Add token expiry validation
+        - [ ] Move 3600 to TOKEN_EXPIRY_SECONDS
+        
+        Want me to implement these?
 
 You: Yes
 
-Claude: [Implements the changes if you approve]
+Claude: [Makes the changes]
 ```
 
-### Running Multiple Review Cycles
-
-You can run `/dev-lead-1` multiple times on the same code. Each run is independent - useful when:
-- You've made changes based on previous feedback and want fresh review
-- You want to review different aspects (first run: security, second run: performance)
-- You want more perspectives on a complex decision
+Not satisfied? Run it again for another round of review.
 
 ## Project Structure
 
