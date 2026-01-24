@@ -37,7 +37,7 @@ if (fs.existsSync(envPath)) {
 
 // Configuration
 const CONFIG = {
-  model: process.env.GPT_MODEL || 'gpt-4o',
+  model: process.env.GPT_MODEL || 'gpt-5.2',
   maxTokens: 4096,
   timeout: 120000, // 2 minutes
 };
