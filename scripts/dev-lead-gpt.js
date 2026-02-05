@@ -165,6 +165,20 @@ function isTransientError(errorMsg) {
 }
 
 /**
+ * Get the next argument value, ensuring it's not another flag or missing.
+ * Only checks for '--' prefix: this toolkit uses long flags exclusively,
+ * so single-dash rejection is not needed.
+ */
+function nextArgValue(args, index, flag) {
+  const value = args[index];
+  if (!value || value.startsWith('--')) {
+    console.error(`\n❌ Error: ${flag} requires a value`);
+    process.exit(1);
+  }
+  return value;
+}
+
+/**
  * Parse command line arguments.
  */
 function parseArgs() {
@@ -180,13 +194,13 @@ function parseArgs() {
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
       case '--context-file':
-        parsed.contextFile = args[++i];
+        parsed.contextFile = nextArgValue(args, ++i, '--context-file');
         break;
       case '--debate-file':
-        parsed.debateFile = args[++i];
+        parsed.debateFile = nextArgValue(args, ++i, '--debate-file');
         break;
       case '--review-type':
-        parsed.reviewType = args[++i];
+        parsed.reviewType = nextArgValue(args, ++i, '--review-type');
         break;
       case '--help':
         printHelp();

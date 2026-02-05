@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh api:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(ls:*)",
+      "Bash(diff:*)",
+      "Bash(git config:*)"
+    ]
+  }
+}

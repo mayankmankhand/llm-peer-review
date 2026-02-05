@@ -95,6 +95,26 @@ We follow this flow for features:
 
 ---
 
+## Permissions
+
+These are defined in `.claude/settings.local.json`. Each one exists for a reason:
+
+| Permission | Why it's here |
+|---|---|
+| `git commit` | `/execute` and `/document` need to commit after work |
+| `gh repo create` | `/create-issue` scaffolding |
+| `gh issue create` | `/create-issue` command |
+| `gh api` | GitHub API calls from commands |
+| `npm install` | Setting up dependencies in new projects |
+| `node` | Running the dev-lead scripts |
+| `npm uninstall` | Removing packages when needed |
+| `ls` | Reading directory contents |
+| `diff` | Comparing files during review |
+| `git config` | Git setup (e.g. safe.directory) |
+| `cd` | **Not included by default.** If your workflow needs it, add `"Bash(cd:*)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access. |
+
+---
+
 ## Remember
 
 - I'm learning - explain what you do
