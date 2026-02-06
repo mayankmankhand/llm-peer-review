@@ -104,7 +104,7 @@ You're set up. Read the next section to use this toolkit in your actual projects
 
 ## Add to a New Project
 
-You have a project folder. You want the slash commands to work there. Two ways to do it:
+You have a project folder. You want the slash commands to work there. Three ways to do it:
 
 ### Option A: Run the Setup Script (Recommended)
 
@@ -140,6 +140,10 @@ cp .env.local.example .env.local
 ```
 
 > The `npm install` and `.env.local` steps are only needed if you want `/dev-lead-gpt` or `/dev-lead-gemini`. The other 9 commands work without them.
+
+### Option C: Let Your AI Agent Do It
+
+Tell your AI agent (Claude Code, Cursor, etc.): "Set up the workflow from this repo in my project" and point it to [`AGENT-SETUP.md`](AGENT-SETUP.md). It has step-by-step instructions written for AI agents.
 
 ---
 
