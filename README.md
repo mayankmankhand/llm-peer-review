@@ -42,6 +42,8 @@ You don't have to use every command every time. But following the order prevents
 
 If you already have Node.js, git, and Cursor installed, skip ahead to [Add to a New Project](#add-to-a-new-project).
 
+> **Not using Cursor?** The setup guide assumes Cursor, but the toolkit works with any editor that supports Claude Code. Copy the relevant setup page into any AI assistant and ask it to rewrite the steps for your editor.
+
 ---
 
 ## Add to a New Project
