@@ -29,7 +29,7 @@ The user's machine needs:
 
 ### Windows note
 
-If the user is on Windows, paths must be converted to WSL format. See the [Windows paths in WSL](README.md#windows-paths-in-wsl) section in the README. Example: `C:\Users\YourName\Projects\my-app` becomes `"/mnt/c/Users/YourName/Projects/my-app"` (quotes required if the path contains spaces).
+If the user is on Windows, paths must be converted to WSL format. See the [Windows paths in WSL](SETUP.md#windows-paths-in-wsl) section in SETUP.md. Example: `C:\Users\YourName\Projects\my-app` becomes `"/mnt/c/Users/YourName/Projects/my-app"` (quotes required if the path contains spaces).
 
 ### Step 1: Copy the toolkit into the user's project
 
