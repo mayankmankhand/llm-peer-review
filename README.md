@@ -14,9 +14,11 @@
 
 ## Setting Up a Brand New Computer
 
-Follow these steps in order. Each one builds on the last.
+Pick your operating system below, then continue with "Both Platforms" at the end.
 
-### Step 1: Install WSL
+### Windows
+
+#### Step 1: Install WSL
 
 WSL (Windows Subsystem for Linux) lets you run a Linux terminal on Windows. The scripts in this toolkit need it.
 
@@ -28,7 +30,9 @@ WSL (Windows Subsystem for Linux) lets you run a Linux terminal on Windows. The 
 - Restart your computer
 - After restart you'll be asked to create a username and password for Linux — write these down
 
-### Step 2: Install Node.js
+> **Already have WSL but no Linux distribution?** Run `wsl --install -d Ubuntu` in PowerShell as Administrator, then restart.
+
+#### Step 2: Install Node.js
 
 Node.js runs the dev-lead scripts (the ChatGPT/Gemini debate features). Install it inside your WSL terminal.
 
@@ -40,9 +44,8 @@ Node.js runs the dev-lead scripts (the ChatGPT/Gemini debate features). Install 
   nvm install 22
   nvm alias default 22
   ```
-- Verify: `node --version` should show `v22.x.x`
 
-### Step 3: Install GitHub CLI
+#### Step 3: Install GitHub CLI
 
 Needed for the `/create-issue` command.
 
@@ -56,46 +59,120 @@ Needed for the `/create-issue` command.
   ```
   Follow the prompts — it opens a browser to authenticate.
 
-### Step 4: Install Cursor
+#### Step 4: Install Cursor
 
 - Go to [cursor.com](https://www.cursor.com) and download the Windows installer
 - Install it normally — it's a desktop app on Windows but can open folders inside WSL
 
-### Step 5: Get API Keys (Optional)
+#### Windows paths in WSL
+
+When using WSL, your Windows files are accessible but the path format changes:
+
+```
+C:\Users\YourName\Projects\my-app  →  /mnt/c/Users/YourName/Projects/my-app
+```
+
+Replace backslashes with forward slashes and replace `C:\` with `/mnt/c/`. If your path has spaces, wrap it in quotes:
+
+```
+"/mnt/c/Users/Jane Doe/Projects/MyApp"
+```
+
+**Now skip to [Both Platforms](#both-platforms) below.**
+
+---
+
+### Mac
+
+Mac has bash and git built in. No WSL needed.
+
+#### Step 1: Install Xcode Command Line Tools
+
+Open Terminal (search "Terminal" in Spotlight) and run:
+```bash
+xcode-select --install
+```
+Click "Install" when prompted. This gives you `git` and other developer tools.
+
+#### Step 2: Install Homebrew
+
+Homebrew is a package manager for Mac. Install it by running this in Terminal:
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+Follow the instructions it prints at the end (usually adding Homebrew to your PATH).
+
+#### Step 3: Install Node.js and GitHub CLI
+
+```bash
+brew install node gh
+```
+
+Then log in to GitHub CLI:
+```bash
+gh auth login
+```
+Follow the prompts — it opens a browser to authenticate.
+
+#### Step 4: Install Cursor
+
+- Go to [cursor.com](https://www.cursor.com) and download the Mac installer
+- Drag it to your Applications folder
+
+**Now continue to [Both Platforms](#both-platforms) below.**
+
+---
+
+### Both Platforms
+
+#### Step 5: Verify Your Setup
+
+Before going further, check that everything installed correctly. Run these in your terminal (Ubuntu/WSL on Windows, Terminal on Mac):
+
+```bash
+node -v
+git --version
+gh --version
+```
+
+You should see version numbers for each. If any command says "not found", go back to the relevant install step above.
+
+#### Step 6: Get API Keys (Optional)
 
 You only need these if you want `/dev-lead-gpt` and `/dev-lead-gemini`. Both services have free tiers.
 
 - **OpenAI key:** Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys) → create a key → copy it
 - **Gemini key:** Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → create a key → copy it
 
-Save these somewhere safe. You'll paste them in Step 7.
+Save these somewhere safe. You'll paste them in Step 8.
 
-### Step 6: Clone This Repo
+#### Step 7: Clone This Repo
 
-In your WSL terminal:
+Run this in your terminal (Ubuntu/WSL on Windows, Terminal on Mac):
 ```bash
 git clone https://github.com/mayankmankhand/llm-peer-review.git
 cd llm-peer-review
 npm install
 ```
 
-### Step 7: Set Up API Keys
+#### Step 8: Set Up API Keys
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-Open `.env.local` and paste in your keys from Step 5:
+Open `.env.local` and paste in your keys from Step 6:
 ```
 OPENAI_API_KEY=sk-your-key-here
 GEMINI_API_KEY=AIza-your-key-here
 ```
 
-### Step 8: Open in Cursor and Test
+#### Step 9: Open in Cursor and Test
 
 - Open Cursor → File → Open Folder
-- Navigate to your `llm-peer-review` folder. In WSL the path looks like:
-  `\\wsl.localhost\Ubuntu\home\your-username\llm-peer-review`
+- Navigate to your `llm-peer-review` folder:
+  - **Windows (WSL):** `\\wsl.localhost\Ubuntu\home\your-username\llm-peer-review`
+  - **Mac:** `/Users/your-username/llm-peer-review`
 - Type `/explore` to test your first command
 
 You're set up. Read the next section to use this toolkit in your actual projects.
@@ -108,7 +185,7 @@ You have a project folder. You want the slash commands to work there. Three ways
 
 ### Option A: Run the Setup Script (Recommended)
 
-Open your WSL terminal and run:
+Open your terminal (Ubuntu/WSL on Windows, Terminal on Mac) and run:
 ```bash
 bash /path/to/llm-peer-review/scripts/setup.sh /path/to/your-project
 ```
@@ -212,6 +289,17 @@ Want a different perspective? Run `/dev-lead-gemini` next.
 - **CLAUDE.md** — Tells the AI how to behave in your project. Edit it to match your style.
 - **Commands** — Each file in `.claude/commands/` is independent. Want `/review` to check different things? Edit `review.md`.
 - **Git workflow** — The git guidance in CLAUDE.md can be adjusted for your team.
+
+---
+
+## Troubleshooting
+
+- **Commands don't show up in Cursor** — Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
+- **`/dev-lead-gpt` or `/dev-lead-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys.
+- **"setup.sh: command not found"** — Run the full command from the setup instructions, not just `setup.sh` on its own.
+- **"target directory does not exist"** — Create the project folder first: `mkdir -p /path/to/project`
+- **Script errors with `/bin/bash^M` or "bad interpreter"** — This is a line-ending issue. Your shell scripts have Windows-style line endings (CRLF) instead of Unix-style (LF). Easiest fix: delete the folder and clone fresh. Advanced fix: run `git add --renormalize . && git checkout -- .` in the repo.
+- **Setup one-liner fails partway through** — Safe to rerun the command. Leftover `/tmp/tmp.*` folders are harmless and can be deleted.
 
 ---
 

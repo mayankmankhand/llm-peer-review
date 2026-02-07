@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # setup.sh — Copy the Cursor Slash Command Toolkit into any project.
-# Assumes Bash 5+ (WSL / Ubuntu). Does not support macOS default Bash 3.2.
+# Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
 #   bash /path/to/llm-peer-review/scripts/setup.sh [target-directory]

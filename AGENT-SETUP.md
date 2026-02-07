@@ -12,27 +12,34 @@ A set of slash commands and scripts that give AI agents a structured workflow: e
 
 ---
 
+## Environment
+
+Assume you are running in a bash environment: Ubuntu/WSL terminal on Windows, Terminal on macOS. Do not run setup commands in PowerShell or CMD.
+
+---
+
 ## Setup Steps
 
 ### Prerequisites
 
 The user's machine needs:
 - `git` (to clone this repo temporarily)
-- `bash` (to run the setup script)
+- `bash` (to run the setup script — compatible with Bash 3.2+, including macOS default)
 - `node` and `npm` (only if they want the `/dev-lead-gpt` and `/dev-lead-gemini` commands)
+
+### Windows note
+
+If the user is on Windows, paths must be converted to WSL format. See the [Windows paths in WSL](README.md#windows-paths-in-wsl) section in the README. Example: `C:\Users\YourName\Projects\my-app` becomes `"/mnt/c/Users/YourName/Projects/my-app"` (quotes required if the path contains spaces).
 
 ### Step 1: Copy the toolkit into the user's project
 
 This single command clones the toolkit to a temporary folder, copies the right files into the user's project, and cleans up. Replace `TARGET_PROJECT_PATH` with the absolute path to the user's project. Keep the quotes around the path.
 
 ```bash
-TEMP_DIR=$(mktemp -d) && \
-git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && \
-bash "$TEMP_DIR/scripts/setup.sh" "TARGET_PROJECT_PATH" && \
-rm -rf "$TEMP_DIR"
+bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && bash "$TEMP_DIR/scripts/setup.sh" "TARGET_PROJECT_PATH" && rm -rf "$TEMP_DIR"'
 ```
 
-If the command fails partway through, the temporary directory may remain in `/tmp` — it is safe to delete.
+If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*` directories are harmless and can be deleted.
 
 This copies:
 - `.claude/commands/` (all slash command definitions)
@@ -89,9 +96,11 @@ The user can now open their project in Cursor or Claude Code and type `/` to see
 
 ## Troubleshooting
 
-- **"setup.sh: command not found"** — Make sure to run the full chained command from Step 1, not just `setup.sh` on its own
+- **"setup.sh: command not found"** — Make sure to run the full `bash -c '...'` command from Step 1, not just `setup.sh` on its own
 - **"target directory does not exist"** — Create the project folder first: `mkdir -p /path/to/project`
 - **Commands don't show up in Cursor** — Make sure `.claude/commands/` exists in the project root with `.md` files inside
 - **`/dev-lead-gpt` or `/dev-lead-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys
 - **"Permission denied"** — Ensure you have write access to the target project directory
 - **Commands exist but don't appear in the editor** — Make sure the editor workspace root is the project folder that contains `.claude/`, not a parent directory
+- **Script errors with `/bin/bash^M` or "bad interpreter"** — Line-ending issue. Delete the folder and clone fresh, or run `git add --renormalize . && git checkout -- .`
+- **Setup command fails partway through** — Safe to rerun. Leftover `/tmp/tmp.*` folders are harmless
