@@ -52,22 +52,35 @@ You have a project folder. You want the slash commands to work there. Three ways
 
 ### Option A: Run a Setup Script (Recommended)
 
-Pick the script that matches your shell:
+Pick the script that matches your shell. You can run it in two ways:
+
+**Method 1: Specify target (works from anywhere)**
 
 **Bash (WSL, macOS, Linux):**
 ```bash
 bash /path/to/llm-peer-review/scripts/setup.sh /path/to/your-project
 ```
 
-Example:
-```bash
-bash ~/llm-peer-review/scripts/setup.sh ~/Projects/my-app
-```
-
 **PowerShell (native Windows, no WSL):**
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1 -Target "C:\path\to\your-project"
 ```
+
+**Method 2: Run from your project directory (no target needed)**
+
+**Bash:**
+```bash
+cd /path/to/your-project
+bash /path/to/llm-peer-review/scripts/setup.sh
+```
+
+**PowerShell:**
+```powershell
+cd C:\path\to\your-project
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1
+```
+
+> **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
 The scripts copy commands and scripts (warn before overwriting), skip CLAUDE.md and settings.local.json if they already exist — those are yours to customize. They also copy setup scripts into the target so you can use that project as a source later.
 

@@ -6,10 +6,16 @@
 # Usage:
 #   bash /path/to/llm-peer-review/scripts/setup.sh [target-directory]
 #
-# If no target directory is given, uses the current working directory.
+# If no target directory is given, uses the current working directory
+# (but will error if run from inside the toolkit repo).
 #
-# Example:
-#   bash ~/llm-peer-review/scripts/setup.sh ~/Projects/my-app
+# Examples:
+#   # From toolkit repo, specify target:
+#   bash scripts/setup.sh ~/Projects/my-app
+#
+#   # From your project directory:
+#   cd ~/Projects/my-app
+#   bash ~/llm-peer-review/scripts/setup.sh
 #
 
 set -e
@@ -21,6 +27,34 @@ TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # ─── Target directory ────────────────────────────────────────
 TARGET="${1:-.}"
+
+# If no target specified, check if we're in the toolkit repo
+if [ "$TARGET" = "." ]; then
+  CURRENT_DIR="$(pwd)"
+  RESOLVED_CURRENT="$(cd "$CURRENT_DIR" && pwd)"
+  RESOLVED_TOOLKIT="$(cd "$TOOLKIT_ROOT" && pwd)"
+  
+  # Check if we're trying to copy into the toolkit repo itself
+  if [ "$RESOLVED_CURRENT" = "$RESOLVED_TOOLKIT" ] || [ "${RESOLVED_CURRENT#$RESOLVED_TOOLKIT/}" != "$RESOLVED_CURRENT" ]; then
+    echo ""
+    echo "  Error: No target directory specified"
+    echo ""
+    echo "  You're running this from inside the toolkit repository."
+    echo "  Please specify a target project directory:"
+    echo ""
+    echo "    bash scripts/setup.sh /path/to/your-project"
+    echo ""
+    echo "  Or run it from your target project directory:"
+    echo ""
+    echo "    cd /path/to/your-project"
+    echo "    bash /path/to/llm-peer-review/scripts/setup.sh"
+    echo ""
+    exit 1
+  fi
+  
+  # If we're in a different directory, use current directory as target
+  TARGET="$RESOLVED_CURRENT"
+fi
 
 if [ ! -d "$TARGET" ]; then
   echo ""

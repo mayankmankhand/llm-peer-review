@@ -1,28 +1,72 @@
-# setup.ps1 — Copy the Cursor Slash Command Toolkit into any project (Windows PowerShell).
+# setup.ps1 - Copy the Cursor Slash Command Toolkit into any project (Windows PowerShell).
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1 -Target "C:\path\to\project"
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1 -Target "C:\path\to\your-project"
 #
-# If -Target is omitted, uses the current working directory.
+# If -Target is omitted, uses the current working directory (but will error if run from inside the toolkit repo).
+#
+# Examples:
+#   # From toolkit repo, specify target:
+#   powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1 -Target "C:\Projects\my-app"
+#
+#   # From your project directory:
+#   cd C:\Projects\my-app
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1
 
 param(
   [string]$Target = "."
 )
+
+# Check PowerShell version (requires 5.1+)
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+  Write-Host ""
+  Write-Host "  Error: PowerShell 5.1 or later is required"
+  Write-Host "  Current version: $($PSVersionTable.PSVersion)"
+  Write-Host ""
+  exit 1
+}
 
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..")
 
-if (-not (Test-Path -LiteralPath $Target -PathType Container)) {
-  Write-Host ""
-  Write-Host "  Error: target directory does not exist: $Target"
-  Write-Host "  Create it first:  New-Item -ItemType Directory -Path '$Target'"
-  Write-Host ""
-  exit 1
+# If no target specified, prompt for it
+if ($Target -eq ".") {
+  $currentDir = (Get-Location).Path
+  $resolvedCurrent = (Resolve-Path -LiteralPath $currentDir).Path
+  $resolvedToolkit = (Resolve-Path -LiteralPath $ToolkitRoot).Path
+  
+  # Check if we're trying to copy into the toolkit repo itself
+  if ($resolvedCurrent -eq $resolvedToolkit -or $resolvedCurrent.StartsWith($resolvedToolkit + "\")) {
+    Write-Host ""
+    Write-Host "  Error: No target directory specified"
+    Write-Host ""
+    Write-Host "  You're running this from inside the toolkit repository."
+    Write-Host "  Please specify a target project directory:"
+    Write-Host ""
+    Write-Host "    powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"C:\path\to\your-project`""
+    Write-Host ""
+    Write-Host "  Or run it from your target project directory:"
+    Write-Host ""
+    Write-Host "    cd C:\path\to\your-project"
+    Write-Host "    powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+    Write-Host ""
+    exit 1
+  }
+  
+  # If we're in a different directory, use current directory as target
+  $Target = $resolvedCurrent
+} else {
+  if (-not (Test-Path -LiteralPath $Target -PathType Container)) {
+    Write-Host ""
+    Write-Host "  Error: target directory does not exist: $Target"
+    Write-Host "  Create it first:  New-Item -ItemType Directory -Path '$Target'"
+    Write-Host ""
+    exit 1
+  }
+  $Target = (Resolve-Path -LiteralPath $Target).Path
 }
-
-$Target = (Resolve-Path -LiteralPath $Target).Path
 
 Write-Host ""
 Write-Host "  ================================"
@@ -76,32 +120,52 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Target "scripts") | Out-Nu
 
 $Skipped = @()
 
-Write-Host "  Copying .claude/commands/ ..."
+Write-Host "  Copying .claude\commands\ ..."
 foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
   $dest = Join-Path $Target (Join-Path ".claude\commands" $src.Name)
   if (Test-Path -LiteralPath $dest -PathType Leaf) {
-    Write-Host "    ↻ overwriting $($src.Name) (back up first if you customized it)"
+    Write-Host "    [overwriting] $($src.Name) (back up first if you customized it)"
   }
-  Copy-Item -LiteralPath $src.FullName -Destination $dest -Force
+  try {
+    Copy-Item -LiteralPath $src.FullName -Destination $dest -Force
+  } catch {
+    Write-Host "  Error: Failed to copy $($src.Name): $_"
+    exit 1
+  }
 }
 
-Write-Host "  Copying scripts/ ..."
+Write-Host "  Copying scripts\ ..."
 foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1")) {
-  Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
+  try {
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
+  } catch {
+    Write-Host "  Error: Failed to copy $scriptName : $_"
+    exit 1
+  }
 }
 
 Write-Host "  Copying .env.local.example ..."
-Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".env.local.example") -Destination (Join-Path $Target ".env.local.example") -Force
+try {
+  Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".env.local.example") -Destination (Join-Path $Target ".env.local.example") -Force
+} catch {
+  Write-Host "  Error: Failed to copy .env.local.example : $_"
+  exit 1
+}
 
 foreach ($f in @("CLAUDE.md", ".claude\settings.local.json")) {
   $src = Join-Path $ToolkitRoot $f
   $dest = Join-Path $Target $f
   if (Test-Path -LiteralPath $dest -PathType Leaf) {
-    Write-Host "  Skipping $f — already exists (yours to customize)"
+    Write-Host "  Skipping $f - already exists (yours to customize)"
     $Skipped += $f
   } else {
     Write-Host "  Copying $f ..."
-    Copy-Item -LiteralPath $src -Destination $dest -Force
+    try {
+      Copy-Item -LiteralPath $src -Destination $dest -Force
+    } catch {
+      Write-Host "  Error: Failed to copy $f : $_"
+      exit 1
+    }
   }
 }
 
@@ -112,7 +176,7 @@ Write-Host "  ================================"
 Write-Host ""
 
 if ($Skipped.Count -gt 0) {
-  Write-Host "    Skipped (already existed — not overwritten):"
+  Write-Host "    Skipped (already existed - not overwritten):"
   foreach ($f in $Skipped) {
     Write-Host "      - $f"
   }
@@ -131,12 +195,12 @@ Write-Host ""
 Write-Host "      2. Set up your API keys:"
 Write-Host "           Copy-Item .env.local.example .env.local"
 Write-Host "         Then open .env.local and paste:"
-Write-Host "           OPENAI_API_KEY  →  https://platform.openai.com/api-keys"
-Write-Host "           GEMINI_API_KEY  →  https://aistudio.google.com/apikey"
+Write-Host "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
+Write-Host "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
 Write-Host ""
 Write-Host "      3. Open the folder in Cursor and type / to see your commands."
 Write-Host ""
-Write-Host "      Steps 1 and 2 are optional — skip them if you don't"
+Write-Host "      Steps 1 and 2 are optional - skip them if you don't"
 Write-Host "      need /dev-lead-gpt or /dev-lead-gemini."
 Write-Host ""
 Write-Host "    Tip: This copy of setup scripts is a snapshot. Run from"
