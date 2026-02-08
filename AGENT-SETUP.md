@@ -24,7 +24,7 @@ Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerSh
 
 The user's machine needs:
 - `git` (to clone this repo temporarily)
-- `bash` (to run the setup script — compatible with Bash 3.2+, including macOS default)
+- `bash` (to run the setup script — compatible with Bash 3.2+ on macOS/Linux/WSL) or PowerShell 5.1+ (native Windows)
 - `node` and `npm` (only if they want the `/dev-lead-gpt` and `/dev-lead-gemini` commands)
 
 ### Windows note
@@ -44,7 +44,7 @@ bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankm
 
 **PowerShell (native Windows):**
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$tmp=New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ([System.Guid]::NewGuid()) ; git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git $tmp.FullName ; powershell -ExecutionPolicy Bypass -File "$($tmp.FullName)\scripts\setup\setup.ps1" -Target "TARGET_PROJECT_PATH" ; Remove-Item -Recurse -Force $tmp.FullName"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$tmp=New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ([System.Guid]::NewGuid()) ; git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git $tmp.FullName ; powershell -ExecutionPolicy Bypass -File `"$($tmp.FullName)\scripts\setup\setup.ps1`" -Target `"TARGET_PROJECT_PATH`" ; Remove-Item -Recurse -Force $tmp.FullName"
 ```
 
 If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*` directories are harmless and can be deleted.

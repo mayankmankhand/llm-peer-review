@@ -33,9 +33,7 @@ if (-not (Test-Path -LiteralPath $ProfilePath -PathType Leaf)) {
   Write-Host "Created PowerShell profile at: $ProfilePath"
 }
 
-# Create function - escape path properly for here-string
-$EscapedSetupScript = $SetupScript -replace '\\', '\\' -replace '"', '\"'
-
+# Create function - PowerShell handles Windows paths in here-strings without escaping
 $Function = @"
 
 # Claude Toolkit Setup - Added by install-alias.ps1
@@ -51,7 +49,7 @@ function setup-claude-toolkit {
     Write-Host "Setting up Claude Toolkit in: `$Target"
   }
   
-  powershell -ExecutionPolicy Bypass -File "$EscapedSetupScript" -Target `$Target
+  powershell -ExecutionPolicy Bypass -File "$SetupScript" -Target `$Target
 }
 
 "@

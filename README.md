@@ -48,7 +48,7 @@ If you already have Node.js, git, and Cursor installed, skip ahead to [Add to a 
 
 ## Add to a New Project
 
-You have a project folder. You want the slash commands to work there. Three ways to do it:
+You have a project folder. You want the slash commands to work there. Four ways to do it:
 
 ### Option A: Install a Convenient Command (Easiest - Recommended)
 
