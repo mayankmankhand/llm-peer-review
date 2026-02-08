@@ -50,21 +50,71 @@ If you already have Node.js, git, and Cursor installed, skip ahead to [Add to a 
 
 You have a project folder. You want the slash commands to work there. Three ways to do it:
 
-### Option A: Run the Setup Script (Recommended)
+### Option A: Install a Convenient Command (Easiest - Recommended)
 
-Open your terminal (Ubuntu/WSL on Windows, Terminal on Mac) and run:
+Install a `setup-claude-toolkit` command you can run from anywhere:
+
+**Bash (WSL, macOS, Linux):**
 ```bash
-bash /path/to/llm-peer-review/scripts/setup.sh /path/to/your-project
+cd /path/to/llm-peer-review
+bash scripts/setup/install-alias.sh
+source ~/.bashrc  # or ~/.zshrc for zsh
 ```
 
-Example:
-```bash
-bash ~/llm-peer-review/scripts/setup.sh ~/Projects/my-app
+**PowerShell (native Windows):**
+```powershell
+cd C:\path\to\llm-peer-review
+powershell -ExecutionPolicy Bypass -File scripts\setup\install-alias.ps1
+. $PROFILE  # Reload profile (or restart PowerShell)
 ```
 
-The script copies commands and scripts (warns before overwriting), skips CLAUDE.md and settings.local.json if they already exist — those are yours to customize. It also copies itself into the target, so you can use that project as a source later.
+> **Note:** If you don't have a PowerShell profile yet, the installer will create one for you automatically.
 
-### Option B: Do It Manually
+Then use it from anywhere:
+```bash
+# Specify target
+setup-claude-toolkit /path/to/your-project
+
+# Or from your project directory
+cd /path/to/your-project
+setup-claude-toolkit .
+```
+
+### Option B: Run a Setup Script Directly
+
+Pick the script that matches your shell. You can run it in two ways:
+
+**Method 1: Specify target (works from anywhere)**
+
+**Bash (WSL, macOS, Linux):**
+```bash
+bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project
+```
+
+**PowerShell (native Windows, no WSL):**
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
+```
+
+**Method 2: Run from your project directory (no target needed)**
+
+**Bash:**
+```bash
+cd /path/to/your-project
+bash /path/to/llm-peer-review/scripts/setup/setup.sh
+```
+
+**PowerShell:**
+```powershell
+cd C:\path\to\your-project
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1
+```
+
+> **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
+
+The scripts copy commands and runtime scripts (dev-lead-*.js) to your project. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md and settings.local.json are skipped if they already exist — those are yours to customize.
+
+### Option C: Do It Manually
 
 Copy these into your project:
 
@@ -72,7 +122,7 @@ Copy these into your project:
 |---|---|
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (whole folder) | `your-project/scripts/` |
+| `scripts/` (only `dev-lead-gpt.js` and `dev-lead-gemini.js`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
 
@@ -85,7 +135,7 @@ cp .env.local.example .env.local
 
 > The `npm install` and `.env.local` steps are only needed if you want `/dev-lead-gpt` or `/dev-lead-gemini`. The other 9 commands work without them.
 
-### Option C: Let Your AI Agent Do It
+### Option D: Let Your AI Agent Do It
 
 Tell your AI agent (Claude Code, Cursor, etc.): "Set up the workflow from this repo in my project" and point it to [`AGENT-SETUP.md`](AGENT-SETUP.md). It has step-by-step instructions written for AI agents.
 
