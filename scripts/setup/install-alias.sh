@@ -15,28 +15,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SETUP_SCRIPT="$TOOLKIT_ROOT/scripts/setup/setup.sh"
 
-# Detect shell
-if [ -n "$ZSH_VERSION" ]; then
-  SHELL_CONFIG="$HOME/.zshrc"
-  SHELL_NAME="zsh"
-elif [ -n "$BASH_VERSION" ]; then
-  SHELL_CONFIG="$HOME/.bashrc"
-  SHELL_NAME="bash"
-else
-  echo "Error: Unsupported shell. Please add the alias manually to your shell config."
-  exit 1
-fi
+# Detect user's login shell (not the shell running this script)
+case "$SHELL" in
+  */zsh)
+    SHELL_CONFIG="$HOME/.zshrc"
+    SHELL_NAME="zsh"
+    ;;
+  */bash)
+    SHELL_CONFIG="$HOME/.bashrc"
+    SHELL_NAME="bash"
+    ;;
+  *)
+    echo "Error: Unsupported shell: ${SHELL:-unknown}"
+    echo "Please add the alias manually to your shell config file."
+    exit 1
+    ;;
+esac
 
 # Create function
 FUNCTION="
 # Claude Toolkit Setup - Added by install-alias.sh
 setup-claude-toolkit() {
-  if [ -z \"\$1\" ]; then
-    echo \"Usage: setup-claude-toolkit [target-project-directory]\"
-    echo \"  If run from your project directory, omit the target.\"
-    return 1
+  local target=\"\${1:-.}\"
+  if [ \"\$target\" = \".\" ]; then
+    echo \"Setting up Claude Toolkit in: \$(pwd)\"
+  else
+    echo \"Setting up Claude Toolkit in: \$target\"
   fi
-  bash \"$SETUP_SCRIPT\" \"\$1\"
+  bash \"$SETUP_SCRIPT\" \"\$target\"
 }
 "
 
