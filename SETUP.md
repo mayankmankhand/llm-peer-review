@@ -7,7 +7,7 @@ Pick your operating system below, then continue with "Both Platforms" at the end
 You can use this toolkit in **two ways** on Windows:
 
 - **Option A (recommended): WSL + bash** for parity with Linux/macOS workflows
-- **Option B: Native Windows PowerShell** using `scripts/setup.ps1` (no WSL required)
+- **Option B: Native Windows PowerShell** using `scripts/setup/setup.ps1` (no WSL required)
 
 ### Step 1: Install Node.js
 

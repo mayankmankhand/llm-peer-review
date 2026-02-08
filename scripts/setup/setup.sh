@@ -4,18 +4,18 @@
 # Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
-#   bash /path/to/llm-peer-review/scripts/setup.sh [target-directory]
+#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory]
 #
 # If no target directory is given, uses the current working directory
 # (but will error if run from inside the toolkit repo).
 #
 # Examples:
 #   # From toolkit repo, specify target:
-#   bash scripts/setup.sh ~/Projects/my-app
+#   bash scripts/setup/setup.sh ~/Projects/my-app
 #
 #   # From your project directory:
 #   cd ~/Projects/my-app
-#   bash ~/llm-peer-review/scripts/setup.sh
+#   bash ~/llm-peer-review/scripts/setup/setup.sh
 #
 
 set -e
@@ -23,7 +23,7 @@ shopt -s failglob
 
 # ─── Where this script lives and where the toolkit root is ───
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── Target directory ────────────────────────────────────────
 TARGET="${1:-.}"
@@ -42,12 +42,12 @@ if [ "$TARGET" = "." ]; then
     echo "  You're running this from inside the toolkit repository."
     echo "  Please specify a target project directory:"
     echo ""
-    echo "    bash scripts/setup.sh /path/to/your-project"
+    echo "    bash scripts/setup/setup.sh /path/to/your-project"
     echo ""
     echo "  Or run it from your target project directory:"
     echo ""
     echo "    cd /path/to/your-project"
-    echo "    bash /path/to/llm-peer-review/scripts/setup.sh"
+    echo "    bash /path/to/llm-peer-review/scripts/setup/setup.sh"
     echo ""
     exit 1
   fi
@@ -87,9 +87,18 @@ elif ! compgen -G "$TOOLKIT_ROOT/.claude/commands/"*.md > /dev/null 2>&1; then
   PREFLIGHT_OK=false
 fi
 
-for f in dev-lead-gpt.js dev-lead-gemini.js setup.sh setup.ps1 install-alias.sh install-alias.ps1; do
+# Check runtime scripts (must exist)
+for f in dev-lead-gpt.js dev-lead-gemini.js; do
   if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/$f"
+    PREFLIGHT_OK=false
+  fi
+done
+
+# Check setup scripts (must exist in setup folder)
+for f in setup.sh setup.ps1 install-alias.sh install-alias.ps1; do
+  if [ ! -f "$TOOLKIT_ROOT/scripts/setup/$f" ]; then
+    echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/setup/$f"
     PREFLIGHT_OK=false
   fi
 done
@@ -128,15 +137,12 @@ for src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   OVERWROTE+=("commands/$fname")
 done
 
-# ─── Scripts (upstream-owned — always copy) ──────────────────
+# ─── Scripts (runtime scripts only — setup scripts stay in toolkit repo) ──────────────────
 echo "  Copying scripts/ ..."
+# Only copy runtime scripts (dev-lead-*.js) - setup scripts stay in toolkit repo
 cp "$TOOLKIT_ROOT/scripts/dev-lead-gpt.js"   "$TARGET/scripts/"
 cp "$TOOLKIT_ROOT/scripts/dev-lead-gemini.js" "$TARGET/scripts/"
-cp "$SCRIPT_DIR/setup.sh"                    "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/setup.ps1"         "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/install-alias.sh"  "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/install-alias.ps1" "$TARGET/scripts/"
-OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js scripts/setup.sh scripts/setup.ps1 scripts/install-alias.sh scripts/install-alias.ps1)
+OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js)
 
 # ─── .env.local.example (template — safe to overwrite) ───────
 echo "  Copying .env.local.example ..."
@@ -190,6 +196,6 @@ echo ""
 echo "      Steps 1 and 2 are optional — skip them if you don't"
 echo "      need /dev-lead-gpt or /dev-lead-gemini."
 echo ""
-echo "    Tip: This copy of setup.sh is a snapshot. Run the one from"
-echo "    the toolkit repo for updates in the future."
+echo "    Tip: To update commands and scripts, run setup again from"
+echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"
 echo ""

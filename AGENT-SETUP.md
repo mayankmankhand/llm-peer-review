@@ -39,12 +39,12 @@ Use one of these commands. Replace `TARGET_PROJECT_PATH` with the absolute path 
 
 **Bash (macOS/Linux/WSL):**
 ```bash
-bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && bash "$TEMP_DIR/scripts/setup.sh" "TARGET_PROJECT_PATH" && rm -rf "$TEMP_DIR"'
+bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH" && rm -rf "$TEMP_DIR"'
 ```
 
 **PowerShell (native Windows):**
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$tmp=New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ([System.Guid]::NewGuid()) ; git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git $tmp.FullName ; powershell -ExecutionPolicy Bypass -File "$($tmp.FullName)\scripts\setup.ps1" -Target "TARGET_PROJECT_PATH" ; Remove-Item -Recurse -Force $tmp.FullName"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$tmp=New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ([System.Guid]::NewGuid()) ; git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git $tmp.FullName ; powershell -ExecutionPolicy Bypass -File "$($tmp.FullName)\scripts\setup\setup.ps1" -Target "TARGET_PROJECT_PATH" ; Remove-Item -Recurse -Force $tmp.FullName"
 ```
 
 If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*` directories are harmless and can be deleted.
@@ -52,9 +52,11 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/settings.local.json` (permission config — skipped if it already exists)
-- `scripts/` (dev-lead-gpt.js, dev-lead-gemini.js, setup.sh, setup.ps1)
+- `scripts/` (only dev-lead-gpt.js and dev-lead-gemini.js — runtime scripts needed for peer review)
 - `CLAUDE.md` (project instructions — skipped if it already exists)
 - `.env.local.example` (API key template)
+
+Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit repo and are not copied to target projects.
 
 ### Step 2: Install dependencies (optional)
 

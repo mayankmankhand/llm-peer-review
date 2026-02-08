@@ -5,15 +5,15 @@
 # This adds a 'setup-claude-toolkit' command to your shell that you can run from anywhere.
 #
 # Usage:
-#   bash scripts/install-alias.sh
+#   bash scripts/setup/install-alias.sh
 #
 # This will detect your shell and add the alias to the appropriate config file.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SETUP_SCRIPT="$TOOLKIT_ROOT/scripts/setup.sh"
+TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SETUP_SCRIPT="$TOOLKIT_ROOT/scripts/setup/setup.sh"
 
 # Detect shell
 if [ -n "$ZSH_VERSION" ]; then
@@ -51,7 +51,7 @@ fi
 echo "" >> "$SHELL_CONFIG"
 echo "$FUNCTION" >> "$SHELL_CONFIG"
 
-echo "✓ Added 'setup-claude-toolkit' alias to $SHELL_CONFIG"
+echo "Added 'setup-claude-toolkit' alias to $SHELL_CONFIG"
 echo ""
 echo "To use it:"
 echo "  1. Reload your shell: source $SHELL_CONFIG"

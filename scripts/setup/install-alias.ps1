@@ -3,15 +3,15 @@
 # This adds a 'setup-claude-toolkit' command to your PowerShell profile that you can run from anywhere.
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File scripts\install-alias.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\setup\install-alias.ps1
 #
 # This will add the function to your PowerShell profile.
 
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..")
-$SetupScript = Join-Path $ToolkitRoot "scripts\setup.ps1"
+$ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
+$SetupScript = Join-Path $ToolkitRoot "scripts\setup\setup.ps1"
 
 # Get PowerShell profile path
 if (-not $PROFILE) {

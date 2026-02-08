@@ -1,17 +1,17 @@
 # setup.ps1 - Copy the Cursor Slash Command Toolkit into any project (Windows PowerShell).
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1 -Target "C:\path\to\your-project"
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
 #
 # If -Target is omitted, uses the current working directory (but will error if run from inside the toolkit repo).
 #
 # Examples:
 #   # From toolkit repo, specify target:
-#   powershell -ExecutionPolicy Bypass -File .\scripts\setup.ps1 -Target "C:\Projects\my-app"
+#   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app"
 #
 #   # From your project directory:
 #   cd C:\Projects\my-app
-#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1
 
 param(
   [string]$Target = "."
@@ -29,7 +29,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..")
+$ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
 
 # If no target specified, prompt for it
 if ($Target -eq ".") {
@@ -91,8 +91,18 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
   }
 }
 
-foreach ($f in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1")) {
+# Check runtime scripts (must exist)
+foreach ($f in @("dev-lead-gpt.js", "dev-lead-gemini.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path "scripts" $f)
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
+    Write-Host "  Error: source file not found: $p"
+    $PreflightOk = $false
+  }
+}
+
+# Check setup scripts (must exist in setup folder)
+foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1")) {
+  $p = Join-Path $ToolkitRoot (Join-Path "scripts\setup" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
     $PreflightOk = $false
@@ -135,7 +145,8 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
 }
 
 Write-Host "  Copying scripts\ ..."
-foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1")) {
+# Only copy runtime scripts (dev-lead-*.js) - setup scripts stay in toolkit repo
+foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js")) {
   try {
     Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
   } catch {
@@ -203,6 +214,6 @@ Write-Host ""
 Write-Host "      Steps 1 and 2 are optional - skip them if you don't"
 Write-Host "      need /dev-lead-gpt or /dev-lead-gemini."
 Write-Host ""
-Write-Host "    Tip: This copy of setup scripts is a snapshot. Run from"
-Write-Host "    the toolkit repo for updates in the future."
+Write-Host "    Tip: To update commands and scripts, run setup again from"
+Write-Host "    the toolkit repo: powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"$Target`""
 Write-Host ""

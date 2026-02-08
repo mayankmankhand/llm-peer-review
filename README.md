@@ -57,14 +57,14 @@ Install a `setup-claude-toolkit` command you can run from anywhere:
 **Bash (WSL, macOS, Linux):**
 ```bash
 cd /path/to/llm-peer-review
-bash scripts/install-alias.sh
+bash scripts/setup/install-alias.sh
 source ~/.bashrc  # or ~/.zshrc for zsh
 ```
 
 **PowerShell (native Windows):**
 ```powershell
 cd C:\path\to\llm-peer-review
-powershell -ExecutionPolicy Bypass -File scripts\install-alias.ps1
+powershell -ExecutionPolicy Bypass -File scripts\setup\install-alias.ps1
 . $PROFILE  # Reload profile (or restart PowerShell)
 ```
 
@@ -88,12 +88,12 @@ Pick the script that matches your shell. You can run it in two ways:
 
 **Bash (WSL, macOS, Linux):**
 ```bash
-bash /path/to/llm-peer-review/scripts/setup.sh /path/to/your-project
+bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project
 ```
 
 **PowerShell (native Windows, no WSL):**
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1 -Target "C:\path\to\your-project"
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
 ```
 
 **Method 2: Run from your project directory (no target needed)**
@@ -101,18 +101,18 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setu
 **Bash:**
 ```bash
 cd /path/to/your-project
-bash /path/to/llm-peer-review/scripts/setup.sh
+bash /path/to/llm-peer-review/scripts/setup/setup.sh
 ```
 
 **PowerShell:**
 ```powershell
 cd C:\path\to\your-project
-powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1
 ```
 
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
-The scripts copy commands and scripts (warn before overwriting), skip CLAUDE.md and settings.local.json if they already exist — those are yours to customize. They also copy setup scripts into the target so you can use that project as a source later.
+The scripts copy commands and runtime scripts (dev-lead-*.js) to your project. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md and settings.local.json are skipped if they already exist — those are yours to customize.
 
 ### Option C: Do It Manually
 
@@ -122,7 +122,7 @@ Copy these into your project:
 |---|---|
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (whole folder, including `setup.sh` and `setup.ps1`) | `your-project/scripts/` |
+| `scripts/` (only `dev-lead-gpt.js` and `dev-lead-gemini.js`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
 
