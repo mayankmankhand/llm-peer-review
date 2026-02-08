@@ -50,9 +50,11 @@ If you already have Node.js, git, and Cursor installed, skip ahead to [Add to a 
 
 You have a project folder. You want the slash commands to work there. Three ways to do it:
 
-### Option A: Run the Setup Script (Recommended)
+### Option A: Run a Setup Script (Recommended)
 
-Open your terminal (Ubuntu/WSL on Windows, Terminal on Mac) and run:
+Pick the script that matches your shell:
+
+**Bash (WSL, macOS, Linux):**
 ```bash
 bash /path/to/llm-peer-review/scripts/setup.sh /path/to/your-project
 ```
@@ -62,7 +64,12 @@ Example:
 bash ~/llm-peer-review/scripts/setup.sh ~/Projects/my-app
 ```
 
-The script copies commands and scripts (warns before overwriting), skips CLAUDE.md and settings.local.json if they already exist — those are yours to customize. It also copies itself into the target, so you can use that project as a source later.
+**PowerShell (native Windows, no WSL):**
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup.ps1 -Target "C:\path\to\your-project"
+```
+
+The scripts copy commands and scripts (warn before overwriting), skip CLAUDE.md and settings.local.json if they already exist — those are yours to customize. They also copy setup scripts into the target so you can use that project as a source later.
 
 ### Option B: Do It Manually
 
@@ -72,7 +79,7 @@ Copy these into your project:
 |---|---|
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (whole folder) | `your-project/scripts/` |
+| `scripts/` (whole folder, including `setup.sh` and `setup.ps1`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
 

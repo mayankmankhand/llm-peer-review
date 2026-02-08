@@ -4,61 +4,59 @@ Pick your operating system below, then continue with "Both Platforms" at the end
 
 ## Windows
 
-### Step 1: Install WSL
+You can use this toolkit in **two ways** on Windows:
 
-WSL (Windows Subsystem for Linux) lets you run a Linux terminal on Windows. The scripts in this toolkit need it.
+- **Option A (recommended): WSL + bash** for parity with Linux/macOS workflows
+- **Option B: Native Windows PowerShell** using `scripts/setup.ps1` (no WSL required)
 
-- Open **PowerShell as Administrator** (right-click Start menu → PowerShell → Run as administrator)
+### Step 1: Install Node.js
+
+Node.js runs the dev-lead scripts (the ChatGPT/Gemini debate features).
+
+- Install from [nodejs.org](https://nodejs.org) (LTS is fine), then reopen terminal
+- Verify:
+  ```powershell
+  node -v
+  npm -v
+  ```
+
+### Step 2: Install GitHub CLI
+
+Needed for the `/create-issue` command.
+
+- Install from [cli.github.com](https://cli.github.com)
+- Log in:
+  ```powershell
+  gh auth login
+  ```
+
+### Step 3: Install Cursor
+
+- Go to [cursor.com](https://www.cursor.com) and download the Windows installer
+- Install it normally
+
+### Step 4 (Optional): Install WSL if you prefer bash workflow
+
+WSL (Windows Subsystem for Linux) gives you a Linux terminal on Windows. If you want bash-first setup and Linux path style:
+
+- Open **PowerShell as Administrator**
 - Run:
   ```powershell
   wsl --install
   ```
 - Restart your computer
-- After restart you'll be asked to create a username and password for Linux — write these down
 
-> **Already have WSL but no Linux distribution?** Run `wsl --install -d Ubuntu` in PowerShell as Administrator, then restart.
+> Already have WSL but no distro? Run `wsl --install -d Ubuntu`.
 
-### Step 2: Install Node.js
+### Windows paths in WSL (only for Option A)
 
-Node.js runs the dev-lead scripts (the ChatGPT/Gemini debate features). Install it inside your WSL terminal.
-
-- Open your WSL terminal (search "Ubuntu" in the Windows Start menu)
-- Run these commands one at a time:
-  ```bash
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-  source ~/.bashrc
-  nvm install 22
-  nvm alias default 22
-  ```
-
-### Step 3: Install GitHub CLI
-
-Needed for the `/create-issue` command.
-
-- In your WSL terminal:
-  ```bash
-  sudo apt update && sudo apt install -y gh
-  ```
-- Log in:
-  ```bash
-  gh auth login
-  ```
-  Follow the prompts — it opens a browser to authenticate.
-
-### Step 4: Install Cursor
-
-- Go to [cursor.com](https://www.cursor.com) and download the Windows installer
-- Install it normally — it's a desktop app on Windows but can open folders inside WSL
-
-### Windows paths in WSL
-
-When using WSL, your Windows files are accessible but the path format changes:
+When using WSL, Windows paths convert like this:
 
 ```
 C:\Users\YourName\Projects\my-app  →  /mnt/c/Users/YourName/Projects/my-app
 ```
 
-Replace backslashes with forward slashes and replace `C:\` with `/mnt/c/`. If your path has spaces, wrap it in quotes:
+If your path has spaces, wrap it in quotes:
 
 ```
 "/mnt/c/Users/Jane Doe/Projects/MyApp"
@@ -134,7 +132,7 @@ Save these somewhere safe. You'll paste them in Step 8.
 
 ### Step 7: Clone This Repo
 
-Run this in your terminal (Ubuntu/WSL on Windows, Terminal on Mac):
+Run this in your terminal (PowerShell or WSL on Windows, Terminal on Mac):
 ```bash
 git clone https://github.com/mayankmankhand/llm-peer-review.git
 cd llm-peer-review
@@ -157,6 +155,7 @@ GEMINI_API_KEY=AIza-your-key-here
 
 - Open Cursor → File → Open Folder
 - Navigate to your `llm-peer-review` folder:
+  - **Windows (PowerShell/native):** `C:\Users\your-username\llm-peer-review`
   - **Windows (WSL):** `\\wsl.localhost\Ubuntu\home\your-username\llm-peer-review`
   - **Mac:** `/Users/your-username/llm-peer-review`
 - Type `/explore` to test your first command
