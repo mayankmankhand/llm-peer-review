@@ -87,7 +87,7 @@ elif ! compgen -G "$TOOLKIT_ROOT/.claude/commands/"*.md > /dev/null 2>&1; then
   PREFLIGHT_OK=false
 fi
 
-for f in dev-lead-gpt.js dev-lead-gemini.js setup.sh setup.ps1; do
+for f in dev-lead-gpt.js dev-lead-gemini.js setup.sh setup.ps1 install-alias.sh install-alias.ps1; do
   if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/$f"
     PREFLIGHT_OK=false
@@ -134,7 +134,9 @@ cp "$TOOLKIT_ROOT/scripts/dev-lead-gpt.js"   "$TARGET/scripts/"
 cp "$TOOLKIT_ROOT/scripts/dev-lead-gemini.js" "$TARGET/scripts/"
 cp "$SCRIPT_DIR/setup.sh"                    "$TARGET/scripts/"
 cp "$TOOLKIT_ROOT/scripts/setup.ps1"         "$TARGET/scripts/"
-OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js scripts/setup.sh scripts/setup.ps1)
+cp "$TOOLKIT_ROOT/scripts/install-alias.sh"  "$TARGET/scripts/"
+cp "$TOOLKIT_ROOT/scripts/install-alias.ps1" "$TARGET/scripts/"
+OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js scripts/setup.sh scripts/setup.ps1 scripts/install-alias.sh scripts/install-alias.ps1)
 
 # ─── .env.local.example (template — safe to overwrite) ───────
 echo "  Copying .env.local.example ..."

@@ -91,7 +91,7 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
   }
 }
 
-foreach ($f in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1")) {
+foreach ($f in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1")) {
   $p = Join-Path $ToolkitRoot (Join-Path "scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -135,7 +135,7 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
 }
 
 Write-Host "  Copying scripts\ ..."
-foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1")) {
+foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js", "setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1")) {
   try {
     Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
   } catch {
