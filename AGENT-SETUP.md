@@ -14,7 +14,7 @@ A set of slash commands and scripts that give AI agents a structured workflow: e
 
 ## Environment
 
-Assume you are running in a bash environment: Ubuntu/WSL terminal on Windows, Terminal on macOS. Do not run setup commands in PowerShell or CMD.
+Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerShell on native Windows. Pick commands that match their shell.
 
 ---
 
@@ -24,19 +24,27 @@ Assume you are running in a bash environment: Ubuntu/WSL terminal on Windows, Te
 
 The user's machine needs:
 - `git` (to clone this repo temporarily)
-- `bash` (to run the setup script — compatible with Bash 3.2+, including macOS default)
+- `bash` (to run the setup script — compatible with Bash 3.2+ on macOS/Linux/WSL) or PowerShell 5.1+ (native Windows)
 - `node` and `npm` (only if they want the `/dev-lead-gpt` and `/dev-lead-gemini` commands)
 
 ### Windows note
 
-If the user is on Windows, paths must be converted to WSL format. See the [Windows paths in WSL](SETUP.md#windows-paths-in-wsl) section in SETUP.md. Example: `C:\Users\YourName\Projects\my-app` becomes `"/mnt/c/Users/YourName/Projects/my-app"` (quotes required if the path contains spaces).
+If the user is on Windows, choose one:
+- **WSL/bash path** (Linux style): convert `C:\Users\YourName\Projects\my-app` to `"/mnt/c/Users/YourName/Projects/my-app"`
+- **PowerShell/native path** (Windows style): keep `C:\Users\YourName\Projects\my-app`
 
 ### Step 1: Copy the toolkit into the user's project
 
-This single command clones the toolkit to a temporary folder, copies the right files into the user's project, and cleans up. Replace `TARGET_PROJECT_PATH` with the absolute path to the user's project. Keep the quotes around the path.
+Use one of these commands. Replace `TARGET_PROJECT_PATH` with the absolute path to the user's project.
 
+**Bash (macOS/Linux/WSL):**
 ```bash
-bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && bash "$TEMP_DIR/scripts/setup.sh" "TARGET_PROJECT_PATH" && rm -rf "$TEMP_DIR"'
+bash -c 'TEMP_DIR=$(mktemp -d) && git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git "$TEMP_DIR" && bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH" && rm -rf "$TEMP_DIR"'
+```
+
+**PowerShell (native Windows):**
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$tmp=New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name ([System.Guid]::NewGuid()) ; git clone --depth 1 https://github.com/mayankmankhand/llm-peer-review.git $tmp.FullName ; powershell -ExecutionPolicy Bypass -File `"$($tmp.FullName)\scripts\setup\setup.ps1`" -Target `"TARGET_PROJECT_PATH`" ; Remove-Item -Recurse -Force $tmp.FullName"
 ```
 
 If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*` directories are harmless and can be deleted.
@@ -44,9 +52,11 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/settings.local.json` (permission config — skipped if it already exists)
-- `scripts/` (dev-lead-gpt.js, dev-lead-gemini.js, setup.sh)
+- `scripts/` (only dev-lead-gpt.js and dev-lead-gemini.js — runtime scripts needed for peer review)
 - `CLAUDE.md` (project instructions — skipped if it already exists)
 - `.env.local.example` (API key template)
+
+Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit repo and are not copied to target projects.
 
 ### Step 2: Install dependencies (optional)
 
