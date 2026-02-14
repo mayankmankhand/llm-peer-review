@@ -39,6 +39,8 @@ flowchart TD
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` | Learn a concept at 3 levels of depth |
 
+> `/ask-gpt` and `/ask-gemini` automate the full debate loop. `/peer-review` is for when you paste feedback from an external tool manually.
+
 ### The Workflow
 
 Use them in this order:

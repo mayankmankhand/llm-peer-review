@@ -101,7 +101,7 @@ The rest of CLAUDE.md (workflow, commands, git guidance) works as-is.
 The user can now open their project in Cursor or Claude Code and type `/` to see the available commands. The recommended workflow order is:
 
 ```
-/explore  →  /create-plan  →  /execute  →  /review  →  /peer-review  →  /document
+/explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
 ```
 
 ---
