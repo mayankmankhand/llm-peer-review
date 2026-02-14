@@ -14,7 +14,7 @@ A set of slash commands and scripts that give AI agents a structured workflow: e
 
 ## Environment
 
-Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerShell on native Windows. Pick commands that match their shell.
+Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerShell on native Windows for setup. Note: the debate commands (`/ask-gpt`, `/ask-gemini`) require bash/WSL — they don't work in native PowerShell.
 
 ---
 

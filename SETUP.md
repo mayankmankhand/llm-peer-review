@@ -2,12 +2,14 @@
 
 Pick your operating system below, then continue with "Both Platforms" at the end.
 
+> **Windows users:** This toolkit runs on macOS, Linux, or WSL. We recommend **Option A (WSL + bash)** for the full experience. Option B (native PowerShell) supports setup and most commands, but the debate commands (`/ask-gpt`, `/ask-gemini`) require bash/WSL.
+
 ## Windows
 
 You can use this toolkit in **two ways** on Windows:
 
-- **Option A (recommended): WSL + bash** for parity with Linux/macOS workflows
-- **Option B: Native Windows PowerShell** using `scripts/setup/setup.ps1` (no WSL required)
+- **Option A (recommended): WSL + bash** for full functionality including AI debates
+- **Option B: Native Windows PowerShell** using `scripts/setup/setup.ps1` (setup + non-debate commands only)
 
 ### Step 1: Install Node.js
 

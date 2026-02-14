@@ -51,6 +51,10 @@ You don't have to use every command every time. But following the order prevents
 
 ---
 
+## Requirements
+
+This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-bash-workflow) first.
+
 ## Setting Up a Brand New Computer
 
 > **Never set up a dev environment before?** Follow the step-by-step guide in **[SETUP.md](SETUP.md)**. It covers Windows (WSL), Mac, Node.js, GitHub CLI, Cursor, and API keys — everything you need from scratch.
@@ -106,7 +110,7 @@ Pick the script that matches your shell. You can run it in two ways:
 bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project
 ```
 
-**PowerShell (native Windows, no WSL):**
+**PowerShell (for setup only — see [Requirements](#requirements)):**
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
 ```
@@ -187,6 +191,8 @@ You: Yes
 ```
 
 Want a different perspective? Run `/ask-gemini` next.
+
+> **API costs:** Each 3-round debate typically costs $0.01–$0.10 in API credits depending on context size. You'll need an OpenAI and/or Gemini API key with credits.
 
 ### What It Looks Like
 

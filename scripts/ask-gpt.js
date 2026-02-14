@@ -53,7 +53,8 @@ if (fs.existsSync(envPath)) {
     const match = trimmedLine.match(/^([^=]+)=(.*)$/);
     if (match) {
       const key = match[1].trim();
-      const value = match[2].trim();
+      // Strip surrounding quotes (single or double) that some tutorials show
+      const value = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
       // Only set if not already in environment
       if (!process.env[key]) {
         process.env[key] = value;

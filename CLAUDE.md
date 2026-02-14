@@ -102,15 +102,16 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | Permission | Why it's here |
 |---|---|
 | `git commit` | `/execute` and `/document` need to commit after work |
-| `gh repo create` | `/create-issue` scaffolding |
-| `gh issue create` | `/create-issue` command |
-| `gh api` | GitHub API calls from commands |
-| `npm install` | Setting up dependencies in new projects |
-| `node` | Running the ask-gpt and ask-gemini scripts |
-| `npm uninstall` | Removing packages when needed |
-| `ls` | Reading directory contents |
-| `diff` | Comparing files during review |
-| `git config` | Git setup (e.g. safe.directory) |
+| `git push`, `git pull`, `git fetch` | Syncing with remote repositories |
+| `git add`, `git rm`, `git branch` | Staging files, removing files, managing branches |
+| `git config`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs) |
+| `gh repo create`, `gh repo view` | Repository scaffolding and viewing |
+| `gh issue create`, `gh issue view`, `gh issue close` | `/create-issue` command and issue management |
+| `gh api`, `gh release list` | GitHub API calls and release checks |
+| `npm install`, `npm uninstall` | Managing dependencies |
+| `node scripts/ask-gpt.js` | Running the ask-gpt debate script |
+| `node scripts/ask-gemini.js` | Running the ask-gemini debate script |
+| `ls`, `diff`, `echo` | Reading directories, comparing files, writing output |
 | `cd` | **Not included by default.** If your workflow needs it, add `"Bash(cd:*)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access. |
 
 ---

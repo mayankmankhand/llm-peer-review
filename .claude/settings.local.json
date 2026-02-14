@@ -6,14 +6,14 @@
       "Bash(gh issue create:*)",
       "Bash(gh api:*)",
       "Bash(npm install:*)",
-      "Bash(node:*)",
+      "Bash(node scripts/ask-gpt.js:*)",
+      "Bash(node scripts/ask-gemini.js:*)",
       "Bash(npm uninstall:*)",
       "Bash(ls:*)",
       "Bash(diff:*)",
       "Bash(git config:*)",
       "Bash(git push:*)",
       "Bash(git remote set-url:*)",
-      "Bash(bash:*)",
       "WebFetch(domain:github.com)",
       "Bash(git rm:*)",
       "Bash(gh issue close:*)",
@@ -25,6 +25,9 @@
       "Bash(gh issue view:*)",
       "Bash(gh repo view:*)",
       "Bash(gh release list:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }
