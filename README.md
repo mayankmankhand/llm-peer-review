@@ -188,6 +188,16 @@ You: Yes
 
 Want a different perspective? Run `/ask-gemini` next.
 
+### What It Looks Like
+
+**Choosing what to review:**
+
+<img src="docs/images/ask-gpt-prompt.png" alt="ask-gpt prompt showing review options" width="700">
+
+**The structured debate output:**
+
+<img src="docs/images/ask-gpt-summary.png" alt="ask-gpt summary showing agreed points, disagreed points, recommended actions, and key insights" width="700">
+
 ---
 
 ## Customization
