@@ -1,6 +1,6 @@
-# Dev Lead Gemini - Automated AI Peer Review (Gemini)
+# Ask GPT - Automated AI Peer Review (ChatGPT)
 
-You are the Dev Lead. Your job is to get a second opinion from Gemini on the user's work, engage in a constructive debate, and produce actionable recommendations.
+You are the Lead Reviewer. Your job is to get a second opinion from ChatGPT on the user's work, engage in a constructive debate, and produce actionable recommendations.
 
 ## Step 1: Ask What to Review
 
@@ -30,28 +30,28 @@ Save all gathered context to a temporary file:
 
 ```bash
 # Create context file with the content to review
-cat > /tmp/dev-lead-context.md << 'CONTEXT_EOF'
+cat > /tmp/ask-context.md << 'CONTEXT_EOF'
 [PASTE THE GATHERED CONTEXT HERE]
 CONTEXT_EOF
 ```
 
-## Step 3: Get Initial Review from Gemini
+## Step 3: Get Initial Review from ChatGPT
 
-Run the dev-lead-gemini script to get Gemini's initial review:
+Run the ask-gpt script to get ChatGPT's initial review:
 
 ```bash
-node scripts/dev-lead-gemini.js review --context-file /tmp/dev-lead-context.md --review-type [plan|code|branch|feature]
+node scripts/ask-gpt.js review --context-file /tmp/ask-context.md --review-type [plan|code|branch|feature]
 ```
 
-Read the output and present Gemini's review to yourself for response.
+Read the output and present ChatGPT's review to yourself for response.
 
 ## Step 4: Debate Cycle (Repeat 3 Times)
 
 For each debate cycle:
 
-### 4a. Respond to Gemini's Feedback
+### 4a. Respond to ChatGPT's Feedback
 
-As the author, respond to Gemini's review using this structure:
+As the author, respond to ChatGPT's review using this structure:
 
 ```markdown
 ## Accepted
@@ -69,7 +69,7 @@ Clarifications needed from the reviewer
 Append your response to a debate file:
 
 ```bash
-cat >> /tmp/dev-lead-debate.md << 'DEBATE_EOF'
+cat >> /tmp/ask-debate.md << 'DEBATE_EOF'
 
 ## Claude (Round N):
 
@@ -78,13 +78,13 @@ cat >> /tmp/dev-lead-debate.md << 'DEBATE_EOF'
 DEBATE_EOF
 ```
 
-### 4c. Get Gemini's Follow-up
+### 4c. Get ChatGPT's Follow-up
 
 ```bash
-node scripts/dev-lead-gemini.js respond --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
+node scripts/ask-gpt.js respond --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
 ```
 
-Append Gemini's response to the debate file and continue to the next round.
+Append ChatGPT's response to the debate file and continue to the next round.
 
 **Repeat this cycle 3 times total.**
 
@@ -93,7 +93,7 @@ Append Gemini's response to the debate file and continue to the next round.
 After 3 debate cycles, generate the final summary:
 
 ```bash
-node scripts/dev-lead-gemini.js summary --context-file /tmp/dev-lead-context.md --debate-file /tmp/dev-lead-debate.md
+node scripts/ask-gpt.js summary --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
 ```
 
 ## Step 6: Present Results to User
@@ -102,10 +102,10 @@ Present the summary to the user in this format:
 
 ---
 
-## Dev Lead Review Complete
+## Lead Reviewer Summary
 
 ### ✅ Agreed Points
-[Points where both Claude and Gemini agreed]
+[Points where both Claude and ChatGPT agreed]
 
 ### ⚠️ Disagreed Points
 [Points of disagreement with both perspectives]
@@ -135,7 +135,7 @@ Ask the user:
 
 ## Guidelines for the Debate
 
-- **Be constructive, not defensive** when responding to Gemini's feedback
+- **Be constructive, not defensive** when responding to ChatGPT's feedback
 - **Acknowledge valid points** even if you disagree on details
 - **Focus on actionable improvements**, not theoretical preferences
 - **Keep the user informed** of progress throughout the process

@@ -11,7 +11,7 @@ You can use this toolkit in **two ways** on Windows:
 
 ### Step 1: Install Node.js
 
-Node.js runs the dev-lead scripts (the ChatGPT/Gemini debate features).
+Node.js runs the ask-gpt and ask-gemini scripts (the ChatGPT/Gemini debate features).
 
 - Install from [nodejs.org](https://nodejs.org) (LTS is fine), then reopen terminal
 - Verify:
@@ -123,7 +123,7 @@ You should see version numbers for each. If any command says "not found", go bac
 
 ### Step 6: Get API Keys (Optional)
 
-You only need these if you want `/dev-lead-gpt` and `/dev-lead-gemini`. Both services have free tiers.
+You only need these if you want `/ask-gpt` and `/ask-gemini`. Both services have free tiers.
 
 - **OpenAI key:** Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys) → create a key → copy it
 - **Gemini key:** Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → create a key → copy it

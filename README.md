@@ -6,7 +6,7 @@ Whether you're speccing a feature, conducting competitive research, building a p
 
 This is the same consensus/divergence synthesis that [Perplexity's Model Council](https://www.perplexity.ai/hub/blog/introducing-model-council) produces and what [Karpathy's LLM Council](https://github.com/karpathy/llm-council) does for general Q&A, applied to a full project lifecycle with multi-round adversarial debate and an implementation workflow.
 
-**Inspired by [Zevi Arnovitz's workflow on Lenny's Podcast](https://www.youtube.com/watch?v=1em64iUFt3U).** The key difference is that Zevi manually conducts peer reviews by copying feedback from one model to another because he likes seeing the reasoning from tools like ChatGPT or Gemini. This toolkit automates the entire process with two slash commands — `/dev-lead-gpt` and `/dev-lead-gemini` — that handle the multi-round debate loop for you.
+**Inspired by [Zevi Arnovitz's workflow on Lenny's Podcast](https://www.youtube.com/watch?v=1em64iUFt3U).** The key difference is that Zevi manually conducts peer reviews by copying feedback from one model to another because he likes seeing the reasoning from tools like ChatGPT or Gemini. This toolkit automates the entire process with two slash commands — `/ask-gpt` and `/ask-gemini` — that handle the multi-round debate loop for you.
 
 Works for product specs, research plans, competitive analysis, and code equally.
 
@@ -15,7 +15,7 @@ flowchart TD
     A(["/explore"]) --> B(["/create-plan"])
     B --> C(["/execute"])
     C --> D(["/review"])
-    D --> E(["/dev-lead-gpt or /dev-lead-gemini"])
+    D --> E(["/ask-gpt or /ask-gemini"])
     E --> F(["Agreed · Disagreed · Actions"])
     F --> G{"You approve"}
     G --> H(["/document"])
@@ -34,8 +34,8 @@ flowchart TD
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
-| `/dev-lead-gpt` | Debate your work with ChatGPT (3 rounds) |
-| `/dev-lead-gemini` | Debate your work with Gemini (3 rounds) |
+| `/ask-gpt` | Debate your work with ChatGPT (3 rounds) |
+| `/ask-gemini` | Debate your work with Gemini (3 rounds) |
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` | Learn a concept at 3 levels of depth |
 
@@ -127,7 +127,7 @@ powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setu
 
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
-The scripts copy commands and runtime scripts (dev-lead-*.js) to your project. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md and settings.local.json are skipped if they already exist — those are yours to customize.
+The scripts copy commands and runtime scripts (ask-gpt.js, ask-gemini.js) to your project. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md and settings.local.json are skipped if they already exist — those are yours to customize.
 
 ### Option C: Do It Manually
 
@@ -137,7 +137,7 @@ Copy these into your project:
 |---|---|
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (only `dev-lead-gpt.js` and `dev-lead-gemini.js`) | `your-project/scripts/` |
+| `scripts/` (only `ask-gpt.js` and `ask-gemini.js`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
 | `.gitignore` | `your-project/.gitignore` |
@@ -150,7 +150,7 @@ cp .env.local.example .env.local
 # Open .env.local and paste your API keys
 ```
 
-> The `npm install` and `.env.local` steps are only needed if you want `/dev-lead-gpt` or `/dev-lead-gemini`. The other 9 commands work without them.
+> The `npm install` and `.env.local` steps are only needed if you want `/ask-gpt` or `/ask-gemini`. The other 9 commands work without them.
 
 ### Option D: Let Your AI Agent Do It
 
@@ -158,14 +158,14 @@ Tell your AI agent (Claude Code, Cursor, etc.): "Set up the workflow from this r
 
 ---
 
-## How Dev-Lead Commands Work
+## How `/ask-gpt` and `/ask-gemini` Work
 
-`/dev-lead-gpt` and `/dev-lead-gemini` run an automated debate between Claude and another AI about your code or plan. You don't have to copy anything manually — it handles the whole loop.
+`/ask-gpt` and `/ask-gemini` run an automated debate between Claude and another AI about your code or plan. You don't have to copy anything manually — it handles the whole loop.
 
 ### Example
 
 ```
-You: /dev-lead-gpt
+You: /ask-gpt
 
 Claude: What would you like me to review?
         1. Plan    2. Code    3. Branch    4. Feature    5. Other
@@ -186,7 +186,7 @@ Claude: [Gathers context → sends to ChatGPT → they debate 3 rounds]
 You: Yes
 ```
 
-Want a different perspective? Run `/dev-lead-gemini` next.
+Want a different perspective? Run `/ask-gemini` next.
 
 ---
 
@@ -201,7 +201,7 @@ Want a different perspective? Run `/dev-lead-gemini` next.
 ## Troubleshooting
 
 - **Commands don't show up in Cursor** — Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
-- **`/dev-lead-gpt` or `/dev-lead-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys.
+- **`/ask-gpt` or `/ask-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys.
 - **"setup.sh: command not found"** — Run the full command from the setup instructions, not just `setup.sh` on its own.
 - **"target directory does not exist"** — Create the project folder first: `mkdir -p /path/to/project`
 - **Script errors with `/bin/bash^M` or "bad interpreter"** — This is a line-ending issue. Your shell scripts have Windows-style line endings (CRLF) instead of Unix-style (LF). Easiest fix: delete the folder and clone fresh. Advanced fix: run `git add --renormalize . && git checkout -- .` in the repo.

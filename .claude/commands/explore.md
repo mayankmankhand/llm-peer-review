@@ -25,7 +25,7 @@ Ask **3-4 focused questions per round**, max 2-3 rounds total. Keep it digestibl
 
 **Good example:**
 > A few quick questions:
-> 1. What's in scope - just the web app, or Dev Lead commands too?
+> 1. What's in scope - just the web app, or the review commands too?
 > 2. The 3 completed PLAN files - delete, archive, or keep?
 > 3. What about manager_package/ and toon_flow/ - part of this project?
 

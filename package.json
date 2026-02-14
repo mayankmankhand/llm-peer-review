@@ -21,8 +21,8 @@
     "developer-tools"
   ],
   "scripts": {
-    "dev-lead-gpt": "node scripts/dev-lead-gpt.js",
-    "dev-lead-gemini": "node scripts/dev-lead-gemini.js"
+    "ask-gpt": "node scripts/ask-gpt.js",
+    "ask-gemini": "node scripts/ask-gemini.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

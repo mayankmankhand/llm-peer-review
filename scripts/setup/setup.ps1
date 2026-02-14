@@ -92,7 +92,7 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
 }
 
 # Check runtime scripts (must exist)
-foreach ($f in @("dev-lead-gpt.js", "dev-lead-gemini.js")) {
+foreach ($f in @("ask-gpt.js", "ask-gemini.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path "scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -145,8 +145,8 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
 }
 
 Write-Host "  Copying scripts\ ..."
-# Only copy runtime scripts (dev-lead-*.js) - setup scripts stay in toolkit repo
-foreach ($scriptName in @("dev-lead-gpt.js", "dev-lead-gemini.js")) {
+# Only copy runtime scripts (ask-gpt.js, ask-gemini.js) - setup scripts stay in toolkit repo
+foreach ($scriptName in @("ask-gpt.js", "ask-gemini.js")) {
   try {
     Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
   } catch {
@@ -223,7 +223,7 @@ Write-Host ""
 Write-Host "      3. Open the folder in Cursor and type / to see your commands."
 Write-Host ""
 Write-Host "      Steps 1 and 2 are optional - skip them if you don't"
-Write-Host "      need /dev-lead-gpt or /dev-lead-gemini."
+Write-Host "      need /ask-gpt or /ask-gemini."
 Write-Host ""
 Write-Host "    Tip: To update commands and scripts, run setup again from"
 Write-Host "    the toolkit repo: powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"$Target`""

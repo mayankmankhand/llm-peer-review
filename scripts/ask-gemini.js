@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Dev Lead Gemini - Automated AI Peer Review Script
- * 
+ * Ask Gemini - Automated AI Peer Review Script
+ *
  * Standalone Node.js script for running peer review debates using Google Gemini.
  * Handles Gemini API calls, manages debate context, and orchestrates multi-turn
  * review cycles. Can be invoked from CLI, Cursor, or integrated into workflows.
  *
  * Intentionally kept as a standalone script (no shared provider module) for
  * independent model flexibility, per-provider error handling, and simpler debugging.
- * 
+ *
  * Commands:
  *   review   - Get initial review from Gemini
  *   respond  - Get Gemini's response to Claude's feedback
  *   summary  - Generate final debate summary
- * 
+ *
  * Usage:
- *   node scripts/dev-lead-gemini.js review --context-file <path> [--review-type <type>]
- *   node scripts/dev-lead-gemini.js respond --context-file <path> --debate-file <path>
- *   node scripts/dev-lead-gemini.js summary --context-file <path> --debate-file <path>
+ *   node scripts/ask-gemini.js review --context-file <path> [--review-type <type>]
+ *   node scripts/ask-gemini.js respond --context-file <path> --debate-file <path>
+ *   node scripts/ask-gemini.js summary --context-file <path> --debate-file <path>
  * 
  * Environment:
  *   GEMINI_API_KEY            Required for Gemini API calls
@@ -219,17 +219,17 @@ function parseArgs() {
  */
 function printHelp() {
   console.log(`
-Dev Lead Gemini - Automated AI Peer Review
+Ask Gemini - Automated AI Peer Review
 
 Commands:
   review    Get initial review from Gemini
-  respond   Get Gemini's response to Claude's feedback  
+  respond   Get Gemini's response to Claude's feedback
   summary   Generate final debate summary
 
 Usage:
-  node scripts/dev-lead-gemini.js review --context-file <path> [--review-type <type>]
-  node scripts/dev-lead-gemini.js respond --context-file <path> --debate-file <path>
-  node scripts/dev-lead-gemini.js summary --context-file <path> --debate-file <path>
+  node scripts/ask-gemini.js review --context-file <path> [--review-type <type>]
+  node scripts/ask-gemini.js respond --context-file <path> --debate-file <path>
+  node scripts/ask-gemini.js summary --context-file <path> --debate-file <path>
 
 Options:
   --context-file   Path to file with content to review (required)
@@ -244,13 +244,13 @@ Environment:
 
 Examples:
   # Initial review
-  node scripts/dev-lead-gemini.js review --context-file context.md --review-type plan
+  node scripts/ask-gemini.js review --context-file context.md --review-type plan
 
   # After Claude responds, get Gemini's follow-up
-  node scripts/dev-lead-gemini.js respond --context-file context.md --debate-file debate.md
+  node scripts/ask-gemini.js respond --context-file context.md --debate-file debate.md
 
   # Generate final summary
-  node scripts/dev-lead-gemini.js summary --context-file context.md --debate-file debate.md
+  node scripts/ask-gemini.js summary --context-file context.md --debate-file debate.md
   `);
 }
 

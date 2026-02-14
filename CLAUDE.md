@@ -40,8 +40,8 @@ We follow this flow for features:
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |
-| `/dev-lead-gpt` | AI peer review with ChatGPT debate (3 rounds) |
-| `/dev-lead-gemini` | AI peer review with Gemini debate (3 rounds) |
+| `/ask-gpt` | AI peer review with ChatGPT debate (3 rounds) |
+| `/ask-gemini` | AI peer review with Gemini debate (3 rounds) |
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
 
@@ -89,7 +89,7 @@ We follow this flow for features:
 **Examples:**
 - `Add git workflow guidance to CLAUDE.md`
 - `Remove Next.js web app (out of scope for v1)`
-- `Fix broken reference in dev-lead command`
+- `Fix broken reference in ask-gpt command`
 
 **Simple rule:** For solo learning projects, working on main is fine. Branch when you want to experiment safely.
 
@@ -106,7 +106,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `gh issue create` | `/create-issue` command |
 | `gh api` | GitHub API calls from commands |
 | `npm install` | Setting up dependencies in new projects |
-| `node` | Running the dev-lead scripts |
+| `node` | Running the ask-gpt and ask-gemini scripts |
 | `npm uninstall` | Removing packages when needed |
 | `ls` | Reading directory contents |
 | `diff` | Comparing files during review |

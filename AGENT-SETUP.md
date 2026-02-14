@@ -25,7 +25,7 @@ Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerSh
 The user's machine needs:
 - `git` (to clone this repo temporarily)
 - `bash` (to run the setup script — compatible with Bash 3.2+ on macOS/Linux/WSL) or PowerShell 5.1+ (native Windows)
-- `node` and `npm` (only if they want the `/dev-lead-gpt` and `/dev-lead-gemini` commands)
+- `node` and `npm` (only if they want the `/ask-gpt` and `/ask-gemini` commands)
 
 ### Windows note
 
@@ -52,7 +52,7 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/settings.local.json` (permission config — skipped if it already exists)
-- `scripts/` (only dev-lead-gpt.js and dev-lead-gemini.js — runtime scripts needed for peer review)
+- `scripts/` (only ask-gpt.js and ask-gemini.js — runtime scripts needed for peer review)
 - `CLAUDE.md` (project instructions — skipped if it already exists)
 - `.env.local.example` (API key template)
 - `.gitignore` (ignores plan files, env files, node_modules, etc.)
@@ -62,7 +62,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 ### Step 2: Install dependencies (optional)
 
-Only needed if the user wants `/dev-lead-gpt` or `/dev-lead-gemini`:
+Only needed if the user wants `/ask-gpt` or `/ask-gemini`:
 
 ```bash
 npm install --prefix "TARGET_PROJECT_PATH" @google/generative-ai openai
@@ -111,7 +111,7 @@ The user can now open their project in Cursor or Claude Code and type `/` to see
 - **"setup.sh: command not found"** — Make sure to run the full `bash -c '...'` command from Step 1, not just `setup.sh` on its own
 - **"target directory does not exist"** — Create the project folder first: `mkdir -p /path/to/project`
 - **Commands don't show up in Cursor** — Make sure `.claude/commands/` exists in the project root with `.md` files inside
-- **`/dev-lead-gpt` or `/dev-lead-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys
+- **`/ask-gpt` or `/ask-gemini` fails** — Check that `npm install` was run and `.env.local` has valid API keys
 - **"Permission denied"** — Ensure you have write access to the target project directory
 - **Commands exist but don't appear in the editor** — Make sure the editor workspace root is the project folder that contains `.claude/`, not a parent directory
 - **Script errors with `/bin/bash^M` or "bad interpreter"** — Line-ending issue. Delete the folder and clone fresh, or run `git add --renormalize . && git checkout -- .`

@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Dev Lead GPT - Automated AI Peer Review Script
- * 
+ * Ask GPT - Automated AI Peer Review Script
+ *
  * Standalone Node.js script for running peer review debates using ChatGPT.
  * Handles OpenAI API calls, manages debate context, and orchestrates multi-turn
  * review cycles. Can be invoked from CLI, Cursor, or integrated into workflows.
  *
  * Intentionally kept as a standalone script (no shared provider module) for
  * independent model flexibility, per-provider error handling, and simpler debugging.
- * 
+ *
  * Commands:
  *   review   - Get initial review from ChatGPT
  *   respond  - Get ChatGPT's response to Claude's feedback
  *   summary  - Generate final debate summary
- * 
+ *
  * Usage:
- *   node scripts/dev-lead-gpt.js review --context-file <path> [--review-type <type>]
- *   node scripts/dev-lead-gpt.js respond --context-file <path> --debate-file <path>
- *   node scripts/dev-lead-gpt.js summary --context-file <path> --debate-file <path>
+ *   node scripts/ask-gpt.js review --context-file <path> [--review-type <type>]
+ *   node scripts/ask-gpt.js respond --context-file <path> --debate-file <path>
+ *   node scripts/ask-gpt.js summary --context-file <path> --debate-file <path>
  * 
  * Environment:
  *   OPENAI_API_KEY   Required for ChatGPT API calls
@@ -216,17 +216,17 @@ function parseArgs() {
  */
 function printHelp() {
   console.log(`
-Dev Lead GPT - Automated AI Peer Review
+Ask GPT - Automated AI Peer Review
 
 Commands:
   review    Get initial review from ChatGPT
-  respond   Get ChatGPT's response to Claude's feedback  
+  respond   Get ChatGPT's response to Claude's feedback
   summary   Generate final debate summary
 
 Usage:
-  node scripts/dev-lead-gpt.js review --context-file <path> [--review-type <type>]
-  node scripts/dev-lead-gpt.js respond --context-file <path> --debate-file <path>
-  node scripts/dev-lead-gpt.js summary --context-file <path> --debate-file <path>
+  node scripts/ask-gpt.js review --context-file <path> [--review-type <type>]
+  node scripts/ask-gpt.js respond --context-file <path> --debate-file <path>
+  node scripts/ask-gpt.js summary --context-file <path> --debate-file <path>
 
 Options:
   --context-file   Path to file with content to review (required)
@@ -240,13 +240,13 @@ Environment:
 
 Examples:
   # Initial review
-  node scripts/dev-lead-gpt.js review --context-file context.md --review-type plan
+  node scripts/ask-gpt.js review --context-file context.md --review-type plan
 
   # After Claude responds, get ChatGPT's follow-up
-  node scripts/dev-lead-gpt.js respond --context-file context.md --debate-file debate.md
+  node scripts/ask-gpt.js respond --context-file context.md --debate-file debate.md
 
   # Generate final summary
-  node scripts/dev-lead-gpt.js summary --context-file context.md --debate-file debate.md
+  node scripts/ask-gpt.js summary --context-file context.md --debate-file debate.md
   `);
 }
 

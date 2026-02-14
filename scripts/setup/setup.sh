@@ -88,7 +88,7 @@ elif ! compgen -G "$TOOLKIT_ROOT/.claude/commands/"*.md > /dev/null 2>&1; then
 fi
 
 # Check runtime scripts (must exist)
-for f in dev-lead-gpt.js dev-lead-gemini.js; do
+for f in ask-gpt.js ask-gemini.js; do
   if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/$f"
     PREFLIGHT_OK=false
@@ -139,10 +139,10 @@ done
 
 # ─── Scripts (runtime scripts only — setup scripts stay in toolkit repo) ──────────────────
 echo "  Copying scripts/ ..."
-# Only copy runtime scripts (dev-lead-*.js) - setup scripts stay in toolkit repo
-cp "$TOOLKIT_ROOT/scripts/dev-lead-gpt.js"   "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/dev-lead-gemini.js" "$TARGET/scripts/"
-OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js)
+# Only copy runtime scripts (ask-gpt.js, ask-gemini.js) - setup scripts stay in toolkit repo
+cp "$TOOLKIT_ROOT/scripts/ask-gpt.js"    "$TARGET/scripts/"
+cp "$TOOLKIT_ROOT/scripts/ask-gemini.js" "$TARGET/scripts/"
+OVERWROTE+=(scripts/ask-gpt.js scripts/ask-gemini.js)
 
 # ─── .env.local.example (template — safe to overwrite) ───────
 echo "  Copying .env.local.example ..."
@@ -203,7 +203,7 @@ echo ""
 echo "      3. Open the folder in Cursor and type / to see your commands."
 echo ""
 echo "      Steps 1 and 2 are optional — skip them if you don't"
-echo "      need /dev-lead-gpt or /dev-lead-gemini."
+echo "      need /ask-gpt or /ask-gemini."
 echo ""
 echo "    Tip: To update commands and scripts, run setup again from"
 echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"
