@@ -23,9 +23,10 @@ We follow this flow for features:
 1. `/explore` - Understand the problem, ask clarifying questions
 2. `/create-plan` - Create a step-by-step plan with status tracking
 3. `/execute` - Build it, updating the plan as we go
-4. `/review` - Review code (report only, don't fix)
-5. `/peer-review` - Evaluate feedback from other AI models
-6. `/document` - Update documentation
+4. `/review` - Review work (report only, don't fix)
+5. `/ask-gpt` or `/ask-gemini` - Get a second opinion via multi-model debate
+6. `/peer-review` - Evaluate debate findings (paste results here)
+7. `/document` - Update documentation
 
 ---
 
@@ -96,6 +97,8 @@ We follow this flow for features:
 ---
 
 ## Permissions
+
+This project uses two settings files. `settings.json` is committed to the repo and provides a shared baseline (currently just temp-file permissions for debate scripts). `settings.local.json` is user-specific and not overwritten on re-setup — your real permissions live here.
 
 These are defined in `.claude/settings.local.json`. Each one exists for a reason:
 

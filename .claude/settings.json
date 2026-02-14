@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(/tmp/ask-gpt-debate.md:*)",
-      "Bash(/tmp/ask-gemini-debate.md:*)"
+      "Bash(/tmp/ask-gemini-debate.md:*)",
+      "Bash(gh repo edit:*)"
     ]
   }
 }

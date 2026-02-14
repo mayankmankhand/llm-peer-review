@@ -44,7 +44,7 @@ flowchart TD
 Use them in this order:
 
 ```
-/explore  →  /create-plan  →  /execute  →  /review  →  /peer-review  →  /document
+/explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
 ```
 
 You don't have to use every command every time. But following the order prevents the most common mistake: coding before you've thought it through.
