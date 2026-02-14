@@ -3,12 +3,12 @@
 /**
  * Dev Lead Gemini - Automated AI Peer Review Script
  * 
- * Handles Google Gemini API calls for the peer review debate.
- * Claude (in Cursor) orchestrates the flow and provides responses.
- * 
- * NOTE: This script is intentionally kept separate from its counterpart
- * (dev-lead-gpt.js) to maintain simplicity and clarity for learning purposes,
- * avoiding abstractions like a shared provider module.
+ * Standalone Node.js script for running peer review debates using Google Gemini.
+ * Handles Gemini API calls, manages debate context, and orchestrates multi-turn
+ * review cycles. Can be invoked from CLI, Cursor, or integrated into workflows.
+ *
+ * Intentionally kept as a standalone script (no shared provider module) for
+ * independent model flexibility, per-provider error handling, and simpler debugging.
  * 
  * Commands:
  *   review   - Get initial review from Gemini
@@ -81,7 +81,7 @@ const ERR = {
   UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use review, respond, or summary.`,
 };
 
-// Prompt templates (same as ChatGPT version - prompts work across models)
+// Prompt templates for Gemini review debates
 const PROMPTS = {
   reviewer: `You are a senior engineer conducting a peer review. Your role is to provide constructive, actionable feedback.
 

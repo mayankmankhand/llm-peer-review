@@ -3,12 +3,12 @@
 /**
  * Dev Lead GPT - Automated AI Peer Review Script
  * 
- * Handles ChatGPT API calls for the peer review debate.
- * Claude (in Cursor) orchestrates the flow and provides responses.
- * 
- * NOTE: This script is intentionally kept separate from its counterpart
- * (dev-lead-gemini.js) to maintain simplicity and clarity for learning purposes,
- * avoiding abstractions like a shared provider module.
+ * Standalone Node.js script for running peer review debates using ChatGPT.
+ * Handles OpenAI API calls, manages debate context, and orchestrates multi-turn
+ * review cycles. Can be invoked from CLI, Cursor, or integrated into workflows.
+ *
+ * Intentionally kept as a standalone script (no shared provider module) for
+ * independent model flexibility, per-provider error handling, and simpler debugging.
  * 
  * Commands:
  *   review   - Get initial review from ChatGPT
