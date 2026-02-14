@@ -1,7 +1,7 @@
 {
   "name": "llm-peer-review",
   "version": "1.0.0",
-  "description": "Cursor slash command toolkit for PM learning to code",
+  "description": "LLM Peer Review - multi-model AI debate for your project lifecycle",
   "author": "Mayank Mankhand",
   "license": "MIT",
   "repository": {

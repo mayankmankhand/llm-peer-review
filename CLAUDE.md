@@ -2,7 +2,7 @@
 
 ## About This Project
 
-**Cursor Slash Command Toolkit** - A portable set of commands for "PM learning to code" workflows.
+**LLM Peer Review** - A portable set of commands for "PM learning to code" workflows.
 
 **Who I Am**: I'm a PM learning to code using AI tools. Explain things simply.
 

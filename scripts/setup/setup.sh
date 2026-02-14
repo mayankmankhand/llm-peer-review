@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# setup.sh — Copy the Cursor Slash Command Toolkit into any project.
+# setup.sh — Copy the LLM Peer Review toolkit into any project.
 # Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
@@ -69,7 +69,7 @@ TARGET="$(cd "$TARGET" && pwd)"
 # ─── Header ──────────────────────────────────────────────────
 echo ""
 echo "  ================================"
-echo "   Cursor Slash Command Toolkit"
+echo "   LLM Peer Review"
 echo "  ================================"
 echo ""
 echo "    From:  $TOOLKIT_ROOT"

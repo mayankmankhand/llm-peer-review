@@ -1,4 +1,4 @@
-# setup.ps1 - Copy the Cursor Slash Command Toolkit into any project (Windows PowerShell).
+# setup.ps1 - Copy the LLM Peer Review toolkit into any project (Windows PowerShell).
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
@@ -70,7 +70,7 @@ if ($Target -eq ".") {
 
 Write-Host ""
 Write-Host "  ================================"
-Write-Host "   Cursor Slash Command Toolkit"
+Write-Host "   LLM Peer Review"
 Write-Host "  ================================"
 Write-Host ""
 Write-Host "    From:  $ToolkitRoot"
