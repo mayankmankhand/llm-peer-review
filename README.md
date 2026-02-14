@@ -10,7 +10,16 @@ This is the same consensus/divergence synthesis that [Perplexity's Model Council
 
 Works for product specs, research plans, competitive analysis, and code equally.
 
-<!-- VISUAL GOES HERE after Issue #5 is complete -->
+```mermaid
+flowchart TD
+    A(["/explore"]) --> B(["/create-plan"])
+    B --> C(["/execute"])
+    C --> D(["/review"])
+    D --> E(["/dev-lead-gpt or /dev-lead-gemini"])
+    E --> F(["Agreed · Disagreed · Actions"])
+    F --> G{"You approve"}
+    G --> H(["/document"])
+```
 
 ---
 
