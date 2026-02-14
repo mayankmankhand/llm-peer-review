@@ -30,7 +30,7 @@ Save all gathered context to a temporary file:
 
 ```bash
 # Create context file with the content to review
-cat > /tmp/ask-context.md << 'CONTEXT_EOF'
+cat > /tmp/ask-gemini-context.md << 'CONTEXT_EOF'
 [PASTE THE GATHERED CONTEXT HERE]
 CONTEXT_EOF
 ```
@@ -40,7 +40,7 @@ CONTEXT_EOF
 Run the ask-gemini script to get Gemini's initial review:
 
 ```bash
-node scripts/ask-gemini.js review --context-file /tmp/ask-context.md --review-type [plan|code|branch|feature]
+node scripts/ask-gemini.js review --context-file /tmp/ask-gemini-context.md --review-type [plan|code|branch|feature]
 ```
 
 Read the output and present Gemini's review to yourself for response.
@@ -69,7 +69,7 @@ Clarifications needed from the reviewer
 Append your response to a debate file:
 
 ```bash
-cat >> /tmp/ask-debate.md << 'DEBATE_EOF'
+cat >> /tmp/ask-gemini-debate.md << 'DEBATE_EOF'
 
 ## Claude (Round N):
 
@@ -81,7 +81,7 @@ DEBATE_EOF
 ### 4c. Get Gemini's Follow-up
 
 ```bash
-node scripts/ask-gemini.js respond --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
+node scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
 Append Gemini's response to the debate file and continue to the next round.
@@ -93,7 +93,7 @@ Append Gemini's response to the debate file and continue to the next round.
 After 3 debate cycles, generate the final summary:
 
 ```bash
-node scripts/ask-gemini.js summary --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
+node scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
 ## Step 6: Present Results to User

@@ -30,7 +30,7 @@ Save all gathered context to a temporary file:
 
 ```bash
 # Create context file with the content to review
-cat > /tmp/ask-context.md << 'CONTEXT_EOF'
+cat > /tmp/ask-gpt-context.md << 'CONTEXT_EOF'
 [PASTE THE GATHERED CONTEXT HERE]
 CONTEXT_EOF
 ```
@@ -40,7 +40,7 @@ CONTEXT_EOF
 Run the ask-gpt script to get ChatGPT's initial review:
 
 ```bash
-node scripts/ask-gpt.js review --context-file /tmp/ask-context.md --review-type [plan|code|branch|feature]
+node scripts/ask-gpt.js review --context-file /tmp/ask-gpt-context.md --review-type [plan|code|branch|feature]
 ```
 
 Read the output and present ChatGPT's review to yourself for response.
@@ -69,7 +69,7 @@ Clarifications needed from the reviewer
 Append your response to a debate file:
 
 ```bash
-cat >> /tmp/ask-debate.md << 'DEBATE_EOF'
+cat >> /tmp/ask-gpt-debate.md << 'DEBATE_EOF'
 
 ## Claude (Round N):
 
@@ -81,7 +81,7 @@ DEBATE_EOF
 ### 4c. Get ChatGPT's Follow-up
 
 ```bash
-node scripts/ask-gpt.js respond --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
+node scripts/ask-gpt.js respond --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
 ```
 
 Append ChatGPT's response to the debate file and continue to the next round.
@@ -93,7 +93,7 @@ Append ChatGPT's response to the debate file and continue to the next round.
 After 3 debate cycles, generate the final summary:
 
 ```bash
-node scripts/ask-gpt.js summary --context-file /tmp/ask-context.md --debate-file /tmp/ask-debate.md
+node scripts/ask-gpt.js summary --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
 ```
 
 ## Step 6: Present Results to User
