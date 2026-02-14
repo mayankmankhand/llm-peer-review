@@ -55,6 +55,8 @@ This copies:
 - `scripts/` (only dev-lead-gpt.js and dev-lead-gemini.js — runtime scripts needed for peer review)
 - `CLAUDE.md` (project instructions — skipped if it already exists)
 - `.env.local.example` (API key template)
+- `.gitignore` (ignores plan files, env files, node_modules, etc.)
+- `.gitattributes` (enforces LF line endings for shell scripts)
 
 Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit repo and are not copied to target projects.
 

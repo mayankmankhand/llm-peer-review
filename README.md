@@ -140,6 +140,8 @@ Copy these into your project:
 | `scripts/` (only `dev-lead-gpt.js` and `dev-lead-gemini.js`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
+| `.gitignore` | `your-project/.gitignore` |
+| `.gitattributes` | `your-project/.gitattributes` |
 
 Then in your project folder:
 ```bash
