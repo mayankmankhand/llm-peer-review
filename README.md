@@ -1,10 +1,16 @@
-# Cursor Slash Command Toolkit
+# LLM Peer Review
 
-**What this is:** A toolkit you drop into any coding project to give the AI a structured workflow. Instead of just asking AI to write code, you follow a process — explore, plan, build, review, get a second opinion. The slash commands enforce good habits and keep things organized.
+**A full project workflow where AI models debate your work before you ship it.**
 
-**What this is not:** An app or a product. It's a set of instructions that live in your project folder. Once they're there, type `/` in your editor and the commands show up.
+Whether you're speccing a feature, conducting competitive research, building a plan, or writing code, this toolkit gives you a structured process: explore the problem, create a plan, build, review, then run a 3-round debate between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: what they agreed on, where they disagreed, and a prioritized action list. Then you approve what gets implemented.
 
-**This workflow is inspired by [Zevi's viral video on Lenny's Podcast](https://www.youtube.com/watch?v=1em64iUFt3U). The key difference is that Zevi manually conducts peer reviews by copying feedback from one model to another because he likes seeing the reasoning from tools like ChatGPT or Gemini. In my case, I don't always need that reasoning and didn't want to deal with the manual copy-paste. So I added two slash commands to automate the entire process.**
+This is the same consensus/divergence synthesis that [Perplexity's Model Council](https://www.perplexity.ai/hub/blog/introducing-model-council) produces and what [Karpathy's LLM Council](https://github.com/karpathy/llm-council) does for general Q&A, applied to a full project lifecycle with multi-round adversarial debate and an implementation workflow.
+
+**Inspired by [Zevi Arnovitz's workflow on Lenny's Podcast](https://www.youtube.com/watch?v=1em64iUFt3U).** The key difference is that Zevi manually conducts peer reviews by copying feedback from one model to another because he likes seeing the reasoning from tools like ChatGPT or Gemini. This toolkit automates the entire process with two slash commands — `/dev-lead-gpt` and `/dev-lead-gemini` — that handle the multi-round debate loop for you.
+
+Works for product specs, research plans, competitive analysis, and code equally.
+
+<!-- VISUAL GOES HERE after Issue #5 is complete -->
 
 ---
 
@@ -12,16 +18,16 @@
 
 | Command | What it does |
 |---|---|
-| `/explore` | Think through the problem before you touch code |
+| `/explore` | Think through the problem before you start building |
 | `/create-plan` | Write a step-by-step plan with status tracking |
 | `/execute` | Build it, updating the plan as you go |
-| `/review` | Review code — reports issues only, won't fix until you say so |
+| `/review` | Review your work — reports issues only, won't fix until you say so |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
-| `/dev-lead-gpt` | Debate your code with ChatGPT (3 rounds) |
-| `/dev-lead-gemini` | Debate your code with Gemini (3 rounds) |
-| `/package-review` | Bundle your code into one file for external review |
+| `/dev-lead-gpt` | Debate your work with ChatGPT (3 rounds) |
+| `/dev-lead-gemini` | Debate your work with Gemini (3 rounds) |
+| `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` | Learn a concept at 3 levels of depth |
 
 ### The Workflow
@@ -48,7 +54,7 @@ If you already have Node.js, git, and Cursor installed, skip ahead to [Add to a 
 
 ## Add to a New Project
 
-You have a project folder. You want the slash commands to work there. Four ways to do it:
+This isn't an app you install — it's a set of instructions that live in your project folder. Once they're there, type `/` in your editor and the commands show up. Four ways to set it up:
 
 ### Option A: Install a Convenient Command (Easiest - Recommended)
 
