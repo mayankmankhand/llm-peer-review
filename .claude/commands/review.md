@@ -8,6 +8,8 @@ Perform comprehensive code review. Be thorough but concise.
 2. **Wait for approval** - Only fix things after I say "fix it"
 3. **Explain simply** - I'm a PM learning to code, use plain English
 
+> **Note:** These checks are opinionated toward a JavaScript/TypeScript web stack. Customize the list below to match your project's language and framework.
+
 ## Check For
 
 - **Logging** - No console.log statements, uses proper logger with context
