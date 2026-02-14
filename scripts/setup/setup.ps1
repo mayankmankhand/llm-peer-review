@@ -109,7 +109,7 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
-foreach ($f in @("CLAUDE.md", ".env.local.example", ".claude\settings.local.json")) {
+foreach ($f in @("CLAUDE.md", ".env.local.example", ".claude\settings.local.json", ".gitignore", ".gitattributes")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -161,6 +161,17 @@ try {
 } catch {
   Write-Host "  Error: Failed to copy .env.local.example : $_"
   exit 1
+}
+
+# ─── .gitignore and .gitattributes (upstream-owned — always copy) ─
+foreach ($gitFile in @(".gitignore", ".gitattributes")) {
+  Write-Host "  Copying $gitFile ..."
+  try {
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot $gitFile) -Destination (Join-Path $Target $gitFile) -Force
+  } catch {
+    Write-Host "  Error: Failed to copy $gitFile : $_"
+    exit 1
+  }
 }
 
 foreach ($f in @("CLAUDE.md", ".claude\settings.local.json")) {

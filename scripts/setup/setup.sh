@@ -103,7 +103,7 @@ for f in setup.sh setup.ps1 install-alias.sh install-alias.ps1; do
   fi
 done
 
-for f in CLAUDE.md .env.local.example .claude/settings.local.json; do
+for f in CLAUDE.md .env.local.example .claude/settings.local.json .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -148,6 +148,15 @@ OVERWROTE+=(scripts/dev-lead-gpt.js scripts/dev-lead-gemini.js)
 echo "  Copying .env.local.example ..."
 cp "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
 OVERWROTE+=(.env.local.example)
+
+# ─── .gitignore and .gitattributes (upstream-owned — always copy) ─
+echo "  Copying .gitignore ..."
+cp "$TOOLKIT_ROOT/.gitignore" "$TARGET/.gitignore"
+OVERWROTE+=(.gitignore)
+
+echo "  Copying .gitattributes ..."
+cp "$TOOLKIT_ROOT/.gitattributes" "$TARGET/.gitattributes"
+OVERWROTE+=(.gitattributes)
 
 # ─── Project-owned files (skip if already exist) ─────────────
 for f in CLAUDE.md .claude/settings.local.json; do
