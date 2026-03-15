@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v2)
+# AI Agent Setup Instructions (v3)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -98,14 +98,16 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v2:** After re-running setup:
-- `/review` renamed to `/review-code` (same functionality plus a 4th sub-agent)
-- 5 new review commands: `/review-commands`, `/review-plan`, `/review-ux`, `/review-browser`, `/review-full`
-- `/review-browser` drives a headless browser to QA running web apps (requires playwright-core + chromium)
-- All review commands share severity anchors and "Use this when" guidance
-- `/explore` now has two gears: scoping mode (default) for concrete features, vision mode for strategy and ideation
-- `/explore` Phase 2 includes optional ASCII diagrams for features with flows or multi-step processes
-- UI/UX preferences now handled directly in `/explore` and `/create-plan` (old UI spec command removed)
+**What's new in v3:** After re-running setup:
+- `/peer-review` rewritten with severity-based evaluation framework and structured output template
+- `/pair-debug` now includes an approval step before fixing (consistent with other review commands)
+- `/execute` defines "critical blocker" with concrete examples
+- `/review-full` clarifies specialist review guidance
+- `/create-plan` adds parallel vs sequential step examples
+- `browse.js` keeps more error context (3 lines instead of 1)
+- Various doc fixes (README link, SETUP step ordering, CHANGELOG cleanup)
+
+**What was new in v2:** `/review` renamed to `/review-code`, 5 new review commands added (`/review-commands`, `/review-plan`, `/review-ux`, `/review-browser`, `/review-full`), `/explore` gained vision mode and ASCII diagrams, UI/UX preferences moved into `/explore` and `/create-plan`.
 
 Tell the user about these changes if they were on an older version. See `CHANGELOG.md` for full details.
 
