@@ -51,7 +51,7 @@ cat /tmp/browse-actions.json | node scripts/browse.js
 | `fill` | `target` (selector), `value` | Type text into an input field |
 | `screenshot` | none | Take a full-page screenshot (saved to /tmp) |
 | `text` | `target` (optional selector) | Extract visible text from page or element |
-| `wait` | `ms` or `selector` | Wait for time or for an element to appear |
+| `wait` | `ms` or `selector` (note: uses `selector`, not `target`) | Wait for time or for an element to appear |
 
 ### Selector Syntax
 
@@ -79,7 +79,10 @@ The script returns JSON with per-action results plus diagnostics:
     { "type": "text", "ok": true, "text": "Welcome to My App..." }
   ],
   "console": [{ "type": "error", "text": "..." }],
-  "network": [{ "url": "/api/data", "status": 500, "method": "GET" }],
+  "network": [
+    { "url": "/api/data", "status": 500, "method": "GET" },
+    { "url": "/api/health", "method": "GET", "error": "net::ERR_CONNECTION_REFUSED" }
+  ],
   "errors": [{ "type": "pageerror", "text": "Uncaught TypeError: ..." }]
 }
 ```
@@ -92,10 +95,8 @@ The `console`, `network`, and `errors` fields only appear when there are issues 
 
 <procedure>
 
-### Step 1: Confirm the server is running
-Ask the user: "Is your dev server running? (e.g. `npm run dev` on localhost:3000)"
-
-### Step 2: Take an initial screenshot and read the page
+### Step 1: Take an initial screenshot and read the page
+Run the initial session below. If the `goto` action fails with a connection error, tell the user: "I can't reach the server. Check that your dev server is running (e.g. `npm run dev`) and confirm the port number." Then stop the review.
 Run a quick browser session to see what's on screen:
 ```json
 {
@@ -108,17 +109,23 @@ Run a quick browser session to see what's on screen:
 }
 ```
 
-Read the screenshot (use the Read tool on the returned path) and the text output to understand the current state.
+Read the screenshot (use the Read tool on the returned path) and the text output to understand the current state. Briefly state what you think the app does and which flows you plan to test. Let the user correct you before proceeding.
 
-### Step 3: Test key user flows
-Based on what you see, run focused sessions (3-6 actions each) to test the main interactive flows. For example:
+**If the page is a login screen:** Tell the user you can't test behind authentication. Suggest they either provide a pre-authenticated URL, test only public pages, or add `fill` actions for login credentials as the first steps.
+
+### Step 2: Test key user flows
+Based on what you see, run focused sessions (3-6 actions each) to test the main interactive flows. Aim for 3-5 sessions, max 8. For example:
 - Navigate to a page, fill a form, submit, check the result
 - Click through navigation, verify pages load
 - Test error states (submit empty forms, click disabled buttons)
 
 Each session should have a clear purpose. After each session, read the screenshots and check the JSON output for console errors, failed network requests, and page errors.
 
-### Step 4: Compile findings
+**When actions fail:** If a session stops on a failed action, run a new session with just a screenshot to see the current state. Adjust your selectors or action sequence. Don't retry the same failing action more than once.
+
+**Note:** Browser sessions are sequential by nature, so this command always runs in single-pass mode (no sub-agents).
+
+### Step 3: Compile findings
 Use the evidence you gathered (screenshots, text, console errors, network failures) to write findings in the standard review format below.
 
 </procedure>
@@ -147,6 +154,8 @@ These categories have minimum severity floors - never downgrade them:
 
 <reference>
 Every finding gets a unique ID: **R1**, **R2**, **R3**, etc. This lets the user say "fix R2 and R5" to approve specific fixes.
+
+To fix specific issues after the review, say "fix R2" or "fix R2 and R5". For a code-level review of the fixes, run `/review-code`.
 </reference>
 
 ## Output Format
@@ -165,6 +174,7 @@ Every finding gets a unique ID: **R1**, **R2**, **R3**, etc. This lets the user 
 
 - **R1** 🚫 `page/route` - [Issue description in plain English]
   - **Screenshot:** [path to screenshot showing the issue]
+  - **Why:** [Why this matters to users]
   - **Evidence:** [Console errors, failed API calls, or text output that supports the finding]
   - **Expected:** [What should happen]
   - **Actual:** [What actually happens]
@@ -172,6 +182,7 @@ Every finding gets a unique ID: **R1**, **R2**, **R3**, etc. This lets the user 
 
 - **R2** ⚠️ `page/route` - [Issue description]
   - **Screenshot:** [path]
+  - **Why:** [Why this matters]
   - **Evidence:** [Supporting data]
   - **Fix direction:** [Approach]
 </output_format>

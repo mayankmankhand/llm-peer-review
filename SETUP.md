@@ -123,16 +123,44 @@ gh --version
 
 You should see version numbers for each. If any command says "not found", go back to the relevant install step above.
 
-### Step 6: Get API Keys (Optional)
+### Step 6: Install Optional Dependencies
 
-You only need these if you want `/ask-gpt` and `/ask-gemini`. Both services have free tiers.
+The toolkit has two optional feature groups. Install what you need:
+
+**For `/ask-gpt` and `/ask-gemini` (AI debate commands):**
+```bash
+npm install @google/generative-ai openai
+```
+
+**For `/review-browser` (headless browser QA):**
+```bash
+npm install playwright-core
+npx playwright-core install chromium
+```
+On WSL/Linux, system libraries are also needed:
+```bash
+sudo npx playwright-core install-deps chromium
+```
+
+Skip both if you just want the core workflow commands (`/explore`, `/create-plan`, `/execute`, `/review-code`, etc.) - they work without any npm dependencies.
+
+**Check what's already installed:**
+```bash
+npm list @google/generative-ai openai    # debate dependencies
+npm list playwright-core                 # browser QA dependency
+npx playwright-core --version            # Chromium binary
+```
+
+### Step 7: Get API Keys (Optional)
+
+You only need these if you installed the debate dependencies above (`/ask-gpt` and `/ask-gemini`). Both services have free tiers.
 
 - **OpenAI key:** Go to [platform.openai.com/api-keys](https://platform.openai.com/api-keys) → create a key → copy it
 - **Gemini key:** Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey) → create a key → copy it
 
-Save these somewhere safe. You'll paste them in Step 8.
+Save these somewhere safe. You'll paste them in Step 9.
 
-### Step 7: Clone This Repo
+### Step 8: Clone This Repo
 
 This step installs the toolkit itself. You'll copy it into your actual projects later using the setup command.
 
@@ -143,19 +171,19 @@ git clone https://github.com/mayankmankhand/llm-peer-review.git
 
 > **Note:** You don't need to run `npm install` here. Dependencies are installed in your target project when you run setup later. Only run `npm install` in this folder if you want to test `/ask-gpt` or `/ask-gemini` inside the toolkit repo itself.
 
-### Step 8: Set Up API Keys
+### Step 9: Set Up API Keys
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-Open `.env.local` and paste in your keys from Step 6:
+Open `.env.local` and paste in your keys from Step 7:
 ```
 OPENAI_API_KEY=sk-your-key-here
 GEMINI_API_KEY=AIza-your-key-here
 ```
 
-### Step 9: Open in Cursor and Test
+### Step 10: Open in Cursor and Test
 
 - Open Cursor → File → Open Folder
 - Navigate to your `llm-peer-review` folder:

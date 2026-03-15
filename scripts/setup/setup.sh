@@ -94,7 +94,7 @@ elif ! compgen -G "$TOOLKIT_ROOT/.claude/commands/"*.md > /dev/null 2>&1; then
 fi
 
 # Check runtime scripts (must exist)
-for f in ask-gpt.js ask-gemini.js; do
+for f in ask-gpt.js ask-gemini.js browse.js; do
   if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/$f"
     PREFLIGHT_OK=false
@@ -183,10 +183,11 @@ done
 
 # ─── Scripts (runtime scripts only - setup scripts stay in toolkit repo) ──────────────────
 echo "  Copying scripts/ ..."
-# Only copy runtime scripts (ask-gpt.js, ask-gemini.js) - setup scripts stay in toolkit repo
+# Only copy runtime scripts - setup scripts stay in toolkit repo
 cp "$TOOLKIT_ROOT/scripts/ask-gpt.js"    "$TARGET/scripts/"
 cp "$TOOLKIT_ROOT/scripts/ask-gemini.js" "$TARGET/scripts/"
-OVERWROTE+=(scripts/ask-gpt.js scripts/ask-gemini.js)
+cp "$TOOLKIT_ROOT/scripts/browse.js"     "$TARGET/scripts/"
+OVERWROTE+=(scripts/ask-gpt.js scripts/ask-gemini.js scripts/browse.js)
 
 # ─── .env.local.example (template - safe to overwrite) ───────
 echo "  Copying .env.local.example ..."
@@ -271,10 +272,17 @@ echo "         Then open .env.local and paste:"
 echo "           OPENAI_API_KEY  →  https://platform.openai.com/api-keys"
 echo "           GEMINI_API_KEY  →  https://aistudio.google.com/apikey"
 echo ""
-echo "      3. Open the folder in Cursor and run /explore to start your first workflow."
+echo "      4. Open the folder in Cursor and run /explore to start your first workflow."
 echo ""
-echo "      Steps 1 and 2 are optional - skip them if you don't"
-echo "      need /ask-gpt or /ask-gemini."
+echo "      3. (Optional) Install browser QA for /review-browser:"
+echo "           npm install playwright-core"
+echo "           npx playwright-core install chromium"
+echo "         On WSL/Linux, also run:"
+echo "           sudo npx playwright-core install-deps chromium"
+echo ""
+echo "      Steps 1-3 are optional. Skip 1-2 if you don't need"
+echo "      /ask-gpt or /ask-gemini. Skip 3 if you don't need"
+echo "      /review-browser."
 echo ""
 echo "    Tip: To update commands and scripts, run setup again from"
 echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"

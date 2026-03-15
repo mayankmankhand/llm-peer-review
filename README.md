@@ -60,6 +60,7 @@ flowchart TD
 | Review slash command prompts and workflows | `/review-commands` |
 | Verify implementation matches a plan | `/review-plan` |
 | Evaluate UX, accessibility, and user flows | `/review-ux` |
+| QA a running web app via headless browser | `/review-browser` |
 | Pre-release go/no-go check across all domains | `/review-full` |
 
 ### The Workflow
@@ -158,7 +159,7 @@ Copy these into your project:
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (only `ask-gpt.js` and `ask-gemini.js`) | `your-project/scripts/` |
+| `scripts/` (`ask-gpt.js`, `ask-gemini.js`, and `browse.js`) | `your-project/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
@@ -167,12 +168,18 @@ Copy these into your project:
 
 Then in your project folder:
 ```bash
+# For /ask-gpt and /ask-gemini (AI debate commands):
 npm install @google/generative-ai openai
 cp .env.local.example .env.local
 # Open .env.local and paste your API keys
+
+# For /review-browser (headless browser QA):
+npm install playwright-core
+npx playwright-core install chromium
+# On Linux/WSL, also: sudo npx playwright-core install-deps chromium
 ```
 
-> The `npm install` and `.env.local` steps are only needed if you want `/ask-gpt` or `/ask-gemini`. The other 13 commands work without them.
+> Both dependency groups are optional. Skip them if you don't need those commands - the other 14 commands work without them.
 
 #### Let Your AI Agent Do It
 
@@ -185,6 +192,31 @@ Tell your AI agent (Claude Code, Cursor, etc.): "Set up the workflow from this r
 ## Update an Existing Project
 
 Re-run the same setup command. It's safe to rerun - commands, scripts, and toolkit rules get updated; your `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are never overwritten. Your `.gitignore` is merged (new toolkit entries are added, your custom entries are preserved).
+
+### Full Setup (All Features)
+
+Want everything working? After running the setup script, run these in your project folder:
+
+```bash
+# AI debate commands (/ask-gpt, /ask-gemini)
+npm install @google/generative-ai openai
+cp .env.local.example .env.local
+# Edit .env.local and paste your OPENAI_API_KEY and GEMINI_API_KEY
+
+# Browser QA (/review-browser)
+npm install playwright-core
+npx playwright-core install chromium
+# On Linux/WSL only:
+sudo npx playwright-core install-deps chromium
+```
+
+**Check what's already installed:**
+```bash
+node -v                                  # Node.js
+npm list @google/generative-ai openai    # debate dependencies
+npm list playwright-core                 # browser QA dependency
+npx playwright-core --version            # Chromium binary
+```
 
 **Coming from before the CLAUDE.md split?** If your `CLAUDE.md` has toolkit rules mixed in (workflow, permissions, slash commands table), those now live in `.claude/rules/toolkit.md`. After re-running setup, edit your `CLAUDE.md` to keep only project-specific info. See [CHANGELOG.md](CHANGELOG.md) for details.
 

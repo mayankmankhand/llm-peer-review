@@ -99,7 +99,7 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
 }
 
 # Check runtime scripts (must exist)
-foreach ($f in @("ask-gpt.js", "ask-gemini.js")) {
+foreach ($f in @("ask-gpt.js", "ask-gemini.js", "browse.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path "scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -189,8 +189,8 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
 }
 
 Write-Host "  Copying scripts\ ..."
-# Only copy runtime scripts (ask-gpt.js, ask-gemini.js) - setup scripts stay in toolkit repo
-foreach ($scriptName in @("ask-gpt.js", "ask-gemini.js")) {
+# Only copy runtime scripts - setup scripts stay in toolkit repo
+foreach ($scriptName in @("ask-gpt.js", "ask-gemini.js", "browse.js")) {
   try {
     Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
   } catch {
@@ -304,10 +304,15 @@ Write-Host "         Then open .env.local and paste:"
 Write-Host "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
 Write-Host "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
 Write-Host ""
-Write-Host "      3. Open the folder in Cursor and run /explore to start your first workflow."
+Write-Host "      4. Open the folder in Cursor and run /explore to start your first workflow."
 Write-Host ""
-Write-Host "      Steps 1 and 2 are optional - skip them if you don't"
-Write-Host "      need /ask-gpt or /ask-gemini."
+Write-Host "      3. (Optional) Install browser QA for /review-browser:"
+Write-Host "           npm install playwright-core"
+Write-Host "           npx playwright-core install chromium"
+Write-Host ""
+Write-Host "      Steps 1-3 are optional. Skip 1-2 if you don't need"
+Write-Host "      /ask-gpt or /ask-gemini. Skip 3 if you don't need"
+Write-Host "      /review-browser."
 Write-Host ""
 Write-Host "    Tip: To update commands and scripts, run setup again from"
 Write-Host "    the toolkit repo: powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"$Target`""

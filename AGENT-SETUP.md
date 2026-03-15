@@ -67,7 +67,7 @@ This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
 - `.claude/settings.local.json` (permission config - skipped if it already exists)
-- `scripts/` (only ask-gpt.js and ask-gemini.js - runtime scripts needed for peer review)
+- `scripts/` (ask-gpt.js, ask-gemini.js, and browse.js - runtime scripts for peer review and browser QA)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log template - skipped if it already exists)
 - `.env.local.example` (API key template)
@@ -100,8 +100,11 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 
 **What's new in v2:** After re-running setup:
 - `/review` renamed to `/review-code` (same functionality plus a 4th sub-agent)
-- 4 new review commands: `/review-commands`, `/review-plan`, `/review-ux`, `/review-full`
+- 5 new review commands: `/review-commands`, `/review-plan`, `/review-ux`, `/review-browser`, `/review-full`
+- `/review-browser` drives a headless browser to QA running web apps (requires playwright-core + chromium)
 - All review commands share severity anchors and "Use this when" guidance
+- `/explore` now has two gears: scoping mode (default) for concrete features, vision mode for strategy and ideation
+- `/explore` Phase 2 includes optional ASCII diagrams for features with flows or multi-step processes
 - UI/UX preferences now handled directly in `/explore` and `/create-plan` (old UI spec command removed)
 
 Tell the user about these changes if they were on an older version. See `CHANGELOG.md` for full details.
@@ -110,13 +113,24 @@ Tell the user about these changes if they were on an older version. See `CHANGEL
 
 ### Step 2: Install dependencies (optional)
 
-Only needed if the user wants `/ask-gpt` or `/ask-gemini`:
+There are two optional dependency groups. Install what's needed:
 
+**For `/ask-gpt` and `/ask-gemini` (AI debate commands):**
 ```bash
 npm install --prefix "TARGET_PROJECT_PATH" @google/generative-ai openai
 ```
 
-If the project doesn't have a `package.json` yet, run `npm init -y` in the project directory first so dependencies are recorded. If the user doesn't need these two commands, skip this step entirely.
+**For `/review-browser` (headless browser QA):**
+```bash
+npm install --prefix "TARGET_PROJECT_PATH" playwright-core
+npx --prefix "TARGET_PROJECT_PATH" playwright-core install chromium
+```
+On Linux/WSL, system libraries are also needed:
+```bash
+sudo npx playwright-core install-deps chromium
+```
+
+If the project doesn't have a `package.json` yet, run `npm init -y` in the project directory first so dependencies are recorded. Skip any group the user doesn't need.
 
 ### Step 3: Set up API keys (optional, requires user input)
 

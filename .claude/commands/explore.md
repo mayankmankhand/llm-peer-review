@@ -21,12 +21,15 @@ Or:
 > "This sounds like a concrete feature, so I'm in **scoping mode**. Say 'switch to vision mode' if you want to think bigger first."
 
 ### Mixed Signals
-If the input has both concrete and exploratory language (e.g., "I'm thinking about adding a settings page"), default to scoping mode - it's the existing behavior and lower risk. Mention vision mode is available in your announcement.
+If the input has both concrete and exploratory language (e.g., "I'm thinking about adding a settings page"), default to scoping mode but explicitly ask: "I'm starting in **scoping mode** to keep things concrete. Would you rather explore the bigger picture first?" This preserves the safe default while giving the user an informed choice.
 
 ### Manual Override
-The user can say "switch to vision mode" or "switch to scoping mode" at any point during the conversation. The mode is sticky - once set, it stays until the user explicitly switches again.
+The user can say "switch to vision mode" or "switch to scoping mode" at any point during the conversation. The mode is sticky - once set, it stays until the user explicitly switches again. When switching modes, don't restart the conversation. Continue from where you are, but adjust your tone and question style to match the new mode.
 
 Re-surface the switch option at natural transition points: after the scope dial, before Phase 2, or if the user's language shifts (e.g., concrete answers in vision mode, or vague answers in scoping mode).
+
+### Phase Markers
+Announce transitions so the user knows where they are: "Now moving to codebase analysis (Phase 2)" or "Here's my closing summary." This is especially important in vision mode where conversations can run long.
 </phase>
 
 ## Phase 1: Challenge the Idea
@@ -83,7 +86,7 @@ Only ask what's genuinely unclear. Skip what's already answered.
 ### Vision Mode Questions (pick 3-4 per round)
 Only ask what's genuinely unclear. Skip what's already answered.
 
-Start with premise and challenge questions, then move to analogy and benchmarking:
+Start with premise and challenge questions, then move to analogy and benchmarking. If the user seems unfamiliar with a concept (e.g., 10-star thinking), briefly explain it before asking:
 
 - **Are we solving the right problem?** (Challenge the premise, not just the solution)
 - **What's the 10-star version of this?** (No constraints - what's the ideal product experience and business outcome?)
@@ -103,13 +106,13 @@ Once the user's answers start pointing toward a direction (usually round 2, some
 > - **Reduce** - strip to absolute essentials
 
 **After the user picks:**
-- **Expand** - continue with vision mode questions, push even bigger
+- **Expand** - continue with vision mode questions, push even bigger. If the user picks Expand twice, re-offer the Scope Dial after one more round. If they pick Expand a third time, gently suggest Hold: "We've explored a lot of territory - want to lock in what we have and move to planning?"
 - **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria) but keep the vision mode tone. This avoids conversational whiplash. Also bring in UI/UX Preferences if the feature involves a UI.
 - Phase 2 stays optional regardless of which dial option was chosen
 
-### UI/UX Preferences (scoping mode only, when the feature involves UI)
+### UI/UX Preferences (scoping mode, or vision mode after Hold/Reduce)
 
-If in scoping mode and the feature involves a user interface (a page, dashboard, form, component, etc.):
+When the feature involves a user interface (a page, dashboard, form, component, etc.):
 
 1. **Proactively ask** about look and behavior as part of your Phase 1 questions. Don't wait for the user to bring it up.
 2. **Accept any format** - the user might give code, a text description, a design guide, or just a rough idea. All are valid.
@@ -162,9 +165,10 @@ Once you're satisfied with the problem definition, shift to technical exploratio
 > "Want me to look at how this connects to the existing codebase, or are we ready for `/create-plan`?"
 
 If they say skip, present a vision-mode closing summary before suggesting `/create-plan`:
-- **Direction chosen** - what the user landed on (and which scope dial option, if offered)
-- **Key decisions made** - premises challenged, ideas scrapped or kept
-- **Open questions** - anything unresolved that `/create-plan` should address
+- **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/create-plan`'s Goal State section.
+- **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
+- **Open questions** - anything unresolved that `/create-plan` should address during execution
+- **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
 - **Suggested next step** - "Ready for `/create-plan` when you are"
 
 If they say yes, continue with the analysis below.
