@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0
+
+- **Review findings cleanup** - Fixed broken internal link in README.md, SETUP.md step ordering (npm install before clone), and CHANGELOG strikethrough dead weight from v1.4.
+- **`/peer-review` rewrite** - Was 23 lines of unstructured prose. Now has a severity-based evaluation framework, verdict summary table, and structured output template matching other review commands.
+- **`/pair-debug` approval step** - Added Step 5 ("Wait for Approval") so the command doesn't dead-end after presenting a fix report.
+- **`/execute` blocker examples** - "Critical blocker" is now defined with concrete examples (API incompatibility, bad architecture) vs. non-blockers (typos, syntax errors).
+- **`/review-full` wording** - Clarified "don't reproduce specialist reviews" to mean "don't duplicate effort, but do recommend which specialist command to run next."
+- **`/create-plan` parallel examples** - Added a concrete example of parallel vs sequential steps.
+- **`browse.js` error messages** - Error messages now keep the first 3 lines instead of truncating to just the first, preserving debugging info from Playwright errors.
+- **AGENT-SETUP.md fix** - "What gets updated" section now lists browse.js alongside ask-gpt.js and ask-gemini.js.
+
+---
+
 ## 2.4
 
 - **`/explore` vision mode** (issue #65) - The `/explore` command now has two gears. **Scoping mode** (default, existing behavior) for concrete features. **Vision mode** for strategy, ideation, and "I'm not sure what to build yet" thinking. Claude auto-detects which mode based on your input and announces the pick. Say "switch to vision mode" or "switch to scoping mode" at any time to override.
@@ -106,12 +119,7 @@
 
 ## 1.4
 
-- ~~**`/ui-spec` command** - Generate a UI design spec (colors, fonts, accessibility rules) linked to a plan. Picks from curated reference data, outputs a `UI-SPEC-*.md` file, and tags plan steps with `[UI]`.~~ (Removed in v2)
-- ~~**UI reference data** - 15 color palettes with semantic roles, 10 font pairings with Google Fonts imports, and 20 UX guidelines (including 5 accessibility fundamentals). Lives in `.claude/ui-reference/`.~~ (Removed in v2)
-- ~~**`/execute` UI awareness** - When a plan has `[UI]` steps and a linked UI-SPEC, `/execute` applies design system injection (states palette/fonts before writing UI code) and runs a micro-checklist (contrast, spacing, focus states).~~ (Removed in v2)
-- ~~**`/review` design checks** - When a UI-SPEC exists, `/review` adds a Design Review section checking palette compliance, typography, contrast, focus states, touch targets, and responsive behavior.~~ (Removed in v2)
-- ~~**`/create-plan` nudge** - After creating a plan, reminds you to run `/ui-spec` if the plan has UI work.~~ (Removed in v2)
-- ~~**Setup scripts updated** - Both `setup.sh` and `setup.ps1` now copy `.claude/ui-reference/` to target projects.~~ (Removed in v2)
+- *Note: This version introduced `/ui-spec` and related UI features, which were removed in v2.0.*
 - **Model updates** - `/ask-gpt` now defaults to GPT-5.4 (was 5.2). `/ask-gemini` now defaults to Gemini 3.1 Pro Preview (was 3 Flash Preview).
 
 ---

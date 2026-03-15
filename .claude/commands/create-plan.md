@@ -41,6 +41,7 @@ Based on our full exchange, produce a markdown plan document.
 - `[parallel]` steps: add `→ delivers: [what this step produces]`
 - `[sequential]` steps: add `→ depends on: Step N`
 - Parallel steps must be independent in both **files AND environment** (dependencies, services, migrations, env vars)
+- Example: "Add button component" + "Write API endpoint" = parallel (different files, no dependency). "Write API endpoint" then "Connect button to API" = sequential (second depends on first).
 - If all steps are sequential, still tag them - the tags confirm you thought about execution order
 
 For plans with fewer than 3 steps, skip the tags.

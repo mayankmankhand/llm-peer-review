@@ -10,7 +10,7 @@ Mile wide, inch deep. Cross-domain release readiness, not a deep specialist revi
 1. **REPORT ONLY** - Do NOT make any changes or edits to files
 2. **Wait for approval** - Only fix things after I say "fix it"
 3. **Explain simply** - I'm a PM learning to code, use plain English
-4. **Do not try to reproduce specialist reviews** - Prioritize cross-domain issues, release blockers, and interactions between code, UX, scope, and operations
+4. **Don't duplicate specialist reviews** - Prioritize cross-domain issues, release blockers, and interactions between code, UX, scope, and operations. If something needs deeper investigation, recommend which specialist command to run next.
 </rules>
 
 ## How to Review

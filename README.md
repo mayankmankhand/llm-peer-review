@@ -287,7 +287,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
 | `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
 
-Setup also copies a few supporting files (`.gitignore`, `.gitattributes`, `settings.local.json`, `.env.local.example`). See [Option C](#option-c-do-it-manually) for the full list.
+Setup also copies a few supporting files (`.gitignore`, `.gitattributes`, `settings.local.json`, `.env.local.example`). See [Do It Manually](#do-it-manually) for the full list.
 
 **Why is CLAUDE.md empty?** On purpose. It's a blank slate for your project-specific info. The toolkit rules live in `.claude/rules/toolkit.md` instead, so toolkit updates can reach you without overwriting your project notes.
 

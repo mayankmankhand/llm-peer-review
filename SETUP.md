@@ -125,6 +125,8 @@ You should see version numbers for each. If any command says "not found", go bac
 
 ### Step 6: Install Optional Dependencies
 
+> **Note:** Run these commands in your project folder after completing Steps 8-10 (clone + setup). They're listed here so you know what's available, but you need the project first.
+
 The toolkit has two optional feature groups. Install what you need:
 
 **For `/ask-gpt` and `/ask-gemini` (AI debate commands):**

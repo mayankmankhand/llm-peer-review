@@ -83,7 +83,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 **What gets updated** (always overwritten):
 - `.claude/commands/` - all slash command definitions
 - `.claude/rules/toolkit.md` - toolkit workflow rules
-- `scripts/ask-gpt.js` and `scripts/ask-gemini.js` - runtime scripts
+- `scripts/ask-gpt.js`, `scripts/ask-gemini.js`, and `scripts/browse.js` - runtime scripts
 - `.env.local.example`, `.gitignore`, `.gitattributes`
 
 **What's preserved** (skipped if it already exists):

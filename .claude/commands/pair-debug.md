@@ -48,4 +48,8 @@ Wait for the user to say which check to run (e.g., "do C1").
 
 ## Step 4: Confirm Root Cause, Then Fix
 
-Only suggest a fix after a check confirms the root cause. Present the fix as a report - don't edit files until the user approves.
+Only suggest a fix after a check confirms the root cause. Present the fix as a report - don't edit files yet.
+
+## Step 5: Wait for Approval
+
+Wait for the user to say "fix it" before making any changes. If the user wants a different approach, discuss it first.

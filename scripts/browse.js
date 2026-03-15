@@ -147,7 +147,7 @@ async function handleGoto(page, action, baseUrl) {
     if (err.name === 'TimeoutError') {
       return { type: 'goto', ok: false, url: fullUrl, error: ERR.TIMEOUT('goto', CONFIG.navigationTimeoutMs) };
     }
-    return { type: 'goto', ok: false, url: fullUrl, error: ERR.NAVIGATION_FAILED(fullUrl, err.message.split('\n')[0]) };
+    return { type: 'goto', ok: false, url: fullUrl, error: ERR.NAVIGATION_FAILED(fullUrl, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
 }
 
@@ -171,7 +171,7 @@ async function handleClick(page, action) {
     if (err.name === 'TimeoutError') {
       return { type: 'click', ok: false, target, error: ERR.TIMEOUT('click', CONFIG.actionTimeoutMs) };
     }
-    return { type: 'click', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n')[0]) };
+    return { type: 'click', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
 }
 
@@ -197,7 +197,7 @@ async function handleFill(page, action) {
     if (err.name === 'TimeoutError') {
       return { type: 'fill', ok: false, target, error: ERR.TIMEOUT('fill', CONFIG.actionTimeoutMs) };
     }
-    return { type: 'fill', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n')[0]) };
+    return { type: 'fill', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
 }
 
@@ -218,7 +218,7 @@ async function handleScreenshot(page, action) {
     });
     return { type: 'screenshot', ok: true, path: filepath };
   } catch (err) {
-    return { type: 'screenshot', ok: false, error: `Screenshot failed: ${err.message.split('\n')[0]}` };
+    return { type: 'screenshot', ok: false, error: `Screenshot failed: ${err.message.split('\n').slice(0, 3).join(' | ')}` };
   }
 }
 
@@ -251,7 +251,7 @@ async function handleText(page, action) {
     if (truncated) result.truncated = true;
     return result;
   } catch (err) {
-    const result = { type: 'text', ok: false, error: `Text extraction failed: ${err.message.split('\n')[0]}` };
+    const result = { type: 'text', ok: false, error: `Text extraction failed: ${err.message.split('\n').slice(0, 3).join(' | ')}` };
     if (action.target) result.target = action.target;
     return result;
   }
@@ -276,7 +276,7 @@ async function handleWait(page, action) {
     if (err.name === 'TimeoutError') {
       return { type: 'wait', ok: false, error: ERR.TIMEOUT('wait', action.ms || CONFIG.actionTimeoutMs) };
     }
-    return { type: 'wait', ok: false, error: `Wait failed: ${err.message.split('\n')[0]}` };
+    return { type: 'wait', ok: false, error: `Wait failed: ${err.message.split('\n').slice(0, 3).join(' | ')}` };
   }
 }
 

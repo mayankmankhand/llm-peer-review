@@ -42,11 +42,13 @@ After all parallel steps finish, always run a sequential checkpoint:
 ## When to Stop
 
 <rules>
-If you hit a critical blocker - a wrong assumption in the plan, a fundamental incompatibility, or a dependency that doesn't work as expected - **stop executing**. Don't push through a broken plan. Instead:
+If you hit a critical blocker, **stop executing**. Don't push through a broken plan. Instead:
 1. Explain what went wrong and why
 2. Suggest re-running `/create-plan` with what you've learned
 
-This only applies to critical failures, not every small hiccup.
+**Critical blocker examples:** the plan assumed an API supports a feature it doesn't, a core dependency is incompatible with the project, or the planned architecture can't work as designed.
+
+**Not a critical blocker:** a typo, a syntax error, a small refactor needed, or a step that takes longer than expected. Fix these and keep going.
 </rules>
 
 ## Status Updates
