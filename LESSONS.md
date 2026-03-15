@@ -19,6 +19,9 @@
 - **Review your own AI-generated code before shipping.** The initial worktree detection logic had a fundamental bug that would have broken every worktree feature. Running `/review-commands` and `/review-code` caught it. The review workflow exists for a reason - don't skip it even when the code "looks right."
 - **Skill tool expansions can serve stale command versions.** Root cause: old command files in `~/.claude/commands/` (global/home directory) override the project's `.claude/commands/` files. In our case, 9 files were manually copied to the home directory in January before setup.sh existed, then never updated. When slash commands ran, the AI used the global copies instead of the current project versions - missing Staff Engineer Check, Finding IDs, and other updates. Fix: delete global copies (commands should only live in each project folder) and setup.sh now warns if it detects conflicting global files. See issue #52.
 
+- **AI debates surface things standard reviews miss.** Running `/ask-gpt` and `/ask-gemini` alongside the 5 `/review-*` commands found insights none of the reviews caught: tone/task decoupling (shift questions but keep tone after scope narrowing) and the need for a vision-mode closing deliverable template. The debates push harder on behavioral edge cases because two models are actively challenging each other.
+- **"Same command, two gears" vs "new command" decision pattern.** When debating whether to add a mode or create a separate command, the key question is: do they share enough structure? If the two behaviors use the same phases, question format, and guardrails (just different content), one command with modes. If they need different structure or workflow, separate commands. Applied this to `/explore` vision mode - both gears share Phase 1/Phase 2 structure, just different questions and tone.
+
 ## Patterns That Work
 <!-- Add approaches and conventions that proved effective -->
 
