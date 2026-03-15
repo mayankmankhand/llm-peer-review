@@ -4,16 +4,50 @@
 Your task is NOT to implement this yet, but to fully understand and prepare.
 </rules>
 
-## Phase 1: Challenge the Idea (PM Mode)
+## Mode Detection
+
+<phase name="mode-detection">
+Before diving into questions, read the user's input and pick a gear:
+
+### Two Gears
+- **Scoping mode** (default) - the user has a concrete idea and needs help defining scope. Signals: "build X," "add Y," "fix Z," specific feature names, concrete nouns, issue references.
+- **Vision mode** - the user is thinking big-picture and needs help exploring possibilities. Signals: "thinking about," "what if," "strategy," "ideate," "not sure what to build," "help me think through," vague or exploratory language.
+
+### Announce Your Pick
+Tell the user which mode you picked and how to switch. Example:
+> "This sounds exploratory, so I'm going into **vision mode** - bigger-picture questions first. Say 'switch to scoping mode' if you'd rather narrow down a specific feature."
+
+Or:
+> "This sounds like a concrete feature, so I'm in **scoping mode**. Say 'switch to vision mode' if you want to think bigger first."
+
+### Mixed Signals
+If the input has both concrete and exploratory language (e.g., "I'm thinking about adding a settings page"), default to scoping mode - it's the existing behavior and lower risk. Mention vision mode is available in your announcement.
+
+### Manual Override
+The user can say "switch to vision mode" or "switch to scoping mode" at any point during the conversation. The mode is sticky - once set, it stays until the user explicitly switches again.
+
+Re-surface the switch option at natural transition points: after the scope dial, before Phase 2, or if the user's language shifts (e.g., concrete answers in vision mode, or vague answers in scoping mode).
+</phase>
+
+## Phase 1: Challenge the Idea
 
 <phase name="challenge-the-idea">
 After the user describes their idea, **think like an experienced product manager**. Your job is to pressure-test the idea before touching any code.
 
 ### Tone
+
+**Scoping mode:**
 - Direct and skeptical: "I need to understand X before we proceed"
 - Challenge assumptions, cut through fluff
 - Don't be gentle, but don't be rude
-- **Challenge the idea, not the person**
+
+**Vision mode:**
+- Expansive and curious: "Let's think bigger - what if..."
+- Challenge premises, not just scope: "Are we even solving the right problem?"
+- Push the user to dream before narrowing down
+- Give permission to scrap and rethink
+
+**Both modes:** Challenge the idea, not the person.
 
 ### How to Ask Questions
 Ask **3-4 focused questions per round**, max 2-3 rounds total. Keep it digestible:
@@ -34,7 +68,7 @@ Ask **3-4 focused questions per round**, max 2-3 rounds total. Keep it digestibl
 > 3. What about manager_package/ and toon_flow/ - part of this project?
 </examples>
 
-### Questions to Consider (pick 3-4 per round)
+### Scoping Mode Questions (pick 3-4 per round)
 Only ask what's genuinely unclear. Skip what's already answered.
 
 - **What problem are we solving?** (Is this a real pain point or a nice-to-have?)
@@ -46,9 +80,36 @@ Only ask what's genuinely unclear. Skip what's already answered.
 - **What should this look like?** (Layout, style, visual direction)
 - **How should this behave?** (Interactions, flows, states)
 
-### UI/UX Preferences (when the feature involves UI)
+### Vision Mode Questions (pick 3-4 per round)
+Only ask what's genuinely unclear. Skip what's already answered.
 
-If the feature involves a user interface (a page, dashboard, form, component, etc.):
+Start with premise and challenge questions, then move to analogy and benchmarking:
+
+- **Are we solving the right problem?** (Challenge the premise, not just the solution)
+- **What's the 10-star version of this?** (No constraints - what's the ideal product experience and business outcome?)
+- **What does this look like in 6 months?** (How does this decision age? What will we wish we'd done differently?)
+- **What would you scrap entirely?** (If you started over today, what would you throw away and rethink?)
+- **What are we afraid of?** (What's the risk we're not talking about?)
+- **Who else does this well?** (What can we learn from how others solved this?)
+
+### Synthesis Checkpoints (vision mode only)
+Between rounds, briefly summarize what you're hearing before asking more questions: "Here's what I'm hearing so far: [2-3 bullet summary]. Does that track?" This keeps the conversation grounded and helps the user see their own thinking reflected back.
+
+### Scope Dial (vision mode only)
+Once the user's answers start pointing toward a direction (usually round 2, sometimes later), offer the scope dial:
+> "Now that we've explored the space, where do you want to land?"
+> - **Expand** - dream big, pursue the 10-star version
+> - **Hold** - keep the current scope but apply what we just discussed
+> - **Reduce** - strip to absolute essentials
+
+**After the user picks:**
+- **Expand** - continue with vision mode questions, push even bigger
+- **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria) but keep the vision mode tone. This avoids conversational whiplash. Also bring in UI/UX Preferences if the feature involves a UI.
+- Phase 2 stays optional regardless of which dial option was chosen
+
+### UI/UX Preferences (scoping mode only, when the feature involves UI)
+
+If in scoping mode and the feature involves a user interface (a page, dashboard, form, component, etc.):
 
 1. **Proactively ask** about look and behavior as part of your Phase 1 questions. Don't wait for the user to bring it up.
 2. **Accept any format** - the user might give code, a text description, a design guide, or just a rough idea. All are valid.
@@ -60,7 +121,7 @@ Since you're working with someone learning to code, briefly explain *why* you're
 
 ### Smart Behavior
 - **If the user's description is solid and complete** - acknowledge it and move to Phase 2. Don't force questions just to hit a quota.
-- **If there are real gaps or red flags** - push back. But still: one question at a time.
+- **If there are real gaps or red flags** - push back. Limit yourself to 3-4 questions max per round, but drop to a single focused question if one issue is clearly blocking.
 - **Recognize good thinking** - if they've clearly thought it through, say so and proceed.
 </phase>
 
@@ -97,6 +158,19 @@ If they return different values, you are in a worktree. If they match, you are i
 <phase name="codebase-analysis">
 Once you're satisfied with the problem definition, shift to technical exploration.
 
+**If in vision mode:** Phase 2 is optional. Ask the user:
+> "Want me to look at how this connects to the existing codebase, or are we ready for `/create-plan`?"
+
+If they say skip, present a vision-mode closing summary before suggesting `/create-plan`:
+- **Direction chosen** - what the user landed on (and which scope dial option, if offered)
+- **Key decisions made** - premises challenged, ideas scrapped or kept
+- **Open questions** - anything unresolved that `/create-plan` should address
+- **Suggested next step** - "Ready for `/create-plan` when you are"
+
+If they say yes, continue with the analysis below.
+
+**If in scoping mode:** proceed with Phase 2 as normal (mandatory).
+
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?
 2. **Dependencies** - what does it rely on (files, packages, APIs)?
@@ -126,4 +200,4 @@ We will go back and forth until you have no further questions. Do NOT assume any
 
 ---
 
-**Ready.** Describe the problem you want to solve. You can describe it in a sentence, paste a GitHub issue, or share a rough idea - any format works.
+**Ready.** Describe what you're thinking - a concrete feature, a rough idea, or a strategic question all work.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.4
+
+- **`/explore` vision mode** - The `/explore` command now has two gears. **Scoping mode** (default, existing behavior) for concrete features. **Vision mode** for strategy, ideation, and "I'm not sure what to build yet" thinking. Claude auto-detects which mode based on your input and announces the pick. Say "switch to vision mode" or "switch to scoping mode" at any time to override.
+  - Vision mode questions: 10-star thinking, premise challenges, temporal questions, permission to scrap and rethink
+  - Scope Dial: after exploring, pick Expand / Hold / Reduce to transition from big-picture to concrete direction
+  - Phase 2 (codebase analysis) is optional in vision mode - skip straight to `/create-plan` if there's no code to analyze yet
+  - Mixed-signal tiebreaker: defaults to scoping mode when input is ambiguous
+
+---
+
 ## 2.3
 
 - **`/review-browser` command** - QA a running web app using a headless browser. Claude navigates pages, clicks buttons, fills forms, takes screenshots, and reports findings with visual evidence. Uses a single-session JSON-in/JSON-out model with passive diagnostics (console errors, page errors, failed network requests).
