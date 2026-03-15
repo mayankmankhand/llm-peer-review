@@ -188,6 +188,38 @@ Give the user a brief summary of what you found before moving to `/create-plan`:
 - How the feature integrates
 - Any technical concerns or trade-offs
 - Remaining questions (if any)
+
+#### Optional: ASCII diagrams
+Include diagrams as part of your summary above when the feature involves flows, data paths, or multi-step processes. Each arrow is a place where things can break - that's the point. In vision mode, diagrams are especially useful for grounding abstract ideas - but keep them high-level to match the conversation.
+
+**When to include one:** The feature involves user flows, API interactions, data pipelines, state changes, or multi-step processes. Just include it alongside your summary.
+
+**When to ask:** The feature might benefit from a diagram but it's not obvious. Ask: "Want me to diagram this flow?"
+
+**When to skip:** Simple changes with no flows - a config tweak, a copy change, a single-file refactor. No need to mention diagrams at all.
+
+**Style:** Keep it lightweight - indented arrows showing the sequence and failure points. No box-drawing characters or UML.
+
+Linear flow example:
+```
+User clicks Submit
+  -> Validate fields (what if empty?)
+  -> Send to API (what if it fails?)
+  -> Save to database (what format?)
+  -> Show success message (or error?)
+```
+
+Branching flow example:
+```
+User hits Save
+  -> Validate input
+    -> Valid: send to API
+      -> Success: show confirmation
+      -> Failure: show retry prompt
+    -> Invalid: highlight errors, stay on form
+```
+
+**Purpose:** Diagrams are a discussion tool. After presenting one, invite the user to challenge the arrows: "Does this flow look right, or am I missing a step?"
 </phase>
 
 ## Important

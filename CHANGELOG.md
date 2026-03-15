@@ -7,6 +7,7 @@
   - Scope Dial: after exploring, pick Expand / Hold / Reduce to transition from big-picture to concrete direction
   - Phase 2 (codebase analysis) is optional in vision mode - skip straight to `/create-plan` if there's no code to analyze yet
   - Mixed-signal tiebreaker: defaults to scoping mode when input is ambiguous
+- **`/explore` optional ASCII diagrams** - Phase 2 now includes lightweight ASCII diagrams when the feature involves flows, data paths, or multi-step processes. Claude auto-includes, asks, or skips based on the feature. Diagrams use indented arrows to surface hidden assumptions - each arrow is a place where things can break. Inspired by gstack's approach (issue #64).
 
 ---
 
