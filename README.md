@@ -73,6 +73,8 @@ Use them in this order:
 
 You don't have to use every command every time. But following the order prevents the most common mistake: coding before you've thought it through.
 
+> **Want to see the full workflow in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)**.
+
 > **Working on multiple things at once?** Use `/worktree` first to create an isolated copy, then open it in a new Cursor window and run `/explore` there.
 
 ---
