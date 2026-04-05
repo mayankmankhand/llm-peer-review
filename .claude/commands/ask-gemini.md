@@ -30,7 +30,7 @@ Based on their answer, gather the relevant context:
 
 Save all gathered context to a temporary file:
 
-Use the **Write** tool to save all gathered context to `/tmp/ask-gemini-context.md`.
+**Read** `/tmp/ask-gemini-context.md` first (ignore the error if it doesn't exist), then **Write** the gathered context to it.
 
 ## Step 3: Get Initial Review from Gemini
 
@@ -67,7 +67,7 @@ Clarifications needed from the reviewer
 
 Append your response to a debate file:
 
-Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-gemini-round-1.md`). Use the **Write** tool to create each file fresh:
+Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-gemini-round-1.md`). **Read** the target file first (ignore the error if it doesn't exist), then **Write** it:
 
 ```markdown
 ## Claude (Round N):
@@ -81,23 +81,17 @@ Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-g
 node scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
-Save Gemini's response to its own round file (e.g., `/tmp/ask-gemini-round-1-gemini.md`), then continue to the next round.
+**Read** the target file first (ignore the error if it doesn't exist), then **Write** Gemini's response to its own round file (e.g., `/tmp/ask-gemini-round-1-gemini.md`). Continue to the next round.
 
 **Repeat this cycle 3 times total.**
 
 ## Step 5: Generate Summary
 
-After 3 debate cycles, concatenate all round files into a single debate file, then generate the final summary:
-
-```bash
-cat /tmp/ask-gemini-round-*.md > /tmp/ask-gemini-debate.md
-```
+After 3 debate cycles, **Read** all 6 round files (`/tmp/ask-gemini-round-1.md` through `/tmp/ask-gemini-round-3-gemini.md`), combine their contents in order, then **Read** `/tmp/ask-gemini-debate.md` (ignore the error if it doesn't exist) and **Write** the combined content to it. Then generate the final summary:
 
 ```bash
 node scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
-
-</procedure>
 
 ## Step 6: Present Results to User
 
@@ -140,6 +134,8 @@ Ask the user:
 **CRITICAL**: Do NOT implement anything until the user explicitly approves.
 
 </rules>
+
+</procedure>
 
 ---
 
