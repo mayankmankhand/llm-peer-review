@@ -228,7 +228,7 @@ npx playwright-core --version            # Chromium binary
 Open `.claude/rules/toolkit.md` in your project. The first comment near the top shows your installed version:
 
 ```
-<!-- Toolkit version: 3.2 | Managed by LLM Peer Review. ...
+<!-- Toolkit version: X.Y | Managed by LLM Peer Review. ...
 ```
 
 To update, re-run setup. The version stamp updates automatically. See [CHANGELOG.md](CHANGELOG.md) for what changed between versions.
