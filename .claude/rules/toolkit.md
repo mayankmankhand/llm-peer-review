@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- This file is managed by the LLM Peer Review toolkit. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 3.2 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -158,7 +158,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `git config`, `git remote add`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs) |
 | `git check-ignore` | Verifying .gitignore rules before committing |
 | `gh repo create`, `gh repo view`, `gh repo edit`, `gh repo clone` | Repository scaffolding, viewing, cloning, and settings |
-| `gh auth` | GitHub authentication |
+| `gh auth status` | GitHub authentication status check |
 | `gh issue create`, `gh issue view`, `gh issue close`, `gh issue list`, `gh issue reopen` | `/create-issue` command and issue management |
 | `gh label list`, `gh label create` | Managing GitHub labels |
 | `gh pr create`, `gh pr view`, `gh pr diff` | Pull request workflows |

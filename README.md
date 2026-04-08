@@ -37,6 +37,7 @@ flowchart TD
 | `/review-commands` | Review slash command prompts for quality, workflow, and consistency |
 | `/review-plan` | Check if implementation matches a plan file in `.claude/plans/` |
 | `/review-ux` | UX review from code/markup - usability, accessibility, user flows |
+| `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics |
 | `/review-full` | Pre-release cross-domain check with Ready / Not ready recommendation |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
@@ -224,10 +225,10 @@ npx playwright-core --version            # Chromium binary
 
 ### Checking Your Version
 
-Open `.claude/rules/toolkit.md` in your project. The first comment at the top shows your installed version:
+Open `.claude/rules/toolkit.md` in your project. The first comment near the top shows your installed version:
 
 ```
-<!-- Toolkit version: X.Y.Z | Managed by LLM Peer Review. ...
+<!-- Toolkit version: 3.2 | Managed by LLM Peer Review. ...
 ```
 
 To update, re-run setup. The version stamp updates automatically. See [CHANGELOG.md](CHANGELOG.md) for what changed between versions.

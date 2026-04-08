@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v3)
+# AI Agent Setup Instructions (v3.2)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -71,8 +71,9 @@ This copies:
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log template - skipped if it already exists)
 - `.env.local.example` (API key template)
-- `.gitignore` (ignores plan files, env files, node_modules, etc.)
+- `.gitignore` (merged with existing - new toolkit entries added, custom entries preserved)
 - `.gitattributes` (enforces LF line endings for shell scripts)
+- `VERSION` (toolkit version number)
 
 Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit repo and are not copied to target projects.
 
@@ -84,7 +85,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 - `.claude/commands/` - all slash command definitions
 - `.claude/rules/toolkit.md` - toolkit workflow rules
 - `scripts/ask-gpt.js`, `scripts/ask-gemini.js`, and `scripts/browse.js` - runtime scripts
-- `.env.local.example`, `.gitignore`, `.gitattributes`
+- `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
 
 **What's preserved** (skipped if it already exists):
 - `CLAUDE.md` - the user's project-specific instructions
@@ -98,7 +99,12 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v3:** After re-running setup:
+**What's new in v3.2:** After re-running setup:
+- Procedure block fix in debate commands - Steps 6 and 7 were outside the `<procedure>` block in both `ask-gpt.md` and `ask-gemini.md`
+- Write tool guard - added Read-before-Write pattern at all file creation points in debate commands so they work as background subagents
+- Demo script (`DEMO-SCRIPT.md`) - 5-minute presenter's script for live-demoing the full workflow
+
+**What was new in v3:** After re-running setup:
 - `/peer-review` rewritten with severity-based evaluation framework and structured output template
 - `/pair-debug` now includes an approval step before fixing (consistent with other review commands)
 - `/execute` defines "critical blocker" with concrete examples

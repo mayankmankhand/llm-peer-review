@@ -2,7 +2,7 @@
 
 The `/ask-gpt` and `/ask-gemini` commands need API keys to talk to ChatGPT and Gemini. This guide walks you through getting the keys and setting them up safely.
 
-> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. The other 13 commands work without any API keys.
+> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. The other 16 commands work without any API keys.
 
 ---
 
