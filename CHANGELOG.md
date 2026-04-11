@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.4
+
+- **Auto-generated project index** (issue #70) - New `/index` command and `INDEX.md` file. A deterministic Node script (`.claude/scripts/generate-index.js`) generates a file tree of all git-tracked files as indented markdown lists. Helps Claude understand project structure without burning tokens on blind exploration.
+  - `setup.sh` generates `INDEX.md` on first run and copies the generator script
+  - `/document` regenerates `INDEX.md` after each session
+  - `/index` rebuilds `INDEX.md` on demand
+  - `/explore` reads `INDEX.md` at the start of Phase 2 (falls back to manual discovery if missing)
+  - `INDEX.md` is gitignored (local-only, machine-generated)
+  - New permission: `node .claude/scripts/generate-index.js`
+
+---
+
 ## 3.3
 
 - **Self-Service guidance** (issue #69) - New "Self-Service" section in `toolkit.md` tells Claude to run commands itself instead of asking the user. Covers dev servers, tests, builds, dependency installs, service status checks, and linting. Explicit carve-outs for screenshots, judgment calls, and destructive actions.

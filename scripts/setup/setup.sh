@@ -109,6 +109,12 @@ for f in setup.sh setup.ps1 install-alias.sh install-alias.ps1; do
   fi
 done
 
+# Check index generator script
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/generate-index.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -164,6 +170,7 @@ fi
 # ─── Create target directories ───────────────────────────────
 mkdir -p "$TARGET/.claude/commands"
 mkdir -p "$TARGET/.claude/rules"
+mkdir -p "$TARGET/.claude/scripts"
 mkdir -p "$TARGET/scripts"
 
 # ─── Track what happens ──────────────────────────────────────
@@ -230,6 +237,11 @@ sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- To
 rm -f "$TARGET/.claude/rules/toolkit.md.bak"
 OVERWROTE+=(.claude/rules/toolkit.md)
 
+# ─── Index generator script (upstream-owned - always copy) ──
+echo "  Copying .claude/scripts/generate-index.js ..."
+cp "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" "$TARGET/.claude/scripts/generate-index.js"
+OVERWROTE+=(.claude/scripts/generate-index.js)
+
 # ─── Project-owned files (skip if already exist) ─────────────
 for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
   if [ -f "$TARGET/$f" ]; then
@@ -241,6 +253,20 @@ for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
     OVERWROTE+=("$f")
   fi
 done
+
+# ─── Generate project index ─────────────────────────────────
+# INDEX.md is a structural map of the project that Claude reads during /explore.
+# It's gitignored (machine-generated, local-only) and can be rebuilt with /index.
+echo "  Generating INDEX.md (file tree that helps Claude understand your project) ..."
+if command -v node > /dev/null 2>&1; then
+  if (cd "$TARGET" && node .claude/scripts/generate-index.js); then
+    OVERWROTE+=(INDEX.md)
+  else
+    echo "    Skipped - script failed (you can run /index later to generate it)"
+  fi
+else
+  echo "    Skipped - Node.js not found (install Node and run /index to generate it)"
+fi
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

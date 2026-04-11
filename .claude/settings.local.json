@@ -47,6 +47,7 @@
       "Bash(node scripts/ask-gpt.js *)",
       "Bash(node scripts/ask-gemini.js *)",
       "Bash(node scripts/browse.js *)",
+      "Bash(node .claude/scripts/generate-index.js *)",
 
       "Read",
       "Edit",

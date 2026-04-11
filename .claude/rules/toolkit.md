@@ -60,6 +60,11 @@ We follow this flow for features:
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
 | `/worktree` | Create an isolated parallel session in a new worktree |
+| `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
+
+### Project Index
+
+`INDEX.md` is an auto-generated file tree of all git-tracked files. It's created by a Node script (`.claude/scripts/generate-index.js`) and is gitignored. `/explore` reads it at the start of Phase 2 to understand project structure. `/document` regenerates it after changes. `/index` rebuilds it on demand. Do not edit INDEX.md manually.
 
 ### Command-Specific Rules
 
@@ -192,6 +197,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node scripts/ask-gpt.js` | Running the ask-gpt debate script |
 | `node scripts/ask-gemini.js` | Running the ask-gemini debate script |
 | `node scripts/browse.js` | Running the headless browser QA script |
+| `node .claude/scripts/generate-index.js` | Generating the project INDEX.md file |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |
 | `cp` | Copying files (e.g. `.env.local` into worktrees) |

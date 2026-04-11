@@ -175,6 +175,9 @@ If they say yes, continue with the analysis below.
 
 **If in scoping mode:** proceed with Phase 2 as normal (mandatory).
 
+### Start with the index
+Before exploring manually, check if `INDEX.md` exists in the project root. If it does, read it first - it's an auto-generated file tree that shows every tracked file and the directory structure. Use it to orient yourself before diving into specific files. If INDEX.md is missing, briefly tell the user: "INDEX.md not found - exploring manually. You can run /index to generate it." Then continue with normal exploration using glob/grep. If it exists but looks malformed, skip it and explore normally.
+
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?
 2. **Dependencies** - what does it rely on (files, packages, APIs)?

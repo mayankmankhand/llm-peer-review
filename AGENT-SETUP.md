@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v3.3)
+# AI Agent Setup Instructions (v3.4)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -67,6 +67,7 @@ This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
 - `.claude/settings.local.json` (permission config - skipped if it already exists)
+- `.claude/scripts/generate-index.js` (project index generator - always updated)
 - `scripts/` (ask-gpt.js, ask-gemini.js, and browse.js - runtime scripts for peer review and browser QA)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log template - skipped if it already exists)
@@ -84,6 +85,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 **What gets updated** (always overwritten):
 - `.claude/commands/` - all slash command definitions
 - `.claude/rules/toolkit.md` - toolkit workflow rules
+- `.claude/scripts/generate-index.js` - project index generator
 - `scripts/ask-gpt.js`, `scripts/ask-gemini.js`, and `scripts/browse.js` - runtime scripts
 - `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
 
@@ -99,7 +101,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v3.3:** After re-running setup:
+**What's new in v3.4:** After re-running setup:
+- `/index` command and `INDEX.md` auto-generation - a Node script generates a file tree of all git-tracked files. Setup generates it on first run, `/document` regenerates it after changes, `/explore` reads it during Phase 2
+- New file: `.claude/scripts/generate-index.js` (toolkit-managed, always updated)
+- New gitignore entry: `INDEX.md` (local-only, machine-generated)
+- New permission: `node .claude/scripts/generate-index.js`
+
+**What was new in v3.3:** After re-running setup:
 - Self-Service section in toolkit rules - Claude now has explicit guidance to run dev servers, tests, builds, and dependency installs itself instead of asking the user
 
 **What was new in v3.2:** After re-running setup:

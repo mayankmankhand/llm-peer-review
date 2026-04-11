@@ -32,6 +32,7 @@ For each changed file:
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
 - **LESSONS.md** - Prompt the user: "Did you learn anything this session worth logging?"
+- **INDEX.md** - Regenerate by running `node .claude/scripts/generate-index.js` (if the script exists). If the script fails, warn the user and skip INDEX.md. Do not write this file manually - always use the script.
 
 ## 4. Documentation Style Rules
 

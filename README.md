@@ -48,6 +48,7 @@ flowchart TD
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` | Learn a concept at 3 levels of depth |
 | `/worktree` | Create an isolated parallel session in a new worktree |
+| `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
 
 > `/ask-gpt` and `/ask-gemini` automate the full debate loop. `/peer-review` is for when you paste feedback from an external tool manually.
 >
@@ -123,7 +124,7 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh
 
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
-The scripts copy commands, runtime scripts (ask-gpt.js, ask-gemini.js), and toolkit rules to your project. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md, LESSONS.md, and settings.local.json are skipped if they already exist - those are yours to customize. Toolkit rules (`.claude/rules/toolkit.md`) are always updated. See [How It Works](#how-it-works-file-architecture) for details on which files are yours vs. managed by the toolkit.
+The scripts copy commands, runtime scripts (ask-gpt.js, ask-gemini.js), the index generator, and toolkit rules to your project. It also generates `INDEX.md`, a file tree that helps Claude understand your project layout. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md, LESSONS.md, and settings.local.json are skipped if they already exist - those are yours to customize. Toolkit rules (`.claude/rules/toolkit.md`) are always updated. See [How It Works](#how-it-works-file-architecture) for details on which files are yours vs. managed by the toolkit.
 
 ### Reusable Command (For Multiple Projects)
 
@@ -163,6 +164,7 @@ Copy these into your project:
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
 | `scripts/` (`ask-gpt.js`, `ask-gemini.js`, and `browse.js`) | `your-project/scripts/` |
+| `.claude/scripts/generate-index.js` | `your-project/.claude/scripts/generate-index.js` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
@@ -289,6 +291,8 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `.claude/rules/toolkit.md` | **Toolkit** | Workflow rules, slash command docs, permissions. Always updated when you re-run setup. |
 | `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
 | `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
+| `.claude/scripts/generate-index.js` | **Toolkit** | Generates `INDEX.md` (a file tree of your project). Always updated on setup. |
+| `INDEX.md` | **Generated** | Auto-generated file tree. Gitignored. Rebuilt by `/document`, `/index`, or setup. |
 
 Setup also copies a few supporting files (`.gitignore`, `.gitattributes`, `settings.local.json`, `.env.local.example`). See [Do It Manually](#do-it-manually) for the full list.
 
