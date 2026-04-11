@@ -105,7 +105,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - `/index` command and `INDEX.md` auto-generation - a Node script generates a file tree of all git-tracked files. Setup generates it on first run, `/document` regenerates it after changes, `/explore` reads it during Phase 2
 - New file: `.claude/scripts/generate-index.js` (toolkit-managed, always updated)
 - New gitignore entry: `INDEX.md` (local-only, machine-generated)
-- New permission: `node .claude/scripts/generate-index.js`
+- New permission: `node .claude/scripts/generate-index.js` - if the user has an existing `.claude/settings.local.json`, add `"Bash(node .claude/scripts/generate-index.js *)"` to the `permissions.allow` array so `/index` and `/document` can run the script without prompting
 
 **What was new in v3.3:** After re-running setup:
 - Self-Service section in toolkit rules - Claude now has explicit guidance to run dev servers, tests, builds, and dependency installs itself instead of asking the user

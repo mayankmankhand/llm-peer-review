@@ -11,6 +11,10 @@
 - **A worktree is just a folder, a branch is just a pointer.** They're independent. Deleting a worktree folder does not delete the branch, PR, or any commits. You can always re-create a worktree from the same branch. Think of it like closing a document window vs. deleting the file.
 - **Worktree detection: `--git-dir` vs `--git-common-dir`.** To check if you're in a Git worktree, compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree. The first attempt used `--show-toplevel` vs `--git-common-dir`, which compares a directory path to a `.git` path - they're never equal, so it always said "worktree." The review process caught this before it shipped.
 
+- **Use deterministic scripts for structural data, not LLMs.** When generating a file tree index, the first instinct was to have Claude scan and describe every file. Both GPT and Gemini called this out: "using an LLM to generate a token-saving index burns more tokens than it saves." A 20-line Node script using `git ls-files` does the job in milliseconds with zero token cost. Reserve LLMs for judgment calls, not mechanical tasks.
+- **Version bumps touch more files than you think.** When releasing v3.4, the reviews caught 5 files that needed version updates: VERSION, CHANGELOG.md, AGENT-SETUP.md title + "What's new" section, and README references. Easy to miss one. No automated fix for the toolkit repo (the checklist would leak to downstream users), so just remember to check all five manually.
+- **`settings.json` can get modified by research subagents.** During the index format research, a subagent fetching aider.chat added a WebFetch permission and additionalDirectories to `.claude/settings.json`. Always run `git diff` before committing to catch unintended changes from subagent side effects.
+
 ## Mistakes to Avoid
 <!-- Add patterns that caused problems so they don't repeat -->
 
