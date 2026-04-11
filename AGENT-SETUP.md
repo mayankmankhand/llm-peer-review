@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v3.2)
+# AI Agent Setup Instructions (v3.3)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -99,7 +99,10 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v3.2:** After re-running setup:
+**What's new in v3.3:** After re-running setup:
+- Self-Service section in toolkit rules - Claude now has explicit guidance to run dev servers, tests, builds, and dependency installs itself instead of asking the user
+
+**What was new in v3.2:** After re-running setup:
 - Procedure block fix in debate commands - Steps 6 and 7 were outside the `<procedure>` block in both `ask-gpt.md` and `ask-gemini.md`
 - Write tool guard - added Read-before-Write pattern at all file creation points in debate commands so they work as background subagents
 - Demo script (`DEMO-SCRIPT.md`) - 5-minute presenter's script for live-demoing the full workflow

@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 3.2 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 3.3 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -134,6 +134,31 @@ When running multiple Claude Code sessions in parallel (via Cursor windows or Re
 - **How it works:** `/explore` auto-renames the branch when an issue comes up. `/create-plan` does the same as a fallback if `/explore` was skipped.
 - **Cleanup:** `/document` handles end-of-session cleanup - creates a PR, then offers to delete the worktree folder. The branch stays alive until the PR is merged.
 - **Key concept:** A worktree is just a folder on disk. Deleting it does not delete the branch or PR. You can always re-create a worktree from the same branch if you need to make fixes.
+
+</guidelines>
+
+---
+
+## Self-Service
+
+<guidelines>
+
+If Claude can do it, Claude should do it. Do not ask the user to run commands that you are capable of running yourself. Act first, report what you did. (This applies to running commands and checks - Critical Rule #1 still governs code changes: report first, fix later.)
+
+### Do it yourself
+- **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
+- **Tests and builds** - run `npm test`, `npm run build`, or the project's equivalent to verify your work. Report pass/fail.
+- **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it.
+- **Service status** - before asking "is the server running?", check yourself with `curl`, `lsof`, or similar tools.
+- **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
+
+### Leave to the user
+- **Screenshots and visual QA** - the user will take and review screenshots themselves.
+- **Judgment calls** - anything that requires the user's opinion, approval, or decision.
+- **Destructive actions** - deleting data, force-pushing, or anything hard to reverse still needs confirmation.
+
+### The rule of thumb
+Ask yourself: "Can I run this command and interpret the result?" If yes, just do it. If you need the user's eyes or opinion, then ask.
 
 </guidelines>
 
