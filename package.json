@@ -1,6 +1,6 @@
 {
   "name": "llm-peer-review",
-  "version": "3.3.0",
+  "version": "3.5.0",
   "description": "LLM Peer Review - multi-model AI debate for your project lifecycle",
   "author": "Mayank Mankhand",
   "license": "MIT",
@@ -25,6 +25,7 @@
     "ask-gemini": "node scripts/ask-gemini.js"
   },
   "dependencies": {
+    "@axe-core/playwright": "^4.10.1",
     "@google/generative-ai": "^0.24.1",
     "openai": "^6.16.0",
     "playwright-core": "^1.58.2"

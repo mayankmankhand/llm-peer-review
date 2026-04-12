@@ -1,8 +1,10 @@
 {
-  "permissions": {
-    "allow": []
-  },
   "env": {
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "65"
+  },
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/shared/**)"
+    ]
   }
 }

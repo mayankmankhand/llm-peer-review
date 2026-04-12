@@ -26,6 +26,15 @@
 - **AI debates surface things standard reviews miss.** Running `/ask-gpt` and `/ask-gemini` alongside the 5 `/review-*` commands found insights none of the reviews caught: tone/task decoupling (shift questions but keep tone after scope narrowing) and the need for a vision-mode closing deliverable template. The debates push harder on behavioral edge cases because two models are actively challenging each other.
 - **"Same command, two gears" vs "new command" decision pattern.** When debating whether to add a mode or create a separate command, the key question is: do they share enough structure? If the two behaviors use the same phases, question format, and guardrails (just different content), one command with modes. If they need different structure or workflow, separate commands. Applied this to `/explore` vision mode - both gears share Phase 1/Phase 2 structure, just different questions and tone.
 
+### Skills migration decisions (issue #71)
+
+- **Subagents do NOT auto-discover project skills.** The orchestrator must read skill files and pass content explicitly. You cannot assume a subagent will "just find" a skill in `.claude/skills/`.
+- **Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.** This is how shared content gets pulled into skill prompts at runtime.
+- **`@axe-core/playwright` is compatible with `playwright-core`** (peer dependency). No conflict with the library-only Playwright install the toolkit uses.
+- **`user-invocable: false` works as documented.** It hides the skill from the slash command menu, but Claude can still invoke it programmatically. Useful for agent-only skills like `project-context`.
+- **Shared files reduce duplication across review skills.** `.claude/skills/shared/` eliminated roughly 48 lines of duplicated content across 6 review skills.
+- **GPT and Gemini peer review caught things standard reviews missed.** Zombie process risk, setup script legacy cleanup gap, missing documentation files, and an axe-core compatibility question all came from the debate rounds, not from `/review-*` commands.
+
 ## Patterns That Work
 <!-- Add approaches and conventions that proved effective -->
 

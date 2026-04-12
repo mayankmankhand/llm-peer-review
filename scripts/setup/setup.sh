@@ -93,6 +93,11 @@ elif ! compgen -G "$TOOLKIT_ROOT/.claude/commands/"*.md > /dev/null 2>&1; then
   PREFLIGHT_OK=false
 fi
 
+if [ ! -d "$TOOLKIT_ROOT/.claude/skills" ]; then
+  echo "  Error: source directory not found: $TOOLKIT_ROOT/.claude/skills/"
+  PREFLIGHT_OK=false
+fi
+
 # Check runtime scripts (must exist)
 for f in ask-gpt.js ask-gemini.js browse.js; do
   if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
@@ -171,7 +176,23 @@ fi
 mkdir -p "$TARGET/.claude/commands"
 mkdir -p "$TARGET/.claude/rules"
 mkdir -p "$TARGET/.claude/scripts"
+mkdir -p "$TARGET/.claude/skills"
 mkdir -p "$TARGET/scripts"
+
+# ─── Legacy cleanup (v3.4 -> v3.5 migration) ────────────────
+# These commands were migrated to skills in v3.5. Delete old command
+# files BEFORE copying new ones to avoid name conflicts.
+LEGACY_COMMANDS=(review-code.md review-ux.md review-plan.md review-commands.md review-browser.md review-full.md learning-opportunity.md)
+LEGACY_CLEANED=0
+for fname in "${LEGACY_COMMANDS[@]}"; do
+  if [ -f "$TARGET/.claude/commands/$fname" ]; then
+    rm -f "$TARGET/.claude/commands/$fname"
+    LEGACY_CLEANED=$((LEGACY_CLEANED + 1))
+  fi
+done
+if [ "$LEGACY_CLEANED" -gt 0 ]; then
+  echo "  Cleaned up $LEGACY_CLEANED legacy command file(s) (now skills)"
+fi
 
 # ─── Track what happens ──────────────────────────────────────
 OVERWROTE=()
@@ -186,6 +207,35 @@ for src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   fi
   cp "$src" "$TARGET/.claude/commands/$fname"
   OVERWROTE+=("commands/$fname")
+done
+
+# ─── Skill files (upstream-owned - always copy) ─────────────
+echo "  Copying .claude/skills/ ..."
+
+# Copy shared supporting files first
+if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
+  mkdir -p "$TARGET/.claude/skills/shared"
+  for src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
+    [ -f "$src" ] || continue
+    fname="$(basename "$src")"
+    cp "$src" "$TARGET/.claude/skills/shared/$fname"
+  done
+  OVERWROTE+=("skills/shared/")
+fi
+
+# Copy each skill directory (contains SKILL.md and optional supporting files)
+for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
+  [ -d "$skill_dir" ] || continue
+  skill_name="$(basename "$skill_dir")"
+  # Skip shared/ - already handled above
+  [ "$skill_name" = "shared" ] && continue
+  mkdir -p "$TARGET/.claude/skills/$skill_name"
+  for src in "$skill_dir"*; do
+    [ -f "$src" ] || continue
+    fname="$(basename "$src")"
+    cp "$src" "$TARGET/.claude/skills/$skill_name/$fname"
+  done
+  OVERWROTE+=("skills/$skill_name/")
 done
 
 # ─── Scripts (runtime scripts only - setup scripts stay in toolkit repo) ──────────────────
@@ -301,15 +351,15 @@ echo ""
 echo "      3. Open the folder in Cursor and run /explore to start your first workflow."
 echo ""
 echo "      4. (Optional) Install browser QA for /review-browser:"
-echo "           npm install playwright-core"
+echo "           npm install playwright-core @axe-core/playwright"
 echo "           npx playwright-core install chromium"
 echo "         On WSL/Linux, also run:"
 echo "           sudo npx playwright-core install-deps chromium"
 echo ""
 echo "      Steps 1-3 are optional. Skip 1-2 if you don't need"
-echo "      /ask-gpt or /ask-gemini. Skip 3 if you don't need"
+echo "      /ask-gpt or /ask-gemini. Skip 4 if you don't need"
 echo "      /review-browser."
 echo ""
-echo "    Tip: To update commands and scripts, run setup again from"
+echo "    Tip: To update commands, skills, and scripts, run setup again from"
 echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"
 echo ""

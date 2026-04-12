@@ -90,13 +90,13 @@
 
 **TYPE:**
 ```
-/review-code
+/review
 ```
 
 **WAIT** for the review report.
 
 **SAY:**
-> This is a written report - bugs, style issues, suggestions. Nothing gets changed until you say "fix it." That keeps you in control.
+> `/review` auto-detects what changed and dispatches the right specialist reviews. This is a written report - bugs, style issues, suggestions. Nothing gets changed until you say "fix it." That keeps you in control.
 
 **TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything."
 
@@ -137,7 +137,7 @@
 | Explore the problem | `/explore` | ~60s |
 | Create a plan | `/create-plan` | ~45s |
 | Build it | `/execute` | ~60s |
-| Review the code | `/review-code` | ~45s |
+| Review the code | `/review` | ~45s |
 | AI debate | `/ask-gpt` | ~45s |
 | Wrap-up (narrate) | `/peer-review`, `/document` | ~15s |
 

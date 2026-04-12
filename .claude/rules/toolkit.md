@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 3.3 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 3.5 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -12,7 +12,7 @@
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Show your work** - Tell me what you're doing and why
-5. **Use the Skill tool for /create-plan and /review-*** - Never manually replicate these commands. If the user says "create plan" or "review", invoke the appropriate command via the Skill tool so the template is followed.
+5. **Use the Skill tool for /create-plan, /review, and /review-*** - Never manually replicate these commands or skills. If the user says "create plan" or "review", invoke the appropriate command or skill via the Skill tool so the template is followed.
 6. **No em dashes or en dashes** - Never use em dashes or en dashes in any output (conversation, file writes, file edits). Use regular hyphens or rewrite the sentence.
 7. **Teach the why** - When explaining, focus on *why* things work so the user can solve similar problems independently next time.
 
@@ -27,7 +27,7 @@ We follow this flow for features:
 1. `/explore` - Understand the problem, ask clarifying questions
 2. `/create-plan` - Create a step-by-step plan with status tracking
 3. `/execute` - Build it, updating the plan as we go
-4. Run the appropriate `/review-*` command (report only, don't fix): `/review-code`, `/review-commands`, `/review-plan`, `/review-ux`, `/review-browser`, or `/review-full` - see command table below
+4. Run `/review` for auto-detected review, or a specific `/review-*` command (report only, don't fix) - see command table below
 5. `/ask-gpt` or `/ask-gemini` - Get a second opinion via multi-model debate
 6. `/peer-review` - Evaluate debate findings (paste results here)
 7. `/document` - Update documentation
@@ -45,12 +45,14 @@ We follow this flow for features:
 | `/explore` | Understand the problem, ask clarifying questions before implementation |
 | `/create-plan` | Create a step-by-step implementation plan with status tracking |
 | `/execute` | Build the feature, updating the plan as you go |
-| `/review-code` | Review code - report issues only, don't fix |
-| `/review-commands` | Review slash command prompts for quality and consistency |
-| `/review-plan` | Check if implementation matches the plan |
-| `/review-ux` | Evaluate UX quality from code and markup |
-| `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics |
-| `/review-full` | Pre-release cross-domain check with go/no-go recommendation |
+| `/review` | Run the right reviews automatically, combine findings into one report |
+| `/review-code` | Review code - report issues only, don't fix (skill - also invoked by /review) |
+| `/review-commands` | Review slash command prompts for quality and consistency (skill - also invoked by /review) |
+| `/review-plan` | Check if implementation matches the plan (skill - also invoked by /review) |
+| `/review-ux` | Evaluate UX quality from code and markup (skill - also invoked by /review) |
+| `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics (skill - also invoked by /review) |
+| `/review-full` | Pre-release cross-domain check with go/no-go recommendation (skill - also invoked by /review) |
+| `/review-deps` | Dependency and supply chain security review (skill - also invoked by /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |
@@ -58,7 +60,8 @@ We follow this flow for features:
 | `/ask-gemini` | AI peer review with Gemini debate (3 rounds) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
 | `/package-review` | Review a package/codebase |
-| `/learning-opportunity` | Pause to learn a concept at 3 levels of depth |
+| `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
+| `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
 
@@ -66,10 +69,16 @@ We follow this flow for features:
 
 `INDEX.md` is an auto-generated file tree of all git-tracked files. It's created by a Node script (`.claude/scripts/generate-index.js`) and is gitignored. `/explore` reads it at the start of Phase 2 to understand project structure. `/document` regenerates it after changes. `/index` rebuilds it on demand. Do not edit INDEX.md manually.
 
+### Skills
+
+Skills live in `.claude/skills/<name>/SKILL.md`. They auto-create slash commands (so users can type `/review-code`, `/learning-opportunity`, etc.) and are also agent-discoverable, meaning Claude can find and invoke them without the user typing a slash command. Shared reference files used by multiple skills live in `.claude/skills/shared/`. The `project-context` skill is agent-only (`user-invocable: false`) - it provides project context to subagents and is not meant to be called directly by users.
+
+**How shared content works:** Skill files use `` !`cat .claude/skills/shared/<file>` `` to inline shared content at skill-load time. This is Claude Code's dynamic context injection syntax - the runtime executes the shell command and replaces it with the output before the skill content reaches the model. It does not require Bash in the skill's `allowed-tools`. Note: subagents do NOT auto-discover skills. The `/review` orchestrator explicitly reads skill files and passes their content to subagents.
+
 ### Command-Specific Rules
 
-**When Running any /review-* command:**
-- Output a written report using the format in the corresponding `.claude/commands/review-*.md`
+**When Running any /review-* command or skill:**
+- Output a written report using the format in the corresponding skill's `SKILL.md` or `.claude/commands/review-*.md`
 - Do NOT modify any files
 - Wait for me to say "fix it" before making changes
 - Use the "Use this when / Don't use this when" guidance at the top of each command to pick the right one
@@ -194,6 +203,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `gh pr create`, `gh pr view`, `gh pr diff` | Pull request workflows |
 | `gh api`, `gh release list` | GitHub API calls and release checks |
 | `npm install`, `npm uninstall` | Managing dependencies |
+| `npm audit`, `npm outdated` | Dependency security and freshness checks (used by `/review-deps`) |
 | `node scripts/ask-gpt.js` | Running the ask-gpt debate script |
 | `node scripts/ask-gemini.js` | Running the ask-gemini debate script |
 | `node scripts/browse.js` | Running the headless browser QA script |

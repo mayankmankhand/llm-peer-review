@@ -136,7 +136,7 @@ npm install @google/generative-ai openai
 
 **For `/review-browser` (headless browser QA):**
 ```bash
-npm install playwright-core
+npm install playwright-core @axe-core/playwright
 npx playwright-core install chromium
 ```
 On WSL/Linux, system libraries are also needed:
