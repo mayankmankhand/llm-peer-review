@@ -178,6 +178,7 @@ mkdir -p "$TARGET/.claude/rules"
 mkdir -p "$TARGET/.claude/scripts"
 mkdir -p "$TARGET/.claude/skills"
 mkdir -p "$TARGET/scripts"
+mkdir -p "$TARGET/plans"
 
 # ─── Legacy cleanup (v3.4 -> v3.5 migration) ────────────────
 # These commands were migrated to skills in v3.5. Delete old command
@@ -192,6 +193,31 @@ for fname in "${LEGACY_COMMANDS[@]}"; do
 done
 if [ "$LEGACY_CLEANED" -gt 0 ]; then
   echo "  Cleaned up $LEGACY_CLEANED legacy command file(s) (now skills)"
+fi
+
+# ─── Plan migration (v3.5 -> v4.0) ─────────────────────────
+# Plans moved from .claude/plans/ to plans/ (top-level) because .claude/
+# is a protected path that always prompts for permission.
+PLANS_MIGRATED=0
+if compgen -G "$TARGET/.claude/plans/PLAN-*.md" > /dev/null 2>&1; then
+  mkdir -p "$TARGET/plans"
+  for plan in "$TARGET/.claude/plans/PLAN-"*.md; do
+    fname="$(basename "$plan")"
+    if [ -f "$TARGET/plans/$fname" ]; then
+      echo "  Skipping $fname - already in plans/"
+    else
+      mv "$plan" "$TARGET/plans/"
+      PLANS_MIGRATED=$((PLANS_MIGRATED + 1))
+    fi
+  done
+fi
+# Clean up old directory if empty (only .gitkeep or nothing left)
+if [ -d "$TARGET/.claude/plans" ]; then
+  rm -f "$TARGET/.claude/plans/.gitkeep"
+  rmdir "$TARGET/.claude/plans" 2>/dev/null || true
+fi
+if [ "$PLANS_MIGRATED" -gt 0 ]; then
+  echo "  Migrated $PLANS_MIGRATED plan file(s) from .claude/plans/ to plans/"
 fi
 
 # ─── Track what happens ──────────────────────────────────────
@@ -363,25 +389,33 @@ if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo ""
 fi
 
-# ─── Upgrade notes (only shown if legacy files were cleaned up) ─
-if [ "$LEGACY_CLEANED" -gt 0 ]; then
-  echo "    ┌──────────────────────────────────────────────────┐"
-  echo "    │  Upgraded to v$VERSION - here's what changed:       │"
-  echo "    └──────────────────────────────────────────────────┘"
+# ─── Upgrade notes (shown if legacy cleanup or plan migration happened) ─
+if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
+  echo "    ┌────────────────────────────────────────────────┐"
+  echo "    │  Upgraded to v$VERSION - here's what changed:     │"
+  echo "    └────────────────────────────────────────────────┘"
   echo ""
-  echo "      - Review commands are now skills (.claude/skills/)"
-  echo "        They still work as /review-code, /review-ux, etc."
-  echo ""
-  echo "      - NEW: /review - auto-detects changes, dispatches"
-  echo "        the right review skills, combines findings"
-  echo ""
-  echo "      - NEW: /review-deps - dependency security review"
-  echo "      - NEW: /codebase-to-course - learn any codebase"
-  echo ""
-  echo "      - browse.js now supports accessibility scanning"
-  echo "        and responsive screenshots. Install with:"
-  echo "          npm install @axe-core/playwright"
-  echo ""
+  if [ "$LEGACY_CLEANED" -gt 0 ]; then
+    echo "      - Review commands are now skills (.claude/skills/)"
+    echo "        They still work as /review-code, /review-ux, etc."
+    echo ""
+    echo "      - NEW: /review - auto-detects changes, dispatches"
+    echo "        the right review skills, combines findings"
+    echo ""
+    echo "      - NEW: /review-deps - dependency security review"
+    echo "      - NEW: /codebase-to-course - learn any codebase"
+    echo ""
+    echo "      - browse.js now supports accessibility scanning"
+    echo "        and responsive screenshots. Install with:"
+    echo "          npm install @axe-core/playwright"
+    echo ""
+  fi
+  if [ "$PLANS_MIGRATED" -gt 0 ]; then
+    echo "      - Plans moved from .claude/plans/ to plans/"
+    echo "        No more permission prompts for plan files."
+    echo "        Your existing plans were moved automatically."
+    echo ""
+  fi
   echo "      See CHANGELOG.md for full details."
   echo ""
 fi

@@ -36,7 +36,7 @@ flowchart TD
 | `/review` | Run the right reviews automatically, combine findings into one report |
 | `/review-code` (skill) | Code review (single pass or 4 sub-agents) - reports issues only, won't fix until you say so |
 | `/review-commands` (skill) | Review slash command prompts for quality, workflow, and consistency |
-| `/review-plan` (skill) | Check if implementation matches a plan file in `.claude/plans/` |
+| `/review-plan` (skill) | Check if implementation matches a plan file in `plans/` |
 | `/review-ux` (skill) | UX review from code/markup - usability, accessibility, user flows |
 | `/review-browser` (skill) | QA a running web app via headless browser - screenshots, interactions, diagnostics |
 | `/review-full` (skill) | Pre-release cross-domain check with Ready / Not ready recommendation |

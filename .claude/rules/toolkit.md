@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 3.5 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 4.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -64,6 +64,10 @@ We follow this flow for features:
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
+
+### Plans
+
+Plans are saved in `plans/` at the project root as `PLAN-*.md` files. They are gitignored (local working docs). `/create-plan` creates them, `/execute` updates them, and `/review-plan` reviews against them.
 
 ### Project Index
 

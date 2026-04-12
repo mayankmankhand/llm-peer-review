@@ -1,5 +1,14 @@
 # Changelog
 
+## v4.0 - Plans Unlocked
+
+### Changed
+- **Plan location** - Plans moved from `.claude/plans/` to `plans/` at the project root. The `.claude/` directory is a protected path in Claude Code - only `commands`, `agents`, and `skills` subdirectories are excepted. Plans in `.claude/plans/` triggered permission prompts on every read/write, even in "Edit automatically" mode. Moving to `plans/` eliminates this friction.
+- **setup.sh migration** - Setup now automatically detects and moves existing plan files from `.claude/plans/` to `plans/` when updating downstream projects. The old `.claude/plans/` directory is removed if empty.
+- **Documentation** - All references to `.claude/plans/` updated across commands, skills, rules, README, and .gitignore.
+
+---
+
 ## v3.5 - Skills Layer
 
 ### Added

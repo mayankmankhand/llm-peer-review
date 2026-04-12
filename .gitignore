@@ -20,8 +20,8 @@ npm-debug.log*
 /tmp/
 /_tmp/
 
-# Plan files (local working docs, stored in .claude/plans/)
-.claude/plans/PLAN-*.md
+# Plan files (local working docs, stored in plans/)
+plans/PLAN-*.md
 
 # IDE (local Cursor settings - shared commands are in .claude/commands/)
 .cursor/

@@ -12,7 +12,7 @@ allowed-tools:
 
 Did we build what we said we'd build? Compares implementation against plan/spec.
 
-**Use this when:** Checking if implementation matches a plan file in `.claude/plans/` - feature completeness, scope drift, quality gates.
+**Use this when:** Checking if implementation matches a plan file in `plans/` - feature completeness, scope drift, quality gates.
 **Don't use this when:** Reviewing code quality (/review-code), testing a running web app (/review-browser), reviewing command prompts (/review-commands), evaluating end-user UX (/review-ux), or doing a pre-release check (/review-full).
 
 ## Critical Rules
@@ -29,7 +29,7 @@ Did we build what we said we'd build? Compares implementation against plan/spec.
 
 <procedure>
 
-First, find the plan file to review against. Auto-detect the most recently modified `PLAN-*.md` file in `.claude/plans/` (also check the project root for legacy plan files). If no plan file exists, pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /review-code be more appropriate?" If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user: "Which plan file should I evaluate against?"
+First, find the plan file to review against. Auto-detect the most recently modified `PLAN-*.md` file in `plans/` (also check the project root for legacy plan files). If no plan file exists, pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /review-code be more appropriate?" If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user: "Which plan file should I evaluate against?"
 
 Read the plan file, then read the implementation files. Compare them. Pick one of two modes:
 

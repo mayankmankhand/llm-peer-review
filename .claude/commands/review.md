@@ -47,7 +47,7 @@ Categorize the changes and pick relevant specialists:
 |---|---|---|
 | `.ts`, `.js`, `.py`, `.go`, `.rs`, `.java`, `.sh` files | Code Quality | `.claude/skills/review-code/SKILL.md` |
 | `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.html` files | UX Quality | `.claude/skills/review-ux/SKILL.md` |
-| Active `PLAN-*.md` exists in `.claude/plans/` | Plan Compliance | `.claude/skills/review-plan/SKILL.md` |
+| Active `PLAN-*.md` exists in `plans/` | Plan Compliance | `.claude/skills/review-plan/SKILL.md` |
 | `.claude/commands/` or `.claude/skills/` files changed | Command Quality | `.claude/skills/review-commands/SKILL.md` |
 | `package.json` or lockfile changed | Dependency Security | `.claude/skills/review-deps/SKILL.md` |
 | Visual/UI changes AND a dev server is running | Browser QA | `.claude/skills/review-browser/SKILL.md` |

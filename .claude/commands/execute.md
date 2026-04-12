@@ -54,6 +54,8 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 ## Status Updates
 
 <procedure>
+Find the plan file in `plans/` (the most recently modified `PLAN-*.md`). Also check the project root for legacy plan files.
+
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task
 - Change 🟨 to 🟩 when completing a task

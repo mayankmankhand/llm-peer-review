@@ -98,11 +98,11 @@ Key architectural/implementation choices made during exploration:
 
 <rules>
 
-Save the plan to `.claude/plans/` using this naming convention:
-- If an issue is referenced: `PLAN-issue-<number>.md` (e.g., `.claude/plans/PLAN-issue-42.md`)
-- If no issue: `PLAN-<short-name>.md` (e.g., `.claude/plans/PLAN-auth-flow.md`)
+Save the plan to `plans/` using this naming convention:
+- If an issue is referenced: `PLAN-issue-<number>.md` (e.g., `plans/PLAN-issue-42.md`)
+- If no issue: `PLAN-<short-name>.md` (e.g., `plans/PLAN-auth-flow.md`)
 
-Create the `.claude/plans/` directory if it doesn't exist.
+Create the `plans/` directory if it doesn't exist.
 
 Again, it's still not time to build yet. Just write the clear plan document. No extra complexity or extra scope beyond what we discussed.
 
