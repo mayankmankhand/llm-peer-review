@@ -1,12 +1,26 @@
+---
+name: learning-opportunity
+description: Pause development to learn a concept at 3 levels of depth. Triggers when unfamiliar patterns, new frameworks, or complex concepts appear during development.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - WebSearch
+---
+
 # Learning Opportunity
 
 Pause development mode. I want to understand something better.
 
 ## Teaching Approach
 
+<guidelines>
+
 **Target audience**: Technical PM with mid-level engineering knowledge. Understands architecture, can read code, ships production apps. Not a senior engineer, but not a beginner either.
 
 **Philosophy**: 80/20 rule - focus on concepts that compound. Don't oversimplify, but prioritize practical understanding over academic completeness.
+
+</guidelines>
 
 ## Three-Level Explanation
 
@@ -32,7 +46,11 @@ Present the concept at **three increasing complexity levels**. Let me absorb eac
 
 ## Tone
 
+<rules>
+
 - Peer-to-peer, not teacher-to-student
 - Technical but not jargon-heavy
 - Concrete examples from the current codebase
 - Acknowledge complexity honestly - "this is genuinely tricky because..."
+
+</rules>

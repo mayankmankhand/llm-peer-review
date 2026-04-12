@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v3.4)
+# AI Agent Setup Instructions (v3.5)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -14,7 +14,7 @@ This file is written for AI agents with shell access (like Cursor or Claude Code
 
 <reference>
 
-A set of slash commands and scripts that give AI agents a structured workflow: explore, plan, build, review, get a second opinion, document. The commands live in `.claude/commands/` and work in Cursor and Claude Code.
+A set of slash commands, skills, and scripts that give AI agents a structured workflow: explore, plan, build, review, get a second opinion, document. Commands live in `.claude/commands/`, skills live in `.claude/skills/`, and both work in Cursor and Claude Code.
 
 </reference>
 
@@ -65,6 +65,7 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 
 This copies:
 - `.claude/commands/` (all slash command definitions)
+- `.claude/skills/` (all skill definitions - review specialists, learning-opportunity, project-context)
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
 - `.claude/settings.local.json` (permission config - skipped if it already exists)
 - `.claude/scripts/generate-index.js` (project index generator - always updated)
@@ -84,6 +85,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 **What gets updated** (always overwritten):
 - `.claude/commands/` - all slash command definitions
+- `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references)
 - `.claude/rules/toolkit.md` - toolkit workflow rules
 - `.claude/scripts/generate-index.js` - project index generator
 - `scripts/ask-gpt.js`, `scripts/ask-gemini.js`, and `scripts/browse.js` - runtime scripts
@@ -101,7 +103,17 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v3.4:** After re-running setup:
+**What's new in v3.5:** After re-running setup:
+- Skills layer: 6 review commands migrated to `.claude/skills/` for agent discovery (`review-code`, `review-ux`, `review-plan`, `review-commands`, `review-browser`, `review-full`). `learning-opportunity` also moved to a skill.
+- Unified `/review` command dispatches specialist review skills and combines findings into one report
+- New skills: `review-deps` (dependency and supply chain security), `project-context` (agent-only - provides context to subagents)
+- New commands: `/review`, `/codebase-to-course`
+- `browse.js` improvements: server auto-start (opt-in), accessibility scanning via `@axe-core/playwright`, responsive screenshots
+- New dependency: `@axe-core/playwright` for accessibility testing in browser QA
+- Legacy cleanup: setup automatically removes old review command files from `.claude/commands/` that were migrated to skills
+- New permissions needed: `npm audit`, `npm outdated` - if the user has an existing `.claude/settings.local.json`, add `"Bash(npm audit *)"` and `"Bash(npm outdated *)"` to the `permissions.allow` array so `/review-deps` can run without prompting
+
+**What was new in v3.4:** After re-running setup:
 - `/index` command and `INDEX.md` auto-generation - a Node script generates a file tree of all git-tracked files. Setup generates it on first run, `/document` regenerates it after changes, `/explore` reads it during Phase 2
 - New file: `.claude/scripts/generate-index.js` (toolkit-managed, always updated)
 - New gitignore entry: `INDEX.md` (local-only, machine-generated)
@@ -141,7 +153,7 @@ npm install --prefix "TARGET_PROJECT_PATH" @google/generative-ai openai
 
 **For `/review-browser` (headless browser QA):**
 ```bash
-npm install --prefix "TARGET_PROJECT_PATH" playwright-core
+npm install --prefix "TARGET_PROJECT_PATH" playwright-core @axe-core/playwright
 npx --prefix "TARGET_PROJECT_PATH" playwright-core install chromium
 ```
 On Linux/WSL, system libraries are also needed:
@@ -186,7 +198,7 @@ Toolkit workflow rules are in `.claude/rules/toolkit.md` (auto-loaded, managed b
 The user can now open their project in Cursor or Claude Code and type `/` to see the available commands. The recommended workflow order is:
 
 ```
-/explore  →  /create-plan  →  /execute  →  /review-code  →  /ask-gpt or /ask-gemini  →  /document
+/explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
 ```
 
 </reference>

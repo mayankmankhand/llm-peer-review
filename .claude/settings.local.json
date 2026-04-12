@@ -43,6 +43,8 @@
 
       "Bash(npm install *)",
       "Bash(npm uninstall *)",
+      "Bash(npm audit *)",
+      "Bash(npm outdated *)",
 
       "Bash(node scripts/ask-gpt.js *)",
       "Bash(node scripts/ask-gemini.js *)",

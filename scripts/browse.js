@@ -18,10 +18,13 @@
  * Input (JSON via stdin):
  *   {
  *     "baseUrl": "http://localhost:3000",
+ *     "autoStart": false,
  *     "actions": [
  *       { "type": "goto", "url": "/" },
  *       { "type": "screenshot" },
- *       { "type": "text" }
+ *       { "type": "text" },
+ *       { "type": "a11y" },
+ *       { "type": "responsive" }
  *     ]
  *   }
  *
@@ -42,6 +45,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
+const { spawn } = require('child_process');
 const { chromium } = require('playwright-core');
 
 // ── Configuration ──────────────────────────────────────────────────────────
@@ -53,10 +58,15 @@ const CONFIG = {
   screenshotDir: '/tmp',
   screenshotPrefix: 'browse-screenshot',
   defaultBaseUrl: 'http://localhost:3000',
+  serverPidFile: '/tmp/browse-server.pid',
+  defaultPorts: [3000, 3001, 5173, 8080, 8888],
+  serverStartTimeoutMs: 30000,
+  serverPollIntervalMs: 500,
+  portCheckTimeoutMs: 500,
 };
 
 // Supported action types
-const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'wait'];
+const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'wait', 'a11y', 'responsive'];
 
 // ── Error messages ─────────────────────────────────────────────────────────
 
@@ -73,7 +83,170 @@ const ERR = {
   NAVIGATION_FAILED: (url, msg) => `Failed to navigate to ${url}: ${msg}`,
   SELECTOR_FAILED: (target, msg) => `Could not find element "${target}": ${msg}`,
   TIMEOUT: (action, ms) => `${action} timed out after ${ms}ms. Is the page fully loaded?`,
+  SERVER_START_TIMEOUT: (ms) => `Dev server did not become ready within ${ms}ms.`,
+  NO_DEV_SCRIPT: 'No "dev" or "start" script found in project package.json.',
 };
+
+// ── Server auto-detection ──────────────────────────────────────────────────
+
+/**
+ * Check if a single port is responding to HTTP requests.
+ * Returns true if the port responds within the timeout, false otherwise.
+ */
+function checkPort(port, timeoutMs) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { hostname: 'localhost', port, method: 'HEAD', timeout: timeoutMs },
+      () => resolve(true)
+    );
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.end();
+  });
+}
+
+/**
+ * Detect a running dev server by checking common ports.
+ * Returns the first port that responds, or null if none found.
+ */
+async function detectServer(ports) {
+  const portsToCheck = ports || CONFIG.defaultPorts;
+  for (const port of portsToCheck) {
+    const alive = await checkPort(port, CONFIG.portCheckTimeoutMs);
+    if (alive) return port;
+  }
+  return null;
+}
+
+// ── Server auto-start ──────────────────────────────────────────────────────
+
+// Track the auto-started child process for cleanup
+let autoStartedProcess = null;
+
+/**
+ * Kill a process by PID, ignoring errors if it is already gone.
+ */
+function killProcess(pid) {
+  try {
+    // Kill the entire process group (negative PID) so child servers
+    // spawned by npm are also terminated, not just the npm wrapper.
+    process.kill(-pid, 'SIGTERM');
+  } catch (_) {
+    // Process already exited or group kill not supported - try direct kill
+    try { process.kill(pid, 'SIGTERM'); } catch (_2) { /* already gone */ }
+  }
+}
+
+/**
+ * Clean up orphan PID file and kill stale process if found.
+ */
+function cleanupOrphanPid() {
+  if (!fs.existsSync(CONFIG.serverPidFile)) return;
+  try {
+    const pid = parseInt(fs.readFileSync(CONFIG.serverPidFile, 'utf-8').trim(), 10);
+    if (!isNaN(pid)) {
+      killProcess(pid);
+    }
+    fs.unlinkSync(CONFIG.serverPidFile);
+  } catch (_) {
+    // If we can't read or delete, move on
+  }
+}
+
+/**
+ * Stop the auto-started server and clean up PID file.
+ */
+function stopAutoStartedServer() {
+  if (autoStartedProcess) {
+    killProcess(autoStartedProcess.pid);
+    autoStartedProcess = null;
+  }
+  try {
+    if (fs.existsSync(CONFIG.serverPidFile)) {
+      fs.unlinkSync(CONFIG.serverPidFile);
+    }
+  } catch (_) {
+    // Best effort cleanup
+  }
+}
+
+// Register signal handlers for cleanup
+process.on('SIGINT', () => {
+  stopAutoStartedServer();
+  process.exit(130);
+});
+process.on('SIGTERM', () => {
+  stopAutoStartedServer();
+  process.exit(143);
+});
+process.on('exit', () => {
+  // On exit, just kill - no async work allowed
+  if (autoStartedProcess) {
+    killProcess(autoStartedProcess.pid);
+  }
+});
+
+/**
+ * Start a dev server from the project's package.json.
+ * Only runs when autoStart is true and no server is already detected.
+ *
+ * Reads package.json from projectDir, finds a "dev" or "start" script,
+ * spawns it, and polls until the port is ready.
+ *
+ * Returns { port, process } on success, throws on failure.
+ */
+async function startServer(projectDir) {
+  const pkgPath = path.join(projectDir, 'package.json');
+  if (!fs.existsSync(pkgPath)) {
+    throw new Error(`No package.json found at ${pkgPath}`);
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const scripts = pkg.scripts || {};
+
+  // Prefer "dev" over "start"
+  const scriptName = scripts.dev ? 'dev' : scripts.start ? 'start' : null;
+  if (!scriptName) {
+    throw new Error(ERR.NO_DEV_SCRIPT);
+  }
+
+  // Clean up any orphan from a previous run
+  cleanupOrphanPid();
+
+  // Spawn the dev server
+  const child = spawn('npm', ['run', scriptName], {
+    cwd: projectDir,
+    stdio: 'ignore',
+    detached: true, // New process group so we can kill npm + its children together
+  });
+
+  autoStartedProcess = child;
+
+  // Write PID file
+  fs.writeFileSync(CONFIG.serverPidFile, String(child.pid), 'utf-8');
+
+  // Guess port from common defaults - check 3000 first, then others
+  // Poll until one of the common ports responds
+  const portsToTry = CONFIG.defaultPorts;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < CONFIG.serverStartTimeoutMs) {
+    for (const port of portsToTry) {
+      const alive = await checkPort(port, CONFIG.portCheckTimeoutMs);
+      if (alive) {
+        return { port, process: child };
+      }
+    }
+    await new Promise((r) => setTimeout(r, CONFIG.serverPollIntervalMs));
+  }
+
+  // Timeout - clean up
+  stopAutoStartedServer();
+  throw new Error(ERR.SERVER_START_TIMEOUT(CONFIG.serverStartTimeoutMs));
+}
 
 // ── Selector resolution ────────────────────────────────────────────────────
 
@@ -280,6 +453,94 @@ async function handleWait(page, action) {
   }
 }
 
+/**
+ * Run accessibility analysis on the current page using axe-core.
+ * Groups violations by impact level and limits node output to avoid huge results.
+ */
+async function handleA11y(page) {
+  let AxeBuilder;
+  try {
+    AxeBuilder = require('@axe-core/playwright').default;
+  } catch (_) {
+    return { type: 'a11y', ok: false, error: '@axe-core/playwright not installed' };
+  }
+
+  try {
+    const results = await new AxeBuilder({ page }).analyze();
+
+    const summary = { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 };
+    const violations = results.violations.map((v) => {
+      const impact = v.impact || 'minor';
+      if (summary[impact] !== undefined) {
+        summary[impact]++;
+      }
+      summary.total++;
+
+      return {
+        id: v.id,
+        impact,
+        description: v.description,
+        helpUrl: v.helpUrl,
+        nodes: v.nodes.slice(0, 5).map((n) => ({
+          target: n.target,
+          failureSummary: n.failureSummary,
+        })),
+      };
+    });
+
+    return {
+      type: 'a11y',
+      ok: true,
+      violations,
+      summary,
+    };
+  } catch (err) {
+    return { type: 'a11y', ok: false, error: `Accessibility analysis failed: ${err.message.split('\n').slice(0, 3).join(' | ')}` };
+  }
+}
+
+/**
+ * Capture responsive screenshots at mobile, tablet, and desktop viewports.
+ * Resizes the viewport, waits for reflow, takes a screenshot, then restores
+ * the original viewport size.
+ */
+async function handleResponsive(page) {
+  const viewports = {
+    mobile: { width: 375, height: 812 },
+    tablet: { width: 768, height: 1024 },
+    desktop: { width: 1280, height: 720 },
+  };
+
+  // Save original viewport so we can restore it after
+  const original = page.viewportSize();
+  const timestamp = Date.now();
+  const screenshots = {};
+
+  try {
+    for (const [name, size] of Object.entries(viewports)) {
+      await page.setViewportSize(size);
+      await page.waitForTimeout(500); // Wait for reflow
+      const filename = `${CONFIG.screenshotPrefix}-${timestamp}-${name}.png`;
+      const filepath = path.join(CONFIG.screenshotDir, filename);
+      await page.screenshot({ path: filepath, fullPage: true, timeout: CONFIG.actionTimeoutMs });
+      screenshots[name] = filepath;
+    }
+
+    // Restore original viewport
+    if (original) {
+      await page.setViewportSize(original);
+    }
+
+    return { type: 'responsive', ok: true, screenshots };
+  } catch (err) {
+    // Restore original viewport even on failure
+    if (original) {
+      try { await page.setViewportSize(original); } catch (_) { /* best effort */ }
+    }
+    return { type: 'responsive', ok: false, error: `Responsive screenshots failed: ${err.message.split('\n').slice(0, 3).join(' | ')}` };
+  }
+}
+
 // ── Input validation ───────────────────────────────────────────────────────
 
 /**
@@ -421,6 +682,8 @@ async function runSession(data) {
     screenshot: (action) => handleScreenshot(page, action),
     text: (action) => handleText(page, action),
     wait: (action) => handleWait(page, action),
+    a11y: () => handleA11y(page),
+    responsive: () => handleResponsive(page),
   };
 
   // Execute each action in sequence
@@ -478,6 +741,7 @@ Usage:
 Input format (JSON via stdin):
   {
     "baseUrl": "http://localhost:3000",
+    "autoStart": false,
     "actions": [
       { "type": "goto", "url": "/" },
       { "type": "click", "target": "text:Login" },
@@ -486,7 +750,9 @@ Input format (JSON via stdin):
       { "type": "text" },
       { "type": "text", "target": "css:.main-content" },
       { "type": "wait", "ms": 2000 },
-      { "type": "wait", "selector": "css:.loaded" }
+      { "type": "wait", "selector": "css:.loaded" },
+      { "type": "a11y" },
+      { "type": "responsive" }
     ]
   }
 
@@ -502,6 +768,12 @@ Action types:
               Fields: target (optional, scoped extraction)
   wait        Wait for time or element
               Fields: ms (milliseconds) or selector
+  a11y        Run accessibility analysis using axe-core
+              Returns violations grouped by impact level
+              Requires @axe-core/playwright (graceful error if missing)
+  responsive  Capture screenshots at 3 viewports (mobile, tablet, desktop)
+              Mobile: 375x812, Tablet: 768x1024, Desktop: 1280x720
+              Screenshots saved to /tmp with viewport suffix
 
 Selector prefixes:
   css:.my-class          CSS selector
@@ -510,6 +782,13 @@ Selector prefixes:
   .my-class              No prefix = CSS selector
 
 Options:
+  autoStart   Set to true in the input JSON to auto-detect or start a dev
+              server before running actions. Checks ports 3000, 3001, 5173,
+              8080, 8888 for an existing server. If none found, reads the
+              project's package.json and runs "npm run dev" (or "npm run
+              start"). The server is stopped automatically when done.
+              Default: false (opt-in only)
+
   --help      Show this help message
 `);
 }
@@ -538,19 +817,54 @@ async function main() {
     process.exit(1);
   }
 
-  // Run the browser session
-  const result = await runSession(validation.data);
+  const data = validation.data;
+  let serverWasAutoStarted = false;
 
-  // Output result as JSON
-  console.log(JSON.stringify(result, null, 2));
+  // Server auto-start (opt-in only)
+  if (data.autoStart === true) {
+    try {
+      // First check if a server is already running
+      const existingPort = await detectServer();
+      if (existingPort) {
+        data.baseUrl = `http://localhost:${existingPort}`;
+      } else {
+        // No server found - start one
+        const projectDir = data.projectDir || process.cwd();
+        const server = await startServer(projectDir);
+        data.baseUrl = `http://localhost:${server.port}`;
+        serverWasAutoStarted = true;
+      }
+    } catch (err) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: `Server auto-start failed: ${err.message}`,
+      }, null, 2));
+      process.exit(1);
+    }
+  }
 
-  // Exit with error code if session failed
-  if (!result.ok) {
-    process.exit(1);
+  try {
+    // Run the browser session
+    const result = await runSession(data);
+
+    // Output result as JSON
+    console.log(JSON.stringify(result, null, 2));
+
+    // Exit with error code if session failed
+    if (!result.ok) {
+      process.exit(1);
+    }
+  } finally {
+    // Always clean up the auto-started server
+    if (serverWasAutoStarted) {
+      stopAutoStartedServer();
+    }
   }
 }
 
 main().catch((err) => {
+  // Clean up server on unexpected errors too
+  stopAutoStartedServer();
   console.log(JSON.stringify({
     ok: false,
     error: `Unexpected error: ${err.message}`,

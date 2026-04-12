@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.5 - Skills Layer
+
+### Added
+- **Skills architecture** - Review commands migrated to `.claude/skills/` for agent discoverability
+- **`/review` command** - Unified orchestrator that auto-detects changes, dispatches specialist skills in parallel, and combines findings into one report
+- **`/review-deps` skill** - Dependency and supply chain security review (npm audit, outdated packages, maintainer risks, licenses)
+- **`/codebase-to-course` command** - Turn any codebase into an interactive HTML learning guide
+- **`project-context` skill** - Agent-only skill that provides project context to subagents
+- **browse.js improvements** - Server auto-start (opt-in), accessibility scanning via axe-core, responsive viewport screenshots
+- **Shared reference files** - `.claude/skills/shared/` eliminates duplicated content across review skills
+
+### Changed
+- Review commands (review-code, review-ux, review-plan, review-commands, review-browser, review-full) are now skills with SKILL.md format
+- `/learning-opportunity` migrated to skill format (Claude can now offer it proactively)
+- setup.sh copies `.claude/skills/` directories and handles legacy cleanup
+- Browser QA now requires `@axe-core/playwright` for accessibility testing (optional)
+- settings.local.json adds `npm audit` and `npm outdated` permissions
+
+### Migration
+- Re-run setup.sh to upgrade: old review command files are automatically deleted
+- Add `@axe-core/playwright` to browser QA dependencies: `npm install @axe-core/playwright`
+- Add `"Bash(npm audit *)"` and `"Bash(npm outdated *)"` to settings.local.json permissions if you have a custom config
+
+---
+
 ## 3.4
 
 - **Auto-generated project index** (issue #70) - New `/index` command and `INDEX.md` file. A deterministic Node script (`.claude/scripts/generate-index.js`) generates a file tree of all git-tracked files as indented markdown lists. Helps Claude understand project structure without burning tokens on blind exploration.

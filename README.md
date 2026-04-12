@@ -15,14 +15,14 @@ flowchart TD
     W(["/worktree (optional)"]) -.-> A(["/explore"])
     A --> B(["/create-plan"])
     B --> C(["/execute"])
-    C --> D(["/review-code"])
+    C --> D(["/review"])
     D --> E(["/ask-gpt or /ask-gemini"])
     E --> F(["Agreed · Disagreed · Actions"])
     F --> G{"You approve"}
     G --> H(["/document"])
 ```
 
-> If the diagram doesn't render, here's the flow: `/worktree` (optional) -> `/explore` -> `/create-plan` -> `/execute` -> `/review-code` -> `/ask-gpt` or `/ask-gemini` -> `/document`
+> If the diagram doesn't render, here's the flow: `/worktree` (optional) -> `/explore` -> `/create-plan` -> `/execute` -> `/review` -> `/ask-gpt` or `/ask-gemini` -> `/document`
 
 ---
 
@@ -33,12 +33,14 @@ flowchart TD
 | `/explore` | Think through the problem - scoping for concrete features, vision for strategy and ideation |
 | `/create-plan` | Write a step-by-step plan with status tracking |
 | `/execute` | Build it, updating the plan as you go |
-| `/review-code` | Code review (single pass or 4 sub-agents) - reports issues only, won't fix until you say so |
-| `/review-commands` | Review slash command prompts for quality, workflow, and consistency |
-| `/review-plan` | Check if implementation matches a plan file in `.claude/plans/` |
-| `/review-ux` | UX review from code/markup - usability, accessibility, user flows |
-| `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics |
-| `/review-full` | Pre-release cross-domain check with Ready / Not ready recommendation |
+| `/review` | Run the right reviews automatically, combine findings into one report |
+| `/review-code` (skill) | Code review (single pass or 4 sub-agents) - reports issues only, won't fix until you say so |
+| `/review-commands` (skill) | Review slash command prompts for quality, workflow, and consistency |
+| `/review-plan` (skill) | Check if implementation matches a plan file in `.claude/plans/` |
+| `/review-ux` (skill) | UX review from code/markup - usability, accessibility, user flows |
+| `/review-browser` (skill) | QA a running web app via headless browser - screenshots, interactions, diagnostics |
+| `/review-full` (skill) | Pre-release cross-domain check with Ready / Not ready recommendation |
+| `/review-deps` (skill) | Dependency and supply chain security review - CVEs, outdated packages, license issues |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
@@ -46,7 +48,8 @@ flowchart TD
 | `/ask-gpt` | Debate your work with ChatGPT (3 rounds) |
 | `/ask-gemini` | Debate your work with Gemini (3 rounds) |
 | `/package-review` | Bundle your work into one file for external review |
-| `/learning-opportunity` | Learn a concept at 3 levels of depth |
+| `/learning-opportunity` (skill) | Learn a concept at 3 levels of depth |
+| `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
 
@@ -70,7 +73,7 @@ flowchart TD
 Use them in this order:
 
 ```
-/worktree (optional)  →  /explore  →  /create-plan  →  /execute  →  /review-code  →  /ask-gpt or /ask-gemini  →  /document
+/worktree (optional)  →  /explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
 ```
 
 You don't have to use every command every time. But following the order prevents the most common mistake: coding before you've thought it through.
@@ -179,7 +182,7 @@ cp .env.local.example .env.local
 # Open .env.local and paste your API keys
 
 # For /review-browser (headless browser QA):
-npm install playwright-core
+npm install playwright-core @axe-core/playwright
 npx playwright-core install chromium
 # On Linux/WSL, also: sudo npx playwright-core install-deps chromium
 ```
@@ -209,7 +212,7 @@ cp .env.local.example .env.local
 # Edit .env.local and paste your OPENAI_API_KEY and GEMINI_API_KEY
 
 # Browser QA (/review-browser)
-npm install playwright-core
+npm install playwright-core @axe-core/playwright
 npx playwright-core install chromium
 # On Linux/WSL only:
 sudo npx playwright-core install-deps chromium
@@ -219,7 +222,7 @@ sudo npx playwright-core install-deps chromium
 ```bash
 node -v                                  # Node.js
 npm list @google/generative-ai openai    # debate dependencies
-npm list playwright-core                 # browser QA dependency
+npm list playwright-core @axe-core/playwright  # browser QA dependencies
 npx playwright-core --version            # Chromium binary
 ```
 
