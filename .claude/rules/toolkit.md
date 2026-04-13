@@ -211,6 +211,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node scripts/ask-gpt.js` | Running the ask-gpt debate script |
 | `node scripts/ask-gemini.js` | Running the ask-gemini debate script |
 | `node scripts/browse.js` | Running the headless browser QA script |
+| `echo/cat * \| node scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants are injected by setup.sh per project. |
 | `node .claude/scripts/generate-index.js` | Generating the project INDEX.md file |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |

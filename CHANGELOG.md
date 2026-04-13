@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.0.1 - Setup Fixes
+
+### Fixed
+- **VERSION file now copied to target** (issue #73) - setup.sh checked for VERSION in preflight but never copied it. Now copies it alongside other upstream-owned files.
+- **browse.js pipe permissions** (issue #75) - Added `echo`/`cat` pipe permission entries for browse.js. setup.sh now also injects absolute-path variants dynamically per project, so Claude won't prompt for permission when using the full filesystem path.
+
+### Improved
+- **Permission merge block hardened** - Paths passed via environment variables instead of string interpolation, fixing a latent quoting bug on paths with special characters. Stale absolute-path permissions from old project locations are cleaned up automatically on re-run.
+
+---
+
 ## v4.0 - Plans Unlocked
 
 ### Changed
