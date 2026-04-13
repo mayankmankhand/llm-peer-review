@@ -29,7 +29,7 @@ This command supports optional focus arguments:
 - `/review code,ux` - specific combination
 - `/review full` - invokes the review-full skill (same as `/review-full`)
 
-If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `full` = review-full.
+If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full.
 
 </reference>
 
@@ -51,9 +51,11 @@ Categorize the changes and pick relevant specialists:
 | `.claude/commands/` or `.claude/skills/` files changed | Command Quality | `.claude/skills/review-commands/SKILL.md` |
 | `package.json` or lockfile changed | Dependency Security | `.claude/skills/review-deps/SKILL.md` |
 | Visual/UI changes AND a dev server is running | Browser QA | `.claude/skills/review-browser/SKILL.md` |
+| `README.md`, `index.html`, or files in `docs/`, `pages/`, `content/`, `posts/` (exclude `CHANGELOG.md`, ADRs, API refs, generated docs) | Copy Clarity | `.claude/skills/review-copy/SKILL.md` |
 
 **Rules:**
 - A file can trigger multiple specialists (e.g., a `.tsx` file triggers both Code and UX)
+- When copy and UX both run on the same artifact, copy focuses on meaning/orientation while UX focuses on usability/accessibility. Deduplicate overlapping findings in synthesis.
 - If no changes are detected (clean working tree), tell the user: "No changes detected. Use `/review code` to force a specific review."
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
 

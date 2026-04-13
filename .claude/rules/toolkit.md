@@ -53,6 +53,7 @@ We follow this flow for features:
 | `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics (skill - also invoked by /review) |
 | `/review-full` | Pre-release cross-domain check with go/no-go recommendation (skill - also invoked by /review) |
 | `/review-deps` | Dependency and supply chain security review (skill - also invoked by /review) |
+| `/review-copy` | Review copy clarity and reader orientation (skill - also invoked by /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |
@@ -211,6 +212,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node scripts/ask-gpt.js` | Running the ask-gpt debate script |
 | `node scripts/ask-gemini.js` | Running the ask-gemini debate script |
 | `node scripts/browse.js` | Running the headless browser QA script |
+| `echo/cat * \| node scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants are injected by setup.sh per project. |
 | `node .claude/scripts/generate-index.js` | Generating the project INDEX.md file |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |

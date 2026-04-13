@@ -300,6 +300,10 @@ echo "  Copying .gitattributes ..."
 cp "$TOOLKIT_ROOT/.gitattributes" "$TARGET/.gitattributes"
 OVERWROTE+=(.gitattributes)
 
+echo "  Copying VERSION ..."
+cp "$TOOLKIT_ROOT/VERSION" "$TARGET/VERSION"
+OVERWROTE+=(VERSION)
+
 # ─── Toolkit rules (upstream-owned - always copy) ────────────
 echo "  Copying .claude/rules/toolkit.md ..."
 if [ -f "$TARGET/.claude/rules/toolkit.md" ]; then
@@ -332,28 +336,55 @@ done
 
 # ─── Merge new permissions into existing settings.local.json ─
 # When upgrading, the user's settings.local.json is preserved (not overwritten).
-# But new toolkit versions may require new permissions. This block adds any
-# missing permissions from the toolkit's settings.local.json into the user's file.
+# But new toolkit versions may require new permissions. This block:
+#   1. Adds any missing permissions from the toolkit's template
+#   2. Removes stale absolute-path browse.js permissions from old project locations
+#   3. Injects absolute-path browse.js pipe permissions for the current $TARGET
+# All three steps happen in one pass to avoid reading/writing the file multiple times.
+# Paths are passed via environment variables to avoid quoting issues with special
+# characters in directory names (spaces, quotes, etc.).
 if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2>&1; then
-  PERMS_ADDED=$(node -e "
+  PERMS_ADDED=$(TOOLKIT_SRC="$TOOLKIT_ROOT" TARGET_DIR="$TARGET" node -e "
     const fs = require('fs');
-    const src = JSON.parse(fs.readFileSync('$TOOLKIT_ROOT/.claude/settings.local.json', 'utf-8'));
-    const tgt = JSON.parse(fs.readFileSync('$TARGET/.claude/settings.local.json', 'utf-8'));
+    const toolkitSrc = process.env.TOOLKIT_SRC;
+    const targetDir = process.env.TARGET_DIR;
+    const src = JSON.parse(fs.readFileSync(toolkitSrc + '/.claude/settings.local.json', 'utf-8'));
+    const tgt = JSON.parse(fs.readFileSync(targetDir + '/.claude/settings.local.json', 'utf-8'));
+    if (!tgt.permissions) tgt.permissions = {};
+    if (!tgt.permissions.allow) tgt.permissions.allow = [];
     const srcPerms = (src.permissions && src.permissions.allow) || [];
-    const tgtPerms = (tgt.permissions && tgt.permissions.allow) || [];
+    let tgtPerms = tgt.permissions.allow;
+
+    // Step 1: merge missing template permissions
     const missing = srcPerms.filter(p => !tgtPerms.includes(p));
-    if (missing.length > 0) {
-      if (!tgt.permissions) tgt.permissions = {};
-      if (!tgt.permissions.allow) tgt.permissions.allow = [];
-      tgt.permissions.allow.push(...missing);
-      fs.writeFileSync('$TARGET/.claude/settings.local.json', JSON.stringify(tgt, null, 2) + '\n');
-      missing.forEach(p => console.log(p));
+
+    // Step 2: remove stale absolute-path browse.js permissions from old locations
+    const browsePattern = /^Bash\((echo|cat) \* \| node \/.*\/scripts\/browse\.js \*\)$/;
+    const stale = tgtPerms.filter(p => browsePattern.test(p) && !p.includes(targetDir));
+    tgtPerms = tgtPerms.filter(p => !stale.includes(p));
+
+    // Step 3: add absolute-path browse.js permissions for current target
+    const absPerms = [
+      'Bash(echo * | node ' + targetDir + '/scripts/browse.js *)',
+      'Bash(cat * | node ' + targetDir + '/scripts/browse.js *)'
+    ];
+    const absNew = absPerms.filter(p => !tgtPerms.includes(p));
+
+    const allNew = [...missing, ...absNew];
+    if (allNew.length > 0 || stale.length > 0) {
+      tgt.permissions.allow = [...tgtPerms, ...allNew];
+      fs.writeFileSync(targetDir + '/.claude/settings.local.json', JSON.stringify(tgt, null, 2) + '\n');
+      stale.forEach(p => console.log('removed: ' + p));
+      allNew.forEach(p => console.log(p));
     }
-  " 2>/dev/null)
+  " 2>&1) || true
   if [ -n "$PERMS_ADDED" ]; then
-    echo "  Merging new permissions into .claude/settings.local.json ..."
+    echo "  Updating permissions in .claude/settings.local.json ..."
     echo "$PERMS_ADDED" | while IFS= read -r perm; do
-      echo "    + $perm"
+      case "$perm" in
+        removed:*) echo "    - ${perm#removed: }" ;;
+        *)         echo "    + $perm" ;;
+      esac
     done
   fi
 fi

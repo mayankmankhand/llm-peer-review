@@ -40,6 +40,7 @@
 | Browser | Staff QA | Core flow works? Error handling? Console health? Network health? |
 | Full | Staff Architect | Cross-domain conflicts? Release risk? What's missing? Deeper reviews needed? |
 | Deps | Security Engineer | Known vulnerabilities? Supply chain risk? License compliance? Update urgency? |
+| Copy | Staff Editor | Clear to a newcomer? Oriented before interaction? Plain language? What would you send back for revision? |
 
 ## Browser Review Extensions
 
