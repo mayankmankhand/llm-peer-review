@@ -53,6 +53,7 @@ We follow this flow for features:
 | `/review-browser` | QA a running web app via headless browser - screenshots, interactions, diagnostics (skill - also invoked by /review) |
 | `/review-full` | Pre-release cross-domain check with go/no-go recommendation (skill - also invoked by /review) |
 | `/review-deps` | Dependency and supply chain security review (skill - also invoked by /review) |
+| `/review-copy` | Review copy clarity and reader orientation (skill - also invoked by /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |

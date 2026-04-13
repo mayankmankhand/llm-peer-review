@@ -58,3 +58,9 @@ These categories have minimum severity floors - never downgrade them:
 - Known CVEs in dependencies = lean toward **Block**
 - Outdated packages with known issues = lean toward **Warn**
 - License concerns or single-maintainer packages = lean toward **Suggest**
+
+### Copy Review
+
+- Reader cannot determine what the content is, who it is for, or what an action means before a consequential action = lean toward **Block**
+- Understanding is possible but delayed, jargon-heavy, or unnecessarily effortful = lean toward **Warn**
+- Wording or structure could be improved but core orientation is intact = lean toward **Suggest**

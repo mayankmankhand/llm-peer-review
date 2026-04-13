@@ -41,6 +41,7 @@ flowchart TD
 | `/review-browser` (skill) | QA a running web app via headless browser - screenshots, interactions, diagnostics |
 | `/review-full` (skill) | Pre-release cross-domain check with Ready / Not ready recommendation |
 | `/review-deps` (skill) | Dependency and supply chain security review - CVEs, outdated packages, license issues |
+| `/review-copy` (skill) | Copy clarity and reader orientation - checks if a fresh reader can understand what they're looking at |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
@@ -66,6 +67,7 @@ flowchart TD
 | Verify implementation matches a plan | `/review-plan` |
 | Evaluate UX, accessibility, and user flows | `/review-ux` |
 | QA a running web app via headless browser | `/review-browser` |
+| Check if copy is clear to a fresh reader | `/review-copy` |
 | Pre-release go/no-go check across all domains | `/review-full` |
 
 ### The Workflow
