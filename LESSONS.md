@@ -16,6 +16,9 @@
 - **Never interpolate shell variables into inline `node -e` strings.** If `$TARGET` contains a single quote (e.g., `/home/user/it's-a-project`), it breaks the JS string literal and `2>/dev/null` silently swallows the error. Pass paths via environment variables instead: `TARGET_DIR="$TARGET" node -e "const dir = process.env.TARGET_DIR; ..."`. This avoids all quoting issues.
 - **`settings.json` can get modified by research subagents.** During the index format research, a subagent fetching aider.chat added a WebFetch permission and additionalDirectories to `.claude/settings.json`. Always run `git diff` before committing to catch unintended changes from subagent side effects.
 
+- **"Do I understand it?" vs "Can I use it?" is the right split for review skills.** When adding `/review-copy`, the key insight was that clarity/orientation and usability/accessibility are genuinely different concerns. A page can be perfectly usable (good contrast, accessible forms) but still confuse a newcomer who doesn't know what they're looking at. Separate skills with a clear tie-break rule ("meaning/orientation = copy, interaction/accessibility = UX") prevents muddled feedback.
+- **Run debates on plans, not just finished work.** Running `/ask-gpt` and `/ask-gemini` on the plan (before building) caught four refinements that would have required rework later: audience assumption wording, severity anchor calibration, auto-detection heuristics, and the need for a non-goals section. Cheaper to fix a plan than to rewrite a shipped skill.
+
 ## Mistakes to Avoid
 <!-- Add patterns that caused problems so they don't repeat -->
 
