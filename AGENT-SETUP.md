@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.0)
+# AI Agent Setup Instructions (v4.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,11 +103,16 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.0:** After re-running setup:
+**What's new in v4.1:** After re-running setup:
+- New `/review-copy` skill for copy clarity and reader orientation review. Works standalone (`/review-copy`) or via the unified dispatcher (`/review copy`).
+- Shared reference files updated: `severity-anchors.md` has Copy Review severity anchors, `output-template.md` has a Copy row in the specialist table.
+- No new permissions needed - all tools used by `/review-copy` (Read, Glob, Grep, Agent, WebSearch) are already in `settings.local.json`.
+
+**What was new in v4.0:** After re-running setup:
 - Plans moved from `.claude/plans/` to `plans/` (top-level). The `.claude/` directory is protected by Claude Code, which caused permission prompts on every plan read/write. Setup automatically migrates existing plan files and removes the old directory.
 - Version bump to 4.0 reflects a workflow-affecting change (plan location)
 
-**What's new in v3.5:** After re-running setup:
+**What was new in v3.5:** After re-running setup:
 - Skills layer: 6 review commands migrated to `.claude/skills/` for agent discovery (`review-code`, `review-ux`, `review-plan`, `review-commands`, `review-browser`, `review-full`). `learning-opportunity` also moved to a skill.
 - Unified `/review` command dispatches specialist review skills and combines findings into one report
 - New skills: `review-deps` (dependency and supply chain security), `project-context` (agent-only - provides context to subagents)

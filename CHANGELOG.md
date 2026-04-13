@@ -1,5 +1,18 @@
 # Changelog
 
+## v4.1 - Copy Review Skill
+
+### Added
+- **`/review-copy` skill** - Copy clarity and reader orientation review. Checks whether content orients a fresh reader. Use for web pages, blog posts, landing pages, guides, prototypes, and any reader-facing deliverable.
+- **`/review` dispatcher integration** - Added `copy` to the `/review` command's focus arguments and dispatch table, so `/review copy` works and unified review can auto-dispatch copy reviews.
+- **Shared reference updates** - Added Copy Review severity section to `severity-anchors.md` and Copy row to `output-template.md` specialist table.
+- **Toolkit rules** - Added `/review-copy` row to the command reference table in `toolkit.md`.
+
+### Notes
+- No new permissions needed - `/review-copy` uses Read, Glob, Grep, Agent, and WebSearch, all already in `settings.local.json`.
+
+---
+
 ## v4.0.1 - Setup Fixes
 
 ### Fixed
