@@ -264,8 +264,9 @@ RENAMED_NEW=(
   scripts/ask-gemini.js
 )
 RENAMED_CLEANED=0
-i=0
-while [ $i -lt ${#RENAMED_OLD[@]} ]; do
+# `${!RENAMED_OLD[@]}` expands to the array's index list, scoping the loop
+# variable cleanly and avoiding a manual counter. Bash 3.2 safe.
+for i in "${!RENAMED_OLD[@]}"; do
   old_rel="${RENAMED_OLD[$i]}"
   new_rel="${RENAMED_NEW[$i]}"
   if [ -f "$TARGET/$old_rel" ]; then
@@ -274,7 +275,6 @@ while [ $i -lt ${#RENAMED_OLD[@]} ]; do
     echo "  Removed renamed file: $old_rel -> $new_rel"
     RENAMED_CLEANED=$((RENAMED_CLEANED + 1))
   fi
-  i=$((i + 1))
 done
 if [ "$RENAMED_CLEANED" -gt 0 ]; then
   echo "  Cleaned up $RENAMED_CLEANED renamed file(s)"

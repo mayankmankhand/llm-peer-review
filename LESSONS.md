@@ -44,3 +44,9 @@
 
 - **Tag vocabulary for prompts:** `<rules>` (must-follow), `<procedure>` (step-by-step), `<template>` (copy-paste schemas), `<output_format>` (expected output), `<conditions>` (if-then logic), `<guidelines>` (best practices), `<reference>` (lookup tables), `<phase>` (named stages), `<examples>` (good/bad demos).
 - **Audit before converting.** Not every file needs XML. Short files, human-facing docs, and already-structured data are fine without it. Focus on files where the AI needs to distinguish content types.
+
+### Rename-aware setup cleanup (issue #80)
+
+- **`for i in "${!array[@]}"` is the idiomatic Bash way to iterate parallel indexed arrays.** First pass used `i=0; while [ $i -lt ${#arr[@]} ]; do ...; i=$((i+1)); done`. Both work and both are Bash 3.2 safe, but `${!array[@]}` expands to the index list, scopes the loop variable to the for-loop, and removes the manual counter. Reviewer caught it on the first pass. Use the for-form whenever you need indexes.
+- **Scope parity gaps explicitly when fixing one of several.** While adding the rename block to setup.ps1, I noticed it was also missing the v3.4->v3.5 skills cleanup AND v4.0 plan migration that setup.sh has. Added only the rename block (issue #80 scope), surfaced the rest as a follow-up. Without explicit scoping, fixing "the obvious thing" tends to drag in adjacent fixes and turn a one-issue PR into a sprint.
+- **A 🟩 on "ask the user about X" can mislead.** The plan-compliance reviewer flagged that marking the sub-task "ask whether to file a follow-up issue" as done was technically correct (I asked) but could read as "follow-up filed." For decision sub-tasks, either keep them 🟨 until acted on, or add a one-liner to Outcomes noting current status.
