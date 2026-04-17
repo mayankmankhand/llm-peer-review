@@ -1,5 +1,16 @@
 # Changelog
 
+## v4.2.1 - Rename-Aware Cleanup
+
+### Fixed
+- **Stale files after upstream renames** (issue #80) - `setup.sh` and `setup.ps1` now maintain a rename map (old name -> new name) alongside the existing legacy-command list. On install, old-named files in `.claude/commands/` and `scripts/` are backed up to `.toolkit-backup-*/` and removed, so renamed slash commands no longer pile up alongside their replacements. Covers the `dev-lead-gpt` / `dev-lead-gemini` -> `ask-gpt` / `ask-gemini` renames for both commands and runtime scripts.
+
+### Notes
+- Each removal is logged individually during setup so the user sees exactly what was cleaned up.
+- Backup behavior from v4.2 is unchanged - any customizations you made to the old-named file survive in the timestamped backup directory.
+
+---
+
 ## v4.2 - Safe Upgrades
 
 ### Added

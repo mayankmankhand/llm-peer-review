@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.2)
+# AI Agent Setup Instructions (v4.2.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,10 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.2:** After re-running setup:
+**What's new in v4.2.1:** After re-running setup:
+- Renamed toolkit files (e.g. `dev-lead-gpt.md` -> `ask-gpt.md`, `dev-lead-gemini.js` -> `ask-gemini.js`) are now cleaned up from target projects. Setup backs up the old file to `.toolkit-backup-*/` and removes it before copying the new one, so stale slash commands don't sit alongside their renamed versions. Each removal is logged.
+
+**What was new in v4.2:** After re-running setup:
 - Setup now preserves any file it would overwrite or delete by copying the original to `.toolkit-backup-<timestamp>/` at the project root, with mirrored paths. Upgrades never destroy user customizations - if something gets replaced, the original is one directory away. Byte-identical files are skipped entirely (no copy, no backup), so clean installs produce no backup directory. The `.toolkit-backup-*/` pattern is added to `.gitignore` automatically on the next install.
 
 **What was new in v4.1:** After re-running setup:

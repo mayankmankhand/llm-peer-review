@@ -244,6 +244,42 @@ if [ "$LEGACY_CLEANED" -gt 0 ]; then
   echo "  Cleaned up $LEGACY_CLEANED legacy command file(s) (now skills)"
 fi
 
+# ─── Renamed files cleanup (issue #80) ───────────────────────
+# When a toolkit file is renamed upstream (e.g. dev-lead-gpt.md -> ask-gpt.md),
+# copying the new name is not enough: the old file sticks around and still
+# loads as a stale slash command. Parallel indexed arrays map old -> new
+# (associative arrays need Bash 4, setup.sh targets Bash 3.2+). Paths are
+# relative to $TARGET. backup_file preserves any customizations the user
+# made to the old-named file before rm removes it.
+RENAMED_OLD=(
+  .claude/commands/dev-lead-gpt.md
+  .claude/commands/dev-lead-gemini.md
+  scripts/dev-lead-gpt.js
+  scripts/dev-lead-gemini.js
+)
+RENAMED_NEW=(
+  .claude/commands/ask-gpt.md
+  .claude/commands/ask-gemini.md
+  scripts/ask-gpt.js
+  scripts/ask-gemini.js
+)
+RENAMED_CLEANED=0
+i=0
+while [ $i -lt ${#RENAMED_OLD[@]} ]; do
+  old_rel="${RENAMED_OLD[$i]}"
+  new_rel="${RENAMED_NEW[$i]}"
+  if [ -f "$TARGET/$old_rel" ]; then
+    backup_file "$TARGET/$old_rel"
+    rm -f "$TARGET/$old_rel"
+    echo "  Removed renamed file: $old_rel -> $new_rel"
+    RENAMED_CLEANED=$((RENAMED_CLEANED + 1))
+  fi
+  i=$((i + 1))
+done
+if [ "$RENAMED_CLEANED" -gt 0 ]; then
+  echo "  Cleaned up $RENAMED_CLEANED renamed file(s)"
+fi
+
 # ─── Plan migration (v3.5 -> v4.0) ─────────────────────────
 # Plans moved from .claude/plans/ to plans/ (top-level) because .claude/
 # is a protected path that always prompts for permission.

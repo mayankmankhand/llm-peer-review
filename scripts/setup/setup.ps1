@@ -244,6 +244,32 @@ function Invoke-SafeCopy {
 
 $Skipped = @()
 
+# --- Renamed files cleanup (issue #80) ----------------------
+# When a toolkit file is renamed upstream (e.g. dev-lead-gpt.md -> ask-gpt.md),
+# copying the new name is not enough: the old file sticks around and still
+# loads as a stale slash command. Each entry maps an old relative path to the
+# new one. Backup-File preserves any customizations the user made to the
+# old-named file before Remove-Item removes it.
+$RenamedFiles = @(
+  @{ Old = ".claude\commands\dev-lead-gpt.md";    New = ".claude\commands\ask-gpt.md" },
+  @{ Old = ".claude\commands\dev-lead-gemini.md"; New = ".claude\commands\ask-gemini.md" },
+  @{ Old = "scripts\dev-lead-gpt.js";             New = "scripts\ask-gpt.js" },
+  @{ Old = "scripts\dev-lead-gemini.js";          New = "scripts\ask-gemini.js" }
+)
+$RenamedCleaned = 0
+foreach ($r in $RenamedFiles) {
+  $oldPath = Join-Path $Target $r.Old
+  if (Test-Path -LiteralPath $oldPath -PathType Leaf) {
+    Backup-File -Original $oldPath
+    Remove-Item -LiteralPath $oldPath -Force
+    Write-Host "  Removed renamed file: $($r.Old) -> $($r.New)"
+    $RenamedCleaned = $RenamedCleaned + 1
+  }
+}
+if ($RenamedCleaned -gt 0) {
+  Write-Host "  Cleaned up $RenamedCleaned renamed file(s)"
+}
+
 # --- Command files (upstream-owned - Invoke-SafeCopy backs up any customizations) ---
 Write-Host "  Copying .claude\commands\ ..."
 foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
