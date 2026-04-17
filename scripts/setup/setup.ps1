@@ -172,27 +172,97 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands")
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target "scripts") | Out-Null
 
+# --- Backup helpers (issue #79) --------------------------------
+# Before overwriting or deleting any file in the target, copy the original
+# to a timestamped backup directory at the target root. The directory is
+# only created on the first backup (no noise for clean installs). All
+# backups in one setup run share the same timestamp.
+$script:BackupDir = ""
+$script:BackupCount = 0
+
+# Backup-File: copy a target-resident file into the backup root, mirroring
+# its relative path. Creates the backup root lazily on first call. Appends
+# $PID to the timestamp so two same-second runs get distinct backup dirs
+# (avoids silent overwrite of a prior run's backups).
+function Backup-File {
+  param([string]$Original)
+  if ([string]::IsNullOrEmpty($script:BackupDir)) {
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $script:BackupDir = Join-Path $Target ".toolkit-backup-$stamp-$PID"
+  }
+  # Compute path relative to $Target so the backup mirrors the layout
+  $rel = $Original
+  $prefix = $Target
+  if (-not $prefix.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+    $prefix = $prefix + [System.IO.Path]::DirectorySeparatorChar
+  }
+  if ($rel.StartsWith($prefix)) {
+    $rel = $rel.Substring($prefix.Length)
+  }
+  $dest = Join-Path $script:BackupDir $rel
+  $destParent = Split-Path -Parent $dest
+  # New-Item -Force is the PowerShell equivalent of mkdir -p
+  New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+  Copy-Item -LiteralPath $Original -Destination $dest -Force
+  $script:BackupCount = $script:BackupCount + 1
+}
+
+# Invoke-SafeCopy: copy src to dst. If dst exists and differs, back it up
+# first. If dst is byte-identical to src, skip entirely (preserves mtime,
+# keeps re-runs clean). Byte comparison matches the bash `cmp -s` behavior.
+# Symlinks are backed up as links (not their targets) and removed before
+# the new file is written - prevents Copy-Item from writing through a link
+# and modifying the user's real target file.
+function Invoke-SafeCopy {
+  param(
+    [string]$Source,
+    [string]$Destination
+  )
+  if (Test-Path -LiteralPath $Destination) {
+    $item = Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+    if ($item -and $item.LinkType) {
+      Backup-File -Original $Destination
+      Remove-Item -LiteralPath $Destination -Force
+    } elseif (Test-Path -LiteralPath $Destination -PathType Leaf) {
+      # Length check first - cheap short-circuit when sizes differ
+      $srcInfo = Get-Item -LiteralPath $Source
+      $dstInfo = Get-Item -LiteralPath $Destination
+      if ($srcInfo.Length -eq $dstInfo.Length) {
+        $srcBytes = [System.IO.File]::ReadAllBytes($Source)
+        $dstBytes = [System.IO.File]::ReadAllBytes($Destination)
+        $identical = $true
+        for ($i = 0; $i -lt $srcBytes.Length; $i++) {
+          if ($srcBytes[$i] -ne $dstBytes[$i]) { $identical = $false; break }
+        }
+        if ($identical) { return }
+      }
+      Backup-File -Original $Destination
+    }
+  }
+  Copy-Item -LiteralPath $Source -Destination $Destination -Force
+}
+
 $Skipped = @()
 
+# --- Command files (upstream-owned - Invoke-SafeCopy backs up any customizations) ---
 Write-Host "  Copying .claude\commands\ ..."
 foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
   $dest = Join-Path $Target (Join-Path ".claude\commands" $src.Name)
-  if (Test-Path -LiteralPath $dest -PathType Leaf) {
-    Write-Host "    [overwriting] $($src.Name) (back up first if you customized it)"
-  }
   try {
-    Copy-Item -LiteralPath $src.FullName -Destination $dest -Force
+    Invoke-SafeCopy -Source $src.FullName -Destination $dest
   } catch {
     Write-Host "  Error: Failed to copy $($src.Name): $_"
     exit 1
   }
 }
 
+# --- Scripts (runtime scripts only - setup scripts stay in toolkit repo) ---
 Write-Host "  Copying scripts\ ..."
-# Only copy runtime scripts - setup scripts stay in toolkit repo
 foreach ($scriptName in @("ask-gpt.js", "ask-gemini.js", "browse.js")) {
   try {
-    Copy-Item -LiteralPath (Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)) -Destination (Join-Path $Target "scripts") -Force
+    $src = Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)
+    $dest = Join-Path $Target (Join-Path "scripts" $scriptName)
+    Invoke-SafeCopy -Source $src -Destination $dest
   } catch {
     Write-Host "  Error: Failed to copy $scriptName : $_"
     exit 1
@@ -231,24 +301,21 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
   }
 }
 
-# ─── .gitattributes (upstream-owned - always copy) ─
+# --- .gitattributes (upstream-owned - Invoke-SafeCopy handles any customizations) ---
 Write-Host "  Copying .gitattributes ..."
 try {
-  Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".gitattributes") -Destination (Join-Path $Target ".gitattributes") -Force
+  Invoke-SafeCopy -Source (Join-Path $ToolkitRoot ".gitattributes") -Destination (Join-Path $Target ".gitattributes")
 } catch {
   Write-Host "  Error: Failed to copy .gitattributes: $_"
   exit 1
 }
 
-# ─── Toolkit rules (upstream-owned - always copy) ─
+# --- Toolkit rules (upstream-owned - Invoke-SafeCopy handles any customizations) ---
 Write-Host "  Copying .claude\rules\toolkit.md ..."
 $toolkitRuleSrc = Join-Path $ToolkitRoot ".claude\rules\toolkit.md"
 $toolkitRuleDest = Join-Path $Target ".claude\rules\toolkit.md"
-if (Test-Path -LiteralPath $toolkitRuleDest -PathType Leaf) {
-  Write-Host "    [overwriting] toolkit.md (this is managed by the toolkit)"
-}
 try {
-  Copy-Item -LiteralPath $toolkitRuleSrc -Destination $toolkitRuleDest -Force
+  Invoke-SafeCopy -Source $toolkitRuleSrc -Destination $toolkitRuleDest
 } catch {
   Write-Host "  Error: Failed to copy toolkit.md: $_"
   exit 1
@@ -280,6 +347,19 @@ Write-Host "  ================================"
 Write-Host "   Done"
 Write-Host "  ================================"
 Write-Host ""
+
+# --- Backup summary (issue #79) --------------------------------
+# Only printed when at least one file was backed up. Clean installs and
+# identical re-runs stay silent.
+if ($script:BackupCount -gt 0) {
+  Write-Host "    Backed up $($script:BackupCount) file(s) to:"
+  Write-Host "      $($script:BackupDir)"
+  Write-Host ""
+  Write-Host "    New in v4.2 - setup now preserves any file it would overwrite"
+  Write-Host "    or delete. If you customized a toolkit file, your original is"
+  Write-Host "    safe in the directory above. Delete when you are done."
+  Write-Host ""
+}
 
 if ($Skipped.Count -gt 0) {
   Write-Host "    Skipped (already existed - not overwritten):"

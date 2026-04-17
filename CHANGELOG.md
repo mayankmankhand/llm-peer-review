@@ -1,5 +1,19 @@
 # Changelog
 
+## v4.2 - Safe Upgrades
+
+### Added
+- **Automatic backup before overwrite** (issue #79) - `setup.sh` and `setup.ps1` now preserve any file they would overwrite or delete by copying it to `.toolkit-backup-<YYYYMMDD-HHMMSS>/` at the target project root, with mirrored paths. Upgrades no longer destroy user customizations.
+- **Byte-identical skip** - Files that match the incoming version byte-for-byte are left alone: no copy, no backup, no mtime change. Clean installs produce no backup directory.
+
+### Changed
+- **`.gitignore` propagation** - Added `.toolkit-backup-*/` to the toolkit's `.gitignore`. The existing `.gitignore` merge logic propagates this entry to target projects on the next install, so backup directories stay out of version control automatically.
+
+### Notes
+- Safe by default - no prompts, no flags. Backward compatible.
+
+---
+
 ## v4.1 - Copy Review Skill
 
 ### Added

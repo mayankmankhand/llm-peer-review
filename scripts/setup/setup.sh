@@ -180,6 +180,54 @@ mkdir -p "$TARGET/.claude/skills"
 mkdir -p "$TARGET/scripts"
 mkdir -p "$TARGET/plans"
 
+# ─── Backup helpers (issue #79) ──────────────────────────────
+# Before overwriting or deleting any file in the target, copy the original
+# to a timestamped backup directory at the target root. The directory is
+# only created on the first backup (no noise for clean installs). All
+# backups in one setup run share the same timestamp.
+BACKUP_DIR=""
+BACKUP_COUNT=0
+
+# backup_file: copy a target-resident file into the backup root, mirroring
+# its relative path. Creates the backup root lazily on first call. Appends
+# the process PID to the timestamp so two same-second runs get distinct
+# backup dirs (avoids silent overwrite of a prior run's backups). `cp -P`
+# preserves symlinks as links so a backed-up symlink can be restored later.
+backup_file() {
+  local original="$1"
+  if [ -z "$BACKUP_DIR" ]; then
+    BACKUP_DIR="$TARGET/.toolkit-backup-$(date +%Y%m%d-%H%M%S)-$$"
+  fi
+  # Inner quotes make the prefix a literal, not a glob pattern - matters
+  # if $TARGET contains `*`, `?`, or `[` characters.
+  local rel="${original#"$TARGET"/}"
+  local dest="$BACKUP_DIR/$rel"
+  # mkdir -p handles nested paths and is portable across GNU and BSD systems
+  mkdir -p "$(dirname "$dest")"
+  cp -P "$original" "$dest"
+  BACKUP_COUNT=$((BACKUP_COUNT + 1))
+}
+
+# safe_copy: copy src to dst. If dst exists and differs, back it up first.
+# If dst is byte-identical to src, skip entirely (preserves mtime, keeps
+# re-runs clean). Symlinks are backed up as links (not their targets), then
+# removed before the new file is written - prevents `cp` from writing
+# through the link and modifying the user's real target file.
+safe_copy() {
+  local src="$1"
+  local dst="$2"
+  if [ -L "$dst" ]; then
+    backup_file "$dst"
+    rm "$dst"
+  elif [ -f "$dst" ]; then
+    if cmp -s "$src" "$dst"; then
+      return 0
+    fi
+    backup_file "$dst"
+  fi
+  cp "$src" "$dst"
+}
+
 # ─── Legacy cleanup (v3.4 -> v3.5 migration) ────────────────
 # These commands were migrated to skills in v3.5. Delete old command
 # files BEFORE copying new ones to avoid name conflicts.
@@ -187,6 +235,7 @@ LEGACY_COMMANDS=(review-code.md review-ux.md review-plan.md review-commands.md r
 LEGACY_CLEANED=0
 for fname in "${LEGACY_COMMANDS[@]}"; do
   if [ -f "$TARGET/.claude/commands/$fname" ]; then
+    backup_file "$TARGET/.claude/commands/$fname"
     rm -f "$TARGET/.claude/commands/$fname"
     LEGACY_CLEANED=$((LEGACY_CLEANED + 1))
   fi
@@ -224,14 +273,11 @@ fi
 OVERWROTE=()
 SKIPPED=()
 
-# ─── Command files (upstream-owned - always copy, warn if overwriting) ─
+# ─── Command files (upstream-owned - safe_copy backs up any customizations) ─
 echo "  Copying .claude/commands/ ..."
 for src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   fname="$(basename "$src")"
-  if [ -f "$TARGET/.claude/commands/$fname" ]; then
-    echo "    ↻ overwriting $fname (back up first if you customized it)"
-  fi
-  cp "$src" "$TARGET/.claude/commands/$fname"
+  safe_copy "$src" "$TARGET/.claude/commands/$fname"
   OVERWROTE+=("commands/$fname")
 done
 
@@ -244,7 +290,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
   for src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
     [ -f "$src" ] || continue
     fname="$(basename "$src")"
-    cp "$src" "$TARGET/.claude/skills/shared/$fname"
+    safe_copy "$src" "$TARGET/.claude/skills/shared/$fname"
   done
   OVERWROTE+=("skills/shared/")
 fi
@@ -259,7 +305,7 @@ for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   for src in "$skill_dir"*; do
     [ -f "$src" ] || continue
     fname="$(basename "$src")"
-    cp "$src" "$TARGET/.claude/skills/$skill_name/$fname"
+    safe_copy "$src" "$TARGET/.claude/skills/$skill_name/$fname"
   done
   OVERWROTE+=("skills/$skill_name/")
 done
@@ -267,9 +313,9 @@ done
 # ─── Scripts (runtime scripts only - setup scripts stay in toolkit repo) ──────────────────
 echo "  Copying scripts/ ..."
 # Only copy runtime scripts - setup scripts stay in toolkit repo
-cp "$TOOLKIT_ROOT/scripts/ask-gpt.js"    "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/ask-gemini.js" "$TARGET/scripts/"
-cp "$TOOLKIT_ROOT/scripts/browse.js"     "$TARGET/scripts/"
+safe_copy "$TOOLKIT_ROOT/scripts/ask-gpt.js"    "$TARGET/scripts/ask-gpt.js"
+safe_copy "$TOOLKIT_ROOT/scripts/ask-gemini.js" "$TARGET/scripts/ask-gemini.js"
+safe_copy "$TOOLKIT_ROOT/scripts/browse.js"     "$TARGET/scripts/browse.js"
 OVERWROTE+=(scripts/ask-gpt.js scripts/ask-gemini.js scripts/browse.js)
 
 # ─── .env.local.example (template - safe to overwrite) ───────
@@ -297,19 +343,16 @@ else
 fi
 
 echo "  Copying .gitattributes ..."
-cp "$TOOLKIT_ROOT/.gitattributes" "$TARGET/.gitattributes"
+safe_copy "$TOOLKIT_ROOT/.gitattributes" "$TARGET/.gitattributes"
 OVERWROTE+=(.gitattributes)
 
 echo "  Copying VERSION ..."
-cp "$TOOLKIT_ROOT/VERSION" "$TARGET/VERSION"
+safe_copy "$TOOLKIT_ROOT/VERSION" "$TARGET/VERSION"
 OVERWROTE+=(VERSION)
 
-# ─── Toolkit rules (upstream-owned - always copy) ────────────
+# ─── Toolkit rules (upstream-owned - safe_copy handles any customizations) ────────────
 echo "  Copying .claude/rules/toolkit.md ..."
-if [ -f "$TARGET/.claude/rules/toolkit.md" ]; then
-  echo "    ↻ overwriting toolkit.md (this is managed by the toolkit)"
-fi
-cp "$TOOLKIT_ROOT/.claude/rules/toolkit.md" "$TARGET/.claude/rules/toolkit.md"
+safe_copy "$TOOLKIT_ROOT/.claude/rules/toolkit.md" "$TARGET/.claude/rules/toolkit.md"
 # Stamp the installed version into toolkit.md so users can check it later
 # sed -i.bak works on both macOS (BSD sed) and Linux (GNU sed). This syntax was
 # chosen for cross-platform compatibility - do not simplify to sed -i '' (breaks Linux).
@@ -317,9 +360,9 @@ sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- To
 rm -f "$TARGET/.claude/rules/toolkit.md.bak"
 OVERWROTE+=(.claude/rules/toolkit.md)
 
-# ─── Index generator script (upstream-owned - always copy) ──
+# ─── Index generator script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/generate-index.js ..."
-cp "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" "$TARGET/.claude/scripts/generate-index.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" "$TARGET/.claude/scripts/generate-index.js"
 OVERWROTE+=(.claude/scripts/generate-index.js)
 
 # ─── Project-owned files (skip if already exist) ─────────────
@@ -409,6 +452,19 @@ echo "  ================================"
 echo "   Done"
 echo "  ================================"
 echo ""
+
+# ─── Backup summary (issue #79) ──────────────────────────────
+# Only printed when at least one file was backed up. Clean installs and
+# identical re-runs stay silent.
+if [ "$BACKUP_COUNT" -gt 0 ]; then
+  echo "    Backed up $BACKUP_COUNT file(s) to:"
+  echo "      $BACKUP_DIR"
+  echo ""
+  echo "    New in v4.2 - setup now preserves any file it would overwrite"
+  echo "    or delete. If you customized a toolkit file, your original is"
+  echo "    safe in the directory above. Delete when you are done."
+  echo ""
+fi
 
 if [ ${#SKIPPED[@]} -gt 0 ]; then
   echo "    Skipped (already existed - not overwritten):"
