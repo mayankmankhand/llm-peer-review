@@ -49,6 +49,7 @@
       "Bash(node scripts/ask-gpt.js *)",
       "Bash(node scripts/ask-gemini.js *)",
       "Bash(node scripts/browse.js *)",
+      "Bash(bash scripts/setup/bump-version.sh *)",
       "Bash(echo * | node scripts/browse.js *)",
       "Bash(cat * | node scripts/browse.js *)",
       "Bash(node .claude/scripts/generate-index.js *)",
