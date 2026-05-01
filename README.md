@@ -30,7 +30,7 @@ flowchart TD
 
 | Command | What it does |
 |---|---|
-| `/explore` | Think through the problem - scoping for concrete features, vision for strategy and ideation |
+| `/explore` | Understand the problem, ask clarifying questions before implementation |
 | `/create-plan` | Write a step-by-step plan with status tracking |
 | `/execute` | Build it, updating the plan as you go |
 | `/review` | Run the right reviews automatically, combine findings into one report |

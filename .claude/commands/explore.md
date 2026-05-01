@@ -7,21 +7,29 @@ Your task is NOT to implement this yet, but to fully understand and prepare.
 ## Mode Detection
 
 <phase name="mode-detection">
-Before diving into questions, read the user's input and pick a gear:
+Before diving into questions, pick a gear with the user.
 
 ### Two Gears
-- **Scoping mode** (default) - the user has a concrete idea and needs help defining scope. Signals: "build X," "add Y," "fix Z," specific feature names, concrete nouns, issue references.
-- **Vision mode** - the user is thinking big-picture and needs help exploring possibilities. Signals: "thinking about," "what if," "strategy," "ideate," "not sure what to build," "help me think through," vague or exploratory language.
+- **Scoping mode** - the user has a concrete idea and needs help defining scope. Pressure-test, narrow down, get to a clear definition of done.
+- **Vision mode** - the user is thinking big-picture and needs help exploring possibilities. Challenge premises, expand the space, decide what to build before how.
 
-### Announce Your Pick
-Tell the user which mode you picked and how to switch. Example:
-> "This sounds exploratory, so I'm going into **vision mode** - bigger-picture questions first. Say 'switch to scoping mode' if you'd rather narrow down a specific feature."
+### Pick a Mode
+Don't try to guess silently. Always ask, but pre-fill your best guess so it's a one-keystroke decision when you guess right.
 
-Or:
-> "This sounds like a concrete feature, so I'm in **scoping mode**. Say 'switch to vision mode' if you want to think bigger first."
+1. Read the user's input and form a best guess: scoping or vision.
+2. **If the input references a GitHub issue**, run `gh issue view <N> --json title,body` first and let the issue body inform your guess. The issue number alone often looks concrete when the body is exploratory. Recognize all of these forms:
+   - `issue 88`, `#88`, `ticket 88` -> use the number directly
+   - A GitHub issue URL like `https://github.com/owner/repo/issues/88` -> extract the trailing number
+   - A bare number on its own (e.g. just `88`) -> ask "Is that an issue number?" before fetching, since a bare number can mean other things
+3. Ask the user with this exact wording, substituting your guess in the brackets:
+   > Scoping or vision? [scoping]
+4. Interpret the answer:
+   - Empty input or just enter -> proceed with the bracketed guess
+   - Anything that clearly maps to scoping or vision (the word itself, single letters `s`/`v`, or common synonyms like "narrow it down" / "big picture") -> use that mode
+   - Truly ambiguous input -> proceed with the bracketed guess but acknowledge it out loud: "Couldn't tell from that - going with scoping. Say 'switch to vision mode' anytime."
 
-### Mixed Signals
-If the input has both concrete and exploratory language (e.g., "I'm thinking about adding a settings page"), default to scoping mode but explicitly ask: "I'm starting in **scoping mode** to keep things concrete. Would you rather explore the bigger picture first?" This preserves the safe default while giving the user an informed choice.
+Once the mode is picked, announce it briefly and tell the user how to switch. Example:
+> "Going with **vision mode**. Say 'switch to scoping mode' anytime if you'd rather narrow down."
 
 ### Manual Override
 The user can say "switch to vision mode" or "switch to scoping mode" at any point during the conversation. The mode is sticky - once set, it stays until the user explicitly switches again. When switching modes, don't restart the conversation. Continue from where you are, but adjust your tone and question style to match the new mode.
