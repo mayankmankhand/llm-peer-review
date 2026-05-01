@@ -34,7 +34,7 @@ echo '{"baseUrl":"http://localhost:3000","actions":[...]}' | node scripts/browse
 
 | Action | Fields | What it does |
 |--------|--------|-------------|
-| `goto` | `url` (resolved against baseUrl) | Navigate to a page. Must be the first action. |
+| `goto` | `url` or `path` (resolved against baseUrl) | Navigate to a page. Must be the first action. `url` is canonical; `path` works as an alias. |
 | `click` | `target` (selector) | Click an element |
 | `fill` | `target` (selector), `value` | Type text into an input field |
 | `screenshot` | none | Take a full-page screenshot (saved to /tmp) |
@@ -42,6 +42,12 @@ echo '{"baseUrl":"http://localhost:3000","actions":[...]}' | node scripts/browse
 | `wait` | `ms` or `selector` (note: uses `selector`, not `target`) | Wait for time or for an element to appear |
 | `a11y` | none | Run accessibility audit on the current page using axe-core. Returns violations grouped by impact level (critical, serious, moderate, minor). |
 | `responsive` | none | Capture screenshots at 3 fixed viewports: mobile (375x812), tablet (768x1024), desktop (1280x720). Returns paths to all screenshots. |
+
+## Execution Behavior
+
+Execution stops on the first failed action. Remaining actions are skipped, but diagnostics (console errors, network failures, page errors) captured up to that point are still returned in the output.
+
+Because of this, keep action sequences short (3-6 actions) and place screenshots or text captures early if you want them recorded even when a later step fails. When a session stops mid-way, read the diagnostics before retrying - they usually tell you what went wrong.
 
 ## Selector Syntax
 

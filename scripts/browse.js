@@ -44,6 +44,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const http = require('http');
 const { spawn } = require('child_process');
@@ -82,7 +83,9 @@ const ERR = {
   UNSAFE_URL: (url) => `Blocked navigation to "${url}". Only http: and https: URLs are allowed. Use baseUrl for local dev servers.`,
   NAVIGATION_FAILED: (url, msg) => `Failed to navigate to ${url}: ${msg}`,
   SELECTOR_FAILED: (target, msg) => `Could not find element "${target}": ${msg}`,
-  TIMEOUT: (action, ms) => `${action} timed out after ${ms}ms. Is the page fully loaded?`,
+  TIMEOUT: (action, ms, target) => target
+    ? `${action} on "${target}" timed out after ${ms}ms. Element not found, or page not fully loaded.`
+    : `${action} timed out after ${ms}ms. Is the page fully loaded?`,
   SERVER_START_TIMEOUT: (ms) => `Dev server did not become ready within ${ms}ms.`,
   NO_DEV_SCRIPT: 'No "dev" or "start" script found in project package.json.',
 };
@@ -141,18 +144,17 @@ function killProcess(pid) {
 }
 
 /**
- * Clean up orphan PID file and kill stale process if found.
+ * Delete stale PID file from a prior run. We do NOT kill the PID -
+ * PID reuse on WSL/Linux makes that unsafe (the recorded PID may now
+ * belong to an unrelated shell or editor). The port snapshot in
+ * startServer will surface a leaked server if one is still bound.
  */
 function cleanupOrphanPid() {
   if (!fs.existsSync(CONFIG.serverPidFile)) return;
   try {
-    const pid = parseInt(fs.readFileSync(CONFIG.serverPidFile, 'utf-8').trim(), 10);
-    if (!isNaN(pid)) {
-      killProcess(pid);
-    }
     fs.unlinkSync(CONFIG.serverPidFile);
   } catch (_) {
-    // If we can't read or delete, move on
+    // If we can't delete, move on
   }
 }
 
@@ -216,6 +218,17 @@ async function startServer(projectDir) {
   // Clean up any orphan from a previous run
   cleanupOrphanPid();
 
+  // Snapshot which default ports are already serving something BEFORE we spawn,
+  // so the port probe below doesn't latch onto an unrelated dev server (e.g.
+  // a stale process from another project on 3000) and have us QA the wrong app.
+  // Probe in parallel - sequential checks would add up to 2.5s on the cold path.
+  const aliveBeforeStates = await Promise.all(
+    CONFIG.defaultPorts.map((p) => checkPort(p, CONFIG.portCheckTimeoutMs))
+  );
+  const portsAliveBeforeSpawn = new Set(
+    CONFIG.defaultPorts.filter((_, i) => aliveBeforeStates[i])
+  );
+
   // Spawn the dev server
   const child = spawn('npm', ['run', scriptName], {
     cwd: projectDir,
@@ -224,21 +237,31 @@ async function startServer(projectDir) {
   });
 
   autoStartedProcess = child;
+  // unref so the parent's event loop isn't held open by the detached child.
+  // We still kill the whole process group on cleanup via process.kill(-pid).
+  child.unref();
 
   // Write PID file
   fs.writeFileSync(CONFIG.serverPidFile, String(child.pid), 'utf-8');
 
-  // Guess port from common defaults - check 3000 first, then others
-  // Poll until one of the common ports responds
-  const portsToTry = CONFIG.defaultPorts;
+  // Poll until a port that was NOT already alive starts responding. Probe all
+  // default ports in parallel each tick. If a port that WAS alive in the
+  // snapshot is no longer alive (the unrelated server died between snapshot
+  // and now), drop it so our newly-spawned server can claim that port.
   const startTime = Date.now();
 
   while (Date.now() - startTime < CONFIG.serverStartTimeoutMs) {
-    for (const port of portsToTry) {
-      const alive = await checkPort(port, CONFIG.portCheckTimeoutMs);
-      if (alive) {
-        return { port, process: child };
-      }
+    const liveStates = await Promise.all(
+      CONFIG.defaultPorts.map((p) => checkPort(p, CONFIG.portCheckTimeoutMs))
+    );
+    CONFIG.defaultPorts.forEach((port, i) => {
+      if (!liveStates[i]) portsAliveBeforeSpawn.delete(port);
+    });
+    const newPortIdx = CONFIG.defaultPorts.findIndex(
+      (port, i) => liveStates[i] && !portsAliveBeforeSpawn.has(port)
+    );
+    if (newPortIdx !== -1) {
+      return { port: CONFIG.defaultPorts[newPortIdx], process: child };
     }
     await new Promise((r) => setTimeout(r, CONFIG.serverPollIntervalMs));
   }
@@ -271,6 +294,20 @@ function resolveLocator(page, target) {
     const parts = target.slice(5).split(':');
     const role = parts[0];
     const name = parts.slice(1).join(':'); // rejoin in case name has colons
+    // Loud failures for typos in the role: prefix. We intentionally do NOT
+    // validate role names against an ARIA whitelist - that would duplicate
+    // Playwright's own role list. A typo'd role name (e.g. "buton") surfaces
+    // as a TimeoutError with the full target string in the message (see
+    // handleClick / handleFill). The two cases we DO catch are shape errors
+    // that would otherwise silently dispatch the wrong locator:
+    //   "role:" / "role::Submit"        -> empty role
+    //   "role:button:" (trailing colon) -> non-empty role, empty name
+    if (!role) {
+      throw new Error(`Invalid locator "${target}": role: prefix requires a role name (e.g., role:button or role:button:Submit)`);
+    }
+    if (parts.length > 1 && !name) {
+      throw new Error(`Invalid locator "${target}": role: prefix has a trailing colon but no name. Use "role:${role}" or "role:${role}:<name>".`);
+    }
     if (name) {
       return page.getByRole(role, { name });
     }
@@ -287,7 +324,16 @@ function resolveLocator(page, target) {
  * Resolves relative URLs against baseUrl.
  */
 async function handleGoto(page, action, baseUrl) {
-  const url = action.url || '/';
+  // Accept `url` (canonical) or `path` (alias - same semantics, both resolved
+  // against baseUrl). When neither is present but other fields are, warn so
+  // that typos like "to" or "href" surface instead of silently QAing "/".
+  const url = action.url || action.path || '/';
+  if (!action.url && !action.path) {
+    const otherKeys = Object.keys(action).filter((k) => k !== 'type');
+    if (otherKeys.length > 0) {
+      console.warn(`[browse.js] goto received unknown fields, defaulting to "/": ${otherKeys.join(', ')}`);
+    }
+  }
   // Only http: and https: are allowed as absolute URLs; relative paths resolve against baseUrl
   const isAbsolute = /^https?:\/\//i.test(url);
   const fullUrl = isAbsolute ? url : `${baseUrl}${url}`;
@@ -318,7 +364,7 @@ async function handleGoto(page, action, baseUrl) {
     };
   } catch (err) {
     if (err.name === 'TimeoutError') {
-      return { type: 'goto', ok: false, url: fullUrl, error: ERR.TIMEOUT('goto', CONFIG.navigationTimeoutMs) };
+      return { type: 'goto', ok: false, url: fullUrl, error: ERR.TIMEOUT('goto', CONFIG.navigationTimeoutMs, fullUrl) };
     }
     return { type: 'goto', ok: false, url: fullUrl, error: ERR.NAVIGATION_FAILED(fullUrl, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
@@ -342,7 +388,7 @@ async function handleClick(page, action) {
     return { type: 'click', ok: true, target };
   } catch (err) {
     if (err.name === 'TimeoutError') {
-      return { type: 'click', ok: false, target, error: ERR.TIMEOUT('click', CONFIG.actionTimeoutMs) };
+      return { type: 'click', ok: false, target, error: ERR.TIMEOUT('click', CONFIG.actionTimeoutMs, target) };
     }
     return { type: 'click', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
@@ -368,7 +414,7 @@ async function handleFill(page, action) {
     return { type: 'fill', ok: true, target, value };
   } catch (err) {
     if (err.name === 'TimeoutError') {
-      return { type: 'fill', ok: false, target, error: ERR.TIMEOUT('fill', CONFIG.actionTimeoutMs) };
+      return { type: 'fill', ok: false, target, error: ERR.TIMEOUT('fill', CONFIG.actionTimeoutMs, target) };
     }
     return { type: 'fill', ok: false, target, error: ERR.SELECTOR_FAILED(target, err.message.split('\n').slice(0, 3).join(' | ')) };
   }
@@ -649,6 +695,24 @@ function readStdin() {
 }
 
 /**
+ * Locate Playwright's browser cache dir. Honors PLAYWRIGHT_BROWSERS_PATH if
+ * set, otherwise falls back to the OS default. Used to FS-probe whether any
+ * browser is installed at all - more reliable than substring-matching error
+ * messages that Playwright may rephrase between releases.
+ */
+function getPlaywrightBrowsersDir() {
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+    return process.env.PLAYWRIGHT_BROWSERS_PATH;
+  }
+  const home = os.homedir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Caches', 'ms-playwright');
+  }
+  // Linux / WSL default (also where this script is primarily run)
+  return path.join(home, '.cache', 'ms-playwright');
+}
+
+/**
  * Run a browser session with the given actions.
  */
 async function runSession(data) {
@@ -662,7 +726,26 @@ async function runSession(data) {
     });
   } catch (err) {
     const msg = err.message || '';
-    // Detect missing browser binary
+    // Two-stage check for "browser not installed". The FS-probe is reliable
+    // ONLY when we positively know the cache dir is empty (it exists, we can
+    // read it, and there's nothing inside). A missing or unreadable dir is
+    // treated as "we don't know" and falls through to the string match - this
+    // matters on platforms where our path computation may be incomplete (e.g.
+    // native Windows uses %LOCALAPPDATA%\ms-playwright, not ~/.cache).
+    let cacheDefinitelyEmpty = false;
+    const browsersDir = getPlaywrightBrowsersDir();
+    if (fs.existsSync(browsersDir)) {
+      try {
+        cacheDefinitelyEmpty = fs.readdirSync(browsersDir).length === 0;
+      } catch (_) {
+        // Unreadable dir - skip; the string match below still has a shot
+      }
+    }
+    if (cacheDefinitelyEmpty) {
+      return { ok: false, error: ERR.BROWSER_NOT_FOUND };
+    }
+    // Fallback: substring match. Catches "specific binary missing from cache"
+    // and any platform where the FS-probe couldn't make a determination.
     if (msg.includes('Executable doesn\'t exist') || msg.includes('browserType.launch')) {
       return { ok: false, error: ERR.BROWSER_NOT_FOUND };
     }
@@ -758,7 +841,7 @@ Input format (JSON via stdin):
 
 Action types:
   goto        Navigate to a URL (must be first action)
-              Fields: url (resolved against baseUrl)
+              Fields: url or path (resolved against baseUrl; url is canonical, path is an alias)
   click       Click an element
               Fields: target (selector with prefix)
   fill        Type text into an input
