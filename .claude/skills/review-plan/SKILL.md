@@ -21,7 +21,7 @@ Did we build what we said we'd build? Compares implementation against plan/spec.
 
 1. **REPORT ONLY** - Do NOT make any changes or edits to files
 2. **Wait for approval** - Only fix things after I say "fix it"
-3. **Explain simply** - I'm a PM learning to code, use plain English
+3. **Explain simply** - Use plain English, avoid jargon
 
 </rules>
 

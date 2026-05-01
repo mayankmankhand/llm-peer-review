@@ -24,7 +24,7 @@
 ## 2. Explore (~60 seconds)
 
 **SAY:**
-> Every feature starts with `/explore`. It asks you questions before you write any code - like a PM would.
+> Every feature starts with `/explore`. It asks you questions about scope, goals, and edge cases before you write any code.
 
 **TYPE:**
 ```

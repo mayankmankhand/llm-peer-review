@@ -127,8 +127,8 @@ When the feature involves a user interface (a page, dashboard, form, component, 
 3. **If the user says "you decide"** - don't leave it vague. Propose a specific direction (e.g., "I'm thinking a two-column layout with a sidebar for filters") and get a soft confirmation before moving on.
 4. **Document the outcome** - whether the user gave detailed guidance or approved your proposal, these decisions will feed into `/create-plan`'s UI/UX Design section.
 
-### Educational Context
-Since you're working with someone learning to code, briefly explain *why* you're asking when it adds value. Example: "I'm asking about success criteria because unclear goals often lead to scope creep."
+### Explain the Why
+Briefly explain *why* you're asking when it adds value. Example: "I'm asking about success criteria because unclear goals often lead to scope creep."
 
 ### Smart Behavior
 - **If the user's description is solid and complete** - acknowledge it and move to Phase 2. Don't force questions just to hit a quota.

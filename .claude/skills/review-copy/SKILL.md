@@ -64,7 +64,7 @@ This skill does NOT cover:
 
 1. **REPORT ONLY** - Do NOT make any changes or edits to files
 2. **Wait for approval** - Only fix things after I say "fix it"
-3. **Explain simply** - I'm a PM learning to code, use plain English
+3. **Explain simply** - Use plain English, avoid jargon
 4. **Structural fix directions** - Give fix directions in structural terms ("explain the artifact before the first CTA", "define the audience earlier", "add a clearer next step after the overview"). Do not rewrite copy or suggest specific wording.
 
 </rules>

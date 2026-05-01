@@ -11,7 +11,7 @@ Tone: collaborative. "Let's figure this out together."
 
 <rules>
 1. **Report first, fix later** - Do NOT edit files until investigation confirms the root cause
-2. **Explain simply** - I'm a PM learning to code, use plain English
+2. **Explain simply** - Use plain English, avoid jargon
 </rules>
 
 ## Step 1: Check the Logs (always start here)

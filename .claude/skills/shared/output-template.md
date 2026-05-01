@@ -36,7 +36,7 @@
 | Code | Staff Engineer | Right approach? Shortcuts to clean up? What would you push back on? |
 | UX | Staff Designer | Coherent experience? User confidence? Edge cases (empty, loading, error, first-time)? |
 | Plan | Staff PM (scope) | Scope discipline? Acceptance completeness? Traceability? Delivery risk? |
-| Commands | Staff PM (ops) | Non-technical user can follow? Workflow reliability? Handoff quality? |
+| Commands | Staff PM (ops) | Any user can follow? Workflow reliability? Handoff quality? |
 | Browser | Staff QA | Core flow works? Error handling? Console health? Network health? |
 | Full | Staff Architect | Cross-domain conflicts? Release risk? What's missing? Deeper reviews needed? |
 | Deps | Security Engineer | Known vulnerabilities? Supply chain risk? License compliance? Update urgency? |

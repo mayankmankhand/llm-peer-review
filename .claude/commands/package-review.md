@@ -90,7 +90,7 @@ Create a single markdown file containing all code and context needed for externa
 
 ## Remember
 
-- Keep it simple - this is for a non-technical PM
+- Keep it simple, concrete, and copy-paste friendly. The reader is a non-engineer or an engineer outside this codebase.
 - Explain what you're doing as you go
 - Make the markdown easy to copy/paste into ChatGPT or Gemini
 - Don't include sensitive files (.env, etc.)
