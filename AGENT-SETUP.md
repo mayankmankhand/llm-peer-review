@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.2.1)
+# AI Agent Setup Instructions (v4.2.2)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,11 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.2.1:** After re-running setup:
+**What's new in v4.2.2:** This release is documentation-only - no code, workflow, or setup-script changes.
+- Audited README.md and API-KEYS.md for drift against the current toolkit (issue #90). Fixed stale command counts, an outdated list of review skills (6 -> 8), an incomplete description of what `setup.sh` copies, and a missing `.claude/skills/` row in the "How It Works" architecture table.
+- README.md and API-KEYS.md are NOT copied to downstream projects by `setup.sh`, so re-running setup will not propagate these fixes to target projects. The version stamp and CHANGELOG entry are the only downstream-visible changes.
+
+**What was new in v4.2.1:** After re-running setup:
 - Renamed toolkit files (e.g. `dev-lead-gpt.md` -> `ask-gpt.md`, `dev-lead-gemini.js` -> `ask-gemini.js`) are now cleaned up from target projects. Setup backs up the old file to `.toolkit-backup-*/` and removes it before copying the new one, so stale slash commands don't sit alongside their renamed versions. Each removal is logged.
 
 **What was new in v4.2:** After re-running setup:
