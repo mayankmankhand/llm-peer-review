@@ -129,7 +129,13 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh
 
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
-The scripts copy commands, runtime scripts (ask-gpt.js, ask-gemini.js), the index generator, and toolkit rules to your project. It also generates `INDEX.md`, a file tree that helps Claude understand your project layout. Setup scripts stay in the toolkit repo and are not copied. CLAUDE.md, LESSONS.md, and settings.local.json are skipped if they already exist - those are yours to customize. Toolkit rules (`.claude/rules/toolkit.md`) are always updated. See [How It Works](#how-it-works-file-architecture) for details on which files are yours vs. managed by the toolkit.
+**What setup does:**
+- **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Also generates `INDEX.md`, a file tree that helps Claude understand your project layout.
+- **Preserves your work:** `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are skipped if they already exist - those are yours to customize.
+- **Always updates:** toolkit rules (`.claude/rules/toolkit.md`).
+- **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
+
+See [How It Works](#how-it-works-file-architecture) for details on which files are yours vs. managed by the toolkit.
 
 ### Reusable Command (For Multiple Projects)
 
@@ -189,7 +195,7 @@ npx playwright-core install chromium
 # On Linux/WSL, also: sudo npx playwright-core install-deps chromium
 ```
 
-> Both dependency groups are optional. Skip them if you don't need those commands - the other 14 commands work without them.
+> Both groups (the debate dependencies and the browser dependencies) are optional. Skip the one you don't need - the rest of the toolkit works without either.
 
 #### Let Your AI Agent Do It
 
@@ -295,6 +301,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `CLAUDE.md` | **You** | Your project-specific instructions (tech stack, preferences, team info). Never overwritten by setup. |
 | `.claude/rules/toolkit.md` | **Toolkit** | Workflow rules, slash command docs, permissions. Always updated when you re-run setup. |
 | `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
+| `.claude/skills/<name>/SKILL.md` | **Toolkit** (editable) | One folder per skill (review specialists, learning-opportunity). Auto-create slash commands and are agent-discoverable. `project-context` is agent-only (not user-invocable). You can customize these. |
 | `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
 | `.claude/scripts/generate-index.js` | **Toolkit** | Generates `INDEX.md` (a file tree of your project). Always updated on setup. |
 | `INDEX.md` | **Generated** | Auto-generated file tree. Gitignored. Rebuilt by `/document`, `/index`, or setup. |
@@ -334,7 +341,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 
 - **CLAUDE.md** - Your project-specific instructions. Describe your project, tech stack, and preferences here. See [How It Works](#how-it-works-file-architecture) for details.
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (auto-updated on setup). Don't edit this - your changes will be overwritten.
-- **Commands** - Each file in `.claude/commands/` is independent. Want `/review-code` to check different things? Edit `review-code.md`. There are 6 review commands: `review-code`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`.
+- **Commands and skills** - Each file in `.claude/commands/` is independent. Skill folders in `.claude/skills/<name>/SKILL.md` work the same way. Want `/review-code` to check different things? Edit `.claude/skills/review-code/SKILL.md`. The 8 review skills are: `review-code`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`, `review-deps`, `review-copy`.
 - **LESSONS.md** - Track what you learn across sessions. Yours to customize.
 
 ---
