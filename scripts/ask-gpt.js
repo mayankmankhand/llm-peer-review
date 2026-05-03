@@ -50,7 +50,7 @@ if (fs.existsSync(envPath)) {
       return;
     }
     
-    const match = trimmedLine.match(/^([^=]+)=(.*)$/);
+    const match = trimmedLine.match(/^(?:export\s+)?([^=]+)=(.*)$/);
     if (match) {
       const key = match[1].trim();
       // Strip surrounding quotes (single or double) that some tutorials show
