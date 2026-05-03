@@ -22,6 +22,7 @@
       "Bash(git check-ignore *)",
       "Bash(git worktree *)",
       "Bash(git rev-parse *)",
+      "Bash(git rev-list *)",
 
       "Bash(gh repo create *)",
       "Bash(gh repo view *)",
@@ -63,6 +64,9 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
+
+      "Skill(review-commands)",
+      "Skill(review-commands:*)",
 
       "Bash(cp *)",
 
