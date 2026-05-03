@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.3.0)
+# AI Agent Setup Instructions (v4.3.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,14 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.3.0:** Toolkit runtime deps are now quarantined under `.claude/scripts/`. Re-running setup auto-migrates v4.2-and-earlier installs.
+**What's new in v4.3.1:** Periodic-audit cleanup release. No setup-script or workflow changes - re-running setup just refreshes commands, skills, and the version stamp.
+- `/ask-gpt` and `/ask-gemini` debate flow rewritten so each round's `respond` call sees the full prior transcript. Pre-fix, the cumulative debate file was only assembled at the end, so rounds 1-3 ran without context. The initial review is now also preserved in the saved transcript (issue #93 R1, R2).
+- `/worktree` now installs both host project and toolkit deps in new worktrees. Pre-fix, fresh worktrees silently lacked `.claude/scripts/node_modules` after the v4.3.0 quarantine, so `/review-browser`, `/ask-gpt`, and `/ask-gemini` failed in them (issue #93 R3).
+- `.gitattributes` now covers `.claude/scripts/**` for LF line endings, matching the existing `scripts/**` rule (issue #93 D1).
+- "Use this when / Don't use this when" markers added to nine commands and skills that lacked them: `/explore`, `/create-plan`, `/execute`, `/document`, `/ask-gpt`, `/ask-gemini`, `/create-issue`, `/package-review`, and the `learning-opportunity` skill (issue #93 R4).
+- See `reports/review-commands-2026-05-03.md` for the full audit report that drove this release.
+
+**What was new in v4.3.0:** Toolkit runtime deps are now quarantined under `.claude/scripts/`. Re-running setup auto-migrates v4.2-and-earlier installs.
 - Runtime scripts moved from `scripts/ask-gpt.js` etc. to `.claude/scripts/ask-gpt.js`. The toolkit's four runtime deps (`openai`, `@google/generative-ai`, `playwright-core`, `@axe-core/playwright`) now live in `.claude/scripts/package.json` so end users of downstream projects no longer inherit them when they `npm install` at project root (issue #91).
 - Install command changed: `npm install --prefix .claude/scripts` instead of `npm install @google/generative-ai openai ...` at project root. Setup script output, README.md, SETUP.md, AGENT-SETUP.md, and the `/review-browser` skill have been updated.
 - Auto-migration: re-running setup detects old `scripts/<name>.js` files, backs them up to `.toolkit-backup-*/`, removes them, strips the four toolkit deps and matching `ask-gpt`/`ask-gemini` convenience scripts from the project's root `package.json`, and refreshes `.claude/settings.local.json` permissions to the new paths. The migration runs only when there's something to clean - clean installs see no migration noise.

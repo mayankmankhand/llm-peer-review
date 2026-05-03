@@ -331,7 +331,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 **What `/worktree` does:**
 1. Checks you're not already in a worktree (and warns about uncommitted changes)
 2. Creates a new worktree in `.claude/worktrees/worktree-N`
-3. Runs `npm install` if a `package.json` exists (so debate scripts work)
+3. Runs `npm install` for both your host project (if a root `package.json` exists) and the toolkit (`.claude/scripts/package.json`), so debate and browser scripts work
 4. Copies `.env.local` so API keys are available
 5. Prints the path to open in a new Cursor window
 
