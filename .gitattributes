@@ -1,7 +1,8 @@
 # Auto-detect text files and normalize line endings
 * text=auto
 
-# Force LF line endings for shell scripts and everything in scripts/
-# Prevents CRLF on Windows clones from breaking bash execution
+# Force LF line endings for shell scripts and toolkit scripts
+# Prevents CRLF on Windows clones from breaking bash execution and Node shebangs
 *.sh text eol=lf
 scripts/** text eol=lf
+.claude/scripts/** text eol=lf
