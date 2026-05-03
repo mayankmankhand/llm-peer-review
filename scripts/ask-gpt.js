@@ -211,6 +211,9 @@ function parseArgs() {
       case '--help':
         printHelp();
         process.exit(0);
+      default:
+        console.error(`\n❌ Error: Unknown argument: ${args[i]}. Use --help to see options.`);
+        process.exit(1);
     }
   }
 
