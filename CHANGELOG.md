@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Env parser tolerates `export` prefix** (issue #85) - The `.env.local` parser in `scripts/ask-gpt.js` and `scripts/ask-gemini.js` now strips an optional leading `export ` from each line. Users who copy from shell-style examples (`export OPENAI_API_KEY=...`) get the key picked up instead of the misleading "OPENAI_API_KEY not found" error. `.env.local.example` also gains a one-line note steering users to the right format.
+- **Unknown CLI flags fail fast in ask-gpt/ask-gemini** (issue #83) - `parseArgs` previously had no `default` case, so a typo like `--debate-files` was silently dropped and resurfaced later as a confusing "Missing required argument: --debate-file". Unknown flags now exit with a clear message pointing at `--help`.
+
+### Notes
+- Both fixes touch only the two debate scripts and `.env.local.example`. No setup, permissions, or workflow changes.
+
+---
+
 ## v4.2.2 - Documentation Audit
 
 ### Fixed
