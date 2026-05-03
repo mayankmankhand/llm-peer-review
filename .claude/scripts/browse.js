@@ -11,9 +11,9 @@
  * and ask-gemini.js) for independent debugging and simple invocation.
  *
  * Usage:
- *   cat actions.json | node scripts/browse.js
- *   echo '{"actions":[...]}' | node scripts/browse.js
- *   node scripts/browse.js --help
+ *   cat actions.json | node .claude/scripts/browse.js
+ *   echo '{"actions":[...]}' | node .claude/scripts/browse.js
+ *   node .claude/scripts/browse.js --help
  *
  * Input (JSON via stdin):
  *   {
@@ -72,7 +72,7 @@ const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'wait', 'a
 // ── Error messages ─────────────────────────────────────────────────────────
 
 const ERR = {
-  NO_INPUT: 'No JSON input received on stdin. Pipe a JSON file: cat actions.json | node scripts/browse.js',
+  NO_INPUT: 'No JSON input received on stdin. Pipe a JSON file: cat actions.json | node .claude/scripts/browse.js',
   INVALID_JSON: (msg) => `Invalid JSON input: ${msg}`,
   NO_ACTIONS: 'Input must include an "actions" array with at least one action.',
   FIRST_MUST_BE_GOTO: 'First action must be "goto" so the browser knows where to navigate.',
@@ -817,9 +817,9 @@ Launches a headless browser, runs a sequence of actions, and returns
 structured JSON results. Designed for Claude to use during /review-browser.
 
 Usage:
-  cat actions.json | node scripts/browse.js
-  echo '<json>' | node scripts/browse.js
-  node scripts/browse.js --help
+  cat actions.json | node .claude/scripts/browse.js
+  echo '<json>' | node .claude/scripts/browse.js
+  node .claude/scripts/browse.js --help
 
 Input format (JSON via stdin):
   {

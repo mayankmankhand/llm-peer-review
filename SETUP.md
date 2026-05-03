@@ -127,30 +127,31 @@ You should see version numbers for each. If any command says "not found", go bac
 
 > **Note:** Run these commands in your project folder after completing Steps 8-10 (clone + setup). They're listed here so you know what's available, but you need the project first.
 
-The toolkit has two optional feature groups. Install what you need:
+All toolkit runtime packages live inside `.claude/scripts/` so they don't pollute your project's root `package.json`. One install in that folder enables every toolkit feature that needs Node packages:
 
-**For `/ask-gpt` and `/ask-gemini` (AI debate commands):**
 ```bash
-npm install @google/generative-ai openai
+npm install --prefix .claude/scripts
 ```
 
-**For `/review-browser` (headless browser QA):**
+That covers the Node packages for `/ask-gpt`, `/ask-gemini`, and `/review-browser`.
+
+`/review-browser` needs one extra step: install the Chromium browser binary itself.
+
 ```bash
-npm install playwright-core @axe-core/playwright
-npx playwright-core install chromium
+npx --prefix .claude/scripts playwright-core install chromium
 ```
-On WSL/Linux, system libraries are also needed:
+
+On WSL/Linux, also install the system libraries Chromium depends on (apt-based; this runs at the system level, so no `--prefix`):
 ```bash
 sudo npx playwright-core install-deps chromium
 ```
 
-Skip both if you just want the core workflow commands (`/explore`, `/create-plan`, `/execute`, `/review-code`, etc.) - they work without any npm dependencies.
+Skip the install entirely if you just want the core workflow commands (`/explore`, `/create-plan`, `/execute`, `/review-code`, etc.) - they work without any npm dependencies.
 
 **Check what's already installed:**
 ```bash
-npm list @google/generative-ai openai    # debate dependencies
-npm list playwright-core                 # browser QA dependency
-npx playwright-core --version            # Chromium binary
+npm list --prefix .claude/scripts --depth=0              # toolkit runtime deps
+npx --prefix .claude/scripts playwright-core --version   # Chromium binary
 ```
 
 ### Step 7: Get API Keys (Optional)

@@ -37,7 +37,7 @@ Save all gathered context to a temporary file:
 Run the ask-gemini script to get Gemini's initial review:
 
 ```bash
-node scripts/ask-gemini.js review --context-file /tmp/ask-gemini-context.md --review-type [plan|code|branch|feature]
+node .claude/scripts/ask-gemini.js review --context-file /tmp/ask-gemini-context.md --review-type [plan|code|branch|feature]
 ```
 
 Read the script output. In the next step, you'll respond to this review as the author.
@@ -78,7 +78,7 @@ Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-g
 ### 4c. Get Gemini's Follow-up
 
 ```bash
-node scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
+node .claude/scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
 **Read** the target file first (ignore the error if it doesn't exist), then **Write** Gemini's response to its own round file (e.g., `/tmp/ask-gemini-round-1-gemini.md`). Continue to the next round.
@@ -90,7 +90,7 @@ node scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --d
 After 3 debate cycles, **Read** all 6 round files (`/tmp/ask-gemini-round-1.md` through `/tmp/ask-gemini-round-3-gemini.md`), combine their contents in order, then **Read** `/tmp/ask-gemini-debate.md` (ignore the error if it doesn't exist) and **Write** the combined content to it. Then generate the final summary:
 
 ```bash
-node scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
+node .claude/scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
 ## Step 6: Present Results to User

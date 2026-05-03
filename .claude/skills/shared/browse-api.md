@@ -5,13 +5,13 @@
 Write your action sequence as JSON, save to a temp file, and pipe it to the script:
 
 ```bash
-cat /tmp/browse-actions.json | node scripts/browse.js
+cat /tmp/browse-actions.json | node .claude/scripts/browse.js
 ```
 
 Or inline:
 
 ```bash
-echo '{"baseUrl":"http://localhost:3000","actions":[...]}' | node scripts/browse.js
+echo '{"baseUrl":"http://localhost:3000","actions":[...]}' | node .claude/scripts/browse.js
 ```
 
 ## Input Format

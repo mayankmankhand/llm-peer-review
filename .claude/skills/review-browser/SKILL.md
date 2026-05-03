@@ -17,7 +17,21 @@ Be thorough but concise.
 
 **Important:** This command requires a running dev server (e.g. `npm run dev`). It drives a real headless browser to interact with the app and take screenshots. Ask the user to confirm the server is running before you start.
 
-**Prerequisites:** Requires `playwright-core` (`npm install playwright-core`) and a Chromium binary (`npx playwright-core install chromium`). On Linux/WSL, system libraries are also needed: `sudo npx playwright-core install-deps chromium` (or install packages like `libnspr4`, `libnss3`, `libgbm1` manually). If the script returns a "Chromium not found" error, relay the install instructions to the user and stop the review.
+**Prerequisites:** Browser QA needs two things, both installed inside the toolkit folder so the user's project stays untouched:
+
+```bash
+# 1. Install the Node packages (one-time, covers all toolkit features):
+npm install --prefix .claude/scripts
+
+# 2. Install the Chromium browser binary:
+npx --prefix .claude/scripts playwright-core install chromium
+
+# On Linux or WSL, also install system libraries (uses apt; no --prefix needed here):
+sudo npx playwright-core install-deps chromium
+# Alternative: install packages like libnspr4, libnss3, libgbm1 manually.
+```
+
+If the script returns a "Chromium not found" error, relay these install instructions to the user and stop the review.
 
 ## Critical Rules
 

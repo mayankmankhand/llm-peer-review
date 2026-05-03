@@ -174,7 +174,7 @@ Copy these into your project:
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `scripts/` (`ask-gpt.js`, `ask-gemini.js`, and `browse.js`) | `your-project/scripts/` |
+| `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `package.json`) | `your-project/.claude/scripts/` |
 | `.claude/scripts/generate-index.js` | `your-project/.claude/scripts/generate-index.js` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
@@ -184,18 +184,20 @@ Copy these into your project:
 
 Then in your project folder:
 ```bash
-# For /ask-gpt and /ask-gemini (AI debate commands):
-npm install @google/generative-ai openai
+# One install covers everything - it stays inside .claude/scripts/ so your
+# project's own package.json is never touched.
+npm install --prefix .claude/scripts
+
+# For /ask-gpt and /ask-gemini, set up your API keys:
 cp .env.local.example .env.local
 # Open .env.local and paste your API keys
 
-# For /review-browser (headless browser QA):
-npm install playwright-core @axe-core/playwright
-npx playwright-core install chromium
+# For /review-browser, install the Chromium browser:
+npx --prefix .claude/scripts playwright-core install chromium
 # On Linux/WSL, also: sudo npx playwright-core install-deps chromium
 ```
 
-> Both groups (the debate dependencies and the browser dependencies) are optional. Skip the one you don't need - the rest of the toolkit works without either.
+> The debate commands and the browser command are optional. Skip the API keys if you don't want `/ask-gpt` and `/ask-gemini`. Skip the Chromium install if you don't want `/review-browser`. The core workflow commands work either way.
 
 #### Let Your AI Agent Do It
 
@@ -214,24 +216,24 @@ Re-run the same setup command. It's safe to rerun - commands, scripts, and toolk
 Want everything working? After running the setup script, run these in your project folder:
 
 ```bash
-# AI debate commands (/ask-gpt, /ask-gemini)
-npm install @google/generative-ai openai
+# Install the toolkit's runtime packages (one-time, stays in .claude/scripts/).
+npm install --prefix .claude/scripts
+
+# AI debate commands (/ask-gpt, /ask-gemini): set up API keys
 cp .env.local.example .env.local
 # Edit .env.local and paste your OPENAI_API_KEY and GEMINI_API_KEY
 
-# Browser QA (/review-browser)
-npm install playwright-core @axe-core/playwright
-npx playwright-core install chromium
-# On Linux/WSL only:
+# Browser QA (/review-browser): install Chromium
+npx --prefix .claude/scripts playwright-core install chromium
+# On Linux/WSL only (apt-based; no --prefix needed):
 sudo npx playwright-core install-deps chromium
 ```
 
 **Check what's already installed:**
 ```bash
-node -v                                  # Node.js
-npm list @google/generative-ai openai    # debate dependencies
-npm list playwright-core @axe-core/playwright  # browser QA dependencies
-npx playwright-core --version            # Chromium binary
+node -v                                                # Node.js
+npm list --prefix .claude/scripts --depth=0            # toolkit runtime deps
+npx --prefix .claude/scripts playwright-core --version # Chromium binary
 ```
 
 **Coming from before the CLAUDE.md split?** If your `CLAUDE.md` has toolkit rules mixed in (workflow, permissions, slash commands table), those now live in `.claude/rules/toolkit.md`. After re-running setup, edit your `CLAUDE.md` to keep only project-specific info. See [CHANGELOG.md](CHANGELOG.md) for details.

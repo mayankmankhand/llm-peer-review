@@ -98,10 +98,12 @@ if [ ! -d "$TOOLKIT_ROOT/.claude/skills" ]; then
   PREFLIGHT_OK=false
 fi
 
-# Check runtime scripts (must exist)
-for f in ask-gpt.js ask-gemini.js browse.js; do
-  if [ ! -f "$TOOLKIT_ROOT/scripts/$f" ]; then
-    echo "  Error: source file not found: $TOOLKIT_ROOT/scripts/$f"
+# Check runtime scripts and the quarantined package.json (must exist).
+# Runtime scripts live in .claude/scripts/ alongside their own package.json
+# so end users of downstream projects don't inherit toolkit-only deps.
+for f in ask-gpt.js ask-gemini.js browse.js package.json; do
+  if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/$f" ]; then
+    echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/$f"
     PREFLIGHT_OK=false
   fi
 done
@@ -177,7 +179,6 @@ mkdir -p "$TARGET/.claude/commands"
 mkdir -p "$TARGET/.claude/rules"
 mkdir -p "$TARGET/.claude/scripts"
 mkdir -p "$TARGET/.claude/skills"
-mkdir -p "$TARGET/scripts"
 mkdir -p "$TARGET/plans"
 
 # ─── Backup helpers (issue #79) ──────────────────────────────
@@ -260,8 +261,8 @@ RENAMED_OLD=(
 RENAMED_NEW=(
   .claude/commands/ask-gpt.md
   .claude/commands/ask-gemini.md
-  scripts/ask-gpt.js
-  scripts/ask-gemini.js
+  .claude/scripts/ask-gpt.js
+  .claude/scripts/ask-gemini.js
 )
 RENAMED_CLEANED=0
 # `${!RENAMED_OLD[@]}` expands to the array's index list, scoping the loop
@@ -305,6 +306,114 @@ if [ "$PLANS_MIGRATED" -gt 0 ]; then
   echo "  Migrated $PLANS_MIGRATED plan file(s) from .claude/plans/ to plans/"
 fi
 
+# ─── Issue #91 migration (v4.2 -> v4.3): toolkit deps in target package.json ──
+# In v4.2.x and earlier, toolkit deps (openai, @google/generative-ai,
+# playwright-core, @axe-core/playwright) were installed at the project root,
+# and runtime scripts lived at scripts/*.js. End users cloning the downstream
+# project pulled toolkit deps they didn't need (issue #91). v4.3 quarantines
+# both under .claude/scripts/. This block detects the old layout and cleans
+# up. Runs BEFORE the copy block so old scripts are backed up before new ones
+# land at .claude/scripts/.
+ISSUE91_OLD_SCRIPTS=(
+  scripts/ask-gpt.js
+  scripts/ask-gemini.js
+  scripts/browse.js
+)
+ISSUE91_SCRIPTS_REMOVED=0
+for old_rel in "${ISSUE91_OLD_SCRIPTS[@]}"; do
+  if [ -f "$TARGET/$old_rel" ]; then
+    backup_file "$TARGET/$old_rel"
+    rm -f "$TARGET/$old_rel"
+    ISSUE91_SCRIPTS_REMOVED=$((ISSUE91_SCRIPTS_REMOVED + 1))
+  fi
+done
+
+# Remove leaked toolkit deps and convenience scripts from $TARGET/package.json.
+# Two-phase approach: dry-run detect first (to decide whether to back up), then
+# write. The four deps are toolkit-owned and always safe to remove. The two
+# convenience scripts are recognized only when their command body still points
+# at the OLD `scripts/<name>.js` path - this avoids clobbering a script the
+# user happens to have customized to do something else under the same name.
+ISSUE91_PKG_TOUCHED=0
+if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
+  # Note: `node -e` wraps the script in a vm context, so a top-level `return`
+  # is a SyntaxError. Use a nullable `pkg` + outer `if` instead of an early
+  # return out of the try/catch.
+  ISSUE91_PKG_DRY=$(TARGET_DIR="$TARGET" node -e "
+    const fs = require('fs');
+    let pkg = null;
+    try { pkg = JSON.parse(fs.readFileSync(process.env.TARGET_DIR + '/package.json', 'utf-8')); } catch (_) {}
+    if (pkg) {
+      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', 'playwright-core', '@axe-core/playwright'];
+      const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
+      let touched = false;
+      if (pkg.dependencies) {
+        for (const dep of TOOLKIT_DEPS) {
+          if (Object.prototype.hasOwnProperty.call(pkg.dependencies, dep)) { touched = true; break; }
+        }
+      }
+      if (!touched && pkg.scripts) {
+        for (const s of TOOLKIT_SCRIPTS) {
+          const v = pkg.scripts[s];
+          if (v && /node\\s+scripts\\/(ask-gpt|ask-gemini)\\.js/.test(v)) { touched = true; break; }
+        }
+      }
+      if (touched) console.log('touched');
+    }
+  " 2>/dev/null) || true
+
+  if [ "$ISSUE91_PKG_DRY" = "touched" ]; then
+    backup_file "$TARGET/package.json"
+    # Capture the write step's exit code instead of swallowing failures with
+    # `|| true`. A migration that silently fails leaves the user with a backup
+    # file, an "all clean" message, and an unchanged package.json - the worst
+    # combination. Surface failures so the user can act.
+    # The regex below intentionally matches the OLD `scripts/<name>.js` path,
+    # not the new `.claude/scripts/...` path. We only want to remove convenience
+    # scripts that point at the now-defunct location; new-path scripts are
+    # user-authored and we leave them alone.
+    if TARGET_DIR="$TARGET" node -e "
+      const fs = require('fs');
+      const pkgPath = process.env.TARGET_DIR + '/package.json';
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', 'playwright-core', '@axe-core/playwright'];
+      const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
+      if (pkg.dependencies) {
+        for (const dep of TOOLKIT_DEPS) delete pkg.dependencies[dep];
+        if (Object.keys(pkg.dependencies).length === 0) delete pkg.dependencies;
+      }
+      if (pkg.scripts) {
+        for (const s of TOOLKIT_SCRIPTS) {
+          const v = pkg.scripts[s];
+          if (v && /node\\s+scripts\\/(ask-gpt|ask-gemini)\\.js/.test(v)) delete pkg.scripts[s];
+        }
+        if (Object.keys(pkg.scripts).length === 0) delete pkg.scripts;
+      }
+      fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\\n');
+    " 2>/dev/null; then
+      ISSUE91_PKG_TOUCHED=1
+    else
+      echo "  Warning: could not rewrite $TARGET/package.json automatically."
+      echo "    Original is preserved in $BACKUP_DIR/package.json."
+      echo "    Manually remove these from your package.json dependencies:"
+      echo "      openai  @google/generative-ai  playwright-core  @axe-core/playwright"
+      echo "    And remove the ask-gpt / ask-gemini script entries if they still"
+      echo "    point at scripts/ask-gpt.js or scripts/ask-gemini.js."
+    fi
+  fi
+fi
+
+if [ "$ISSUE91_SCRIPTS_REMOVED" -gt 0 ] || [ "$ISSUE91_PKG_TOUCHED" -gt 0 ]; then
+  echo "  Migrated v4.2 -> v4.3 toolkit dep layout (issue #91):"
+  if [ "$ISSUE91_SCRIPTS_REMOVED" -gt 0 ]; then
+    echo "    - Removed $ISSUE91_SCRIPTS_REMOVED old script(s) from $TARGET/scripts/"
+  fi
+  if [ "$ISSUE91_PKG_TOUCHED" -gt 0 ]; then
+    echo "    - Cleaned toolkit deps and convenience scripts from $TARGET/package.json"
+  fi
+  echo "    Run 'npm install --prefix .claude/scripts' to install the deps in the new location."
+fi
+
 # ─── Track what happens ──────────────────────────────────────
 OVERWROTE=()
 SKIPPED=()
@@ -346,13 +455,21 @@ for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   OVERWROTE+=("skills/$skill_name/")
 done
 
-# ─── Scripts (runtime scripts only - setup scripts stay in toolkit repo) ──────────────────
-echo "  Copying scripts/ ..."
-# Only copy runtime scripts - setup scripts stay in toolkit repo
-safe_copy "$TOOLKIT_ROOT/scripts/ask-gpt.js"    "$TARGET/scripts/ask-gpt.js"
-safe_copy "$TOOLKIT_ROOT/scripts/ask-gemini.js" "$TARGET/scripts/ask-gemini.js"
-safe_copy "$TOOLKIT_ROOT/scripts/browse.js"     "$TARGET/scripts/browse.js"
-OVERWROTE+=(scripts/ask-gpt.js scripts/ask-gemini.js scripts/browse.js)
+# ─── Runtime scripts and quarantined package.json (issue #91) ────────────────
+# Runtime scripts and their deps live under .claude/scripts/ so they don't
+# leak into the downstream project's root package.json. Setup scripts stay
+# in the toolkit repo and are not copied to the target.
+echo "  Copying .claude/scripts/ runtime files ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/ask-gpt.js"     "$TARGET/.claude/scripts/ask-gpt.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/ask-gemini.js"  "$TARGET/.claude/scripts/ask-gemini.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/browse.js"      "$TARGET/.claude/scripts/browse.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/package.json"   "$TARGET/.claude/scripts/package.json"
+# Lockfile is optional - shipping it gives reproducible installs but if the
+# toolkit author hasn't committed one yet, don't fail.
+if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
+  safe_copy "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" "$TARGET/.claude/scripts/package-lock.json"
+fi
+OVERWROTE+=(.claude/scripts/ask-gpt.js .claude/scripts/ask-gemini.js .claude/scripts/browse.js .claude/scripts/package.json)
 
 # ─── .env.local.example (template - safe to overwrite) ───────
 echo "  Copying .env.local.example ..."
@@ -434,18 +551,43 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     const srcPerms = (src.permissions && src.permissions.allow) || [];
     let tgtPerms = tgt.permissions.allow;
 
-    // Step 1: merge missing template permissions
+    // Step 1: merge missing template permissions (the new .claude/scripts/-prefixed
+    // entries land here automatically once the source template has been updated).
     const missing = srcPerms.filter(p => !tgtPerms.includes(p));
 
-    // Step 2: remove stale absolute-path browse.js permissions from old locations
-    const browsePattern = /^Bash\((echo|cat) \* \| node \/.*\/scripts\/browse\.js \*\)$/;
-    const stale = tgtPerms.filter(p => browsePattern.test(p) && !p.includes(targetDir));
+    // Step 2a: remove stale relative-path entries for the v4.2-and-earlier
+    // script layout. Their replacements (with .claude/scripts/ prefix) come
+    // in via Step 1's missing-template merge.
+    const STALE_RELATIVE_PERMS = [
+      'Bash(node scripts/ask-gpt.js *)',
+      'Bash(node scripts/ask-gemini.js *)',
+      'Bash(node scripts/browse.js *)',
+      'Bash(echo * | node scripts/browse.js *)',
+      'Bash(cat * | node scripts/browse.js *)'
+    ];
+    const staleRel = tgtPerms.filter(p => STALE_RELATIVE_PERMS.includes(p));
+
+    // Step 2b: remove stale absolute-path browse.js entries. Matches both old
+    // (.../scripts/browse.js) and new (.../.claude/scripts/browse.js) shapes,
+    // then drops anything that doesn't equal one of the two correct entries
+    // for the current target. Using exact equality (not substring .includes())
+    // avoids accidentally over-keeping unusual hand-edited entries that happen
+    // to contain the target prefix.
+    const browsePattern = /^Bash\\((echo|cat) \\* \\| node \\/.*\\/(\\.claude\\/)?scripts\\/browse\\.js \\*\\)$/;
+    const correctAbsEntries = new Set([
+      'Bash(echo * | node ' + targetDir + '/.claude/scripts/browse.js *)',
+      'Bash(cat * | node ' + targetDir + '/.claude/scripts/browse.js *)'
+    ]);
+    const staleAbs = tgtPerms.filter(p => browsePattern.test(p) && !correctAbsEntries.has(p));
+
+    const stale = [...staleRel, ...staleAbs];
     tgtPerms = tgtPerms.filter(p => !stale.includes(p));
 
-    // Step 3: add absolute-path browse.js permissions for current target
+    // Step 3: add absolute-path browse.js permissions for the current target,
+    // pointing at the new .claude/scripts/ location.
     const absPerms = [
-      'Bash(echo * | node ' + targetDir + '/scripts/browse.js *)',
-      'Bash(cat * | node ' + targetDir + '/scripts/browse.js *)'
+      'Bash(echo * | node ' + targetDir + '/.claude/scripts/browse.js *)',
+      'Bash(cat * | node ' + targetDir + '/.claude/scripts/browse.js *)'
     ];
     const absNew = absPerms.filter(p => !tgtPerms.includes(p));
 
@@ -529,8 +671,8 @@ if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
     echo "      - NEW: /codebase-to-course - learn any codebase"
     echo ""
     echo "      - browse.js now supports accessibility scanning"
-    echo "        and responsive screenshots. Install with:"
-    echo "          npm install @axe-core/playwright"
+    echo "        and responsive screenshots. The dep ships with"
+    echo "        the toolkit's quarantined .claude/scripts/."
     echo ""
   fi
   if [ "$PLANS_MIGRATED" -gt 0 ]; then
@@ -547,21 +689,22 @@ echo "    What to do next:"
 echo ""
 echo "      cd $TARGET"
 echo ""
-echo "      1. Install the npm packages:"
-echo "           npm install @google/generative-ai openai"
+echo "      1. Install the toolkit's runtime packages."
+echo "         (Stays inside .claude/scripts/. Your project's"
+echo "         package.json is not touched.)"
+echo "           npm install --prefix .claude/scripts"
 echo ""
 echo "      2. Set up your API keys:"
 echo "           cp .env.local.example .env.local"
 echo "         Then open .env.local and paste:"
-echo "           OPENAI_API_KEY  →  https://platform.openai.com/api-keys"
-echo "           GEMINI_API_KEY  →  https://aistudio.google.com/apikey"
+echo "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
+echo "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
 echo ""
 echo "      3. Open the folder in Cursor and run /explore to start your first workflow."
 echo ""
-echo "      4. (Optional) Install browser QA for /review-browser:"
-echo "           npm install playwright-core @axe-core/playwright"
-echo "           npx playwright-core install chromium"
-echo "         On WSL/Linux, also run:"
+echo "      4. (Optional) Install Chromium for /review-browser:"
+echo "           npx --prefix .claude/scripts playwright-core install chromium"
+echo "         On WSL/Linux, also run (apt-based; no --prefix needed):"
 echo "           sudo npx playwright-core install-deps chromium"
 echo ""
 echo "      Steps 1-3 are optional. Skip 1-2 if you don't need"

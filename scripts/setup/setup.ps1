@@ -98,9 +98,11 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
   }
 }
 
-# Check runtime scripts (must exist)
-foreach ($f in @("ask-gpt.js", "ask-gemini.js", "browse.js")) {
-  $p = Join-Path $ToolkitRoot (Join-Path "scripts" $f)
+# Check runtime scripts and the quarantined package.json (must exist).
+# Runtime scripts live in .claude\scripts\ alongside their own package.json
+# so end users of downstream projects don't inherit toolkit-only deps.
+foreach ($f in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json")) {
+  $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
     $PreflightOk = $false
@@ -170,7 +172,7 @@ if (Test-Path -LiteralPath $GlobalCmdDir -PathType Container) {
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $Target "scripts") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\scripts") | Out-Null
 
 # --- Backup helpers (issue #79) --------------------------------
 # Before overwriting or deleting any file in the target, copy the original
@@ -253,8 +255,8 @@ $Skipped = @()
 $RenamedFiles = @(
   @{ Old = ".claude\commands\dev-lead-gpt.md";    New = ".claude\commands\ask-gpt.md" },
   @{ Old = ".claude\commands\dev-lead-gemini.md"; New = ".claude\commands\ask-gemini.md" },
-  @{ Old = "scripts\dev-lead-gpt.js";             New = "scripts\ask-gpt.js" },
-  @{ Old = "scripts\dev-lead-gemini.js";          New = "scripts\ask-gemini.js" }
+  @{ Old = "scripts\dev-lead-gpt.js";             New = ".claude\scripts\ask-gpt.js" },
+  @{ Old = "scripts\dev-lead-gemini.js";          New = ".claude\scripts\ask-gemini.js" }
 )
 $RenamedCleaned = 0
 foreach ($r in $RenamedFiles) {
@@ -270,6 +272,96 @@ if ($RenamedCleaned -gt 0) {
   Write-Host "  Cleaned up $RenamedCleaned renamed file(s)"
 }
 
+# --- Issue #91 migration (v4.2 -> v4.3): toolkit deps in target package.json ---
+# In v4.2.x and earlier, toolkit deps (openai, @google/generative-ai,
+# playwright-core, @axe-core/playwright) were installed at the project root,
+# and runtime scripts lived at scripts\*.js. End users cloning the downstream
+# project pulled toolkit deps they didn't need (issue #91). v4.3 quarantines
+# both under .claude\scripts\. This block detects the old layout and cleans
+# up. Runs BEFORE the copy block so old scripts are backed up before new ones
+# land at .claude\scripts\.
+#
+# Cross-reference: setup.sh has the canonical Bash version of this same
+# logic. If you change the deps list, the script regex, or the migration
+# message here, update setup.sh in lockstep so Bash and PowerShell users
+# get identical behavior.
+$Issue91OldScripts = @("scripts\ask-gpt.js", "scripts\ask-gemini.js", "scripts\browse.js")
+$Issue91ScriptsRemoved = 0
+foreach ($oldRel in $Issue91OldScripts) {
+  $oldPath = Join-Path $Target $oldRel
+  if (Test-Path -LiteralPath $oldPath -PathType Leaf) {
+    Backup-File -Original $oldPath
+    Remove-Item -LiteralPath $oldPath -Force
+    $Issue91ScriptsRemoved = $Issue91ScriptsRemoved + 1
+  }
+}
+
+# Remove leaked toolkit deps and convenience scripts from $Target\package.json.
+# The four deps are toolkit-owned and always safe to remove. The two
+# convenience scripts are recognized only when their command body still
+# points at the OLD `scripts/<name>.js` path so we don't clobber a script
+# the user customized to do something else under the same name.
+$Issue91PkgTouched = 0
+$pkgPath = Join-Path $Target "package.json"
+if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
+  try {
+    $pkgRaw = Get-Content -LiteralPath $pkgPath -Raw
+    $pkg = $pkgRaw | ConvertFrom-Json
+    $TOOLKIT_DEPS = @("openai", "@google/generative-ai", "playwright-core", "@axe-core/playwright")
+    $TOOLKIT_SCRIPTS = @("ask-gpt", "ask-gemini")
+    $touched = $false
+    if ($pkg.PSObject.Properties.Name -contains "dependencies" -and $pkg.dependencies) {
+      foreach ($dep in $TOOLKIT_DEPS) {
+        if ($pkg.dependencies.PSObject.Properties.Name -contains $dep) {
+          $pkg.dependencies.PSObject.Properties.Remove($dep)
+          $touched = $true
+        }
+      }
+      if (($pkg.dependencies.PSObject.Properties | Measure-Object).Count -eq 0) {
+        $pkg.PSObject.Properties.Remove("dependencies")
+      }
+    }
+    if ($pkg.PSObject.Properties.Name -contains "scripts" -and $pkg.scripts) {
+      foreach ($s in $TOOLKIT_SCRIPTS) {
+        if ($pkg.scripts.PSObject.Properties.Name -contains $s) {
+          $v = $pkg.scripts.$s
+          if ($v -and $v -match "node\s+scripts/(ask-gpt|ask-gemini)\.js") {
+            $pkg.scripts.PSObject.Properties.Remove($s)
+            $touched = $true
+          }
+        }
+      }
+      if (($pkg.scripts.PSObject.Properties | Measure-Object).Count -eq 0) {
+        $pkg.PSObject.Properties.Remove("scripts")
+      }
+    }
+    if ($touched) {
+      Backup-File -Original $pkgPath
+      $newJson = ConvertTo-Json $pkg -Depth 100
+      # Write as UTF-8 WITHOUT a BOM. Windows PowerShell 5.1 (the system
+      # default on Windows) writes UTF-8-with-BOM via Set-Content; some npm
+      # versions and bundlers reject a BOM-prefixed package.json. Use the
+      # .NET API to force consistent BOM-less UTF-8 across PS 5.1 and 7+.
+      $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+      [System.IO.File]::WriteAllText($pkgPath, $newJson + "`n", $utf8NoBom)
+      $Issue91PkgTouched = 1
+    }
+  } catch {
+    # If JSON parsing or editing fails, leave the file alone
+  }
+}
+
+if ($Issue91ScriptsRemoved -gt 0 -or $Issue91PkgTouched -gt 0) {
+  Write-Host "  Migrated v4.2 -> v4.3 toolkit dep layout (issue #91):"
+  if ($Issue91ScriptsRemoved -gt 0) {
+    Write-Host "    - Removed $Issue91ScriptsRemoved old script(s) from $Target\scripts\"
+  }
+  if ($Issue91PkgTouched -gt 0) {
+    Write-Host "    - Cleaned toolkit deps and convenience scripts from $Target\package.json"
+  }
+  Write-Host "    Run 'npm install --prefix .claude\scripts' to install the deps in the new location."
+}
+
 # --- Command files (upstream-owned - Invoke-SafeCopy backs up any customizations) ---
 Write-Host "  Copying .claude\commands\ ..."
 foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
@@ -282,15 +374,31 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
   }
 }
 
-# --- Scripts (runtime scripts only - setup scripts stay in toolkit repo) ---
-Write-Host "  Copying scripts\ ..."
-foreach ($scriptName in @("ask-gpt.js", "ask-gemini.js", "browse.js")) {
+# --- Runtime scripts and quarantined package.json (issue #91) ---
+# Runtime scripts and their deps live under .claude\scripts\ so they don't
+# leak into the downstream project's root package.json. Setup scripts stay
+# in the toolkit repo and are not copied to the target.
+Write-Host "  Copying .claude\scripts\ runtime files ..."
+$runtimeFiles = @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json")
+foreach ($name in $runtimeFiles) {
   try {
-    $src = Join-Path $ToolkitRoot (Join-Path "scripts" $scriptName)
-    $dest = Join-Path $Target (Join-Path "scripts" $scriptName)
+    $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
+    $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)
     Invoke-SafeCopy -Source $src -Destination $dest
   } catch {
-    Write-Host "  Error: Failed to copy $scriptName : $_"
+    Write-Host "  Error: Failed to copy $name : $_"
+    exit 1
+  }
+}
+# Lockfile is optional - shipping it gives reproducible installs but if the
+# toolkit author hasn't committed one yet, don't fail.
+$lockSrc = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" "package-lock.json")
+if (Test-Path -LiteralPath $lockSrc -PathType Leaf) {
+  try {
+    $lockDest = Join-Path $Target (Join-Path ".claude\scripts" "package-lock.json")
+    Invoke-SafeCopy -Source $lockSrc -Destination $lockDest
+  } catch {
+    Write-Host "  Error: Failed to copy package-lock.json : $_"
     exit 1
   }
 }
@@ -401,8 +509,10 @@ Write-Host "    What to do next:"
 Write-Host ""
 Write-Host "      cd $Target"
 Write-Host ""
-Write-Host "      1. Install the npm packages:"
-Write-Host "           npm install @google/generative-ai openai"
+Write-Host "      1. Install the toolkit's runtime packages."
+Write-Host "         (Stays inside .claude\scripts\. Your project's"
+Write-Host "         package.json is not touched.)"
+Write-Host "           npm install --prefix .claude\scripts"
 Write-Host ""
 Write-Host "      2. Set up your API keys:"
 Write-Host "           Copy-Item .env.local.example .env.local"
@@ -410,14 +520,13 @@ Write-Host "         Then open .env.local and paste:"
 Write-Host "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
 Write-Host "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
 Write-Host ""
-Write-Host "      4. Open the folder in Cursor and run /explore to start your first workflow."
+Write-Host "      3. Open the folder in Cursor and run /explore to start your first workflow."
 Write-Host ""
-Write-Host "      3. (Optional) Install browser QA for /review-browser:"
-Write-Host "           npm install playwright-core"
-Write-Host "           npx playwright-core install chromium"
+Write-Host "      4. (Optional) Install Chromium for /review-browser:"
+Write-Host "           npx --prefix .claude\scripts playwright-core install chromium"
 Write-Host ""
 Write-Host "      Steps 1-3 are optional. Skip 1-2 if you don't need"
-Write-Host "      /ask-gpt or /ask-gemini. Skip 3 if you don't need"
+Write-Host "      /ask-gpt or /ask-gemini. Skip 4 if you don't need"
 Write-Host "      /review-browser."
 Write-Host ""
 Write-Host "    Tip: To update commands and scripts, run setup again from"

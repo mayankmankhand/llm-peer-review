@@ -37,7 +37,7 @@ Save all gathered context to a temporary file:
 Run the ask-gpt script to get ChatGPT's initial review:
 
 ```bash
-node scripts/ask-gpt.js review --context-file /tmp/ask-gpt-context.md --review-type [plan|code|branch|feature]
+node .claude/scripts/ask-gpt.js review --context-file /tmp/ask-gpt-context.md --review-type [plan|code|branch|feature]
 ```
 
 Read the script output. In the next step, you'll respond to this review as the author.
@@ -78,7 +78,7 @@ Save each round to its own file: `/tmp/ask-gpt-round-N.md` (e.g., `/tmp/ask-gpt-
 ### 4c. Get ChatGPT's Follow-up
 
 ```bash
-node scripts/ask-gpt.js respond --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
+node .claude/scripts/ask-gpt.js respond --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
 ```
 
 **Read** the target file first (ignore the error if it doesn't exist), then **Write** ChatGPT's response to its own round file (e.g., `/tmp/ask-gpt-round-1-gpt.md`). Continue to the next round.
@@ -90,7 +90,7 @@ node scripts/ask-gpt.js respond --context-file /tmp/ask-gpt-context.md --debate-
 After 3 debate cycles, **Read** all 6 round files (`/tmp/ask-gpt-round-1.md` through `/tmp/ask-gpt-round-3-gpt.md`), combine their contents in order, then **Read** `/tmp/ask-gpt-debate.md` (ignore the error if it doesn't exist) and **Write** the combined content to it. Then generate the final summary:
 
 ```bash
-node scripts/ask-gpt.js summary --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
+node .claude/scripts/ask-gpt.js summary --context-file /tmp/ask-gpt-context.md --debate-file /tmp/ask-gpt-debate.md
 ```
 
 ## Step 6: Present Results to User

@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.2.2)
+# AI Agent Setup Instructions (v4.3.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -69,7 +69,7 @@ This copies:
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
 - `.claude/settings.local.json` (permission config - skipped if it already exists)
 - `.claude/scripts/generate-index.js` (project index generator - always updated)
-- `scripts/` (ask-gpt.js, ask-gemini.js, and browse.js - runtime scripts for peer review and browser QA)
+- `.claude/scripts/` (ask-gpt.js, ask-gemini.js, browse.js, and a quarantined `package.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log template - skipped if it already exists)
 - `.env.local.example` (API key template)
@@ -88,7 +88,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 - `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references)
 - `.claude/rules/toolkit.md` - toolkit workflow rules
 - `.claude/scripts/generate-index.js` - project index generator
-- `scripts/ask-gpt.js`, `scripts/ask-gemini.js`, and `scripts/browse.js` - runtime scripts
+- `.claude/scripts/ask-gpt.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` - runtime scripts and their quarantined deps
 - `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
 
 **What's preserved** (skipped if it already exists):
@@ -103,7 +103,14 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.2.2:** This release is documentation-only - no code, workflow, or setup-script changes.
+**What's new in v4.3.0:** Toolkit runtime deps are now quarantined under `.claude/scripts/`. Re-running setup auto-migrates v4.2-and-earlier installs.
+- Runtime scripts moved from `scripts/ask-gpt.js` etc. to `.claude/scripts/ask-gpt.js`. The toolkit's four runtime deps (`openai`, `@google/generative-ai`, `playwright-core`, `@axe-core/playwright`) now live in `.claude/scripts/package.json` so end users of downstream projects no longer inherit them when they `npm install` at project root (issue #91).
+- Install command changed: `npm install --prefix .claude/scripts` instead of `npm install @google/generative-ai openai ...` at project root. Setup script output, README.md, SETUP.md, AGENT-SETUP.md, and the `/review-browser` skill have been updated.
+- Auto-migration: re-running setup detects old `scripts/<name>.js` files, backs them up to `.toolkit-backup-*/`, removes them, strips the four toolkit deps and matching `ask-gpt`/`ask-gemini` convenience scripts from the project's root `package.json`, and refreshes `.claude/settings.local.json` permissions to the new paths. The migration runs only when there's something to clean - clean installs see no migration noise.
+- CI/automation note: any downstream pipeline calling `node scripts/ask-gpt.js`, `node scripts/ask-gemini.js`, or `node scripts/browse.js` directly will need to update the path. Slash commands (`/ask-gpt`, `/ask-gemini`, `/review-browser`) are unchanged.
+- Also fixed in this release: env parser tolerates `export` prefix (issue #85), unknown CLI flags fail fast in ask-gpt/ask-gemini (issue #83). See CHANGELOG for details.
+
+**What was new in v4.2.2:** This release was documentation-only - no code, workflow, or setup-script changes.
 - Audited README.md and API-KEYS.md for drift against the current toolkit (issue #90). Fixed stale command counts, an outdated list of review skills (6 -> 8), an incomplete description of what `setup.sh` copies, and a missing `.claude/skills/` row in the "How It Works" architecture table.
 - README.md and API-KEYS.md are NOT copied to downstream projects by `setup.sh`, so re-running setup will not propagate these fixes to target projects. The version stamp and CHANGELOG entry are the only downstream-visible changes.
 
@@ -163,24 +170,28 @@ Tell the user about these changes if they were on an older version. See `CHANGEL
 
 ### Step 2: Install dependencies (optional)
 
-There are two optional dependency groups. Install what's needed:
+All toolkit runtime packages live inside `.claude/scripts/` so they don't pollute the user's root `package.json`. One install covers both feature groups:
 
-**For `/ask-gpt` and `/ask-gemini` (AI debate commands):**
 ```bash
-npm install --prefix "TARGET_PROJECT_PATH" @google/generative-ai openai
+npm install --prefix "TARGET_PROJECT_PATH/.claude/scripts"
 ```
 
-**For `/review-browser` (headless browser QA):**
+That installs:
+- `openai` and `@google/generative-ai` (used by `/ask-gpt` and `/ask-gemini`)
+- `playwright-core` and `@axe-core/playwright` (used by `/review-browser`)
+
+All four packages land inside `.claude/scripts/node_modules/`.
+
+**For `/review-browser` (headless browser QA), also install Chromium:**
 ```bash
-npm install --prefix "TARGET_PROJECT_PATH" playwright-core @axe-core/playwright
-npx --prefix "TARGET_PROJECT_PATH" playwright-core install chromium
+npx --prefix "TARGET_PROJECT_PATH/.claude/scripts" playwright-core install chromium
 ```
-On Linux/WSL, system libraries are also needed:
+On Linux/WSL, install the system libraries Chromium depends on. This step uses apt at the OS level (not npm), so it does NOT take `--prefix`:
 ```bash
 sudo npx playwright-core install-deps chromium
 ```
 
-If the project doesn't have a `package.json` yet, run `npm init -y` in the project directory first so dependencies are recorded. Skip any group the user doesn't need.
+The user's project does NOT need a root `package.json` for the toolkit to work. Skip the install entirely if the user doesn't need `/ask-gpt`, `/ask-gemini`, or `/review-browser` - the rest of the toolkit (`/explore`, `/create-plan`, `/execute`, `/review-code`, etc.) works without any npm dependencies.
 
 ### Step 3: Set up API keys (optional, requires user input)
 

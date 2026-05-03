@@ -64,16 +64,20 @@ NEW_VERSION="$NEW" node -e '
 '
 echo "  Updated package.json"
 
-# 3. package-lock.json (top-level + packages."" entries)
-NEW_VERSION="$NEW" node -e '
-  const fs = require("fs");
-  const v = process.env.NEW_VERSION;
-  const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
-  lock.version = v;
-  if (lock.packages && lock.packages[""]) lock.packages[""].version = v;
-  fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
-'
-echo "  Updated package-lock.json"
+# 3. Root package-lock.json - no longer present after issue #91. The toolkit's
+# four runtime deps moved to .claude/scripts/package.json with its own
+# (deliberately versioned 0.0.0, private:true) lockfile. Skip if missing.
+if [ -f package-lock.json ]; then
+  NEW_VERSION="$NEW" node -e '
+    const fs = require("fs");
+    const v = process.env.NEW_VERSION;
+    const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+    lock.version = v;
+    if (lock.packages && lock.packages[""]) lock.packages[""].version = v;
+    fs.writeFileSync("package-lock.json", JSON.stringify(lock, null, 2) + "\n");
+  '
+  echo "  Updated package-lock.json"
+fi
 
 # 4. .claude/rules/toolkit.md version stamp
 NEW_VERSION="$NEW" node -e '

@@ -1,0 +1,12 @@
+{
+  "name": "llm-peer-review-scripts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Quarantined runtime dependencies for the LLM Peer Review toolkit. Lives inside the toolkit's .claude/scripts/ folder so downstream projects' users don't inherit these deps when they clone and run npm install at the project root.",
+  "dependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@google/generative-ai": "^0.24.1",
+    "openai": "^6.16.0",
+    "playwright-core": "^1.58.2"
+  }
+}
