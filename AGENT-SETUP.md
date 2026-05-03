@@ -184,7 +184,7 @@ npm install --prefix "TARGET_PROJECT_PATH/.claude/scripts"
 ```
 
 That installs:
-- `openai` and `@google/generative-ai` (used by `/ask-gpt` and `/ask-gemini`)
+- `openai` and `@google/genai` (used by `/ask-gpt` and `/ask-gemini`)
 - `playwright-core` and `@axe-core/playwright` (used by `/review-browser`)
 
 All four packages land inside `.claude/scripts/node_modules/`.

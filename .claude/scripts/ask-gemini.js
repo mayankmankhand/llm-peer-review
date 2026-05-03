@@ -29,7 +29,7 @@
  *   - Designed for Linux/WSL environments
  *   - Expects simple .env.local format (KEY=value, no quotes needed)
  *   - Fail-fast philosophy with one transparent retry on transient errors
- *   - SDK version: @google/generative-ai ^0.24.x (supports systemInstruction)
+ *   - SDK version: @google/genai ^1.x (systemInstruction passed via config)
  */
 
 const fs = require('fs');
@@ -309,8 +309,8 @@ function readFile(filePath) {
 }
 
 /**
- * Initialize GoogleGenerativeAI client.
- * Creates the client once; call getModel() to get a model for a specific prompt.
+ * Initialize GoogleGenAI client.
+ * Creates the client once; call buildRequest() to assemble per-call params.
  */
 function initGemini() {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
@@ -318,28 +318,30 @@ function initGemini() {
     throw new Error(ERR.MISSING_KEY);
   }
 
-  const { GoogleGenerativeAI } = require('@google/generative-ai');
-  return new GoogleGenerativeAI(apiKey);
+  const { GoogleGenAI } = require('@google/genai');
+  return new GoogleGenAI({ apiKey });
 }
 
 /**
- * Get a generative model from the client with the given system prompt.
- * Uses systemInstruction when available, unless fallback mode is enabled.
+ * Build the per-call request shape for client.models.generateContent.
+ * The new SDK has no separate model object; model name and config travel
+ * with each request. The caller adds `contents` per call.
+ * Uses systemInstruction in config unless fallback mode is enabled.
  */
-function getModel(client, systemPrompt) {
-  const modelConfig = {
-    model: CONFIG.model,
-    generationConfig: {
-      maxOutputTokens: CONFIG.maxTokens,
-    },
+function buildRequest(systemPrompt) {
+  const config = {
+    maxOutputTokens: CONFIG.maxTokens,
   };
 
   // Use systemInstruction unless fallback mode is enabled
   if (!CONFIG.useConcatPrompt && systemPrompt) {
-    modelConfig.systemInstruction = systemPrompt;
+    config.systemInstruction = systemPrompt;
   }
 
-  return client.getGenerativeModel(modelConfig);
+  return {
+    model: CONFIG.model,
+    config,
+  };
 }
 
 /**
@@ -355,10 +357,10 @@ function sleep(ms) {
  * Includes one transparent retry on transient errors.
  */
 async function callGemini(client, systemPrompt, userPrompt) {
-  const model = getModel(client, systemPrompt);
+  const { model, config } = buildRequest(systemPrompt);
 
   // Build the prompt based on mode
-  const prompt = CONFIG.useConcatPrompt
+  const contents = CONFIG.useConcatPrompt
     ? `${systemPrompt}\n\n---\n\n${userPrompt}`
     : userPrompt;
 
@@ -372,10 +374,9 @@ async function callGemini(client, systemPrompt, userPrompt) {
     }, 10000);
 
     try {
-      const result = await model.generateContent(prompt);
+      const response = await client.models.generateContent({ model, contents, config });
       clearTimeout(progressTimer);
-      const response = result.response;
-      const text = response.text();
+      const text = response.text;
 
       return typeof text === 'string' ? text.trim() : '';
     } catch (error) {

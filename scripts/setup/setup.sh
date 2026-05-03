@@ -344,7 +344,7 @@ if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
     let pkg = null;
     try { pkg = JSON.parse(fs.readFileSync(process.env.TARGET_DIR + '/package.json', 'utf-8')); } catch (_) {}
     if (pkg) {
-      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', 'playwright-core', '@axe-core/playwright'];
+      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', '@google/genai', 'playwright-core', '@axe-core/playwright'];
       const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
       let touched = false;
       if (pkg.dependencies) {
@@ -376,7 +376,7 @@ if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
       const fs = require('fs');
       const pkgPath = process.env.TARGET_DIR + '/package.json';
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', 'playwright-core', '@axe-core/playwright'];
+      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', '@google/genai', 'playwright-core', '@axe-core/playwright'];
       const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
       if (pkg.dependencies) {
         for (const dep of TOOLKIT_DEPS) delete pkg.dependencies[dep];
@@ -396,7 +396,7 @@ if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
       echo "  Warning: could not rewrite $TARGET/package.json automatically."
       echo "    Original is preserved in $BACKUP_DIR/package.json."
       echo "    Manually remove these from your package.json dependencies:"
-      echo "      openai  @google/generative-ai  playwright-core  @axe-core/playwright"
+      echo "      openai  @google/generative-ai  @google/genai  playwright-core  @axe-core/playwright"
       echo "    And remove the ask-gpt / ask-gemini script entries if they still"
       echo "    point at scripts/ask-gpt.js or scripts/ask-gemini.js."
     fi
