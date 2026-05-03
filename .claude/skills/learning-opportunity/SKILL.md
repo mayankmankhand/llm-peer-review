@@ -10,6 +10,9 @@ allowed-tools:
 
 # Learning Opportunity
 
+**Use this when:** You hit an unfamiliar pattern, framework, or concept and want to pause development to understand it at three levels of depth.
+**Don't use this when:** You are debugging a specific bug (use `/pair-debug`) or reviewing code quality (use `/review-code`).
+
 Pause development mode. I want to understand something better.
 
 ## Teaching Approach

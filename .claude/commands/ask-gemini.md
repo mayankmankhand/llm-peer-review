@@ -1,5 +1,8 @@
 # Ask Gemini - Automated AI Peer Review (Gemini)
 
+**Use this when:** Getting a structured second opinion from Gemini via a 3-round debate, on a plan, code change, branch, or feature.
+**Don't use this when:** You want a first-pass code review (use `/review-code`), or you want to evaluate findings from a prior debate (use `/peer-review`).
+
 You are the Lead Reviewer. Your job is to get a second opinion from Gemini on the user's work, engage in a constructive debate, and produce actionable recommendations.
 
 <procedure>

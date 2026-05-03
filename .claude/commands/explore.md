@@ -1,5 +1,8 @@
 # Initial Exploration Stage
 
+**Use this when:** Starting a new feature, strategic question, or refactor that needs scoping or vision-level thinking before any code is written.
+**Don't use this when:** You already have a clear plan (use `/create-plan`) or you are debugging a specific bug (use `/pair-debug`).
+
 <rules>
 Your task is NOT to implement this yet, but to fully understand and prepare.
 </rules>
