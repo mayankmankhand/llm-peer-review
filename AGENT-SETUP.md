@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.3.1)
+# AI Agent Setup Instructions (v4.3.3)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,16 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.3.1:** Periodic-audit cleanup release. No setup-script or workflow changes - re-running setup just refreshes commands, skills, and the version stamp.
+**What's new in v4.3.3:** Default GPT model bumped from `gpt-5.4` to `gpt-5.5` (issue #95). No setup-script or workflow changes - re-running setup just refreshes commands, scripts, and the version stamp.
+- `/ask-gpt` now defaults to `gpt-5.5` (released 2026-04-23). Users on `gpt-5.4` or other slugs are unaffected - the `GPT_MODEL` env var override still works the same way.
+- Gemini default unchanged. Verified: `gemini-3.1-pro-preview` is still the only Gemini 3.1 Pro slug Google offers, no GA replacement exists yet.
+
+**What was new in v4.3.2:** Gemini SDK migration (issue #92). No user-facing behavior change.
+- `/ask-gemini` migrated from `@google/generative-ai` (deprecated 2025-08-31, no further bug fixes or security patches) to the actively-maintained `@google/genai`. Same prompts, same outputs, same `GEMINI_MODEL` / `GEMINI_USE_CONCAT_PROMPT` env knobs.
+- Setup-script cleanup arrays list both old and new dep names so users upgrading from a v4.2.x install still get the dead `@google/generative-ai` stripped from their root `package.json`.
+- Smoke-tested all three commands (`review`, `respond`, `summary`) plus the `GEMINI_USE_CONCAT_PROMPT=1` fallback against the live Gemini API.
+
+**What was new in v4.3.1:** Periodic-audit cleanup release. No setup-script or workflow changes - re-running setup just refreshes commands, skills, and the version stamp.
 - `/ask-gpt` and `/ask-gemini` debate flow rewritten so each round's `respond` call sees the full prior transcript. Pre-fix, the cumulative debate file was only assembled at the end, so rounds 1-3 ran without context. The initial review is now also preserved in the saved transcript (issue #93 R1, R2).
 - `/worktree` now installs both host project and toolkit deps in new worktrees. Pre-fix, fresh worktrees silently lacked `.claude/scripts/node_modules` after the v4.3.0 quarantine, so `/review-browser`, `/ask-gpt`, and `/ask-gemini` failed in them (issue #93 R3).
 - `.gitattributes` now covers `.claude/scripts/**` for LF line endings, matching the existing `scripts/**` rule (issue #93 D1).

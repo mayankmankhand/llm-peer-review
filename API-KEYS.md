@@ -136,7 +136,7 @@ Then try running a debate:
 
 ## Changing the Model
 
-By default, `/ask-gpt` uses `gpt-5.4` and `/ask-gemini` uses `gemini-3.1-pro-preview`. You can change these with additional environment variables or `.env.local` entries:
+By default, `/ask-gpt` uses `gpt-5.5` and `/ask-gemini` uses `gemini-3.1-pro-preview`. You can change these with additional environment variables or `.env.local` entries:
 
 ```bash
 # Environment variable (add to ~/.bashrc or ~/.zshrc):
