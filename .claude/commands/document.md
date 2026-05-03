@@ -1,5 +1,8 @@
 # Update Documentation Task
 
+**Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or INDEX after code changes have shipped.
+**Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
+
 You are updating documentation after code changes.
 
 ## Primary Documentation Files

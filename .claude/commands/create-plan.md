@@ -1,5 +1,8 @@
 # Plan Creation Stage
 
+**Use this when:** Turning a fully-explored idea into a step-by-step implementation plan with status tracking.
+**Don't use this when:** The idea is not yet scoped (use `/explore` first), or the change is small enough that a plan would just be ceremony.
+
 Based on our full exchange, produce a markdown plan document.
 
 ## Worktree Check

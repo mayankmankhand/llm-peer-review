@@ -1,5 +1,8 @@
 # Package Code for Review
 
+**Use this when:** Bundling code into a single markdown file for external AI review (paste into ChatGPT or Gemini directly).
+**Don't use this when:** You want an automated multi-round debate (use `/ask-gpt` or `/ask-gemini`).
+
 Create a single markdown file containing all code and context needed for external peer review (ChatGPT, Gemini, etc.).
 
 ## How It Works

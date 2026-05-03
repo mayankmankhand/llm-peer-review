@@ -1,5 +1,8 @@
 # Ask Gemini - Automated AI Peer Review (Gemini)
 
+**Use this when:** Getting a structured second opinion from Gemini via a 3-round debate, on a plan, code change, branch, or feature.
+**Don't use this when:** You want a first-pass code review (use `/review-code`), or you want to evaluate findings from a prior debate (use `/peer-review`).
+
 You are the Lead Reviewer. Your job is to get a second opinion from Gemini on the user's work, engage in a constructive debate, and produce actionable recommendations.
 
 <procedure>
@@ -32,7 +35,7 @@ Save all gathered context to a temporary file:
 
 **Read** `/tmp/ask-gemini-context.md` first (ignore the error if it doesn't exist), then **Write** the gathered context to it.
 
-## Step 3: Get Initial Review from Gemini
+## Step 3: Get Initial Review and Seed the Debate File
 
 Run the ask-gemini script to get Gemini's initial review:
 
@@ -40,17 +43,27 @@ Run the ask-gemini script to get Gemini's initial review:
 node .claude/scripts/ask-gemini.js review --context-file /tmp/ask-gemini-context.md --review-type [plan|code|branch|feature]
 ```
 
-Read the script output. In the next step, you'll respond to this review as the author.
+The cumulative debate file `/tmp/ask-gemini-debate.md` is built incrementally: every script call and every Claude turn gets appended to it BEFORE the next step runs. This way each `respond` call sees the full prior transcript.
+
+**Read** `/tmp/ask-gemini-debate.md` first (ignore the error if it does not exist - this is a fresh debate). Then **Write** the file with the script's output under this heading:
+
+```markdown
+## Gemini (Initial Review):
+
+[STDOUT FROM THE REVIEW SCRIPT]
+```
+
+Read the saved review yourself - the next step is responding to it as the author.
 
 If the script fails, show the error to the user. Common issues: missing API key in `.env.local` or environment variables, network errors, rate limits. Do not retry automatically.
 
 ## Step 4: Debate Cycle (Repeat 3 Times)
 
-For each debate cycle:
+For each debate cycle (rounds 1, 2, and 3):
 
 ### 4a. Respond to Gemini's Feedback
 
-As the author, respond to Gemini's review using this structure:
+As the author, draft a response using this structure:
 
 ```markdown
 ## Accepted
@@ -63,11 +76,9 @@ Points where I have a different perspective (with reasoning)
 Clarifications needed from the reviewer
 ```
 
-### 4b. Save the Debate History
+### 4b. Append Your Response to the Debate File
 
-Append your response to a debate file:
-
-Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-gemini-round-1.md`). **Read** the target file first (ignore the error if it doesn't exist), then **Write** it:
+**Read** `/tmp/ask-gemini-debate.md` first, then **Write** the file with your response appended at the end under this heading (where N is the current round number):
 
 ```markdown
 ## Claude (Round N):
@@ -75,19 +86,31 @@ Save each round to its own file: `/tmp/ask-gemini-round-N.md` (e.g., `/tmp/ask-g
 [YOUR RESPONSE]
 ```
 
+The file now contains the full transcript through your latest turn.
+
 ### 4c. Get Gemini's Follow-up
 
 ```bash
 node .claude/scripts/ask-gemini.js respond --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md
 ```
 
-**Read** the target file first (ignore the error if it doesn't exist), then **Write** Gemini's response to its own round file (e.g., `/tmp/ask-gemini-round-1-gemini.md`). Continue to the next round.
+The script reads the cumulative debate file, which now includes the initial review, all prior Claude turns, and all prior Gemini turns. It generates the next response with full context.
+
+**Read** `/tmp/ask-gemini-debate.md` first, then **Write** the file with the script's output appended at the end under this heading:
+
+```markdown
+## Gemini (Round N):
+
+[STDOUT FROM THE RESPOND SCRIPT]
+```
+
+Continue to the next round.
 
 **Repeat this cycle 3 times total.**
 
 ## Step 5: Generate Summary
 
-After 3 debate cycles, **Read** all 6 round files (`/tmp/ask-gemini-round-1.md` through `/tmp/ask-gemini-round-3-gemini.md`), combine their contents in order, then **Read** `/tmp/ask-gemini-debate.md` (ignore the error if it doesn't exist) and **Write** the combined content to it. Then generate the final summary:
+After 3 debate cycles, the debate file contains the complete transcript: initial review, then 3 rounds of Claude/Gemini exchanges. Generate the final summary:
 
 ```bash
 node .claude/scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context.md --debate-file /tmp/ask-gemini-debate.md

@@ -45,9 +45,12 @@ If it fails because the branch name is taken, increment N and try again.
 
 ### Step 5: Install dependencies
 
-If `package.json` exists in the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`
+Install host project deps and toolkit deps separately. The toolkit's deps live in `.claude/scripts/` (post-v4.3) and need their own install - without it, `/review-browser`, `/ask-gpt`, and `/ask-gemini` will not work in the new worktree.
 
-If there is no `package.json`, skip this step. If npm install fails, warn the user but do NOT stop. The worktree is still usable for non-debate work.
+1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
+2. **Toolkit deps** - if `.claude/scripts/package.json` exists in the worktree, run: `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Skip if there is no toolkit package.json (older v4.2 layouts kept toolkit deps at the host root).
+
+If either install fails, warn the user but do NOT stop. The worktree is still usable for general work, but the affected toolkit features will not run until the missing deps are installed manually.
 
 ### Step 6: Copy environment
 
@@ -68,10 +71,11 @@ Print a clear summary using this format:
 ```
 Worktree ready!
 
-  Path:    /full/absolute/path/to/.claude/worktrees/worktree-N
-  Branch:  worktree-N
-  npm:     installed (or: failed - run manually / skipped - no package.json)
-  .env:    copied (or: skipped - not found / already exists)
+  Path:         /full/absolute/path/to/.claude/worktrees/worktree-N
+  Branch:       worktree-N
+  Host npm:     installed (or: failed - run manually / skipped - no package.json)
+  Toolkit npm:  installed (or: failed - run manually / skipped - no .claude/scripts/package.json)
+  .env:         copied (or: skipped - not found / already exists)
 
 Next steps:
   1. Open that path in a new Cursor window

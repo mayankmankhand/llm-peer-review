@@ -1,5 +1,8 @@
 # Execute Plan
 
+**Use this when:** Building a feature step-by-step against an existing plan in `plans/PLAN-*.md`.
+**Don't use this when:** No plan exists yet (use `/create-plan` first), or the change is a one-line fix that does not need a plan.
+
 Now implement precisely as planned, in full.
 
 ## Implementation Requirements

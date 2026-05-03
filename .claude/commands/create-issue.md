@@ -1,5 +1,8 @@
 # Create Issue
 
+**Use this when:** Capturing a short bug, feature, or improvement on GitHub - the WHAT, not the HOW.
+**Don't use this when:** You need to plan implementation details (use `/explore` and `/create-plan`).
+
 Hey! I'm ready to help you capture this issue. What's on your mind? Just give me:
 
 - **What's the issue/feature** (1-2 sentences)
