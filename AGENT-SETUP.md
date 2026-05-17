@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.4.1)
+# AI Agent Setup Instructions (v4.5.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,14 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.4.1:** Richer review explanations (issue #98). After re-running setup:
+**What's new in v4.5.0:** Model default safety net (issue #100). After re-running setup:
+- `/ask-gpt` and `/ask-gemini` now hold a `KNOWN_STALE_*_MODELS` list. If `GPT_MODEL` or `GEMINI_MODEL` in `.env.local` matches a previous default (e.g. `gpt-5.2`, `gpt-5.4`, `gemini-3-flash-preview`, matched case-insensitively), the script ignores the env value, uses the current default, and prints a one-line stderr warning. Custom values not on the stale list are still respected silently. Result: latest toolkit = latest models, no manual `.env.local` edits required.
+- Each script prints `Using <provider> model: X` on stderr at the start of every run so users can confirm which model actually fired. stderr (not stdout) so the diagnostic stays out of the captured `/tmp/ask-*-debate.md` transcript that downstream rounds re-read.
+- `setup.sh` now prints the current model defaults at the end of a run (greps the JS files for `const DEFAULT_X_MODEL = '...'`). A one-liner explicitly notes that the toolkit never reads or writes `.env.local`.
+- `bump-version.sh` got an ordered checklist reminder for future model bumps: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL`. Catches the obvious paste-the-new-value mistake.
+- No new permissions needed. `.env.local` is never read or written by any of the new code - all override logic lives in the Node scripts where the env value is already in memory.
+
+**What was new in v4.4.1:** Richer review explanations (issue #98). After re-running setup:
 - All review findings now follow a mandatory 4-field structure: What / Why it matters / Example / Suggested fix. The Example field describes real-world impact (user or system consequence), not abstract risk. All 8 review skills (`/review-code`, `/review-ux`, `/review-plan`, `/review-commands`, `/review-browser`, `/review-full`, `/review-deps`, `/review-copy`) inherit the change automatically via shared `!cat` injection.
 - A Skip rule was added to `severity-anchors.md`: purely cosmetic findings (typos in non-user-facing comments, whitespace, missing periods, etc.) with no functional/security/a11y/maintainability impact are dropped entirely instead of being bulked up to fit the 4-field structure. Existing severity floors (secrets, data loss, a11y, requirements) still override the skip rule when relevant.
 - The `/review` orchestrator was DRYed up: it now inlines the shared template via `!cat`, wrapped in `<shared_template>` XML tags, instead of duplicating the format inline. Single source of truth.
