@@ -1,5 +1,26 @@
 # Changelog
 
+## v4.5.0 - Model Default Safety Net
+
+### Added
+- **Stale-model auto-override in `/ask-gpt` and `/ask-gemini`** (#100) - Each script now holds a `KNOWN_STALE_*_MODELS` list. If `GPT_MODEL` or `GEMINI_MODEL` in `.env.local` matches a previous default (e.g. `gpt-5.2`, `gpt-5.4`, `gemini-3-flash-preview`), the script ignores the env value, uses the current default, and prints a one-line warning. Custom values not on the stale list are still respected silently - this only catches users who copied an old `.env.local.example` once and never updated. Result: latest toolkit = latest models, no manual file edits required.
+- **"Using <provider> model: X" print on every script run.** `ask-gpt.js` and `ask-gemini.js` print which model fired at the start of each invocation so users can confirm overrides took effect and notice when an auto-override happened.
+- **Setup output shows current model defaults.** `scripts/setup/setup.sh` extracts the defaults from the runtime scripts at install time (greps `const DEFAULT_*_MODEL = '...'`) and prints them before "What to do next", with a one-liner noting we never read or write `.env.local`.
+- **Maintainer reminder in `bump-version.sh`.** A new manual-TODO bullet covers updating `DEFAULT_*_MODEL`, appending the previous default to `KNOWN_STALE_*_MODELS`, and syncing `.env.local.example` + `API-KEYS.md` whenever a model is bumped.
+
+### Fixed (found during `/review`)
+- **Stale-model check is now case-insensitive.** A value like `GPT_MODEL=GPT-5.2` (wrong casing from a copy-paste) now triggers the override; previously the lowercase-only comparison silently let it through.
+- **"Using model X" and deprecation warning routed to stderr.** Both diagnostic lines now use `console.error` instead of `console.log` so they stay out of the captured `/tmp/ask-*-debate.md` transcript that subsequent rounds re-read.
+- **`bump-version.sh` reminder reordered.** The model-bump checklist is now a single ordered step ("append OLD default to KNOWN_STALE FIRST, then update DEFAULT") so a maintainer can't paste the new value into the stale list by accident.
+- **Help text wording harmonized between `ask-gpt.js` and `ask-gemini.js`.** Both now say "Stale values are auto-overridden with a warning." instead of listing specific values inline, so the help line scales when more stale values are added later.
+
+### Notes
+- **`.env.local` is never read or written by any of this code.** Security design constraint: the file contains API keys, so all override logic lives in the Node scripts where the env value is already in memory. No backup files containing keys are created. No setup-time file edits touch `.env.local`. Users who want to silence the warning edit the file themselves.
+- **No model bumps in this release.** Current defaults (`gpt-5.5`, `gemini-3.1-pro-preview`) are unchanged - confirmed via [ai.google.dev](https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview) that Gemini 3.1 Pro still ships only as `-preview`. This release is the machinery; future model bumps benefit from it automatically.
+- **Issue #100's original framing was scoped up during `/explore`.** The issue asked for a passive "print defaults at end of setup" so users could eyeball-compare. During exploration the scope expanded to an active safety net once it was clear that passive printing relies on users manually fixing stale files - which most don't.
+
+---
+
 ## v4.4.1 - Richer Review Explanations
 
 ### Changed

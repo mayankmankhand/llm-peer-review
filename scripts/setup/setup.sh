@@ -700,6 +700,24 @@ if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
   echo ""
 fi
 
+# ─── Current model defaults ──────────────────────────────────
+# Extract defaults from the runtime scripts at install time so this block
+# stays in sync without a hardcoded list. The grep target is the stable
+# `const DEFAULT_X_MODEL = 'value';` line in each script. Fall back to
+# "unknown" so a display bug never breaks the setup run.
+GPT_DEFAULT="$(grep -oE "const DEFAULT_GPT_MODEL = '[^']+'" "$TOOLKIT_ROOT/.claude/scripts/ask-gpt.js" 2>/dev/null | sed -E "s/.*'([^']+)'/\\1/" | head -1)"
+GEMINI_DEFAULT="$(grep -oE "const DEFAULT_GEMINI_MODEL = '[^']+'" "$TOOLKIT_ROOT/.claude/scripts/ask-gemini.js" 2>/dev/null | sed -E "s/.*'([^']+)'/\\1/" | head -1)"
+GPT_DEFAULT="${GPT_DEFAULT:-unknown}"
+GEMINI_DEFAULT="${GEMINI_DEFAULT:-unknown}"
+
+echo "    Current model defaults (used when .env.local has no override):"
+echo "      GPT_MODEL     = $GPT_DEFAULT"
+echo "      GEMINI_MODEL  = $GEMINI_DEFAULT"
+echo ""
+echo "    The scripts override known-stale GPT_MODEL/GEMINI_MODEL values in"
+echo "    .env.local with a warning. We never read or write your API keys."
+echo ""
+
 echo "    What to do next:"
 echo ""
 echo "      cd $TARGET"

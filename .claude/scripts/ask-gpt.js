@@ -22,7 +22,8 @@
  * 
  * Environment:
  *   OPENAI_API_KEY   Required for ChatGPT API calls
- *   GPT_MODEL        Optional model override (default: gpt-5.5)
+ *   GPT_MODEL        Optional model override (default: gpt-5.5). Known-stale
+ *                    values are auto-overridden with a warning.
  * 
  * Scope & Assumptions:
  *   - Designed for Linux/WSL environments
@@ -86,9 +87,37 @@ if (fs.existsSync(envPath)) {
   });
 }
 
+// Model defaults. When bumping the default here, append the previous default
+// to KNOWN_STALE_GPT_MODELS so users with that value in .env.local are
+// auto-routed to the new model with a warning instead of silently running on
+// an old model. setup.sh greps the DEFAULT_GPT_MODEL line to display the
+// current default at end of setup - keep the `const NAME = 'value';` shape.
+const DEFAULT_GPT_MODEL = 'gpt-5.5';
+const KNOWN_STALE_GPT_MODELS = ['gpt-5.2', 'gpt-5.4'];
+
+/**
+ * Resolve which model to use. The hardcoded default wins over a stale env
+ * override so latest toolkit = latest model. Custom env values (not on the
+ * stale list, not the current default) are respected.
+ */
+function resolveModel() {
+  const envValue = process.env.GPT_MODEL;
+  if (!envValue) return DEFAULT_GPT_MODEL;
+  // Case-insensitive match so values like `GPT-5.2` (wrong casing from a
+  // copy-paste) still trigger the override.
+  const isStale = KNOWN_STALE_GPT_MODELS.some(m => m.toLowerCase() === envValue.toLowerCase());
+  if (isStale) {
+    // stderr so the warning stays out of the captured debate transcript
+    // that downstream `/ask-gpt` rounds re-read.
+    console.error(`⚠️  Note: GPT_MODEL=${envValue} in .env.local is deprecated. Using ${DEFAULT_GPT_MODEL}. Edit .env.local to silence this.`);
+    return DEFAULT_GPT_MODEL;
+  }
+  return envValue;
+}
+
 // Configuration
 const CONFIG = {
-  model: process.env.GPT_MODEL || 'gpt-5.5',
+  model: resolveModel(),
   maxTokens: parseInt(process.env.GPT_MAX_TOKENS, 10) || 4096,
   retryDelayMs: 1000,
 };
@@ -269,6 +298,7 @@ Options:
 Environment:
   OPENAI_API_KEY   Required for ChatGPT API calls
   GPT_MODEL        Model to use (default: gpt-5.5)
+                   Stale values are auto-overridden with a warning.
 
 Examples:
   # Initial review
@@ -481,6 +511,11 @@ async function main() {
     printHelp();
     process.exit(0);
   }
+
+  // Make the model in use visible on every run so users can confirm the
+  // toolkit picked up the right model and spot stale-value overrides.
+  // stderr so this diagnostic stays out of the captured debate transcript.
+  console.error(`Using GPT model: ${CONFIG.model}`);
 
   try {
     const client = initOpenAI();

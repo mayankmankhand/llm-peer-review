@@ -74,7 +74,11 @@
       "Bash(diff *)",
       "Bash(echo *)",
       "Bash(mkdir *)",
-      "Bash(cat *)"
+      "Bash(cat *)",
+
+      "Bash(bash -n scripts/setup/setup.sh)",
+      "Bash(bash -n scripts/setup/bump-version.sh)",
+      "Bash(GPT_MODEL=GPT-5.2 node -e ' *)"
     ],
     "additionalDirectories": [
       "/tmp"

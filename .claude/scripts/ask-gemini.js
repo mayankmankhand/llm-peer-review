@@ -22,7 +22,8 @@
  * 
  * Environment:
  *   GEMINI_API_KEY            Required for Gemini API calls
- *   GEMINI_MODEL              Optional model override (default: gemini-3.1-pro-preview)
+ *   GEMINI_MODEL              Optional model override (default: gemini-3.1-pro-preview).
+ *                             Known-stale values are auto-overridden with a warning.
  *   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use concatenated prompts instead of systemInstruction
  * 
  * Scope & Assumptions:
@@ -88,9 +89,37 @@ if (fs.existsSync(envPath)) {
   });
 }
 
+// Model defaults. When bumping the default here, append the previous default
+// to KNOWN_STALE_GEMINI_MODELS so users with that value in .env.local are
+// auto-routed to the new model with a warning instead of silently running on
+// an old model. setup.sh greps the DEFAULT_GEMINI_MODEL line to display the
+// current default at end of setup - keep the `const NAME = 'value';` shape.
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-pro-preview';
+const KNOWN_STALE_GEMINI_MODELS = ['gemini-3-flash-preview'];
+
+/**
+ * Resolve which model to use. The hardcoded default wins over a stale env
+ * override so latest toolkit = latest model. Custom env values (not on the
+ * stale list, not the current default) are respected.
+ */
+function resolveModel() {
+  const envValue = process.env.GEMINI_MODEL;
+  if (!envValue) return DEFAULT_GEMINI_MODEL;
+  // Case-insensitive match so values like `Gemini-3-Flash-Preview` (wrong
+  // casing from a copy-paste) still trigger the override.
+  const isStale = KNOWN_STALE_GEMINI_MODELS.some(m => m.toLowerCase() === envValue.toLowerCase());
+  if (isStale) {
+    // stderr so the warning stays out of the captured debate transcript
+    // that downstream `/ask-gemini` rounds re-read.
+    console.error(`⚠️  Note: GEMINI_MODEL=${envValue} in .env.local is deprecated. Using ${DEFAULT_GEMINI_MODEL}. Edit .env.local to silence this.`);
+    return DEFAULT_GEMINI_MODEL;
+  }
+  return envValue;
+}
+
 // Configuration
 const CONFIG = {
-  model: process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview',
+  model: resolveModel(),
   maxTokens: 4096,
   useConcatPrompt: process.env.GEMINI_USE_CONCAT_PROMPT === '1',
   retryDelayMs: 1000,
@@ -272,6 +301,7 @@ Options:
 Environment:
   GEMINI_API_KEY            Required for Gemini API calls
   GEMINI_MODEL              Model to use (default: gemini-3.1-pro-preview)
+                            Stale values are auto-overridden with a warning.
   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use fallback concatenated prompts
 
 Examples:
@@ -504,6 +534,11 @@ async function main() {
     printHelp();
     process.exit(0);
   }
+
+  // Make the model in use visible on every run so users can confirm the
+  // toolkit picked up the right model and spot stale-value overrides.
+  // stderr so this diagnostic stays out of the captured debate transcript.
+  console.error(`Using Gemini model: ${CONFIG.model}`);
 
   try {
     const client = initGemini();
