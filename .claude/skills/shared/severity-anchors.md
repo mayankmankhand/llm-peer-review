@@ -1,5 +1,22 @@
 # Severity Anchors
 
+## Skip These Entirely
+
+Before assigning severity, decide whether the finding is worth reporting at all.
+
+**Rule:** if a finding is purely cosmetic with no functional, security, accessibility, or maintainability impact, drop it. Do not bulk it up to fit the 4-field structure (What / Why it matters / Example / Suggested fix).
+
+Skip-worthy items:
+- Pure typos in non-user-facing comments or internal variable names
+- Trailing whitespace, missing trailing newlines, indentation off by one space
+- Missing periods at the end of code comments
+- Single-character variable names in short scopes (e.g., `i` in a 3-line loop)
+- Stylistic preferences with no readability impact (e.g., single vs double quotes in an already-mixed file)
+
+**Exception:** the Universal Anchors below override this rule when relevant. A typo in user-facing copy, a whitespace change in whitespace-sensitive YAML or Python, or a "trivial" variable name that masks a security issue should still be reported with the appropriate severity.
+
+**Why this rule exists:** every reported finding should feel justified to the user, even at Suggest level. The rule prevents bulked-up nonsense findings that erode trust in the review.
+
 ## Severity Levels
 
 - 🚫 **Block** - Will break the app or block users. Must fix before shipping.

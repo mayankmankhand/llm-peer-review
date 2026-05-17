@@ -104,31 +104,43 @@ Collect all findings from all subagents. Then:
 [code] ✅ | [ux] ✅ | [plan] ⏭️ skipped (no plan file) | [deps] ✅
 ```
 
-### Top Issues (scannable summary)
-```
-🚫 X Blocks: R1 [code] (file:line - description), R3 [browser] (page - description)
-⚠️ X Warns: R2 [ux] (file:line - description)
-💡 X Suggests: R4 [deps] (package - description)
-```
+### Base Structure
 
-### Looks Good
-- [What's working well across all specialists - 3-5 items]
+The orchestrator report uses the standard 4-field finding structure (What / Why it matters / Example / Suggested fix) inlined below from the shared template. This is the single source of truth - do not duplicate it elsewhere. The `<shared_template>` tags isolate the inlined content from this file's own heading hierarchy so the template's headings do not collide with the orchestrator's structure.
 
-### Findings
+<shared_template>
+!`cat .claude/skills/shared/output-template.md`
+</shared_template>
 
-- **R1** [code] 🚫 `file:line` - [Issue description in plain English]
-  - **Why:** [Why this matters]
-  - **Fix direction:** [What to change]
+### Orchestrator Supplement
 
-- **R2** [ux] ⚠️ `file:line` - [Issue description]
-  - **Why:** [Why this matters]
-  - **Fix direction:** [Approach]
+The orchestrator adds a `[specialist]` tag right after each finding ID, indicating which specialist flagged it. If multiple specialists flagged the same file:line with the same issue, merge them and list all sources: `[code, ux]`.
 
-- **R3** [code, ux] ⚠️ `file:line` - [Issue flagged by multiple specialists]
-  - **Why:** [Why this matters]
-  - **Fix direction:** [Approach]
+The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line - one-line What)`.
 
-### Summary
+**Suppress the inlined Summary block.** The shared template inside `<shared_template>` includes its own `### Summary` block. Do NOT render it. Use only the orchestrator-specific Summary below (which adds Specialists run and Deduplicated findings). Otherwise the report ends with two Summary blocks and the reader cannot tell which is authoritative.
+
+**Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. Use this field order in the merged finding:
+
+`What -> Why it matters -> Example -> Screenshot -> Evidence -> Expected -> Actual -> Suggested fix`
+
+Example findings with tags applied:
+
+- **R1** [code] 🚫 `file:line` - [What: the issue in plain English]
+  - **Why it matters:** [The harm or risk this creates]
+  - **Example:** [Real-world impact]
+  - **Suggested fix:** [The approach]
+
+- **R3** [code, browser] ⚠️ `file:line` - [Issue flagged by both code and browser specialists]
+  - **Why it matters:** [The harm or risk this creates]
+  - **Example:** [Real-world impact]
+  - **Screenshot:** [Path]
+  - **Evidence:** [Console errors, failed API calls, or text output]
+  - **Expected:** [What should happen]
+  - **Actual:** [What actually happens]
+  - **Suggested fix:** [The approach]
+
+### Summary (orchestrator-specific)
 - Specialists run: X of Y
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X
