@@ -1,5 +1,4 @@
 {
-  "defaultMode": "acceptEdits",
   "permissions": {
     "allow": [
       "Bash(git init *)",
@@ -23,7 +22,6 @@
       "Bash(git worktree *)",
       "Bash(git rev-parse *)",
       "Bash(git rev-list *)",
-
       "Bash(gh repo create *)",
       "Bash(gh repo view *)",
       "Bash(gh repo edit *)",
@@ -41,12 +39,10 @@
       "Bash(gh pr diff *)",
       "Bash(gh api *)",
       "Bash(gh release list *)",
-
       "Bash(npm install *)",
       "Bash(npm uninstall *)",
       "Bash(npm audit *)",
       "Bash(npm outdated *)",
-
       "Bash(node .claude/scripts/ask-gpt.js *)",
       "Bash(node .claude/scripts/ask-gemini.js *)",
       "Bash(node .claude/scripts/browse.js *)",
@@ -54,34 +50,31 @@
       "Bash(echo * | node .claude/scripts/browse.js *)",
       "Bash(cat * | node .claude/scripts/browse.js *)",
       "Bash(node .claude/scripts/generate-index.js *)",
-
       "Read",
       "Edit",
       "Write",
       "Glob",
       "Grep",
-
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
-
       "Skill(review-commands)",
       "Skill(review-commands:*)",
-
       "Bash(cp *)",
-
       "Bash(ls *)",
       "Bash(diff *)",
       "Bash(echo *)",
       "Bash(mkdir *)",
       "Bash(cat *)",
-
       "Bash(bash -n scripts/setup/setup.sh)",
       "Bash(bash -n scripts/setup/bump-version.sh)",
-      "Bash(GPT_MODEL=GPT-5.2 node -e ' *)"
+      "Bash(GPT_MODEL=GPT-5.2 node -e ' *)",
+      "Skill(review-copy)",
+      "Skill(review-copy:*)"
     ],
     "additionalDirectories": [
       "/tmp"
     ]
-  }
+  },
+  "defaultMode": "acceptEdits"
 }
