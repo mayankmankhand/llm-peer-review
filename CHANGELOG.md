@@ -1,5 +1,35 @@
 # Changelog
 
+## What's new since v4.3.3
+
+If you last installed v4.3.3, four releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.
+
+## v4.5.1 - Documentation Audit
+
+### Changed
+- **README rewrite for non-AI-fluent newcomers** (#99) - Repositioned for colleagues you would forward the link to. New headline ("AI peer review for your work."), debate-output screenshot moved to the top as the orientation hook, new "How key commands work" section with 4-6 line callouts for `/explore` (scoping vs vision modes), `/create-plan`, `/execute`, `/review`, `/ask-gpt` and `/ask-gemini`, `/create-issue`. AGENT-SETUP path promoted to the recommended setup option. "Slash command", "Cursor", and "Claude Code" are now defined inline before any command name is referenced.
+- **"What's new since v4.3.3" rollup** added at the top of CHANGELOG.md and linked from README so returning users get one upgrade story for v4.4.0 -> v4.4.1 -> v4.5.0 -> v4.5.1 instead of reading four release notes separately.
+- **AGENT-SETUP.md graveyard trimmed.** Kept only the last three release-notes blocks inline (v4.5.0, v4.4.1, v4.4.0). Older entries point at CHANGELOG.md. File shrank from 291 to 213 lines.
+- **Cost claims removed** from CHANGELOG.md (v4.4.0 entry) and AGENT-SETUP.md per the issue 99 review comment. Replaced "a few dollars" and "10-40k tokens saved" projections with "See `/index` output for actual cost."
+- **API-KEYS.md** gained a "deprecated model warning" subsection explaining v4.5.0's auto-override behavior in plain language. Verified current defaults (`gpt-5.5`, `gemini-3.1-pro-preview`) match the JS sources.
+- **SETUP.md** got a beginner-clarity pass: top-of-file pointer to AGENT-SETUP as the recommended path, one-line explainers for Node.js, GitHub CLI, Cursor, and npm.
+- **CONTRIBUTING.md** Releasing section updated with the v4.5.0 model-bump checklist ordering and the `gh release create` step.
+- **`.claude/rules/toolkit.md`** permissions table reconciled with `.claude/settings.local.json` (missing rows added for `git rev-list`, `bash scripts/setup/bump-version.sh`, `bash -n` syntax checks, the `GPT_MODEL=... node -e` probe entry, and `Skill(review-commands)`).
+- **LESSONS.md** received a single annotation on the "version bumps touch more files than you think" entry to reflect setup.sh's path under `scripts/setup/`.
+
+### Fixed (found during `/review-copy` of the rewritten README)
+- **"Slash command" never defined** for the new newcomer audience - now explained inline in the opening section with a one-sentence framing of Claude Code and Cursor as the editors where slash commands live.
+- **"What's new" placement** interrupted first-time readers - moved below Requirements so it does not block the headline-to-workflow-to-commands narrative.
+- **"Tell your AI agent" instruction** did not say where to paste the message - now specifies the AI chat panel.
+- **Broken internal anchors** discovered during link verification: README's `SETUP.md#step-4-...-bash-workflow` (heading was renamed during the SETUP audit) and API-KEYS's `README.md#full-setup-all-features` (section was consolidated). Both retargeted to live anchors.
+
+### Notes
+- **No behavior, workflow, or setup-script changes.** Re-running setup refreshes the doc files copied to downstream projects (`CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are still preserved per existing rules).
+- **Slash command files and skill files were not modified.** The user reviewed the audit framing for these prompt files mid-execution and judged them current. A new `feedback-prompt-files-approval` memory captures that prompt files require explicit per-change approval going forward.
+- **`/ask-gemini` did not run** for this release - issue 99 worked through the structured `/explore` -> `/create-plan` -> `/execute` -> `/review-copy` flow rather than a debate cycle.
+
+---
+
 ## v4.5.0 - Model Default Safety Net
 
 ### Added
@@ -57,9 +87,8 @@
 
 ### Notes
 - **Inspiration credit:** the semantic-map approach is inspired by [Cartographer](https://github.com/kingbootoshi/cartographer), a Claude Code plugin with the same goal. Rather than depending on an external plugin (which carries lifecycle risk - one variant `pect0ral/claude-cartographer` is already 404), v4.4.0 builds a native equivalent that integrates with this toolkit's existing slash command surface.
-- **Cost model (unmeasured estimate):** generating the map costs a few dollars in API credits per project for small/medium codebases; more for very large ones (the cost-confirm prompt fires above 500k tokens or on per-chunk overflow). Note that `/document` triggers a regeneration via `/index`, so heavy `/document` usage compounds the cost over time. Each subsequent session reads ~3k tokens of map and saves an estimated 10-40k tokens of file reads. These numbers are projections, not measurements - empirical validation is filed as a follow-up.
 - **No new permissions needed.** The existing `Bash(node .claude/scripts/generate-index.js *)` permission covers the refactored scanner. Agent tool calls (subagent spawning) are built-in to Claude Code and not gated by allowlist.
-- **The v3.4 lesson stands, with nuance.** The "LLMs cost more than they save" lesson was correct about mid-session scanning. It was over-applied during v3.4 to cancel one-time upfront generation, which left an empty file tree behind. See LESSONS.md for the full re-read.
+- **The v3.4 lesson stands, with nuance.** The original lesson against mid-session scanning was correct, but it was over-applied during v3.4 to cancel one-time upfront generation as well, which left an empty file tree behind. v4.4.0 restores upfront generation while keeping mid-session scanning off. See LESSONS.md for the full re-read.
 
 ---
 

@@ -1,8 +1,10 @@
 # Setting Up a Brand New Computer
 
+> **Prefer to have your AI agent install the toolkit for you?** See [AGENT-SETUP.md](AGENT-SETUP.md). That is the recommended path. This page is the manual alternative for users who want to walk through every step themselves.
+
 Pick your operating system below, then continue with "Both Platforms" at the end.
 
-> **Windows users:** This toolkit runs on macOS, Linux, or WSL. We recommend **Option A (WSL + bash)** for the full experience. Option B (native PowerShell) supports setup and most commands, but the debate commands (`/ask-gpt`, `/ask-gemini`) require bash/WSL.
+> **Windows users:** This toolkit runs on macOS, Linux, or WSL (Windows Subsystem for Linux, a way to run a Linux terminal inside Windows). We recommend **Option A (WSL + bash)** so every command works. Option B (native PowerShell) supports setup and most commands, but the debate commands (`/ask-gpt`, `/ask-gemini`) require bash/WSL.
 
 ## Windows
 
@@ -13,9 +15,9 @@ You can use this toolkit in **two ways** on Windows:
 
 ### Step 1: Install Node.js
 
-Node.js runs the ask-gpt and ask-gemini scripts (the ChatGPT/Gemini debate features).
+Node.js (a runtime that lets your computer execute JavaScript outside a browser) runs the ask-gpt and ask-gemini scripts.
 
-- Install from [nodejs.org](https://nodejs.org) (LTS is fine), then reopen terminal
+- Install from [nodejs.org](https://nodejs.org) (LTS is the stable long-term version, which is fine), then reopen your terminal
 - Verify:
   ```powershell
   node -v
@@ -24,7 +26,7 @@ Node.js runs the ask-gpt and ask-gemini scripts (the ChatGPT/Gemini debate featu
 
 ### Step 2: Install GitHub CLI
 
-Needed for the `/create-issue` command.
+GitHub CLI (a command-line tool for working with GitHub from your terminal) is needed for the `/create-issue` command.
 
 - Install from [cli.github.com](https://cli.github.com)
 - Log in:
@@ -34,12 +36,14 @@ Needed for the `/create-issue` command.
 
 ### Step 3: Install Cursor
 
+Cursor (an AI-powered code editor based on VS Code) is the app you will use to run the toolkit commands.
+
 - Go to [cursor.com](https://www.cursor.com) and download the Windows installer
 - Install it normally
 
-### Step 4 (Optional): Install WSL if you prefer bash workflow
+### Step 4 (Optional): Install WSL if you prefer a bash workflow
 
-WSL (Windows Subsystem for Linux) gives you a Linux terminal on Windows. If you want bash-first setup and Linux path style:
+WSL gives you a Linux terminal on Windows. Install it if you want bash-style commands and Linux file paths:
 
 - Open **PowerShell as Administrator**
 - Run:
@@ -102,6 +106,8 @@ Follow the prompts - it opens a browser to authenticate.
 
 ### Step 4: Install Cursor
 
+Cursor (an AI-powered code editor based on VS Code) is the app you will use to run the toolkit commands.
+
 - Go to [cursor.com](https://www.cursor.com) and download the Mac installer
 - Drag it to your Applications folder
 
@@ -125,17 +131,17 @@ You should see version numbers for each. If any command says "not found", go bac
 
 ### Step 6: Install Optional Dependencies
 
-> **Note:** Run these commands in your project folder after completing Steps 8-10 (clone + setup). They're listed here so you know what's available, but you need the project first.
+> **Note:** Run these commands in your project folder after completing Steps 8-10 (clone + setup). They are listed here so you know what is available, but you need the project first.
 
-All toolkit runtime packages live inside `.claude/scripts/` so they don't pollute your project's root `package.json`. One install in that folder enables every toolkit feature that needs Node packages:
+All toolkit runtime packages live inside `.claude/scripts/` so they do not clutter your project's root `package.json` (the file Node uses to list a project's dependencies). One install in that folder enables every toolkit feature that needs Node packages:
 
 ```bash
 npm install --prefix .claude/scripts
 ```
 
-That covers the Node packages for `/ask-gpt`, `/ask-gemini`, and `/review-browser`.
+`npm` is Node's package installer. That command covers the Node packages for `/ask-gpt`, `/ask-gemini`, and `/review-browser`.
 
-`/review-browser` needs one extra step: install the Chromium browser binary itself.
+`/review-browser` needs one extra step: install Chromium (the open-source browser engine Playwright drives in the background).
 
 ```bash
 npx --prefix .claude/scripts playwright-core install chromium
@@ -195,6 +201,8 @@ GEMINI_API_KEY=AIza-your-key-here
   - **Mac:** `/Users/your-username/llm-peer-review`
 - Type `/explore` to verify the commands are working
 
-You're set up. Now read the [Add to a New Project](README.md#add-to-a-new-project) section in the README to copy the toolkit into your actual projects.
+You are set up. Now read the [Add to a New Project](README.md#add-to-a-new-project) section in the README to copy the toolkit into your actual projects.
+
+> **Tip:** Next time, you can skip this manual walkthrough by pointing your AI agent at [AGENT-SETUP.md](AGENT-SETUP.md) and letting it do the install for you.
 
 > **Important:** Do not copy command files to `~/.claude/commands/` (your home directory). Commands should only live inside each project's `.claude/commands/` folder. Global copies in the home directory override project copies, which means you'll get outdated commands even after updating the toolkit. If you have files there, delete them.

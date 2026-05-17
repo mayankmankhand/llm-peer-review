@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 4.5.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 4.5.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -197,7 +197,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `git push`, `git pull`, `git fetch` | Syncing with remote repositories |
 | `git branch`, `git checkout`, `git stash` | Branch management and stashing work in progress |
 | `git worktree` | Creating, listing, and removing worktrees for parallel sessions |
-| `git rev-parse` | Worktree detection and repo path queries |
+| `git rev-parse`, `git rev-list` | Worktree detection, repo path queries, commit-range checks |
 | `git status`, `git log`, `git diff`, `git show` | Inspecting repo state and history |
 | `git config`, `git remote add`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs) |
 | `git check-ignore` | Verifying .gitignore rules before committing |
@@ -214,13 +214,17 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node .claude/scripts/browse.js` | Running the headless browser QA script |
 | `echo/cat * \| node .claude/scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants pointing at the current project's `.claude/scripts/browse.js` are injected by setup.sh per project; stale `scripts/browse.js` entries from older installs are removed automatically on the next setup run. |
 | `node .claude/scripts/generate-index.js` | Running the codebase scanner that emits the file manifest consumed by `/index` to build `CODEBASE_MAP.md` |
+| `bash scripts/setup/bump-version.sh` | Running the version-bump script during release prep |
+| `bash -n scripts/setup/setup.sh`, `bash -n scripts/setup/bump-version.sh` | Syntax-checking setup scripts before release |
+| `GPT_MODEL=GPT-5.2 node -e ' *` | One-off model-override probes when validating `/ask-gpt` defaults |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
+| `Skill(review-commands)`, `Skill(review-commands:*)` | Allow the `/review-commands` skill to be invoked without a prompt |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |
 | `cp` | Copying files (e.g. `.env.local` into worktrees) |
 | `ls`, `diff`, `echo`, `mkdir`, `cat` | Reading directories, comparing files, writing output, creating folders |
 | `cd` | **Not included by default.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access. |
 
-**Note:** `settings.local.json` also sets `defaultMode: acceptEdits`, which auto-approves file edits after you give a command. This is a top-level setting, not a permission entry.
+**Note:** `settings.local.json` also sets `defaultMode: acceptEdits` (auto-approves file edits after a command) and `additionalDirectories: ["/tmp"]` (lets Claude read/write `/tmp` for debate scripts and temp files). These are top-level settings, not permission entries.
 
 </reference>
 
