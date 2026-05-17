@@ -14,6 +14,16 @@ Tone: collaborative. "Let's figure this out together."
 2. **Explain simply** - Use plain English, avoid jargon
 </rules>
 
+## Step 0: Load Project Context
+
+Check if `CODEBASE_MAP.md` exists in the project root.
+
+**If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug.
+
+**If it does not exist (first run after upgrade or fresh setup):** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute." Then invoke `/index`. After it completes, read the new map and proceed.
+
+**If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
+
 ## Step 1: Check the Logs (always start here)
 
 Ask: "What do the logs say? Check your browser console, terminal output, or log files. Paste the error or relevant output here."

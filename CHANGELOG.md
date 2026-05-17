@@ -1,5 +1,27 @@
 # Changelog
 
+## v4.4.0 - Codebase Map Replaces INDEX.md
+
+### Changed
+- **`/index` is now a Codebase Map generator** (#97) - Issue #97 audited v3.4's flat-tree `INDEX.md` and found it did not save tokens (Claude still had to grep/read files to learn what they did). v4.4.0 replaces the flat tree with `CODEBASE_MAP.md`, a semantic map containing module purposes, entry points, dependencies, conventions, gotchas, and a navigation guide. `/index` now orchestrates parallel Claude subagents (one per ~250k-token chunk, max 5 chunks) to analyze the codebase, then synthesizes their findings into a ~10k-token map.
+- **Consumer commands read `CODEBASE_MAP.md`** - `/explore` Phase 2, `/create-plan`, and `/pair-debug` all read the map at session start to inform their work. `/explore` performs a staleness check (compares HEAD with the map's commit) and warns if drift is detected. If the map is missing on first `/explore`, `/explore` auto-runs `/index` (lazy generation).
+- **`/document` regenerates the map via `/index`** instead of calling the scanner directly. The map represents "the codebase at the last `/document` checkpoint."
+- **`.claude/scripts/generate-index.js` repurposed.** The script no longer writes `INDEX.md` directly; it now emits a JSON manifest (per-file token estimates, chunk assignments, directory tree, current commit) consumed by `/index`. Same filename, completely new behavior - minimizes upgrade surprises.
+
+### Removed
+- **`INDEX.md` retired.** Setup detects and removes old `INDEX.md` files during upgrade (the original is preserved in `.toolkit-backup-*/` per issue #79). Downstream projects upgrading from v4.3.x have their old `INDEX.md` cleaned up automatically.
+
+### Fixed (found during review of this release)
+- **`GPT_MAX_TOKENS` env var now actually takes effect in `/ask-gpt`.** Surfaced while running the /ask-gpt review of issue #97 itself - the script's `maxTokens` was hardcoded to 4096 despite docs referencing the env var. One-line wire-up so the override works as advertised.
+
+### Notes
+- **Inspiration credit:** the semantic-map approach is inspired by [Cartographer](https://github.com/kingbootoshi/cartographer), a Claude Code plugin with the same goal. Rather than depending on an external plugin (which carries lifecycle risk - one variant `pect0ral/claude-cartographer` is already 404), v4.4.0 builds a native equivalent that integrates with this toolkit's existing slash command surface.
+- **Cost model (unmeasured estimate):** generating the map costs a few dollars in API credits per project for small/medium codebases; more for very large ones (the cost-confirm prompt fires above 500k tokens or on per-chunk overflow). Note that `/document` triggers a regeneration via `/index`, so heavy `/document` usage compounds the cost over time. Each subsequent session reads ~3k tokens of map and saves an estimated 10-40k tokens of file reads. These numbers are projections, not measurements - empirical validation is filed as a follow-up.
+- **No new permissions needed.** The existing `Bash(node .claude/scripts/generate-index.js *)` permission covers the refactored scanner. Agent tool calls (subagent spawning) are built-in to Claude Code and not gated by allowlist.
+- **The v3.4 lesson stands, with nuance.** The "LLMs cost more than they save" lesson was correct about mid-session scanning. It was over-applied during v3.4 to cancel one-time upfront generation, which left an empty file tree behind. See LESSONS.md for the full re-read.
+
+---
+
 ## v4.3.3 - GPT-5.5 Default
 
 ### Changed

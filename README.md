@@ -52,7 +52,7 @@ flowchart TD
 | `/learning-opportunity` (skill) | Learn a concept at 3 levels of depth |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/worktree` | Create an isolated parallel session in a new worktree |
-| `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
+| `/index` | (Re)generate the project's `CODEBASE_MAP.md` (semantic map of modules, conventions, gotchas) |
 
 > `/ask-gpt` and `/ask-gemini` automate the full debate loop. `/peer-review` is for when you paste feedback from an external tool manually.
 >
@@ -130,7 +130,7 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it will show an error to prevent accidentally copying files into the wrong place.
 
 **What setup does:**
-- **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Also generates `INDEX.md`, a file tree that helps Claude understand your project layout.
+- **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Detects and removes any legacy `INDEX.md`. The new `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
 - **Preserves your work:** `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are skipped if they already exist - those are yours to customize.
 - **Always updates:** toolkit rules (`.claude/rules/toolkit.md`).
 - **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
@@ -305,8 +305,8 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
 | `.claude/skills/<name>/SKILL.md` | **Toolkit** (editable) | One folder per skill (review specialists, learning-opportunity). Auto-create slash commands and are agent-discoverable. `project-context` is agent-only (not user-invocable). You can customize these. |
 | `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
-| `.claude/scripts/generate-index.js` | **Toolkit** | Generates `INDEX.md` (a file tree of your project). Always updated on setup. |
-| `INDEX.md` | **Generated** | Auto-generated file tree. Gitignored. Rebuilt by `/document`, `/index`, or setup. |
+| `.claude/scripts/generate-index.js` | **Toolkit** | Scans the project and emits a manifest used by `/index` to build `CODEBASE_MAP.md`. Always updated on setup. |
+| `CODEBASE_MAP.md` | **Generated** | Auto-generated semantic map (modules, conventions, gotchas, navigation guide). Gitignored. Built by `/index`, refreshed by `/document`. |
 
 Setup also copies a few supporting files (`.gitignore`, `.gitattributes`, `settings.local.json`, `.env.local.example`). See [Do It Manually](#do-it-manually) for the full list.
 

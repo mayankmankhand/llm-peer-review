@@ -5,6 +5,16 @@
 
 Based on our full exchange, produce a markdown plan document.
 
+## Load Project Context
+
+Check if `CODEBASE_MAP.md` exists in the project root.
+
+**If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure.
+
+**If it does not exist (first run after upgrade or fresh setup):** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/index`. After it completes, read the new map and proceed.
+
+**If it is malformed or `/index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
+
 ## Worktree Check
 
 <procedure>

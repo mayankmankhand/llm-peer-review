@@ -35,7 +35,7 @@ For each changed file:
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
 - **LESSONS.md** - Prompt the user: "Did you learn anything this session worth logging?"
-- **INDEX.md** - Regenerate by running `node .claude/scripts/generate-index.js` (if the script exists). If the script fails, warn the user and skip INDEX.md. Do not write this file manually - always use the script.
+- **CODEBASE_MAP.md** - Regenerate by invoking `/index` (the command orchestrates the scanner and parallel subagents to produce a fresh semantic map). For projects over 500k tokens or with per-chunk overflow, `/index` will prompt for cost confirmation before spending API tokens - tell the user this may happen and that they can decline to skip the refresh (the prior map remains intact). If `/index` fails or the user declines, leave the existing map untouched and continue with the rest of `/document`. Do not write the map file manually.
 
 ## 4. Documentation Style Rules
 

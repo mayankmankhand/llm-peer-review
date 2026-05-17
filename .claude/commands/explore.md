@@ -186,8 +186,14 @@ If they say yes, continue with the analysis below.
 
 **If in scoping mode:** proceed with Phase 2 as normal (mandatory).
 
-### Start with the index
-Before exploring manually, check if `INDEX.md` exists in the project root. If it does, read it first - it's an auto-generated file tree that shows every tracked file and the directory structure. Use it to orient yourself before diving into specific files. If INDEX.md is missing, briefly tell the user: "INDEX.md not found - exploring manually. You can run /index to generate it." Then continue with normal exploration using glob/grep. If it exists but looks malformed, skip it and explore normally.
+### Start with the codebase map
+Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root.
+
+**If it exists:** Read it. It contains directory tree, module purposes, conventions, gotchas, and a navigation guide - your starting point before any glob/grep. Then check staleness: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD`, and run `git rev-list --count <map_commit>..HEAD` to count commits since. Only warn if the count is >= 10 (single-commit drift is noisy and not actionable). If the map header notes `generated_while_dirty`, mention that to the user regardless of commit count - it signals the map was built from uncommitted state. When warning, frame it as a choice: "Your codebase map is N commits behind. Run `/index` to refresh, or continue with possibly outdated info."
+
+**If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/index` to generate the map. After it completes, read the new map and proceed.
+
+**If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?

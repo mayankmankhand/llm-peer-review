@@ -89,7 +89,7 @@ if (fs.existsSync(envPath)) {
 // Configuration
 const CONFIG = {
   model: process.env.GPT_MODEL || 'gpt-5.5',
-  maxTokens: 4096,
+  maxTokens: parseInt(process.env.GPT_MAX_TOKENS, 10) || 4096,
   retryDelayMs: 1000,
 };
 

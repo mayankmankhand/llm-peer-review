@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 4.3.3 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 4.4.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -64,15 +64,15 @@ We follow this flow for features:
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/worktree` | Create an isolated parallel session in a new worktree |
-| `/index` | Rebuild the project's INDEX.md file (auto-generated file tree) |
+| `/index` | (Re)generate `CODEBASE_MAP.md` - a semantic map of module purposes, conventions, and gotchas. Read by `/explore`, `/create-plan`, `/pair-debug`. |
 
 ### Plans
 
 Plans are saved in `plans/` at the project root as `PLAN-*.md` files. They are gitignored (local working docs). `/create-plan` creates them, `/execute` updates them, and `/review-plan` reviews against them.
 
-### Project Index
+### Codebase Map
 
-`INDEX.md` is an auto-generated file tree of all git-tracked files. It's created by a Node script (`.claude/scripts/generate-index.js`) and is gitignored. `/explore` reads it at the start of Phase 2 to understand project structure. `/document` regenerates it after changes. `/index` rebuilds it on demand. Do not edit INDEX.md manually.
+`CODEBASE_MAP.md` is an auto-generated semantic map (module purposes, entry points, conventions, gotchas, navigation guide). It is produced by `/index`, which orchestrates parallel Claude subagents over the codebase. `/explore`, `/create-plan`, and `/pair-debug` read it at session start to save tokens. `/document` regenerates it after work cycles. The file is gitignored (per-user, per-machine) and should not be edited manually - always use `/index`.
 
 ### Skills
 
@@ -213,7 +213,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node .claude/scripts/ask-gemini.js` | Running the ask-gemini debate script |
 | `node .claude/scripts/browse.js` | Running the headless browser QA script |
 | `echo/cat * \| node .claude/scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants pointing at the current project's `.claude/scripts/browse.js` are injected by setup.sh per project; stale `scripts/browse.js` entries from older installs are removed automatically on the next setup run. |
-| `node .claude/scripts/generate-index.js` | Generating the project INDEX.md file |
+| `node .claude/scripts/generate-index.js` | Running the codebase scanner that emits the file manifest consumed by `/index` to build `CODEBASE_MAP.md` |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |
 | `cp` | Copying files (e.g. `.env.local` into worktrees) |
