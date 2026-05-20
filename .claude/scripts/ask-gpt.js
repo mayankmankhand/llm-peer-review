@@ -24,6 +24,8 @@
  *   OPENAI_API_KEY   Required for ChatGPT API calls
  *   GPT_MODEL        Optional model override (default: gpt-5.5). Known-stale
  *                    values are auto-overridden with a warning.
+ *   GPT_MAX_TOKENS   Optional max_completion_tokens override (default: 32000).
+ *                    Covers reasoning + visible output for reasoning models.
  * 
  * Scope & Assumptions:
  *   - Designed for Linux/WSL environments
@@ -118,7 +120,13 @@ function resolveModel() {
 // Configuration
 const CONFIG = {
   model: resolveModel(),
-  maxTokens: parseInt(process.env.GPT_MAX_TOKENS, 10) || 4096,
+  // 32000 sits above OpenAI's recommended 25K reserve for reasoning models (per
+  // their reasoning models guide) and well below the 128K cap. Reasoning tokens
+  // AND visible output share this budget, so 4096 was too low: reasoning could
+  // consume the whole cap and leave nothing for output, returning an empty body.
+  // The cap is a ceiling, not a target: the model only uses what it needs.
+  // Lower via GPT_MAX_TOKENS if cost-sensitive.
+  maxTokens: parseInt(process.env.GPT_MAX_TOKENS, 10) || 32000,
   retryDelayMs: 1000,
 };
 
@@ -299,6 +307,8 @@ Environment:
   OPENAI_API_KEY   Required for ChatGPT API calls
   GPT_MODEL        Model to use (default: gpt-5.5)
                    Stale values are auto-overridden with a warning.
+  GPT_MAX_TOKENS   max_completion_tokens budget (default: 32000)
+                   Covers reasoning + visible output for reasoning models.
 
 Examples:
   # Initial review
@@ -332,6 +342,23 @@ function readFile(filePath) {
   }
 
   return fs.readFileSync(absolutePath, 'utf-8');
+}
+
+/**
+ * Warn if --context-file and --debate-file have different session ID suffixes.
+ * The slash command generates a per-session ID and embeds it in both filenames
+ * (e.g., /tmp/ask-gpt-context-1747700000-29481.md). A mismatch means the
+ * runner likely regenerated the ID mid-flow, which would split the debate
+ * across two file pairs and break script continuity. Warning only, not an
+ * error: the script still runs with whatever paths it was given.
+ */
+function warnIfSessionMismatch(contextFile, debateFile) {
+  const extractId = (p) => path.basename(p).match(/-(\d+-\d+)\.md$/)?.[1];
+  const ctxId = extractId(contextFile);
+  const debId = extractId(debateFile);
+  if (ctxId && debId && ctxId !== debId) {
+    console.error(`⚠️  Warning: context file and debate file have different session IDs (${ctxId} vs ${debId}). The debate may be missing earlier rounds.`);
+  }
 }
 
 /**
@@ -371,10 +398,11 @@ async function callChatGPT(client, system, user) {
       console.log('⏳ Still waiting for response...');
     }, 10000);
 
+    let response;
     try {
       // Using max_completion_tokens (not max_tokens) as required by newer OpenAI models (gpt-4+)
       // See: https://platform.openai.com/docs/api-reference/chat/create
-      const response = await client.chat.completions.create({
+      response = await client.chat.completions.create({
         model: CONFIG.model,
         max_completion_tokens: CONFIG.maxTokens,
         messages: [
@@ -382,10 +410,6 @@ async function callChatGPT(client, system, user) {
           { role: 'user', content: user },
         ],
       });
-
-      clearTimeout(progressTimer);
-      const text = response.choices[0]?.message?.content;
-      return typeof text === 'string' ? text.trim() : '';
     } catch (error) {
       clearTimeout(progressTimer);
       const msg = error instanceof Error ? error.message : String(error);
@@ -404,6 +428,43 @@ async function callChatGPT(client, system, user) {
       }
       throw new Error(ERR.API_ERROR(msg));
     }
+
+    clearTimeout(progressTimer);
+
+    // Reasoning models can consume the entire max_completion_tokens budget on
+    // reasoning, leaving no visible output (finish_reason: "length", content: "").
+    // Surface the cause instead of returning an empty string silently. Also
+    // surfaces refusals and other non-error empty bodies.
+    //
+    // Empty-body errors thrown here stay UNWRAPPED (not prefixed with "OpenAI API
+    // error:" via ERR.API_ERROR) because they are first-class non-transport
+    // errors. The message itself names the cause and the fix, so prefixing would
+    // just add noise. Transport errors (caught above) get wrapped because their
+    // raw messages are vendor-specific and the prefix gives context.
+    const choice = response.choices[0];
+    const text = choice?.message?.content;
+    if (typeof text !== 'string' || text.trim() === '') {
+      const refusal = choice?.message?.refusal;
+      if (refusal) {
+        throw new Error(`OpenAI returned a refusal: ${refusal}`);
+      }
+      const finishReason = choice?.finish_reason || 'unknown';
+      const completionTokens = response.usage?.completion_tokens ?? 0;
+      const reasoningTokens = response.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+      throw new Error(
+        `OpenAI returned empty body (finish_reason: ${finishReason}, reasoning_tokens: ${reasoningTokens}, completion_tokens: ${completionTokens}). Raise GPT_MAX_TOKENS or shorten the input.`
+      );
+    }
+
+    // Warn (but don't fail) when content is non-empty but truncated at the
+    // token cap. The user still wants the partial output, but needs to know
+    // it's incomplete so they can rerun with a higher GPT_MAX_TOKENS if needed.
+    if (choice?.finish_reason === 'length') {
+      const completionTokens = response.usage?.completion_tokens ?? 0;
+      const reasoningTokens = response.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+      console.error(`⚠️  Warning: response truncated at token cap (finish_reason: length, reasoning_tokens: ${reasoningTokens}, completion_tokens: ${completionTokens}). Raise GPT_MAX_TOKENS for complete output.`);
+    }
+    return text.trim();
   }
 
   // Should not reach here, but just in case
@@ -537,6 +598,7 @@ async function main() {
         if (!args.debateFile) {
           throw new Error(ERR.MISSING_ARG('--debate-file'));
         }
+        warnIfSessionMismatch(args.contextFile, args.debateFile);
         const context = readFile(args.contextFile);
         const debate = readFile(args.debateFile);
         await cmdRespond(client, context, debate);
@@ -550,6 +612,7 @@ async function main() {
         if (!args.debateFile) {
           throw new Error(ERR.MISSING_ARG('--debate-file'));
         }
+        warnIfSessionMismatch(args.contextFile, args.debateFile);
         const context = readFile(args.contextFile);
         const debate = readFile(args.debateFile);
         await cmdSummary(client, context, debate);

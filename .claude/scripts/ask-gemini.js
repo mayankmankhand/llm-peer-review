@@ -24,6 +24,8 @@
  *   GEMINI_API_KEY            Required for Gemini API calls
  *   GEMINI_MODEL              Optional model override (default: gemini-3.1-pro-preview).
  *                             Known-stale values are auto-overridden with a warning.
+ *   GEMINI_MAX_TOKENS         Optional maxOutputTokens override (default: 32000).
+ *                             Covers thinking + visible output for reasoning models.
  *   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use concatenated prompts instead of systemInstruction
  * 
  * Scope & Assumptions:
@@ -120,7 +122,12 @@ function resolveModel() {
 // Configuration
 const CONFIG = {
   model: resolveModel(),
-  maxTokens: 4096,
+  // 32000 sits well below Gemini's 65,536 hard cap and above the SDK's own 8192
+  // default. The previous 4096 was BELOW the SDK default, which is why long
+  // reviews truncated mid-sentence. Gemini 3.x thinking tokens share this budget
+  // with visible output. The cap is a ceiling, not a target: the model only uses
+  // what it needs. Lower via GEMINI_MAX_TOKENS if cost-sensitive.
+  maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS, 10) || 32000,
   useConcatPrompt: process.env.GEMINI_USE_CONCAT_PROMPT === '1',
   retryDelayMs: 1000,
 };
@@ -302,6 +309,8 @@ Environment:
   GEMINI_API_KEY            Required for Gemini API calls
   GEMINI_MODEL              Model to use (default: gemini-3.1-pro-preview)
                             Stale values are auto-overridden with a warning.
+  GEMINI_MAX_TOKENS         maxOutputTokens budget (default: 32000)
+                            Covers thinking + visible output for reasoning models.
   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use fallback concatenated prompts
 
 Examples:
@@ -336,6 +345,23 @@ function readFile(filePath) {
   }
 
   return fs.readFileSync(absolutePath, 'utf-8');
+}
+
+/**
+ * Warn if --context-file and --debate-file have different session ID suffixes.
+ * The slash command generates a per-session ID and embeds it in both filenames
+ * (e.g., /tmp/ask-gemini-context-1747700000-29481.md). A mismatch means the
+ * runner likely regenerated the ID mid-flow, which would split the debate
+ * across two file pairs and break script continuity. Warning only, not an
+ * error: the script still runs with whatever paths it was given.
+ */
+function warnIfSessionMismatch(contextFile, debateFile) {
+  const extractId = (p) => path.basename(p).match(/-(\d+-\d+)\.md$/)?.[1];
+  const ctxId = extractId(contextFile);
+  const debId = extractId(debateFile);
+  if (ctxId && debId && ctxId !== debId) {
+    console.error(`⚠️  Warning: context file and debate file have different session IDs (${ctxId} vs ${debId}). The debate may be missing earlier rounds.`);
+  }
 }
 
 /**
@@ -403,12 +429,9 @@ async function callGemini(client, systemPrompt, userPrompt) {
       console.log('⏳ Still waiting for response...');
     }, 10000);
 
+    let response;
     try {
-      const response = await client.models.generateContent({ model, contents, config });
-      clearTimeout(progressTimer);
-      const text = response.text;
-
-      return typeof text === 'string' ? text.trim() : '';
+      response = await client.models.generateContent({ model, contents, config });
     } catch (error) {
       clearTimeout(progressTimer);
       const msg = error instanceof Error ? error.message : String(error);
@@ -427,6 +450,45 @@ async function callGemini(client, systemPrompt, userPrompt) {
       }
       throw new Error(ERR.API_ERROR(msg));
     }
+
+    clearTimeout(progressTimer);
+
+    // Gemini 3.x thinking tokens can consume the entire maxOutputTokens budget,
+    // leaving no visible output (finishReason: "MAX_TOKENS", text: ""). Surface
+    // the cause instead of returning an empty string silently. Also surfaces
+    // safety-blocked responses and other non-error empty bodies.
+    //
+    // Empty-body errors thrown here stay UNWRAPPED (not prefixed with "Gemini API
+    // error:" via ERR.API_ERROR) because they are first-class non-transport
+    // errors. The message itself names the cause and the fix, so prefixing would
+    // just add noise. Transport errors (caught above) get wrapped because their
+    // raw messages are vendor-specific and the prefix gives context.
+    const text = response.text;
+    const candidate = response.candidates?.[0];
+    // Token counts from usageMetadata are included in both the empty-body error
+    // and the truncation warning, so users can decide whether to raise the cap
+    // or switch models. Mirror parity with the GPT side.
+    const thoughtsTokens = response.usageMetadata?.thoughtsTokenCount ?? 0;
+    const candidatesTokens = response.usageMetadata?.candidatesTokenCount ?? 0;
+    if (typeof text !== 'string' || text.trim() === '') {
+      const finishReason = candidate?.finishReason || 'unknown';
+      const blockedSafety = (candidate?.safetyRatings || []).filter(r => r.blocked);
+      if (blockedSafety.length > 0) {
+        const categories = blockedSafety.map(r => r.category).join(', ');
+        throw new Error(`Gemini blocked the response on safety grounds (${categories}).`);
+      }
+      throw new Error(
+        `Gemini returned empty body (finishReason: ${finishReason}, thoughts_tokens: ${thoughtsTokens}, candidates_tokens: ${candidatesTokens}). Raise GEMINI_MAX_TOKENS or shorten the input.`
+      );
+    }
+
+    // Warn (but don't fail) when content is non-empty but truncated at the
+    // token cap. The user still wants the partial output, but needs to know
+    // it's incomplete so they can rerun with a higher GEMINI_MAX_TOKENS if needed.
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      console.error(`⚠️  Warning: response truncated at token cap (finishReason: MAX_TOKENS, thoughts_tokens: ${thoughtsTokens}, candidates_tokens: ${candidatesTokens}). Raise GEMINI_MAX_TOKENS for complete output.`);
+    }
+    return text.trim();
   }
 
   // Should not reach here, but just in case
@@ -560,6 +622,7 @@ async function main() {
         if (!args.debateFile) {
           throw new Error(ERR.MISSING_ARG('--debate-file'));
         }
+        warnIfSessionMismatch(args.contextFile, args.debateFile);
         const context = readFile(args.contextFile);
         const debate = readFile(args.debateFile);
         await cmdRespond(client, context, debate);
@@ -573,6 +636,7 @@ async function main() {
         if (!args.debateFile) {
           throw new Error(ERR.MISSING_ARG('--debate-file'));
         }
+        warnIfSessionMismatch(args.contextFile, args.debateFile);
         const context = readFile(args.contextFile);
         const debate = readFile(args.debateFile);
         await cmdSummary(client, context, debate);

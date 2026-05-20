@@ -156,6 +156,37 @@ Starting in v4.5.0, the scripts protect you from running on an outdated default 
 
 ---
 
+## Changing the Token Budget
+
+The scripts default to a 32,000-token budget per API call. This is large enough to cover the model's reasoning/thinking plus a substantial review. You can lower it to cap cost (the model only uses what it needs, but the cap is the upper bound) or raise it for very long reviews.
+
+```bash
+# Environment variable (add to ~/.bashrc or ~/.zshrc):
+export GPT_MAX_TOKENS=16000
+export GEMINI_MAX_TOKENS=16000
+
+# Or in .env.local:
+GPT_MAX_TOKENS=16000
+GEMINI_MAX_TOKENS=16000
+```
+
+### Why 32,000 by default?
+
+Reasoning models (gpt-5.x, gemini-3.x) use part of the token budget on internal reasoning before producing visible output. If the budget is too small, reasoning can consume everything and leave nothing for the actual review - the API returns an empty response with no clear error.
+
+- **OpenAI's own guidance** recommends reserving at least 25,000 tokens for reasoning models.
+- **Gemini's SDK default** is 8,192 tokens; the older toolkit default of 4,096 was below even that, which is why reviews would truncate mid-sentence on long inputs.
+- **32,000** sits above OpenAI's floor, well under the GPT-5.x 128K cap and Gemini's 65,536 cap, and matches across providers for consistency.
+
+### What happens if the budget is too small?
+
+Starting with the v4.5.1 fix for issue #101, the scripts now actively detect this case and tell you what happened:
+
+- **Empty output** -> the script throws `OpenAI returned empty body (finish_reason: length, reasoning_tokens: N, completion_tokens: N). Raise GPT_MAX_TOKENS or shorten the input.` (or the Gemini equivalent with `thoughts_tokens` / `candidates_tokens`). Exit code 1.
+- **Truncated output** (some content but cut off mid-sentence) -> the script prints a warning to stderr naming the cause and token counts, then still returns whatever content was produced. Exit code 0. You see both the warning and the partial content so you can decide whether to rerun with a higher cap.
+
+---
+
 ## FAQ
 
 **Can I use just one key?** Yes. If you only set up an OpenAI key, `/ask-gpt` works and `/ask-gemini` will tell you it's missing a key. Same the other way around. Set up whichever one you actually plan to use.
