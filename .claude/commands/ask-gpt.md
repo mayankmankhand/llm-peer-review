@@ -143,7 +143,7 @@ node .claude/scripts/ask-gpt.js summary --context-file /tmp/ask-gpt-context-<ses
 
 ## Step 6: Present Results to User
 
-Present the summary to the user in this format:
+Present the summary to the user in this format. Each Recommended Action uses the same 4-field structure as `/review` findings (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and sequential R-IDs - the reasoning is mined from the 3-round debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
 
 <output_format>
 
@@ -152,18 +152,30 @@ Present the summary to the user in this format:
 ## Lead Reviewer Summary
 
 ### ✅ Agreed Points
-[Points where both Claude and ChatGPT agreed]
+[Points where both Claude and ChatGPT agreed - terse bullets]
 
-### ⚠️ Disagreed Points
-[Points of disagreement with both perspectives]
+### 🤔 Disagreed Points
+[Points of disagreement with both perspectives - terse bullets]
+
+### Top Issues
+🚫 X Blocks: R1 (file:line - one-line What), R3 (file:line - one-line What)
+⚠️ X Warns: R2 (file:line - one-line What)
+💡 X Suggests: R4 (file:line - one-line What)
 
 ### 📋 Recommended Actions
-- [ ] Action 1 (priority)
-- [ ] Action 2 (priority)
-- [ ] Action 3 (priority)
+
+- **R1** 🚫 `file:line` - [What: the issue in plain English, one line]
+  - **Why it matters:** [The harm or risk this creates]
+  - **Example:** [Real-world impact - what could happen to a user, the system, or a future maintainer]
+  - **Suggested fix:** [The approach, not the exact code]
+
+- **R2** ⚠️ `file:line` - [What]
+  - **Why it matters:** [...]
+  - **Example:** [...]
+  - **Suggested fix:** [...]
 
 ### 💬 Key Insights
-[Notable observations from the debate]
+[Notable observations from the debate - terse bullets]
 
 ---
 

@@ -146,6 +146,45 @@ const ERR = {
   UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use review, respond, or summary.`,
 };
 
+/**
+ * Load the canonical 4-field finding template from the shared /review template.
+ *
+ * Slices the "Base Format" section out of .claude/skills/shared/output-template.md
+ * by splitting on "## Illustrative Examples", so the debate summary prompt gets
+ * the format spec without the per-domain example flood. Single source of truth:
+ * editing the shared template propagates to /review skills AND to this script.
+ *
+ * Throws loudly on missing file or missing slice marker. A silent fallback would
+ * ship a malformed summary; loud failure forces the install or rename to be fixed.
+ */
+function loadOutputTemplate() {
+  const templatePath = path.join(__dirname, '..', 'skills', 'shared', 'output-template.md');
+  if (!fs.existsSync(templatePath)) {
+    throw new Error(
+      `Shared output template not found at ${templatePath}. ` +
+      `The /ask-gemini summary inlines this file for the 4-field finding format. ` +
+      `Restore it from git with \`git checkout HEAD -- .claude/skills/shared/output-template.md\` or re-run \`bash scripts/setup/setup.sh\`.`
+    );
+  }
+  const content = fs.readFileSync(templatePath, 'utf-8');
+  const marker = '## Illustrative Examples';
+  const splitIndex = content.indexOf(marker);
+  if (splitIndex === -1) {
+    throw new Error(
+      `Slice marker "${marker}" not found in ${templatePath}. ` +
+      `loadOutputTemplate() uses this heading to isolate the Base Format section. ` +
+      `If the heading was renamed in the shared template, update the marker constant in BOTH .claude/scripts/ask-gpt.js AND .claude/scripts/ask-gemini.js to match (mirror parity required).`
+    );
+  }
+  return content.slice(0, splitIndex).trim();
+}
+
+// Cache for the lazily-built summary prompt. Populated on first access to
+// PROMPTS.summary and reused for the rest of the process. Module-scoped so
+// the getter can read and write it across calls without leaking state onto
+// the PROMPTS object itself.
+let _cachedSummaryPrompt = null;
+
 // Prompt templates for Gemini review debates
 const PROMPTS = {
   reviewer: `You are a senior engineer conducting a peer review. Your role is to provide constructive, actionable feedback.
@@ -153,7 +192,7 @@ const PROMPTS = {
 Guidelines:
 - Be specific: Point to exact issues, not vague concerns
 - Be constructive: Suggest fixes, not just problems
-- Be prioritized: Mark issues as Critical, Major, or Minor
+- Be prioritized: Use 🚫 (Block - must fix before shipping), ⚠️ (Warn - should fix before shipping), or 💡 (Suggest - nice to have)
 - Be fair: Acknowledge strengths as well as weaknesses
 - Be practical: Focus on real-world impact, not theoretical perfection
 
@@ -163,9 +202,8 @@ Structure your review as:
 Brief overall assessment (2-3 sentences)
 
 ## Issues Found
-For each issue:
-- **[CRITICAL/MAJOR/MINOR]** Issue title
-  - Location: Where in the code/plan
+For each issue, use a sequential R-ID (R1, R2, R3, ...) and a severity emoji. Mid-debate findings stay concise (Problem + Suggestion); the full 4-field structure is only required in the final summary.
+- **R1** 🚫 Issue title (file:line)
   - Problem: What's wrong
   - Suggestion: How to fix it
 
@@ -195,27 +233,45 @@ Ongoing disagreements with your updated perspective
 ## New Observations
 Any new points based on the author's response`,
 
-  summary: `You are summarizing a peer review debate between two engineers (Gemini as Reviewer, Claude as Author). Produce a clear, actionable summary.
+  // Lazily build and cache the summary prompt on first access. The shared
+  // output template is read once per process; subsequent reads (e.g., from a
+  // future debug log accessing PROMPTS.summary twice) reuse the cached string.
+  // Lazy evaluation also keeps `review` and `respond` working when the template
+  // file is missing - they do not access this getter.
+  get summary() {
+    if (_cachedSummaryPrompt) return _cachedSummaryPrompt;
+    _cachedSummaryPrompt = `You are summarizing a peer review debate between two engineers (Gemini as Reviewer, Claude as Author). Produce a clear, actionable summary.
 
-Output this exact structure:
+The user will display your output under a "## Lead Reviewer Summary" header. Emit exactly these five sections, in order, each as an H3:
 
-## Agreed Points
-Points where both reached consensus:
+### ✅ Agreed Points
+Points where both reached consensus, as terse bullets:
 - [Point 1]
 - [Point 2]
 
-## Disagreed Points
-Points where there was no resolution:
+### 🤔 Disagreed Points
+Points where there was no resolution, as terse bullets:
 - **[Topic]**: Reviewer's view vs Author's view
 
-## Recommended Actions
-Prioritized list of concrete actions:
-1. [CRITICAL] Action description
-2. [MAJOR] Action description  
-3. [MINOR] Action description
+### Top Issues
+A scannable line of finding counts in this format (from the canonical template):
+🚫 X Blocks: R1 (file:line - one-line What), R3 (file:line - one-line What)
+⚠️ X Warns: R2 (file:line - one-line What)
+💡 X Suggests: R4 (file:line - one-line What)
 
-## Key Insights
-Notable observations from the debate worth remembering`,
+### 📋 Recommended Actions
+Each action uses the full 4-field structure (What / Why it matters / Example / Suggested fix) from the canonical template below. Use 🚫 (Block), ⚠️ (Warn), or 💡 (Suggest) emojis with sequential R-IDs (R1, R2, R3, ...). Mine the 3-round debate transcript for the reasoning behind each action - this is what makes the summary worth reading versus a terse bullet list. Do NOT use [CRITICAL]/[MAJOR]/[MINOR] tags.
+
+### 💬 Key Insights
+Notable observations from the debate worth remembering, as terse bullets.
+
+The canonical /review output template is inlined below in <shared_template> tags. Apply the Top Issues format and the Findings 4-field structure to this debate summary. Ignore the Looks Good, Staff Check, and Files-reviewed Summary sub-sections inside the template - those are for full /review runs, not for debate summaries.
+
+<shared_template>
+${loadOutputTemplate()}
+</shared_template>`;
+    return _cachedSummaryPrompt;
+  },
 };
 
 /**
