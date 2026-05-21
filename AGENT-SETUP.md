@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.5.1)
+# AI Agent Setup Instructions (v4.6.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,14 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.5.1:** Documentation audit (issue #99). After re-running setup:
+**What's new in v4.6.0:** Debate hardening (#101 + #103/#104). After re-running setup:
+- `/ask-gpt` and `/ask-gemini` now actively detect silent empty bodies. If the token cap is exhausted by reasoning/thinking, a refusal is returned, or a safety filter triggers, the script throws a descriptive error naming the cause AND the fix (e.g. "Raise GPT_MAX_TOKENS or shorten the input"). Empty exit-code-0 returns are no longer possible.
+- Default token cap raised from 4096 to 32000 in both scripts. Above OpenAI's 25K reasoning reserve and Gemini's 8192 SDK default, so reasoning has room to think before visible output is generated. Lower it with `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS` to cap cost.
+- Each `/ask-gpt` and `/ask-gemini` invocation now gets a session ID (`$(date +%s)-$RANDOM`) embedded in every `/tmp/ask-*-{context,debate}-<session-id>.md` path. Two parallel Cursor or Claude Code tabs running the same command no longer clobber each other's transcripts. The debate file's first line is `<!-- Session: <id> -->` so the ID stays recoverable if context compression drops it; recovery instructions explicitly warn against blindly picking the most recent file under concurrency.
+- `/ask-gpt` and `/ask-gemini` final summaries now use the canonical 4-field finding structure from `/review` (What / Why it matters / Example / Suggested fix), sliced from `.claude/skills/shared/output-template.md` via a new `loadOutputTemplate()` helper. Mid-debate severity vocabulary unified from `[CRITICAL/MAJOR/MINOR]` to 🚫/⚠️/💡 + R-IDs. Disagreed Points use 🤔 to avoid colliding with Warn severity.
+- `.claude/settings.local.json` adds Skill permissions for `/explore`, `/create-plan`, `/execute`, `/review` so subagents do not prompt mid-flow.
+
+**What was new in v4.5.1:** Documentation audit (issue #99). After re-running setup:
 - README.md repositioned for non-AI-fluent newcomers: new headline ("AI peer review for your work."), debate-output screenshot moved to the top, "How key commands work" section with callouts for the six commands carrying the workflow, "slash command" / Cursor / Claude Code defined inline.
 - AGENT-SETUP graveyard trimmed: only the last three release-notes blocks remain inline; older entries point at CHANGELOG.md.
 - Cost claims removed from CHANGELOG.md and AGENT-SETUP.md per issue 99 review-comment. Replaced unmeasured projections with "See `/index` output for actual cost."
@@ -118,22 +125,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - `bump-version.sh` got an ordered checklist reminder for future model bumps: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL`. Catches the obvious paste-the-new-value mistake.
 - No new permissions needed. `.env.local` is never read or written by any of the new code - all override logic lives in the Node scripts where the env value is already in memory.
 
-**What was new in v4.4.1:** Richer review explanations (issue #98). After re-running setup:
-- All review findings now follow a mandatory 4-field structure: What / Why it matters / Example / Suggested fix. The Example field describes real-world impact (user or system consequence), not abstract risk. All 8 review skills (`/review-code`, `/review-ux`, `/review-plan`, `/review-commands`, `/review-browser`, `/review-full`, `/review-deps`, `/review-copy`) inherit the change automatically via shared `!cat` injection.
-- A Skip rule was added to `severity-anchors.md`: purely cosmetic findings (typos in non-user-facing comments, whitespace, missing periods, etc.) with no functional/security/a11y/maintainability impact are dropped entirely instead of being bulked up to fit the 4-field structure. Existing severity floors (secrets, data loss, a11y, requirements) still override the skip rule when relevant.
-- The `/review` orchestrator was DRYed up: it now inlines the shared template via `!cat`, wrapped in `<shared_template>` XML tags, instead of duplicating the format inline. Single source of truth.
-- Code+browser merged findings now preserve browser evidence fields (Screenshot, Evidence, Expected, Actual) alongside the 4 base fields - the merged finding is a unified evidence-plus-fix report.
-- No new permissions needed. No setup-script changes - re-running setup refreshes the three modified shared/orchestrator files.
-
-**What was new in v4.4.0:** Codebase Map replaces flat-tree `INDEX.md` (issue #97). After re-running setup:
-- Old `INDEX.md` is detected and removed (the original is preserved in `.toolkit-backup-*/` per issue #79). It is replaced by `CODEBASE_MAP.md`, a semantic map: module purposes, entry points, conventions, gotchas, navigation guide.
-- `CODEBASE_MAP.md` is generated by `/index`, which orchestrates parallel Claude subagents (one per ~250k-token chunk, max 5). See `/index` output for actual cost.
-- The first `/explore` after upgrade auto-invokes `/index` to generate the map. No manual step needed; lazy generation handles it.
-- `/create-plan`, `/pair-debug`, and `/document` now also consume `CODEBASE_MAP.md`. `/explore` performs a staleness check (compares HEAD with map commit) and warns if drift is detected.
-- No new permissions needed - the existing `Bash(node .claude/scripts/generate-index.js *)` permission still covers the refactored scanner.
-- The v3.4 lesson ("LLMs cost more than they save") was correct about mid-session scanning, but over-applied to cancel one-time upfront generation. See LESSONS.md for the nuanced re-read.
-
-See [CHANGELOG.md](CHANGELOG.md) for older release notes (v4.3.3 and earlier).
+See [CHANGELOG.md](CHANGELOG.md) for older release notes (v4.4.1 and earlier).
 
 ---
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v4.6.0 - Debate Hardening
 
 ### Changed
 - **`/ask-gpt` and `/ask-gemini` final summaries now use the 4-field finding structure** (#103, PR #104) - Each Recommended Action emits What / Why it matters / Example / Suggested fix, sourced from the canonical `.claude/skills/shared/output-template.md` via a new `loadOutputTemplate()` slice. Mid-debate severity vocabulary unified from `[CRITICAL/MAJOR/MINOR]` to 🚫/⚠️/💡 + R-IDs, matching `/review`. End-to-end the user now sees one severity language across `/review`, `/ask-gpt`, and `/ask-gemini`.
@@ -23,7 +23,7 @@
 
 ## What's new since v4.3.3
 
-If you last installed v4.3.3, four releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.
+If you last installed v4.3.3, five releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. v4.6.0 hardens the debate path: silent empty bodies and parallel-tab `/tmp` collisions are gone (#101), and `/ask-gpt` + `/ask-gemini` final summaries now use the same 4-field finding structure as `/review` (#103). Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.
 
 ## v4.5.1 - Documentation Audit
 

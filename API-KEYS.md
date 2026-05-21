@@ -180,7 +180,7 @@ Reasoning models (gpt-5.x, gemini-3.x) use part of the token budget on internal 
 
 ### What happens if the budget is too small?
 
-Starting with the v4.5.1 fix for issue #101, the scripts now actively detect this case and tell you what happened:
+Starting with the v4.6.0 fix for issue #101, the scripts now actively detect this case and tell you what happened:
 
 - **Empty output** -> the script throws `OpenAI returned empty body (finish_reason: length, reasoning_tokens: N, completion_tokens: N). Raise GPT_MAX_TOKENS or shorten the input.` (or the Gemini equivalent with `thoughts_tokens` / `candidates_tokens`). Exit code 1.
 - **Truncated output** (some content but cut off mid-sentence) -> the script prints a warning to stderr naming the cause and token counts, then still returns whatever content was produced. Exit code 0. You see both the warning and the partial content so you can decide whether to rerun with a higher cap.

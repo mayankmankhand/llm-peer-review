@@ -134,14 +134,13 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's new since v4.3.3
 
-Several releases plus two unreleased fixes land as one upgrade if you last installed v4.3.3:
+Five releases land as one upgrade if you last installed v4.3.3:
 
 - **v4.4.0 - Codebase map.** `/index` now produces `CODEBASE_MAP.md`, a semantic map (module purposes, conventions, gotchas) consumed by `/explore`, `/create-plan`, and `/pair-debug`. Replaces the flat-tree `INDEX.md` from v3.4.
 - **v4.4.1 - Richer review explanations.** All `/review-*` skills now use a 4-field finding structure (What / Why it matters / Example / Suggested fix). Cosmetic-only findings are dropped instead of being bulked up.
 - **v4.5.0 - Model default safety net.** `/ask-gpt` and `/ask-gemini` auto-override outdated `GPT_MODEL` or `GEMINI_MODEL` values in `.env.local`. Setting an old default (e.g. `gpt-5.4`) gets you the current default (`gpt-5.5`) with a one-line warning.
 - **v4.5.1 - Documentation audit.** README repositioned for newcomers, "What's new" rollup added to CHANGELOG, deprecated-model warning explainer added to API-KEYS.md, broken anchors fixed. Doc-only release, no behavior change.
-- **Unreleased: empty-body detection and 32K token caps** (#101). Both debate scripts now detect when a token cap is exhausted by reasoning tokens or hit by a refusal/safety block, and throw a descriptive error naming the cause and the fix. Default cap raised from 4096 to 32000 (overridable via `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS`). Each debate invocation gets a session ID embedded in its `/tmp` paths so two parallel tabs can't clobber each other's transcripts.
-- **Unreleased: unified 4-field finding format across debates** (#103). `/ask-gpt` and `/ask-gemini` final summaries now use the same `What / Why it matters / Example / Suggested fix` structure as `/review`, with 🚫/⚠️/💡 emojis and R-IDs end-to-end. Disagreed Points now use 🤔 instead of ⚠️ to avoid colliding with Warn severity.
+- **v4.6.0 - Debate hardening.** Two-PR cut. (#101) Empty-body detection in `/ask-gpt` and `/ask-gemini`: silent failures (token cap exhausted by reasoning, refusals, safety blocks) now throw a descriptive error naming both cause and fix. Default token cap raised from 4096 to 32000 (overridable via `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS`). Each debate invocation gets a session ID embedded in its `/tmp` paths so two parallel Cursor or Claude Code tabs cannot clobber each other's transcripts. (#103) `/ask-gpt` and `/ask-gemini` final summaries now use the same 4-field finding structure as `/review` (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and R-IDs end-to-end. Disagreed Points use 🤔 instead of ⚠️ to avoid colliding with Warn severity.
 
 See the [full upgrade summary in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), or re-run setup to pick up everything automatically.
 
