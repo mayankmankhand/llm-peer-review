@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- **`/ask-gpt` and `/ask-gemini` final summaries now use the 4-field finding structure** (#103, PR #104) - Each Recommended Action emits What / Why it matters / Example / Suggested fix, sourced from the canonical `.claude/skills/shared/output-template.md` via a new `loadOutputTemplate()` slice. Mid-debate severity vocabulary unified from `[CRITICAL/MAJOR/MINOR]` to 🚫/⚠️/💡 + R-IDs, matching `/review`. End-to-end the user now sees one severity language across `/review`, `/ask-gpt`, and `/ask-gemini`.
+- **"Disagreed Points" emoji changed from ⚠️ to 🤔** to avoid collision with Warn severity in the same report.
+- **`loadOutputTemplate()` is lazy and memoized** via a `get summary()` getter on the PROMPTS object. The `review` and `respond` paths still work when the template file is missing; only `summary` requires it.
+- **Loud-failure error paths** when the shared template is missing or the slice marker has been renamed. Errors name both scripts and the specific marker constant to update, satisfying the mirror-parity requirement.
+- **Skill permissions for `/explore`, `/create-plan`, `/execute`, `/review`** added to `.claude/settings.local.json` so subagents do not prompt mid-flow.
+
+### Fixed
+- **`/ask-gpt` and `/ask-gemini` silent empty bodies** (#101) - Both scripts previously returned `''` with exit code 0 when a token cap was exhausted by reasoning tokens, a refusal hit, or a safety block triggered. Detection now actively inspects `finish_reason` / `finishReason`, `refusal`, `safetyRatings`, and reasoning/thoughts token counts, then throws a descriptive error naming the cause AND the fix (e.g. "Raise GPT_MAX_TOKENS or shorten the input"). Truncation (`finish_reason: length` with non-empty content) prints a stderr warning with token counts but does not fail.
+- **`/ask-gpt` and `/ask-gemini` token caps raised from 4096 to 32000** (#101) - The previous 4096 cap could be entirely consumed by reasoning/thinking tokens on long contexts, leaving zero for visible output. New `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS` env overrides for users who want a lower cap to limit cost.
+- **`/ask-gpt` and `/ask-gemini` tab-collision in /tmp paths** (#101) - Two parallel Cursor or Claude Code tabs running the same command would clobber each other's `/tmp/ask-*-{context,debate}.md` files. Each invocation now generates a session ID (`$(date +%s)-$RANDOM`) via Step 1.5 of the command and embeds it in every temp file path. The debate file's first line is `<!-- Session: <id> -->` so the ID stays recoverable after context compression. A `warnIfSessionMismatch` helper warns when `--context-file` and `--debate-file` carry different session IDs.
+
+### Notes
+- **Mirror parity** between `ask-gpt.js` and `ask-gemini.js` (and between their `.md` command files) is enforced by convention. Any change to one is mirrored in the other; the loud-failure error message reminds future editors to update both scripts when the slice marker is renamed.
+- **Settled action items from the post-merge `/ask-gpt` + `/ask-gemini` debate** (PR #104 follow-up): replace heading-based template slicing with explicit `BEGIN_REVIEW_FINDING_OUTPUT_CONTRACT` / `END_...` markers, narrow the slice to just the reusable finding contract, rename the helper to `loadFindingOutputContract()`, bracket-wrap meta-instructions in the summary prompt, align R-line shape across all surfaces, standardize the recovery command on `git restore`. Not in this release; tracked as a future follow-up titled "Harden debate summary prompt against template drift."
+- **Re-running setup** picks up the new scripts, the new permissions, and the updated command files.
+
+---
+
 ## What's new since v4.3.3
 
 If you last installed v4.3.3, four releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.

@@ -70,7 +70,7 @@ Full prompt: [`.claude/commands/review.md`](.claude/commands/review.md)
 
 ### `/ask-gpt` and `/ask-gemini` - Debate with another AI
 
-Run a 3-round structured debate between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](API-KEYS.md) for setup.
+Run a 3-round structured debate between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same 4-field structure as `/review` (What / Why it matters / Example / Suggested fix), so the output model is consistent across all peer-review surfaces. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](API-KEYS.md) for setup.
 
 Full prompts: [`.claude/commands/ask-gpt.md`](.claude/commands/ask-gpt.md) | [`.claude/commands/ask-gemini.md`](.claude/commands/ask-gemini.md)
 
@@ -134,11 +134,14 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's new since v4.3.3
 
-Three releases land as one upgrade if you last installed v4.3.3:
+Several releases plus two unreleased fixes land as one upgrade if you last installed v4.3.3:
 
 - **v4.4.0 - Codebase map.** `/index` now produces `CODEBASE_MAP.md`, a semantic map (module purposes, conventions, gotchas) consumed by `/explore`, `/create-plan`, and `/pair-debug`. Replaces the flat-tree `INDEX.md` from v3.4.
 - **v4.4.1 - Richer review explanations.** All `/review-*` skills now use a 4-field finding structure (What / Why it matters / Example / Suggested fix). Cosmetic-only findings are dropped instead of being bulked up.
 - **v4.5.0 - Model default safety net.** `/ask-gpt` and `/ask-gemini` auto-override outdated `GPT_MODEL` or `GEMINI_MODEL` values in `.env.local`. Setting an old default (e.g. `gpt-5.4`) gets you the current default (`gpt-5.5`) with a one-line warning.
+- **v4.5.1 - Documentation audit.** README repositioned for newcomers, "What's new" rollup added to CHANGELOG, deprecated-model warning explainer added to API-KEYS.md, broken anchors fixed. Doc-only release, no behavior change.
+- **Unreleased: empty-body detection and 32K token caps** (#101). Both debate scripts now detect when a token cap is exhausted by reasoning tokens or hit by a refusal/safety block, and throw a descriptive error naming the cause and the fix. Default cap raised from 4096 to 32000 (overridable via `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS`). Each debate invocation gets a session ID embedded in its `/tmp` paths so two parallel tabs can't clobber each other's transcripts.
+- **Unreleased: unified 4-field finding format across debates** (#103). `/ask-gpt` and `/ask-gemini` final summaries now use the same `What / Why it matters / Example / Suggested fix` structure as `/review`, with 🚫/⚠️/💡 emojis and R-IDs end-to-end. Disagreed Points now use 🤔 instead of ⚠️ to avoid colliding with Warn severity.
 
 See the [full upgrade summary in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), or re-run setup to pick up everything automatically.
 
