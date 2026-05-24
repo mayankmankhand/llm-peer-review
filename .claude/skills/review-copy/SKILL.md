@@ -101,6 +101,18 @@ Each sub-agent should use the severity scale and Finding ID format below. If a s
 
 !`cat .claude/skills/shared/output-template.md`
 
+## HTML Companion (when gate fires)
+
+After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+
+!`cat .claude/skills/shared/html-render-review.md`
+
+Design tokens for the HTML output (typography, color palette, severity hex values):
+
+!`cat .claude/skills/shared/html-look.md`
+
+For direct calls to this skill, use `<type>` = `copy` in the HTML filename. Skip the Specialist Chips header (single-specialist context).
+
 ### Staff Editor Check
 
 <guidelines>

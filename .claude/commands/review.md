@@ -80,6 +80,8 @@ Project context:
 
 Files to review:
 [LIST CHANGED FILES RELEVANT TO THIS SPECIALIST]
+
+Important: Do NOT generate an HTML companion file. The orchestrator produces a single combined HTML for the whole run after synthesizing your findings. Only output the markdown report; skip the HTML Companion section entirely.
 ```
 
 **If a subagent fails** (error, timeout, or empty response), note it in the final report: "Note: [Specialist name] review did not complete. Run `/review [type]` to retry."
@@ -147,6 +149,21 @@ Example findings with tags applied:
 - Deduplicated findings: X (Y raw findings from specialists)
 
 </output_format>
+
+## HTML Companion (when gate fires)
+
+After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+
+!`cat .claude/skills/shared/html-render-review.md`
+
+Design tokens for the HTML output (typography, color palette, severity hex values):
+
+!`cat .claude/skills/shared/html-look.md`
+
+For orchestrator output specifically:
+- Use `<type>` = `orchestrator` in the HTML filename
+- Render the Specialist Chips header when 2 or more specialists were dispatched; skip the chips for single-specialist orchestrator runs
+- Group finding cards by specialist tag, preserving the order from Phase 3 synthesis
 
 <rules>
 ## REMEMBER: Report issues only. Do NOT edit any files until I approve.

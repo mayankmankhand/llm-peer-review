@@ -63,6 +63,18 @@ Each sub-agent should use the severity scale and Finding ID format below. If a s
 
 !`cat .claude/skills/shared/output-template.md`
 
+## HTML Companion (when gate fires)
+
+After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+
+!`cat .claude/skills/shared/html-render-review.md`
+
+Design tokens for the HTML output (typography, color palette, severity hex values):
+
+!`cat .claude/skills/shared/html-look.md`
+
+For direct calls to this skill, use `<type>` = `full` in the HTML filename. Render the Specialist Chips header with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip-rendering purposes.
+
 ### Staff Architect Check
 
 <guidelines>

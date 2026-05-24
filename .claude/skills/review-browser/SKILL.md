@@ -106,6 +106,18 @@ Use the evidence you gathered (screenshots, text, console errors, network failur
 
 !`cat .claude/skills/shared/output-template.md`
 
+## HTML Companion (when gate fires)
+
+After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+
+!`cat .claude/skills/shared/html-render-review.md`
+
+Design tokens for the HTML output (typography, color palette, severity hex values):
+
+!`cat .claude/skills/shared/html-look.md`
+
+For direct calls to this skill, use `<type>` = `browser` in the HTML filename. Skip the Specialist Chips header (single-specialist context). Browser findings carry extra fields (Screenshot, Evidence, Expected, Actual) which the shared template maps to additional `<div class="field">` blocks inside each finding card.
+
 ### Staff QA Check
 
 <guidelines>

@@ -120,3 +120,46 @@ Create the `plans/` directory if it doesn't exist.
 Again, it's still not time to build yet. Just write the clear plan document. No extra complexity or extra scope beyond what we discussed.
 
 </rules>
+
+## Render HTML View (default-on)
+
+After writing the markdown plan, also render an HTML view of the same plan to `plans/` using the matching name (`PLAN-issue-N.html` or `PLAN-<short-name>.html`).
+
+<rules>
+
+- HTML is generated **only at plan creation**. `/execute` never re-renders it.
+- HTML is a one-time snapshot for the human reader. Markdown remains canonical for `/execute` and `/review-plan`.
+- File is self-contained: inline `<style>` block, no CDN, no external assets.
+- This is default-on per `.claude/rules/html-outputs.md`. No judgement call needed.
+
+</rules>
+
+### Inline the Shared Visual Look
+
+Inline the typography, color tokens, and severity badge colors documented in the shared look reference. Read it via:
+
+!`cat .claude/skills/shared/html-look.md`
+
+Apply those tokens as CSS custom properties inside a `<style>` block. Do not introduce new tokens.
+
+### HTML Structure
+
+The HTML mirrors the markdown sections:
+
+1. `<h1>` with the plan name
+2. **TLDR** card at the top (background `--bg-muted`, prominent)
+3. **Goal State** as a two-column layout (Current vs Goal) when present
+4. **UI/UX Design** block when present
+5. **Critical Decisions** list
+6. **Tasks** as a table or grid. Each row shows the step name, the parallel/sequential tag, and a status badge
+7. **Outcomes** placeholder (empty section, populated later from markdown if needed)
+
+Use semantic HTML (`<section>`, `<article>`, `<h2>`, `<h3>`) so the file is readable.
+
+### Status Badges (Visual Scaffolding)
+
+<rules>
+
+All tasks render with the 🟥 To Do badge at creation. This is visual scaffolding showing the structure of the work, not live status. The badges never update because the HTML never re-renders. Markdown is the source of truth for current status during `/execute`.
+
+</rules>
