@@ -180,6 +180,7 @@ If they say skip, present a vision-mode closing summary before suggesting `/crea
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
 - **Open questions** - anything unresolved that `/create-plan` should address during execution
 - **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
+- **HTML playground (when 2+ options being compared)** - announce per `.claude/rules/html-outputs.md`: "Generating an HTML playground because you are comparing N options. Say 'skip HTML' if you want markdown only." Then dispatch the `playground` skill for a static side-by-side HTML view by default. Ask the user "Want this interactive? (drag, toggle, slider)" and upgrade to an interactive playground if yes. The user reviews in their browser and returns with their decision. **Detecting the reply:** if the user's message starts with `Playground result`, treat the rest as structured state (selection, drag order, slider values, toggle states) and feed it into the closing summary. Otherwise treat the reply as natural-language decision input. `/explore` never modifies the playground output - the export loop is the only path back. Skip this bullet entirely when fewer than 2 options are on the table.
 - **Suggested next step** - "Ready for `/create-plan` when you are"
 
 If they say yes, continue with the analysis below.

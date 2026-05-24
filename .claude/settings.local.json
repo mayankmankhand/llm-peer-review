@@ -79,8 +79,15 @@
       "Skill(execute:*)",
       "Skill(review)",
       "Skill(review:*)",
+      "Skill(playground)",
+      "Skill(playground:*)",
       "Bash(grep -q \"^# Codebase Map$\" CODEBASE_MAP.md.tmp)",
-      "Bash(grep -q \"^## Module Guide$\" CODEBASE_MAP.md.tmp)"
+      "Bash(grep -q \"^## Module Guide$\" CODEBASE_MAP.md.tmp)",
+      "WebFetch(domain:thariqs.github.io)",
+      "Edit(/.claude/skills/shared/**)",
+      "Bash(command -v pwsh)",
+      "Bash(pwsh -NoProfile -Command '& { $ErrorActionPreference='\\\\''Stop'\\\\''; try { [scriptblock]::Create\\(\\(Get-Content -Raw scripts/setup/setup.ps1\\)\\) | Out-Null; Write-Output '\\\\''setup.ps1 syntax OK'\\\\'' } catch { Write-Output \"setup.ps1 syntax error: $_\"; exit 1 } }')",
+      "Bash(grep -rn '!`cat' .claude/skills/)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -63,6 +63,7 @@ We follow this flow for features:
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
+| `/playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /explore vision mode) |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | (Re)generate `CODEBASE_MAP.md` - a semantic map of module purposes, conventions, and gotchas. Read by `/explore`, `/create-plan`, `/pair-debug`. |
 
