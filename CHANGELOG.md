@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **HTML output rule and shared visual reference** (#113) - Foundation for #102. New `.claude/rules/html-outputs.md` documents when toolkit commands produce HTML: the Reader/Claude principle (markdown for Claude, HTML for the human, playground for the user-doing-something), the default-on list (`/codebase-to-course`, `/create-plan`, `/document` cycle summary), Claude's-judgement triggers per other command, and the playground export-loop rule. New `.claude/skills/shared/html-look.md` defines minimal v1 visual tokens: typography, neutral color palette, severity badge hex (Block `#dc2626`, Warn `#d97706`, Suggest `#2563eb`), and the copy-button pattern. `setup.sh` and `setup.ps1` propagate the new rule with the same version-stamp pattern as `toolkit.md`; `bump-version.sh` now stamps both rule files per release. New gitignored `artifacts/html/` for cycle-bound HTML output. Sub-issues B (playground skill), C (plans + reviews HTML), D (explore + debate + document HTML) build on top of this foundation.
+
+### Fixed
+- **`setup.ps1` never copied `.claude/skills/`** (#113, discovered mid-execution) - Pre-existing gap surfaced while implementing #113: the PowerShell installer had no skills propagation logic at all, so Windows users running `setup.ps1` received no review skills, no learning-opportunity skill, and no shared reference files. Now mirrors the bash skills loop (`shared/*.md` first, then each per-skill directory) with matching try/catch error handling. Two related setup.ps1 gaps remain as potential follow-ups (no `VERSION` copy, no `generate-index.js` copy).
+
+---
+
 ## v4.6.0 - Debate Hardening
 
 ### Changed
