@@ -10,6 +10,14 @@
 
 ### Fixed
 - **`setup.ps1` never copied `.claude/skills/`** (#113, discovered mid-execution) - Pre-existing gap surfaced while implementing #113: the PowerShell installer had no skills propagation logic at all, so Windows users running `setup.ps1` received no review skills, no learning-opportunity skill, and no shared reference files. Now mirrors the bash skills loop (`shared/*.md` first, then each per-skill directory) with matching try/catch error handling. Two related setup.ps1 gaps remain as potential follow-ups (no `VERSION` copy, no `generate-index.js` copy).
+- **Review fixes on the #113-#116 HTML feature** (#102 follow-up) - A diff review of the shipped sub-issues surfaced gaps, now fixed:
+  - `setup.sh` and `setup.ps1` create `artifacts/` and propagate the tracked `artifacts/README.md`. Previously orphaned: the feature wrote to `artifacts/html/` downstream but the orientation README never shipped, and `.gitignore` pushed an `artifacts/html/` rule for a directory that did not exist (R1).
+  - HTML artifacts auto-open in the user's browser (`open` / `wslview` / `explorer.exe` / `xdg-open`) via a new "Opening the Artifact" rule in `html-outputs.md`. Previously the user got a file link that opens HTML source in the editor, not the rendered page (R4).
+  - `bump-version.sh` collapses its two duplicated version-stamp blocks into one loop over a `RULES_FILES` array (R6).
+  - `/ask-gpt` and `/ask-gemini` HTML headings match the review skills ("HTML Companion (when gate fires)") with the 3+ Recommended Actions trigger stated in the body (R7).
+  - `/explore`'s HTML bullet is now four scannable sub-bullets marking the `artifacts/html/` file as the canonical record and the playground as the disposable throwaway (R9, R14).
+  - `/document`'s cycle summary states its chosen window in plain English on fallback so a wrong scope (e.g. a marker from another branch) is catchable (R10).
+  - `artifacts/README.md` corrected (plan renders live in `plans/`, not `artifacts/`) and gained a disposability note (R5).
 
 ---
 
