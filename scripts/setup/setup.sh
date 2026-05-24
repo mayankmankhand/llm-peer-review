@@ -123,7 +123,7 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" ]; then
 fi
 
 # Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .gitignore .gitattributes; do
+for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -512,6 +512,15 @@ safe_copy "$TOOLKIT_ROOT/.claude/rules/toolkit.md" "$TARGET/.claude/rules/toolki
 sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/toolkit.md"
 rm -f "$TARGET/.claude/rules/toolkit.md.bak"
 OVERWROTE+=(.claude/rules/toolkit.md)
+
+# HTML output rules (issue #113) - same stamp pattern as toolkit.md.
+# Source ships pre-stamped via bump-version.sh; this sed is a no-op on
+# stamped files and harmless on re-runs.
+echo "  Copying .claude/rules/html-outputs.md ..."
+safe_copy "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" "$TARGET/.claude/rules/html-outputs.md"
+sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/html-outputs.md"
+rm -f "$TARGET/.claude/rules/html-outputs.md.bak"
+OVERWROTE+=(.claude/rules/html-outputs.md)
 
 # ─── Index generator script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/generate-index.js ..."

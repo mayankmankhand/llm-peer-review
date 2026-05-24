@@ -118,7 +118,7 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".gitignore", ".gitattributes")) {
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", ".gitignore", ".gitattributes")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -173,6 +173,7 @@ if (Test-Path -LiteralPath $GlobalCmdDir -PathType Container) {
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\scripts") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\skills") | Out-Null
 
 # --- Backup helpers (issue #79) --------------------------------
 # Before overwriting or deleting any file in the target, copy the original
@@ -374,6 +375,50 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
   }
 }
 
+# --- Skill files (upstream-owned - always copy; mirrors setup.sh) ---
+# Added in issue #113. Previously setup.ps1 did not copy .claude\skills\
+# at all, so Windows users never received review skills or shared reference
+# files (output-template.md, severity-anchors.md, html-look.md, etc.).
+# This block mirrors the setup.sh skills loop: copy shared\ first, then
+# iterate each skill directory.
+Write-Host "  Copying .claude\skills\ ..."
+
+# Copy shared supporting files first
+$sharedDir = Join-Path $ToolkitRoot ".claude\skills\shared"
+if (Test-Path -LiteralPath $sharedDir -PathType Container) {
+  $sharedDest = Join-Path $Target ".claude\skills\shared"
+  New-Item -ItemType Directory -Force -Path $sharedDest | Out-Null
+  foreach ($src in Get-ChildItem -Path $sharedDir -Filter *.md -File) {
+    $dest = Join-Path $sharedDest $src.Name
+    try {
+      Invoke-SafeCopy -Source $src.FullName -Destination $dest
+    } catch {
+      Write-Host "  Error: Failed to copy shared\$($src.Name): $_"
+      exit 1
+    }
+  }
+}
+
+# Copy each skill directory (contains SKILL.md and optional supporting files)
+$skillsRoot = Join-Path $ToolkitRoot ".claude\skills"
+if (Test-Path -LiteralPath $skillsRoot -PathType Container) {
+  foreach ($skillDir in Get-ChildItem -Path $skillsRoot -Directory) {
+    if ($skillDir.Name -eq "shared") { continue }
+    Write-Host "    $($skillDir.Name)"
+    $skillDest = Join-Path $Target (Join-Path ".claude\skills" $skillDir.Name)
+    New-Item -ItemType Directory -Force -Path $skillDest | Out-Null
+    foreach ($src in Get-ChildItem -Path $skillDir.FullName -File) {
+      $dest = Join-Path $skillDest $src.Name
+      try {
+        Invoke-SafeCopy -Source $src.FullName -Destination $dest
+      } catch {
+        Write-Host "  Error: Failed to copy $($skillDir.Name)\$($src.Name): $_"
+        exit 1
+      }
+    }
+  }
+}
+
 # --- Runtime scripts and quarantined package.json (issue #91) ---
 # Runtime scripts and their deps live under .claude\scripts\ so they don't
 # leak into the downstream project's root package.json. Setup scripts stay
@@ -458,6 +503,23 @@ try {
 $content = Get-Content -LiteralPath $toolkitRuleDest -Raw
 $content = $content -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
 Set-Content -LiteralPath $toolkitRuleDest -Value $content -NoNewline
+
+# --- HTML output rules (issue #113, mirror of toolkit.md handling) ---
+# Same stamp pattern as toolkit.md. Source ships pre-stamped via
+# bump-version.sh; this -replace is a no-op on stamped files and harmless
+# on re-runs.
+Write-Host "  Copying .claude\rules\html-outputs.md ..."
+$htmlRuleSrc = Join-Path $ToolkitRoot ".claude\rules\html-outputs.md"
+$htmlRuleDest = Join-Path $Target ".claude\rules\html-outputs.md"
+try {
+  Invoke-SafeCopy -Source $htmlRuleSrc -Destination $htmlRuleDest
+} catch {
+  Write-Host "  Error: Failed to copy html-outputs.md: $_"
+  exit 1
+}
+$htmlContent = Get-Content -LiteralPath $htmlRuleDest -Raw
+$htmlContent = $htmlContent -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
+Set-Content -LiteralPath $htmlRuleDest -Value $htmlContent -NoNewline
 
 foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
   $src = Join-Path $ToolkitRoot $f

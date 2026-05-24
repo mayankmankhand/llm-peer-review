@@ -80,6 +80,10 @@ Skills live in `.claude/skills/<name>/SKILL.md`. They auto-create slash commands
 
 **How shared content works:** Skill files use `` !`cat .claude/skills/shared/<file>` `` to inline shared content at skill-load time. This is Claude Code's dynamic context injection syntax - the runtime executes the shell command and replaces it with the output before the skill content reaches the model. It does not require Bash in the skill's `allowed-tools`. Note: subagents do NOT auto-discover skills. The `/review` orchestrator explicitly reads skill files and passes their content to subagents.
 
+### HTML Outputs
+
+`.claude/rules/html-outputs.md` documents when and how toolkit commands produce HTML (Reader/Claude principle, default-on commands, Claude's judgement triggers, playground export-loop rule). The shared visual reference (typography, colors, severity badge hex values, copy-button pattern) lives in `.claude/skills/shared/html-look.md` and inlines into HTML-producing commands via `` !`cat` ``. Cycle-bound HTML artifacts land in `artifacts/html/` (gitignored).
+
 ### Command-Specific Rules
 
 **When Running any /review-* command or skill:**

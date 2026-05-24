@@ -98,6 +98,28 @@ NEW_VERSION="$NEW" node -e '
 '
 echo "  Updated .claude/rules/toolkit.md"
 
+# 5. .claude/rules/html-outputs.md version stamp (added in issue #113)
+# Uses the same regex pattern as toolkit.md above. If a third rule file is
+# added in the future, consider refactoring this and the toolkit.md block
+# into a loop over .claude/rules/*.md.
+NEW_VERSION="$NEW" node -e '
+  const fs = require("fs");
+  const path = ".claude/rules/html-outputs.md";
+  const v = process.env.NEW_VERSION;
+  const content = fs.readFileSync(path, "utf8");
+  const updated = content.replace(
+    /<!-- Toolkit version: [^|]+\|/,
+    `<!-- Toolkit version: ${v} |`
+  );
+  if (updated === content) {
+    console.error("Error: could not find version stamp in " + path);
+    console.error("Expected pattern: <!-- Toolkit version: X.Y.Z |");
+    process.exit(1);
+  }
+  fs.writeFileSync(path, updated);
+'
+echo "  Updated .claude/rules/html-outputs.md"
+
 echo ""
 echo "Automated updates done. Still to do manually:"
 echo ""
