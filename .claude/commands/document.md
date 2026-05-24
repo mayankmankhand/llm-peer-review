@@ -75,3 +75,35 @@ Walk the user through each step one at a time, confirming before proceeding to t
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
 8. The branch stays alive on GitHub until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.
+
+## 7. Cycle Summary (HTML, default-on)
+
+Generate a one-page HTML summary of what shipped this cycle. Runs on every `/document`, per `.claude/rules/html-outputs.md` (default-on).
+
+### Determine the cycle window
+
+The "cycle" is everything since the last `/document` run, tracked by a marker file.
+
+1. Read `artifacts/html/.last-cycle` (a single line: the last summarized commit SHA).
+2. **If the marker exists** and the SHA is still in history: window = `<marker>..HEAD`.
+3. **If the marker is absent** (first run / fresh clone) **or the SHA is missing** (rebased/force-pushed): fall back to the last merged PR's merge commit (`gh pr list --state merged --limit 1 --json mergeCommit`, or the most recent merge in `git log`). Window = `<last-merge>..HEAD`. If no merged PR exists, use the last 20 commits.
+
+### Decide whether to generate
+
+Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (only whitespace or a single typo fix), skip the HTML but still advance the marker (last step). Otherwise generate the summary.
+
+### Generate the summary
+
+Write `artifacts/html/document-<YYYY-MM-DD>.html` (same-day re-run overwrites). Create `artifacts/html/` first if needed. Contents:
+- **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>`
+- **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each
+- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR (`gh pr list`), else omit
+- **Mini commit chart** - small inline bars of commits per day across the window (inline SVG or divs), from `git log --format=%ad --date=short <window>`
+
+For the visual look, **read** `.claude/skills/shared/html-look.md` only when generating this summary (not on every `/document` run) and inline its tokens (typography, color tokens, severity hex) into the `<style>` block.
+
+### Advance the marker (LAST step)
+
+After the HTML is written (or deliberately skipped), write the current `HEAD` SHA to `artifacts/html/.last-cycle`, overwriting the previous value.
+
+**This must be the final action of `/document`.** The marker is a high-water mark meaning "every commit up to here is already summarized." Writing it last guarantees that an interrupted run re-summarizes the same window (a harmless duplicate) rather than skipping work permanently. Never write the marker before the summary exists.

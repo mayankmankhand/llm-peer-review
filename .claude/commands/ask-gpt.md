@@ -181,6 +181,18 @@ Present the summary to the user in this format. Each Recommended Action uses the
 
 </output_format>
 
+### HTML Companion (when there are 3+ recommended actions)
+
+After presenting the markdown summary, evaluate whether to also generate an HTML view of the debate. Use the shared template:
+
+!`cat .claude/skills/shared/html-render-debate.md`
+
+Design tokens for the HTML output (typography, color palette, severity hex values):
+
+!`cat .claude/skills/shared/html-look.md`
+
+Use `gpt` as the `{model}` token in the HTML filename.
+
 ## Step 7: Await Approval
 
 <rules>
