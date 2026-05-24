@@ -123,7 +123,7 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" ]; then
 fi
 
 # Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md .gitignore .gitattributes; do
+for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -180,6 +180,7 @@ mkdir -p "$TARGET/.claude/rules"
 mkdir -p "$TARGET/.claude/scripts"
 mkdir -p "$TARGET/.claude/skills"
 mkdir -p "$TARGET/plans"
+mkdir -p "$TARGET/artifacts"
 
 # ─── Backup helpers (issue #79) ──────────────────────────────
 # Before overwriting or deleting any file in the target, copy the original
@@ -521,6 +522,14 @@ safe_copy "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" "$TARGET/.claude/rules/h
 sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/html-outputs.md"
 rm -f "$TARGET/.claude/rules/html-outputs.md.bak"
 OVERWROTE+=(.claude/rules/html-outputs.md)
+
+# ─── artifacts/ scaffold (issue #113) ────────────────────────
+# The HTML-output feature writes to artifacts/html/ in the target project.
+# Ship the tracked README so the directory is discoverable and the gitignored
+# html/ subdir has a home. safe_copy backs up any user customization.
+echo "  Copying artifacts/README.md ..."
+safe_copy "$TOOLKIT_ROOT/artifacts/README.md" "$TARGET/artifacts/README.md"
+OVERWROTE+=(artifacts/README.md)
 
 # ─── Index generator script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/generate-index.js ..."

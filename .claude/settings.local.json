@@ -87,7 +87,12 @@
       "Edit(/.claude/skills/shared/**)",
       "Bash(command -v pwsh)",
       "Bash(pwsh -NoProfile -Command '& { $ErrorActionPreference='\\\\''Stop'\\\\''; try { [scriptblock]::Create\\(\\(Get-Content -Raw scripts/setup/setup.ps1\\)\\) | Out-Null; Write-Output '\\\\''setup.ps1 syntax OK'\\\\'' } catch { Write-Output \"setup.ps1 syntax error: $_\"; exit 1 } }')",
-      "Bash(grep -rn '!`cat' .claude/skills/)"
+      "Bash(grep -rn '!`cat' .claude/skills/)",
+      "Bash(open *)",
+      "Bash(xdg-open *)",
+      "Bash(wslview *)",
+      "Bash(explorer.exe *)",
+      "Bash(wslpath *)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -181,9 +181,9 @@ Present the summary to the user in this format. Each Recommended Action uses the
 
 </output_format>
 
-### HTML Companion (when there are 3+ recommended actions)
+### HTML Companion (when gate fires)
 
-After presenting the markdown summary, evaluate whether to also generate an HTML view of the debate. Use the shared template:
+After presenting the markdown summary, evaluate whether to also generate an HTML view of the debate. The gate fires when there are 3+ Recommended Actions in the final summary (per `.claude/rules/html-outputs.md`). Use the shared template:
 
 !`cat .claude/skills/shared/html-render-debate.md`
 

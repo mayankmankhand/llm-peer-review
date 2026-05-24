@@ -79,46 +79,33 @@ if [ -f package-lock.json ]; then
   echo "  Updated package-lock.json"
 fi
 
-# 4. .claude/rules/toolkit.md version stamp
-NEW_VERSION="$NEW" node -e '
-  const fs = require("fs");
-  const path = ".claude/rules/toolkit.md";
-  const v = process.env.NEW_VERSION;
-  const content = fs.readFileSync(path, "utf8");
-  const updated = content.replace(
-    /<!-- Toolkit version: [^|]+\|/,
-    `<!-- Toolkit version: ${v} |`
-  );
-  if (updated === content) {
-    console.error("Error: could not find version stamp in " + path);
-    console.error("Expected pattern: <!-- Toolkit version: X.Y.Z |");
-    process.exit(1);
-  }
-  fs.writeFileSync(path, updated);
-'
-echo "  Updated .claude/rules/toolkit.md"
-
-# 5. .claude/rules/html-outputs.md version stamp (added in issue #113)
-# Uses the same regex pattern as toolkit.md above. If a third rule file is
-# added in the future, consider refactoring this and the toolkit.md block
-# into a loop over .claude/rules/*.md.
-NEW_VERSION="$NEW" node -e '
-  const fs = require("fs");
-  const path = ".claude/rules/html-outputs.md";
-  const v = process.env.NEW_VERSION;
-  const content = fs.readFileSync(path, "utf8");
-  const updated = content.replace(
-    /<!-- Toolkit version: [^|]+\|/,
-    `<!-- Toolkit version: ${v} |`
-  );
-  if (updated === content) {
-    console.error("Error: could not find version stamp in " + path);
-    console.error("Expected pattern: <!-- Toolkit version: X.Y.Z |");
-    process.exit(1);
-  }
-  fs.writeFileSync(path, updated);
-'
-echo "  Updated .claude/rules/html-outputs.md"
+# 4. Version stamp in managed rules files. Each file ships pre-stamped; this
+# rewrites the stamp to the new version. To add a new managed rule file, append
+# its path to the array below and it gets stamped automatically. Bash 3.2 safe
+# (simple indexed array).
+RULES_FILES=(
+  .claude/rules/toolkit.md
+  .claude/rules/html-outputs.md
+)
+for rules_file in "${RULES_FILES[@]}"; do
+  RULES_FILE="$rules_file" NEW_VERSION="$NEW" node -e '
+    const fs = require("fs");
+    const path = process.env.RULES_FILE;
+    const v = process.env.NEW_VERSION;
+    const content = fs.readFileSync(path, "utf8");
+    const updated = content.replace(
+      /<!-- Toolkit version: [^|]+\|/,
+      `<!-- Toolkit version: ${v} |`
+    );
+    if (updated === content) {
+      console.error("Error: could not find version stamp in " + path);
+      console.error("Expected pattern: <!-- Toolkit version: X.Y.Z |");
+      process.exit(1);
+    }
+    fs.writeFileSync(path, updated);
+  '
+  echo "  Updated $rules_file"
+done
 
 echo ""
 echo "Automated updates done. Still to do manually:"

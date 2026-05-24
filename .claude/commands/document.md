@@ -86,7 +86,8 @@ The "cycle" is everything since the last `/document` run, tracked by a marker fi
 
 1. Read `artifacts/html/.last-cycle` (a single line: the last summarized commit SHA).
 2. **If the marker exists** and the SHA is still in history: window = `<marker>..HEAD`.
-3. **If the marker is absent** (first run / fresh clone) **or the SHA is missing** (rebased/force-pushed): fall back to the last merged PR's merge commit (`gh pr list --state merged --limit 1 --json mergeCommit`, or the most recent merge in `git log`). Window = `<last-merge>..HEAD`. If no merged PR exists, use the last 20 commits.
+3. **If the marker is absent** (first run / fresh clone) **or the SHA is missing** (rebased/force-pushed, or the marker belongs to a different branch after a worktree switch): fall back to the last merged PR's merge commit (`gh pr list --state merged --limit 1 --json mergeCommit`, or the most recent merge in `git log`). Window = `<last-merge>..HEAD`. If no merged PR exists, use the last 20 commits.
+4. **State the chosen window in plain English** before generating, especially on any fallback: e.g., "Summarizing commits since `<ref>` (cycle marker found)." or "The cycle marker was missing or stale, so I am summarizing since `<ref>` instead - check that scope looks right." This lets the user catch a wrong window (for example a marker SHA from a different branch) before trusting the summary.
 
 ### Decide whether to generate
 

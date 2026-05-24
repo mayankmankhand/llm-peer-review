@@ -64,6 +64,24 @@ The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
 
+## Opening the Artifact
+
+HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. After writing any HTML file, open it in the user's default browser. Do not just hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source code, which is exactly the friction this rule removes.
+
+Detect the platform and use the first opener that works:
+
+| Platform | Command |
+|---|---|
+| macOS | `open "<file>"` |
+| WSL | `wslview "<file>"`, falling back to `explorer.exe "$(wslpath -w "<file>")"` |
+| Linux (no WSL) | `xdg-open "<file>"` |
+
+Then tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
+
+If every opener fails (headless environment, opener not installed), do not retry in a loop. Tell the user the path and that they should open it in a browser, not the editor: "Open this in your browser (not the editor): `<path>`."
+
+The `/playground` skill opens its `/tmp/` file the same way.
+
 ## Visual Look
 
 Typography, color tokens, severity badge colors, and the copy-button pattern live in `.claude/skills/shared/html-look.md`. Commands and skills generating HTML inline that file via `` !`cat .claude/skills/shared/html-look.md` ``.

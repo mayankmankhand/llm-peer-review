@@ -118,7 +118,7 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", ".gitignore", ".gitattributes")) {
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -174,6 +174,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands")
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\scripts") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\skills") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Target "artifacts") | Out-Null
 
 # --- Backup helpers (issue #79) --------------------------------
 # Before overwriting or deleting any file in the target, copy the original
@@ -520,6 +521,20 @@ try {
 $htmlContent = Get-Content -LiteralPath $htmlRuleDest -Raw
 $htmlContent = $htmlContent -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
 Set-Content -LiteralPath $htmlRuleDest -Value $htmlContent -NoNewline
+
+# --- artifacts/ scaffold (issue #113, mirror of setup.sh) ---
+# The HTML-output feature writes to artifacts\html\ in the target project.
+# Ship the tracked README so the directory is discoverable and the gitignored
+# html\ subdir has a home. Invoke-SafeCopy backs up any user customization.
+Write-Host "  Copying artifacts\README.md ..."
+$artifactsReadmeSrc = Join-Path $ToolkitRoot "artifacts\README.md"
+$artifactsReadmeDest = Join-Path $Target "artifacts\README.md"
+try {
+  Invoke-SafeCopy -Source $artifactsReadmeSrc -Destination $artifactsReadmeDest
+} catch {
+  Write-Host "  Error: Failed to copy artifacts\README.md: $_"
+  exit 1
+}
 
 foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
   $src = Join-Path $ToolkitRoot $f
