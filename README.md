@@ -107,6 +107,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` (skill) | Learn a concept at 3 levels of depth |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
+| `/playground` (skill) | Generate throwaway interactive HTML to compare options, drag-to-reorder, toggle variants, or tune sliders |
 | `/audit-html` (skill) | Scan your project's own markdown for files that would benefit from an HTML view. Report-only |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | (Re)generate the project's `CODEBASE_MAP.md` (semantic map of modules, conventions, gotchas) |

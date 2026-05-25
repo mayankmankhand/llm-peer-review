@@ -1,6 +1,6 @@
 # HTML Output Rules
 
-<!-- Toolkit version: 4.6.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.0.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## Purpose
 
@@ -40,8 +40,9 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 - `/explore` vision-mode summary: 2+ options being compared
 - `/ask-gpt` / `/ask-gemini`: 3+ Recommended Actions in the final summary
 - `/peer-review`: paired with an `/ask-*` debate that already produced HTML (mirror the upstream decision)
-- `/learning-opportunity`: 3+ depth levels with concrete examples at each, OR the concept is interactive (state machines, hashing, retries, etc.)
-- `/pair-debug`: 3+ hypotheses tracked
+- `/audit-html`: 5+ candidates listed in the report
+- `/learning-opportunity` (planned - not yet wired): 3+ depth levels with concrete examples at each, OR the concept is interactive (state machines, hashing, retries, etc.)
+- `/pair-debug` (planned - not yet wired): 3+ hypotheses tracked
 
 **When in doubt, skip HTML.** Markdown is the default; HTML is additive. Generating HTML for borderline cases creates inconsistent UX from session to session.
 
@@ -84,7 +85,7 @@ The `/playground` skill opens its `/tmp/` file the same way.
 
 ## Visual Look
 
-Typography, color tokens, severity badge colors, and the copy-button pattern live in `.claude/skills/shared/html-look.md`. Commands and skills generating HTML inline that file via `` !`cat .claude/skills/shared/html-look.md` ``.
+Typography, color tokens, severity badge colors, and the copy-button pattern live in `.claude/skills/shared/html-look.md`. Most commands and skills generating HTML inline that file via `` !`cat .claude/skills/shared/html-look.md` ``. The exceptions are `/explore` and `/document`, which run often but rarely produce HTML; they read `html-look.md` on demand only when generating, rather than inlining it on every invocation.
 
 ## Your Own Files (downstream projects)
 

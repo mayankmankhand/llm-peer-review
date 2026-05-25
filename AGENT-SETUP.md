@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v4.6.0)
+# AI Agent Setup Instructions (v5.0.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v4.6.0:** Debate hardening (#101 + #103/#104). After re-running setup:
+**What's new in v5.0.0:** HTML output milestone (#113-#118). Additive, not a breaking change. After re-running setup:
+- Human-read toolkit outputs now render an optional HTML view alongside the canonical markdown: `/create-plan` and `/document` (default-on), and `/review*`, `/ask-gpt`/`/ask-gemini`, `/explore` when a judgement gate fires. One rule file (`.claude/rules/html-outputs.md`) governs when and how. Markdown stays the source of truth; HTML is the rendered view for the human.
+- New `/playground` skill: throwaway, self-contained interactive HTML in `/tmp/` for in-the-loop decisions - compare options, drag-to-reorder, toggle variants, tune sliders. Output pastes back into chat as text; nothing is written into the repo.
+- New `/audit-html` skill: scans the project's own markdown and reports which files would read better as an HTML view. Report-only by default; the source markdown is never converted.
+- HTML artifacts land in gitignored `artifacts/html/` (and `plans/PLAN-*.html` for plans). Setup propagates the new rule file plus an `artifacts/README.md`, and announces "new this version" on upgrade.
+
+**What was new in v4.6.0:** Debate hardening (#101 + #103/#104). After re-running setup:
 - `/ask-gpt` and `/ask-gemini` now actively detect silent empty bodies. If the token cap is exhausted by reasoning/thinking, a refusal is returned, or a safety filter triggers, the script throws a descriptive error naming the cause AND the fix (e.g. "Raise GPT_MAX_TOKENS or shorten the input"). Empty exit-code-0 returns are no longer possible.
 - Default token cap raised from 4096 to 32000 in both scripts. Above OpenAI's 25K reasoning reserve and Gemini's 8192 SDK default, so reasoning has room to think before visible output is generated. Lower it with `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS` to cap cost.
 - Each `/ask-gpt` and `/ask-gemini` invocation now gets a session ID (`$(date +%s)-$RANDOM`) embedded in every `/tmp/ask-*-{context,debate}-<session-id>.md` path. Two parallel Cursor or Claude Code tabs running the same command no longer clobber each other's transcripts. The debate file's first line is `<!-- Session: <id> -->` so the ID stays recoverable if context compression drops it; recovery instructions explicitly warn against blindly picking the most recent file under concurrency.
@@ -118,14 +124,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - Broken internal anchors fixed (README -> SETUP heading rename; API-KEYS -> removed README section).
 - No new permissions, no behavior changes, no setup-script changes. Slash command and skill files were intentionally not modified during this audit. Downstream projects re-running setup refresh the doc files copied to them; `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` remain preserved.
 
-**What was new in v4.5.0:** Model default safety net (issue #100). After re-running setup:
-- `/ask-gpt` and `/ask-gemini` now hold a `KNOWN_STALE_*_MODELS` list. If `GPT_MODEL` or `GEMINI_MODEL` in `.env.local` matches a previous default (e.g. `gpt-5.2`, `gpt-5.4`, `gemini-3-flash-preview`, matched case-insensitively), the script ignores the env value, uses the current default, and prints a one-line stderr warning. Custom values not on the stale list are still respected silently. Result: latest toolkit = latest models, no manual `.env.local` edits required.
-- Each script prints `Using <provider> model: X` on stderr at the start of every run so users can confirm which model actually fired. stderr (not stdout) so the diagnostic stays out of the captured `/tmp/ask-*-debate.md` transcript that downstream rounds re-read.
-- `setup.sh` now prints the current model defaults at the end of a run (greps the JS files for `const DEFAULT_X_MODEL = '...'`). A one-liner explicitly notes that the toolkit never reads or writes `.env.local`.
-- `bump-version.sh` got an ordered checklist reminder for future model bumps: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL`. Catches the obvious paste-the-new-value mistake.
-- No new permissions needed. `.env.local` is never read or written by any of the new code - all override logic lives in the Node scripts where the env value is already in memory.
-
-See [CHANGELOG.md](CHANGELOG.md) for older release notes (v4.4.1 and earlier).
+See [CHANGELOG.md](CHANGELOG.md) for older release notes (v4.5.0 and earlier).
 
 ---
 
