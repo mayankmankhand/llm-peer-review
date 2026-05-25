@@ -57,6 +57,12 @@
 - **Shared files reduce duplication across review skills.** `.claude/skills/shared/` eliminated roughly 48 lines of duplicated content across 6 review skills.
 - **GPT and Gemini peer review caught things standard reviews missed.** Zombie process risk, setup script legacy cleanup gap, missing documentation files, and an axe-core compatibility question all came from the debate rounds, not from `/review-*` commands.
 
+### Doc audit + v5.0.0 release (issue #118)
+
+- **Verify audit findings against file content before acting - subagent claims about file structure are not facts.** The audit subagent reported a "broken README anchor" (claimed `## What's new since v4.3.3` was not a markdown heading - it is, so the GitHub slug resolves fine) and a "missing /playground in AGENT-SETUP" (AGENT-SETUP has no command catalog, so there was nothing to add). Both were false positives. A 30-second `grep`/`sed` against the actual file would have caught each. Pattern: when a subagent reports a concrete, checkable claim ("X is not a heading", "Y is missing from Z"), confirm it on the real file before turning it into a plan task or an edit. The two genuine findings (the README /playground row and the three `html-outputs.md` contradictions) survived because I had verified them directly.
+- **A major version bump on additive-only work needs explicit framing.** 4.6.0 -> 5.0.0 with no breaking change reads as an accident unless the release notes say "milestone, not a breaking change." State the intent in the first line of the CHANGELOG section and the GitHub release body.
+- **Extending a running rollup beats adding a competing one.** The plan said add a "What's new since v4.6.0" section, but the toolkit already had a running `## What's new since v4.3.3` catch-up that chains every version. Adding a second would have forced repointing the README link and left two overlapping rollups. Extending the existing one kept the anchor valid and the narrative single.
+
 ## Patterns That Work
 <!-- Add approaches and conventions that proved effective -->
 
