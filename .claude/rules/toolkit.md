@@ -64,6 +64,7 @@ We follow this flow for features:
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /explore vision mode) |
+| `/audit-html` | Scan your project's own markdown for files that would benefit from an HTML view. Report-only by default; opt-in static view generation (skill). |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | (Re)generate `CODEBASE_MAP.md` - a semantic map of module purposes, conventions, and gotchas. Read by `/explore`, `/create-plan`, `/pair-debug`. |
 
@@ -84,6 +85,8 @@ Skills live in `.claude/skills/<name>/SKILL.md`. They auto-create slash commands
 ### HTML Outputs
 
 `.claude/rules/html-outputs.md` documents when and how toolkit commands produce HTML (Reader/Claude principle, default-on commands, Claude's judgement triggers, playground export-loop rule). The shared visual reference (typography, colors, severity badge hex values, copy-button pattern) lives in `.claude/skills/shared/html-look.md` and inlines into HTML-producing commands via `` !`cat` ``. Cycle-bound HTML artifacts land in `artifacts/html/` (gitignored).
+
+The `/audit-html` skill applies the same principle to the project's own markdown (see the "Your Own Files" section in `html-outputs.md`). Report-only by default; opt-in static view generation.
 
 ### Command-Specific Rules
 

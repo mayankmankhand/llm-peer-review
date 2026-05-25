@@ -81,6 +81,8 @@
       "Skill(review:*)",
       "Skill(playground)",
       "Skill(playground:*)",
+      "Skill(audit-html)",
+      "Skill(audit-html:*)",
       "Bash(grep -q \"^# Codebase Map$\" CODEBASE_MAP.md.tmp)",
       "Bash(grep -q \"^## Module Guide$\" CODEBASE_MAP.md.tmp)",
       "WebFetch(domain:thariqs.github.io)",
@@ -92,7 +94,10 @@
       "Bash(xdg-open *)",
       "Bash(wslview *)",
       "Bash(explorer.exe *)",
-      "Bash(wslpath *)"
+      "Bash(wslpath *)",
+      "Bash(grep -n \"^!\\\\`cat\" .claude/skills/audit-html/SKILL.md)",
+      "Bash(awk '{print length, $0}')",
+      "Bash(powershell.exe *)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -192,6 +192,8 @@ The user can now open their project in Cursor or Claude Code and type `/` to see
 /explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
 ```
 
+On any install or update, `/audit-html` can scan the user's own markdown for files that would benefit from an HTML view (report-only). Toolkit outputs already render HTML automatically.
+
 </reference>
 
 ---

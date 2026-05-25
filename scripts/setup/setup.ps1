@@ -170,6 +170,17 @@ if (Test-Path -LiteralPath $GlobalCmdDir -PathType Container) {
   }
 }
 
+# --- Detect install vs upgrade ---------------------------------
+# Captured here, before any directory is created, so we can tell later
+# whether this target already had a toolkit install. The presence of a
+# managed rules file is the most reliable signal: setup always writes
+# it, so a pre-existing copy proves an earlier setup ran. Mirrors the
+# IS_UPGRADE check in setup.sh.
+$IsUpgrade = $false
+if (Test-Path -LiteralPath (Join-Path $Target ".claude\rules\toolkit.md") -PathType Leaf) {
+  $IsUpgrade = $true
+}
+
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\scripts") | Out-Null
@@ -582,6 +593,29 @@ if ($Skipped.Count -gt 0) {
   Write-Host ""
 }
 
+# --- New-this-version announcement (upgrades only) -----------
+# Fires on any upgrade so a plain version bump no longer lands silently.
+# Mirrors the Bash block in setup.sh. setup.ps1 has no LEGACY_CLEANED /
+# PLANS_MIGRATED counters, so the gate is just $IsUpgrade.
+if ($IsUpgrade) {
+  Write-Host "    +------------------------------------------------+"
+  Write-Host "    |  Upgraded to v$Version - new this version:        |"
+  Write-Host "    +------------------------------------------------+"
+  Write-Host ""
+  Write-Host "      - HTML viewing for human-read outputs."
+  Write-Host "        /create-plan and /document now render an HTML view"
+  Write-Host "        alongside markdown. /review-* and /ask-* may render"
+  Write-Host "        HTML when a finding count or severity mix justifies it."
+  Write-Host "        Markdown stays canonical; HTML is additive."
+  Write-Host ""
+  Write-Host "      - NEW: /audit-html scans your project's own markdown"
+  Write-Host "        for files that would benefit from an HTML view."
+  Write-Host "        Report-only; opt-in for static view generation."
+  Write-Host ""
+  Write-Host "      See .claude\rules\html-outputs.md and CHANGELOG.md."
+  Write-Host ""
+}
+
 Write-Host "    What to do next:"
 Write-Host ""
 Write-Host "      cd $Target"
@@ -602,9 +636,15 @@ Write-Host ""
 Write-Host "      4. (Optional) Install Chromium for /review-browser:"
 Write-Host "           npx --prefix .claude\scripts playwright-core install chromium"
 Write-Host ""
-Write-Host "      Steps 1-3 are optional. Skip 1-2 if you don't need"
+Write-Host "      5. (Optional) Try /audit-html. It scans your project's"
+Write-Host "         own markdown for files that would benefit from an"
+Write-Host "         HTML view. Toolkit outputs (plans, reviews, debates)"
+Write-Host "         already render HTML automatically."
+Write-Host ""
+Write-Host "      Steps 1-4 are optional. Skip 1-2 if you don't need"
 Write-Host "      /ask-gpt or /ask-gemini. Skip 4 if you don't need"
-Write-Host "      /review-browser."
+Write-Host "      /review-browser. Skip 5 if your project has no long"
+Write-Host "      human-read markdown."
 Write-Host ""
 Write-Host "    Tip: To update commands and scripts, run setup again from"
 Write-Host "    the toolkit repo: powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"$Target`""

@@ -107,6 +107,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` (skill) | Learn a concept at 3 levels of depth |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
+| `/audit-html` (skill) | Scan your project's own markdown for files that would benefit from an HTML view. Report-only |
 | `/worktree` | Create an isolated parallel session in a new worktree |
 | `/index` | (Re)generate the project's `CODEBASE_MAP.md` (semantic map of modules, conventions, gotchas) |
 
@@ -259,6 +260,8 @@ npx --prefix .claude/scripts playwright-core install chromium
 ## Update an Existing Project
 
 Re-run the same setup command (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md) again). It's safe to rerun: commands, scripts, and toolkit rules get updated; your `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are never overwritten. Your `.gitignore` is merged (new toolkit entries added, custom entries preserved).
+
+After updating, try `/audit-html` to see if any of your project's own markdown files would benefit from an HTML view. Toolkit outputs (plans, reviews, debates) already render HTML automatically; `/audit-html` is for your project's own long human-read pages.
 
 Want optional features (`/ask-gpt`, `/ask-gemini`, `/review-browser`)? After re-running setup, run these in your project folder:
 

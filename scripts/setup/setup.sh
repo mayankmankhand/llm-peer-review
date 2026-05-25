@@ -174,6 +174,18 @@ if [ -d "$GLOBAL_CMD_DIR" ]; then
   fi
 fi
 
+# ─── Detect install vs upgrade ───────────────────────────────
+# Captured here, before any mkdir/copy runs, so we can tell later whether
+# this target already had a toolkit install. The presence of a managed
+# rules file is the most reliable signal: setup.sh always writes it, so a
+# pre-existing copy proves an earlier setup ran. Used by the "new this
+# version" announcement block below to fire on upgrades regardless of
+# whether a legacy migration also happened.
+IS_UPGRADE=0
+if [ -f "$TARGET/.claude/rules/toolkit.md" ]; then
+  IS_UPGRADE=1
+fi
+
 # ─── Create target directories ───────────────────────────────
 mkdir -p "$TARGET/.claude/commands"
 mkdir -p "$TARGET/.claude/rules"
@@ -718,6 +730,30 @@ if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
   echo ""
 fi
 
+# ─── New-this-version announcement (upgrades only) ───────────
+# Fires on any upgrade, independent of the LEGACY_CLEANED/PLANS_MIGRATED
+# gate above. Exists because a plain version bump (e.g. 4.6 -> 4.7) would
+# otherwise land silently and users would never learn about the HTML
+# viewing feature their old workflows now produce.
+if [ "$IS_UPGRADE" -eq 1 ] && [ "$LEGACY_CLEANED" -eq 0 ] && [ "$PLANS_MIGRATED" -eq 0 ]; then
+  echo "    ┌────────────────────────────────────────────────┐"
+  echo "    │  Upgraded to v$VERSION - new this version:        │"
+  echo "    └────────────────────────────────────────────────┘"
+  echo ""
+  echo "      - HTML viewing for human-read outputs."
+  echo "        /create-plan and /document now render an HTML view"
+  echo "        alongside markdown. /review-* and /ask-* may render"
+  echo "        HTML when a finding count or severity mix justifies it."
+  echo "        Markdown stays canonical; HTML is additive."
+  echo ""
+  echo "      - NEW: /audit-html scans your project's own markdown"
+  echo "        for files that would benefit from an HTML view."
+  echo "        Report-only; opt-in for static view generation."
+  echo ""
+  echo "      See .claude/rules/html-outputs.md and CHANGELOG.md."
+  echo ""
+fi
+
 # ─── Current model defaults ──────────────────────────────────
 # Extract defaults from the runtime scripts at install time so this block
 # stays in sync without a hardcoded list. The grep target is the stable
@@ -758,9 +794,15 @@ echo "           npx --prefix .claude/scripts playwright-core install chromium"
 echo "         On WSL/Linux, also run (apt-based; no --prefix needed):"
 echo "           sudo npx playwright-core install-deps chromium"
 echo ""
-echo "      Steps 1-3 are optional. Skip 1-2 if you don't need"
+echo "      5. (Optional) Try /audit-html. It scans your project's"
+echo "         own markdown for files that would benefit from an"
+echo "         HTML view. Toolkit outputs (plans, reviews, debates)"
+echo "         already render HTML automatically."
+echo ""
+echo "      Steps 1-4 are optional. Skip 1-2 if you don't need"
 echo "      /ask-gpt or /ask-gemini. Skip 4 if you don't need"
-echo "      /review-browser."
+echo "      /review-browser. Skip 5 if your project has no long"
+echo "      human-read markdown."
 echo ""
 echo "    Tip: To update commands, skills, and scripts, run setup again from"
 echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"
