@@ -122,6 +122,12 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check artifact opener script
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/open-artifact.sh"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -543,10 +549,17 @@ echo "  Copying artifacts/README.md ..."
 safe_copy "$TOOLKIT_ROOT/artifacts/README.md" "$TARGET/artifacts/README.md"
 OVERWROTE+=(artifacts/README.md)
 
+# PARITY: .claude/scripts/ files must be copied by BOTH setup.sh and setup.ps1.
+# Add a new script to one installer? Add it to the other too (issue #126).
 # ─── Index generator script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/generate-index.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" "$TARGET/.claude/scripts/generate-index.js"
 OVERWROTE+=(.claude/scripts/generate-index.js)
+
+# ─── Artifact opener script (upstream-owned - safe_copy handles any customizations) ──
+echo "  Copying .claude/scripts/open-artifact.sh ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" "$TARGET/.claude/scripts/open-artifact.sh"
+OVERWROTE+=(.claude/scripts/open-artifact.sh)
 
 # ─── Project-owned files (skip if already exist) ─────────────
 for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do

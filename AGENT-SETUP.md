@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.0.0)
+# AI Agent Setup Instructions (v5.0.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,11 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.0.0:** HTML output milestone (#113-#118). Additive, not a breaking change. After re-running setup:
+**What's new in v5.0.1:** Fresh-install reliability fixes (#119, #126). After re-running setup:
+- HTML artifacts now open reliably on WSL. The opener moved from prose Claude ran by hand into a deterministic script (`.claude/scripts/open-artifact.sh`) with real fallback, so it no longer silently fails when no browser launcher is on PATH.
+- The Windows installer (`setup.ps1`) now copies `generate-index.js`, so `/index` and `/document`'s map refresh work out of the box on fresh Windows installs (closing a v5.0.0 follow-up). Windows users who installed before this version should re-run `setup.ps1` to pick up the fix.
+
+**What was new in v5.0.0:** HTML output milestone (#113-#118). Additive, not a breaking change. After re-running setup:
 - Human-read toolkit outputs now render an optional HTML view alongside the canonical markdown: `/create-plan` and `/document` (default-on), and `/review*`, `/ask-gpt`/`/ask-gemini`, `/explore` when a judgement gate fires. One rule file (`.claude/rules/html-outputs.md`) governs when and how. Markdown stays the source of truth; HTML is the rendered view for the human.
 - New `/playground` skill: throwaway, self-contained interactive HTML in `/tmp/` for in-the-loop decisions - compare options, drag-to-reorder, toggle variants, tune sliders. Output pastes back into chat as text; nothing is written into the repo.
 - New `/audit-html` skill: scans the project's own markdown and reports which files would read better as an HTML view. Report-only by default; the source markdown is never converted.

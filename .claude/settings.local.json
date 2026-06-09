@@ -97,7 +97,8 @@
       "Bash(wslpath *)",
       "Bash(grep -n \"^!\\\\`cat\" .claude/skills/audit-html/SKILL.md)",
       "Bash(awk '{print length, $0}')",
-      "Bash(powershell.exe *)"
+      "Bash(powershell.exe *)",
+      "Bash(bash .claude/scripts/open-artifact.sh *)"
     ],
     "additionalDirectories": [
       "/tmp"

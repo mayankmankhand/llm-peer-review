@@ -118,6 +118,15 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
+# Check dep-free runtime scripts (index generator + artifact opener) - must exist.
+foreach ($f in @("generate-index.js", "open-artifact.sh")) {
+  $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
+    Write-Host "  Error: source file not found: $p"
+    $PreflightOk = $false
+  }
+}
+
 foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
@@ -456,6 +465,22 @@ if (Test-Path -LiteralPath $lockSrc -PathType Leaf) {
     Invoke-SafeCopy -Source $lockSrc -Destination $lockDest
   } catch {
     Write-Host "  Error: Failed to copy package-lock.json : $_"
+    exit 1
+  }
+}
+
+# PARITY: .claude\scripts\ files must be copied by BOTH setup.sh and setup.ps1.
+# Add a new script to one installer? Add it to the other too (issue #126).
+# Dep-free runtime scripts: copied separately from the issue-#91 quarantine
+# group above (which carries scripts that need node_modules). Mirrors setup.sh.
+Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh) ..."
+foreach ($name in @("generate-index.js", "open-artifact.sh")) {
+  try {
+    $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
+    $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)
+    Invoke-SafeCopy -Source $src -Destination $dest
+  } catch {
+    Write-Host "  Error: Failed to copy $name : $_"
     exit 1
   }
 }

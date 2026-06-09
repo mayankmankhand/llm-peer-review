@@ -1,5 +1,17 @@
 # Changelog
 
+## v5.0.1 - WSL Opener + Windows Installer Fix (2026-06-08)
+
+Two fresh-install reliability fixes. **#119:** HTML artifacts now open reliably on WSL - the opener moved from prose Claude ran by hand into a deterministic script (`.claude/scripts/open-artifact.sh`) with real fallback, so it no longer silently no-ops when no browser launcher is on PATH. **#126:** the Windows installer (`setup.ps1`) now copies `generate-index.js`, so `/index` and `/document` work out of the box on fresh Windows installs (closing a follow-up deferred in v5.0.0). Windows users who installed before this version should re-run `setup.ps1` to pick up the fix.
+
+### Fixed
+- **HTML opener silently failed on WSL** (#119) - The "Opening the Artifact" step in `html-outputs.md` was prose Claude ran by hand (`wslview` -> `explorer.exe` -> `xdg-open`); on a WSL distro with none of those on PATH it silently no-opped and the artifact never displayed. Replaced with `.claude/scripts/open-artifact.sh`: deterministic platform detection (macOS `open`; WSL `wslview` -> located/full-path PowerShell `Start-Process` -> `explorer.exe`; native Linux `xdg-open` gated on `DISPLAY`), real exit-code-driven fallthrough, apostrophe-safe Windows path quoting, and a genuine-headless exit-1 that prints the path. `html-outputs.md` now calls the script and branches on its exit code; a single narrow permission `Bash(bash .claude/scripts/open-artifact.sh *)` replaces the per-launcher permission surface, and the script is propagated by both installers. Also reconciled a contradiction: `html-outputs.md` had claimed `/playground` "opens the same way", but playground intentionally does not auto-open.
+- **`setup.ps1` never copied `generate-index.js`** (#126) - The Windows installer omitted the index-generator script, so fresh Windows installs hit `MODULE_NOT_FOUND` when `/index` (and `/document`'s map refresh) ran; `setup.sh` already copied it. `setup.ps1` now copies `generate-index.js` (and the new `open-artifact.sh`) via a dep-free `foreach` plus a preflight check, mirroring `setup.sh`. Closes the follow-up explicitly deferred in v5.0.0. A `PARITY:` comment in both installers and a corrected `bump-version.sh` header guard against the recurring "update one installer, forget the other" drift. The sibling `VERSION`-copy gap noted in v5.0.0 was verified inert (nothing downstream reads `$TARGET/VERSION`) and deliberately left as-is.
+
+Re-run `setup.sh` / `setup.ps1` (or follow `AGENT-SETUP.md`) to pick this up.
+
+---
+
 ## v5.0.0 - HTML Milestone (2026-05-25)
 
 The major version bump marks a milestone, not a breaking change - everything here is additive. v5.0.0 brings HTML output to the toolkit. Toolkit outputs a human reads (plans, reviews, debate summaries, the `/document` cycle summary, `/explore` option comparisons) can now render an HTML view alongside the canonical markdown, governed by one rule file (`.claude/rules/html-outputs.md`). The new `/playground` skill produces throwaway interactive HTML for in-the-loop decisions, and the new `/audit-html` skill helps downstream projects spot their own markdown that would read better as HTML. Markdown stays the source of truth everywhere; HTML is the rendered view for the human. Re-run `setup.sh` (or follow `AGENT-SETUP.md`) to pick it up.

@@ -8,9 +8,9 @@
 #   bash scripts/setup/bump-version.sh 4.3.0
 #
 # This script lives in scripts/setup/ and is NOT copied to downstream
-# projects. setup.sh only propagates the three runtime scripts
-# (ask-gpt.js, ask-gemini.js, browse.js); everything else in scripts/
-# stays in the toolkit repo.
+# projects. setup.sh propagates the .claude/scripts/ runtime files
+# (ask-gpt.js, ask-gemini.js, browse.js, generate-index.js, open-artifact.sh,
+# package.json); everything else in scripts/ stays in the toolkit repo.
 #
 # It handles the mechanical updates only. CHANGELOG and AGENT-SETUP
 # entries stay manual because release notes need human writing.

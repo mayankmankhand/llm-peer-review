@@ -1,6 +1,6 @@
 # HTML Output Rules
 
-<!-- Toolkit version: 5.0.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.0.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## Purpose
 
@@ -69,19 +69,19 @@ The `artifacts/html/` directory lives at the project root. It parallels `plans/`
 
 HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. After writing any HTML file, open it in the user's default browser. Do not just hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source code, which is exactly the friction this rule removes.
 
-Detect the platform and use the first opener that works:
+Open it with the toolkit's opener script, which tries each platform launcher in
+order with real fallback and only fails when the environment is genuinely headless:
 
-| Platform | Command |
-|---|---|
-| macOS | `open "<file>"` |
-| WSL | `wslview "<file>"`, falling back to `explorer.exe "$(wslpath -w "<file>")"` |
-| Linux (no WSL) | `xdg-open "<file>"` |
+```bash
+bash .claude/scripts/open-artifact.sh "<file>"
+```
 
-Then tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
+Pass the path as you wrote it, relative to the project root (the script resolves it from the current directory). It handles macOS (`open`), WSL (`wslview` -> full-path PowerShell `Start-Process` -> `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve.
 
-If every opener fails (headless environment, opener not installed), do not retry in a loop. Tell the user the path and that they should open it in a browser, not the editor: "Open this in your browser (not the editor): `<path>`."
+- **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
+- **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
 
-The `/playground` skill opens its `/tmp/` file the same way.
+The `/playground` skill does NOT auto-open (its output is throwaway `/tmp/` HTML the user pastes back, per the Playground Export-Loop Rule); it emits a clickable `file://` link in chat instead (see `.claude/skills/playground/SKILL.md`).
 
 ## Visual Look
 
