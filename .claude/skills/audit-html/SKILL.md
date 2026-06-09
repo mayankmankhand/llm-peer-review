@@ -131,11 +131,11 @@ No new view will be built.
 
 The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed (the same "3+ findings" gate for `/review-*`, raised to 5 here because audit candidates are softer than review findings).
 
-When rendering, inline the shared look tokens:
+Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 
-!`cat .claude/skills/shared/html-look.md`
+`node .claude/scripts/render-html.js --shell audit --name audit-html --data /tmp/audit-data.json`
 
-Write to `artifacts/html/audit-html-<YYYY-MM-DD>.html`. Open in the user's browser per the opening rules in `html-outputs.md`.
+Open the printed path in the user's browser per the opening rules in `html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`.
 
 ## Static View Generation (opt-in, on request only)
 
@@ -143,7 +143,7 @@ When the user says "yes, generate the view" after seeing the report:
 
 1. Read the source markdown for the top candidate.
 2. Render a static HTML view that mirrors the markdown structure (headings, tables, lists) using the tokens from `html-look.md`. Tables become sortable. Long sections get collapsible `<details>` wrappers.
-3. Write to `artifacts/html/<source-basename>.html`. Do not modify the source markdown.
+3. Write to `artifacts/html/<source-basename>.html`. Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - and unlike the helper-rendered audit report (which is timestamped), this opt-in single-file static view is intentionally not timestamped, because it is keyed to the source file's identity.
 4. Open in the user's browser per the opening rules in `html-outputs.md`.
 5. Confirm in chat: "Opened the view in your browser: `artifacts/html/<basename>.html`. The source markdown is unchanged."
 

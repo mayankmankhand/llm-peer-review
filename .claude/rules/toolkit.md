@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 5.0.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.1.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -84,7 +84,7 @@ Skills live in `.claude/skills/<name>/SKILL.md`. They auto-create slash commands
 
 ### HTML Outputs
 
-`.claude/rules/html-outputs.md` documents when and how toolkit commands produce HTML (Reader/Claude principle, default-on commands, Claude's judgement triggers, playground export-loop rule). The shared visual reference (typography, colors, severity badge hex values, copy-button pattern) lives in `.claude/skills/shared/html-look.md` and inlines into HTML-producing commands via `` !`cat` ``. Cycle-bound HTML artifacts land in `artifacts/html/` (gitignored).
+`.claude/rules/html-outputs.md` documents when and how toolkit commands produce HTML (Reader/Claude principle, default-on commands, Claude's judgement triggers, playground export-loop rule). The five cycle-bound types (review, document, explore, debate, audit report) are rendered by `.claude/scripts/render-html.js`, which injects a compact JSON payload plus the shared `.claude/skills/shared/shells/tokens.css` into a prebuilt shell under `.claude/skills/shared/shells/` and writes a timestamped file - the commands no longer hand-write HTML or inline `html-look.md`. The hand-rendered exceptions (plan views, the `/audit-html` single-file static view, `/playground`) still inline or read the visual reference `.claude/skills/shared/html-look.md` (typography, colors, severity badge hex values, copy-button pattern), which `tokens.css` mirrors. Cycle-bound HTML artifacts land in `artifacts/html/` (gitignored).
 
 The `/audit-html` skill applies the same principle to the project's own markdown (see the "Your Own Files" section in `html-outputs.md`). Report-only by default; opt-in static view generation.
 

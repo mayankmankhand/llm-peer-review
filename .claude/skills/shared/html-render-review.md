@@ -1,8 +1,8 @@
-# Review HTML Render Template
+# Review HTML Render
 
-Shared HTML rendering reference for review output. Inlined into review skills and the `/review` orchestrator via `` !`cat .claude/skills/shared/html-render-review.md` ``. Same pattern `output-template.md` and `severity-anchors.md` use.
+Shared reference for turning a review's findings into an HTML view. Inlined into the review skills and the `/review` orchestrator via `` !`cat .claude/skills/shared/html-render-review.md` ``.
 
-This file documents WHEN to render HTML (the gate), WHERE the file goes, and WHAT structure it takes.
+This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
 
 ## When to Render (Judgement Gate)
 
@@ -22,153 +22,34 @@ When the gate fires, announce before generating:
 
 Honor "skip HTML" if the user replies with that phrase. Continue with markdown only.
 
-## File Naming and Location
+## How to Render (data injection - do NOT hand-write HTML)
 
-| Output | Path |
-|---|---|
-| Markdown report | Inline in chat by default. If a skill also saves markdown to disk, use `reports/review-<type>-<YYYY-MM-DD>.md`. |
-| HTML companion | `artifacts/html/review-<type>-<YYYY-MM-DD>.html` |
+The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `.claude/skills/shared/shells/review-shell.html`. You produce ONLY a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file. This is what makes the open fast and collision-free (issues #120, #127). Generating the whole HTML by hand is the old, slow path - do not do it.
 
-The `<type>` is the skill name (`code`, `ux`, `browser`, `plan`, `full`, `deps`, `copy`, `commands`) when called directly, or `orchestrator` when called via `/review`. The HTML companion is standalone - it can be opened on its own without a markdown file on disk.
+Steps:
 
-Create the `artifacts/html/` directory before writing. It is already gitignored. (`artifacts/` itself is tracked via a README so it exists in fresh clones.)
+1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/review-shell.html`. Read that header comment for the authoritative field list (it is the single source of truth). Compact reference:
+   - `title`, `subtitle` (HTML allowed)
+   - `chips`: `[{name, on}]` - `on:true` = specialist ran, `on:false` = "(skipped)". Omit for a single-specialist run.
+   - `topIssues`: `{block:[], warn:[], suggest:[]}` - each entry is a short string (e.g. `"R1 [code] (file.sh:91 - desc)"`).
+   - `looksGood`: `[string]` (HTML allowed)
+   - `groups`: `[{label, findings:[...]}]` grouped by specialist. Each finding: `{id, severity, specialist, file:{relPath, absPath, line}, what, fields:[{label, value}]}`. `severity` is `"block" | "warn" | "suggest"`. `what` and each field `value` may contain trusted inline HTML (`<code>`, `<strong>`). Browser findings just add more `fields` (Screenshot as an `<img>` value, Evidence as a `<pre>` value, Expected, Actual).
+   - `summary`: `[{emoji?, label, value}]` - the footer count strip.
+
+2. **Write the JSON to a temp file**, e.g. `/tmp/review-data.json`.
+
+3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+   ```
+   node .claude/scripts/render-html.js --shell review --name review-<type> --data /tmp/review-data.json
+   ```
+   - `<type>` = the skill name (`code`, `ux`, `browser`, `plan`, `full`, `deps`, `copy`, `commands`) when a specialist is called directly, or `orchestrator` when called via `/review`. So `--name review-orchestrator`, `--name review-code`, etc.
+   - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
+
+4. **Open the printed path** in the browser per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`:
+   ```
+   bash .claude/scripts/open-artifact.sh "<printed-path>"
+   ```
 
 ## Subagent Rule (orchestrator dispatch only)
 
 When the orchestrator (`/review`) dispatches specialist subagents, those subagents MUST NOT emit their own HTML companion. Only the orchestrator produces HTML for an orchestrator run - this guarantees one combined HTML file per cycle rather than several overlapping ones. Specialist skills only generate HTML when called directly (e.g., `/review-code` on its own).
-
-## HTML Structure
-
-Self-contained file. Inline `<style>` block, no CDN, no external assets.
-
-```html
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>[Review Type] Review</title>
-  <style>
-    /* Inline tokens from .claude/skills/shared/html-look.md */
-  </style>
-</head>
-<body>
-  <header>
-    <h1>[Review Type] Review</h1>
-    <!-- Specialist chips here (orchestrator only, when 2+ specialists) -->
-  </header>
-  <section class="top-issues">...</section>
-  <section class="looks-good">...</section>
-  <section class="findings">...</section>
-  <footer class="summary">...</footer>
-</body>
-</html>
-```
-
-Inline the design tokens from `.claude/skills/shared/html-look.md` into the `<style>` block.
-
-## Specialist Chips Header (orchestrator only)
-
-Render only when 2 or more specialists were dispatched. Skip for single-specialist runs (the page title already says what was reviewed).
-
-```html
-<div class="chips">
-  <span class="chip">code</span>
-  <span class="chip">ux</span>
-  <span class="chip">browser</span>
-</div>
-```
-
-## Top Issues (sticky)
-
-Sticky-position bar at the top so it stays visible while scrolling. Mirrors the markdown Top Issues block.
-
-```html
-<section class="top-issues" style="position: sticky; top: 0;">
-  <div class="top-row top-row--block">🚫 X Blocks: R1, R3</div>
-  <div class="top-row top-row--warn">⚠️ X Warns: R2</div>
-  <div class="top-row top-row--suggest">💡 X Suggests: R4</div>
-</section>
-```
-
-## Looks Good Section
-
-Mirrors the markdown "Looks Good" block.
-
-```html
-<section class="looks-good">
-  <h2>Looks Good</h2>
-  <ul>
-    <li>[What's working well]</li>
-  </ul>
-</section>
-```
-
-## Finding Card Template
-
-Each finding is a card with a severity-colored left border, badge, file:line link, and the four required fields.
-
-```html
-<article class="finding finding--block">
-  <header>
-    <span class="badge badge--block">🚫 Block</span>
-    <span class="finding-id">R1</span>
-    <span class="specialist-tag">[code]</span>
-    <a class="file-link" href="vscode://file/[absolute-path]:[line]">[relative-path]:[line]</a>
-  </header>
-  <h3 class="what">[What: one-line summary]</h3>
-  <div class="field"><strong>Why it matters:</strong> [...]</div>
-  <div class="field"><strong>Example:</strong> [...]</div>
-  <div class="field"><strong>Suggested fix:</strong> [...]</div>
-</article>
-```
-
-### Severity Colors (from html-look.md)
-
-| Severity | CSS class | Hex |
-|---|---|---|
-| Block (🚫) | `finding--block` | `#dc2626` |
-| Warn (⚠️) | `finding--warn` | `#d97706` |
-| Suggest (💡) | `finding--suggest` | `#2563eb` |
-
-Apply the hex as the `border-left` color (4 to 6 px) and as the badge background.
-
-### File:Line Links
-
-Render as a clickable `<a>` element with the `vscode://file/...` scheme.
-
-```html
-<a href="vscode://file/[absolute-path]:[line]">[relative-path]:[line]</a>
-```
-
-- Visible text uses the relative path so it matches the markdown report.
-- The `href` uses the absolute path so the editor can resolve it.
-- In editors that don't recognize `vscode://`, the link gracefully no-ops; the path stays readable as text.
-
-## Browser Review Extensions
-
-Browser findings (from `/review-browser`) carry extra evidence fields. Add them inside the finding card between Example and Suggested fix.
-
-```html
-<div class="field"><strong>Screenshot:</strong> <img src="[path]" alt="[description]"></div>
-<div class="field"><strong>Evidence:</strong> <pre>[console errors / failed API calls]</pre></div>
-<div class="field"><strong>Expected:</strong> [...]</div>
-<div class="field"><strong>Actual:</strong> [...]</div>
-```
-
-## Summary Block (footer)
-
-Mirrors the markdown Summary block.
-
-```html
-<footer class="summary">
-  <span>Files reviewed: X</span>
-  <span>🚫 Blocks: X</span>
-  <span>⚠️ Warns: X</span>
-  <span>💡 Suggests: X</span>
-</footer>
-```
-
-For orchestrator output, also include:
-
-- Specialists run: X of Y
-- Deduplicated findings: X (Y raw findings)

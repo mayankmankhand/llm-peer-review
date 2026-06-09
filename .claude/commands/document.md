@@ -95,13 +95,19 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 
 ### Generate the summary
 
-Write `artifacts/html/document-<YYYY-MM-DD>.html` (same-day re-run overwrites). Create `artifacts/html/` first if needed. Contents:
-- **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>`
-- **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each
-- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR (`gh pr list`), else omit
-- **Mini commit chart** - small inline bars of commits per day across the window (inline SVG or divs), from `git log --format=%ad --date=short <window>`
+Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
+- **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
+- **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
+- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR (`gh pr list`), else omit -> `prLink` / `prNote`
+- **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-For the visual look, **read** `.claude/skills/shared/html-look.md` only when generating this summary (not on every `/document` run) and inline its tokens (typography, color tokens, severity hex) into the `<style>` block.
+Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+
+```
+node .claude/scripts/render-html.js --shell document --name document --data /tmp/document-data.json
+```
+
+Open the printed path per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`. You do not name, read, or clean up any prior file - the helper handles naming and overwrites.
 
 ### Advance the marker (LAST step)
 

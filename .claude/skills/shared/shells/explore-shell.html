@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exploration</title>
+<!--
+  explore-shell.html - prebuilt shell for /explore vision-mode option comparisons.
+  This is the canonical persisted record of an exploration that compared 2+ options
+  (see .claude/commands/explore.md, the "HTML option comparison" step in Phase 2).
+
+  Rendered by .claude/scripts/render-html.js, which inlines two things:
+    1. tokens.css  -> the TOKENS slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json data
+       island carrying id="render-data") further down in <body>
+  Each slot's literal placeholder appears EXACTLY ONCE below (the helper does a
+  first-occurrence replace), so this comment must not repeat those literal tokens.
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://.
+
+  Shared conventions (severity strings, file-link scheme, label/value fields)
+  match review-shell.html and debate-shell.html for cross-toolkit consistency.
+
+  ===================================================================
+  RENDER DATA JSON SCHEMA (what /explore must produce; renderer consumes it)
+  ===================================================================
+  All fields optional unless noted; a section is skipped when its data is
+  missing or empty.
+
+  {
+    "topic":    "string - the exploration topic. Shown under the h1. (HTML allowed)",
+    "subtitle": "string - optional small line under the topic, e.g. a date or
+                 issue ref. (HTML allowed, e.g. &middot;)",
+
+    // The compared options. Two or more expected (HTML option comparison only
+    // fires at 2+). Each renders as a card in a responsive grid.
+    "options": [
+      {
+        "name":    "Option A",            // card heading (plain text)
+        "summary": "Short one-or-two-line description. (trusted inline HTML ok)",
+        "pros":    ["string", ...],       // bulleted pros (trusted inline HTML ok)
+        "cons":    ["string", ...],       // bulleted cons (trusted inline HTML ok)
+        // "considerations" is an alias for "cons" when an option is framed as
+        // neutral key considerations rather than downsides; either key works.
+        "considerations": ["string", ...],
+        "notes":   "string - free-form note under the lists. (trusted inline HTML ok)",
+        // Optional ordered detail rows (same shape as review/debate fields).
+        "fields":  [ { "label": "Effort", "value": "Medium <code>~3d</code>" } ],
+        // Optional file reference shown in the card header (vscode:// link).
+        "file":    { "relPath": "src/foo.js", "absPath": "/abs/src/foo.js", "line": 42 },
+        // Optional: mark the chosen/recommended option (adds a highlight + badge).
+        "recommended": true
+      }
+    ],
+
+    // Scope-dial outcome. One of "Expand" | "Hold" | "Reduce" (case-insensitive).
+    // Optional accompanying note. Rendered as a callout; skipped if absent.
+    "scopeDial": "Hold",
+    "scopeNote": "string - optional context on the dial choice. (trusted inline HTML ok)",
+
+    // Key decisions made during the exploration. Bulleted list. (inline HTML ok)
+    "decisions": ["string", ...]
+  }
+
+  Notes:
+  - "summary", "notes", pros/cons/considerations items, "scopeNote", "decisions"
+    items, and every field "value" may contain trusted Claude-generated inline
+    HTML (<code>, <strong>, <a>); rendered via innerHTML. This is /explore output,
+    not untrusted user input.
+  - File-reference rendering: <a class="file-link"
+      href="vscode://file/<absPath>[:<line>]"><relPath>[:<line>]</a>.
+    Visible text = relPath (+ :line if present); href uses absPath (falls back to
+    relPath when absPath is missing).
+  - scopeDial maps to a color accent: Expand -> suggest/blue, Hold -> warn/amber,
+    Reduce -> block/red (visual cue only; no severity semantics implied).
+  ===================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- explore-specific layout (everything else comes from tokens.css) ---- */
+
+header.page{margin:2rem 0 1rem;padding-bottom:1rem;border-bottom:1px solid var(--border);}
+header.page .topic{color:var(--text-muted);font-size:1.05rem;margin:.25rem 0 0;}
+header.page .sub{color:var(--text-muted);font-size:.9rem;margin:.3rem 0 0;}
+
+/* Responsive option grid: cards size to fit, wrap as the viewport narrows. */
+.option-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:1rem;
+  margin:1.2rem 0 0;
+  align-items:start;
+}
+
+/* Each option is a card. Reuses the muted-bg/border look of tokens, with a
+   top accent bar to separate it from severity .finding/.action cards. */
+.option{
+  border:1px solid var(--border);
+  border-radius:8px;
+  padding:1rem 1.2rem 1.2rem;
+  background:var(--bg);
+  border-top:4px solid var(--accent);
+  display:flex;
+  flex-direction:column;
+}
+.option.recommended{
+  border-color:#c7d2fe;
+  background:#f8faff;
+  box-shadow:0 0 0 1px #c7d2fe;
+}
+.option > header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;}
+.option > header h3{margin:0;font-size:1.1rem;font-weight:600;}
+.option .pick-badge{
+  font-size:.7rem;font-weight:600;padding:.16rem .5rem;border-radius:999px;
+  background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;white-space:nowrap;
+}
+.option .summary{font-size:.95rem;color:var(--text);margin:.1rem 0 .7rem;}
+
+/* Pros / cons / considerations sub-lists. */
+.option .list-block{margin:.2rem 0 .6rem;}
+.option .list-label{
+  font-family:ui-monospace,Consolas,monospace;font-size:.72rem;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);
+  margin:0 0 .25rem;
+}
+.option ul{margin:0;padding-left:1.1rem;}
+.option li{margin-bottom:.25rem;font-size:.9rem;}
+.option li.pro::marker{color:#15803d;}
+.option li.con::marker{color:var(--block);}
+.option li.consideration::marker{color:var(--warn);}
+.option .notes{font-size:.88rem;color:var(--text-muted);margin:.4rem 0 0;font-style:italic;}
+
+/* Scope-dial callout. */
+.scope-dial{
+  margin-top:2rem;border:1px solid var(--border);border-radius:8px;
+  padding:1rem 1.2rem;background:var(--bg-muted);border-left:5px solid var(--accent);
+}
+.scope-dial--expand{border-left-color:var(--suggest);}
+.scope-dial--hold{border-left-color:var(--warn);}
+.scope-dial--reduce{border-left-color:var(--block);}
+.scope-dial h2{margin:0 0 .35rem;font-size:1rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);}
+.scope-dial .dial-value{font-size:1.25rem;font-weight:600;}
+.scope-dial .dial-note{font-size:.92rem;color:var(--text);margin:.4rem 0 0;}
+
+/* Key decisions list. */
+.decisions ul{margin:.4rem 0 0;padding-left:1.2rem;}
+.decisions li{margin-bottom:.4rem;font-size:.95rem;}
+
+@media (max-width:560px){.option-grid{grid-template-columns:1fr;}}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+<noscript>
+  <p class="noscript-note">This report needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p>
+</noscript>
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+<script>
+(function () {
+  'use strict';
+
+  var data = JSON.parse(document.getElementById('render-data').textContent);
+
+  // ---- tiny DOM helpers --------------------------------------------------
+  function el(tag, className) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+  function textEl(tag, className, str) {
+    var node = el(tag, className);
+    node.textContent = (str == null ? '' : String(str));
+    return node;
+  }
+  function htmlEl(tag, className, markup) {
+    var node = el(tag, className);
+    node.innerHTML = (markup == null ? '' : String(markup));
+    return node;
+  }
+  function isArr(x) { return Object.prototype.toString.call(x) === '[object Array]'; }
+  function nonEmptyArr(x) { return isArr(x) && x.length > 0; }
+  function isNonEmpty(s) { return typeof s === 'string' && s.trim().length > 0; }
+
+  // file reference -> <a class="file-link"> per shared convention.
+  function fileLink(file) {
+    if (!file || (!file.relPath && !file.absPath)) return null;
+    var rel = file.relPath || file.absPath;
+    var abs = file.absPath || file.relPath;
+    var suffix = (file.line || file.line === 0) ? (':' + file.line) : '';
+    var a = el('a', 'file-link');
+    a.href = 'vscode://file/' + abs + suffix;
+    a.textContent = rel + suffix;
+    return a;
+  }
+
+  // bulleted list block (pros / cons / considerations). Items may carry HTML.
+  function listBlock(label, items, liClass) {
+    if (!nonEmptyArr(items)) return null;
+    var block = el('div', 'list-block');
+    block.appendChild(textEl('p', 'list-label', label));
+    var ul = el('ul', null);
+    items.forEach(function (item) {
+      if (item == null || (typeof item === 'string' && !isNonEmpty(item))) return;
+      ul.appendChild(htmlEl('li', liClass, item));
+    });
+    if (ul.childNodes.length) {
+      block.appendChild(ul);
+      return block;
+    }
+    return null;
+  }
+
+  var body = el('main'); // all rendered output lives in one <main> landmark (a11y)
+
+  // ---- header ------------------------------------------------------------
+  var header = el('header', 'page');
+  header.appendChild(textEl('h1', null, 'Exploration'));
+  if (isNonEmpty(data.topic)) header.appendChild(htmlEl('p', 'topic', data.topic));
+  if (isNonEmpty(data.subtitle)) header.appendChild(htmlEl('p', 'sub', data.subtitle));
+  body.appendChild(header);
+
+  // ---- option grid -------------------------------------------------------
+  if (nonEmptyArr(data.options)) {
+    body.appendChild(textEl('h2', null, 'Options Compared'));
+
+    var grid = el('div', 'option-grid');
+    data.options.forEach(function (opt) {
+      if (!opt) return;
+      var card = el('article', 'option' + (opt.recommended ? ' recommended' : ''));
+
+      // card header: name, optional recommended badge, optional file link
+      var head = el('header', null);
+      head.appendChild(textEl('h3', null, opt.name || 'Option'));
+      if (opt.recommended) {
+        head.appendChild(textEl('span', 'pick-badge', '✅ Chosen')); // ✅
+      }
+      var link = fileLink(opt.file);
+      if (link) head.appendChild(link);
+      card.appendChild(head);
+
+      if (isNonEmpty(opt.summary)) card.appendChild(htmlEl('p', 'summary', opt.summary));
+
+      var pros = listBlock('Pros', opt.pros, 'pro');
+      if (pros) card.appendChild(pros);
+
+      var cons = listBlock('Cons', opt.cons, 'con');
+      if (cons) card.appendChild(cons);
+
+      var considerations = listBlock('Considerations', opt.considerations, 'consideration');
+      if (considerations) card.appendChild(considerations);
+
+      // optional ordered detail rows (label/value), same shape as other shells
+      if (nonEmptyArr(opt.fields)) {
+        opt.fields.forEach(function (f) {
+          if (!f || !isNonEmpty(f.label)) return;
+          var field = el('div', 'field');
+          var strong = el('strong', null);
+          strong.textContent = f.label + ':';
+          field.appendChild(strong);
+          field.appendChild(document.createTextNode(' '));
+          var span = el('span', null);
+          span.innerHTML = (f.value != null) ? String(f.value) : '';
+          field.appendChild(span);
+          card.appendChild(field);
+        });
+      }
+
+      if (isNonEmpty(opt.notes)) card.appendChild(htmlEl('p', 'notes', opt.notes));
+
+      grid.appendChild(card);
+    });
+    body.appendChild(grid);
+  }
+
+  // ---- scope-dial outcome ------------------------------------------------
+  if (isNonEmpty(data.scopeDial) || isNonEmpty(data.scopeNote)) {
+    var dialRaw = isNonEmpty(data.scopeDial) ? data.scopeDial.trim() : '';
+    var dialKey = dialRaw.toLowerCase();
+    var dialMod = (dialKey === 'expand' || dialKey === 'hold' || dialKey === 'reduce')
+      ? ' scope-dial--' + dialKey : '';
+
+    var dial = el('section', 'scope-dial' + dialMod);
+    dial.appendChild(textEl('h2', null, 'Scope Dial Outcome'));
+    if (dialRaw) {
+      // Normalize display capitalization (Expand / Hold / Reduce) when recognized.
+      var nice = dialMod ? dialKey.charAt(0).toUpperCase() + dialKey.slice(1) : dialRaw;
+      dial.appendChild(textEl('div', 'dial-value', nice));
+    }
+    if (isNonEmpty(data.scopeNote)) dial.appendChild(htmlEl('p', 'dial-note', data.scopeNote));
+    body.appendChild(dial);
+  }
+
+  // ---- key decisions -----------------------------------------------------
+  if (nonEmptyArr(data.decisions)) {
+    var section = el('section', 'decisions');
+    section.appendChild(textEl('h2', null, 'Key Decisions'));
+    var ul = el('ul', null);
+    data.decisions.forEach(function (d) {
+      if (d == null || (typeof d === 'string' && !isNonEmpty(d))) return;
+      ul.appendChild(htmlEl('li', null, d));
+    });
+    if (ul.childNodes.length) {
+      section.appendChild(ul);
+      body.appendChild(section);
+    }
+  }
+
+  document.body.appendChild(body); // attach the assembled <main> once
+})();
+</script>
+</body>
+</html>

@@ -128,6 +128,12 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check HTML renderer script (dependency-free, like generate-index.js / open-artifact.sh)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/render-html.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/render-html.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -459,6 +465,28 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
   OVERWROTE+=("skills/shared/")
 fi
 
+# PARITY: shared/shells/ must be copied by BOTH setup.sh and setup.ps1 (issue #126).
+# The shared/ loop above copies ONLY *.md, and the per-skill loop below SKIPS
+# shared/ - so this prebuilt-shell subdirectory (the *.html shells + tokens.css
+# that render-html.js injects into) needs its own copy step. Copy every file in
+# the directory (the shells are *.html plus tokens.css). The [ -f ] guard skips
+# any nested directories. A plain * glob avoids the failglob abort that separate
+# *.html / *.css patterns would trigger if one extension were ever absent - but
+# only when files are present. An empty shells/ dir would still trigger failglob,
+# so the loop is guarded by nullglob (restored afterward) to yield zero
+# iterations instead of a "no match" abort.
+if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
+  mkdir -p "$TARGET/.claude/skills/shared/shells"
+  shopt -s nullglob
+  for src in "$TOOLKIT_ROOT/.claude/skills/shared/shells/"*; do
+    [ -f "$src" ] || continue
+    fname="$(basename "$src")"
+    safe_copy "$src" "$TARGET/.claude/skills/shared/shells/$fname" || { echo "  Error: failed to copy shells/$fname"; exit 1; }
+  done
+  shopt -u nullglob
+  OVERWROTE+=("skills/shared/shells/")
+fi
+
 # Copy each skill directory (contains SKILL.md and optional supporting files)
 for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   [ -d "$skill_dir" ] || continue
@@ -560,6 +588,13 @@ OVERWROTE+=(.claude/scripts/generate-index.js)
 echo "  Copying .claude/scripts/open-artifact.sh ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" "$TARGET/.claude/scripts/open-artifact.sh"
 OVERWROTE+=(.claude/scripts/open-artifact.sh)
+
+# ─── HTML renderer script (upstream-owned - safe_copy handles any customizations) ──
+# Dependency-free like generate-index.js / open-artifact.sh. It injects a JSON
+# payload into a prebuilt shell under .claude/skills/shared/shells/ (copied below).
+echo "  Copying .claude/scripts/render-html.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/render-html.js" "$TARGET/.claude/scripts/render-html.js"
+OVERWROTE+=(.claude/scripts/render-html.js)
 
 # ─── Project-owned files (skip if already exist) ─────────────
 for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do

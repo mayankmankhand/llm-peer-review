@@ -152,18 +152,14 @@ Example findings with tags applied:
 
 ## HTML Companion (when gate fires)
 
-After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template (it covers the gate and the data-injection steps):
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-Design tokens for the HTML output (typography, color palette, severity hex values):
-
-!`cat .claude/skills/shared/html-look.md`
-
 For orchestrator output specifically:
-- Use `<type>` = `orchestrator` in the HTML filename
-- Render the Specialist Chips header when 2 or more specialists were dispatched; skip the chips for single-specialist orchestrator runs
-- Group finding cards by specialist tag, preserving the order from Phase 3 synthesis
+- Pass `--name review-orchestrator` to the helper
+- Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
+- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis
 
 <rules>
 ## REMEMBER: Report issues only. Do NOT edit any files until I approve.

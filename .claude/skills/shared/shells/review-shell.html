@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review</title>
+<!--
+  review-shell.html - prebuilt HTML shell for /review and the /review-* family.
+
+  Rendered by .claude/scripts/render-html.js, which inlines two things:
+    1. tokens.css  -> the tokens slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json
+       data island carrying id="render-data") further down in <body>
+  (Each slot's literal placeholder token appears EXACTLY ONCE in this file, at
+  its real injection point - the helper does a first-occurrence replace, so this
+  doc must not repeat those tokens verbatim.)
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://. Reproduces the gold look of
+  artifacts/html/review-orchestrator-2026-06-08.html.
+
+  ==========================================================================
+  JSON SCHEMA (the slash commands produce this; the renderer below consumes it)
+  ==========================================================================
+  All fields optional unless noted; a section is skipped when its data is
+  missing or empty. Severity is the string "block" | "warn" | "suggest".
+  Inline trusted HTML (Claude-generated review text) is allowed in: looksGood
+  items, a finding's "what", and every field "value". Those render via
+  innerHTML. Emoji in the JSON are literal (rendered directly).
+
+  {
+    "title":    "Orchestrator Review",          // h1 (required-ish; defaults to "Review")
+    "subtitle": "#119 ... &middot; 2026-06-08", // p.sub under the title (HTML allowed)
+
+    // Specialist chips. on:true -> "<name>"      (class "chip on")
+    //                   on:false -> "<name> (skipped)" (class "chip")
+    // Omit/empty the array to hide the chip row (e.g. single-specialist run).
+    "chips": [ {"name":"code","on":true}, {"name":"ux","on":false} ],
+
+    // Sticky top-issues bar. Each key is an array of entry strings.
+    // A row always renders for all three severities (shows the count, e.g.
+    // "0 Blocks"); when the array is non-empty it appends ": " + comma-joined
+    // entries. Omit topIssues entirely to hide the whole bar.
+    "topIssues": {
+      "block":   ["R1 [code] (file.sh:91 - desc)"],
+      "warn":    ["R2 [code]"],
+      "suggest": ["R3 [code]", "R4 [commands]"]
+    },
+
+    // Looks-good callout box. Items may contain inline HTML.
+    "looksGood": [ "<strong>The core approach is right.</strong> ..." ],
+
+    // Findings, grouped by specialist. Each group renders a .group-label then
+    // its finding cards. (Flat top-level "findings" array also accepted as a
+    // fallback for single-specialist runs - see renderer.)
+    "groups": [
+      {
+        "label": "code",
+        "findings": [
+          {
+            "id":         "R1",
+            "severity":   "warn",                 // block | warn | suggest
+            "specialist": "code",                 // shown as [code]; defaults to group label
+            "file": { "relPath": ".claude/scripts/open-artifact.sh",
+                      "absPath": "/home/.../open-artifact.sh",
+                      "line": 91 },               // line optional; file optional
+            "what": "One-line summary (HTML allowed).",
+            "fields": [                            // arbitrary label/value rows, in order
+              { "label": "Why it matters", "value": "... <code>x</code> ..." },
+              { "label": "Example",        "value": "..." },
+              { "label": "Suggested fix",  "value": "..." }
+              // Browser findings just add more rows, e.g.:
+              // { "label": "Screenshot", "value": "<img src='...' alt='...'>" },
+              // { "label": "Evidence",   "value": "<pre>console errors</pre>" },
+              // { "label": "Expected",   "value": "..." },
+              // { "label": "Actual",     "value": "..." }
+            ]
+          }
+        ]
+      }
+    ],
+
+    // Footer count strip. Each span = optional emoji + bold label + value.
+    "summary": [
+      { "emoji": "",  "label": "Specialists run", "value": "3 of 3 (4 auto-skipped)" },
+      { "emoji": "",  "label": "Files reviewed",  "value": "6" },
+      { "emoji": "🚫", "label": "Blocks",          "value": "0" },
+      { "emoji": "⚠️", "label": "Warns",           "value": "2" },
+      { "emoji": "💡", "label": "Suggests",        "value": "5" },
+      { "emoji": "",  "label": "Deduplicated",    "value": "7 (8 raw)" }
+    ]
+  }
+
+  File-reference rendering: <a class="file-link"
+    href="vscode://file/<absPath>[:<line>]"><relPath>[:<line>]</a>.
+  Visible text = relPath (+ :line if present). href uses absPath (falls back to
+  relPath when absPath is missing).
+  ==========================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- review-specific layout (everything NOT already in tokens.css) ---- */
+header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
+.sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
+.chips{margin-top:.8rem;display:flex;gap:.4rem;flex-wrap:wrap;}
+.chip{font-family:ui-monospace,Consolas,monospace;font-size:.75rem;background:var(--bg-muted);border:1px solid var(--border);color:var(--text-muted);padding:.2rem .55rem;border-radius:999px;}
+.chip.on{background:#eef2ff;border-color:#c7d2fe;color:#3730a3;}
+.top-issues{position:sticky;top:0;background:var(--bg);padding:.8rem 0;border-bottom:1px solid var(--border);z-index:10;max-height:40vh;overflow-y:auto;}
+.top-row{font-size:.9rem;padding:.15rem 0;}
+.top-row--block{color:var(--block);font-weight:600;}
+.top-row--warn{color:var(--warn-strong);font-weight:600;}
+.top-row--suggest{color:var(--suggest);}
+.looks-good{background:var(--bg-muted);border:1px solid var(--border);border-left:4px solid #15803d;border-radius:8px;padding:1rem 1.2rem;margin-top:1rem;}
+.looks-good h2{margin:0 0 .5rem;font-size:1rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);}
+.looks-good ul{margin:0;padding-left:1.1rem;}
+.looks-good li{margin-bottom:.35rem;}
+.group-label{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:1.6rem 0 .6rem;}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="noscript-note">This report needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p>
+</noscript>
+
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var data = JSON.parse(document.getElementById("render-data").textContent);
+
+  var SEV = {
+    block:   { label: "Block",   emoji: "🚫" }, /* 🚫 */
+    warn:    { label: "Warn",    emoji: "⚠️" },  /* ⚠️ */
+    suggest: { label: "Suggest", emoji: "💡" }   /* 💡 */
+  };
+
+  // ---- tiny DOM helpers -------------------------------------------------
+  function el(tag, cls) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    return n;
+  }
+  // Trusted inline HTML (Claude-generated review text, not untrusted input).
+  function html(node, markup) { node.innerHTML = (markup == null ? "" : String(markup)); return node; }
+  function text(node, str)    { node.textContent = (str == null ? "" : String(str));   return node; }
+  function isArr(x)           { return Object.prototype.toString.call(x) === "[object Array]"; }
+  function nonEmpty(x)        { return isArr(x) && x.length > 0; }
+
+  // All rendered output lives inside a <main> landmark (a11y: one main region
+  // per page). We build into "body" (the main element) and attach it once at the
+  // end. Keeping the variable name "body" leaves the rest of the renderer
+  // untouched; only the container element changed from document.body to <main>.
+  var body = el("main");
+
+  // ---- header.page (title, subtitle, chips) -----------------------------
+  var header = el("header", "page");
+  var h1 = el("h1");
+  text(h1, data.title || "Review");
+  header.appendChild(h1);
+
+  if (data.subtitle) {
+    var sub = el("p", "sub");
+    html(sub, data.subtitle); // subtitle may carry inline HTML (e.g. &middot;)
+    header.appendChild(sub);
+  }
+
+  if (nonEmpty(data.chips)) {
+    var chips = el("div", "chips");
+    data.chips.forEach(function (c) {
+      if (!c || !c.name) return;
+      var chip;
+      if (c.on) {
+        chip = el("span", "chip on");
+        text(chip, c.name);
+      } else {
+        chip = el("span", "chip");
+        text(chip, c.name + " (skipped)");
+      }
+      chips.appendChild(chip);
+    });
+    if (chips.childNodes.length) header.appendChild(chips);
+  }
+  body.appendChild(header);
+
+  // ---- top-issues (sticky) ----------------------------------------------
+  if (data.topIssues) {
+    var ti = data.topIssues;
+    var rows = [
+      { key: "block",   word: "Blocks"   },
+      { key: "warn",    word: "Warns"    },
+      { key: "suggest", word: "Suggests" }
+    ];
+    var sec = el("section", "top-issues");
+    rows.forEach(function (r) {
+      var entries = isArr(ti[r.key]) ? ti[r.key] : [];
+      var row = el("div", "top-row top-row--" + r.key);
+      var line = SEV[r.key].emoji + " " + entries.length + " " + r.word;
+      if (entries.length > 0) line += ": " + entries.join(", ");
+      text(row, line);
+      sec.appendChild(row);
+    });
+    body.appendChild(sec);
+  }
+
+  // ---- looks-good -------------------------------------------------------
+  if (nonEmpty(data.looksGood)) {
+    var lg = el("section", "looks-good");
+    var lgh = el("h2");
+    text(lgh, "Looks Good");
+    lg.appendChild(lgh);
+    var ul = el("ul");
+    data.looksGood.forEach(function (item) {
+      var li = el("li");
+      html(li, item); // inline HTML allowed
+      ul.appendChild(li);
+    });
+    lg.appendChild(ul);
+    body.appendChild(lg);
+  }
+
+  // ---- findings ---------------------------------------------------------
+  // Accept either grouped (data.groups) or a flat data.findings fallback.
+  var groups = [];
+  if (nonEmpty(data.groups)) {
+    groups = data.groups;
+  } else if (nonEmpty(data.findings)) {
+    groups = [{ label: null, findings: data.findings }];
+  }
+
+  var hasFindings = groups.some(function (g) { return g && nonEmpty(g.findings); });
+
+  if (hasFindings) {
+    var fh = el("h2");
+    text(fh, "Findings");
+    body.appendChild(fh);
+
+    groups.forEach(function (group) {
+      if (!group || !nonEmpty(group.findings)) return;
+
+      if (group.label) {
+        // h2 (not div) so the group label is a heading for SR navigation. The
+        // .group-label class outranks the bare h2 rule, so the look is unchanged.
+        var gl = el("h2", "group-label");
+        text(gl, group.label);
+        body.appendChild(gl);
+      }
+
+      group.findings.forEach(function (f) {
+        if (!f) return;
+        var sev = SEV[f.severity] ? f.severity : "suggest";
+        var meta = SEV[sev];
+
+        var card = el("article", "finding finding--" + sev);
+
+        // card header: badge, id, specialist tag, file link
+        var cardHead = el("header");
+
+        var badge = el("span", "badge badge--" + sev);
+        text(badge, meta.emoji + " " + meta.label);
+        cardHead.appendChild(badge);
+
+        if (f.id) {
+          var idSpan = el("span", "finding-id");
+          text(idSpan, f.id);
+          cardHead.appendChild(idSpan);
+        }
+
+        var tag = f.specialist != null ? f.specialist : group.label;
+        if (tag) {
+          var tagSpan = el("span", "specialist-tag");
+          text(tagSpan, "[" + tag + "]");
+          cardHead.appendChild(tagSpan);
+        }
+
+        if (f.file && (f.file.relPath || f.file.absPath)) {
+          cardHead.appendChild(fileLink(f.file));
+        }
+
+        card.appendChild(cardHead);
+
+        // what (one-line summary) - rendered as an h3 so screen-reader heading
+        // navigation can jump between findings. The .what class (specificity
+        // beats the bare h3 element rule) preserves the look.
+        if (f.what) {
+          var what = el("h3", "what");
+          html(what, f.what); // inline HTML allowed
+          card.appendChild(what);
+        }
+
+        // arbitrary field rows, in order
+        if (nonEmpty(f.fields)) {
+          f.fields.forEach(function (fld) {
+            if (!fld || (fld.label == null && fld.value == null)) return;
+            var row = el("div", "field");
+            var strong = el("strong");
+            text(strong, (fld.label != null ? fld.label : "") + ":");
+            row.appendChild(strong);
+            row.appendChild(document.createTextNode(" "));
+            var span = document.createElement("span");
+            html(span, fld.value); // value may carry inline HTML (incl <img>, <pre>)
+            row.appendChild(span);
+            card.appendChild(row);
+          });
+        }
+
+        body.appendChild(card);
+      });
+    });
+  }
+
+  // ---- footer.summary ---------------------------------------------------
+  if (nonEmpty(data.summary)) {
+    var footer = el("footer", "summary");
+    data.summary.forEach(function (s) {
+      if (!s) return;
+      var span = document.createElement("span");
+      if (s.emoji) span.appendChild(document.createTextNode(s.emoji + " "));
+      if (s.label != null) {
+        var strong = el("strong");
+        text(strong, s.label + ":");
+        span.appendChild(strong);
+      }
+      if (s.value != null) {
+        span.appendChild(document.createTextNode((s.label != null ? " " : "") + s.value));
+      }
+      footer.appendChild(span);
+    });
+    body.appendChild(footer);
+  }
+
+  // Attach the assembled <main> landmark to the document once.
+  document.body.appendChild(body);
+
+  // ---- file reference -> clickable vscode:// link -----------------------
+  function fileLink(file) {
+    var rel = file.relPath || file.absPath || "";
+    var abs = file.absPath || file.relPath || "";
+    var hasLine = file.line != null && file.line !== "";
+    var visible = rel + (hasLine ? ":" + file.line : "");
+    var target = abs + (hasLine ? ":" + file.line : "");
+    var a = el("a", "file-link");
+    a.setAttribute("href", "vscode://file/" + target);
+    text(a, visible);
+    return a;
+  }
+})();
+</script>
+
+</body>
+</html>

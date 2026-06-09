@@ -4,6 +4,8 @@ Shared visual reference for HTML output produced by toolkit commands and the `/p
 
 This is the minimal v1: typography, colors, severity badges, and the copy-button pattern.
 
+> **Mirror:** The five helper-rendered shells read these tokens from `.claude/skills/shared/shells/tokens.css`, which mirrors this file. Update BOTH together when the look changes. (`tokens.css` points back here.)
+
 ## Typography
 
 - Body: system font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
@@ -34,10 +36,11 @@ Maps to the existing 🚫⚠️💡 scale used in markdown reports. Use these he
 | Level | Emoji | Hex | Notes |
 |---|---|---|---|
 | Block | 🚫 | `#dc2626` | Red. Badge background with white text, or left-border accent. |
-| Warn | ⚠️ | `#d97706` | Amber. Distinct weight from red, not pale yellow (low contrast). |
+| Warn (border) | ⚠️ | `#d97706` | Amber. Decorative card left-border only, where contrast rules do not apply. Distinct weight from red, not pale yellow (low contrast). |
+| Warn (text/badge) | ⚠️ | `#b45309` | Darker amber for white-text surfaces (badge backgrounds, severity chips). About 5:1 contrast, AA-compliant. |
 | Suggest | 💡 | `#2563eb` | Blue, not green. Green reads as "success/pass". |
 
-All three pass WCAG AA contrast (>= 4.5:1) with white text. They are Tailwind 600-level tones, chosen for visual consistency and readability across light backgrounds.
+Block (`#dc2626`) and Suggest (`#2563eb`) pass WCAG AA contrast (>= 4.5:1) with white text. The base Warn amber `#d97706` does NOT (about 3.2:1 white-on-it), so it is used only for the decorative card left-border, where contrast rules do not apply. Any Warn text or badge surface uses the darker variant `#b45309` (about 5:1, AA-compliant) instead. These are Tailwind 600/700-level tones, chosen for visual consistency and readability across light backgrounds.
 
 ## Copy-Button Pattern
 

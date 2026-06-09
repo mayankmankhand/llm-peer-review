@@ -1,6 +1,6 @@
 {
   "name": "llm-peer-review",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "description": "LLM Peer Review - multi-model AI debate for your project lifecycle",
   "author": "Mayank Mankhand",
   "license": "MIT",

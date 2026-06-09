@@ -50,6 +50,7 @@
       "Bash(echo * | node .claude/scripts/browse.js *)",
       "Bash(cat * | node .claude/scripts/browse.js *)",
       "Bash(node .claude/scripts/generate-index.js *)",
+      "Bash(node .claude/scripts/render-html.js *)",
       "Read",
       "Edit",
       "Write",

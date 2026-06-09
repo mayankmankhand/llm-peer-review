@@ -1,6 +1,6 @@
 # HTML Output Rules
 
-<!-- Toolkit version: 5.0.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.1.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## Purpose
 
@@ -61,13 +61,25 @@ The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-
 |---|---|
 | `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
-| `artifacts/html/` | Cycle-bound artifacts (document summaries, debate views, explore option comparisons, review reports). Gitignored. |
+| `artifacts/html/` | Cycle-bound artifacts (review reports, document summaries, debate views, explore option comparisons, audit reports). Timestamped, gitignored. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
 
+### Generation mechanism (render-html.js)
+
+The five `artifacts/html/` output types (review, document, explore, debate, audit) are NOT hand-written. Each command produces a compact JSON payload and runs the shared helper, which injects that JSON plus the shared `tokens.css` into a prebuilt shell and writes the file:
+
+```
+node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit> --name <basename> --data <json-file>
+```
+
+The helper computes a unique timestamped name `<basename>-YYYY-MM-DD-HHMMSS.html` (with a `-N` guard for same-second runs), creates `artifacts/html/`, overwrites freely, and prints the output path to stdout. This is what keeps the open fast and collision-free (issues #120, #127): the command emits only the small JSON, never the boilerplate, and there is never a read-then-overwrite cycle. The prebuilt shells live in `.claude/skills/shared/shells/`; each documents its own JSON schema in a header comment.
+
+**Exceptions** (still hand-rendered, NOT via the helper, and they keep stable identity-keyed names rather than timestamps): plan HTML (`plans/PLAN-*.html`, written once at plan creation), the `/audit-html` opt-in static view of a single markdown file (`artifacts/html/<source-basename>.html`), and `/playground` throwaways (`/tmp/`, interactive).
+
 ## Opening the Artifact
 
-HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. After writing any HTML file, open it in the user's default browser. Do not just hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source code, which is exactly the friction this rule removes.
+HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. After an HTML file is written (by `render-html.js` for the five artifact types - which prints the path - or by hand for the exceptions), open it in the user's default browser. Do not just hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source code, which is exactly the friction this rule removes.
 
 Open it with the toolkit's opener script, which tries each platform launcher in
 order with real fallback and only fails when the environment is genuinely headless:
@@ -76,7 +88,7 @@ order with real fallback and only fails when the environment is genuinely headle
 bash .claude/scripts/open-artifact.sh "<file>"
 ```
 
-Pass the path as you wrote it, relative to the project root (the script resolves it from the current directory). It handles macOS (`open`), WSL (`wslview` -> full-path PowerShell `Start-Process` -> `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve.
+For helper-rendered artifacts, pass the absolute path `render-html.js` printed (the script resolves either an absolute or a project-relative path); for the hand-rendered exceptions, pass the path as you wrote it, relative to the project root (the script resolves it from the current directory). It handles macOS (`open`), WSL (`wslview` -> full-path PowerShell `Start-Process` -> `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve.
 
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
@@ -85,7 +97,9 @@ The `/playground` skill does NOT auto-open (its output is throwaway `/tmp/` HTML
 
 ## Visual Look
 
-Typography, color tokens, severity badge colors, and the copy-button pattern live in `.claude/skills/shared/html-look.md`. Most commands and skills generating HTML inline that file via `` !`cat .claude/skills/shared/html-look.md` ``. The exceptions are `/explore` and `/document`, which run often but rarely produce HTML; they read `html-look.md` on demand only when generating, rather than inlining it on every invocation.
+Typography, color tokens, severity badge colors, and the copy-button pattern live in `.claude/skills/shared/html-look.md`. For the five helper-rendered artifact types (review, document, explore, debate, audit), those tokens are embodied in `.claude/skills/shared/shells/tokens.css`, which `render-html.js` inlines into every shell at render time - the commands no longer inline `html-look.md` themselves. `tokens.css` mirrors `html-look.md`; update both together when the look changes.
+
+The remaining hand-rendered HTML (plan views via `/create-plan`, the `/audit-html` single-file static view, and `/playground`) still inlines or reads `html-look.md` directly, since those do not go through a shell.
 
 ## Your Own Files (downstream projects)
 

@@ -1,8 +1,8 @@
-# Debate HTML Render Template
+# Debate HTML Render
 
-Shared HTML rendering reference for `/ask-gpt` and `/ask-gemini` debate summaries. Inlined into both commands via `` !`cat .claude/skills/shared/html-render-debate.md` ``. Same pattern `html-render-review.md` uses.
+Shared reference for turning an `/ask-gpt` or `/ask-gemini` debate summary into an HTML view. Inlined into both commands via `` !`cat .claude/skills/shared/html-render-debate.md` ``.
 
-This file documents WHEN to render HTML (the gate), WHERE the file goes, and WHAT structure it takes.
+This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
 
 ## When to Render (Judgement Gate)
 
@@ -18,72 +18,29 @@ When the gate fires, announce before generating:
 
 Honor "skip HTML" if the user replies with that phrase. Continue with markdown only.
 
-## File Naming and Location
+## How to Render (data injection - do NOT hand-write HTML)
 
-| Output | Path |
-|---|---|
-| Markdown summary | Inline in chat (today's behavior) |
-| HTML companion | `artifacts/html/debate-{model}-<YYYY-MM-DD>.html` |
+The boilerplate (all CSS, the per-round two-column layout, and the synthesis cards) lives once in the prebuilt shell `.claude/skills/shared/shells/debate-shell.html`. You produce ONLY a compact JSON payload; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file (issues #120, #127). Do not hand-write the HTML.
 
-`{model}` is `gpt` or `gemini` (passed by the calling command). Same-day re-run overwrites (latest wins). Create `artifacts/html/` before writing; it is already gitignored.
+Steps:
 
-## HTML Structure
+1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/debate-shell.html` (the authoritative source). Compact reference:
+   - `topic`, `model` (e.g. `"GPT-5.5"` or `"Gemini"`) - used in the title and the right-column header.
+   - `rounds`: `[{n, claude, model}]` - one per debate round; `claude` and `model` are the two positions (trusted inline HTML allowed).
+   - `synthesis`: `{agreed:[], disagreed:[], actions:[...]}`. Each action: `{id, severity, file:{relPath, absPath, line}, what, fields:[{label, value}]}`, mirroring the review finding shape. `severity` is `"block" | "warn" | "suggest"`. `what` and field `value`s may contain trusted inline HTML.
 
-Self-contained file. Inline `<style>` block, no CDN, no external assets. Inline the design tokens from `.claude/skills/shared/html-look.md`.
+2. **Write the JSON to a temp file**, e.g. `/tmp/debate-data.json`.
 
-```html
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Debate: [topic] (Claude vs [Model])</title>
-  <style>/* Inline tokens from html-look.md */</style>
-</head>
-<body>
-  <header><h1>Debate Summary</h1></header>
-  <section class="rounds">...</section>     <!-- per-round two-column -->
-  <section class="synthesis">...</section>   <!-- agreed / disagreed / actions -->
-</body>
-</html>
-```
+3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+   ```
+   node .claude/scripts/render-html.js --shell debate --name debate-<model> --data /tmp/debate-data.json
+   ```
+   - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.
+   - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
-### Per-Round Two-Column
+4. **Open the printed path** in the browser per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`:
+   ```
+   bash .claude/scripts/open-artifact.sh "<printed-path>"
+   ```
 
-One row per debate round. Left column = Claude's position, right column = the model's position. Lets the reader see how positions converged or diverged across the 3 rounds.
-
-```html
-<section class="rounds">
-  <article class="round">
-    <h2>Round 1</h2>
-    <div class="two-col">
-      <div class="col col--claude"><h3>Claude</h3><p>[position]</p></div>
-      <div class="col col--model"><h3>[Model]</h3><p>[position]</p></div>
-    </div>
-  </article>
-  <!-- Rounds 2, 3 -->
-</section>
-```
-
-### Synthesis Block
-
-Mirrors the markdown Lead Reviewer Summary: Agreed Points, Disagreed Points, Top Issues, and Recommended Actions. Recommended Actions reuse the severity badge colors from `html-look.md` (🚫 Block `#dc2626`, ⚠️ Warn `#d97706`, 💡 Suggest `#2563eb`) as card left-borders and badges, with the same R-IDs as the markdown.
-
-```html
-<section class="synthesis">
-  <div class="agreed">...</div>
-  <div class="disagreed">...</div>
-  <div class="actions">
-    <article class="action action--block">
-      <span class="badge badge--block">🚫 Block</span>
-      <span class="action-id">R1</span>
-      <a class="file-link" href="vscode://file/[absolute-path]:[line]">[relative-path]:[line]</a>
-      <h3>[What]</h3>
-      <div class="field"><strong>Why it matters:</strong> [...]</div>
-      <div class="field"><strong>Example:</strong> [...]</div>
-      <div class="field"><strong>Suggested fix:</strong> [...]</div>
-    </article>
-  </div>
-</section>
-```
-
-Use the same severity hex, file:line link scheme (visible relative path, `vscode://` absolute href), and 4-field action format as `html-render-review.md` for visual consistency across the toolkit.
+The debate cards reuse the same severity scale, file-link scheme, and field format as the review shell for visual consistency across the toolkit.

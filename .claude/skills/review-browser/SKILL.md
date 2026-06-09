@@ -112,11 +112,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-Design tokens for the HTML output (typography, color palette, severity hex values):
-
-!`cat .claude/skills/shared/html-look.md`
-
-For direct calls to this skill, use `<type>` = `browser` in the HTML filename. Skip the Specialist Chips header (single-specialist context). Browser findings carry extra fields (Screenshot, Evidence, Expected, Actual) which the shared template maps to additional `<div class="field">` blocks inside each finding card.
+For direct calls to this skill, pass `--name review-browser` to the helper and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Screenshot as an `<img>` value, Evidence as a `<pre>` value, Expected, Actual); the review shell renders them as extra field rows inside each finding card.
 
 ### Staff QA Check
 

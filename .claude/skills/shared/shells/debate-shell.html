@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debate Summary</title>
+<!--
+  debate-shell.html - prebuilt shell for /ask-gpt and /ask-gemini debate summaries.
+  Rendered by .claude/scripts/render-html.js, which inlines tokens.css into the
+  TOKENS slot (in the style block) and the JSON payload into the RENDER-DATA slot
+  (the render-data block, an application/json data island near the top of body).
+  Each slot's literal placeholder appears exactly once below, so do not repeat
+  those literal strings in prose.
+
+  Spec: .claude/skills/shared/html-render-debate.md
+  Shared conventions: severity strings, file-link scheme, action fields all match
+  the review shell for cross-toolkit visual consistency.
+
+  ===================================================================
+  RENDER DATA JSON SCHEMA (what the slash commands must produce):
+  ===================================================================
+  {
+    "topic":   "string (optional) - the debate topic, shown in the title",
+    "model":   "string (optional) - the opposing model name, e.g. 'GPT-5.5' or
+                'Gemini'. Used in the title and as the right column header.",
+    "rounds": [                       // optional; one entry per debate round
+      {
+        "n":      1,                  // round number (optional; falls back to index)
+        "claude": "string - Claude's position this round (trusted inline HTML ok)",
+        "model":  "string - the opposing model's position (trusted inline HTML ok)"
+      }
+    ],
+    "synthesis": {                    // optional; mirrors the Lead Reviewer Summary
+      "agreed":    ["string", ...],   // Agreed Points (trusted inline HTML ok)
+      "disagreed": ["string", ...],   // Disagreed Points (trusted inline HTML ok)
+      "actions": [                    // Recommended Actions -> .action cards
+        {
+          "id":       "R1",           // action id, e.g. R1 (optional)
+          "severity": "block" | "warn" | "suggest",  // -> badge + card class + emoji
+          "file": {                   // optional file reference
+            "relPath": "src/foo.js",  // visible link text
+            "absPath": "/abs/src/foo.js", // used in vscode://file/ href (falls back to relPath)
+            "line":    42             // optional; appended as :line to text and href
+          },
+          "what": "string - one-line summary of the action (trusted inline HTML ok)",
+          "fields": [                 // optional ordered detail rows
+            { "label": "Why it matters", "value": "string (trusted inline HTML ok)" },
+            { "label": "Example",        "value": "string (trusted inline HTML ok)" },
+            { "label": "Suggested fix",  "value": "string (trusted inline HTML ok)" }
+          ]
+        }
+      ]
+    }
+  }
+
+  Notes:
+  - Severity strings map: block -> 🚫 Block, warn -> ⚠️ Warn, suggest -> 💡 Suggest.
+  - "value", "what", "claude", "model" position text and agreed/disagreed items may
+    contain trusted Claude-generated inline HTML (<code>, <strong>, <a>); rendered
+    via innerHTML. This is review output, not untrusted user input.
+  - Any missing or empty section is skipped (no empty headers rendered).
+  ===================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- debate-specific layout (everything else comes from tokens.css) ---- */
+
+header.page{margin:2rem 0 1rem;}
+header.page .subtitle{color:var(--text-muted);font-size:1rem;margin:.15rem 0 0;}
+
+/* Rounds: each round is a card, with a two-column position layout inside. */
+.round{border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem 1.2rem;margin-bottom:1rem;background:var(--bg);}
+.round > h2{margin:0 0 .8rem;font-size:1.15rem;}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+.col{background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;padding:.8rem 1rem;border-top-width:3px;border-top-style:solid;}
+.col--claude{border-top-color:var(--accent);}
+.col--model{border-top-color:var(--text-muted);}
+.col > h3{margin:0 0 .4rem;font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:.4rem;}
+.col > h3 .side-dot{width:.6rem;height:.6rem;border-radius:50%;display:inline-block;flex:0 0 auto;}
+.col--claude > h3 .side-dot{background:var(--accent);}
+.col--model > h3 .side-dot{background:var(--text-muted);}
+.col p{margin:0;font-size:.92rem;color:var(--text);}
+
+/* Stack the two columns on narrow screens (two paragraph columns only persist when there is real room). */
+@media (max-width:760px){.two-col{grid-template-columns:1fr;}}
+
+/* Synthesis sub-sections. */
+.synthesis h2{margin-top:2rem;}
+.synth-group{margin-bottom:1.4rem;}
+.synth-group h3{font-size:1.05rem;font-weight:600;margin:0 0 .5rem;}
+ul.points{margin:.2rem 0 0;padding-left:1.2rem;}
+ul.points li{margin-bottom:.35rem;font-size:.95rem;}
+</style>
+</head>
+<body>
+<noscript><p style="color:var(--text-muted);">This report needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p></noscript>
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+<script>
+(function () {
+  'use strict';
+
+  var data = JSON.parse(document.getElementById('render-data').textContent);
+
+  // All rendered content lives inside a <main> landmark for screen-reader navigation.
+  var main = document.createElement('main');
+  document.body.appendChild(main);
+
+  // ---- helpers -----------------------------------------------------------
+  var SEV = {
+    block:   { label: 'Block',   emoji: '🚫' }, // 🚫
+    warn:    { label: 'Warn',    emoji: '⚠️' }, // ⚠️
+    suggest: { label: 'Suggest', emoji: '💡' }  // 💡
+  };
+
+  function el(tag, className) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function textEl(tag, className, text) {
+    var node = el(tag, className);
+    node.textContent = text;
+    return node;
+  }
+
+  function htmlEl(tag, className, html) {
+    var node = el(tag, className);
+    node.innerHTML = html;
+    return node;
+  }
+
+  function isNonEmpty(s) {
+    return typeof s === 'string' && s.trim().length > 0;
+  }
+
+  // file reference -> <a class="file-link"> per shared convention.
+  function fileLink(file) {
+    if (!file || (!file.relPath && !file.absPath)) return null;
+    var rel = file.relPath || file.absPath;
+    var abs = file.absPath || file.relPath;
+    var suffix = (file.line || file.line === 0) ? (':' + file.line) : '';
+    var a = el('a', 'file-link');
+    a.href = 'vscode://file/' + abs + suffix;
+    a.textContent = rel + suffix;
+    return a;
+  }
+
+  // ---- header ------------------------------------------------------------
+  var header = el('header', 'page');
+  header.appendChild(textEl('h1', null, 'Debate Summary'));
+
+  var subBits = [];
+  if (isNonEmpty(data.topic)) subBits.push(data.topic);
+  if (isNonEmpty(data.model)) subBits.push('Claude vs ' + data.model);
+  if (subBits.length) {
+    header.appendChild(textEl('p', 'subtitle', subBits.join('  -  ')));
+  }
+  main.appendChild(header);
+
+  // ---- rounds ------------------------------------------------------------
+  var modelName = isNonEmpty(data.model) ? data.model : 'Model';
+
+  if (Array.isArray(data.rounds) && data.rounds.length) {
+    var roundsSection = el('section', 'rounds');
+    data.rounds.forEach(function (round, i) {
+      if (!round) return;
+      var article = el('article', 'round');
+      var num = (round.n || round.n === 0) ? round.n : (i + 1);
+      article.appendChild(textEl('h2', null, 'Round ' + num));
+
+      var twoCol = el('div', 'two-col');
+
+      // Claude column
+      var claudeCol = el('div', 'col col--claude');
+      var ch3 = el('h3', null);
+      var cdot = el('span', 'side-dot');
+      ch3.appendChild(cdot);
+      ch3.appendChild(document.createTextNode('Claude'));
+      claudeCol.appendChild(ch3);
+      if (isNonEmpty(round.claude)) claudeCol.appendChild(htmlEl('p', null, round.claude));
+
+      // Model column
+      var modelCol = el('div', 'col col--model');
+      var mh3 = el('h3', null);
+      var mdot = el('span', 'side-dot');
+      mh3.appendChild(mdot);
+      mh3.appendChild(document.createTextNode(modelName));
+      modelCol.appendChild(mh3);
+      if (isNonEmpty(round.model)) modelCol.appendChild(htmlEl('p', null, round.model));
+
+      twoCol.appendChild(claudeCol);
+      twoCol.appendChild(modelCol);
+      article.appendChild(twoCol);
+      roundsSection.appendChild(article);
+    });
+    main.appendChild(roundsSection);
+  }
+
+  // ---- synthesis ---------------------------------------------------------
+  var synth = data.synthesis || {};
+  var hasAgreed = Array.isArray(synth.agreed) && synth.agreed.length;
+  var hasDisagreed = Array.isArray(synth.disagreed) && synth.disagreed.length;
+  var hasActions = Array.isArray(synth.actions) && synth.actions.length;
+
+  if (hasAgreed || hasDisagreed || hasActions) {
+    var section = el('section', 'synthesis');
+    section.appendChild(textEl('h2', null, 'Lead Reviewer Summary'));
+
+    function pointsGroup(title, items) {
+      var group = el('div', 'synth-group');
+      group.appendChild(textEl('h3', null, title));
+      var ul = el('ul', 'points');
+      items.forEach(function (item) {
+        if (!isNonEmpty(item)) return;
+        ul.appendChild(htmlEl('li', null, item));
+      });
+      group.appendChild(ul);
+      return group;
+    }
+
+    if (hasAgreed) section.appendChild(pointsGroup('Agreed Points', synth.agreed));
+    if (hasDisagreed) section.appendChild(pointsGroup('Disagreed Points', synth.disagreed));
+
+    if (hasActions) {
+      var actionsGroup = el('div', 'synth-group actions');
+      actionsGroup.appendChild(textEl('h3', null, 'Recommended Actions'));
+
+      synth.actions.forEach(function (action) {
+        if (!action) return;
+        var sevKey = (action.severity && SEV[action.severity]) ? action.severity : 'suggest';
+        var sev = SEV[sevKey];
+
+        var card = el('article', 'action action--' + sevKey);
+
+        var head = el('header', null);
+        var badge = el('span', 'badge badge--' + sevKey);
+        badge.textContent = sev.emoji + ' ' + sev.label;
+        head.appendChild(badge);
+
+        if (isNonEmpty(action.id)) {
+          head.appendChild(textEl('span', 'action-id', action.id));
+        }
+
+        var link = fileLink(action.file);
+        if (link) head.appendChild(link);
+
+        card.appendChild(head);
+
+        if (isNonEmpty(action.what)) {
+          // Card title is an <h3> (keeps the .what class) so screen-reader heading
+          // navigation can jump between actions. .what wins on specificity over h3.
+          card.appendChild(htmlEl('h3', 'what', action.what));
+        }
+
+        if (Array.isArray(action.fields)) {
+          action.fields.forEach(function (f) {
+            if (!f || !isNonEmpty(f.label)) return;
+            var field = el('div', 'field');
+            var strong = el('strong', null);
+            strong.textContent = f.label + ':';
+            field.appendChild(strong);
+            field.appendChild(document.createTextNode(' '));
+            var span = el('span', null);
+            span.innerHTML = (f.value != null) ? String(f.value) : '';
+            field.appendChild(span);
+            card.appendChild(field);
+          });
+        }
+
+        actionsGroup.appendChild(card);
+      });
+
+      section.appendChild(actionsGroup);
+    }
+
+    main.appendChild(section);
+  }
+})();
+</script>
+</body>
+</html>

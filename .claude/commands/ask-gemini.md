@@ -183,15 +183,11 @@ Present the summary to the user in this format. Each Recommended Action uses the
 
 ### HTML Companion (when gate fires)
 
-After presenting the markdown summary, evaluate whether to also generate an HTML view of the debate. The gate fires when there are 3+ Recommended Actions in the final summary (per `.claude/rules/html-outputs.md`). Use the shared template:
+After presenting the markdown summary, evaluate whether to also generate an HTML view of the debate. The gate fires when there are 3+ Recommended Actions in the final summary (per `.claude/rules/html-outputs.md`). Use the shared template (it covers the gate and the data-injection steps):
 
 !`cat .claude/skills/shared/html-render-debate.md`
 
-Design tokens for the HTML output (typography, color palette, severity hex values):
-
-!`cat .claude/skills/shared/html-look.md`
-
-Use `gemini` as the `{model}` token in the HTML filename.
+Pass `--name debate-gemini` to the helper.
 
 ## Step 7: Await Approval
 

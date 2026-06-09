@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTML Audit</title>
+<!--
+  audit-shell.html - prebuilt HTML shell for the /audit-html REPORT.
+
+  Renders the AUDIT REPORT: the list of candidate markdown files the audit
+  scanned, each with the signals that flagged it, any vetoes that applied, and a
+  verdict (candidate vs veto) plus a one-line reason. This is NOT the opt-in
+  static view of a single markdown file - it is the report that lists which
+  files would benefit from an HTML view. Per html-outputs.md, this view is
+  generated when 5+ candidates are listed.
+
+  Rendered by .claude/scripts/render-html.js, which inlines two things:
+    1. tokens.css  -> the tokens slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json data
+       island carrying id="render-data") further down in <body>
+  (Each slot's literal placeholder token appears EXACTLY ONCE in this file, at
+  its real injection point - the helper does a first-occurrence replace, so this
+  doc comment must not repeat those tokens verbatim.)
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://.
+
+  ==========================================================================
+  JSON SCHEMA (the /audit-html skill produces this; the renderer consumes it)
+  ==========================================================================
+  All fields optional unless noted; a section is skipped when its data is
+  missing or empty. Inline trusted HTML (Claude-generated audit text) is allowed
+  in: the subtitle, every candidate "reason", and each footer summary value.
+  Those render via innerHTML. Emoji in the JSON are literal (rendered directly).
+
+  {
+    "title":    "HTML Audit",                       // h1 (defaults to "HTML Audit")
+    "subtitle": "Scanned 23 files &middot; 2 candidates", // p.sub (HTML allowed)
+
+    // The scanned files, in report order (top candidate first by convention).
+    "candidates": [
+      {
+        // file may be a string (path) OR a file-reference object
+        // {relPath, absPath, line}. A string is treated as relPath.
+        "file": "STATUS.md",
+        // OR: "file": { "relPath": "STATUS.md",
+        //               "absPath": "/home/.../STATUS.md", "line": 1 },
+
+        "verdict":  "candidate",          // "candidate" | "veto" (default candidate)
+        "signals":  ["read-every-session", "file so long the human hunts (812 lines)"],
+        "vetoes":   [],                   // empty/omitted for candidates
+        "reason":   "Lists every roadmap item with status; you <strong>Ctrl+F</strong> it weekly." // HTML allowed
+      },
+      {
+        "file": "LESSONS.md",
+        "verdict": "veto",
+        "signals": ["long (430 lines)"],  // signals that DID fire (shown muted)
+        "vetoes":  ["Claude-read"],       // why it is vetoed
+        "reason":  "Read by Claude every session; HTML wastes tokens on re-ingestion."
+      }
+    ],
+
+    // Optional footer count strip. Each span = optional emoji + bold label + value.
+    "summary": [
+      { "label": "Scanned",   "value": "23 files" },
+      { "label": "Candidates","value": "2" },
+      { "label": "Vetoed",    "value": "4" }
+    ]
+  }
+
+  File-reference rendering (when "file" is an object):
+    <a class="file-link" href="vscode://file/<absPath>[:<line>]"><relPath>[:<line>]</a>.
+    Visible text = relPath (+ :line if present). href uses absPath (falls back
+    to relPath when absPath is missing). When "file" is a plain string, it is
+    rendered as a non-link mono filename.
+
+  Verdict treatment:
+    - candidate -> accent/positive: green left border + "CANDIDATE" badge.
+    - veto      -> muted/struck:   grey, reduced opacity, struck filename + "VETO" badge.
+  ==========================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- audit-specific layout (everything NOT already in tokens.css) ---- */
+header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
+.sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
+
+.candidates{margin-top:1.6rem;}
+
+/* Each scanned file is a card. Verdict drives the left-border + tone. */
+.cand{border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;margin-bottom:.9rem;border-left-width:5px;border-left-style:solid;}
+.cand--candidate{border-left-color:#15803d;}                     /* green = keep/positive */
+.cand--veto{border-left-color:var(--border);background:var(--bg-muted);opacity:.78;}
+
+.cand header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;}
+
+/* Verdict badges (reuse the .badge pill shape from tokens.css). */
+.verdict{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:#fff;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em;}
+.verdict--candidate{background:#15803d;}
+.verdict--veto{background:var(--text-muted);}
+
+.cand-file{font-family:ui-monospace,Consolas,monospace;font-weight:600;font-size:.95rem;margin:0;}
+.cand--veto .cand-file{text-decoration:line-through;color:var(--text-muted);}
+.cand .file-link{margin-left:0;}            /* override tokens' margin-left:auto in this layout */
+
+.cand-reason{font-size:.95rem;margin:.1rem 0 .6rem;}
+.cand--veto .cand-reason{color:var(--text-muted);}
+
+/* Signal / veto chip rows. */
+.chip-row{display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline;margin-bottom:.35rem;}
+.chip-row-label{font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-right:.15rem;}
+.tag{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;padding:.18rem .5rem;border-radius:999px;border:1px solid var(--border);background:var(--bg-muted);color:var(--text-muted);}
+.tag--signal{background:#eef2ff;border-color:#c7d2fe;color:#3730a3;}   /* signals that fired */
+.tag--veto{background:#fef2f2;border-color:#fecaca;color:#b91c1c;}     /* veto reasons */
+.cand--veto .tag--signal{background:var(--bg-muted);border-color:var(--border);color:var(--text-muted);}
+
+.empty{margin-top:1.6rem;color:var(--text-muted);font-size:.95rem;}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="noscript-note">This report needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p>
+</noscript>
+
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var data = JSON.parse(document.getElementById("render-data").textContent);
+
+  // ---- tiny DOM helpers -------------------------------------------------
+  function el(tag, cls) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    return n;
+  }
+  // Trusted inline HTML (Claude-generated audit text, not untrusted input).
+  function html(node, markup) { node.innerHTML = (markup == null ? "" : String(markup)); return node; }
+  function text(node, str)    { node.textContent = (str == null ? "" : String(str));   return node; }
+  function isArr(x)           { return Object.prototype.toString.call(x) === "[object Array]"; }
+  function nonEmpty(x)        { return isArr(x) && x.length > 0; }
+
+  var body = el("main"); // all rendered output lives in one <main> landmark (a11y)
+
+  // ---- header.page (title, subtitle) ------------------------------------
+  var header = el("header", "page");
+  var h1 = el("h1");
+  text(h1, data.title || "HTML Audit");
+  header.appendChild(h1);
+
+  if (data.subtitle) {
+    var sub = el("p", "sub");
+    html(sub, data.subtitle); // subtitle may carry inline HTML (e.g. &middot;)
+    header.appendChild(sub);
+  }
+  body.appendChild(header);
+
+  // ---- candidate list ---------------------------------------------------
+  if (nonEmpty(data.candidates)) {
+    var list = el("section", "candidates");
+
+    data.candidates.forEach(function (c) {
+      if (!c) return;
+      var verdict = (c.verdict === "veto") ? "veto" : "candidate";
+
+      var card = el("article", "cand cand--" + verdict);
+
+      // card header: verdict badge + filename (link or plain mono)
+      var cardHead = el("header");
+
+      var vb = el("span", "verdict verdict--" + verdict);
+      // Leading glyph is a non-color shape cue (a11y: do not rely on green/grey alone).
+      text(vb, verdict === "veto" ? "✗ Veto" : "✓ Candidate");
+      cardHead.appendChild(vb);
+
+      cardHead.appendChild(fileNode(c.file));
+      card.appendChild(cardHead);
+
+      // one-line reason (HTML allowed)
+      if (c.reason) {
+        var reason = el("p", "cand-reason");
+        html(reason, c.reason);
+        card.appendChild(reason);
+      }
+
+      // signals that fired
+      if (nonEmpty(c.signals)) {
+        card.appendChild(chipRow("Signals", c.signals, "tag--signal"));
+      }
+
+      // veto reasons
+      if (nonEmpty(c.vetoes)) {
+        card.appendChild(chipRow("Vetoes", c.vetoes, "tag--veto"));
+      }
+
+      list.appendChild(card);
+    });
+
+    body.appendChild(list);
+  } else {
+    var empty = el("p", "empty");
+    text(empty, "No candidates this pass.");
+    body.appendChild(empty);
+  }
+
+  // ---- footer.summary ---------------------------------------------------
+  if (nonEmpty(data.summary)) {
+    var footer = el("footer", "summary");
+    data.summary.forEach(function (s) {
+      if (!s) return;
+      var span = document.createElement("span");
+      if (s.emoji) span.appendChild(document.createTextNode(s.emoji + " "));
+      if (s.label != null) {
+        var strong = el("strong");
+        text(strong, s.label + ":");
+        span.appendChild(strong);
+      }
+      if (s.value != null) {
+        var v = document.createElement("span");
+        html(v, (s.label != null ? " " : "") + s.value); // value may carry inline HTML
+        span.appendChild(v);
+      }
+      footer.appendChild(span);
+    });
+    body.appendChild(footer);
+  }
+
+  document.body.appendChild(body); // attach the assembled <main> once
+
+  // ---- chip row builder -------------------------------------------------
+  function chipRow(label, items, tagClass) {
+    var row = el("div", "chip-row");
+    var lab = el("span", "chip-row-label");
+    text(lab, label);
+    row.appendChild(lab);
+    items.forEach(function (item) {
+      if (item == null || item === "") return;
+      var tag = el("span", "tag " + tagClass);
+      text(tag, String(item)); // signal/veto labels are plain text, not HTML
+      row.appendChild(tag);
+    });
+    return row;
+  }
+
+  // ---- file node: a vscode:// link (object) or plain mono name (string) -
+  function fileNode(file) {
+    // The filename is the card's title, so return it as an <h3> heading (a11y:
+    // screen-reader heading navigation between candidates). The .cand-file class
+    // keeps the look; margin:0 keeps it aligned in the flex header.
+    var h = el("h3", "cand-file");
+    if (file && typeof file === "object" && (file.relPath || file.absPath)) {
+      var rel = file.relPath || file.absPath || "";
+      var abs = file.absPath || file.relPath || "";
+      var hasLine = file.line != null && file.line !== "";
+      var visible = rel + (hasLine ? ":" + file.line : "");
+      var target = abs + (hasLine ? ":" + file.line : "");
+      var a = el("a", "file-link");
+      a.setAttribute("href", "vscode://file/" + target);
+      text(a, visible);
+      h.appendChild(a);
+      return h;
+    }
+    // plain string filename (or missing) -> non-link mono text
+    text(h, (file == null ? "" : String(file)));
+    return h;
+  }
+})();
+</script>
+
+</body>
+</html>

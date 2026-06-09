@@ -69,11 +69,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-Design tokens for the HTML output (typography, color palette, severity hex values):
-
-!`cat .claude/skills/shared/html-look.md`
-
-For direct calls to this skill, use `<type>` = `full` in the HTML filename. Render the Specialist Chips header with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip-rendering purposes.
+For direct calls to this skill, pass `--name review-full` to the helper. Include the `chips` array with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip purposes.
 
 ### Staff Architect Check
 

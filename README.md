@@ -226,7 +226,7 @@ Copy these into your project:
 | `.claude/skills/` (whole folder) | `your-project/.claude/skills/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `package.json`) | `your-project/.claude/scripts/` |
+| `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `open-artifact.sh`, `render-html.js`, `package.json`) | `your-project/.claude/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
@@ -352,6 +352,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `.claude/skills/shared/*.md` | **Toolkit** (editable) | Shared reference files used by multiple review skills (`severity-anchors.md`, `output-template.md`, `finding-id-system.md`, `browse-api.md`). Editing one of these affects every skill that injects it. |
 | `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
 | `.claude/scripts/generate-index.js` | **Toolkit** | Scans the project and emits a manifest used by `/index` to build `CODEBASE_MAP.md`. Always updated on setup. |
+| `.claude/scripts/render-html.js` | **Toolkit** | Injects a JSON payload plus the shared `tokens.css` into a prebuilt shell (`.claude/skills/shared/shells/`) to render HTML artifacts (review, document, explore, debate, audit). Always updated on setup. |
 | `CODEBASE_MAP.md` | **Generated** | Auto-generated semantic map (modules, conventions, gotchas, navigation guide). Gitignored. Built by `/index`, refreshed by `/document`. |
 | `plans/PLAN-*.md` | **Generated** | Plans produced by `/create-plan` and updated by `/execute`. Gitignored (local working docs). |
 

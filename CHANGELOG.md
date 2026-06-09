@@ -1,5 +1,26 @@
 # Changelog
 
+## v5.1.0 - HTML Render Pipeline (2026-06-09)
+
+A performance, reliability, and accessibility overhaul of how toolkit commands produce HTML. Three issues. **#120:** review (and every other) HTML report now opens fast - commands stopped hand-writing the whole ~13KB file and instead emit a compact JSON payload that a new helper injects into a prebuilt shell. **#127:** HTML files are now uniquely timestamped, so a same-day re-run never collides and the old "Claude must read the stale file before overwriting it" double-cost is gone. **#122:** `/explore`'s options HTML now fires reliably (the gate is unchanged - vision mode + 2+ options - but the step is explicit and unmissable). Markdown stays canonical everywhere; this only changes how the HTML view is generated. Re-run `setup.sh` / `setup.ps1` (or follow `AGENT-SETUP.md`) to pick it up.
+
+### Added
+- **`render-html.js` data-injection pipeline** (#120, #127) - New zero-dependency `.claude/scripts/render-html.js` is the single renderer for all five cycle-bound HTML types (review, document, explore, debate, audit report). A command emits only a compact findings JSON; the helper injects it plus the shared design tokens into a prebuilt shell, computes a unique `YYYY-MM-DD-HHMMSS` filename (with a `-N` same-second guard), and writes a self-contained file (inline CSS + JSON + renderer JS, no CDN, works offline). Because a script overwriting a file has no "read-before-overwrite" constraint, the stale-file read-then-overwrite cycle that doubled cost on same-day re-runs is eliminated. The helper validates `--shell` against an allowlist (no path traversal) and escapes `<`, U+2028, and U+2029 in the JSON island so embedded markup cannot break the data block.
+- **Prebuilt shells + shared `tokens.css`** - New `.claude/skills/shared/shells/` holds one `<type>-shell.html` per output (inline CSS plus a vanilla-JS renderer that builds the DOM from the injected JSON, with graceful handling of missing/empty fields) plus `tokens.css`, the machine-usable mirror of `html-look.md`. Both installers now copy the new folder and script, and a `Bash(node .claude/scripts/render-html.js *)` permission is merged into downstream `settings.local.json`.
+
+### Changed
+- **HTML generation rewired across `/review` (+ 8 specialists), `/document`, `/explore`, `/ask-gpt`/`/ask-gemini`, `/audit-html`** - These now produce JSON and call the helper instead of hand-writing HTML. The shared `html-render-review.md` / `html-render-debate.md` templates were rewritten to document the data schema and helper call, and the commands no longer inline `html-look.md` (the helper injects `tokens.css`). The gates that decide *when* to render are unchanged. Hand-rendered exceptions kept as-is: plan HTML (`/create-plan`), the `/audit-html` single-file static view, and `/playground`.
+- **Timestamped artifact naming** (#127) - Files in `artifacts/html/` are now `<name>-YYYY-MM-DD-HHMMSS.html`. Plan HTML and the audit single-file view keep their stable identity-keyed names.
+- **`/explore` options HTML made reliable** (#122) - The options-comparison HTML step is now an explicit "REQUIRED when 2+ options are being compared" instruction with a sharp definition of what counts (two or more distinct, named directions the user is actively deciding between, each with a tradeoff). The gate (vision mode + 2+ options) is unchanged; it was previously an easy-to-skip sub-bullet.
+
+### Fixed (accessibility + robustness pass)
+- **Warn color now meets WCAG AA** - The amber used for warn text and badges was 3.2:1 (below the 4.5:1 AA floor). A darker `--warn-strong` (`#b45309`, ~5:1) now backs text and badge surfaces, while the bright `#d97706` stays for the decorative card border only. Corrected a false "all three pass AA" claim in `html-look.md`.
+- **No-JS fallback, landmarks, and headings** - Each shell now carries a `<noscript>` note (the old hand-written HTML rendered without JS; the shell+renderer approach needed a fallback), wraps its content in a `<main>` landmark, and renders card titles / group labels as real headings for screen-reader navigation. The `/document` commit chart gained a `role="img"` plus a summarizing `aria-label`, and the `/audit-html` verdict gained a non-color glyph cue (color is no longer the only signal).
+
+Re-run `setup.sh` / `setup.ps1` (or follow `AGENT-SETUP.md`) to pick this up.
+
+---
+
 ## v5.0.1 - WSL Opener + Windows Installer Fix (2026-06-08)
 
 Two fresh-install reliability fixes. **#119:** HTML artifacts now open reliably on WSL - the opener moved from prose Claude ran by hand into a deterministic script (`.claude/scripts/open-artifact.sh`) with real fallback, so it no longer silently no-ops when no browser launcher is on PATH. **#126:** the Windows installer (`setup.ps1`) now copies `generate-index.js`, so `/index` and `/document` work out of the box on fresh Windows installs (closing a follow-up deferred in v5.0.0). Windows users who installed before this version should re-run `setup.ps1` to pick up the fix.

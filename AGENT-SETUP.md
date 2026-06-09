@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.0.1)
+# AI Agent Setup Instructions (v5.1.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -103,7 +103,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.0.1:** Fresh-install reliability fixes (#119, #126). After re-running setup:
+**What's new in v5.1.0:** HTML render pipeline (#120, #122, #127). After re-running setup:
+- HTML reports (review, document, explore, debate, audit) now open faster: commands emit a small JSON payload that a new helper (`.claude/scripts/render-html.js`) injects into a prebuilt shell, instead of hand-writing the whole file.
+- HTML filenames in `artifacts/html/` are now timestamped, so same-day re-runs never collide and there is no stale-file overwrite cycle.
+- An accessibility pass: a darker AA-compliant warn color, a `<noscript>` fallback, `<main>` landmarks, heading-navigable findings, and chart/verdict cues that no longer rely on color alone.
+- New `.claude/skills/shared/shells/` folder (the prebuilt shells plus `tokens.css`); both installers copy it and the new script, and merge in a `render-html.js` permission.
+
+**What was new in v5.0.1:** Fresh-install reliability fixes (#119, #126). After re-running setup:
 - HTML artifacts now open reliably on WSL. The opener moved from prose Claude ran by hand into a deterministic script (`.claude/scripts/open-artifact.sh`) with real fallback, so it no longer silently fails when no browser launcher is on PATH.
 - The Windows installer (`setup.ps1`) now copies `generate-index.js`, so `/index` and `/document`'s map refresh work out of the box on fresh Windows installs (closing a v5.0.0 follow-up). Windows users who installed before this version should re-run `setup.ps1` to pick up the fix.
 

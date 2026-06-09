@@ -118,8 +118,8 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
-# Check dep-free runtime scripts (index generator + artifact opener) - must exist.
-foreach ($f in @("generate-index.js", "open-artifact.sh")) {
+# Check dep-free runtime scripts (index generator + artifact opener + HTML renderer) - must exist.
+foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -420,6 +420,27 @@ if (Test-Path -LiteralPath $sharedDir -PathType Container) {
   }
 }
 
+# PARITY: shared\shells\ must be copied by BOTH setup.sh and setup.ps1 (issue #126).
+# The shared loop above copies ONLY *.md, and the per-skill loop below SKIPS
+# shared - so this prebuilt-shell subdirectory (the *.html shells + tokens.css
+# that render-html.js injects into) needs its own copy step. Copy every file in
+# the directory (the shells are *.html plus tokens.css); -File excludes any
+# nested directories. Mirrors the shells block in setup.sh.
+$shellsDir = Join-Path $ToolkitRoot ".claude\skills\shared\shells"
+if (Test-Path -LiteralPath $shellsDir -PathType Container) {
+  $shellsDest = Join-Path $Target ".claude\skills\shared\shells"
+  New-Item -ItemType Directory -Force -Path $shellsDest | Out-Null
+  foreach ($src in Get-ChildItem -Path $shellsDir -File) {
+    $dest = Join-Path $shellsDest $src.Name
+    try {
+      Invoke-SafeCopy -Source $src.FullName -Destination $dest
+    } catch {
+      Write-Host "  Error: Failed to copy shared\shells\$($src.Name): $_"
+      exit 1
+    }
+  }
+}
+
 # Copy each skill directory (contains SKILL.md and optional supporting files)
 $skillsRoot = Join-Path $ToolkitRoot ".claude\skills"
 if (Test-Path -LiteralPath $skillsRoot -PathType Container) {
@@ -473,8 +494,10 @@ if (Test-Path -LiteralPath $lockSrc -PathType Leaf) {
 # Add a new script to one installer? Add it to the other too (issue #126).
 # Dep-free runtime scripts: copied separately from the issue-#91 quarantine
 # group above (which carries scripts that need node_modules). Mirrors setup.sh.
-Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh) ..."
-foreach ($name in @("generate-index.js", "open-artifact.sh")) {
+# render-html.js injects a JSON payload into a prebuilt shell under
+# .claude\skills\shared\shells\ (copied with the skills block above).
+Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh, render-html.js) ..."
+foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js")) {
   try {
     $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
     $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)

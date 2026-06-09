@@ -69,11 +69,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-Design tokens for the HTML output (typography, color palette, severity hex values):
-
-!`cat .claude/skills/shared/html-look.md`
-
-For direct calls to this skill, use `<type>` = `ux` in the HTML filename. Skip the Specialist Chips header (single-specialist context).
+For direct calls to this skill, pass `--name review-ux` to the helper and omit the `chips` array (single-specialist context).
 
 ### Staff Designer Check
 
