@@ -61,6 +61,35 @@ For plans with fewer than 3 steps, skip the tags.
 
 </conditions>
 
+## Test Steps (conditional)
+
+<conditions>
+
+Decide whether this plan needs a dedicated test step. This is dynamic, not blanket - a plan that changes real logic usually gets one; a plan that does not should not get one. **When in doubt, skip it** - a missing test step is cheaper than a plan cluttered with tests nobody needed.
+
+**Add a "Verify" test step when the plan changes verifiable logic:**
+- New business logic with defined inputs and outputs (e.g., a pricing calculator): WRITE new tests that assert the correct outputs.
+- A refactor of code that already has test coverage (e.g., a parser): RUN the existing tests to confirm behavior is unchanged.
+- Anything with a checkable result: pure functions, parsers, calculations, data transforms, business rules.
+
+**Skip the test step when there is nothing to verify:**
+- Config, docs, comments, copy, or styling only.
+- Exploratory or research work (investigating a bug, reading code) with no code change yet.
+
+**How to decide (no heavy scanning):** infer from the task descriptions you just wrote, plus `CODEBASE_MAP.md` signals - is there a `tests/` directory? a test framework in the project's dependencies? Do NOT scan the codebase for per-function coverage.
+
+**Where it goes:** one dedicated step named "Verify" near the end of the Tasks list. It runs existing tests and/or adds new ones, whichever fits. It `depends on` the code steps it verifies (never on the optional setup step below), so the plan stays valid even if that optional step is deleted. Because it is a step, it counts toward the 3-or-more-step threshold for Execution Order Tags above; tag it `[sequential]` when that threshold applies.
+
+**Explain why, in one line.** Directly under the Verify step (and under the optional setup step, if present), add a short plain-English note so a non-technical reader knows why it appeared and whether it is safe to drop. Format it as an italic sub-line, e.g. `_Why this step: this plan changes pricing math, so we confirm the numbers come out right._`
+
+**When the project has no way to run tests yet** (no test framework in dependencies, no `tests/` directory) AND a test step is warranted:
+- Add a flagged, optional setup step before the code steps, named like "Set up <framework> (optional - recommended)".
+- Auto-detect the idiomatic framework from the project: Vitest or Jest for JavaScript/TypeScript (`package.json`), pytest for Python (`pyproject.toml` or `requirements.txt`), and so on. If the ecosystem is unclear, use generic wording: "Set up a test framework (optional - recommended)".
+- Give it a why-note that says it is safe to delete, e.g. `_Why this step: optional. Delete it if you do not want to add a test tool now; the Verify step still works, it just runs manually._`
+- Because the Verify step depends on the code steps and not on this setup step, deleting the optional step never leaves a dangling reference. Never force a framework install onto a small change.
+
+</conditions>
+
 ## Markdown Template
 
 <template>
@@ -102,6 +131,12 @@ Key architectural/implementation choices made during exploration:
 - [ ] 🟥 **Step 3: [Name]** `[sequential]` → depends on: Steps 1, 2
   - [ ] 🟥 Subtask 1
   - [ ] 🟥 Subtask 2
+
+- [ ] 🟥 **Step N: Verify** `[sequential]` → depends on: the code steps it verifies
+  <!-- Conditional step (see "Test Steps (conditional)" above). Include ONLY when the plan changes verifiable logic; omit entirely for docs/config/exploratory plans. If the project has no test runner, add a flagged optional "Set up <framework> (optional - recommended)" step before the code steps. This Verify step depends on the CODE steps, not the optional setup step, so deleting the optional step never breaks it. -->
+  - _Why this step: [one plain-English line, e.g. "this plan changes pricing math, so we confirm the numbers come out right"]_
+  - [ ] 🟥 Run existing tests for [module], confirm behavior unchanged
+  - [ ] 🟥 Add tests for [new logic]: assert [input] produces [expected output]
 
 ## Outcomes
 <!-- Fill in after execution: decision-relevant deltas only. What changed vs. planned? Key decisions made? Assumptions invalidated? -->

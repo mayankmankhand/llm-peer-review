@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Conditional unit-test steps in `/create-plan`** (#121) - Plans now decide for themselves whether to include a dedicated "Verify" test step, instead of never planning tests. A new `## Test Steps (conditional)` block (modeled on the existing "Execution Order Tags" conditions) adds the step when the plan changes verifiable logic - WRITE new tests for new business logic (a pricing calculator), RUN existing tests after a refactor of covered code (a parser) - and skips it for docs/config/comment-only or exploratory/research plans ("when in doubt, skip it"). The decision reads from the task descriptions plus `CODEBASE_MAP.md` signals (a `tests/` directory, a test framework in dependencies); no extra codebase scanning. When the project has no test runner, the plan adds a flagged *optional* "Set up <framework> (optional - recommended)" step with the idiomatic tool auto-detected (Vitest/Jest for JS, pytest for Python; generic wording if unclear); the Verify step depends on the code steps and never on that optional step, so deleting it never leaves a dangling reference. Each test step carries a plain-English `_Why this step:_` note for non-technical readers.
+
+### Changed
+- **`/review-plan` Quality Gate softened to match** (#121) - The plan-compliance reviewer's gate changed from "Tests written?" to "Tests written (when the plan warranted them)?" so it no longer flags plans that correctly skipped tests. This closes a loop: `/review-plan` already graded test presence, but `/create-plan` never planned tests, so a plan could be dinged for something the planning step never asked for.
+
+---
+
 ## v5.1.0 - HTML Render Pipeline (2026-06-09)
 
 A performance, reliability, and accessibility overhaul of how toolkit commands produce HTML. Three issues. **#120:** review (and every other) HTML report now opens fast - commands stopped hand-writing the whole ~13KB file and instead emit a compact JSON payload that a new helper injects into a prebuilt shell. **#127:** HTML files are now uniquely timestamped, so a same-day re-run never collides and the old "Claude must read the stale file before overwriting it" double-cost is gone. **#122:** `/explore`'s options HTML now fires reliably (the gate is unchanged - vision mode + 2+ options - but the step is explicit and unmissable). Markdown stays canonical everywhere; this only changes how the HTML view is generated. Re-run `setup.sh` / `setup.ps1` (or follow `AGENT-SETUP.md`) to pick it up.

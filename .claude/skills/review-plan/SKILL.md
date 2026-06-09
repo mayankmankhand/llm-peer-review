@@ -42,7 +42,7 @@ Read the plan file, then read the implementation files. Compare them. Pick one o
 | **Feature Completeness** | Every plan task implemented? Subtasks done? Placeholders remaining? |
 | **Spec Compliance** | Implementation matches UI/UX Design section and critical decisions in plan? |
 | **Scope Management** | Unplanned additions? Cuts justified and documented? Scope creep? |
-| **Quality Gates** | Success criteria met? Tests written? Docs updated? |
+| **Quality Gates** | Success criteria met? Tests written (when the plan warranted them)? Docs updated? |
 
 Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
 
