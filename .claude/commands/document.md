@@ -9,7 +9,7 @@ You are updating documentation after code changes.
 
 - **CLAUDE.md** - Project-specific instructions: tech stack, preferences, team info (user-owned)
 - **README.md** - Project overview for humans
-- **LESSONS.md** - Learning log: what worked, what didn't, mistakes to avoid (user-owned)
+- **LESSONS.md** / **LESSONS-detail.md** - Learning log (user-owned): `LESSONS.md` is the one-line index Claude reads each session, `LESSONS-detail.md` holds the full write-ups it opens on demand
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes (update if it exists)
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (toolkit-owned, **do not edit** - overwritten on update)
 
@@ -34,7 +34,7 @@ For each changed file:
 - **README.md** - New features, changed behavior, setup instructions, new commands
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
-- **LESSONS.md** - Prompt the user: "Did you learn anything this session worth logging?"
+- **LESSONS.md** / **LESSONS-detail.md** - First show the user the current lesson index (`LESSONS.md`) so nothing gets duplicated, then prompt: "Did you learn anything this session worth logging?" Capture a lesson when Claude repeated a mistake, a review caught something Claude should have known, or the user typed the same correction twice. When adding one, write the one-liner to `LESSONS.md` (under the right section) AND the full write-up to `LESSONS-detail.md` (same bold lead). Then do a quick cleanup pass: dedupe near-duplicate lessons, mark superseded ones, and keep the index short. Capture stays user-approved - do not auto-write lessons.
 - **CODEBASE_MAP.md** - Regenerate by invoking `/index` (the command orchestrates the scanner and parallel subagents to produce a fresh semantic map). For projects over 500k tokens or with per-chunk overflow, `/index` will prompt for cost confirmation before spending API tokens - tell the user this may happen and that they can decline to skip the refresh (the prior map remains intact). If `/index` fails or the user declines, leave the existing map untouched and continue with the rest of `/document`. Do not write the map file manually.
 
 ## 4. Documentation Style Rules

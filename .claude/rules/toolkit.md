@@ -32,6 +32,8 @@ We follow this flow for features:
 6. `/peer-review` - Evaluate debate findings (paste results here)
 7. `/document` - Update documentation
 
+The lessons captured at `/document` are read back at the start of the next `/explore`, `/create-plan`, `/execute`, and `/pair-debug` - that feedback loop is what keeps the toolkit from repeating mistakes.
+
 </procedure>
 
 ---
@@ -75,6 +77,10 @@ Plans are saved in `plans/` at the project root as `PLAN-*.md` files. They are g
 ### Codebase Map
 
 `CODEBASE_MAP.md` is an auto-generated semantic map (module purposes, entry points, conventions, gotchas, navigation guide). It is produced by `/index`, which orchestrates parallel Claude subagents over the codebase. `/explore`, `/create-plan`, and `/pair-debug` read it at session start to save tokens. `/document` regenerates it after work cycles. The file is gitignored (per-user, per-machine) and should not be edited manually - always use `/index`.
+
+### Lessons
+
+`LESSONS.md` is the user-owned learning log, split in two: `LESSONS.md` is a short index (one line per lesson) and `LESSONS-detail.md` holds the full write-ups. `/explore`, `/create-plan`, `/execute`, and `/pair-debug` read the index at session start (`/explore`, `/create-plan`, and `/pair-debug` read it at the same point they read `CODEBASE_MAP.md`; `/execute` reads it too, though it does not read the map); when a one-line lesson is relevant, they open the matching entry in `LESSONS-detail.md` on demand. This closes the loop: lessons captured at `/document` time are read back into future work instead of sitting unused. Backward compatible: if `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format and is read whole. Lessons guide Claude; they are context, not enforced rules.
 
 ### Skills
 
@@ -245,6 +251,6 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 - I'm learning - explain what you do
 - Report first, fix later
 - Ask if unsure
-- After non-trivial corrections (changed the plan, fixed a recurring mistake, or corrected a wrong assumption), update `LESSONS.md`
+- After non-trivial corrections, update the learning log: a one-liner in `LESSONS.md` plus the full write-up in `LESSONS-detail.md`. Capture a lesson when Claude makes the same mistake a second time, when a review catches something Claude should have known, or when you type the same correction you typed before.
 
 </rules>

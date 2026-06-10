@@ -15,6 +15,10 @@ Now implement precisely as planned, in full.
   - Update the markdown tracking document with emoji status and overall progress percentage dynamically
 </rules>
 
+## Read Past Lessons
+
+Before implementing, read `LESSONS.md` (the lesson index, one line each). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+
 ## Parallel Steps
 
 When the plan has steps tagged `[parallel]`, follow these rules:

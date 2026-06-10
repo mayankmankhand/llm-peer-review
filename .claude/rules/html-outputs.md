@@ -123,7 +123,7 @@ This is *additive and shape-aware*, never a migration. Every project qualifies f
 
 ### Vetoes (these stay markdown no matter how long)
 
-- **Claude-read files** - `CODEBASE_MAP.md`, `PLAN-*.md`, `CLAUDE.md`, `LESSONS.md`, anything Claude parses every session. HTML wastes tokens on re-ingestion.
+- **Claude-read files** - `CODEBASE_MAP.md`, `PLAN-*.md`, `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md` (the index is parsed every session, the detail on demand), anything else Claude parses every session. HTML wastes tokens on re-ingestion.
 - **Canonical / data-source / self-description** - if the file *is* the source of truth that other tools or scripts parse, markdown is the contract.
 - **GitHub-native** - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, anything GitHub already renders for you.
 - **Lives in `.claude/`** - prompt files, skill files, rules. These are Claude's instructions, not human-read pages.
@@ -138,7 +138,7 @@ These stay markdown regardless of length or complexity:
 
 - `CODEBASE_MAP.md` (Claude reads it, not the user)
 - `README.md`, `SETUP.md`, `API-KEYS.md`, `AGENT-SETUP.md`, `CONTRIBUTING.md`, `DEMO-SCRIPT.md` (GitHub renders these natively)
-- `CLAUDE.md`, `LESSONS.md`, `.claude/rules/*.md` (read by Claude every session)
+- `CLAUDE.md`, `LESSONS.md` (index, read every session), `LESSONS-detail.md` (read on demand), `.claude/rules/*.md` (read by Claude every session)
 - `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)
 - `CHANGELOG.md` (per-release notes, GitHub-native)
 - `/create-issue` output (issues are markdown on GitHub)

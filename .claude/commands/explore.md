@@ -202,6 +202,9 @@ Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root
 
 **If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
+### Read past lessons
+After the codebase map, read `LESSONS.md` (the lesson index, one line each). If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?
 2. **Dependencies** - what does it rely on (files, packages, APIs)?

@@ -135,7 +135,7 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/render-html.js" ]; then
 fi
 
 # Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
+for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -440,7 +440,6 @@ if [ "$ISSUE91_SCRIPTS_REMOVED" -gt 0 ] || [ "$ISSUE91_PKG_TOUCHED" -gt 0 ]; the
 fi
 
 # ─── Track what happens ──────────────────────────────────────
-OVERWROTE=()
 SKIPPED=()
 
 # ─── Command files (upstream-owned - safe_copy backs up any customizations) ─
@@ -448,7 +447,6 @@ echo "  Copying .claude/commands/ ..."
 for src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   fname="$(basename "$src")"
   safe_copy "$src" "$TARGET/.claude/commands/$fname"
-  OVERWROTE+=("commands/$fname")
 done
 
 # ─── Skill files (upstream-owned - always copy) ─────────────
@@ -462,7 +460,6 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
     fname="$(basename "$src")"
     safe_copy "$src" "$TARGET/.claude/skills/shared/$fname"
   done
-  OVERWROTE+=("skills/shared/")
 fi
 
 # PARITY: shared/shells/ must be copied by BOTH setup.sh and setup.ps1 (issue #126).
@@ -484,7 +481,6 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
     safe_copy "$src" "$TARGET/.claude/skills/shared/shells/$fname" || { echo "  Error: failed to copy shells/$fname"; exit 1; }
   done
   shopt -u nullglob
-  OVERWROTE+=("skills/shared/shells/")
 fi
 
 # Copy each skill directory (contains SKILL.md and optional supporting files)
@@ -499,7 +495,6 @@ for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
     fname="$(basename "$src")"
     safe_copy "$src" "$TARGET/.claude/skills/$skill_name/$fname"
   done
-  OVERWROTE+=("skills/$skill_name/")
 done
 
 # ─── Runtime scripts and quarantined package.json (issue #91) ────────────────
@@ -516,12 +511,10 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/package.json"   "$TARGET/.claude/script
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
   safe_copy "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" "$TARGET/.claude/scripts/package-lock.json"
 fi
-OVERWROTE+=(.claude/scripts/ask-gpt.js .claude/scripts/ask-gemini.js .claude/scripts/browse.js .claude/scripts/package.json)
 
 # ─── .env.local.example (template - safe to overwrite) ───────
 echo "  Copying .env.local.example ..."
 cp "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
-OVERWROTE+=(.env.local.example)
 
 # ─── .gitignore (merge - preserve user entries, add toolkit lines) ─
 if [ -f "$TARGET/.gitignore" ]; then
@@ -535,20 +528,16 @@ if [ -f "$TARGET/.gitignore" ]; then
       echo "$line" >> "$TARGET/.gitignore"
     fi
   done < "$TOOLKIT_ROOT/.gitignore"
-  OVERWROTE+=(".gitignore (merged)")
 else
   echo "  Copying .gitignore ..."
   cp "$TOOLKIT_ROOT/.gitignore" "$TARGET/.gitignore"
-  OVERWROTE+=(.gitignore)
 fi
 
 echo "  Copying .gitattributes ..."
 safe_copy "$TOOLKIT_ROOT/.gitattributes" "$TARGET/.gitattributes"
-OVERWROTE+=(.gitattributes)
 
 echo "  Copying VERSION ..."
 safe_copy "$TOOLKIT_ROOT/VERSION" "$TARGET/VERSION"
-OVERWROTE+=(VERSION)
 
 # ─── Toolkit rules (upstream-owned - safe_copy handles any customizations) ────────────
 echo "  Copying .claude/rules/toolkit.md ..."
@@ -558,7 +547,6 @@ safe_copy "$TOOLKIT_ROOT/.claude/rules/toolkit.md" "$TARGET/.claude/rules/toolki
 # chosen for cross-platform compatibility - do not simplify to sed -i '' (breaks Linux).
 sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/toolkit.md"
 rm -f "$TARGET/.claude/rules/toolkit.md.bak"
-OVERWROTE+=(.claude/rules/toolkit.md)
 
 # HTML output rules (issue #113) - same stamp pattern as toolkit.md.
 # Source ships pre-stamped via bump-version.sh; this sed is a no-op on
@@ -567,7 +555,6 @@ echo "  Copying .claude/rules/html-outputs.md ..."
 safe_copy "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" "$TARGET/.claude/rules/html-outputs.md"
 sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/html-outputs.md"
 rm -f "$TARGET/.claude/rules/html-outputs.md.bak"
-OVERWROTE+=(.claude/rules/html-outputs.md)
 
 # ─── artifacts/ scaffold (issue #113) ────────────────────────
 # The HTML-output feature writes to artifacts/html/ in the target project.
@@ -575,28 +562,30 @@ OVERWROTE+=(.claude/rules/html-outputs.md)
 # html/ subdir has a home. safe_copy backs up any user customization.
 echo "  Copying artifacts/README.md ..."
 safe_copy "$TOOLKIT_ROOT/artifacts/README.md" "$TARGET/artifacts/README.md"
-OVERWROTE+=(artifacts/README.md)
 
 # PARITY: .claude/scripts/ files must be copied by BOTH setup.sh and setup.ps1.
 # Add a new script to one installer? Add it to the other too (issue #126).
 # ─── Index generator script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/generate-index.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/generate-index.js" "$TARGET/.claude/scripts/generate-index.js"
-OVERWROTE+=(.claude/scripts/generate-index.js)
 
 # ─── Artifact opener script (upstream-owned - safe_copy handles any customizations) ──
 echo "  Copying .claude/scripts/open-artifact.sh ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" "$TARGET/.claude/scripts/open-artifact.sh"
-OVERWROTE+=(.claude/scripts/open-artifact.sh)
 
 # ─── HTML renderer script (upstream-owned - safe_copy handles any customizations) ──
 # Dependency-free like generate-index.js / open-artifact.sh. It injects a JSON
 # payload into a prebuilt shell under .claude/skills/shared/shells/ (copied below).
 echo "  Copying .claude/scripts/render-html.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/render-html.js" "$TARGET/.claude/scripts/render-html.js"
-OVERWROTE+=(.claude/scripts/render-html.js)
 
 # ─── Project-owned files (skip if already exist) ─────────────
+# Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
+# LESSONS-detail.md is only seeded on a genuinely fresh install (see the block below).
+# Written as an if-statement (not `&&`) so it is safe under `set -e`.
+LESSONS_PREEXISTED=false
+if [ -f "$TARGET/LESSONS.md" ]; then LESSONS_PREEXISTED=true; fi
+
 for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
   if [ -f "$TARGET/$f" ]; then
     echo "  Skipping $f - already exists (yours to customize)"
@@ -604,9 +593,27 @@ for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
   else
     echo "  Copying $f ..."
     cp "$TOOLKIT_ROOT/$f" "$TARGET/$f"
-    OVERWROTE+=("$f")
   fi
 done
+
+# ─── LESSONS-detail.md (paired with the LESSONS.md index) ────
+# LESSONS.md is the short index Claude reads each session; LESSONS-detail.md holds the full
+# write-ups it opens on demand. Only SEED the detail file on a fresh install (LESSONS.md did
+# not already exist). On upgrade, an existing flat LESSONS.md is preserved and we must NOT
+# drop a mismatched detail file beside it - the session-start read treats a missing detail
+# file as "LESSONS.md is the older flat format" and reads it whole instead.
+if [ "$LESSONS_PREEXISTED" = true ]; then
+  if [ -f "$TARGET/LESSONS-detail.md" ]; then
+    echo "  Skipping LESSONS-detail.md - already exists (yours to customize)"
+    SKIPPED+=("LESSONS-detail.md")
+  else
+    echo "  Note: your LESSONS.md predates the index/detail split - it still works as-is."
+    echo "        To enable on-demand loading, ask Claude to split it into LESSONS.md (index) + LESSONS-detail.md."
+  fi
+elif [ ! -f "$TARGET/LESSONS-detail.md" ]; then
+  echo "  Copying LESSONS-detail.md ..."
+  cp "$TOOLKIT_ROOT/LESSONS-detail.md" "$TARGET/LESSONS-detail.md"
+fi
 
 # ─── Merge new permissions into existing settings.local.json ─
 # When upgrading, the user's settings.local.json is preserved (not overwritten).

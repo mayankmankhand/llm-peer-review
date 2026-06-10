@@ -24,6 +24,8 @@ Check if `CODEBASE_MAP.md` exists in the project root.
 
 **If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 
+After the map, read `LESSONS.md` (the lesson index, one line each). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+
 ## Step 1: Check the Logs (always start here)
 
 Ask: "What do the logs say? Check your browser console, terminal output, or log files. Paste the error or relevant output here."

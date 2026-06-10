@@ -71,7 +71,8 @@ This copies:
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/` (ask-gpt.js, ask-gemini.js, browse.js, and a quarantined `package.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
-- `LESSONS.md` (learning log template - skipped if it already exists)
+- `LESSONS.md` (learning log index - skipped if it already exists; read at session start so past lessons feed back into new work)
+- `LESSONS-detail.md` (full lesson write-ups behind the index - seeded only on a fresh install, preserved on upgrade)
 - `.env.local.example` (API key template)
 - `.gitignore` (merged with existing - new toolkit entries added, custom entries preserved)
 - `.gitattributes` (enforces LF line endings for shell scripts)
@@ -93,7 +94,8 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 **What's preserved** (skipped if it already exists):
 - `CLAUDE.md` - the user's project-specific instructions
-- `LESSONS.md` - the user's learning log
+- `LESSONS.md` - the user's learning log (index)
+- `LESSONS-detail.md` - the full lesson write-ups behind the index (present once the index/detail split exists)
 - `.claude/settings.local.json` - the user's permission config
 
 **Migrating from the old CLAUDE.md (pre-split):** If the user's `CLAUDE.md` contains toolkit rules (workflow, slash commands table, permissions table, git workflow, subagent strategy), those rules now live in `.claude/rules/toolkit.md` and are auto-loaded. The user should:

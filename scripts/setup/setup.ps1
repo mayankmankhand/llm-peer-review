@@ -127,7 +127,7 @@ foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js")) {
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes")) {
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -595,6 +595,10 @@ try {
   exit 1
 }
 
+# Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
+# LESSONS-detail.md is only seeded on a genuinely fresh install (see the block below).
+$LessonsPreexisted = Test-Path -LiteralPath (Join-Path $Target "LESSONS.md") -PathType Leaf
+
 foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
   $src = Join-Path $ToolkitRoot $f
   $dest = Join-Path $Target $f
@@ -609,6 +613,31 @@ foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
       Write-Host "  Error: Failed to copy $f : $_"
       exit 1
     }
+  }
+}
+
+# ─── LESSONS-detail.md (paired with the LESSONS.md index) ────
+# LESSONS.md is the short index Claude reads each session; LESSONS-detail.md holds the full
+# write-ups it opens on demand. Only SEED the detail file on a fresh install (LESSONS.md did
+# not already exist). On upgrade, an existing flat LESSONS.md is preserved and we must NOT
+# drop a mismatched detail file beside it - the session-start read treats a missing detail
+# file as "LESSONS.md is the older flat format" and reads it whole instead.
+$lessonsDetailDest = Join-Path $Target "LESSONS-detail.md"
+if ($LessonsPreexisted) {
+  if (Test-Path -LiteralPath $lessonsDetailDest -PathType Leaf) {
+    Write-Host "  Skipping LESSONS-detail.md - already exists (yours to customize)"
+    $Skipped += "LESSONS-detail.md"
+  } else {
+    Write-Host "  Note: your LESSONS.md predates the index/detail split - it still works as-is."
+    Write-Host "        To enable on-demand loading, ask Claude to split it into LESSONS.md (index) + LESSONS-detail.md."
+  }
+} elseif (-not (Test-Path -LiteralPath $lessonsDetailDest -PathType Leaf)) {
+  Write-Host "  Copying LESSONS-detail.md ..."
+  try {
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot "LESSONS-detail.md") -Destination $lessonsDetailDest -Force
+  } catch {
+    Write-Host "  Error: Failed to copy LESSONS-detail.md : $_"
+    exit 1
   }
 }
 

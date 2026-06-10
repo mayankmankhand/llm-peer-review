@@ -184,7 +184,7 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh
 
 **What setup does:**
 - **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Detects and removes any legacy `INDEX.md`. The new `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
-- **Preserves your work:** `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are skipped if they already exist - those are yours to customize.
+- **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize.
 - **Always updates:** toolkit rules (`.claude/rules/toolkit.md`).
 - **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
 
@@ -229,6 +229,7 @@ Copy these into your project:
 | `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `open-artifact.sh`, `render-html.js`, `package.json`) | `your-project/.claude/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
+| `LESSONS-detail.md` | `your-project/LESSONS-detail.md` |
 | `.env.local.example` | `your-project/.env.local.example` |
 | `.gitignore` | `your-project/.gitignore` |
 | `.gitattributes` | `your-project/.gitattributes` |
@@ -260,7 +261,7 @@ npx --prefix .claude/scripts playwright-core install chromium
 
 ## Update an Existing Project
 
-Re-run the same setup command (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md) again). It's safe to rerun: commands, scripts, and toolkit rules get updated; your `CLAUDE.md`, `LESSONS.md`, and `settings.local.json` are never overwritten. Your `.gitignore` is merged (new toolkit entries added, custom entries preserved).
+Re-run the same setup command (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md) again). It's safe to rerun: commands, scripts, and toolkit rules get updated; your `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md`, and `settings.local.json` are never overwritten. Your `.gitignore` is merged (new toolkit entries added, custom entries preserved).
 
 After updating, try `/audit-html` to see if any of your project's own markdown files would benefit from an HTML view. Toolkit outputs (plans, reviews, debates) already render HTML automatically; `/audit-html` is for your project's own long human-read pages.
 
@@ -350,7 +351,8 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
 | `.claude/skills/<name>/SKILL.md` | **Toolkit** (editable) | One folder per skill (review specialists, learning-opportunity). Auto-create slash commands and are agent-discoverable. `project-context` is agent-only (not user-invocable). |
 | `.claude/skills/shared/*.md` | **Toolkit** (editable) | Shared reference files used by multiple review skills (`severity-anchors.md`, `output-template.md`, `finding-id-system.md`, `browse-api.md`). Editing one of these affects every skill that injects it. |
-| `LESSONS.md` | **You** | Track what you learn across sessions. Never overwritten. |
+| `LESSONS.md` | **You** | Lesson index (one line per lesson). Read at the start of `/explore`, `/create-plan`, `/execute`, and `/pair-debug` so past lessons inform new work. Never overwritten. |
+| `LESSONS-detail.md` | **You** | Full write-ups behind the index, opened on demand when a lesson is relevant. Never overwritten. |
 | `.claude/scripts/generate-index.js` | **Toolkit** | Scans the project and emits a manifest used by `/index` to build `CODEBASE_MAP.md`. Always updated on setup. |
 | `.claude/scripts/render-html.js` | **Toolkit** | Injects a JSON payload plus the shared `tokens.css` into a prebuilt shell (`.claude/skills/shared/shells/`) to render HTML artifacts (review, document, explore, debate, audit). Always updated on setup. |
 | `CODEBASE_MAP.md` | **Generated** | Auto-generated semantic map (modules, conventions, gotchas, navigation guide). Gitignored. Built by `/index`, refreshed by `/document`. |
@@ -392,7 +394,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 - **CLAUDE.md** - Your project-specific instructions. Describe your project, tech stack, and preferences here. See [How It Works](#how-it-works-file-architecture) for details.
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (auto-updated on setup). Don't edit this; your changes will be overwritten.
 - **Commands and skills** - Each file in `.claude/commands/` is independent. Skill folders in `.claude/skills/<name>/SKILL.md` work the same way. Want `/review-code` to check different things? Edit `.claude/skills/review-code/SKILL.md`. The 8 review skills are: `review-code`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`, `review-deps`, `review-copy`.
-- **LESSONS.md** - Track what you learn across sessions. Yours to customize.
+- **LESSONS.md** - Lesson index that Claude reads each session so past lessons feed back into new work; full write-ups live in **LESSONS-detail.md**. Both are yours to customize.
 
 ---
 

@@ -15,6 +15,8 @@ Check if `CODEBASE_MAP.md` exists in the project root.
 
 **If it is malformed or `/index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
 
+After the map, also read `LESSONS.md` (the lesson index, one line each). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+
 ## Worktree Check
 
 <procedure>
