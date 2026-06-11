@@ -142,9 +142,11 @@ Open the printed path in the user's browser per the opening rules in `html-outpu
 When the user says "yes, generate the view" after seeing the report:
 
 1. Read the source markdown for the top candidate.
-2. Render a static HTML view that mirrors the markdown structure (headings, tables, lists) using the tokens from `html-look.md`. Tables become sortable. Long sections get collapsible `<details>` wrappers.
-3. Write to `artifacts/html/<source-basename>.html`. Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - and unlike the helper-rendered audit report (which is timestamped), this opt-in single-file static view is intentionally not timestamped, because it is keyed to the source file's identity.
-4. Open in the user's browser per the opening rules in `html-outputs.md`.
+2. Do NOT hand-write the HTML. Convert the markdown's structure into a JSON payload matching the schema documented in the header of `.claude/skills/shared/shells/docview-shell.html` (sections with heading/level/blocks; block types: prose, list, table, code). The shell builds the viewing behaviors in once: tables are sortable, long sections collapse automatically (explicit `collapsed: true/false` overrides). Write the payload to a temp file (e.g. `/tmp/docview-data.json`).
+3. Run the helper from the project root:
+   `node .claude/scripts/render-html.js --shell docview --name <source-basename> --stable --data /tmp/docview-data.json`
+   `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
+4. Open the printed path in the user's browser: `bash .claude/scripts/open-artifact.sh "<printed-path>"` (per the opening rules in `html-outputs.md`).
 5. Confirm in chat: "Opened the view in your browser: `artifacts/html/<basename>.html`. The source markdown is unchanged."
 
 The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them in v1.

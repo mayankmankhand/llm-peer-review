@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan</title>
+<!--
+  plan-shell.html - prebuilt HTML shell for /create-plan implementation-plan views.
+
+  Rendered by .claude/scripts/render-html.js in STABLE mode:
+    node .claude/scripts/render-html.js \
+      --shell plan --name PLAN-<basename> --out-dir plans --stable --data <json>
+  Output lands at plans/PLAN-<basename>.html, right next to its canonical
+  markdown twin plans/PLAN-<basename>.md, and is REPLACED whenever the plan
+  is re-rendered (stable mode: no timestamp, no collision suffix).
+
+  The helper inlines two things:
+    1. tokens.css  -> the tokens slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json
+       data island carrying id="render-data") further down in <body>
+  Each slot's literal placeholder appears EXACTLY ONCE in this file, at its
+  real injection point - the helper does a first-occurrence replace, so this
+  comment must not repeat those tokens verbatim.
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://. Reproduces the gold look of the
+  hand-written plan HTML files previously emitted by /create-plan.
+
+  STATUS BADGES ARE STATIC SCAFFOLDING. Every step renders with the red
+  square emoji + "To Do" badge unconditionally and there is deliberately NO
+  status field in the schema below. The HTML is a one-time snapshot taken at
+  plan creation; /execute never re-renders it. The markdown plan is the live
+  source of truth for step status.
+
+  ==========================================================================
+  RENDER DATA JSON SCHEMA (what /create-plan produces; the renderer consumes it)
+  ==========================================================================
+  All fields optional; a section is skipped when its data is missing or empty
+  (Outcomes is the one exception - it always renders, falling back to the
+  standard empty-placeholder box). Fields marked "trusted inline HTML ok"
+  carry Claude-generated markup (<code>, <strong>, <a>, &middot;) and render
+  via innerHTML; everything else is plain text rendered via textContent.
+
+  {
+    "title":    "plan title (plain text; h1)",
+    "subtitle": "small line under the title, e.g. issue ref + date + canonical
+                 markdown path (trusted inline HTML ok)",
+
+    // Progress bar under the header. Omitted entirely -> defaults to 0%.
+    // percent: 0-100 number (fill width). label: e.g. "0 of 7 steps",
+    // shown as "Overall progress: <percent>% (<label>)" (plain text).
+    "progress": { "percent": 0, "label": "0 of 7 steps" },
+
+    "tldr":     "TLDR paragraph (trusted inline HTML ok)",
+
+    // Two-column Goal State cards. Either key may be omitted to drop its card.
+    "goalState": { "current": "trusted inline HTML ok",
+                   "goal":    "trusted inline HTML ok" },
+
+    // UI/UX Design rows - label/value pairs, same shape as other shells'
+    // fields. label is plain text; value is trusted inline HTML ok.
+    "uiux": [ { "label": "Source", "value": "Existing look, user-approved" } ],
+
+    // Critical Decisions bullet list (each item trusted inline HTML ok).
+    "decisions": [ "string", "..." ],
+
+    // Tasks table rows, in order. The renderer numbers steps itself
+    // ("1. ", "2. ", ...) - do NOT include the number in "name".
+    "steps": [
+      {
+        "name": "Extend render-html.js",          // step heading (plain text)
+        "tag":  "parallel",                        // "parallel" | "sequential"
+                                                   // order pill (plain text)
+        "meta": "delivers: ... OR depends on: Steps 1, 2 (trusted inline HTML ok)",
+        "note": "optional callout, e.g. 'prompt file - needs explicit approval'
+                 (rendered as an amber note; trusted inline HTML ok)",
+        "why":  "optional italic why-line, e.g. for Verify steps
+                 (trusted inline HTML ok)",
+        "subtasks": [ "string (trusted inline HTML ok)", "..." ]
+      }
+    ],
+
+    // Outcomes. When present: rendered as a paragraph (trusted inline HTML
+    // ok). When absent: the standard empty-placeholder box ("Filled in after
+    // execution: ...") renders instead - the section itself never skips.
+    "outcomes": "string"
+  }
+  ==========================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- plan-specific layout (everything NOT already in tokens.css) ---- */
+header.page{margin:2rem 0 0;}
+.sub{color:var(--text-muted);font-size:.875rem;margin:.2rem 0 1.25rem;}
+.sub code{font-size:.8rem;}
+
+/* Progress bar: muted track, accent fill whose width = progress.percent. */
+.progress-wrap{display:flex;align-items:center;gap:.75rem;margin:1rem 0 .5rem;}
+.progress-bar{flex:1;height:10px;background:var(--bg-muted);border:1px solid var(--border);border-radius:999px;overflow:hidden;}
+.progress-fill{height:100%;width:0%;background:var(--accent);}
+.progress-label{font-size:.875rem;color:var(--text-muted);white-space:nowrap;}
+
+/* TLDR card with accent left border. */
+.tldr{background:var(--bg-muted);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:1rem 1.25rem;margin:1.25rem 0 0;}
+.tldr h2{margin:0 0 .5rem;font-size:1.125rem;}
+.tldr p{margin:0;}
+
+/* Two-column Goal State grid. */
+.goal-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.5rem;}
+@media (max-width:640px){.goal-grid{grid-template-columns:1fr;}}
+.goal-card{background:var(--bg-muted);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;}
+.goal-card h3{margin:0 0 .5rem;font-size:1rem;font-weight:600;}
+.goal-card p{margin:0;font-size:.9375rem;}
+
+/* UI/UX rows + Critical Decisions list. */
+ul{padding-left:1.4rem;margin:.5rem 0;}
+li{margin:.35rem 0;}
+
+/* Tasks table. */
+table{border-collapse:collapse;width:100%;margin-top:.75rem;}
+th,td{text-align:left;vertical-align:top;border:1px solid var(--border);padding:.6rem .75rem;}
+th{background:var(--bg-muted);font-weight:600;font-size:.875rem;}
+td{font-size:.9375rem;}
+th.narrow{width:1%;}
+
+/* Status badge: neutral pill (NOT the tokens.css severity .badge). Static
+   scaffolding - always the red square emoji + "To Do". */
+.status-badge{display:inline-block;font-size:.8125rem;font-weight:500;border-radius:999px;padding:.1rem .6rem;white-space:nowrap;background:var(--bg-muted);border:1px solid var(--border);}
+
+/* Order tag pill (parallel / sequential). */
+.tag{display:inline-block;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.75rem;color:var(--text-muted);background:var(--bg-muted);border:1px solid var(--border);border-radius:4px;padding:.05rem .4rem;white-space:nowrap;}
+
+.subtasks{margin:.4rem 0 0;padding-left:1.1rem;font-size:.875rem;color:var(--text-muted);}
+.subtasks li{margin:.2rem 0;}
+.why{font-style:italic;color:var(--text-muted);font-size:.875rem;margin:.4rem 0 0;}
+.note{color:var(--warn-strong);font-size:.8125rem;font-weight:500;}
+
+/* Outcomes placeholder box (renders when "outcomes" is absent). */
+.outcomes-empty{border:1px dashed var(--border);border-radius:8px;padding:1rem 1.25rem;color:var(--text-muted);font-size:.9375rem;}
+
+.small{font-size:.875rem;color:var(--text-muted);}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="noscript-note">This plan view needs JavaScript to render. Its data is in this file's source, or open the canonical markdown plan.</p>
+</noscript>
+
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+
+<script>
+(function () {
+  'use strict';
+
+  var data;
+  try {
+    data = JSON.parse(document.getElementById('render-data').textContent);
+  } catch (e) {
+    var err = document.createElement('p');
+    err.className = 'noscript-note';
+    err.textContent = 'Could not render this plan view: the embedded data is not valid JSON. Open the canonical markdown plan instead.';
+    document.body.appendChild(err);
+    return;
+  }
+  if (data == null || typeof data !== 'object') data = {};
+
+  // ---- tiny DOM helpers --------------------------------------------------
+  function el(tag, className) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+  function textEl(tag, className, str) {
+    var node = el(tag, className);
+    node.textContent = (str == null ? '' : String(str));
+    return node;
+  }
+  // Trusted inline HTML (Claude-generated plan text, not untrusted input).
+  function htmlEl(tag, className, markup) {
+    var node = el(tag, className);
+    node.innerHTML = (markup == null ? '' : String(markup));
+    return node;
+  }
+  function isArr(x) { return Object.prototype.toString.call(x) === '[object Array]'; }
+  function nonEmptyArr(x) { return isArr(x) && x.length > 0; }
+  function isNonEmpty(s) { return typeof s === 'string' && s.trim().length > 0; }
+
+  var body = el('main'); // all rendered output lives in one <main> landmark (a11y)
+
+  // ---- document title (browser tab label) ---------------------------------
+  document.title = isNonEmpty(data.title) ? data.title : 'Implementation Plan';
+
+  // ---- header (title + subtitle) ----------------------------------------
+  var header = el('header', 'page');
+  header.appendChild(textEl('h1', null, isNonEmpty(data.title) ? data.title : 'Implementation Plan'));
+  if (isNonEmpty(data.subtitle)) header.appendChild(htmlEl('p', 'sub', data.subtitle));
+  body.appendChild(header);
+
+  // ---- progress bar (always renders; omitted progress -> 0%) -------------
+  var pct = 0;
+  var progLabel = '';
+  if (data.progress && typeof data.progress === 'object') {
+    var n = Number(data.progress.percent);
+    if (isFinite(n)) pct = Math.max(0, Math.min(100, n));
+    if (isNonEmpty(data.progress.label)) progLabel = data.progress.label;
+  }
+  var wrap = el('div', 'progress-wrap');
+  var bar = el('div', 'progress-bar');
+  var fill = el('div', 'progress-fill');
+  fill.style.width = pct + '%';
+  bar.appendChild(fill);
+  wrap.appendChild(bar);
+  var labelText = 'Overall progress: ' + pct + '%' + (progLabel ? ' (' + progLabel + ')' : '');
+  wrap.appendChild(textEl('span', 'progress-label', labelText));
+  body.appendChild(wrap);
+
+  // ---- TLDR card ----------------------------------------------------------
+  if (isNonEmpty(data.tldr)) {
+    var tldr = el('section', 'tldr');
+    tldr.appendChild(textEl('h2', null, 'TLDR'));
+    tldr.appendChild(htmlEl('p', null, data.tldr));
+    body.appendChild(tldr);
+  }
+
+  // ---- Goal State (two-column grid) ---------------------------------------
+  var gs = data.goalState;
+  if (gs && (isNonEmpty(gs.current) || isNonEmpty(gs.goal))) {
+    var gsSec = el('section', null);
+    gsSec.appendChild(textEl('h2', null, 'Goal State'));
+    var grid = el('div', 'goal-grid');
+    [{ key: 'current', heading: 'Current' }, { key: 'goal', heading: 'Goal' }].forEach(function (c) {
+      if (!isNonEmpty(gs[c.key])) return;
+      var card = el('div', 'goal-card');
+      card.appendChild(textEl('h3', null, c.heading));
+      card.appendChild(htmlEl('p', null, gs[c.key]));
+      grid.appendChild(card);
+    });
+    gsSec.appendChild(grid);
+    body.appendChild(gsSec);
+  }
+
+  // ---- UI/UX Design (label/value rows) ------------------------------------
+  if (nonEmptyArr(data.uiux)) {
+    var uxSec = el('section', null);
+    uxSec.appendChild(textEl('h2', null, 'UI/UX Design'));
+    var uxList = el('ul', null);
+    data.uiux.forEach(function (row) {
+      if (!row || !isNonEmpty(row.label)) return;
+      var li = el('li', null);
+      var strong = textEl('strong', null, row.label + ':');
+      li.appendChild(strong);
+      li.appendChild(document.createTextNode(' '));
+      li.appendChild(htmlEl('span', null, row.value != null ? String(row.value) : ''));
+      uxList.appendChild(li);
+    });
+    if (uxList.childNodes.length) {
+      uxSec.appendChild(uxList);
+      body.appendChild(uxSec);
+    }
+  }
+
+  // ---- Critical Decisions --------------------------------------------------
+  if (nonEmptyArr(data.decisions)) {
+    var decSec = el('section', null);
+    decSec.appendChild(textEl('h2', null, 'Critical Decisions'));
+    var decList = el('ul', null);
+    data.decisions.forEach(function (d) {
+      if (d == null || (typeof d === 'string' && !isNonEmpty(d))) return;
+      decList.appendChild(htmlEl('li', null, d));
+    });
+    if (decList.childNodes.length) {
+      decSec.appendChild(decList);
+      body.appendChild(decSec);
+    }
+  }
+
+  // ---- Tasks table -----------------------------------------------------------
+  if (nonEmptyArr(data.steps)) {
+    var taskSec = el('section', null);
+    taskSec.appendChild(textEl('h2', null, 'Tasks'));
+
+    var table = el('table', null);
+    var thead = el('thead', null);
+    var headRow = el('tr', null);
+    headRow.appendChild(textEl('th', 'narrow', 'Status'));
+    headRow.appendChild(textEl('th', null, 'Step'));
+    headRow.appendChild(textEl('th', 'narrow', 'Order'));
+    headRow.appendChild(textEl('th', null, 'Delivers / Depends on'));
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    var tbody = el('tbody', null);
+    data.steps.forEach(function (step, i) {
+      if (!step) return;
+      var tr = el('tr', null);
+
+      // Status: static scaffolding, always the red square + "To Do". The
+      // markdown plan tracks real status; this HTML never re-renders.
+      var tdStatus = el('td', null);
+      tdStatus.appendChild(textEl('span', 'status-badge', '🟥 To Do')); // red square emoji
+      tr.appendChild(tdStatus);
+
+      // Step: numbered name + optional amber note + optional why + subtasks.
+      var tdStep = el('td', null);
+      tdStep.appendChild(textEl('strong', null, (i + 1) + '. ' + (step.name || 'Step')));
+      if (isNonEmpty(step.note)) {
+        tdStep.appendChild(document.createTextNode(' '));
+        tdStep.appendChild(htmlEl('span', 'note', step.note));
+      }
+      if (isNonEmpty(step.why)) {
+        tdStep.appendChild(htmlEl('p', 'why', 'Why this step: ' + step.why));
+      }
+      if (nonEmptyArr(step.subtasks)) {
+        var subs = el('ul', 'subtasks');
+        step.subtasks.forEach(function (s) {
+          if (s == null || (typeof s === 'string' && !isNonEmpty(s))) return;
+          subs.appendChild(htmlEl('li', null, s));
+        });
+        if (subs.childNodes.length) tdStep.appendChild(subs);
+      }
+      tr.appendChild(tdStep);
+
+      // Order tag (parallel / sequential).
+      var tdTag = el('td', null);
+      if (isNonEmpty(step.tag)) tdTag.appendChild(textEl('span', 'tag', step.tag));
+      tr.appendChild(tdTag);
+
+      // Delivers / Depends on.
+      tr.appendChild(htmlEl('td', null, isNonEmpty(step.meta) ? step.meta : ''));
+
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    taskSec.appendChild(table);
+
+    taskSec.appendChild(textEl('p', 'small',
+      'Status badges are visual scaffolding frozen at creation time. The markdown plan is the live source of truth during /execute.'));
+    body.appendChild(taskSec);
+  }
+
+  // ---- Outcomes (always renders; placeholder box when data is absent) -----
+  var outSec = el('section', null);
+  outSec.appendChild(textEl('h2', null, 'Outcomes'));
+  if (isNonEmpty(data.outcomes)) {
+    outSec.appendChild(htmlEl('p', null, data.outcomes));
+  } else {
+    outSec.appendChild(textEl('div', 'outcomes-empty',
+      'Filled in after execution: what changed vs. planned, key decisions made, assumptions invalidated.'));
+  }
+  body.appendChild(outSec);
+
+  document.body.appendChild(body); // attach the assembled <main> once
+})();
+</script>
+
+</body>
+</html>

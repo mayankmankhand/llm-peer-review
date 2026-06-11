@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document View</title>
+<!--
+  docview-shell.html - prebuilt GENERIC markdown-mirror shell (issue #129).
+
+  This is the /audit-html skill's opt-in "static view": an arbitrary human-read
+  markdown file (status tracker, runbook, decision log) rendered as a styled
+  HTML page. The source markdown stays canonical and untouched; this page is an
+  additive, disposable view that mirrors its structure (headings, prose, lists,
+  tables, code). The two behaviors the skill promises are built in ONCE here:
+  tables are sortable, and long sections collapse into <details> wrappers.
+
+  Stable-mode usage (identity-keyed, NOT timestamped):
+    node .claude/scripts/render-html.js \
+      --shell docview --name <source-basename> --stable
+  lands at artifacts/html/<source-basename>.html and is overwritten on every
+  re-run, because the view is keyed to the source file's identity: a re-render
+  must refresh the one view, not pile up timestamped copies.
+
+  Rendered by .claude/scripts/render-html.js, which inlines two things:
+    1. tokens.css  -> the tokens slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json data
+       island carrying id="render-data") further down in <body>
+  (Each slot's literal placeholder token appears EXACTLY ONCE in this file, at
+  its real injection point - the helper does a first-occurrence replace, so
+  this doc comment must not repeat those tokens verbatim.)
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://.
+
+  ==========================================================================
+  RENDER DATA JSON SCHEMA (the /audit-html skill produces this; the renderer
+  consumes it). All fields optional; a section or block is skipped when its
+  data is missing or empty.
+  ==========================================================================
+
+  {
+    "title":      "page title, usually the source filename (plain text)",
+    "sourcePath": "relative path of the source markdown, shown as a subtitle
+                   with a note that the markdown stays canonical (plain text)",
+    "generated":  "optional human-readable timestamp line (plain text)",
+
+    // Optional top-level blocks: content that sat before any heading in the
+    // source markdown. Same block shapes as inside sections.
+    "blocks": [ ...block objects, see below... ],
+
+    "sections": [
+      {
+        "heading":   "section heading text (plain text)",
+        "level":     2,        // 2 -> h2, 3 -> h3; anything else (or absent)
+                               // defaults to 2
+        "collapsed": true,     // optional; true wraps the section in a CLOSED
+                               // <details> with the heading in <summary>;
+                               // false NEVER collapses; when absent the
+                               // renderer auto-collapses (rule below)
+        "blocks": [
+          { "type": "prose", "html": "paragraph content (trusted inline HTML ok)" },
+          { "type": "list",  "ordered": false,
+            "items": [ "item (trusted inline HTML ok)", "..." ] },
+          { "type": "table",
+            "headers": [ "plain text", "..." ],
+            "rows": [ [ "cell (trusted inline HTML ok)", "..." ], [ "..." ] ] },
+          { "type": "code", "lang": "bash",
+            "text": "ALWAYS escaped via textContent, never innerHTML" }
+        ]
+      }
+    ]
+  }
+
+  Behavior notes:
+  - SORTABLE TABLES: clicking (or pressing Enter/Space on) a column header
+    sorts the body rows by that column; click again to flip asc/desc. The
+    compare is numeric when BOTH values parse as numbers (commas stripped),
+    case-insensitive text otherwise. The active column shows an arrow
+    indicator and sets aria-sort.
+  - AUTO-COLLAPSE RULE: when "collapsed" is absent, a section collapses if it
+    has MORE THAN 6 blocks OR its combined rendered text is LONGER THAN 2500
+    characters (roughly a full screen of reading). Explicit false always wins;
+    a section with no heading never collapses (there is nothing to put in the
+    <summary>).
+  - Escape-or-trust policy: prose "html", list "items", and table row cells
+    are trusted Claude-generated inline HTML (rendered via innerHTML; this is
+    toolkit output, not untrusted user input). "title", "sourcePath",
+    "generated", section "heading", and table "headers" are plain text. Code
+    "text" is ALWAYS set via textContent so the snippet can never inject
+    markup.
+  - Graceful degradation: unknown block types are skipped silently; an
+    unparseable data island shows a plain error message pointing back to the
+    source markdown.
+  ==========================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- docview-specific layout (everything NOT already in tokens.css) ---- */
+
+header.page{margin:2rem 0 1.2rem;padding-bottom:1rem;border-bottom:1px solid var(--border);}
+header.page .source{font-size:.9rem;color:var(--text-muted);margin:.35rem 0 0;}
+header.page .source code{font-size:.82rem;}
+header.page .generated{font-size:.82rem;color:var(--text-muted);margin:.3rem 0 0;}
+
+/* Plain (non-collapsed) sections: h2 gets the toolkit underline rule. */
+section.sec{margin:1.4rem 0 0;}
+section.sec > h2{padding-bottom:.3rem;border-bottom:1px solid var(--border);}
+section.sec > h3{margin-top:1.4rem;}
+
+/* Collapsed sections: a bordered <details> card with the heading in summary. */
+details.sec{border:1px solid var(--border);border-radius:8px;margin:1.2rem 0;background:var(--bg);}
+details.sec > summary{cursor:pointer;padding:.65rem 1rem;list-style-position:outside;}
+details.sec > summary:hover{background:var(--bg-muted);}
+details.sec[open] > summary{border-bottom:1px solid var(--border);}
+details.sec > summary h2,
+details.sec > summary h3{display:inline;margin:0;font-size:1.15rem;vertical-align:middle;}
+details.sec > summary h3{font-size:1rem;}
+details.sec > .sec-body{padding:.3rem 1rem .9rem;}
+
+/* Prose and lists. */
+p.prose{margin:.5rem 0 .9rem;font-size:.95rem;}
+.doc-list{margin:.4rem 0 1rem;padding-left:1.4rem;font-size:.95rem;}
+.doc-list li{margin-bottom:.3rem;}
+
+/* Tables: bordered grid in the toolkit palette, zebra rows, sticky-feel head. */
+table.doc-table{border-collapse:collapse;width:100%;margin:.6rem 0 1.1rem;font-size:.9rem;}
+.doc-table th,.doc-table td{border:1px solid var(--border);padding:.4rem .65rem;text-align:left;vertical-align:top;}
+.doc-table tbody tr:nth-child(even){background:#fafafa;}
+.doc-table thead th{
+  background:var(--bg-muted);font-weight:600;cursor:pointer;
+  -webkit-user-select:none;user-select:none;white-space:nowrap;
+}
+.doc-table thead th:hover,.doc-table thead th:focus-visible{color:var(--accent);}
+/* Sort indicators: a muted up-down hint on every sortable header, an accent
+   arrow on the active column. Arrows are CSS escapes, not literal glyphs. */
+.doc-table thead th::after{content:" \2195";color:var(--text-muted);font-size:.75em;}
+.doc-table thead th[data-sort="asc"]::after{content:" \2191";color:var(--accent);}
+.doc-table thead th[data-sort="desc"]::after{content:" \2193";color:var(--accent);}
+
+/* Code blocks: bordered card, optional language tag, escaped text inside. */
+.code-block{margin:.6rem 0 1.1rem;border:1px solid var(--border);border-radius:8px;background:var(--bg-muted);overflow:hidden;}
+.code-block .code-lang{
+  font-family:ui-monospace,Consolas,monospace;font-size:.7rem;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);
+  padding:.4rem .85rem 0;
+}
+.code-block pre{margin:0;padding:.55rem .85rem .75rem;overflow-x:auto;}
+.code-block code{background:none;padding:0;font-size:.85rem;line-height:1.5;}
+
+footer.note{margin-top:2.2rem;border-top:1px solid var(--border);padding-top:.8rem;font-size:.8rem;color:var(--text-muted);}
+.parse-error{color:var(--block);font-size:.95rem;padding:1.2rem 0;}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="noscript-note">This view needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p>
+</noscript>
+
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+
+<script>
+(function () {
+  'use strict';
+
+  // Unparseable data island -> plain error message, never a blank page.
+  var data;
+  try {
+    data = JSON.parse(document.getElementById('render-data').textContent);
+  } catch (e) {
+    var err = document.createElement('p');
+    err.className = 'parse-error';
+    err.textContent = 'Could not render this view: the embedded data is not valid JSON. Open the source markdown instead.';
+    document.body.appendChild(err);
+    return;
+  }
+  if (!data || typeof data !== 'object') data = {};
+
+  // ---- tiny DOM helpers --------------------------------------------------
+  function el(tag, className) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+  function textEl(tag, className, str) {
+    var node = el(tag, className);
+    node.textContent = (str == null ? '' : String(str));
+    return node;
+  }
+  // Trusted inline HTML (Claude-generated view content, not untrusted input).
+  function htmlEl(tag, className, markup) {
+    var node = el(tag, className);
+    node.innerHTML = (markup == null ? '' : String(markup));
+    return node;
+  }
+  function isArr(x) { return Object.prototype.toString.call(x) === '[object Array]'; }
+  function nonEmptyArr(x) { return isArr(x) && x.length > 0; }
+  function isNonEmpty(s) { return typeof s === 'string' && s.trim().length > 0; }
+
+  var body = el('main'); // all rendered output lives in one <main> landmark (a11y)
+
+  // ---- header: title, source path, generated line ------------------------
+  var header = el('header', 'page');
+  var titleText = isNonEmpty(data.title) ? data.title : 'Document View';
+  header.appendChild(textEl('h1', null, titleText));
+  document.title = titleText;
+  if (isNonEmpty(data.sourcePath)) {
+    var src = el('p', 'source');
+    src.appendChild(document.createTextNode('Source: '));
+    src.appendChild(textEl('code', null, data.sourcePath));
+    src.appendChild(document.createTextNode(' (stays canonical; this page is the rendered view)'));
+    header.appendChild(src);
+  }
+  if (isNonEmpty(data.generated)) {
+    header.appendChild(textEl('p', 'generated', data.generated));
+  }
+  body.appendChild(header);
+
+  // ---- top-level blocks (content before any heading in the source) -------
+  if (nonEmptyArr(data.blocks)) {
+    renderBlocks(data.blocks).forEach(function (node) { body.appendChild(node); });
+  }
+
+  // ---- sections -----------------------------------------------------------
+  if (nonEmptyArr(data.sections)) {
+    data.sections.forEach(function (sec) {
+      var node = sectionNode(sec);
+      if (node) body.appendChild(node);
+    });
+  }
+
+  // ---- footer --------------------------------------------------------------
+  var footer = el('footer', 'note');
+  footer.textContent = 'Static view generated by /audit-html. The source markdown stays canonical; regenerate this view whenever it changes.';
+  body.appendChild(footer);
+
+  document.body.appendChild(body); // attach the assembled <main> once
+
+  // ====================================================================
+  // builders
+  // ====================================================================
+
+  // One section -> plain <section> with h2/h3, or a <details> wrapper when
+  // collapsed (explicitly, or by the auto-collapse rule in the header doc).
+  function sectionNode(sec) {
+    if (!sec || typeof sec !== 'object') return null;
+    var level = (sec.level === 3) ? 3 : 2; // default h2
+    var heading = isNonEmpty(sec.heading) ? sec.heading.trim() : '';
+    var blocks = isArr(sec.blocks) ? sec.blocks : [];
+    var rendered = renderBlocks(blocks);
+    if (!heading && !rendered.length) return null;
+
+    var collapse;
+    if (sec.collapsed === true) collapse = true;
+    else if (sec.collapsed === false) collapse = false;
+    else collapse = autoCollapse(blocks, rendered);
+    // A collapse needs a heading for the <summary>, and content worth hiding.
+    if (!heading || !rendered.length) collapse = false;
+
+    var headingTag = (level === 3) ? 'h3' : 'h2';
+
+    if (collapse) {
+      var details = el('details', 'sec');
+      var summary = el('summary');
+      summary.appendChild(textEl(headingTag, null, heading));
+      details.appendChild(summary);
+      var inner = el('div', 'sec-body');
+      rendered.forEach(function (node) { inner.appendChild(node); });
+      details.appendChild(inner);
+      return details;
+    }
+
+    var section = el('section', 'sec');
+    if (heading) section.appendChild(textEl(headingTag, null, heading));
+    rendered.forEach(function (node) { section.appendChild(node); });
+    return section;
+  }
+
+  // Auto-collapse rule (documented in the header comment): more than 6 blocks,
+  // or combined rendered text longer than 2500 characters.
+  function autoCollapse(blocks, rendered) {
+    if (blocks.length > 6) return true;
+    var chars = 0;
+    for (var i = 0; i < rendered.length; i++) {
+      chars += (rendered[i].textContent || '').length;
+      if (chars > 2500) return true;
+    }
+    return false;
+  }
+
+  // Block list -> array of DOM nodes. Unknown/empty blocks skipped silently.
+  function renderBlocks(blocks) {
+    var out = [];
+    if (!isArr(blocks)) return out;
+    blocks.forEach(function (block) {
+      if (!block || typeof block !== 'object') return;
+      var node = null;
+      if (block.type === 'prose') node = proseBlock(block);
+      else if (block.type === 'list') node = listBlock(block);
+      else if (block.type === 'table') node = tableBlock(block);
+      else if (block.type === 'code') node = codeBlock(block);
+      // any other type: skipped silently (graceful degradation)
+      if (node) out.push(node);
+    });
+    return out;
+  }
+
+  function proseBlock(block) {
+    if (!isNonEmpty(block.html)) return null;
+    return htmlEl('p', 'prose', block.html); // trusted inline HTML
+  }
+
+  function listBlock(block) {
+    if (!nonEmptyArr(block.items)) return null;
+    var list = el(block.ordered === true ? 'ol' : 'ul', 'doc-list');
+    block.items.forEach(function (item) {
+      if (item == null || (typeof item === 'string' && !isNonEmpty(item))) return;
+      list.appendChild(htmlEl('li', null, item)); // trusted inline HTML
+    });
+    return list.childNodes.length ? list : null;
+  }
+
+  function tableBlock(block) {
+    var headers = isArr(block.headers) ? block.headers : [];
+    var rows = isArr(block.rows) ? block.rows : [];
+    if (!headers.length && !rows.length) return null;
+
+    var table = el('table', 'doc-table');
+
+    if (headers.length) {
+      var thead = el('thead');
+      var headRow = el('tr');
+      headers.forEach(function (h, colIndex) {
+        var th = textEl('th', null, h); // headers are plain text
+        th.setAttribute('scope', 'col');
+        th.tabIndex = 0; // keyboard-sortable
+        th.title = 'Sort by this column';
+        th.addEventListener('click', function () { sortTable(table, colIndex, th); });
+        th.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            sortTable(table, colIndex, th);
+          }
+        });
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+    }
+
+    var tbody = el('tbody');
+    rows.forEach(function (row) {
+      if (!isArr(row)) return;
+      var tr = el('tr');
+      row.forEach(function (cell) {
+        tr.appendChild(htmlEl('td', null, cell)); // trusted inline HTML
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function codeBlock(block) {
+    if (typeof block.text !== 'string' || !block.text.length) return null;
+    var wrap = el('div', 'code-block');
+    if (isNonEmpty(block.lang)) wrap.appendChild(textEl('div', 'code-lang', block.lang));
+    var pre = el('pre');
+    pre.appendChild(textEl('code', null, block.text)); // ALWAYS escaped text
+    wrap.appendChild(pre);
+    return wrap;
+  }
+
+  // ====================================================================
+  // table sorting
+  // ====================================================================
+
+  // Click a header -> sort body rows by that column ascending; click the same
+  // header again -> descending. Numeric compare when BOTH values parse as
+  // numbers (commas stripped), case-insensitive text compare otherwise.
+  function sortTable(table, colIndex, th) {
+    var tbody = table.tBodies[0];
+    if (!tbody) return;
+    var asc = th.getAttribute('data-sort') !== 'asc'; // toggle on repeat click
+
+    // Clear indicators on every header, then mark the active column.
+    var ths = table.tHead ? table.tHead.rows[0].cells : [];
+    for (var i = 0; i < ths.length; i++) {
+      ths[i].removeAttribute('data-sort');
+      ths[i].removeAttribute('aria-sort');
+    }
+    th.setAttribute('data-sort', asc ? 'asc' : 'desc');
+    th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+
+    var rows = Array.prototype.slice.call(tbody.rows);
+    rows.sort(function (a, b) {
+      var av = cellText(a, colIndex);
+      var bv = cellText(b, colIndex);
+      var an = asNumber(av);
+      var bn = asNumber(bv);
+      var cmp;
+      if (an !== null && bn !== null) cmp = an - bn;
+      else cmp = av.localeCompare(bv, undefined, { sensitivity: 'base' });
+      return asc ? cmp : -cmp;
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); }); // re-append in order
+  }
+
+  function cellText(row, colIndex) {
+    var cell = row.cells[colIndex];
+    return cell ? (cell.textContent || '').trim() : '';
+  }
+
+  // "1,234" -> 1234; "42" -> 42; "v2" / "" / "3 files" -> null (not numeric).
+  function asNumber(s) {
+    var t = String(s).replace(/,/g, '').trim();
+    if (t === '' || !isFinite(t)) return null;
+    return parseFloat(t);
+  }
+})();
+</script>
+
+</body>
+</html>
