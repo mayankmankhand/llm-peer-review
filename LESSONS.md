@@ -102,3 +102,7 @@
 
 - **Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.**
 - **A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.**
+
+### v5.2.0 release + doc audit (issue #128)
+
+- **Self-enforce release-time conventions in the artifact or the checklist, not in memory.**
