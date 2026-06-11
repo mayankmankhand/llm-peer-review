@@ -166,37 +166,31 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 - HTML is generated **only at plan creation**. `/execute` never re-renders it.
 - HTML is a one-time snapshot for the human reader. Markdown remains canonical for `/execute` and `/review-plan`.
-- File is self-contained: inline `<style>` block, no CDN, no external assets.
 - This is default-on per `.claude/rules/html-outputs.md`. No judgement call needed.
+- Do NOT hand-write the HTML. Emit a compact JSON payload and run the shared helper, which injects it plus the shared `tokens.css` into the prebuilt plan shell.
 
 </rules>
 
-### Inline the Shared Visual Look
+### Build the JSON Payload
 
-Inline the typography, color tokens, and severity badge colors documented in the shared look reference. Read it via:
+Produce a JSON payload matching the schema documented in the header comment of `.claude/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `tldr`, `goalState`, `uiux`, `decisions`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
 
-!`cat .claude/skills/shared/html-look.md`
+- Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
+- There is no status field. Every step renders with the 🟥 To Do badge: visual scaffolding showing the structure of the work, not live status. The badges never update because the HTML never re-renders; markdown is the source of truth during `/execute`.
 
-Apply those tokens as CSS custom properties inside a `<style>` block. Do not introduce new tokens.
+Write the payload to a temp file (e.g. `/tmp/plan-data.json`).
 
-### HTML Structure
+### Run the Helper
 
-The HTML mirrors the markdown sections:
+From the project root:
 
-1. `<h1>` with the plan name
-2. **TLDR** card at the top (background `--bg-muted`, prominent)
-3. **Goal State** as a two-column layout (Current vs Goal) when present
-4. **UI/UX Design** block when present
-5. **Critical Decisions** list
-6. **Tasks** as a table or grid. Each row shows the step name, the parallel/sequential tag, and a status badge
-7. **Outcomes** placeholder (empty section, populated later from markdown if needed)
+```bash
+node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
+     --out-dir plans --stable --data /tmp/plan-data.json
+```
 
-Use semantic HTML (`<section>`, `<article>`, `<h2>`, `<h3>`) so the file is readable.
+`<basename>` matches the markdown plan name (e.g. `PLAN-issue-129`). `--stable` writes exactly `plans/PLAN-<basename>.html` - no timestamp - and a re-plan for the same issue replaces the old view. Malformed JSON dies before any file is written, so there is never a broken page. The helper prints the output path to stdout; open it:
 
-### Status Badges (Visual Scaffolding)
-
-<rules>
-
-All tasks render with the 🟥 To Do badge at creation. This is visual scaffolding showing the structure of the work, not live status. The badges never update because the HTML never re-renders. Markdown is the source of truth for current status during `/execute`.
-
-</rules>
+```bash
+bash .claude/scripts/open-artifact.sh "<printed-path>"
+```

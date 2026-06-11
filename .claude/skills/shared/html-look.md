@@ -4,7 +4,7 @@ Shared visual reference for HTML output produced by toolkit commands and the `/p
 
 This is the minimal v1: typography, colors, severity badges, and the copy-button pattern.
 
-> **Mirror:** The five helper-rendered shells read these tokens from `.claude/skills/shared/shells/tokens.css`, which mirrors this file. Update BOTH together when the look changes. (`tokens.css` points back here.)
+> **Mirror:** The seven helper-rendered shells read these tokens from `.claude/skills/shared/shells/tokens.css`, which mirrors this file. Update BOTH together when the look changes. (`tokens.css` points back here.)
 
 ## Typography
 

@@ -94,3 +94,8 @@
 - **Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.**
 - **Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.**
 - **Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.**
+
+### Plan HTML migration (issue #129)
+
+- **Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.**
+- **A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.**
