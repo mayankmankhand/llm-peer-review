@@ -134,17 +134,18 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ---
 
-## What's new since v4.3.3
+## What's New
 
-Five releases land as one upgrade if you last installed v4.3.3:
+**Latest release: v5.2.0** (June 2026). Highlights:
 
-- **v4.4.0 - Codebase map.** `/index` now produces `CODEBASE_MAP.md`, a semantic map (module purposes, conventions, gotchas) consumed by `/explore`, `/create-plan`, and `/pair-debug`. Replaces the flat-tree `INDEX.md` from v3.4.
-- **v4.4.1 - Richer review explanations.** All `/review-*` skills now use a 4-field finding structure (What / Why it matters / Example / Suggested fix). Cosmetic-only findings are dropped instead of being bulked up.
-- **v4.5.0 - Model default safety net.** `/ask-gpt` and `/ask-gemini` auto-override outdated `GPT_MODEL` or `GEMINI_MODEL` values in `.env.local`. Setting an old default (e.g. `gpt-5.4`) gets you the current default (`gpt-5.5`) with a one-line warning.
-- **v4.5.1 - Documentation audit.** README repositioned for newcomers, "What's new" rollup added to CHANGELOG, deprecated-model warning explainer added to API-KEYS.md, broken anchors fixed. Doc-only release, no behavior change.
-- **v4.6.0 - Debate hardening.** Two-PR cut. (#101) Empty-body detection in `/ask-gpt` and `/ask-gemini`: silent failures (token cap exhausted by reasoning, refusals, safety blocks) now throw a descriptive error naming both cause and fix. Default token cap raised from 4096 to 32000 (overridable via `GPT_MAX_TOKENS` / `GEMINI_MAX_TOKENS`). Each debate invocation gets a session ID embedded in its `/tmp` paths so two parallel Cursor or Claude Code tabs cannot clobber each other's transcripts. (#103) `/ask-gpt` and `/ask-gemini` final summaries now use the same 4-field finding structure as `/review` (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and R-IDs end-to-end. Disagreed Points use 🤔 instead of ⚠️ to avoid colliding with Warn severity.
+- **Installers you can preview and trust.** Every setup run now prints a pre-flight report (what will change, what is yours and stays untouched, where backups go) before touching anything, and `--dry-run` shows an upgrade with zero changes. The "your custom files are never modified" guarantee is enforced by a test suite.
+- **Faster, cheaper sessions.** Commands start with one startup call instead of several file reads, `/review` dispatches leaner specialist payloads, `/index` runs its heavy lifting on a cheaper model, and plan HTML renders about 2x faster.
+- **Lessons feed back into new work.** The learning log is an always-read index with on-demand detail, read at the start of every workflow command - so past mistakes inform future sessions instead of sitting in a file.
+- **Plans include test steps when the work warrants them** - and skip them when it does not.
 
-See the [full upgrade summary in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), or re-run setup to pick up everything automatically.
+Upgrading from v5.0.0 or earlier? This release also carries everything from v5.0.1 (reliable HTML opening on WSL, Windows installer fixes) and v5.1.0 (the HTML render pipeline) - one re-run of setup picks up all of it.
+
+Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
 
 ---
 
