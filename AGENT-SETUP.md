@@ -39,7 +39,8 @@ Assume shell access on the user machine. Use bash on macOS/Linux/WSL, or PowerSh
 The user's machine needs:
 - `git` (to clone this repo temporarily)
 - `bash` (to run the setup script - compatible with Bash 3.2+ on macOS/Linux/WSL) or PowerShell 5.1+ (native Windows)
-- `node` and `npm` (only if they want the `/ask-gpt` and `/ask-gemini` commands)
+- `node` (required - it runs the toolkit's dependency-free helper scripts: HTML rendering via `render-html.js`, the `/index` codebase scanner, and the session-startup aggregator)
+- `npm` (only needed for the optional `/ask-gpt`, `/ask-gemini`, and `/review-browser` dependencies in Step 2)
 
 ### Windows note
 
@@ -65,12 +66,15 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 
 This copies:
 - `.claude/commands/` (all slash command definitions)
-- `.claude/skills/` (all skill definitions - review specialists, learning-opportunity, project-context)
+- `.claude/skills/` (all skill definitions - review specialists, learning-opportunity, project-context - plus the shared reference files and the prebuilt HTML shells in `shared/shells/`)
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
-- `.claude/settings.local.json` (permission config - skipped if it already exists)
+- `.claude/rules/html-outputs.md` (HTML output rules - always updated)
+- `.claude/settings.local.json` (permission config - preserved if it already exists; new toolkit permissions are merged in on re-run)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
-- `.claude/scripts/` (ask-gpt.js, ask-gemini.js, browse.js, and a quarantined `package.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
+- `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` (HTML renderer + cross-platform artifact opener - always updated)
+- `.claude/scripts/` (ask-gpt.js, ask-gemini.js, browse.js, and a quarantined `package.json` + `package-lock.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
+- `artifacts/README.md` (scaffold for the gitignored `artifacts/html/` output directory)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log index - skipped if it already exists; read at session start so past lessons feed back into new work)
 - `LESSONS-detail.md` (full lesson write-ups behind the index - seeded only on a fresh install, preserved on upgrade)
@@ -87,18 +91,19 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 **What gets updated** (always overwritten):
 - `.claude/commands/` - all slash command definitions
-- `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references)
-- `.claude/rules/toolkit.md` - toolkit workflow rules
+- `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references, and the prebuilt HTML shells in `shared/shells/`)
+- `.claude/rules/toolkit.md` and `.claude/rules/html-outputs.md` - the managed rules files
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
-- `.claude/scripts/ask-gpt.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` - runtime scripts and their quarantined deps
-- `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
+- `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
+- `.claude/scripts/ask-gpt.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` + `package-lock.json` - runtime scripts and their quarantined deps
+- `artifacts/README.md`, `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
 
 **What's preserved** (skipped if it already exists):
 - `CLAUDE.md` - the user's project-specific instructions
 - `LESSONS.md` - the user's learning log (index)
 - `LESSONS-detail.md` - the full lesson write-ups behind the index (present once the index/detail split exists)
-- `.claude/settings.local.json` - the user's permission config
+- `.claude/settings.local.json` - the user's permission config (preserved, with new toolkit permissions merged in on re-run)
 
 **Migrating from the old CLAUDE.md (pre-split):** If the user's `CLAUDE.md` contains toolkit rules (workflow, slash commands table, permissions table, git workflow, subagent strategy), those rules now live in `.claude/rules/toolkit.md` and are auto-loaded. The user should:
 1. Re-run setup (Step 1 above) to get the new `toolkit.md`
