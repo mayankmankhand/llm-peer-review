@@ -37,11 +37,13 @@
 - **Don't trust merged review severities without verifying the source lines.**
 - **Review proposed prompt edits before applying them, and triage the volume hard.**
 - **Editing the currently-running command file trips the harness self-modification guard.**
+- **The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.**
 - **A prompt's user-facing message is not enforcement.**
 - **Pin subagents freely; never switch the main-loop model mid-session.**
 
 ## Mistakes to Avoid
 
+- **Fill a plan's Outcomes by replacing the template placeholder, not inserting above it.**
 - **Don't micro-tag individual bullets.**
 - **Watch for tool output artifacts in reviews.**
 - **Review your own AI-generated code before shipping.**

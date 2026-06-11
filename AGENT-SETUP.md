@@ -69,6 +69,7 @@ This copies:
 - `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
 - `.claude/settings.local.json` (permission config - skipped if it already exists)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
+- `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
 - `.claude/scripts/` (ask-gpt.js, ask-gemini.js, browse.js, and a quarantined `package.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log index - skipped if it already exists; read at session start so past lessons feed back into new work)
@@ -89,6 +90,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 - `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references)
 - `.claude/rules/toolkit.md` - toolkit workflow rules
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
+- `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
 - `.claude/scripts/ask-gpt.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` - runtime scripts and their quarantined deps
 - `.env.local.example`, `.gitignore` (merged, not overwritten), `.gitattributes`, `VERSION`
 
