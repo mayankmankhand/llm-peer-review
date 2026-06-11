@@ -1,20 +1,29 @@
 # setup.ps1 - Copy the LLM Peer Review toolkit into any project (Windows PowerShell).
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project" [-DryRun]
 #
 # If -Target is omitted, uses the current working directory (but will error if run from inside the toolkit repo).
+#
+# -DryRun prints the pre-flight report (version gap, migrations that would
+# run, managed files that would be overwritten, custom files that are left
+# alone, backup location) and exits without creating, modifying, or
+# deleting anything.
 #
 # Examples:
 #   # From toolkit repo, specify target:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app"
+#
+#   # See what an upgrade would do without changing anything:
+#   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app" -DryRun
 #
 #   # From your project directory:
 #   cd C:\Projects\my-app
 #   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1
 
 param(
-  [string]$Target = "."
+  [string]$Target = ".",
+  [switch]$DryRun
 )
 
 # Check PowerShell version (requires 5.1+)
@@ -29,13 +38,18 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ToolkitRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
+# .ProviderPath, not .Path: for UNC locations (e.g. a toolkit checked out
+# under \\wsl.localhost\...) .Path returns a provider-qualified string
+# ("Microsoft.PowerShell.Core\FileSystem::\\...") that the .NET file APIs
+# used by Invoke-SafeCopy cannot parse. .ProviderPath is always the plain
+# filesystem form and is identical to .Path for local drive paths.
+$ToolkitRoot = (Resolve-Path (Join-Path $ScriptDir "..\..")).ProviderPath
 
 # If no target specified, prompt for it
 if ($Target -eq ".") {
   $currentDir = (Get-Location).Path
-  $resolvedCurrent = (Resolve-Path -LiteralPath $currentDir).Path
-  $resolvedToolkit = (Resolve-Path -LiteralPath $ToolkitRoot).Path
+  $resolvedCurrent = (Resolve-Path -LiteralPath $currentDir).ProviderPath
+  $resolvedToolkit = (Resolve-Path -LiteralPath $ToolkitRoot).ProviderPath
   
   # Check if we're trying to copy into the toolkit repo itself
   if ($resolvedCurrent -eq $resolvedToolkit -or $resolvedCurrent.StartsWith($resolvedToolkit + "\")) {
@@ -65,7 +79,7 @@ if ($Target -eq ".") {
     Write-Host ""
     exit 1
   }
-  $Target = (Resolve-Path -LiteralPath $Target).Path
+  $Target = (Resolve-Path -LiteralPath $Target).ProviderPath
 }
 
 # ─── Read version ─────────────────────────────────────────────
@@ -190,30 +204,305 @@ if (Test-Path -LiteralPath (Join-Path $Target ".claude\rules\toolkit.md") -PathT
   $IsUpgrade = $true
 }
 
+# --- Migration inventory (issue #133) --------------------------
+# The legacy-path lists consumed by the migration blocks further down,
+# defined once up here so the pre-flight report can announce which
+# migrations will run BEFORE any of them executes. Mirrors the migration
+# inventory in setup.sh - keep both in lockstep.
+
+# v3.4 -> v3.5: commands that became skills (deleted before copy to
+# avoid name conflicts; backed up first).
+$LegacyCommands = @("review-code.md", "review-ux.md", "review-plan.md", "review-commands.md", "review-browser.md", "review-full.md", "learning-opportunity.md")
+
+# Issue #80: upstream renames, old -> new. Paths relative to $Target.
+$RenamedFiles = @(
+  @{ Old = ".claude\commands\dev-lead-gpt.md";    New = ".claude\commands\ask-gpt.md" },
+  @{ Old = ".claude\commands\dev-lead-gemini.md"; New = ".claude\commands\ask-gemini.md" },
+  @{ Old = "scripts\dev-lead-gpt.js";             New = ".claude\scripts\ask-gpt.js" },
+  @{ Old = "scripts\dev-lead-gemini.js";          New = ".claude\scripts\ask-gemini.js" }
+)
+
+# Issue #91 (v4.2 -> v4.3): runtime scripts that moved from scripts\ to
+# .claude\scripts\, plus the toolkit-owned package.json deps and script
+# entries cleaned from the target. Keep in lockstep with setup.sh
+# (issue #133 parity note: @google/genai was missing here before).
+$Issue91OldScripts = @("scripts\ask-gpt.js", "scripts\ask-gemini.js", "scripts\browse.js")
+$Issue91ToolkitDeps = @("openai", "@google/generative-ai", "@google/genai", "playwright-core", "@axe-core/playwright")
+$Issue91ToolkitScripts = @("ask-gpt", "ask-gemini")
+
+# --- Pre-flight report (issue #133) ----------------------------
+# Everything in this section is READ-ONLY. It prints what this run will
+# do - the version gap, which migrations fire, which managed files will
+# be overwritten (with a diff summary), which custom files are left
+# alone, and where backups go - BEFORE any file is created, modified,
+# or deleted. With -DryRun, the script exits right after this report.
+# Mirrors the pre-flight section in setup.sh.
+
+# The backup directory name is fixed here so the report can announce the
+# location up front. Creation stays lazy: the directory only appears if
+# something is actually backed up. The $PID suffix keeps two same-second
+# runs from sharing a backup dir.
+$pfStamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$script:BackupDir = Join-Path $Target ".toolkit-backup-$pfStamp-$PID"
+
+# Old version for the gap line. $IsUpgrade (not the VERSION file) decides
+# install vs upgrade: early toolkit versions did not ship VERSION, and a
+# fresh target may carry its own unrelated VERSION file.
+$OldVersion = ""
+$pfTargetVersionFile = Join-Path $Target "VERSION"
+if ($IsUpgrade -and (Test-Path -LiteralPath $pfTargetVersionFile -PathType Leaf)) {
+  $OldVersion = (Get-Content -LiteralPath $pfTargetVersionFile -Raw).Trim()
+}
+
+# Get-PreflightDiffSummary: line-level diff summary between the incoming
+# source file and the target's current copy. Returns $null when the target
+# copy is missing or identical. -IgnoreVersionStamp drops the managed-
+# version stamp line both rules files carry, so a pure version-bump
+# difference is not misreported as a local edit. Line-based comparison
+# also keeps CRLF/LF-only differences from showing up as edits.
+function Get-PreflightDiffSummary {
+  param(
+    [string]$Source,
+    [string]$Destination,
+    [switch]$IgnoreVersionStamp
+  )
+  if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) { return $null }
+  $srcLines = @(Get-Content -LiteralPath $Source)
+  $dstLines = @(Get-Content -LiteralPath $Destination)
+  if ($IgnoreVersionStamp) {
+    $stampPattern = '<!-- Toolkit version: .* \| Managed by LLM Peer Review\.|<!-- This file is managed by the LLM Peer Review toolkit\.'
+    $srcLines = @($srcLines | Where-Object { $_ -notmatch $stampPattern })
+    $dstLines = @($dstLines | Where-Object { $_ -notmatch $stampPattern })
+  }
+  # Handle empty sides explicitly - Compare-Object rejects empty arrays.
+  if ($srcLines.Count -eq 0 -and $dstLines.Count -eq 0) { return $null }
+  if ($srcLines.Count -eq 0) { return "+0/-$($dstLines.Count) line(s) vs incoming" }
+  if ($dstLines.Count -eq 0) { return "+$($srcLines.Count)/-0 line(s) vs incoming" }
+  $cmp = @(Compare-Object -ReferenceObject $dstLines -DifferenceObject $srcLines)
+  if ($cmp.Count -eq 0) { return $null }
+  $added = @($cmp | Where-Object { $_.SideIndicator -eq "=>" }).Count
+  $removed = @($cmp | Where-Object { $_.SideIndicator -eq "<=" }).Count
+  return "+$added/-$removed line(s) vs incoming"
+}
+
+# Add-PreflightDiff: record a managed file in the will-be-overwritten
+# list when its target copy differs from the incoming version.
+$script:PfDiffs = @()
+function Add-PreflightDiff {
+  param([string]$Source, [string]$Rel, [switch]$IgnoreVersionStamp)
+  $dst = Join-Path $Target $Rel
+  $summary = Get-PreflightDiffSummary -Source $Source -Destination $dst -IgnoreVersionStamp:$IgnoreVersionStamp
+  if ($summary) { $script:PfDiffs += "$Rel  ($summary)" }
+}
+
+# Which staged migrations will fire. Read-only mirrors of the conditions
+# the migration blocks below check.
+$PfMigrations = @()
+$pfCount = 0
+foreach ($pfName in $LegacyCommands) {
+  if (Test-Path -LiteralPath (Join-Path $Target (Join-Path ".claude\commands" $pfName)) -PathType Leaf) { $pfCount++ }
+}
+if ($pfCount -gt 0) {
+  $PfMigrations += "Legacy command cleanup (v3.5): $pfCount command file(s) became skills - old copies backed up, then removed"
+}
+$pfCount = 0
+foreach ($r in $RenamedFiles) {
+  if (Test-Path -LiteralPath (Join-Path $Target $r.Old) -PathType Leaf) { $pfCount++ }
+}
+if ($pfCount -gt 0) {
+  $PfMigrations += "Renamed-file cleanup (issue #80): $pfCount old-named file(s) backed up, then removed"
+}
+$pfCount = 0
+foreach ($pfRel in $Issue91OldScripts) {
+  if (Test-Path -LiteralPath (Join-Path $Target $pfRel) -PathType Leaf) { $pfCount++ }
+}
+if ($pfCount -gt 0) {
+  $PfMigrations += "Script relocation (issue #91): $pfCount old script(s) under scripts\ backed up, then removed"
+}
+
+# Issue #91 package.json detection (read-only; the migration block below
+# performs the actual rewrite using the same lists).
+$Issue91PkgWillChange = $false
+$pfPkgPath = Join-Path $Target "package.json"
+if (Test-Path -LiteralPath $pfPkgPath -PathType Leaf) {
+  try {
+    $pfPkg = (Get-Content -LiteralPath $pfPkgPath -Raw) | ConvertFrom-Json
+    if ($pfPkg.PSObject.Properties.Name -contains "dependencies" -and $pfPkg.dependencies) {
+      foreach ($dep in $Issue91ToolkitDeps) {
+        if ($pfPkg.dependencies.PSObject.Properties.Name -contains $dep) { $Issue91PkgWillChange = $true; break }
+      }
+    }
+    if (-not $Issue91PkgWillChange -and $pfPkg.PSObject.Properties.Name -contains "scripts" -and $pfPkg.scripts) {
+      foreach ($s in $Issue91ToolkitScripts) {
+        if ($pfPkg.scripts.PSObject.Properties.Name -contains $s) {
+          $v = $pfPkg.scripts.$s
+          if ($v -and $v -match "node\s+scripts/(ask-gpt|ask-gemini)\.js") { $Issue91PkgWillChange = $true; break }
+        }
+      }
+    }
+  } catch {
+    # Unparseable package.json - the migration block will leave it alone too
+  }
+}
+if ($Issue91PkgWillChange) {
+  $PfMigrations += "package.json cleanup (issue #91): toolkit deps/scripts removed from your package.json (backed up first)"
+}
+
+# Managed files that differ from the incoming version. The enumeration
+# below mirrors the copy blocks exactly: every file setup overwrites via
+# Invoke-SafeCopy is compared here, nothing else.
+foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
+  Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\commands" $src.Name)
+}
+$pfSharedDir = Join-Path $ToolkitRoot ".claude\skills\shared"
+if (Test-Path -LiteralPath $pfSharedDir -PathType Container) {
+  foreach ($src in Get-ChildItem -Path $pfSharedDir -Filter *.md -File) {
+    Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\skills\shared" $src.Name)
+  }
+}
+$pfShellsDir = Join-Path $ToolkitRoot ".claude\skills\shared\shells"
+if (Test-Path -LiteralPath $pfShellsDir -PathType Container) {
+  foreach ($src in Get-ChildItem -Path $pfShellsDir -File) {
+    Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\skills\shared\shells" $src.Name)
+  }
+}
+$pfSkillsRoot = Join-Path $ToolkitRoot ".claude\skills"
+if (Test-Path -LiteralPath $pfSkillsRoot -PathType Container) {
+  foreach ($skillDir in Get-ChildItem -Path $pfSkillsRoot -Directory) {
+    if ($skillDir.Name -eq "shared") { continue }
+    foreach ($src in Get-ChildItem -Path $skillDir.FullName -File) {
+      Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\skills" (Join-Path $skillDir.Name $src.Name))
+    }
+  }
+}
+foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js")) {
+  Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
+}
+$pfLockSrc = Join-Path $ToolkitRoot ".claude\scripts\package-lock.json"
+if (Test-Path -LiteralPath $pfLockSrc -PathType Leaf) {
+  Add-PreflightDiff -Source $pfLockSrc -Rel ".claude\scripts\package-lock.json"
+}
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".env.local.example") -Rel ".env.local.example"
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".gitattributes") -Rel ".gitattributes"
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot "artifacts\README.md") -Rel "artifacts\README.md"
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\toolkit.md") -Rel ".claude\rules\toolkit.md" -IgnoreVersionStamp
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\html-outputs.md") -Rel ".claude\rules\html-outputs.md" -IgnoreVersionStamp
+# VERSION is compared only on a fresh install: on upgrade it always
+# differs (that is the version gap, reported above), but a fresh target
+# carrying its own unrelated VERSION file is about to lose it.
+if (-not $IsUpgrade) {
+  Add-PreflightDiff -Source (Join-Path $ToolkitRoot "VERSION") -Rel "VERSION"
+}
+
+# Custom files in toolkit-managed directories. Anything listed here is
+# NOT shipped by the toolkit and setup NEVER modifies or deletes it:
+# the copy loops only write files that exist in the toolkit source, and
+# the migration blocks only touch the specific legacy paths inventoried
+# above. node_modules\ (created by npm install under .claude\scripts\)
+# is skipped - it is machine-generated, not a customization.
+$PfCustom = @()
+$pfMigrationTargets = @($RenamedFiles | ForEach-Object { $_.Old })
+foreach ($pfName in $LegacyCommands) {
+  $pfMigrationTargets += (Join-Path ".claude\commands" $pfName)
+}
+$pfPrefix = $Target
+if (-not $pfPrefix.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+  $pfPrefix = $pfPrefix + [System.IO.Path]::DirectorySeparatorChar
+}
+foreach ($pfDirName in @("commands", "rules", "scripts", "skills")) {
+  $pfDir = Join-Path $Target (Join-Path ".claude" $pfDirName)
+  if (-not (Test-Path -LiteralPath $pfDir -PathType Container)) { continue }
+  foreach ($pfFile in Get-ChildItem -Path $pfDir -Recurse -File -Force) {
+    if ($pfFile.FullName -match '[\\/]node_modules[\\/]') { continue }
+    $pfRel = $pfFile.FullName
+    if ($pfRel.StartsWith($pfPrefix)) { $pfRel = $pfRel.Substring($pfPrefix.Length) }
+    if ($pfMigrationTargets -contains $pfRel) { continue }
+    if (-not (Test-Path -LiteralPath (Join-Path $ToolkitRoot $pfRel) -PathType Leaf)) {
+      $PfCustom += $pfRel
+    }
+  }
+}
+
+# Stale backup directories from earlier runs (issue #133 evidence: these
+# linger in project roots for years without anyone noticing).
+$PfStaleBackups = @(Get-ChildItem -Path $Target -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue).Count
+
+Write-Host "  ----------------------------------------"
+Write-Host "   Pre-flight report (no changes made yet)"
+Write-Host "  ----------------------------------------"
+Write-Host ""
+if ($IsUpgrade) {
+  if ($OldVersion -and $OldVersion -ne $Version) {
+    Write-Host "    Install type: upgrade (v$OldVersion -> v$Version)"
+  } elseif ($OldVersion) {
+    Write-Host "    Install type: re-run of v$Version"
+  } else {
+    Write-Host "    Install type: upgrade (pre-VERSION install -> v$Version)"
+  }
+} else {
+  Write-Host "    Install type: fresh install (v$Version)"
+}
+Write-Host ""
+Write-Host "    Migrations that will run:"
+if ($PfMigrations.Count -gt 0) {
+  foreach ($pfLine in $PfMigrations) { Write-Host "      - $pfLine" }
+} else {
+  Write-Host "      (none)"
+}
+Write-Host ""
+Write-Host "    Managed toolkit files that differ from the incoming version"
+Write-Host "    (will be overwritten - your current copy is backed up first):"
+if ($script:PfDiffs.Count -gt 0) {
+  foreach ($pfLine in $script:PfDiffs) { Write-Host "      - $pfLine" }
+} else {
+  Write-Host "      (none - your managed files match the incoming ones)"
+}
+Write-Host ""
+Write-Host "    Custom files detected in toolkit-managed directories"
+Write-Host "    (not shipped by the toolkit - setup will NOT modify or delete them):"
+if ($PfCustom.Count -gt 0) {
+  foreach ($pfLine in $PfCustom) { Write-Host "      - $pfLine" }
+} else {
+  Write-Host "      (none)"
+}
+Write-Host ""
+Write-Host "    Backups: anything this run overwrites or deletes is copied first to"
+Write-Host "      $($script:BackupDir)"
+if ($PfStaleBackups -gt 0) {
+  Write-Host ""
+  Write-Host "    Note: $PfStaleBackups older .toolkit-backup-* folder(s) from previous runs are"
+  Write-Host "    still in the project root. Delete them when no longer needed."
+}
+Write-Host ""
+
+if ($DryRun) {
+  Write-Host "  Dry run complete - no files were created, modified, or deleted."
+  Write-Host ""
+  exit 0
+}
+
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\rules") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\scripts") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\skills") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Target "plans") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Target "artifacts") | Out-Null
 
 # --- Backup helpers (issue #79) --------------------------------
 # Before overwriting or deleting any file in the target, copy the original
-# to a timestamped backup directory at the target root. The directory is
-# only created on the first backup (no noise for clean installs). All
-# backups in one setup run share the same timestamp.
-$script:BackupDir = ""
+# to a timestamped backup directory at the target root. The directory name
+# is fixed in the pre-flight section above (so the report can announce it
+# up front); it is only created on the first backup, so clean installs and
+# identical re-runs leave no empty backup dir behind. All backups in one
+# setup run share the same directory.
 $script:BackupCount = 0
 
 # Backup-File: copy a target-resident file into the backup root, mirroring
-# its relative path. Creates the backup root lazily on first call. Appends
-# $PID to the timestamp so two same-second runs get distinct backup dirs
-# (avoids silent overwrite of a prior run's backups).
+# its relative path. $script:BackupDir carries $PID so two same-second
+# runs get distinct backup dirs (avoids silent overwrite of a prior run's
+# backups).
 function Backup-File {
   param([string]$Original)
-  if ([string]::IsNullOrEmpty($script:BackupDir)) {
-    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $script:BackupDir = Join-Path $Target ".toolkit-backup-$stamp-$PID"
-  }
   # Compute path relative to $Target so the backup mirrors the layout
   $rel = $Original
   $prefix = $Target
@@ -268,18 +557,33 @@ function Invoke-SafeCopy {
 
 $Skipped = @()
 
+# --- Legacy cleanup (v3.4 -> v3.5 migration) -------------------
+# Commands that became skills in v3.5 (the $LegacyCommands list lives in
+# the migration inventory above, shared with the pre-flight report).
+# Delete old command files BEFORE copying new ones to avoid name conflicts.
+# Mirrors the LEGACY_COMMANDS block in setup.sh; added in issue #133 -
+# setup.ps1 has copied command files since the v3.4 era too, so Windows
+# upgrades could carry the same stale command files this block removes.
+$LegacyCleaned = 0
+foreach ($fname in $LegacyCommands) {
+  $oldPath = Join-Path $Target (Join-Path ".claude\commands" $fname)
+  if (Test-Path -LiteralPath $oldPath -PathType Leaf) {
+    Backup-File -Original $oldPath
+    Remove-Item -LiteralPath $oldPath -Force
+    $LegacyCleaned = $LegacyCleaned + 1
+  }
+}
+if ($LegacyCleaned -gt 0) {
+  Write-Host "  Cleaned up $LegacyCleaned legacy command file(s) (now skills)"
+}
+
 # --- Renamed files cleanup (issue #80) ----------------------
 # When a toolkit file is renamed upstream (e.g. dev-lead-gpt.md -> ask-gpt.md),
 # copying the new name is not enough: the old file sticks around and still
-# loads as a stale slash command. Each entry maps an old relative path to the
-# new one. Backup-File preserves any customizations the user made to the
+# loads as a stale slash command. The $RenamedFiles list lives in the
+# migration inventory above (shared with the pre-flight report).
+# Backup-File preserves any customizations the user made to the
 # old-named file before Remove-Item removes it.
-$RenamedFiles = @(
-  @{ Old = ".claude\commands\dev-lead-gpt.md";    New = ".claude\commands\ask-gpt.md" },
-  @{ Old = ".claude\commands\dev-lead-gemini.md"; New = ".claude\commands\ask-gemini.md" },
-  @{ Old = "scripts\dev-lead-gpt.js";             New = ".claude\scripts\ask-gpt.js" },
-  @{ Old = "scripts\dev-lead-gemini.js";          New = ".claude\scripts\ask-gemini.js" }
-)
 $RenamedCleaned = 0
 foreach ($r in $RenamedFiles) {
   $oldPath = Join-Path $Target $r.Old
@@ -306,8 +610,9 @@ if ($RenamedCleaned -gt 0) {
 # Cross-reference: setup.sh has the canonical Bash version of this same
 # logic. If you change the deps list, the script regex, or the migration
 # message here, update setup.sh in lockstep so Bash and PowerShell users
-# get identical behavior.
-$Issue91OldScripts = @("scripts\ask-gpt.js", "scripts\ask-gemini.js", "scripts\browse.js")
+# get identical behavior. The $Issue91OldScripts / $Issue91ToolkitDeps /
+# $Issue91ToolkitScripts lists live in the migration inventory above
+# (shared with the pre-flight report).
 $Issue91ScriptsRemoved = 0
 foreach ($oldRel in $Issue91OldScripts) {
   $oldPath = Join-Path $Target $oldRel
@@ -329,11 +634,9 @@ if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
   try {
     $pkgRaw = Get-Content -LiteralPath $pkgPath -Raw
     $pkg = $pkgRaw | ConvertFrom-Json
-    $TOOLKIT_DEPS = @("openai", "@google/generative-ai", "playwright-core", "@axe-core/playwright")
-    $TOOLKIT_SCRIPTS = @("ask-gpt", "ask-gemini")
     $touched = $false
     if ($pkg.PSObject.Properties.Name -contains "dependencies" -and $pkg.dependencies) {
-      foreach ($dep in $TOOLKIT_DEPS) {
+      foreach ($dep in $Issue91ToolkitDeps) {
         if ($pkg.dependencies.PSObject.Properties.Name -contains $dep) {
           $pkg.dependencies.PSObject.Properties.Remove($dep)
           $touched = $true
@@ -344,7 +647,7 @@ if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
       }
     }
     if ($pkg.PSObject.Properties.Name -contains "scripts" -and $pkg.scripts) {
-      foreach ($s in $TOOLKIT_SCRIPTS) {
+      foreach ($s in $Issue91ToolkitScripts) {
         if ($pkg.scripts.PSObject.Properties.Name -contains $s) {
           $v = $pkg.scripts.$s
           if ($v -and $v -match "node\s+scripts/(ask-gpt|ask-gemini)\.js") {
@@ -508,9 +811,10 @@ foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "
   }
 }
 
+# --- .env.local.example (template - Invoke-SafeCopy backs up local edits) ---
 Write-Host "  Copying .env.local.example ..."
 try {
-  Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".env.local.example") -Destination (Join-Path $Target ".env.local.example") -Force
+  Invoke-SafeCopy -Source (Join-Path $ToolkitRoot ".env.local.example") -Destination (Join-Path $Target ".env.local.example")
 } catch {
   Write-Host "  Error: Failed to copy .env.local.example : $_"
   exit 1
@@ -546,6 +850,17 @@ try {
   Invoke-SafeCopy -Source (Join-Path $ToolkitRoot ".gitattributes") -Destination (Join-Path $Target ".gitattributes")
 } catch {
   Write-Host "  Error: Failed to copy .gitattributes: $_"
+  exit 1
+}
+
+# --- VERSION (upstream-owned; parity with setup.sh, issue #133) ---
+# setup.ps1 historically never wrote VERSION into the target, so Windows
+# installs could not report a version gap on upgrade. Mirrors setup.sh.
+Write-Host "  Copying VERSION ..."
+try {
+  Invoke-SafeCopy -Source (Join-Path $ToolkitRoot "VERSION") -Destination (Join-Path $Target "VERSION")
+} catch {
+  Write-Host "  Error: Failed to copy VERSION: $_"
   exit 1
 }
 
