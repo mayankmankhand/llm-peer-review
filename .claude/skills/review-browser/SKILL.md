@@ -94,6 +94,10 @@ Use the evidence you gathered (screenshots, text, console errors, network failur
 
 </procedure>
 
+## Reading Budget
+
+!`cat .claude/skills/shared/reading-budget.md`
+
 ## Severity Levels and Anchors
 
 !`cat .claude/skills/shared/severity-anchors.md`

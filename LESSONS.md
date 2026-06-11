@@ -52,6 +52,7 @@
 - **"Same command, two gears" vs "new command" decision pattern.**
 - **CLI default-acceptance prompts don't fully translate to chat.**
 - **When changing user-facing copy, grep for the same description elsewhere.**
+- **Don't state a cited past lesson as if it happened this session.**
 
 ### Skills migration decisions (issue #71)
 
