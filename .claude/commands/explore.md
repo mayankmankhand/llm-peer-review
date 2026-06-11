@@ -144,8 +144,10 @@ Briefly explain *why* you're asking when it adds value. Example: "I'm asking abo
 <phase name="worktree-setup">
 Before starting codebase analysis, check if this session is running in a Git worktree. A worktree is a separate working folder linked to the same repo - it lets you work on a feature without touching your main code.
 
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors (older installs), do the manual reads described in this section and Phase 2 instead - behavior is identical.
+
 ### How to detect a worktree
-Compare the output of these two commands:
+Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, fall back to comparing the output of these two commands:
 - `git rev-parse --git-dir` - the Git directory for this working copy
 - `git rev-parse --git-common-dir` - the shared Git directory for the whole repo
 
@@ -196,14 +198,14 @@ If they say yes, continue with the analysis below.
 ### Start with the codebase map
 Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root.
 
-**If it exists:** Read it. It contains directory tree, module purposes, conventions, gotchas, and a navigation guide - your starting point before any glob/grep. Then check staleness: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD`, and run `git rev-list --count <map_commit>..HEAD` to count commits since. Only warn if the count is >= 10 (single-commit drift is noisy and not actionable). If the map header notes `generated_while_dirty`, mention that to the user regardless of commit count - it signals the map was built from uncommitted state. When warning, frame it as a choice: "Your codebase map is N commits behind. Run `/index` to refresh, or continue with possibly outdated info."
+**If it exists:** Read it for the directory tree, module purposes, conventions, gotchas, and navigation guide - your starting point before any glob/grep. For staleness, use the session-init JSON instead of running git yourself: `map.commitsBehind` is the count and `map.stale` is true when it is >= 10 (single-commit drift is noisy and not actionable). If the script was unavailable, compute it manually: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD` and run `git rev-list --count <map_commit>..HEAD`. Only warn when `map.stale` is true. If `map.generatedWhileDirty` is true (the header notes `generated_while_dirty`), mention that to the user regardless of commit count - it signals the map was built from uncommitted state. When warning, frame it as a choice: "Your codebase map is N commits behind. Run `/index` to refresh, or continue with possibly outdated info."
 
 **If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/index` to generate the map. After it completes, read the new map and proceed.
 
 **If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
 ### Read past lessons
-After the codebase map, read `LESSONS.md` (the lesson index, one line each). If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
 
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?

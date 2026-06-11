@@ -134,6 +134,12 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/render-html.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check session-init script (dependency-free; aggregates command-startup reads into one JSON)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/session-init.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/session-init.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -578,6 +584,13 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/open-artifact.sh" "$TARGET/.claude/scri
 # payload into a prebuilt shell under .claude/skills/shared/shells/ (copied below).
 echo "  Copying .claude/scripts/render-html.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/render-html.js" "$TARGET/.claude/scripts/render-html.js"
+
+# ─── Session-init script (upstream-owned - safe_copy handles any customizations) ──
+# Dependency-free like generate-index.js / open-artifact.sh. Emits one JSON with the
+# map freshness, lessons index, plan statuses, and worktree state that /explore,
+# /create-plan, /pair-debug, and /execute read at startup - one call instead of N.
+echo "  Copying .claude/scripts/session-init.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/session-init.js" "$TARGET/.claude/scripts/session-init.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired

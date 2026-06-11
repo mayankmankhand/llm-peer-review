@@ -17,7 +17,9 @@ Now implement precisely as planned, in full.
 
 ## Read Past Lessons
 
-Before implementing, read `LESSONS.md` (the lesson index, one line each). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `lessons` (exists, content, hasDetail) and `newestPlan` (the most recently modified `PLAN-*.md`, used in Status Updates below). Use these instead of separate reads. **Fallback:** if the script is missing or errors (older installs), do the manual reads instead - behavior is identical.
+
+Before implementing, use the lesson index from the JSON (`lessons.content`, one line each; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
 
 ## Parallel Steps
 
@@ -61,7 +63,7 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 ## Status Updates
 
 <procedure>
-Find the plan file in `plans/` (the most recently modified `PLAN-*.md`). Also check the project root for legacy plan files.
+Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for legacy plan files.
 
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task

@@ -16,7 +16,9 @@ Tone: collaborative. "Let's figure this out together."
 
 ## Step 0: Load Project Context
 
-Check if `CODEBASE_MAP.md` exists in the project root.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors (older installs), do the manual reads described here instead - behavior is identical.
+
+Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
 **If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug.
 
@@ -24,7 +26,7 @@ Check if `CODEBASE_MAP.md` exists in the project root.
 
 **If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 
-After the map, read `LESSONS.md` (the lesson index, one line each). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
 
 ## Step 1: Check the Logs (always start here)
 
