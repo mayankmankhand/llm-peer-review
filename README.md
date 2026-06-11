@@ -182,9 +182,17 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh
 
 > **Note:** If you run the script from inside the toolkit repository without specifying a target, it shows an error to prevent accidentally copying files into the wrong place.
 
+**Preview first (optional):** add `--dry-run` (bash) or `-DryRun` (PowerShell) to see exactly what an install or upgrade would do - version gap, migrations, files that would be overwritten, custom files that are left alone, and where backups go - without changing anything:
+
+```bash
+bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project --dry-run
+```
+
+Every real run prints the same pre-flight report before it touches anything.
+
 **What setup does:**
 - **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Detects and removes any legacy `INDEX.md`. The new `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
-- **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize.
+- **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize. Custom files you add inside `.claude/commands/`, `.claude/skills/`, `.claude/scripts/`, or `.claude/rules/` are never modified or deleted (this guarantee is covered by the toolkit's installer test suite), and anything setup does overwrite is backed up to a timestamped `.toolkit-backup-*` folder first.
 - **Always updates:** toolkit rules (`.claude/rules/toolkit.md`).
 - **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
 
