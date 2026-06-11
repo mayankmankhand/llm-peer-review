@@ -226,7 +226,7 @@ Copy these into your project:
 | `.claude/skills/` (whole folder) | `your-project/.claude/skills/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
-| `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `open-artifact.sh`, `render-html.js`, `package.json`) | `your-project/.claude/scripts/` |
+| `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `open-artifact.sh`, `render-html.js`, `session-init.js`, `package.json`) | `your-project/.claude/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
 | `LESSONS.md` | `your-project/LESSONS.md` |
 | `LESSONS-detail.md` | `your-project/LESSONS-detail.md` |
@@ -355,6 +355,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `LESSONS-detail.md` | **You** | Full write-ups behind the index, opened on demand when a lesson is relevant. Never overwritten. |
 | `.claude/scripts/generate-index.js` | **Toolkit** | Scans the project and emits a manifest used by `/index` to build `CODEBASE_MAP.md`. Always updated on setup. |
 | `.claude/scripts/render-html.js` | **Toolkit** | Injects a JSON payload plus the shared `tokens.css` into a prebuilt shell (`.claude/skills/shared/shells/`) to render HTML artifacts (review, document, explore, debate, audit, plan, audit static view). Always updated on setup. |
+| `.claude/scripts/session-init.js` | **Toolkit** | Emits one JSON with codebase-map freshness, the lessons index, plan statuses, and worktree state, so `/explore`, `/create-plan`, `/pair-debug`, and `/execute` make one startup call instead of several reads. Always updated on setup. |
 | `CODEBASE_MAP.md` | **Generated** | Auto-generated semantic map (modules, conventions, gotchas, navigation guide). Gitignored. Built by `/index`, refreshed by `/document`. |
 | `plans/PLAN-*.md` | **Generated** | Plans produced by `/create-plan` and updated by `/execute`. Gitignored (local working docs). |
 
