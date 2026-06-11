@@ -4,14 +4,22 @@
 # Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
-#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory]
+#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory] [--dry-run]
 #
 # If no target directory is given, uses the current working directory
 # (but will error if run from inside the toolkit repo).
 #
+# --dry-run prints the pre-flight report (version gap, migrations that
+# would run, managed files that would be overwritten, custom files that
+# are left alone, backup location) and exits without creating, modifying,
+# or deleting anything.
+#
 # Examples:
 #   # From toolkit repo, specify target:
 #   bash scripts/setup/setup.sh ~/Projects/my-app
+#
+#   # See what an upgrade would do without changing anything:
+#   bash scripts/setup/setup.sh ~/Projects/my-app --dry-run
 #
 #   # From your project directory:
 #   cd ~/Projects/my-app
@@ -25,8 +33,36 @@ shopt -s failglob
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# ─── Target directory ────────────────────────────────────────
-TARGET="${1:-.}"
+# ─── Arguments ───────────────────────────────────────────────
+# Positional target directory plus the optional --dry-run flag, in any
+# order. Unknown options error out instead of being mistaken for a
+# target directory.
+TARGET=""
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    -*)
+      echo ""
+      echo "  Error: unknown option: $arg"
+      echo "  Usage: bash setup.sh [target-directory] [--dry-run]"
+      echo ""
+      exit 1
+      ;;
+    *)
+      if [ -n "$TARGET" ]; then
+        echo ""
+        echo "  Error: more than one target directory given: $TARGET, $arg"
+        echo ""
+        exit 1
+      fi
+      TARGET="$arg"
+      ;;
+  esac
+done
+TARGET="${TARGET:-.}"
 
 # If no target specified, check if we're in the toolkit repo
 if [ "$TARGET" = "." ]; then
@@ -204,6 +240,295 @@ if [ -f "$TARGET/.claude/rules/toolkit.md" ]; then
   IS_UPGRADE=1
 fi
 
+# ─── Migration inventory (issue #133) ────────────────────────
+# The legacy-path lists consumed by the migration blocks further down,
+# defined once up here so the pre-flight report can announce which
+# migrations will run BEFORE any of them executes.
+
+# v3.4 -> v3.5: commands that became skills (deleted before copy to
+# avoid name conflicts; backed up first).
+LEGACY_COMMANDS=(review-code.md review-ux.md review-plan.md review-commands.md review-browser.md review-full.md learning-opportunity.md)
+
+# Issue #80: upstream renames, old -> new. Parallel indexed arrays map
+# old -> new (associative arrays need Bash 4, setup.sh targets Bash 3.2+).
+# Paths are relative to $TARGET.
+RENAMED_OLD=(
+  .claude/commands/dev-lead-gpt.md
+  .claude/commands/dev-lead-gemini.md
+  scripts/dev-lead-gpt.js
+  scripts/dev-lead-gemini.js
+)
+RENAMED_NEW=(
+  .claude/commands/ask-gpt.md
+  .claude/commands/ask-gemini.md
+  .claude/scripts/ask-gpt.js
+  .claude/scripts/ask-gemini.js
+)
+
+# Issue #91 (v4.2 -> v4.3): runtime scripts that moved from scripts/ to
+# .claude/scripts/ (old copies backed up, then removed).
+ISSUE91_OLD_SCRIPTS=(
+  scripts/ask-gpt.js
+  scripts/ask-gemini.js
+  scripts/browse.js
+)
+
+# ─── Pre-flight report (issue #133) ──────────────────────────
+# Everything in this section is READ-ONLY. It prints what this run will
+# do - the version gap, which migrations fire, which managed files will
+# be overwritten (with a diff summary), which custom files are left
+# alone, and where backups go - BEFORE any file is created, modified,
+# or deleted. With --dry-run, the script exits right after this report.
+
+# The backup directory name is fixed here so the report can announce the
+# location up front. Creation stays lazy: the directory only appears if
+# something is actually backed up. The process PID suffix keeps two
+# same-second runs from sharing a backup dir.
+BACKUP_DIR="$TARGET/.toolkit-backup-$(date +%Y%m%d-%H%M%S)-$$"
+
+# Old version for the gap line. IS_UPGRADE (not the VERSION file) decides
+# install vs upgrade: early toolkit versions did not ship VERSION, and a
+# fresh target may carry its own unrelated VERSION file.
+OLD_VERSION=""
+if [ "$IS_UPGRADE" -eq 1 ] && [ -f "$TARGET/VERSION" ]; then
+  OLD_VERSION="$(tr -d '[:space:]' < "$TARGET/VERSION")"
+fi
+
+# Strips the managed-version stamp comment that setup rewrites on copy,
+# so a pure version-bump difference in the two rules files is not
+# misreported as a local edit. Covers both the current pre-stamped form
+# and the unstamped form older installs may still carry.
+PF_STAMP_SED='/<!-- Toolkit version: .* | Managed by LLM Peer Review\./d
+/<!-- This file is managed by the LLM Peer Review toolkit\./d'
+
+# preflight_record_diff <src> <rel> [stamped]
+# Compares the incoming file <src> against $TARGET/<rel>. If the target
+# copy exists and differs, records it with a +added/-removed line summary.
+# A difference can be a local edit or an older toolkit version of the
+# file - either way this run will overwrite it (after backing it up).
+PF_DIFFS=()
+preflight_record_diff() {
+  local src="$1" rel="$2" mode="${3:-plain}"
+  local dst="$TARGET/$rel"
+  local diffout added removed
+  [ -f "$dst" ] || return 0
+  if [ "$mode" = "stamped" ]; then
+    diffout=$(diff <(sed "$PF_STAMP_SED" "$dst") <(sed "$PF_STAMP_SED" "$src") 2>/dev/null) || true
+  else
+    if cmp -s "$src" "$dst"; then return 0; fi
+    diffout=$(diff "$dst" "$src" 2>/dev/null) || true
+  fi
+  [ -n "$diffout" ] || return 0
+  added=$(printf '%s\n' "$diffout" | grep -c '^>') || true
+  removed=$(printf '%s\n' "$diffout" | grep -c '^<') || true
+  PF_DIFFS+=("$rel  (+$added/-$removed line(s) vs incoming)")
+}
+
+# preflight_is_migration_target <rel>: true when a target file is one of
+# the legacy paths a migration block will remove. Those are reported
+# under "migrations", not as custom files (they will NOT be left alone).
+preflight_is_migration_target() {
+  local rel="$1" pf_name
+  for pf_name in "${LEGACY_COMMANDS[@]}"; do
+    if [ "$rel" = ".claude/commands/$pf_name" ]; then return 0; fi
+  done
+  for pf_name in "${RENAMED_OLD[@]}"; do
+    if [ "$rel" = "$pf_name" ]; then return 0; fi
+  done
+  return 1
+}
+
+# Which staged migrations will fire. Read-only mirrors of the conditions
+# the migration blocks below check.
+PF_MIGRATIONS=()
+PF_COUNT=0
+for pf_name in "${LEGACY_COMMANDS[@]}"; do
+  if [ -f "$TARGET/.claude/commands/$pf_name" ]; then PF_COUNT=$((PF_COUNT + 1)); fi
+done
+if [ "$PF_COUNT" -gt 0 ]; then
+  PF_MIGRATIONS+=("Legacy command cleanup (v3.5): $PF_COUNT command file(s) became skills - old copies backed up, then removed")
+fi
+PF_COUNT=0
+for pf_rel in "${RENAMED_OLD[@]}"; do
+  if [ -f "$TARGET/$pf_rel" ]; then PF_COUNT=$((PF_COUNT + 1)); fi
+done
+if [ "$PF_COUNT" -gt 0 ]; then
+  PF_MIGRATIONS+=("Renamed-file cleanup (issue #80): $PF_COUNT old-named file(s) backed up, then removed")
+fi
+PF_COUNT=$(compgen -G "$TARGET/.claude/plans/PLAN-*.md" 2>/dev/null | wc -l | tr -d ' ')
+if [ "$PF_COUNT" -gt 0 ]; then
+  PF_MIGRATIONS+=("Plan migration (v4.0): $PF_COUNT plan(s) move from .claude/plans/ to plans/")
+fi
+PF_COUNT=0
+for pf_rel in "${ISSUE91_OLD_SCRIPTS[@]}"; do
+  if [ -f "$TARGET/$pf_rel" ]; then PF_COUNT=$((PF_COUNT + 1)); fi
+done
+if [ "$PF_COUNT" -gt 0 ]; then
+  PF_MIGRATIONS+=("Script relocation (issue #91): $PF_COUNT old script(s) under scripts/ backed up, then removed")
+fi
+
+# Issue #91 package.json detection. Computed once here (read-only) and
+# reused by the migration block below, so detection and action cannot
+# drift apart.
+# Note: `node -e` wraps the script in a vm context, so a top-level `return`
+# is a SyntaxError. Use a nullable `pkg` + outer `if` instead of an early
+# return out of the try/catch.
+ISSUE91_PKG_DRY=""
+if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
+  ISSUE91_PKG_DRY=$(TARGET_DIR="$TARGET" node -e "
+    const fs = require('fs');
+    let pkg = null;
+    try { pkg = JSON.parse(fs.readFileSync(process.env.TARGET_DIR + '/package.json', 'utf-8')); } catch (_) {}
+    if (pkg) {
+      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', '@google/genai', 'playwright-core', '@axe-core/playwright'];
+      const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
+      let touched = false;
+      if (pkg.dependencies) {
+        for (const dep of TOOLKIT_DEPS) {
+          if (Object.prototype.hasOwnProperty.call(pkg.dependencies, dep)) { touched = true; break; }
+        }
+      }
+      if (!touched && pkg.scripts) {
+        for (const s of TOOLKIT_SCRIPTS) {
+          const v = pkg.scripts[s];
+          if (v && /node\\s+scripts\\/(ask-gpt|ask-gemini)\\.js/.test(v)) { touched = true; break; }
+        }
+      }
+      if (touched) console.log('touched');
+    }
+  " 2>/dev/null) || true
+fi
+if [ "$ISSUE91_PKG_DRY" = "touched" ]; then
+  PF_MIGRATIONS+=("package.json cleanup (issue #91): toolkit deps/scripts removed from your package.json (backed up first)")
+fi
+if [ -f "$TARGET/INDEX.md" ]; then
+  PF_MIGRATIONS+=("Legacy INDEX.md removal: backed up, then removed (replaced by CODEBASE_MAP.md)")
+fi
+
+# Managed files that differ from the incoming version. The enumeration
+# below mirrors the copy blocks exactly: every file setup overwrites via
+# safe_copy is compared here, nothing else.
+for pf_src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
+  preflight_record_diff "$pf_src" ".claude/commands/$(basename "$pf_src")"
+done
+if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
+  for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
+    [ -f "$pf_src" ] || continue
+    preflight_record_diff "$pf_src" ".claude/skills/shared/$(basename "$pf_src")"
+  done
+fi
+if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
+  shopt -s nullglob
+  for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/shells/"*; do
+    [ -f "$pf_src" ] || continue
+    preflight_record_diff "$pf_src" ".claude/skills/shared/shells/$(basename "$pf_src")"
+  done
+  shopt -u nullglob
+fi
+for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
+  [ -d "$pf_skill_dir" ] || continue
+  pf_skill_name="$(basename "$pf_skill_dir")"
+  [ "$pf_skill_name" = "shared" ] && continue
+  for pf_src in "$pf_skill_dir"*; do
+    [ -f "$pf_src" ] || continue
+    preflight_record_diff "$pf_src" ".claude/skills/$pf_skill_name/$(basename "$pf_src")"
+  done
+done
+for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js; do
+  preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
+done
+if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
+  preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ".claude/scripts/package-lock.json"
+fi
+preflight_record_diff "$TOOLKIT_ROOT/.env.local.example" ".env.local.example"
+preflight_record_diff "$TOOLKIT_ROOT/.gitattributes" ".gitattributes"
+preflight_record_diff "$TOOLKIT_ROOT/artifacts/README.md" "artifacts/README.md"
+preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/toolkit.md" ".claude/rules/toolkit.md" stamped
+preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" ".claude/rules/html-outputs.md" stamped
+# VERSION is compared only on a fresh install: on upgrade it always
+# differs (that is the version gap, reported above), but a fresh target
+# carrying its own unrelated VERSION file is about to lose it.
+if [ "$IS_UPGRADE" -eq 0 ]; then
+  preflight_record_diff "$TOOLKIT_ROOT/VERSION" "VERSION"
+fi
+
+# Custom files in toolkit-managed directories. Anything listed here is
+# NOT shipped by the toolkit and setup NEVER modifies or deletes it:
+# the copy loops only write files that exist in the toolkit source, and
+# the migration blocks only touch the specific legacy paths inventoried
+# above. node_modules/ (created by npm install under .claude/scripts/)
+# is skipped - it is machine-generated, not a customization.
+PF_CUSTOM=()
+for pf_dir_name in commands rules scripts skills; do
+  pf_dir="$TARGET/.claude/$pf_dir_name"
+  [ -d "$pf_dir" ] || continue
+  while IFS= read -r pf_file; do
+    [ -n "$pf_file" ] || continue
+    pf_rel="${pf_file#"$TARGET"/}"
+    if preflight_is_migration_target "$pf_rel"; then continue; fi
+    [ -f "$TOOLKIT_ROOT/$pf_rel" ] && continue
+    PF_CUSTOM+=("$pf_rel")
+  done < <(find "$pf_dir" -name node_modules -prune -o -type f -print 2>/dev/null | sort)
+done
+
+# Stale backup directories from earlier runs (issue #133 evidence: these
+# linger in project roots for years without anyone noticing).
+PF_STALE_BACKUPS=$(find "$TARGET" -maxdepth 1 -name '.toolkit-backup-*' -type d 2>/dev/null | wc -l | tr -d ' ')
+
+echo "  ────────────────────────────────────────"
+echo "   Pre-flight report (no changes made yet)"
+echo "  ────────────────────────────────────────"
+echo ""
+if [ "$IS_UPGRADE" -eq 1 ]; then
+  if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$VERSION" ]; then
+    echo "    Install type: upgrade (v$OLD_VERSION -> v$VERSION)"
+  elif [ -n "$OLD_VERSION" ]; then
+    echo "    Install type: re-run of v$VERSION"
+  else
+    echo "    Install type: upgrade (pre-VERSION install -> v$VERSION)"
+  fi
+else
+  echo "    Install type: fresh install (v$VERSION)"
+fi
+echo ""
+echo "    Migrations that will run:"
+if [ ${#PF_MIGRATIONS[@]} -gt 0 ]; then
+  for pf_line in "${PF_MIGRATIONS[@]}"; do echo "      - $pf_line"; done
+else
+  echo "      (none)"
+fi
+echo ""
+echo "    Managed toolkit files that differ from the incoming version"
+echo "    (will be overwritten - your current copy is backed up first):"
+if [ ${#PF_DIFFS[@]} -gt 0 ]; then
+  for pf_line in "${PF_DIFFS[@]}"; do echo "      - $pf_line"; done
+else
+  echo "      (none - your managed files match the incoming ones)"
+fi
+echo ""
+echo "    Custom files detected in toolkit-managed directories"
+echo "    (not shipped by the toolkit - setup will NOT modify or delete them):"
+if [ ${#PF_CUSTOM[@]} -gt 0 ]; then
+  for pf_line in "${PF_CUSTOM[@]}"; do echo "      - $pf_line"; done
+else
+  echo "      (none)"
+fi
+echo ""
+echo "    Backups: anything this run overwrites or deletes is copied first to"
+echo "      $BACKUP_DIR"
+if [ "$PF_STALE_BACKUPS" -gt 0 ]; then
+  echo ""
+  echo "    Note: $PF_STALE_BACKUPS older .toolkit-backup-* folder(s) from previous runs are"
+  echo "    still in the project root. Delete them when no longer needed."
+fi
+echo ""
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "  Dry run complete - no files were created, modified, or deleted."
+  echo ""
+  exit 0
+fi
+
 # ─── Create target directories ───────────────────────────────
 mkdir -p "$TARGET/.claude/commands"
 mkdir -p "$TARGET/.claude/rules"
@@ -214,22 +539,20 @@ mkdir -p "$TARGET/artifacts"
 
 # ─── Backup helpers (issue #79) ──────────────────────────────
 # Before overwriting or deleting any file in the target, copy the original
-# to a timestamped backup directory at the target root. The directory is
-# only created on the first backup (no noise for clean installs). All
-# backups in one setup run share the same timestamp.
-BACKUP_DIR=""
+# to a timestamped backup directory at the target root. The directory name
+# is fixed in the pre-flight section above (so the report can announce it
+# up front); it is only created on the first backup, so clean installs and
+# identical re-runs leave no empty backup dir behind. All backups in one
+# setup run share the same directory.
 BACKUP_COUNT=0
 
 # backup_file: copy a target-resident file into the backup root, mirroring
-# its relative path. Creates the backup root lazily on first call. Appends
-# the process PID to the timestamp so two same-second runs get distinct
-# backup dirs (avoids silent overwrite of a prior run's backups). `cp -P`
-# preserves symlinks as links so a backed-up symlink can be restored later.
+# its relative path. $BACKUP_DIR carries the process PID so two same-second
+# runs get distinct backup dirs (avoids silent overwrite of a prior run's
+# backups). `cp -P` preserves symlinks as links so a backed-up symlink can
+# be restored later.
 backup_file() {
   local original="$1"
-  if [ -z "$BACKUP_DIR" ]; then
-    BACKUP_DIR="$TARGET/.toolkit-backup-$(date +%Y%m%d-%H%M%S)-$$"
-  fi
   # Inner quotes make the prefix a literal, not a glob pattern - matters
   # if $TARGET contains `*`, `?`, or `[` characters.
   local rel="${original#"$TARGET"/}"
@@ -261,9 +584,9 @@ safe_copy() {
 }
 
 # ─── Legacy cleanup (v3.4 -> v3.5 migration) ────────────────
-# These commands were migrated to skills in v3.5. Delete old command
-# files BEFORE copying new ones to avoid name conflicts.
-LEGACY_COMMANDS=(review-code.md review-ux.md review-plan.md review-commands.md review-browser.md review-full.md learning-opportunity.md)
+# Commands that became skills in v3.5 (the LEGACY_COMMANDS list lives in
+# the migration inventory above, shared with the pre-flight report).
+# Delete old command files BEFORE copying new ones to avoid name conflicts.
 LEGACY_CLEANED=0
 for fname in "${LEGACY_COMMANDS[@]}"; do
   if [ -f "$TARGET/.claude/commands/$fname" ]; then
@@ -279,22 +602,10 @@ fi
 # ─── Renamed files cleanup (issue #80) ───────────────────────
 # When a toolkit file is renamed upstream (e.g. dev-lead-gpt.md -> ask-gpt.md),
 # copying the new name is not enough: the old file sticks around and still
-# loads as a stale slash command. Parallel indexed arrays map old -> new
-# (associative arrays need Bash 4, setup.sh targets Bash 3.2+). Paths are
-# relative to $TARGET. backup_file preserves any customizations the user
-# made to the old-named file before rm removes it.
-RENAMED_OLD=(
-  .claude/commands/dev-lead-gpt.md
-  .claude/commands/dev-lead-gemini.md
-  scripts/dev-lead-gpt.js
-  scripts/dev-lead-gemini.js
-)
-RENAMED_NEW=(
-  .claude/commands/ask-gpt.md
-  .claude/commands/ask-gemini.md
-  .claude/scripts/ask-gpt.js
-  .claude/scripts/ask-gemini.js
-)
+# loads as a stale slash command. The RENAMED_OLD/RENAMED_NEW arrays live in
+# the migration inventory above (shared with the pre-flight report).
+# backup_file preserves any customizations the user made to the old-named
+# file before rm removes it.
 RENAMED_CLEANED=0
 # `${!RENAMED_OLD[@]}` expands to the array's index list, scoping the loop
 # variable cleanly and avoiding a manual counter. Bash 3.2 safe.
@@ -344,12 +655,8 @@ fi
 # project pulled toolkit deps they didn't need (issue #91). v4.3 quarantines
 # both under .claude/scripts/. This block detects the old layout and cleans
 # up. Runs BEFORE the copy block so old scripts are backed up before new ones
-# land at .claude/scripts/.
-ISSUE91_OLD_SCRIPTS=(
-  scripts/ask-gpt.js
-  scripts/ask-gemini.js
-  scripts/browse.js
-)
+# land at .claude/scripts/. The ISSUE91_OLD_SCRIPTS list lives in the
+# migration inventory above (shared with the pre-flight report).
 ISSUE91_SCRIPTS_REMOVED=0
 for old_rel in "${ISSUE91_OLD_SCRIPTS[@]}"; do
   if [ -f "$TARGET/$old_rel" ]; then
@@ -360,40 +667,15 @@ for old_rel in "${ISSUE91_OLD_SCRIPTS[@]}"; do
 done
 
 # Remove leaked toolkit deps and convenience scripts from $TARGET/package.json.
-# Two-phase approach: dry-run detect first (to decide whether to back up), then
-# write. The four deps are toolkit-owned and always safe to remove. The two
-# convenience scripts are recognized only when their command body still points
-# at the OLD `scripts/<name>.js` path - this avoids clobbering a script the
-# user happens to have customized to do something else under the same name.
+# Two-phase approach: the read-only detection ran in the pre-flight section
+# above (ISSUE91_PKG_DRY) so the report and this action cannot drift; here we
+# back up and write only when it flagged the file. The deps are toolkit-owned
+# and always safe to remove. The two convenience scripts are recognized only
+# when their command body still points at the OLD `scripts/<name>.js` path -
+# this avoids clobbering a script the user happens to have customized to do
+# something else under the same name.
 ISSUE91_PKG_TOUCHED=0
-if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
-  # Note: `node -e` wraps the script in a vm context, so a top-level `return`
-  # is a SyntaxError. Use a nullable `pkg` + outer `if` instead of an early
-  # return out of the try/catch.
-  ISSUE91_PKG_DRY=$(TARGET_DIR="$TARGET" node -e "
-    const fs = require('fs');
-    let pkg = null;
-    try { pkg = JSON.parse(fs.readFileSync(process.env.TARGET_DIR + '/package.json', 'utf-8')); } catch (_) {}
-    if (pkg) {
-      const TOOLKIT_DEPS = ['openai', '@google/generative-ai', '@google/genai', 'playwright-core', '@axe-core/playwright'];
-      const TOOLKIT_SCRIPTS = ['ask-gpt', 'ask-gemini'];
-      let touched = false;
-      if (pkg.dependencies) {
-        for (const dep of TOOLKIT_DEPS) {
-          if (Object.prototype.hasOwnProperty.call(pkg.dependencies, dep)) { touched = true; break; }
-        }
-      }
-      if (!touched && pkg.scripts) {
-        for (const s of TOOLKIT_SCRIPTS) {
-          const v = pkg.scripts[s];
-          if (v && /node\\s+scripts\\/(ask-gpt|ask-gemini)\\.js/.test(v)) { touched = true; break; }
-        }
-      }
-      if (touched) console.log('touched');
-    }
-  " 2>/dev/null) || true
-
-  if [ "$ISSUE91_PKG_DRY" = "touched" ]; then
+if [ "$ISSUE91_PKG_DRY" = "touched" ]; then
     backup_file "$TARGET/package.json"
     # Capture the write step's exit code instead of swallowing failures with
     # `|| true`. A migration that silently fails leaves the user with a backup
@@ -431,7 +713,6 @@ if [ -f "$TARGET/package.json" ] && command -v node > /dev/null 2>&1; then
       echo "    And remove the ask-gpt / ask-gemini script entries if they still"
       echo "    point at scripts/ask-gpt.js or scripts/ask-gemini.js."
     fi
-  fi
 fi
 
 if [ "$ISSUE91_SCRIPTS_REMOVED" -gt 0 ] || [ "$ISSUE91_PKG_TOUCHED" -gt 0 ]; then
@@ -518,9 +799,9 @@ if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
   safe_copy "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" "$TARGET/.claude/scripts/package-lock.json"
 fi
 
-# ─── .env.local.example (template - safe to overwrite) ───────
+# ─── .env.local.example (template - safe_copy backs up any local edits) ──
 echo "  Copying .env.local.example ..."
-cp "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
+safe_copy "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
 
 # ─── .gitignore (merge - preserve user entries, add toolkit lines) ─
 if [ -f "$TARGET/.gitignore" ]; then
