@@ -31,7 +31,7 @@
 /explore Add a /hello slash command that greets the user by name
 ```
 
-**WAIT** for Claude to ask scoping questions (2-4 questions).
+**WAIT** for Claude to ask "Scoping or vision? [scoping]" first - answer `scoping` (or just confirm the default). Then it asks the scoping questions (2-4 questions).
 
 **SAY:**
 > See how it's asking about scope, success criteria, and edge cases? This is the "think before you build" step. I'll give quick answers to move things along.
@@ -55,12 +55,12 @@
 /create-plan
 ```
 
-**WAIT** for the plan to be generated.
+**WAIT** for the plan to be generated. An HTML view of the plan will also open in your default browser - that is expected, not a glitch.
 
 **SAY:**
-> Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. No more "where were we?" moments.
+> Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. And that page that just opened in the browser? That's the same plan rendered as HTML, so you can scan it without reading raw markdown.
 
-**TIP:** If the plan is long, just highlight the Tasks section and move on.
+**TIP:** If the plan is long, just highlight the Tasks section and move on. If the browser tab steals focus, drag it next to the terminal - it makes a nice split-screen for the rest of the demo.
 
 ---
 
@@ -98,7 +98,7 @@
 **SAY:**
 > `/review` auto-detects what changed and dispatches the right specialist reviews. This is a written report - bugs, style issues, suggestions. Nothing gets changed until you say "fix it." That keeps you in control.
 
-**TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything."
+**TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may open in the browser - narrate it as the rendered view of the same findings.
 
 ---
 
@@ -117,7 +117,7 @@
 **SAY** (while waiting):
 > This is running 3 rounds of back-and-forth. ChatGPT reviews the work first, then Claude responds as the author - accepting some points, pushing back on others. ChatGPT follows up, and they go back and forth for 3 rounds. At the end you get a summary of what they agreed on, where they disagreed, and a prioritized action list.
 
-**TIP:** If the API is slow, keep narrating: "The models are debating right now - you'll see the rounds appear as they complete." If it errors, say: "In a real session you'd retry - the output is a structured verdict with agreed/disagreed/actions."
+**TIP:** If the API is slow, keep narrating: "The models are debating right now - you'll see the rounds appear as they complete." If it errors, say: "In a real session you'd retry - the output is a structured verdict with agreed/disagreed/actions." When the summary has 3+ recommended actions, an HTML view of the debate may open in the browser too.
 
 ---
 
@@ -148,6 +148,7 @@
 Checklist:
 - [ ] Claude Code is installed and running
 - [ ] API keys are configured (`.env.local` has OpenAI key for `/ask-gpt`)
+- [ ] Default browser is ready - the plan (and possibly review/debate) HTML views open in it automatically
 - [ ] Clean git state (no uncommitted changes)
 - [ ] You're in the project directory
 - [ ] Terminal font is large enough for the audience to read

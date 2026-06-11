@@ -130,7 +130,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 
 ## Requirements
 
-This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-a-bash-workflow) first.
+This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-a-bash-workflow) first. Native Windows PowerShell also works for setup and all non-debate commands; only `/ask-gpt` and `/ask-gemini` require bash/WSL.
 
 ---
 
@@ -169,7 +169,7 @@ Prefer to run the setup script yourself? Pick the script that matches your shell
 bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project
 ```
 
-**PowerShell (for setup only - see [Requirements](#requirements)):**
+**PowerShell (setup and non-debate commands - see [Requirements](#requirements)):**
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project"
 ```
@@ -191,9 +191,9 @@ bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project --dry
 Every real run prints the same pre-flight report before it touches anything.
 
 **What setup does:**
-- **Copies into your project:** commands, skills, runtime scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`), the index generator, `VERSION`, and `.env.local.example`. Detects and removes any legacy `INDEX.md`. The new `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
+- **Copies into your project:** commands, skills (including the prebuilt HTML shells), both rules files (`toolkit.md`, `html-outputs.md`), and all runtime and helper scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `render-html.js`, `session-init.js`, `open-artifact.sh`), plus `VERSION` and `.env.local.example`. Detects and removes any legacy `INDEX.md`. `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
 - **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize. Custom files you add inside `.claude/commands/`, `.claude/skills/`, `.claude/scripts/`, or `.claude/rules/` are never modified or deleted (this guarantee is covered by the toolkit's installer test suite), and anything setup does overwrite is backed up to a timestamped `.toolkit-backup-*` folder first.
-- **Always updates:** toolkit rules (`.claude/rules/toolkit.md`).
+- **Always updates:** the managed rules files (`.claude/rules/toolkit.md`, `.claude/rules/html-outputs.md`).
 - **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
 
 See [How It Works](#how-it-works-file-architecture) for details on which files are yours vs. managed by the toolkit.
@@ -223,6 +223,7 @@ Then use it from anywhere:
 setup-claude-toolkit /path/to/your-project
 ```
 
+<a id="advanced-do-it-manually"></a>
 <details>
 <summary><strong>Advanced: Do It Manually</strong></summary>
 
@@ -233,6 +234,7 @@ Copy these into your project:
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/skills/` (whole folder) | `your-project/.claude/skills/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
+| `.claude/rules/html-outputs.md` | `your-project/.claude/rules/html-outputs.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
 | `.claude/scripts/` (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `open-artifact.sh`, `render-html.js`, `session-init.js`, `package.json`) | `your-project/.claude/scripts/` |
 | `CLAUDE.md` | `your-project/CLAUDE.md` |
@@ -241,6 +243,7 @@ Copy these into your project:
 | `.env.local.example` | `your-project/.env.local.example` |
 | `.gitignore` | `your-project/.gitignore` |
 | `.gitattributes` | `your-project/.gitattributes` |
+| `artifacts/README.md` | `your-project/artifacts/README.md` |
 
 Then in your project folder:
 ```bash
