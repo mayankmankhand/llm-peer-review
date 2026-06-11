@@ -37,6 +37,8 @@
 - **Don't trust merged review severities without verifying the source lines.**
 - **Review proposed prompt edits before applying them, and triage the volume hard.**
 - **Editing the currently-running command file trips the harness self-modification guard.**
+- **A prompt's user-facing message is not enforcement.**
+- **Pin subagents freely; never switch the main-loop model mid-session.**
 
 ## Mistakes to Avoid
 
