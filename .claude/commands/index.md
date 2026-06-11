@@ -47,7 +47,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=general-purpose` (universally available across Claude Code versions). Use this prompt template, substituting the chunk's file list:
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=general-purpose` (universally available across Claude Code versions) and `model=sonnet` to pin every chunk agent to Sonnet. The pin is what makes the Step 2 cost message ("Sonnet via general-purpose subagent") true rather than aspirational - without it the chunks silently inherit the session model (Opus or Fable). Pinning subagents is safe and carries no prompt-cache penalty: they build their context from scratch. Do NOT pin Step 4 (synthesis) - that runs on the main loop and must stay on the session model ("pin down, inherit up": the worker subagents get a fixed cheap model, while the main synthesis loop keeps whatever model you are running). Use this prompt template, substituting the chunk's file list:
 
 <template>
 

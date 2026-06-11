@@ -7,7 +7,9 @@ Based on our full exchange, produce a markdown plan document.
 
 ## Load Project Context
 
-Check if `CODEBASE_MAP.md` exists in the project root.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview), `lessons` (exists, content, hasDetail), `plans` (each with progress and status, for numbering the new plan and avoiding name clashes), and `worktree` (for the Worktree Check below). Use these instead of the individual git/file roundtrips. **Fallback:** if the script is missing or errors (older installs), do the manual reads described here and in the Worktree Check instead - behavior is identical.
+
+Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
 **If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure.
 
@@ -15,7 +17,7 @@ Check if `CODEBASE_MAP.md` exists in the project root.
 
 **If it is malformed or `/index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
 
-After the map, also read `LESSONS.md` (the lesson index, one line each). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format - read it whole.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
 
 ## Worktree Check
 
@@ -23,7 +25,7 @@ After the map, also read `LESSONS.md` (the lesson index, one line each). If a le
 
 **Fallback branch rename** - `/explore` is the primary place this happens, but if the user skipped it or didn't have an issue number yet, handle it here before generating the plan.
 
-1. Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree.
+1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir` - they differ when you're in a worktree).
 2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern.
 3. If both are true AND an issue is referenced in the conversation, rename the branch following the worktree naming convention in toolkit.md.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."
