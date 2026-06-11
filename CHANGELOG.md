@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+<!-- Placement rule: the "What's new since v4.3.3" rollup below stays at the
+     top of this file, ABOVE the newest release section. When cutting a
+     release, add the new "## vX.Y.Z" section BELOW the rollup and extend the
+     rollup paragraph with one sentence for the new version - the README links
+     here as "the full upgrade summary", so it must stay current and findable. -->
+
+## What's new since v4.3.3
+
+If you last installed v4.3.3, nine releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. v4.6.0 hardens the debate path: silent empty bodies and parallel-tab `/tmp` collisions are gone (#101), and `/ask-gpt` + `/ask-gemini` final summaries now use the same 4-field finding structure as `/review` (#103). v5.0.0 is the HTML milestone: human-read toolkit outputs (plans, reviews, debates, cycle summaries, `/explore` comparisons) gain optional HTML views, plus the new `/playground` and `/audit-html` skills - all additive, with markdown still canonical. v5.0.1 makes HTML artifacts open reliably on WSL (a deterministic opener script with real fallbacks) and fixes the Windows installer so `/index` works out of the box. v5.1.0 rewires HTML generation through a prebuilt-shell pipeline (`render-html.js`): reports open faster, filenames are timestamped so re-runs never collide, and an accessibility pass lands. v5.2.0 adds installer pre-flight reports with `--dry-run` and a tested custom-file guarantee, cuts command startup to one `session-init.js` call, restructures `/review` for token economy, pins `/index`'s heavy lifting to Sonnet, renders plan HTML through the shared pipeline (about 2x faster), splits the lessons log into an always-read index plus on-demand detail, and lets plans include test steps when the work warrants them. Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.
+
+---
+
+## v5.2.0 - Installer Guarantees + Token Economy (2026-06-11)
+
+> **First GitHub release since v5.0.0 - cumulative, not breaking.** This release rolls up v5.0.1 (WSL opener + Windows installer fixes) and v5.1.0 (HTML render pipeline), neither of which was published to GitHub, plus the v5.2.0 changes below. Re-running setup once picks up all three versions.
 
 ### Added
 - **Installer pre-flight report, `--dry-run`, and a tested custom-file guarantee** (#133) - Both installers now print a read-only pre-flight report BEFORE creating, modifying, or deleting anything: the install type and version gap (e.g. `upgrade (v4.0.0 -> v5.1.0)`), which staged migrations will run, every managed toolkit file that differs from the incoming version (with a `+added/-removed` line summary - a locally edited managed file about to be overwritten is no longer a silent surprise), every custom file detected inside toolkit-managed directories with the explicit statement that setup will not modify or delete it, and the backup location announced up front instead of after the fact. Stale `.toolkit-backup-*` folders from past runs are flagged for cleanup. A new `--dry-run` flag (bash) / `-DryRun` switch (PowerShell) prints the report and exits with zero changes. The long-implicit custom-file guarantee is now enforced by scratch-project test suites (`scripts/setup/test-installer-guarantees.sh` / `.ps1`, toolkit-repo only, never copied to projects) that plant custom files in every managed directory - including a nested command subdirectory - and verify byte-for-byte survival through a full fresh-install -> local-edit -> dry-run -> upgrade -> re-run cycle; 37/37 assertions pass on Linux bash and on Windows PowerShell 5.1. The version-stamp line in the two managed rules files is ignored during comparison, so a pure version bump is never misreported as a local edit. `.env.local.example` (previously the one managed file overwritten without backup) now goes through `safe_copy` in both installers. Re-run `setup.sh` / `setup.ps1` to pick it up.
@@ -98,10 +112,6 @@ The major version bump marks a milestone, not a breaking change - everything her
 - **Re-running setup** picks up the new scripts, the new permissions, and the updated command files.
 
 ---
-
-## What's new since v4.3.3
-
-If you last installed v4.3.3, six releases have shipped on top of it. v4.4.0 replaced the old flat-tree `INDEX.md` with a semantic `CODEBASE_MAP.md` that `/explore`, `/create-plan`, and `/pair-debug` read at session start. v4.4.1 tightened every review skill to a 4-field `What / Why it matters / Example / Suggested fix` structure so even low-severity findings feel justified. v4.5.0 added a stale-model safety net so `/ask-gpt` and `/ask-gemini` auto-override known-old defaults in `.env.local` and print the model that actually fired. v4.5.1 is a documentation-only release: README repositioned for newcomers, AGENT-SETUP graveyard trimmed, unmeasured cost claims removed, broken anchors fixed. v4.6.0 hardens the debate path: silent empty bodies and parallel-tab `/tmp` collisions are gone (#101), and `/ask-gpt` + `/ask-gemini` final summaries now use the same 4-field finding structure as `/review` (#103). v5.0.0 is the HTML milestone: human-read toolkit outputs (plans, reviews, debates, cycle summaries, `/explore` comparisons) gain optional HTML views, plus the new `/playground` and `/audit-html` skills - all additive, with markdown still canonical. Re-run `setup.sh` (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md)) to pick everything up. See full per-version details below.
 
 ## v4.5.1 - Documentation Audit
 

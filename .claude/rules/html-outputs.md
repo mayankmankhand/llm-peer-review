@@ -1,6 +1,6 @@
 # HTML Output Rules
 
-<!-- Toolkit version: 5.1.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.2.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## Purpose
 
