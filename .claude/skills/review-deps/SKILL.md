@@ -49,6 +49,10 @@ Be thorough but concise.
 
 </procedure>
 
+## Reading Budget
+
+!`cat .claude/skills/shared/reading-budget.md`
+
 ## Severity Levels and Anchors
 
 !`cat .claude/skills/shared/severity-anchors.md`

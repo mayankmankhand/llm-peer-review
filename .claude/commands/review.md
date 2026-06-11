@@ -59,13 +59,24 @@ Categorize the changes and pick relevant specialists:
 - If no changes are detected (clean working tree), tell the user: "No changes detected. Use `/review code` to force a specific review."
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
 
+### Phase 1.5: Size gate (skip the fan-out for tiny diffs)
+
+This gate applies only to the auto-detect path. (Explicit focus calls like `/review code` and `/review full` skip detection entirely, so they never reach this gate - the specialist you named always runs, regardless of size.)
+
+Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum the added + removed columns across all changed files. **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged.
+
+**Never-gate specialist:** Dependency Security (selected when a `package.json`/lockfile changed). Its presence disables the size gate for the whole run - diff size is not a proxy for CVE risk.
+
+The inline path still obeys the report-only rule and the HTML gate; it simply has no subagents to dispatch.
+
 ### Phase 2: Dispatch
 
 For each selected specialist:
 
-1. Read the specialist's SKILL.md file (subagents cannot discover skills on their own - you must read the file and pass its content)
+1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, output template, and reading budget - but NOT `html-render-review.md`: rendering HTML is the orchestrator's job, so a dispatched specialist never needs it.
 2. Also read `.claude/skills/project-context/SKILL.md` and follow its instructions to gather project context
-3. Spawn a subagent using the Agent tool. Pass the skill's full content as the subagent's prompt, along with the project context summary. Tell the subagent what files to review.
+3. Read the changed files once, here, so each subagent receives the relevant excerpts instead of re-opening every file (paste-don't-read)
+4. Spawn a subagent using the Agent tool with the prompt template below: the skill's review criteria, the project context summary, and the pre-read file excerpts
 
 **Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder. Browser QA is always sequential (it drives a browser), so it runs last if included.
 
@@ -73,27 +84,45 @@ For each selected specialist:
 ```
 You are a specialist reviewer. Follow these instructions exactly:
 
-[PASTE FULL SKILL.MD CONTENT HERE]
+[PASTE THE SKILL'S REVIEW CRITERIA: its "How to Review" body plus the severity anchors, finding-id system, output template, and reading budget it inlines. SKIP the skill's "HTML Companion" / html-render-review content - as a dispatched subagent you never render HTML.]
 
 Project context:
 [PASTE PROJECT CONTEXT SUMMARY HERE]
 
-Files to review:
-[LIST CHANGED FILES RELEVANT TO THIS SPECIALIST]
+Files to review (excerpts already read for you):
+[PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
 
-Important: Do NOT generate an HTML companion file. The orchestrator produces a single combined HTML for the whole run after synthesizing your findings. Only output the markdown report; skip the HTML Companion section entirely.
+Important (dispatched-subagent contract): You are a single-pass subagent. Do NOT spawn sub-agents - the Agent tool is unavailable to you, so any "run N sub-agents in parallel" instruction in the skill above is for direct invocation only and does not apply to you. Do NOT generate an HTML companion file and do NOT write a prose markdown report. Output your findings as JSONL per "Dispatched findings format" below (or the literal NO FINDINGS). The output template above still governs *what* each finding contains - the 4 fields, the skip rule, severity, the quality bar in its examples - just serialize each finding as JSON, not markdown bullets. The report-level sections (Top Issues, Looks Good, Summary, Staff Check) are the orchestrator's job, not yours.
+```
+
+**Dispatched findings format (JSONL).** A dispatched specialist does NOT write a prose report. It emits its findings as JSONL - one JSON object per line - or the single literal line `NO FINDINGS` if it found nothing. The orchestrator parses these, dedups them, assigns IDs, and derives both the markdown report and the HTML from this one structure: findings are authored once and formatted twice, never re-written.
+
+Each finding object (the field names match the HTML shell's finding schema, so the HTML maps directly):
+
+- `severity`: `"block" | "warn" | "suggest"`
+- `specialist`: the specialist name, e.g. `"code"`
+- `file`: `{ "relPath": "...", "absPath": "...", "line": 42 }` - `line` optional; omit `file` entirely for a finding not tied to a location
+- `what`: one-line summary of the issue (plain English; trusted inline HTML like `<code>` allowed)
+- `fields`: an ordered array of `{ "label": "...", "value": "..." }` rows carrying the SAME depth the markdown would. For most reviews: `Why it matters`, `Example`, `Suggested fix`. Browser findings add `Screenshot`, `Evidence`, `Expected`, `Actual`. Each `value` is full prose, not a stub - a thin Example here becomes a thin Example in the report.
+- `key`: a dedup key = `relPath:line:` followed by the first few normalized (lowercased) words of `what`. Two specialists flagging the same issue at the same spot emit the same key.
+
+Do NOT include an `id` field - the orchestrator assigns R1, R2, ... after dedup (IDs must be sequential and gap-free across the whole run).
+
+Example line:
+```
+{"severity":"warn","specialist":"code","file":{"relPath":"auth/login.ts","absPath":"/abs/auth/login.ts","line":42},"what":"Session token logged on failed login","fields":[{"label":"Why it matters","value":"Tokens in logs let anyone with log access impersonate the user."},{"label":"Example","value":"An attacker reading the support log dashboard gets every active session token from the last hour."},{"label":"Suggested fix","value":"Log only that a failed attempt occurred, never the credential payload."}],"key":"auth/login.ts:42:session-token-logged"}
 ```
 
 **If a subagent fails** (error, timeout, or empty response), note it in the final report: "Note: [Specialist name] review did not complete. Run `/review [type]` to retry."
 
 ### Phase 3: Synthesize
 
-Collect all findings from all subagents. Then:
+Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none). Then:
 
-1. **Renumber** - Assign a single R1, R2, R3 sequence across all specialists. Order by severity (Blocks first, then Warns, then Suggests).
-2. **Deduplicate** - If two specialists flagged the same file:line with the same issue, merge them into one finding and note which specialists agreed.
-3. **Tag source** - After each finding ID, note which specialist it came from: e.g., `**R1** [code] 🚫` or `**R3** [ux, plan] ⚠️`
-4. **Present one combined report** using the format below.
+1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). This is a free, mechanical pass over structured data - no re-judging.
+2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`.
+3. **Derive the markdown report** from the deduped findings using the format below: each finding's `what` becomes the dash summary line and each `fields[]` row becomes a labeled sub-bullet, in order.
+4. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written.
 
 </procedure>
 
@@ -109,6 +138,8 @@ Collect all findings from all subagents. Then:
 ### Base Structure
 
 The orchestrator report uses the standard 4-field finding structure (What / Why it matters / Example / Suggested fix) inlined below from the shared template. This is the single source of truth - do not duplicate it elsewhere. The `<shared_template>` tags isolate the inlined content from this file's own heading hierarchy so the template's headings do not collide with the orchestrator's structure.
+
+The orchestrator fills this structure from the deduped JSON findings (Phase 3): each finding's `what` becomes the dash summary line, and its `fields[]` rows become the labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
 
 <shared_template>
 !`cat .claude/skills/shared/output-template.md`
@@ -159,7 +190,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 For orchestrator output specifically:
 - Pass `--name review-orchestrator` to the helper
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
-- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis
+- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the deduped Phase 3 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
 
 <rules>
 ## REMEMBER: Report issues only. Do NOT edit any files until I approve.

@@ -36,7 +36,7 @@ Then pick one of two modes:
 
 **Small change** (1-2 files, minor update): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or significant feature): Run four focused sub-agents in parallel using the Agent tool, then combine their results:
+**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool, then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
@@ -50,6 +50,10 @@ Each sub-agent should stay broad. If a sub-agent finds something that needs deep
 Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
 
 </procedure>
+
+## Reading Budget
+
+!`cat .claude/skills/shared/reading-budget.md`
 
 ## Severity Levels and Anchors
 

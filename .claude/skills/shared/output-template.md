@@ -16,6 +16,8 @@
 
 Every finding must include all 4 fields below. No shorthand, no skipping. If a finding is too trivial to justify all 4 fields, do not report it (see the Skip rule in severity-anchors.md).
 
+Whether you write these fields directly (a direct `/review-*` call) or the orchestrator fills them from structured JSON findings (`what` plus the `fields[]` rows, in the `/review` dispatch path), every finding carries all 4 with full prose - the structure is identical, only the serialization differs.
+
 - **R1** 🚫 `file:line` - [What: the issue in plain English, one line]
   - **Why it matters:** [The harm or risk this creates, in plain language]
   - **Example:** [Real-world impact: what could happen to a user, the system, or a future maintainer if this is not fixed. Be concrete, not abstract.]
