@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.2.0)
+# AI Agent Setup Instructions (v5.3.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -112,7 +112,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.2.0:** Installer guarantees + token economy (#121, #125, #129, #130, #131, #133). After re-running setup:
+**What's new in v5.3.0:** Security review domain + sharper reviewers (#136). After re-running setup:
+- `/review` runs a dedicated application-security pass (`review-security`) on every code change: it hunts the diff-catchable vulnerability classes (secrets, injection, XSS, path traversal, SSRF, weak crypto) through an adversarial lens, requires a source-to-sink exploit sentence per finding, and stays silent via a danger-spot gate when nothing security-sensitive changed.
+- New standalone `/security-audit` for a deep, on-demand whole-repo pass (entry points, per-route authorization, crypto inventory, recommended `gitleaks` history scan). Both defer dependency CVEs to `/review-deps`.
+- Reviewers are sharper: each expert persona is now passed to the dispatched subagent (design verdict before nits), every finding must carry a `file:line` receipt or it is dropped, and a new near-empty shared `do-not-report.md` suppresses known-noise classes once you add them.
+- Review reports open with an Overall Verdict line and apply a readability backstop (lead with the top 5, collapse the rest, past 7 findings).
+
+**What was new in v5.2.0:** Installer guarantees + token economy (#121, #125, #129, #130, #131, #133). After re-running setup:
 - Both installers print a read-only pre-flight report BEFORE any file changes: version gap, migrations that will run, managed files with local edits (diff summary), custom files (explicitly never touched), and the backup location. `--dry-run` (bash) / `-DryRun` (PowerShell) prints the report and exits with zero changes. The custom-file guarantee is enforced by scratch-project test suites in the toolkit repo.
 - New `.claude/scripts/session-init.js`: `/explore`, `/create-plan`, `/pair-debug`, and `/execute` make one startup call instead of 4-5 sequential reads. The installer merges the matching permission into `settings.local.json` automatically.
 - `LESSONS.md` is now an always-read index with full write-ups in `LESSONS-detail.md` (seeded on fresh installs, preserved on upgrades; a pre-split flat `LESSONS.md` still works).

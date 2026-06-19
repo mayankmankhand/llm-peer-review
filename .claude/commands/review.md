@@ -29,7 +29,7 @@ This command supports optional focus arguments:
 - `/review code,ux` - specific combination
 - `/review full` - invokes the review-full skill (same as `/review-full`)
 
-If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full.
+If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `security` = review-security, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full.
 
 </reference>
 
@@ -46,6 +46,7 @@ Categorize the changes and pick relevant specialists:
 | What changed | Specialist | Skill file |
 |---|---|---|
 | `.ts`, `.js`, `.py`, `.go`, `.rs`, `.java`, `.sh` files | Code Quality | `.claude/skills/review-code/SKILL.md` |
+| The same code files (any code change) | Security | `.claude/skills/review-security/SKILL.md` |
 | `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.html` files | UX Quality | `.claude/skills/review-ux/SKILL.md` |
 | Active `PLAN-*.md` exists in `plans/` | Plan Compliance | `.claude/skills/review-plan/SKILL.md` |
 | `.claude/commands/` or `.claude/skills/` files changed | Command Quality | `.claude/skills/review-commands/SKILL.md` |
@@ -55,6 +56,7 @@ Categorize the changes and pick relevant specialists:
 
 **Rules:**
 - A file can trigger multiple specialists (e.g., a `.tsx` file triggers both Code and UX)
+- **Security runs on every code change, alongside Code Quality.** The same files that select Code Quality also select Security (review-security). Code Quality asks "is this written well?"; Security asks "what can a malicious user make this do?" - different lenses, both run. Security has its own danger-spot gate, so it stays quiet on changes that touch no security-sensitive sink.
 - When copy and UX both run on the same artifact, copy focuses on meaning/orientation while UX focuses on usability/accessibility. Deduplicate overlapping findings in synthesis.
 - If no changes are detected (clean working tree), tell the user: "No changes detected. Use `/review code` to force a specific review."
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
@@ -65,7 +67,7 @@ This gate applies only to the auto-detect path. (Explicit focus calls like `/rev
 
 Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum the added + removed columns across all changed files. **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged.
 
-**Never-gate specialist:** Dependency Security (selected when a `package.json`/lockfile changed). Its presence disables the size gate for the whole run - diff size is not a proxy for CVE risk.
+**Never-gate specialists:** Dependency Security (selected when a `package.json`/lockfile changed) and Security (selected whenever code changes). Either one's presence disables the size gate for the whole run - diff size is not a proxy for risk. A one-line change can introduce a severe vulnerability or pull in a bad dependency, so neither security pass is ever skipped for being small. (Trade-off: because Security is selected on any code change, code reviews fan out to subagents rather than taking the fast inline path - the deliberate cost of never size-gating security.)
 
 The inline path still obeys the report-only rule and the HTML gate; it simply has no subagents to dispatch.
 
@@ -73,7 +75,7 @@ The inline path still obeys the report-only rule and the HTML gate; it simply ha
 
 For each selected specialist:
 
-1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, output template, and reading budget - but NOT `html-render-review.md`: rendering HTML is the orchestrator's job, so a dispatched specialist never needs it.
+1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, do-not-report list, output template, and reading budget - but NOT `html-render-review.md`: rendering HTML is the orchestrator's job, so a dispatched specialist never needs it. Also note the specialist's **expert role** from its Staff Check section (the Staff Check Variants table in the output template lists each: Staff Engineer for code, Staff Security Engineer for security, Staff Designer for ux, etc.) - you pass this to the subagent as a review lens (see the template below).
 2. Also read `.claude/skills/project-context/SKILL.md` and follow its instructions to gather project context
 3. Read the changed files once, here, so each subagent receives the relevant excerpts instead of re-opening every file (paste-don't-read)
 4. Spawn a subagent using the Agent tool with the prompt template below: the skill's review criteria, the project context summary, and the pre-read file excerpts
@@ -82,9 +84,11 @@ For each selected specialist:
 
 **Subagent prompt template:**
 ```
-You are a specialist reviewer. Follow these instructions exactly:
+You are a [PASTE THE SPECIALIST'S EXPERT ROLE, e.g. "Staff Engineer" for code, "Staff Security Engineer" for security, "Staff Designer" for ux - from the skill's Staff Check section / the Staff Check Variants table]. Review through that expert lens. Follow these instructions exactly:
 
-[PASTE THE SKILL'S REVIEW CRITERIA: its "How to Review" body plus the severity anchors, finding-id system, output template, and reading budget it inlines. SKIP the skill's "HTML Companion" / html-render-review content - as a dispatched subagent you never render HTML.]
+[PASTE THE SKILL'S REVIEW CRITERIA: its "How to Review" body plus the severity anchors, finding-id system, do-not-report list, output template, and reading budget it inlines. SKIP the skill's "HTML Companion" / html-render-review content - as a dispatched subagent you never render HTML.]
+
+Review lens (do this first): Before hunting line-level issues, make a one-line design-level judgment through your expert role above - is the overall approach of this change sound? If it is NOT, that is your highest-severity finding; emit it first (as a `what` describing the design problem). Only then look for the specific issues your criteria call out. The lens shapes what you flag and its priority; it does not change the output format.
 
 Project context:
 [PASTE PROJECT CONTEXT SUMMARY HERE]
@@ -92,7 +96,7 @@ Project context:
 Files to review (excerpts already read for you):
 [PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
 
-Important (dispatched-subagent contract): You are a single-pass subagent. Do NOT spawn sub-agents - the Agent tool is unavailable to you, so any "run N sub-agents in parallel" instruction in the skill above is for direct invocation only and does not apply to you. Do NOT generate an HTML companion file and do NOT write a prose markdown report. Output your findings as JSONL per "Dispatched findings format" below (or the literal NO FINDINGS). The output template above still governs *what* each finding contains - the 4 fields, the skip rule, severity, the quality bar in its examples - just serialize each finding as JSON, not markdown bullets. The report-level sections (Top Issues, Looks Good, Summary, Staff Check) are the orchestrator's job, not yours.
+Important (dispatched-subagent contract): You are a single-pass subagent. Do NOT spawn sub-agents - the Agent tool is unavailable to you, so any "run N sub-agents in parallel" instruction in the skill above is for direct invocation only and does not apply to you. Do NOT generate an HTML companion file and do NOT write a prose markdown report. Output your findings as JSONL per "Dispatched findings format" below (or the literal NO FINDINGS). The output template above still governs *what* each finding contains - the 4 fields, the skip rule, the receipt rule, severity, the quality bar in its examples - just serialize each finding as JSON, not markdown bullets. The report-level SECTIONS (Top Issues, Overall Verdict, Looks Good, Summary, and the written Staff Check section) are the orchestrator's job, not yours - but you DO review through the expert lens above and surface a design-level finding when the approach is unsound.
 ```
 
 **Dispatched findings format (JSONL).** A dispatched specialist does NOT write a prose report. It emits its findings as JSONL - one JSON object per line - or the single literal line `NO FINDINGS` if it found nothing. The orchestrator parses these, dedups them, assigns IDs, and derives both the markdown report and the HTML from this one structure: findings are authored once and formatted twice, never re-written.
@@ -172,6 +176,14 @@ Example findings with tags applied:
   - **Expected:** [What should happen]
   - **Actual:** [What actually happens]
   - **Suggested fix:** [The approach]
+
+### Overall Verdict, readability, and the security nudge (orchestrator)
+
+The inlined template defines an **Overall Verdict** line, a **readability backstop**, and the receipt rule. Apply them across the merged run:
+
+- **Overall Verdict** leads the report (before Top Issues). Compute it from the deduped findings: any Block -> `changes-requested`; no Blocks but one or more Warn/Suggest -> `approve-with-nits`; nothing -> `approve`. One line, plain reason.
+- **Readability backstop:** when the deduped findings exceed 7, show the 5 highest-severity in full and list the rest one line each under `### More findings`. Nothing is dropped - only demoted - so the headline risks are not buried.
+- **Security escalation nudge:** if the changed files touch a genuine trust boundary - a new route/endpoint, file upload, or webhook; authentication logic; crypto; or secret handling - append one line after the report: _"Consider `/security-audit`: this change touches [X], which deserves a deeper whole-repo pass."_ Only when a trigger is genuinely present; the Security specialist also emits this when called directly.
 
 ### Summary (orchestrator-specific)
 - Specialists run: X of Y

@@ -2,6 +2,19 @@
 
 ## Base Format
 
+### Overall Verdict (one line, first thing the reader sees)
+
+Open every report with a single verdict so a long, thorough review still gets read at a glance:
+
+```
+Verdict: <approve | approve-with-nits | changes-requested> - <one-line reason>
+```
+
+Derive it mechanically from the findings, never by gut feel:
+- Any **Block** present -> `changes-requested`
+- No Blocks, but one or more **Warn**/**Suggest** -> `approve-with-nits`
+- Nothing worth reporting -> `approve`
+
 ### Top Issues (scannable summary)
 ```
 🚫 X Blocks: R1 (file:line - one-line What), R3 (file:line - one-line What)
@@ -9,12 +22,16 @@
 💡 X Suggests: R4 (file:line - one-line What)
 ```
 
+**Readability backstop.** A review that flags everything is a review nobody reads. When a single report has **more than 7 findings**, lead with the **5 highest-severity** ones in full (the Findings section below) and list the remainder compactly - one line each (`R6 ⚠️ file:line - What`) under a `### More findings` subhead - so the headline risks are not buried. This caps what the reader must process, never what the review looks at: nothing is dropped, only demoted.
+
 ### Looks Good
 - [What's working well - 2-3 items]
 
 ### Findings
 
 Every finding must include all 4 fields below. No shorthand, no skipping. If a finding is too trivial to justify all 4 fields, do not report it (see the Skip rule in severity-anchors.md).
+
+**Receipt rule (every finding must be provable).** A finding must point at the specific evidence that proves it - the exact `file:line` (already required in the format) and, when the claim is about behavior, the concrete code or pattern you can cite. If you cannot point to the line or snippet that demonstrates the problem, do not report it. This keeps reviews honest: a real issue always has a receipt, and "confident findings that point at nothing" are the fastest way to lose the reader's trust. The receipt grounds the finding; it does not lower its severity (the Universal Anchors in severity-anchors.md still apply).
 
 Whether you write these fields directly (a direct `/review-*` call) or the orchestrator fills them from structured JSON findings (`what` plus the `fields[]` rows, in the `/review` dispatch path), every finding carries all 4 with full prose - the structure is identical, only the serialization differs.
 
@@ -75,6 +92,7 @@ This example is deliberately on the boundary between "skip-worthy" and "valid Su
 | Domain | Staff Role | Focus |
 |--------|-----------|-------|
 | Code | Staff Engineer | Right approach? Shortcuts to clean up? What would you push back on? |
+| Security | Staff Security Engineer | Attacker's eyes? New attack surface? Trust boundary crossed? Every finding backed by an exploit path? |
 | UX | Staff Designer | Coherent experience? User confidence? Edge cases (empty, loading, error, first-time)? |
 | Plan | Staff PM (scope) | Scope discipline? Acceptance completeness? Traceability? Delivery risk? |
 | Commands | Staff PM (ops) | Any user can follow? Workflow reliability? Handoff quality? |
