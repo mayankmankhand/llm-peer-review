@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 5.2.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.3.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -49,6 +49,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/execute` | Build the feature, updating the plan as you go |
 | `/review` | Run the right reviews automatically, combine findings into one report |
 | `/review-code` | Review code - report issues only, don't fix (skill - also invoked by /review) |
+| `/review-security` | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (skill - also invoked by /review on every code change) |
 | `/review-commands` | Review slash command prompts for quality and consistency (skill - also invoked by /review) |
 | `/review-plan` | Check if implementation matches the plan (skill - also invoked by /review) |
 | `/review-ux` | Evaluate UX quality from code and markup (skill - also invoked by /review) |
@@ -56,6 +57,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/review-full` | Pre-release cross-domain check with go/no-go recommendation (skill - also invoked by /review) |
 | `/review-deps` | Dependency and supply chain security review (skill - also invoked by /review) |
 | `/review-copy` | Review copy clarity and reader orientation (skill - also invoked by /review) |
+| `/security-audit` | Deep on-demand whole-repo security audit - entry points, authorization, crypto inventory, secret-history scan (skill - run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |

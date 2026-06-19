@@ -64,7 +64,7 @@ Full prompt: [`.claude/commands/execute.md`](.claude/commands/execute.md)
 
 ### `/review` - Auto-detect what changed, run the right specialists
 
-Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Reports issues only; never edits your code until you say "fix it."
+Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Reports issues only; never edits your code until you say "fix it."
 
 Full prompt: [`.claude/commands/review.md`](.claude/commands/review.md)
 
@@ -91,6 +91,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/execute` | Build it, updating the plan as you go |
 | `/review` | Run the right reviews automatically, combine findings into one report |
 | `/review-code` (skill) | Code review (single pass or 4 sub-agents) |
+| `/review-security` (skill) | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (runs inside /review on every code change) |
 | `/review-commands` (skill) | Review slash command prompts for quality, workflow, and consistency |
 | `/review-plan` (skill) | Check if implementation matches a plan file in `plans/` |
 | `/review-ux` (skill) | UX review from code/markup - usability, accessibility, user flows |
@@ -98,6 +99,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/review-full` (skill) | Pre-release cross-domain check with Ready / Not ready recommendation |
 | `/review-deps` (skill) | Dependency and supply chain security review |
 | `/review-copy` (skill) | Copy clarity and reader orientation review |
+| `/security-audit` (skill) | Deep on-demand whole-repo security audit - entry points, authorization, crypto, secret-history scan (run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
@@ -118,7 +120,10 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 
 | I need to... | Use |
 |---|---|
-| Check code for bugs, security, and quality | `/review-code` |
+| Check code for bugs, logic, and quality | `/review-code` |
+| Security-check a code change (injection, secrets, XSS, ...) | `/review-security` (auto-runs inside `/review`) |
+| Check dependencies/packages for known vulnerabilities (CVEs) | `/review-deps` |
+| Deep whole-repo security audit (auth, secrets, crypto, history) | `/security-audit` |
 | Review slash command prompts and workflows | `/review-commands` |
 | Verify implementation matches a plan | `/review-plan` |
 | Evaluate UX, accessibility, and user flows | `/review-ux` |
@@ -406,7 +411,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 
 - **CLAUDE.md** - Your project-specific instructions. Describe your project, tech stack, and preferences here. See [How It Works](#how-it-works-file-architecture) for details.
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (auto-updated on setup). Don't edit this; your changes will be overwritten.
-- **Commands and skills** - Each file in `.claude/commands/` is independent. Skill folders in `.claude/skills/<name>/SKILL.md` work the same way. Want `/review-code` to check different things? Edit `.claude/skills/review-code/SKILL.md`. The 8 review skills are: `review-code`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`, `review-deps`, `review-copy`.
+- **Commands and skills** - Each file in `.claude/commands/` is independent. Skill folders in `.claude/skills/<name>/SKILL.md` work the same way. Want `/review-code` to check different things? Edit `.claude/skills/review-code/SKILL.md`. The 9 review skills are: `review-code`, `review-security`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`, `review-deps`, `review-copy`. There is also a standalone `security-audit` skill for a deep on-demand whole-repo security pass.
 - **LESSONS.md** - Lesson index that Claude reads each session so past lessons feed back into new work; full write-ups live in **LESSONS-detail.md**. Both are yours to customize.
 
 ---
