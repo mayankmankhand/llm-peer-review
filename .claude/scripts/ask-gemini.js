@@ -260,7 +260,7 @@ A scannable line of finding counts in this format (from the canonical template):
 💡 X Suggests: R4 (file:line - one-line What)
 
 ### 📋 Recommended Actions
-Each action uses the full 4-field structure (What / Why it matters / Example / Suggested fix) from the canonical template below. Use 🚫 (Block), ⚠️ (Warn), or 💡 (Suggest) emojis with sequential R-IDs (R1, R2, R3, ...). Mine the 3-round debate transcript for the reasoning behind each action - this is what makes the summary worth reading versus a terse bullet list. Do NOT use [CRITICAL]/[MAJOR]/[MINOR] tags.
+Each action uses the full 4-field structure (What / Why it matters / Example / Suggested fix) from the canonical template below. Use 🚫 (Block), ⚠️ (Warn), or 💡 (Suggest) emojis with sequential R-IDs (R1, R2, R3, ...). Mine the debate transcript (up to 3 rounds) for the reasoning behind each action - this is what makes the summary worth reading versus a terse bullet list. Do NOT use [CRITICAL]/[MAJOR]/[MINOR] tags.
 
 ### 💬 Key Insights
 Notable observations from the debate worth remembering, as terse bullets.

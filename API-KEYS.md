@@ -191,7 +191,7 @@ Starting with the v4.6.0 fix for issue #101, the scripts now actively detect thi
 
 **Can I use just one key?** Yes. If you only set up an OpenAI key, `/ask-gpt` works and `/ask-gemini` will tell you it's missing a key. Same the other way around. Set up whichever one you actually plan to use.
 
-**How much does it cost?** Each 3-round debate typically costs between $0.01 and $0.10 in API credits, depending on how much context (code, plan, conversation history) you send. You're billed by the API provider, not by this toolkit.
+**How much does it cost?** Each debate (up to 3 rounds) typically costs between $0.01 and $0.10 in API credits, depending on how much context (code, plan, conversation history) you send. You're billed by the API provider, not by this toolkit.
 
 **I rotated my key. How do I update it?** Same as Step 2: replace the old key in `~/.bashrc`, `~/.zshrc`, your PowerShell environment, or `.env.local` with the new one, then open a new terminal (or run `source ~/.bashrc`) so the change takes effect.
 

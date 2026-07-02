@@ -52,6 +52,8 @@ Whether you write these fields directly (a direct `/review-*` call) or the orche
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X
 
+End the report with one line so the user knows what happens after approval: _"After 'fix it', I will apply the approved fixes and then re-verify each one (re-verify protocol in `.claude/rules/toolkit.md`, max 2 rounds)."_
+
 ## Illustrative Examples
 
 These show what the 4-field structure looks like in practice across different review types. The Example field describes real-world impact, not abstract risk.

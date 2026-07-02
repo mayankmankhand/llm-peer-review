@@ -191,6 +191,8 @@ The inlined template defines an **Overall Verdict** line, a **readability backst
 - Blocks: X | Warns: X | Suggests: X
 - Deduplicated findings: X (Y raw findings from specialists)
 
+End the report with one line so the user knows what happens after approval: _"After 'fix it', I will apply the approved fixes and then re-verify each one (re-verify protocol in `.claude/rules/toolkit.md`, max 2 rounds)."_
+
 </output_format>
 
 ## HTML Companion (when gate fires)

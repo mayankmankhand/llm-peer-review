@@ -105,7 +105,7 @@
 ## 6. AI Peer Review (~45 seconds)
 
 **SAY:**
-> Here's where it gets interesting. We send our work to ChatGPT for a 3-round debate with Claude. They push back on each other, concede points, and produce a structured verdict.
+> Here's where it gets interesting. We send our work to ChatGPT for a debate with Claude - up to 3 rounds. They push back on each other, concede points, and produce a structured verdict.
 
 **TYPE:**
 ```
@@ -115,7 +115,7 @@
 **WAIT** for the debate to run (this takes 30-60 seconds).
 
 **SAY** (while waiting):
-> This is running 3 rounds of back-and-forth. ChatGPT reviews the work first, then Claude responds as the author - accepting some points, pushing back on others. ChatGPT follows up, and they go back and forth for 3 rounds. At the end you get a summary of what they agreed on, where they disagreed, and a prioritized action list.
+> This is running up to 3 rounds of back-and-forth. ChatGPT reviews the work first, then Claude responds as the author - accepting some points, pushing back on others. ChatGPT follows up, and they go back and forth for up to 3 rounds (if they fully agree after round 2, it ends early). At the end you get a summary of what they agreed on, where they disagreed, and a prioritized action list.
 
 **TIP:** If the API is slow, keep narrating: "The models are debating right now - you'll see the rounds appear as they complete." If it errors, say: "In a real session you'd retry - the output is a structured verdict with agreed/disagreed/actions." When the summary has 3+ recommended actions, an HTML view of the debate may open in the browser too.
 

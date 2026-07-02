@@ -61,8 +61,8 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
 | `/create-issue` | Create GitHub issues (ask questions first, keep short) |
-| `/ask-gpt` | AI peer review with ChatGPT debate (3 rounds) |
-| `/ask-gemini` | AI peer review with Gemini debate (3 rounds) |
+| `/ask-gpt` | AI peer review with ChatGPT debate (up to 3 rounds) |
+| `/ask-gemini` | AI peer review with Gemini debate (up to 3 rounds) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
 | `/package-review` | Review a package/codebase |
 | `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
@@ -103,6 +103,13 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 - Do NOT modify any files
 - Wait for me to say "fix it" before making changes
 - Use the "Use this when / Don't use this when" guidance at the top of each command to pick the right one
+
+**After "fix it" on review findings or approved debate Recommended Actions (re-verify protocol):**
+- Once the approved fixes are applied, re-verify each approved finding - a fix is not done until its check passes:
+  - **Mechanical findings** (a test, build, script exit code, or specific browser action demonstrated the issue): re-run that exact check inline. The tool's result is the verdict - no subagent needed.
+  - **Judgment findings** (quality, clarity, UX - nothing runnable proves them): dispatch ONE fresh subagent per round to verify. Give it the approved finding IDs, the original finding text, each finding's file:line, and the diff of the fixes. It verifies only those findings, and it must return one line per finding ID - "R3: FIXED" or "R3: NOT FIXED" plus a one-line receipt. Anything else it says falls under the report-only rule below.
+- Hard limit: max 2 verification rounds. If round 1 returns any NOT FIXED items, make one more fix attempt on just those items; round 2 then re-checks only them. After round 2, stop and report status honestly - which findings verified as fixed and which did not.
+- Anything NEW discovered while re-verifying is report-only: list it and wait for my approval - never fix it without approval.
 
 **When Running /create-issue:**
 - Ask 2-3 clarifying questions first
@@ -232,7 +239,6 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `node .claude/scripts/generate-index.js` | Running the codebase scanner that emits the file manifest consumed by `/index` to build `CODEBASE_MAP.md` |
 | `bash scripts/setup/bump-version.sh` | Running the version-bump script during release prep |
 | `bash -n scripts/setup/setup.sh`, `bash -n scripts/setup/bump-version.sh` | Syntax-checking setup scripts before release |
-| `GPT_MODEL=GPT-5.2 node -e ' *` | One-off model-override probes when validating `/ask-gpt` defaults |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `Skill(review-commands)`, `Skill(review-commands:*)` | Allow the `/review-commands` skill to be invoked without a prompt |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |

@@ -1,6 +1,6 @@
 # Ask Gemini - Automated AI Peer Review (Gemini)
 
-**Use this when:** Getting a structured second opinion from Gemini via a 3-round debate, on a plan, code change, branch, or feature.
+**Use this when:** Getting a structured second opinion from Gemini via a debate of up to 3 rounds, on a plan, code change, branch, or feature.
 **Don't use this when:** You want a first-pass code review (use `/review-code`), or you want to evaluate findings from a prior debate (use `/peer-review`).
 
 You are the Lead Reviewer. Your job is to get a second opinion from Gemini on the user's work, engage in a constructive debate, and produce actionable recommendations.
@@ -33,7 +33,7 @@ Record the output (e.g., `1747700000-29481`). Echo it back to the user so it's a
 
 > Session ID for this debate: `1747700000-29481`. All temp files for this run will use this suffix.
 
-**You will use this exact session ID in every `/tmp/ask-gemini-*-<session-id>.md` path throughout this entire command** - Step 2's context file, Step 3's debate file, all three Step 4 rounds, AND Step 5's summary call. Do NOT regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
+**You will use this exact session ID in every `/tmp/ask-gemini-*-<session-id>.md` path throughout this entire command** - Step 2's context file, Step 3's debate file, every Step 4 round, AND Step 5's summary call. Do NOT regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
 
 **Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
 
@@ -82,9 +82,9 @@ Read the saved review yourself - the next step is responding to it as the author
 
 If the script fails, show the error to the user. Common issues: missing API key in `.env.local` or environment variables, network errors, rate limits. Do not retry automatically.
 
-## Step 4: Debate Cycle (Repeat 3 Times)
+## Step 4: Debate Cycle (Up to 3 Times)
 
-For each debate cycle (rounds 1, 2, and 3):
+For each debate cycle (up to 3 rounds; the convergence gate below decides whether round 3 runs):
 
 ### 4a. Respond to Gemini's Feedback
 
@@ -129,13 +129,15 @@ The script reads the cumulative debate file, which now includes the initial revi
 [STDOUT FROM THE RESPOND SCRIPT]
 ```
 
-Continue to the next round.
+Continue to the next round (subject to the round cap and convergence gate below).
 
-**Repeat this cycle 3 times total.**
+**Repeat this cycle up to 3 times total.** The maximum is 3 rounds - never run a 4th, even if points remain unresolved.
+
+**Convergence gate (checked once, after round 2):** a section counts as settled when it is absent, empty, or contains only a none-style placeholder ("None", "Nothing further") with no substantive bullet. End the debate after round 2 only if, in the round 2 reviewer response, the "Still Discussing" section is settled AND the "New Observations" section is settled. Otherwise run round 3. If the gate fires, tell the user the debate converged after round 2, then go straight to Step 5.
 
 ## Step 5: Generate Summary
 
-After 3 debate cycles, the debate file contains the complete transcript: initial review, then 3 rounds of Claude/Gemini exchanges. Generate the final summary:
+After the debate ends (3 rounds, or 2 if the convergence gate fired), the debate file contains the complete transcript: initial review, then every completed round of Claude/Gemini exchanges. Generate the final summary:
 
 ```bash
 node .claude/scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-context-<session-id>.md --debate-file /tmp/ask-gemini-debate-<session-id>.md
@@ -143,7 +145,7 @@ node .claude/scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-contex
 
 ## Step 6: Present Results to User
 
-Present the summary to the user in this format. Each Recommended Action uses the same 4-field structure as `/review` findings (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and sequential R-IDs - the reasoning is mined from the 3-round debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
+Present the summary to the user in this format. Each Recommended Action uses the same 4-field structure as `/review` findings (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and sequential R-IDs - the reasoning is mined from the debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
 
 <output_format>
 
@@ -200,6 +202,8 @@ Ask the user:
 > - **No** - We'll discuss further or skip implementation
 
 **CRITICAL**: Do NOT implement anything until the user explicitly approves.
+
+When the user approves (Yes or Partial), implementing those actions counts as "fix it": after implementing, re-verify them per the re-verify protocol in `.claude/rules/toolkit.md` (max 2 rounds).
 
 </rules>
 

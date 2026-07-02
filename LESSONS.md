@@ -31,6 +31,7 @@
 - **Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.**
 - **Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.**
 - **Define a judgement gate once, in countable terms, consistent with its governing rule.**
+- **A gate must be countable against the output the model actually produces.**
 - **`gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.**
 - **HTML output is useless if the user only gets a file link - it opens as source in the editor.**
 - **A diff review of already-closed work still earns its keep.**
