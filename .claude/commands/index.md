@@ -8,7 +8,7 @@
 - Subagent prompts must direct **conditional detection**: only report conventions and gotchas when there is concrete code evidence. No speculation.
 - The final map MUST stay under ~10k tokens. If synthesis exceeds, trim sections in the order listed in Step 5 - the Module Guide is the semantic core and is trimmed last.
 - Use **atomic write** (Step 5 details). Never delete the legacy `INDEX.md` until the new map is fully written and validated. A failed run must leave the user's existing state intact.
-- If any step fails (scanner error, all subagents fail, validation fails), stop and report. Do NOT partially overwrite `CODEBASE_MAP.md`.
+- If any step fails (scanner error, all subagents fail after Step 3's one automatic retry per chunk, validation fails), stop and report. Do NOT partially overwrite `CODEBASE_MAP.md`.
 </rules>
 
 ## Steps
@@ -29,6 +29,7 @@ Parse the JSON. The manifest contains:
 - `timestamp` (UTC, for the map header)
 - `chunks` (array of `{ id, files: [{path, tokens}], totalTokens }`)
 - `largestChunkTokens` (size of the largest chunk - helps explain overflow)
+- `chunkTargetTokens` (the per-chunk token target - a chunk whose `totalTokens` exceeds this is oversized)
 - `directoryTree` (array of indented strings)
 - `needsConfirm` (true if project total > 500k tokens OR any chunk overflows the per-chunk target)
 - `anyChunkOverflows` (true if at least one chunk exceeds the per-chunk target despite chunking)
@@ -81,7 +82,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 
 Launch all subagents in parallel (one Agent tool call per chunk in a single message). Wait for all to return.
 
-If any subagent fails or returns an empty response, note the gap (you may need to ask the user whether to retry or proceed with partial coverage).
+If any subagent fails or returns an empty response, retry that chunk once automatically (same prompt, same model pin) - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If the retry also fails, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 7. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
 
 ### Step 4: Synthesize the map content
 Combine the subagent responses into a single map content string (do NOT write the file yet - Step 5 handles the write atomically). Use this structure:

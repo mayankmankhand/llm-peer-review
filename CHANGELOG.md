@@ -12,6 +12,18 @@ If you last installed v4.3.3, nine releases have shipped on top of it. v4.4.0 re
 
 ---
 
+## Unreleased
+
+Implements #137 (bounded, verifier-gated loops). Prompt-file and doc changes; fold this section into the next release cut. Re-run `setup.sh` / `setup.ps1` to pick up the updated command, rules, script, and shared files.
+
+### Added
+- **Fix-then-re-verify protocol** (#137) - After you approve review fixes ("fix it" on `/review` findings, or "Yes"/"Partial" on `/ask-gpt`/`/ask-gemini` Recommended Actions), the fixes are re-verified instead of assumed done. Mechanical findings (a test, build, script exit code, or browser action proved the issue) re-run that exact check inline; judgment findings get ONE fresh subagent per round, briefed with the approved finding IDs, original finding text, file:line, and the diff, and it must return a countable per-finding verdict ("R3: FIXED" / "R3: NOT FIXED" plus a one-line receipt). Hard cap: 2 rounds - round 2 re-fixes and re-checks only the NOT FIXED set, then status is reported honestly. Anything new discovered while verifying is report-only. Review reports (all entry points, via the shared output template) now announce the loop so it is never a surprise.
+- **Debate early exit on convergence** (#137) - `/ask-gpt` and `/ask-gemini` debates now run "up to 3 rounds": after round 2, if the reviewer's "Still Discussing" and "New Observations" sections are both settled (absent, empty, or only a none-style placeholder with no substantive bullet), the debate ends early and goes straight to the summary - saving an API round on debates that already agree. The maximum stays 3, never extended. The gate is worded byte-identically in both mirror files, and all round-count copy (README, DEMO-SCRIPT, API-KEYS, the embedded script summary prompts) now says "up to 3 rounds".
+
+### Changed
+- **`/execute` fix loop bounded** (#137) - Small failures get max 3 fix attempts per step, each iterating against that step's verification output (the failing test or build result). A plan's Verify step counts as a step under the SAME shared budget - no fresh allowance when the same failure resurfaces. The 3rd failed attempt routes into the existing critical-blocker path (stop, explain, suggest re-running `/create-plan`). Parallel step agents carry the same bound through a new Agent Contract item, so a background agent cannot loop unbounded on a doomed step.
+- **`/index` failed-chunk auto-retry** (#137) - A failed or empty chunk subagent is retried once silently before the user is interrupted (then: retry again vs continue with partial coverage). Oversized chunks (`totalTokens` above `chunkTargetTokens`, now documented in the manifest field list) skip the doomed auto-retry and go straight to the user. If EVERY chunk failed after retries, `/index` stops and leaves the existing map untouched instead of offering partial coverage.
+
 ## v5.3.0 - Security Review Domain + Sharper Reviewers (2026-06-18)
 
 Implements #136. Additive: new skills and reviewer-prompt sharpening, no breaking changes. Re-run `setup.sh` / `setup.ps1` to pick up the new skills and updated command/shared files.

@@ -4,9 +4,9 @@
 
 <img src="docs/images/ask-gpt-summary.png" alt="ask-gpt summary showing agreed points, disagreed points, recommended actions, and key insights" width="700">
 
-*A real `/ask-gpt` debate output: Claude and ChatGPT argue across three rounds and hand you a structured verdict (what they agreed on, where they disagreed, and a prioritized action list). You approve what gets implemented.*
+*A real `/ask-gpt` debate output: Claude and ChatGPT argue across up to three rounds and hand you a structured verdict (what they agreed on, where they disagreed, and a prioritized action list). You approve what gets implemented.*
 
-This toolkit gives you slash commands for every step of a project: explore the problem, create a plan, build, review, then run a 3-round debate between Claude and ChatGPT (or Gemini). Works for product specs, research plans, competitive analysis, and code.
+This toolkit gives you slash commands for every step of a project: explore the problem, create a plan, build, review, then run a debate (up to 3 rounds) between Claude and ChatGPT (or Gemini). Works for product specs, research plans, competitive analysis, and code.
 
 **Inspired by [Zevi Arnovitz's workflow on Lenny's Podcast](https://www.youtube.com/watch?v=1em64iUFt3U).** The key difference: Zevi manually copies feedback between models. This toolkit automates the entire debate loop with two commands (`/ask-gpt` and `/ask-gemini`).
 
@@ -58,19 +58,19 @@ Full prompt: [`.claude/commands/create-plan.md`](.claude/commands/create-plan.md
 
 ### `/execute` - Build it, update the plan as you go
 
-Walks through the plan step by step, updating status emojis and progress in real time. Spawns parallel agents for `[parallel]` steps, runs `[sequential]` steps in order. Stops on critical blockers (e.g. the plan assumed an API supports a feature it doesn't) instead of pushing through a broken plan.
+Walks through the plan step by step, updating status emojis and progress in real time. Spawns parallel agents for `[parallel]` steps, runs `[sequential]` steps in order. Small failures get at most 3 fix attempts per step. Stops on critical blockers (e.g. the plan assumed an API supports a feature it doesn't) instead of pushing through a broken plan.
 
 Full prompt: [`.claude/commands/execute.md`](.claude/commands/execute.md)
 
 ### `/review` - Auto-detect what changed, run the right specialists
 
-Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Reports issues only; never edits your code until you say "fix it."
+Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Reports issues only; never edits your code until you say "fix it." After "fix it," each approved fix is re-verified (max 2 rounds) instead of assumed done.
 
 Full prompt: [`.claude/commands/review.md`](.claude/commands/review.md)
 
 ### `/ask-gpt` and `/ask-gemini` - Debate with another AI
 
-Run a 3-round structured debate between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same 4-field structure as `/review` (What / Why it matters / Example / Suggested fix), so the output model is consistent across all peer-review surfaces. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](API-KEYS.md) for setup.
+Run a structured debate of up to 3 rounds between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same 4-field structure as `/review` (What / Why it matters / Example / Suggested fix), so the output model is consistent across all peer-review surfaces. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](API-KEYS.md) for setup.
 
 Full prompts: [`.claude/commands/ask-gpt.md`](.claude/commands/ask-gpt.md) | [`.claude/commands/ask-gemini.md`](.claude/commands/ask-gemini.md)
 
@@ -104,8 +104,8 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/document` | Update your README and docs to match what was built |
 | `/create-issue` | Create a GitHub issue (asks you questions first) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
-| `/ask-gpt` | Debate your work with ChatGPT (3 rounds) |
-| `/ask-gemini` | Debate your work with Gemini (3 rounds) |
+| `/ask-gpt` | Debate your work with ChatGPT (up to 3 rounds) |
+| `/ask-gemini` | Debate your work with Gemini (up to 3 rounds) |
 | `/package-review` | Bundle your work into one file for external review |
 | `/learning-opportunity` (skill) | Learn a concept at 3 levels of depth |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
@@ -321,7 +321,7 @@ To update, re-run setup. The version stamp updates automatically. See [CHANGELOG
 
 ## How `/ask-gpt` and `/ask-gemini` Work
 
-`/ask-gpt` and `/ask-gemini` run an automated debate between Claude and another AI about your code or plan. You don't have to copy anything manually; the toolkit handles the whole loop.
+`/ask-gpt` and `/ask-gemini` run an automated debate between Claude and another AI about your code or plan. You don't have to copy anything manually; the toolkit handles the whole loop. A debate runs up to 3 rounds - if both models fully agree after round 2, it ends early instead of running a third.
 
 ### Example
 
@@ -333,7 +333,7 @@ Claude: What would you like me to review?
 
 You: Review the auth middleware
 
-Claude: [Gathers context → sends to ChatGPT → they debate 3 rounds]
+Claude: [Gathers context → sends to ChatGPT → they debate up to 3 rounds]
 
         --- Summary ---
         Agreed: Add token expiry check, extract magic numbers
@@ -349,7 +349,7 @@ You: Yes
 
 Want a different perspective? Run `/ask-gemini` next.
 
-> **API costs:** Each 3-round debate typically costs $0.01-$0.10 in API credits depending on context size. You'll need an OpenAI and/or Gemini API key with credits. See **[API-KEYS.md](API-KEYS.md)** for a step-by-step setup guide.
+> **API costs:** Each debate (up to 3 rounds) typically costs $0.01-$0.10 in API credits depending on context size. You'll need an OpenAI and/or Gemini API key with credits. See **[API-KEYS.md](API-KEYS.md)** for a step-by-step setup guide.
 
 **Choosing what to review:**
 

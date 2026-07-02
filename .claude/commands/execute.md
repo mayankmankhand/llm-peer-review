@@ -39,6 +39,7 @@ Each parallel agent must:
 1. **Declare touched files** - list every file it will create or modify
 2. **State assumptions** - what it expects to be true about the codebase
 3. **Provide an integration checklist** - what the next step needs to verify
+4. **Carry the retry bound** - the prompt that spawns it must include the same rule from When to Stop: max 3 fix attempts per step, iterating against that step's verification output, then stop and report the blocker
 
 ### Integration Checkpoint
 After all parallel steps finish, always run a sequential checkpoint:
@@ -57,7 +58,11 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 
 **Critical blocker examples:** the plan assumed an API supports a feature it doesn't, a core dependency is incompatible with the project, or the planned architecture can't work as designed.
 
-**Not a critical blocker:** a typo, a syntax error, a small refactor needed, or a step that takes longer than expected. Fix these and keep going.
+**Not a critical blocker:** a typo, a syntax error, a small refactor needed, or a step that takes longer than expected. Fix these and keep going - within the retry bound below.
+
+**Retry bound (small failures):** max 3 fix attempts per step, and a plan's Verify step counts as a step under this same bound. The budget is shared, not fresh: if a failure already used its 3 attempts inside a step, it does not get 3 more when the same failure resurfaces at the Verify step. Each attempt must iterate against that step's verification output (the failing test or build result), not guess blindly. If the 3rd attempt still fails, treat it as a critical blocker: stop and follow the two steps above.
+
+**When a plan's Verify step fails:** the retry bound above applies unchanged. The only Verify-specific addition is the outcome: when the bound is exhausted, stop via the critical-blocker path above and suggest re-running `/create-plan` with what you learned.
 </rules>
 
 ## Status Updates
