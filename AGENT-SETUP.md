@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.3.0)
+# AI Agent Setup Instructions (v5.4.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -112,7 +112,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.3.0:** Security review domain + sharper reviewers (#136). After re-running setup:
+**What's new in v5.4.0:** Bounded, verifier-gated loops (#137). After re-running setup:
+- After you approve review fixes ("fix it" on `/review` findings, or Yes/Partial on debate Recommended Actions), the fixes are re-verified instead of assumed done: mechanical checks re-run inline; judgment findings get one fresh subagent per round returning countable verdicts ("R3: FIXED" / "R3: NOT FIXED" plus a receipt). Max 2 rounds; anything new found mid-verification is report-only.
+- `/execute` caps small-failure retries at 3 attempts per step, iterating against real test/build output; a plan's Verify step shares the same budget (no fresh allowance), and parallel step agents carry the bound in their prompts.
+- `/ask-gpt` and `/ask-gemini` debates run up to 3 rounds: a countable convergence gate ends the debate after round 2 when the reviewer's "Still Discussing" and "New Observations" sections are both settled. The maximum never extends.
+- `/index` retries a failed chunk once silently before asking you; oversized chunks skip the doomed retry; if every chunk fails, it stops and leaves the existing map untouched.
+
+**What was new in v5.3.0:** Security review domain + sharper reviewers (#136). After re-running setup:
 - `/review` runs a dedicated application-security pass (`review-security`) on every code change: it hunts the diff-catchable vulnerability classes (secrets, injection, XSS, path traversal, SSRF, weak crypto) through an adversarial lens, requires a source-to-sink exploit sentence per finding, and stays silent via a danger-spot gate when nothing security-sensitive changed.
 - New standalone `/security-audit` for a deep, on-demand whole-repo pass (entry points, per-route authorization, crypto inventory, recommended `gitleaks` history scan). Both defer dependency CVEs to `/review-deps`.
 - Reviewers are sharper: each expert persona is now passed to the dispatched subagent (design verdict before nits), every finding must carry a `file:line` receipt or it is dropped, and a new near-empty shared `do-not-report.md` suppresses known-noise classes once you add them.
