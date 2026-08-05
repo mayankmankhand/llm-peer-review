@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.4.0)
+# AI Agent Setup Instructions (v5.5.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -112,7 +112,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.4.0:** Bounded, verifier-gated loops (#137). After re-running setup:
+**What's new in v5.5.0:** Installer guardrails + model refresh (#134, #138, #139, #140). After re-running setup:
+- Setup detects local edits inside toolkit-managed files via a hash manifest (`.claude/.toolkit-manifest.json`). Locally modified files gate the run: an interactive terminal prompts, a non-interactive run (you, most likely) exits 1 listing the files. If that happens, show the list to the user and confirm before re-running the Step 1 command with `--force` (bash) / `-Force` (PowerShell) appended to the setup arguments - every replaced file is backed up first and listed after setup.
+- `/ask-gpt` defaults to `gpt-5.6-sol` and `/ask-gemini` to `gemini-3.6-flash`; an old pinned model in `.env.local` auto-overrides with a stderr notice.
+- HTML artifacts on WSL open PowerShell-first (wslview dropped); a genuinely headless failure prints the Windows-side UNC path that can be pasted into a Windows browser.
+- `/worktree` copies `CODEBASE_MAP.md` into new worktrees (like `.env.local`), so worktree sessions no longer regenerate the map.
+
+**What was new in v5.4.0:** Bounded, verifier-gated loops (#137). After re-running setup:
 - After you approve review fixes ("fix it" on `/review` findings, or Yes/Partial on debate Recommended Actions), the fixes are re-verified instead of assumed done: mechanical checks re-run inline; judgment findings get one fresh subagent per round returning countable verdicts ("R3: FIXED" / "R3: NOT FIXED" plus a receipt). Max 2 rounds; anything new found mid-verification is report-only.
 - `/execute` caps small-failure retries at 3 attempts per step, iterating against real test/build output; a plan's Verify step shares the same budget (no fresh allowance), and parallel step agents carry the bound in their prompts.
 - `/ask-gpt` and `/ask-gemini` debates run up to 3 rounds: a countable convergence gate ends the debate after round 2 when the reviewer's "Still Discussing" and "New Observations" sections are both settled. The maximum never extends.
@@ -124,25 +130,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - Reviewers are sharper: each expert persona is now passed to the dispatched subagent (design verdict before nits), every finding must carry a `file:line` receipt or it is dropped, and a new near-empty shared `do-not-report.md` suppresses known-noise classes once you add them.
 - Review reports open with an Overall Verdict line and apply a readability backstop (lead with the top 5, collapse the rest, past 7 findings).
 
-**What was new in v5.2.0:** Installer guarantees + token economy (#121, #125, #129, #130, #131, #133). After re-running setup:
-- Both installers print a read-only pre-flight report BEFORE any file changes: version gap, migrations that will run, managed files with local edits (diff summary), custom files (explicitly never touched), and the backup location. `--dry-run` (bash) / `-DryRun` (PowerShell) prints the report and exits with zero changes. The custom-file guarantee is enforced by scratch-project test suites in the toolkit repo.
-- New `.claude/scripts/session-init.js`: `/explore`, `/create-plan`, `/pair-debug`, and `/execute` make one startup call instead of 4-5 sequential reads. The installer merges the matching permission into `settings.local.json` automatically.
-- `LESSONS.md` is now an always-read index with full write-ups in `LESSONS-detail.md` (seeded on fresh installs, preserved on upgrades; a pre-split flat `LESSONS.md` still works).
-- `/review` dispatches leaner (structured JSONL findings, a diff-size gate that reviews small changes inline, reading budgets); `/index` pins its chunk analysis to Sonnet; `/create-plan` renders plan HTML via the shared helper (about 2x faster).
-- Plans add a conditional Verify test step when the work changes verifiable logic, and skip it for docs/config-only work.
-- Windows parity fixes: `setup.ps1` now copies `VERSION` (version-gap reporting works), runs the v3.5 legacy command cleanup, and works from UNC paths like `\\wsl.localhost\...`.
-
-**What was new in v5.1.0:** HTML render pipeline (#120, #122, #127). After re-running setup:
-- HTML reports (review, document, explore, debate, audit) now open faster: commands emit a small JSON payload that a new helper (`.claude/scripts/render-html.js`) injects into a prebuilt shell, instead of hand-writing the whole file.
-- HTML filenames in `artifacts/html/` are now timestamped, so same-day re-runs never collide and there is no stale-file overwrite cycle.
-- An accessibility pass: a darker AA-compliant warn color, a `<noscript>` fallback, `<main>` landmarks, heading-navigable findings, and chart/verdict cues that no longer rely on color alone.
-- New `.claude/skills/shared/shells/` folder (the prebuilt shells plus `tokens.css`); both installers copy it and the new script, and merge in a `render-html.js` permission.
-
-**What was new in v5.0.1:** Fresh-install reliability fixes (#119, #126). After re-running setup:
-- HTML artifacts now open reliably on WSL. The opener moved from prose Claude ran by hand into a deterministic script (`.claude/scripts/open-artifact.sh`) with real fallback, so it no longer silently fails when no browser launcher is on PATH.
-- The Windows installer (`setup.ps1`) now copies `generate-index.js`, so `/index` and `/document`'s map refresh work out of the box on fresh Windows installs (closing a v5.0.0 follow-up). Windows users who installed before this version should re-run `setup.ps1` to pick up the fix.
-
-See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.0.0 and earlier).
+See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.2.0 and earlier).
 
 ---
 
