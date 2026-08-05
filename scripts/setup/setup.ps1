@@ -1,7 +1,7 @@
 # setup.ps1 - Copy the LLM Peer Review toolkit into any project (Windows PowerShell).
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project" [-DryRun]
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project" [-DryRun] [-Force]
 #
 # If -Target is omitted, uses the current working directory (but will error if run from inside the toolkit repo).
 #
@@ -9,6 +9,11 @@
 # run, managed files that would be overwritten, custom files that are left
 # alone, backup location) and exits without creating, modifying, or
 # deleting anything.
+#
+# -Force skips the overwrite confirmation for locally modified managed
+# files (issue #138). Without it, setup prompts before replacing files
+# you have edited, and aborts when it cannot prompt (non-interactive
+# host). Every replaced file is backed up first either way.
 #
 # Examples:
 #   # From toolkit repo, specify target:
@@ -23,7 +28,8 @@
 
 param(
   [string]$Target = ".",
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$Force
 )
 
 # Check PowerShell version (requires 5.1+)
@@ -285,14 +291,106 @@ function Get-PreflightDiffSummary {
   return "+$added/-$removed line(s) vs incoming"
 }
 
+# --- Overwrite guardrails: hashes + manifest (issue #138) ------
+# The manifest written at the end of every real run records the sha256 of
+# each managed file exactly as setup left it on disk. On the next run,
+# comparing a file's current hash against that recorded hash separates
+# "locally modified" (the user edited it - confirm before overwriting)
+# from "outdated" (setup wrote it and the toolkit has since moved on -
+# normal overwrite with backup). Hashes are EOL-normalized (CR bytes
+# stripped before hashing) so a CRLF flip on Windows never flags a file
+# as modified; forward-slash keys keep the manifest portable between
+# setup.sh and setup.ps1. Mirrors the guardrail blocks in setup.sh.
+$script:ManifestPath = Join-Path $Target ".claude\.toolkit-manifest.json"
+
+# Get-ToolkitFileHash: EOL-normalized sha256 of a file. Latin-1 (code
+# page 28591) round-trips every byte 1:1, so stripping CR from the
+# decoded text and re-encoding hashes exactly the raw bytes minus CR -
+# the same digest setup.sh computes with `tr -d '\r' | sha256sum`.
+# -IgnoreVersionStamp additionally drops the managed-version stamp line
+# the two rules files carry (the PF_STAMP_SED equivalent), so a pure
+# version-bump difference never reads as a local edit. PS 5.1 compatible.
+function Get-ToolkitFileHash {
+  param([string]$Path, [switch]$IgnoreVersionStamp)
+  $enc = [System.Text.Encoding]::GetEncoding(28591)
+  $text = $enc.GetString([System.IO.File]::ReadAllBytes($Path))
+  $text = $text.Replace("`r", "")
+  if ($IgnoreVersionStamp) {
+    $stampPattern = '<!-- Toolkit version: .* \| Managed by LLM Peer Review\.|<!-- This file is managed by the LLM Peer Review toolkit\.'
+    $lines = @($text -split "`n" | Where-Object { $_ -notmatch $stampPattern })
+    $text = $lines -join "`n"
+  }
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $hashBytes = $sha.ComputeHash($enc.GetBytes($text))
+  $sha.Dispose()
+  return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToLowerInvariant()
+}
+
+# Load the existing manifest (if any) into a hashtable keyed by the
+# forward-slash relative path. An unreadable manifest is treated as
+# absent - the pre-manifest warn+backup behavior, never a hard failure.
+$script:ManifestHashes = @{}
+if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
+  try {
+    $mf = (Get-Content -LiteralPath $script:ManifestPath -Raw) | ConvertFrom-Json
+    if ($mf.PSObject.Properties.Name -contains "files" -and $mf.files) {
+      foreach ($prop in $mf.files.PSObject.Properties) {
+        $script:ManifestHashes[$prop.Name] = $prop.Value
+      }
+    }
+  } catch {
+    # Corrupt or hand-edited manifest - fall back to pre-manifest behavior
+  }
+}
+
 # Add-PreflightDiff: record a managed file in the will-be-overwritten
-# list when its target copy differs from the incoming version.
+# list when its target copy differs from the incoming version, with a
+# manifest-based classification (issue #138):
+#   [LOCALLY MODIFIED]            the user edited the file since setup
+#                                 last wrote it - the overwrite gate below
+#                                 will prompt (or require -Force)
+#   [outdated]                    the file matches what setup last wrote,
+#                                 the toolkit has just moved on - normal
+#                                 overwrite with backup, no gate
+#   [differs, provenance unknown] no manifest entry to compare against
+#                                 (pre-manifest install or interrupted
+#                                 run) - warn+backup behavior, no gate
+# Every enumerated file also joins $script:ManagedRels, whether or not it
+# exists in the target yet: the manifest write at the end of the run
+# reuses that list, so the two enumerations cannot drift apart.
 $script:PfDiffs = @()
+$script:PfModified = @()
+$script:ManagedRels = @()
 function Add-PreflightDiff {
   param([string]$Source, [string]$Rel, [switch]$IgnoreVersionStamp)
   $dst = Join-Path $Target $Rel
+  $script:ManagedRels += $Rel
+  if (-not (Test-Path -LiteralPath $dst -PathType Leaf)) { return }
   $summary = Get-PreflightDiffSummary -Source $Source -Destination $dst -IgnoreVersionStamp:$IgnoreVersionStamp
-  if ($summary) { $script:PfDiffs += "$Rel  ($summary)" }
+  if (-not $summary) { return }
+  # Classification for the overwrite gate. The clean check (current vs
+  # incoming, stamp-normalized for the two rules files) uses the same
+  # normalization as the diff summary. The manifest hash was recorded
+  # from the FINAL on-disk file of the previous run (after version
+  # stamping), so it is compared against the plain EOL-normalized hash.
+  $label = ""
+  $curNorm = Get-ToolkitFileHash -Path $dst -IgnoreVersionStamp:$IgnoreVersionStamp
+  $incNorm = Get-ToolkitFileHash -Path $Source -IgnoreVersionStamp:$IgnoreVersionStamp
+  if ($curNorm -ne $incNorm) {
+    $relKey = $Rel.Replace("\", "/")
+    if ($script:ManifestHashes.ContainsKey($relKey)) {
+      $curPlain = Get-ToolkitFileHash -Path $dst
+      if ($curPlain -eq $script:ManifestHashes[$relKey]) {
+        $label = " [outdated]"
+      } else {
+        $label = " [LOCALLY MODIFIED]"
+        $script:PfModified += $Rel
+      }
+    } else {
+      $label = " [differs, provenance unknown]"
+    }
+  }
+  $script:PfDiffs += "$Rel  ($summary)$label"
 }
 
 # Which staged migrations will fire. Read-only mirrors of the conditions
@@ -389,9 +487,12 @@ Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\toolkit.md") -R
 Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\html-outputs.md") -Rel ".claude\rules\html-outputs.md" -IgnoreVersionStamp
 # VERSION is compared only on a fresh install: on upgrade it always
 # differs (that is the version gap, reported above), but a fresh target
-# carrying its own unrelated VERSION file is about to lose it.
+# carrying its own unrelated VERSION file is about to lose it. On
+# upgrade it still joins ManagedRels so the manifest keeps tracking it.
 if (-not $IsUpgrade) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot "VERSION") -Rel "VERSION"
+} else {
+  $script:ManagedRels += "VERSION"
 }
 
 # Custom files in toolkit-managed directories. Anything listed here is
@@ -479,6 +580,52 @@ if ($DryRun) {
   Write-Host "  Dry run complete - no files were created, modified, or deleted."
   Write-Host ""
   exit 0
+}
+
+# --- Overwrite gate (issue #138) -------------------------------
+# Runs after the pre-flight report and the -DryRun exit, BEFORE the
+# first filesystem write. Files classified LOCALLY MODIFIED above carry
+# the user's own edits; silently replacing them is the one destructive
+# thing the installer could still do. Interactive runs get a confirm
+# prompt; non-interactive hosts abort and point at -Force instead of
+# hanging on Read-Host. Either way each file is backed up before being
+# overwritten. Mirrors the overwrite gate in setup.sh.
+if ($script:PfModified.Count -gt 0 -and -not $Force) {
+  Write-Host "  $($script:PfModified.Count) locally modified file(s) will be overwritten (backups made):"
+  foreach ($rel in $script:PfModified) {
+    Write-Host "    - $rel"
+  }
+  Write-Host ""
+  $proceed = $false
+  # Only prompt when a human can actually answer. Redirected stdin or a
+  # non-interactive host must take the abort path, not block forever.
+  $canPrompt = $true
+  try {
+    if ([Console]::IsInputRedirected) { $canPrompt = $false }
+  } catch {
+    $canPrompt = $false
+  }
+  if ($canPrompt -and -not [Environment]::UserInteractive) { $canPrompt = $false }
+  if ($canPrompt) {
+    try {
+      $answer = Read-Host "  Continue? [y/N]"
+      if ($answer -match '^[yY]$') { $proceed = $true }
+    } catch {
+      $proceed = $false
+    }
+    if (-not $proceed) {
+      Write-Host ""
+      Write-Host "  Aborted - no files were created, modified, or deleted."
+      Write-Host "  Re-run with -Force to skip this prompt (each file is backed up first)."
+      Write-Host ""
+      exit 1
+    }
+  } else {
+    Write-Host "  Not running interactively, so setup cannot ask for confirmation."
+    Write-Host "  Re-run with -Force to proceed (each file is backed up first)."
+    Write-Host ""
+    exit 1
+  }
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Target ".claude\commands") | Out-Null
@@ -956,6 +1103,36 @@ if ($LessonsPreexisted) {
   }
 }
 
+# --- Toolkit manifest (issue #138) -----------------------------
+# Wholesale-regenerated on every real run (never on -DryRun, which exits
+# above). Records the EOL-normalized sha256 of every managed file exactly
+# as this run left it on disk - i.e. AFTER the version-stamp rewrites of
+# the two rules files - so stamped files never self-flag on the next run.
+# User-owned skip-if-exists files (CLAUDE.md, LESSONS.md,
+# LESSONS-detail.md, .claude\settings.local.json) and the line-merged
+# .gitignore are NOT tracked: setup never overwrites those, so they need
+# no gate. ManagedRels is accumulated by the pre-flight enumeration,
+# which mirrors the copy blocks exactly. Forward-slash keys and BOM-less
+# UTF-8 with LF newlines keep it portable with setup.sh.
+$manifestEntries = @()
+foreach ($rel in $script:ManagedRels) {
+  $p = Join-Path $Target $rel
+  # Tolerate conditionally-shipped files (e.g. package-lock.json) that
+  # were enumerated but not written this run.
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+  $h = Get-ToolkitFileHash -Path $p
+  $manifestEntries += "    `"$($rel.Replace('\', '/'))`": `"$h`""
+}
+$manifestBody = "{`n"
+$manifestBody += "  `"toolkitVersion`": `"$Version`",`n"
+$manifestBody += "  `"files`": {`n"
+$manifestBody += ($manifestEntries -join ",`n") + "`n"
+$manifestBody += "  }`n"
+$manifestBody += "}`n"
+$manifestUtf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($script:ManifestPath, $manifestBody, $manifestUtf8NoBom)
+Write-Host "  Wrote .claude\.toolkit-manifest.json ($($manifestEntries.Count) managed file(s) tracked)"
+
 Write-Host ""
 Write-Host "  ================================"
 Write-Host "   Done"
@@ -972,6 +1149,22 @@ if ($script:BackupCount -gt 0) {
   Write-Host "    New in v4.2 - setup now preserves any file it would overwrite"
   Write-Host "    or delete. If you customized a toolkit file, your original is"
   Write-Host "    safe in the directory above. Delete when you are done."
+  Write-Host ""
+}
+
+# --- Locally modified files summary (issue #138) ---------------
+# Printed when this run overwrote files the manifest flagged as locally
+# modified (the user confirmed the gate or passed -Force). Each line
+# pairs the file with its backup so re-applying local changes is a
+# checklist, not an archaeology dig. Mirrors the block in setup.sh.
+if ($script:PfModified.Count -gt 0) {
+  Write-Host "    Locally modified file(s) replaced with stock versions:"
+  foreach ($rel in $script:PfModified) {
+    Write-Host "      - $rel"
+    Write-Host "        backup: $(Join-Path $script:BackupDir $rel)"
+  }
+  Write-Host ""
+  Write-Host "    Re-apply your changes from the backups above if you still need them."
   Write-Host ""
 }
 
