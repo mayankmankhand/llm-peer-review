@@ -22,7 +22,7 @@
  * 
  * Environment:
  *   GEMINI_API_KEY            Required for Gemini API calls
- *   GEMINI_MODEL              Optional model override (default: gemini-3.1-pro-preview).
+ *   GEMINI_MODEL              Optional model override (default: gemini-3.6-flash).
  *                             Known-stale values are auto-overridden with a warning.
  *   GEMINI_MAX_TOKENS         Optional maxOutputTokens override (default: 32000).
  *                             Covers thinking + visible output for reasoning models.
@@ -96,8 +96,8 @@ if (fs.existsSync(envPath)) {
 // auto-routed to the new model with a warning instead of silently running on
 // an old model. setup.sh greps the DEFAULT_GEMINI_MODEL line to display the
 // current default at end of setup - keep the `const NAME = 'value';` shape.
-const DEFAULT_GEMINI_MODEL = 'gemini-3.1-pro-preview';
-const KNOWN_STALE_GEMINI_MODELS = ['gemini-3-flash-preview'];
+const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+const KNOWN_STALE_GEMINI_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-pro-preview'];
 
 /**
  * Resolve which model to use. The hardcoded default wins over a stale env
@@ -122,11 +122,11 @@ function resolveModel() {
 // Configuration
 const CONFIG = {
   model: resolveModel(),
-  // 32000 sits well below Gemini's 65,536 hard cap and above the SDK's own 8192
-  // default. The previous 4096 was BELOW the SDK default, which is why long
-  // reviews truncated mid-sentence. Gemini 3.x thinking tokens share this budget
-  // with visible output. The cap is a ceiling, not a target: the model only uses
-  // what it needs. Lower via GEMINI_MAX_TOKENS if cost-sensitive.
+  // 32000 sits well below gemini-3.6-flash's 65,536 output cap and above the
+  // SDK's own 8192 default. The previous 4096 was BELOW the SDK default, which
+  // is why long reviews truncated mid-sentence. Gemini 3.x thinking tokens
+  // share this budget with visible output. The cap is a ceiling, not a target:
+  // the model only uses what it needs. Lower via GEMINI_MAX_TOKENS if cost-sensitive.
   maxTokens: parseInt(process.env.GEMINI_MAX_TOKENS, 10) || 32000,
   useConcatPrompt: process.env.GEMINI_USE_CONCAT_PROMPT === '1',
   retryDelayMs: 1000,
@@ -363,7 +363,7 @@ Options:
 
 Environment:
   GEMINI_API_KEY            Required for Gemini API calls
-  GEMINI_MODEL              Model to use (default: gemini-3.1-pro-preview)
+  GEMINI_MODEL              Model to use (default: gemini-3.6-flash)
                             Stale values are auto-overridden with a warning.
   GEMINI_MAX_TOKENS         maxOutputTokens budget (default: 32000)
                             Covers thinking + visible output for reasoning models.

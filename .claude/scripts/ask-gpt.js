@@ -22,7 +22,7 @@
  * 
  * Environment:
  *   OPENAI_API_KEY   Required for ChatGPT API calls
- *   GPT_MODEL        Optional model override (default: gpt-5.5). Known-stale
+ *   GPT_MODEL        Optional model override (default: gpt-5.6-sol). Known-stale
  *                    values are auto-overridden with a warning.
  *   GPT_MAX_TOKENS   Optional max_completion_tokens override (default: 32000).
  *                    Covers reasoning + visible output for reasoning models.
@@ -94,8 +94,8 @@ if (fs.existsSync(envPath)) {
 // auto-routed to the new model with a warning instead of silently running on
 // an old model. setup.sh greps the DEFAULT_GPT_MODEL line to display the
 // current default at end of setup - keep the `const NAME = 'value';` shape.
-const DEFAULT_GPT_MODEL = 'gpt-5.5';
-const KNOWN_STALE_GPT_MODELS = ['gpt-5.2', 'gpt-5.4'];
+const DEFAULT_GPT_MODEL = 'gpt-5.6-sol';
+const KNOWN_STALE_GPT_MODELS = ['gpt-5.2', 'gpt-5.4', 'gpt-5.5'];
 
 /**
  * Resolve which model to use. The hardcoded default wins over a stale env
@@ -121,9 +121,10 @@ function resolveModel() {
 const CONFIG = {
   model: resolveModel(),
   // 32000 sits above OpenAI's recommended 25K reserve for reasoning models (per
-  // their reasoning models guide) and well below the 128K cap. Reasoning tokens
-  // AND visible output share this budget, so 4096 was too low: reasoning could
-  // consume the whole cap and leave nothing for output, returning an empty body.
+  // their reasoning models guide) and well below gpt-5.6-sol's 128K output cap.
+  // Reasoning tokens AND visible output share this budget, so 4096 was too low:
+  // reasoning could consume the whole cap and leave nothing for output,
+  // returning an empty body.
   // The cap is a ceiling, not a target: the model only uses what it needs.
   // Lower via GPT_MAX_TOKENS if cost-sensitive.
   maxTokens: parseInt(process.env.GPT_MAX_TOKENS, 10) || 32000,
@@ -361,7 +362,7 @@ Options:
 
 Environment:
   OPENAI_API_KEY   Required for ChatGPT API calls
-  GPT_MODEL        Model to use (default: gpt-5.5)
+  GPT_MODEL        Model to use (default: gpt-5.6-sol)
                    Stale values are auto-overridden with a warning.
   GPT_MAX_TOKENS   max_completion_tokens budget (default: 32000)
                    Covers reasoning + visible output for reasoning models.
