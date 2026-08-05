@@ -7,10 +7,16 @@
 #      edited managed files, and custom files before anything is touched
 #   3. Custom files planted in EVERY toolkit-managed directory (including a
 #      nested command subdirectory) survive an upgrade byte-for-byte
-#   4. A locally edited managed file is backed up, then refreshed to stock
+#   4. A locally edited managed file blocks a non-interactive run (exit 1,
+#      target untouched) until --force is passed; the forced run backs the
+#      file up, refreshes it to stock, and lists it (with its backup path)
+#      in the post-setup summary (issue #138)
 #   5. Legacy migration targets are reported as migrations, not as custom
 #      files, and are backed up before removal
-#   6. An identical re-run creates no new backup directory
+#   6. An identical re-run creates no new backup directory and never
+#      triggers the overwrite gate
+#   7. A manifest (.claude/.toolkit-manifest.json) is written on every real
+#      run, never on --dry-run, and carries per-file sha256 entries
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -51,9 +57,13 @@ echo "Toolkit: $TOOLKIT_ROOT"
 echo "Scratch: $SCRATCH"
 echo ""
 
+# All setup invocations run with stdin redirected from /dev/null so the
+# overwrite gate (issue #138) can never prompt: the suite exercises the
+# non-interactive abort path and the --force path, never a live prompt.
+
 # ─── [1] --dry-run on an empty target makes no changes ───────
 echo "[1] --dry-run on an empty target"
-bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --dry-run > "$LOG/dryrun-fresh.log" 2>&1
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --dry-run < /dev/null > "$LOG/dryrun-fresh.log" 2>&1
 if [ -z "$(ls -A "$SCRATCH")" ]; then
   ok "empty target untouched"
 else
@@ -64,11 +74,16 @@ assert_grep "Dry run complete" "$LOG/dryrun-fresh.log" "prints dry-run completio
 
 # ─── [2] fresh install ───────────────────────────────────────
 echo "[2] fresh install"
-bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" > "$LOG/install.log" 2>&1
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/install.log" 2>&1
 if [ -f "$SCRATCH/.claude/rules/toolkit.md" ]; then
   ok "install completed"
 else
   fail "install did not complete"
+fi
+if [ -f "$SCRATCH/.claude/.toolkit-manifest.json" ]; then
+  ok "manifest written on fresh install"
+else
+  fail "manifest missing after fresh install"
 fi
 
 # ─── [3] plant custom files + edit a managed file ────────────
@@ -103,15 +118,16 @@ ok "planted ${#CUSTOM_FILES[@]} custom files, 1 legacy file, 1 local edit"
 # ─── [4] --dry-run on the populated project ──────────────────
 echo "[4] --dry-run on the populated project"
 cp -R "$SCRATCH" "$SNAP"
-bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --dry-run > "$LOG/dryrun.log" 2>&1
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --dry-run < /dev/null > "$LOG/dryrun.log" 2>&1
 if diff -r "$SCRATCH" "$SNAP" > /dev/null 2>&1; then
-  ok "dry run changed nothing"
+  ok "dry run changed nothing (manifest included)"
 else
   fail "dry run modified the target: $(diff -rq "$SCRATCH" "$SNAP" 2>&1 | head -3 | tr '\n' ' ')"
 fi
 assert_grep "upgrade (v4.0.0 -> v" "$LOG/dryrun.log" "reports the version gap"
 assert_grep "Legacy command cleanup" "$LOG/dryrun.log" "announces the legacy migration"
 assert_grep ".claude/commands/$EDITED_CMD" "$LOG/dryrun.log" "lists the locally edited managed file"
+assert_grep "LOCALLY MODIFIED" "$LOG/dryrun.log" "shows the locally modified classification"
 for rel in "${CUSTOM_FILES[@]}"; do
   assert_grep "$rel" "$LOG/dryrun.log" "lists custom file $rel"
 done
@@ -121,9 +137,36 @@ else
   ok "legacy file not listed as custom"
 fi
 
-# ─── [5] real upgrade run ────────────────────────────────────
-echo "[5] real upgrade run"
-bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" > "$LOG/upgrade.log" 2>&1
+# ─── [5] non-interactive upgrade aborts on modified files ────
+# The overwrite gate (issue #138): a locally modified managed file plus
+# no --force plus no terminal on stdin must abort with exit 1 before any
+# filesystem write.
+echo "[5] upgrade without --force aborts (modified file, non-interactive)"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/abort.log" 2>&1
+ABORT_RC=$?
+set -e
+if [ "$ABORT_RC" -eq 1 ]; then
+  ok "aborted with exit 1"
+else
+  fail "expected exit 1, got $ABORT_RC"
+fi
+assert_grep ".claude/commands/$EDITED_CMD" "$LOG/abort.log" "abort lists the modified file"
+assert_grep "--force" "$LOG/abort.log" "abort points at --force"
+if grep -q "LOCAL EDIT MARKER" "$SCRATCH/.claude/commands/$EDITED_CMD"; then
+  ok "modified file untouched by the aborted run"
+else
+  fail "aborted run replaced the modified file"
+fi
+if diff -r "$SCRATCH" "$SNAP" > /dev/null 2>&1; then
+  ok "aborted run changed nothing"
+else
+  fail "aborted run modified the target: $(diff -rq "$SCRATCH" "$SNAP" 2>&1 | head -3 | tr '\n' ' ')"
+fi
+
+# ─── [6] real upgrade run (--force) ──────────────────────────
+echo "[6] real upgrade run (--force)"
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --force < /dev/null > "$LOG/upgrade.log" 2>&1
 
 for rel in "${CUSTOM_FILES[@]}"; do
   if cmp -s "$SCRATCH/$rel" "$SNAP/$rel"; then
@@ -158,15 +201,35 @@ else
   fail "VERSION not updated"
 fi
 
-# ─── [6] identical re-run is clean ───────────────────────────
-echo "[6] identical re-run"
+assert_grep "Locally modified file(s) replaced with stock versions:" "$LOG/upgrade.log" "summary announces replaced modified files"
+if grep -F "backup:" "$LOG/upgrade.log" | grep -qF ".claude/commands/$EDITED_CMD"; then
+  ok "summary pairs the modified file with its backup path"
+else
+  fail "backup path for the modified file missing from summary"
+fi
+
+# Manifest guarantees (issue #138): written on the real run, one
+# plausible sha256 entry per managed file.
+if grep -qE "\"\.claude/commands/$EDITED_CMD\": \"[0-9a-f]{64}\"" "$SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then
+  ok "manifest has a plausible entry for the refreshed file"
+else
+  fail "manifest entry for .claude/commands/$EDITED_CMD missing or malformed"
+fi
+
+# ─── [7] identical re-run is clean ───────────────────────────
+echo "[7] identical re-run"
 BACKUPS_BEFORE="$(find "$SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | wc -l | tr -d ' ')"
-bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" > "$LOG/rerun.log" 2>&1
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/rerun.log" 2>&1
 BACKUPS_AFTER="$(find "$SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | wc -l | tr -d ' ')"
 if [ "$BACKUPS_BEFORE" = "$BACKUPS_AFTER" ]; then
   ok "no new backup dir on identical re-run"
 else
   fail "identical re-run created a backup dir"
+fi
+if grep -qi "locally modified" "$LOG/rerun.log"; then
+  fail "clean re-run triggered the overwrite gate"
+else
+  ok "clean re-run did not trigger the overwrite gate"
 fi
 for rel in "${CUSTOM_FILES[@]}"; do
   if cmp -s "$SCRATCH/$rel" "$SNAP/$rel"; then

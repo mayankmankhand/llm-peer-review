@@ -4,7 +4,7 @@
 # Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
-#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory] [--dry-run]
+#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory] [--dry-run] [--force]
 #
 # If no target directory is given, uses the current working directory
 # (but will error if run from inside the toolkit repo).
@@ -13,6 +13,11 @@
 # would run, managed files that would be overwritten, custom files that
 # are left alone, backup location) and exits without creating, modifying,
 # or deleting anything.
+#
+# --force skips the overwrite confirmation for locally modified managed
+# files (issue #138). Without it, setup prompts before replacing files
+# you have edited, and aborts when it cannot prompt (no terminal). Every
+# replaced file is backed up first either way.
 #
 # Examples:
 #   # From toolkit repo, specify target:
@@ -34,20 +39,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── Arguments ───────────────────────────────────────────────
-# Positional target directory plus the optional --dry-run flag, in any
-# order. Unknown options error out instead of being mistaken for a
-# target directory.
+# Positional target directory plus the optional --dry-run and --force
+# flags, in any order. Unknown options error out instead of being
+# mistaken for a target directory.
 TARGET=""
 DRY_RUN=0
+FORCE=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run)
       DRY_RUN=1
       ;;
+    --force)
+      FORCE=1
+      ;;
     -*)
       echo ""
       echo "  Error: unknown option: $arg"
-      echo "  Usage: bash setup.sh [target-directory] [--dry-run]"
+      echo "  Usage: bash setup.sh [target-directory] [--dry-run] [--force]"
       echo ""
       exit 1
       ;;
@@ -301,16 +310,78 @@ fi
 PF_STAMP_SED='/<!-- Toolkit version: .* | Managed by LLM Peer Review\./d
 /<!-- This file is managed by the LLM Peer Review toolkit\./d'
 
+# ─── Overwrite guardrails: hashes + manifest (issue #138) ────
+# The manifest written at the end of every real run records the sha256 of
+# each managed file exactly as setup left it on disk. On the next run,
+# comparing a file's current hash against that recorded hash separates
+# "locally modified" (the user edited it - confirm before overwriting)
+# from "outdated" (setup wrote it and the toolkit has since moved on -
+# normal overwrite with backup). Hashes are EOL-normalized (CR bytes
+# stripped before hashing) so a CRLF flip on Windows never flags a file
+# as modified; forward-slash keys keep the manifest portable between
+# setup.sh and setup.ps1.
+MANIFEST_FILE="$TARGET/.claude/.toolkit-manifest.json"
+
+# toolkit_sha256_stdin: sha256 hex digest of stdin. Fallback chain covers
+# macOS, which ships shasum and openssl but not sha256sum.
+toolkit_sha256_stdin() {
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  elif command -v shasum > /dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  else
+    openssl dgst -sha256 | awk '{print $NF}'
+  fi
+}
+
+# toolkit_hash <file> [stamped]: EOL-normalized sha256 of <file>. In
+# stamped mode the managed-version stamp line is dropped first (the same
+# PF_STAMP_SED normalization the diff report uses), so a pure version-
+# bump difference in the two rules files never reads as a local edit.
+toolkit_hash() {
+  local f="$1" mode="${2:-plain}"
+  if [ "$mode" = "stamped" ]; then
+    sed "$PF_STAMP_SED" "$f" | tr -d '\r' | toolkit_sha256_stdin
+  else
+    tr -d '\r' < "$f" | toolkit_sha256_stdin
+  fi
+}
+
+# manifest_lookup <rel>: the recorded hash for <rel>, empty when the
+# manifest is absent or has no entry (pre-manifest installs). The
+# manifest is written by this script in a fixed one-entry-per-line shape,
+# so a grep/sed line parse is safe and avoids a node dependency.
+manifest_lookup() {
+  local rel="$1"
+  [ -f "$MANIFEST_FILE" ] || return 0
+  grep -F "\"$rel\": \"" "$MANIFEST_FILE" 2>/dev/null | head -1 | sed -n 's/.*": "\([0-9a-f]\{64\}\)".*/\1/p'
+}
+
 # preflight_record_diff <src> <rel> [stamped]
 # Compares the incoming file <src> against $TARGET/<rel>. If the target
-# copy exists and differs, records it with a +added/-removed line summary.
-# A difference can be a local edit or an older toolkit version of the
-# file - either way this run will overwrite it (after backing it up).
+# copy exists and differs, records it with a +added/-removed line summary
+# and a manifest-based classification (issue #138):
+#   [LOCALLY MODIFIED]           the user edited the file since setup last
+#                                wrote it - the overwrite gate below will
+#                                prompt (or require --force) before it is
+#                                replaced
+#   [outdated]                   the file matches what setup last wrote,
+#                                the toolkit has just moved on - normal
+#                                overwrite with backup, no gate
+#   [differs, provenance unknown] no manifest entry to compare against
+#                                (pre-manifest install or interrupted run)
+#                                - today's warn+backup behavior, no gate
 PF_DIFFS=()
+PF_MODIFIED=()
+MANAGED_RELS=()
 preflight_record_diff() {
   local src="$1" rel="$2" mode="${3:-plain}"
   local dst="$TARGET/$rel"
-  local diffout added removed
+  local diffout added removed cls_inc cls_cur cls_man cls_label
+  # Every enumerated file is manifest-managed, whether or not it exists in
+  # the target yet. The manifest write at the end of the run reuses this
+  # list, so the two enumerations cannot drift apart.
+  MANAGED_RELS+=("$rel")
   [ -f "$dst" ] || return 0
   if [ "$mode" = "stamped" ]; then
     diffout=$(diff <(sed "$PF_STAMP_SED" "$dst") <(sed "$PF_STAMP_SED" "$src") 2>/dev/null) || true
@@ -321,7 +392,28 @@ preflight_record_diff() {
   [ -n "$diffout" ] || return 0
   added=$(printf '%s\n' "$diffout" | grep -c '^>') || true
   removed=$(printf '%s\n' "$diffout" | grep -c '^<') || true
-  PF_DIFFS+=("$rel  (+$added/-$removed line(s) vs incoming)")
+  # Classification for the overwrite gate. The clean check (current vs
+  # incoming, stamp-normalized for the two rules files) never reaches
+  # here - identical files returned above. The manifest hash was recorded
+  # from the FINAL on-disk file of the previous run (after version
+  # stamping), so it is compared against the plain EOL-normalized hash.
+  cls_label=""
+  cls_cur=$(toolkit_hash "$dst" "$mode")
+  cls_inc=$(toolkit_hash "$src" "$mode")
+  if [ "$cls_cur" != "$cls_inc" ]; then
+    cls_man=$(manifest_lookup "$rel")
+    if [ -n "$cls_man" ]; then
+      if [ "$(toolkit_hash "$dst")" = "$cls_man" ]; then
+        cls_label=" [outdated]"
+      else
+        cls_label=" [LOCALLY MODIFIED]"
+        PF_MODIFIED+=("$rel")
+      fi
+    else
+      cls_label=" [differs, provenance unknown]"
+    fi
+  fi
+  PF_DIFFS+=("$rel  (+$added/-$removed line(s) vs incoming)$cls_label")
 }
 
 # preflight_is_migration_target <rel>: true when a target file is one of
@@ -447,9 +539,12 @@ preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/toolkit.md" ".claude/rules/to
 preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" ".claude/rules/html-outputs.md" stamped
 # VERSION is compared only on a fresh install: on upgrade it always
 # differs (that is the version gap, reported above), but a fresh target
-# carrying its own unrelated VERSION file is about to lose it.
+# carrying its own unrelated VERSION file is about to lose it. On
+# upgrade it still joins MANAGED_RELS so the manifest keeps tracking it.
 if [ "$IS_UPGRADE" -eq 0 ]; then
   preflight_record_diff "$TOOLKIT_ROOT/VERSION" "VERSION"
+else
+  MANAGED_RELS+=("VERSION")
 fi
 
 # Custom files in toolkit-managed directories. Anything listed here is
@@ -527,6 +622,42 @@ if [ "$DRY_RUN" -eq 1 ]; then
   echo "  Dry run complete - no files were created, modified, or deleted."
   echo ""
   exit 0
+fi
+
+# ─── Overwrite gate (issue #138) ─────────────────────────────
+# Runs after the pre-flight report and the --dry-run exit, BEFORE the
+# first filesystem write. Files classified LOCALLY MODIFIED above carry
+# the user's own edits; silently replacing them is the one destructive
+# thing the installer could still do. Interactive runs get a confirm
+# prompt; non-interactive runs abort and point at --force. Either way
+# each file is backed up before being overwritten.
+if [ ${#PF_MODIFIED[@]} -gt 0 ] && [ "$FORCE" -eq 0 ]; then
+  echo "  ${#PF_MODIFIED[@]} locally modified file(s) will be overwritten (backups made):"
+  for rel in "${PF_MODIFIED[@]}"; do
+    echo "    - $rel"
+  done
+  echo ""
+  if [ -t 0 ]; then
+    printf "  Continue? [y/N] "
+    read -r GATE_REPLY || GATE_REPLY=""
+    case "$GATE_REPLY" in
+      y|Y)
+        echo ""
+        ;;
+      *)
+        echo ""
+        echo "  Aborted - no files were created, modified, or deleted."
+        echo "  Re-run with --force to skip this prompt (each file is backed up first)."
+        echo ""
+        exit 1
+        ;;
+    esac
+  else
+    echo "  Not running interactively, so setup cannot ask for confirmation."
+    echo "  Re-run with --force to proceed (each file is backed up first)."
+    echo ""
+    exit 1
+  fi
 fi
 
 # ─── Create target directories ───────────────────────────────
@@ -934,17 +1065,19 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     // entries land here automatically once the source template has been updated).
     const missing = srcPerms.filter(p => !tgtPerms.includes(p));
 
-    // Step 2a: remove stale relative-path entries for the v4.2-and-earlier
-    // script layout. Their replacements (with .claude/scripts/ prefix) come
-    // in via Step 1's missing-template merge.
-    const STALE_RELATIVE_PERMS = [
+    // Step 2a: remove stale exact-match entries the toolkit has retired:
+    // relative-path entries for the v4.2-and-earlier script layout (their
+    // .claude/scripts/-prefixed replacements come in via Step 1's merge), and
+    // the wslview grant, unused since the opener went PowerShell-first (#134).
+    const STALE_PERMS = [
       'Bash(node scripts/ask-gpt.js *)',
       'Bash(node scripts/ask-gemini.js *)',
       'Bash(node scripts/browse.js *)',
       'Bash(echo * | node scripts/browse.js *)',
-      'Bash(cat * | node scripts/browse.js *)'
+      'Bash(cat * | node scripts/browse.js *)',
+      'Bash(wslview *)'
     ];
-    const staleRel = tgtPerms.filter(p => STALE_RELATIVE_PERMS.includes(p));
+    const staleRel = tgtPerms.filter(p => STALE_PERMS.includes(p));
 
     // Step 2b: remove stale absolute-path browse.js entries. Matches both old
     // (.../scripts/browse.js) and new (.../.claude/scripts/browse.js) shapes,
@@ -1018,6 +1151,42 @@ if [ -f "$TARGET/.gitignore" ] && grep -qxF "INDEX.md" "$TARGET/.gitignore"; the
   echo "    Cleaned stale INDEX.md entries from .gitignore"
 fi
 
+# ─── Toolkit manifest (issue #138) ───────────────────────────
+# Wholesale-regenerated on every real run (never on --dry-run, which
+# exits above). Records the EOL-normalized sha256 of every managed file
+# exactly as this run left it on disk - i.e. AFTER the version-stamp
+# rewrites of the two rules files - so stamped files never self-flag on
+# the next run. User-owned skip-if-exists files (CLAUDE.md, LESSONS.md,
+# LESSONS-detail.md, .claude/settings.local.json) and the line-merged
+# .gitignore are NOT tracked: setup never overwrites those, so they need
+# no gate. MANAGED_RELS is accumulated by the pre-flight enumeration,
+# which mirrors the copy blocks exactly. Written with printf (no node
+# dependency); forward-slash keys keep it portable with setup.ps1.
+MANIFEST_ENTRIES=()
+for i in "${!MANAGED_RELS[@]}"; do
+  rel="${MANAGED_RELS[$i]}"
+  # Tolerate conditionally-shipped files (e.g. package-lock.json) that
+  # were enumerated but not written this run.
+  [ -f "$TARGET/$rel" ] || continue
+  MANIFEST_ENTRIES+=("    \"$rel\": \"$(toolkit_hash "$TARGET/$rel")\"")
+done
+MANIFEST_LAST=$(( ${#MANIFEST_ENTRIES[@]} - 1 ))
+{
+  printf '{\n'
+  printf '  "toolkitVersion": "%s",\n' "$VERSION"
+  printf '  "files": {\n'
+  for i in "${!MANIFEST_ENTRIES[@]}"; do
+    if [ "$i" -lt "$MANIFEST_LAST" ]; then
+      printf '%s,\n' "${MANIFEST_ENTRIES[$i]}"
+    else
+      printf '%s\n' "${MANIFEST_ENTRIES[$i]}"
+    fi
+  done
+  printf '  }\n'
+  printf '}\n'
+} > "$MANIFEST_FILE"
+echo "  Wrote .claude/.toolkit-manifest.json (${#MANIFEST_ENTRIES[@]} managed file(s) tracked)"
+
 # ─── Summary ─────────────────────────────────────────────────
 echo ""
 echo "  ================================"
@@ -1035,6 +1204,22 @@ if [ "$BACKUP_COUNT" -gt 0 ]; then
   echo "    New in v4.2 - setup now preserves any file it would overwrite"
   echo "    or delete. If you customized a toolkit file, your original is"
   echo "    safe in the directory above. Delete when you are done."
+  echo ""
+fi
+
+# ─── Locally modified files summary (issue #138) ─────────────
+# Printed when this run overwrote files the manifest flagged as locally
+# modified (the user confirmed the gate or passed --force). Each line
+# pairs the file with its backup so re-applying local changes is a
+# checklist, not an archaeology dig.
+if [ ${#PF_MODIFIED[@]} -gt 0 ]; then
+  echo "    Locally modified file(s) replaced with stock versions:"
+  for rel in "${PF_MODIFIED[@]}"; do
+    echo "      - $rel"
+    echo "        backup: $BACKUP_DIR/$rel"
+  done
+  echo ""
+  echo "    Re-apply your changes from the backups above if you still need them."
   echo ""
 fi
 
