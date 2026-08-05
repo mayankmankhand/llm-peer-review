@@ -92,7 +92,6 @@
       "Bash(grep -rn '!`cat' .claude/skills/)",
       "Bash(open *)",
       "Bash(xdg-open *)",
-      "Bash(wslview *)",
       "Bash(explorer.exe *)",
       "Bash(wslpath *)",
       "Bash(grep -n \"^!\\\\`cat\" .claude/skills/audit-html/SKILL.md)",

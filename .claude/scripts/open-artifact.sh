@@ -11,6 +11,14 @@
 #   opener in order with real error handling and reports failure ONLY when the
 #   environment is genuinely headless.
 #
+# Why no wslview (issue #134):
+#   The WSL chain used to try wslview first. Its interop detection is
+#   version-dependent (newer WSL registers binfmt interop as WSLInterop-late,
+#   which older wslu builds misread), its error text leaks into tool output,
+#   and its exit code conflates interop state with launch success. PowerShell's
+#   Start-Process exit code is trustworthy and works whenever interop is
+#   functional, so the chain now goes straight there.
+#
 # Usage:   bash .claude/scripts/open-artifact.sh <file>
 # Exit:    0  an opener launched successfully
 #          1  bad usage, missing file, or every opener failed (headless)
@@ -41,10 +49,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 # fail_headless: last resort. Tell the user where the file is and that it must
 # be opened in a browser, not the editor. Claude keys off the exit-1 to print
-# the same guidance in chat rather than silently moving on.
+# the same guidance in chat rather than silently moving on. On WSL, also print
+# the Windows-side (UNC) path when we managed to compute one - the Linux path
+# alone is not openable from a Windows browser (issue #134).
 fail_headless() {
   echo "open-artifact.sh: could not auto-open. Open this in your browser (not the editor):"
   echo "  $FILE"
+  if [ -n "${WINPATH:-}" ]; then
+    echo "  From a Windows browser use this path instead: $WINPATH"
+  fi
   exit 1
 }
 
@@ -65,27 +78,32 @@ case "$UNAME" in
     if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
       # --- WSL: try launchers in order, fall through on failure ---
 
-      # 1) wslview (from the wslu package): the clean path, reliable exit code.
-      if have wslview; then
-        wslview "$FILE" && exit 0
-      fi
-
       # Convert to a Windows path once for the Windows-side launchers. wslpath
       # ships with WSL itself (not wslu), so it is effectively always present.
+      # Computed before any rung so fail_headless can show it too.
       WINPATH=""
       if have wslpath; then
         WINPATH="$(wslpath -w "$FILE" 2>/dev/null || echo "")"
       fi
 
-      # 2) powershell.exe Start-Process: works even when nothing toolkit-related
+      # Derive the Linux mount of C:\Windows the same way, instead of
+      # hardcoding /mnt/c: a custom automount root (wsl.conf [automount]
+      # root=) would make every /mnt/c full-path fallback miss (issue #134).
+      WINROOT=""
+      if have wslpath; then
+        WINROOT="$(wslpath -u 'C:\Windows' 2>/dev/null || echo "")"
+      fi
+      [ -n "$WINROOT" ] || WINROOT="/mnt/c/Windows"
+
+      # 1) powershell.exe Start-Process: works even when nothing toolkit-related
       #    is on PATH (the reported #119 case) and gives a TRUSTWORTHY exit code,
       #    unlike explorer.exe. Locate it on PATH first, then fall back to the
       #    Windows PowerShell 5.1 full path that ships with every Windows install.
       PWSH=""
       if have powershell.exe; then
         PWSH="powershell.exe"
-      elif [ -x "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
-        PWSH="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+      elif [ -x "$WINROOT/System32/WindowsPowerShell/v1.0/powershell.exe" ]; then
+        PWSH="$WINROOT/System32/WindowsPowerShell/v1.0/powershell.exe"
       fi
       if [ -n "$PWSH" ] && [ -n "$WINPATH" ]; then
         # PowerShell single-quoted strings require any embedded apostrophe to be
@@ -95,21 +113,21 @@ case "$UNAME" in
         "$PWSH" -NoProfile -Command "Start-Process '$WINPATH_PS'" >/dev/null 2>&1 && exit 0
       fi
 
-      # 3) explorer.exe via PATH interop. It almost always returns non-zero even
+      # 2) explorer.exe via PATH interop. It almost always returns non-zero even
       #    on success, so its exit code cannot be trusted - if it exists and
       #    runs, treat the launch as done. NOTE: this makes the explorer rungs
-      #    (3 and 4) best-effort - a genuine failure here cannot be detected and
+      #    (2 and 3) best-effort - a genuine failure here cannot be detected and
       #    will still report exit 0. They are last-resort only, reached after
-      #    wslview and PowerShell (which DO return trustworthy codes) have failed.
+      #    PowerShell (which DOES return a trustworthy code) has failed.
       if have explorer.exe && [ -n "$WINPATH" ]; then
         explorer.exe "$WINPATH" >/dev/null 2>&1
         exit 0
       fi
 
-      # 4) explorer.exe by full path: final Windows-side attempt when nothing is
+      # 3) explorer.exe by full path: final Windows-side attempt when nothing is
       #    on PATH at all.
-      if [ -x "/mnt/c/Windows/explorer.exe" ] && [ -n "$WINPATH" ]; then
-        /mnt/c/Windows/explorer.exe "$WINPATH" >/dev/null 2>&1
+      if [ -x "$WINROOT/explorer.exe" ] && [ -n "$WINPATH" ]; then
+        "$WINROOT/explorer.exe" "$WINPATH" >/dev/null 2>&1
         exit 0
       fi
 

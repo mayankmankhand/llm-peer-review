@@ -90,7 +90,7 @@ order with real fallback and only fails when the environment is genuinely headle
 bash .claude/scripts/open-artifact.sh "<file>"
 ```
 
-Pass the absolute path `render-html.js` printed (the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (`wslview` -> full-path PowerShell `Start-Process` -> `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve.
+Pass the absolute path `render-html.js` printed (the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (PowerShell `Start-Process`, located on PATH or by full path, then `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve; on WSL the headless message also prints the Windows-side (UNC) path so it can be pasted into a Windows browser.
 
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
