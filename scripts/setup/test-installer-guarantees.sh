@@ -219,7 +219,15 @@ fi
 # ─── [7] identical re-run is clean ───────────────────────────
 echo "[7] identical re-run"
 BACKUPS_BEFORE="$(find "$SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | wc -l | tr -d ' ')"
+set +e
 bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/rerun.log" 2>&1
+RERUN_RC=$?
+set -e
+if [ "$RERUN_RC" -eq 0 ]; then
+  ok "clean re-run exited 0"
+else
+  fail "clean re-run exited $RERUN_RC (log: $LOG/rerun.log)"
+fi
 BACKUPS_AFTER="$(find "$SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | wc -l | tr -d ' ')"
 if [ "$BACKUPS_BEFORE" = "$BACKUPS_AFTER" ]; then
   ok "no new backup dir on identical re-run"

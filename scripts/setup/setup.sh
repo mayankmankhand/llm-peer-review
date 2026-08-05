@@ -323,14 +323,19 @@ PF_STAMP_SED='/<!-- Toolkit version: .* | Managed by LLM Peer Review\./d
 MANIFEST_FILE="$TARGET/.claude/.toolkit-manifest.json"
 
 # toolkit_sha256_stdin: sha256 hex digest of stdin. Fallback chain covers
-# macOS, which ships shasum and openssl but not sha256sum.
+# macOS, which ships shasum and openssl but not sha256sum. Every branch is
+# guarded so a machine with none of the three fails with a clear message
+# instead of a raw command-not-found mid-preflight.
 toolkit_sha256_stdin() {
   if command -v sha256sum > /dev/null 2>&1; then
     sha256sum | awk '{print $1}'
   elif command -v shasum > /dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
-  else
+  elif command -v openssl > /dev/null 2>&1; then
     openssl dgst -sha256 | awk '{print $NF}'
+  else
+    echo "Error: no sha256 tool found (need sha256sum, shasum, or openssl)." >&2
+    exit 1
   fi
 }
 
@@ -641,20 +646,22 @@ if [ ${#PF_MODIFIED[@]} -gt 0 ] && [ "$FORCE" -eq 0 ]; then
     printf "  Continue? [y/N] "
     read -r GATE_REPLY || GATE_REPLY=""
     case "$GATE_REPLY" in
-      y|Y)
+      y|Y|yes|Yes|YES)
         echo ""
         ;;
       *)
         echo ""
         echo "  Aborted - no files were created, modified, or deleted."
-        echo "  Re-run with --force to skip this prompt (each file is backed up first)."
+        echo "  Re-run with --force after the target path (setup.sh <target> --force)"
+        echo "  to skip this prompt; each file is backed up first."
         echo ""
         exit 1
         ;;
     esac
   else
     echo "  Not running interactively, so setup cannot ask for confirmation."
-    echo "  Re-run with --force to proceed (each file is backed up first)."
+    echo "  Re-run with --force added to the setup.sh arguments, right after the"
+    echo "  target path (setup.sh <target> --force); each file is backed up first."
     echo ""
     exit 1
   fi

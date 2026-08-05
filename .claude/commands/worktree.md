@@ -64,7 +64,8 @@ Copy `CODEBASE_MAP.md` from the main repo root into the worktree root the same w
 `cp CODEBASE_MAP.md .claude/worktrees/worktree-N/CODEBASE_MAP.md`
 
 - If `CODEBASE_MAP.md` does not exist in the main repo, skip and note it -
-  /explore in the worktree will offer to generate one via /index.
+  /explore in the worktree will detect the missing map and generate one
+  automatically via /index (one-time, may take a minute).
 - If it already exists in the worktree, skip (don't overwrite).
 
 ### Step 7: Print summary

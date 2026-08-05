@@ -609,20 +609,22 @@ if ($script:PfModified.Count -gt 0 -and -not $Force) {
   if ($canPrompt) {
     try {
       $answer = Read-Host "  Continue? [y/N]"
-      if ($answer -match '^[yY]$') { $proceed = $true }
+      if ($answer -match '^(?i)(y|yes)$') { $proceed = $true }
     } catch {
       $proceed = $false
     }
     if (-not $proceed) {
       Write-Host ""
       Write-Host "  Aborted - no files were created, modified, or deleted."
-      Write-Host "  Re-run with -Force to skip this prompt (each file is backed up first)."
+      Write-Host "  Re-run with -Force added to the arguments (setup.ps1 -Target <target> -Force)"
+      Write-Host "  to skip this prompt; each file is backed up first."
       Write-Host ""
       exit 1
     }
   } else {
     Write-Host "  Not running interactively, so setup cannot ask for confirmation."
-    Write-Host "  Re-run with -Force to proceed (each file is backed up first)."
+    Write-Host "  Re-run with -Force added to the arguments (setup.ps1 -Target <target> -Force);"
+    Write-Host "  each file is backed up first."
     Write-Host ""
     exit 1
   }
