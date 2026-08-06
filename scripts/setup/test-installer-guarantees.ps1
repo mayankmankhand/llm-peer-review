@@ -8,10 +8,16 @@
 #      edited managed files, and custom files before anything is touched
 #   3. Custom files planted in EVERY toolkit-managed directory (including a
 #      nested command subdirectory) survive an upgrade byte-for-byte
-#   4. A locally edited managed file is backed up, then refreshed to stock
+#   4. A locally edited managed file blocks a non-interactive run (exit 1,
+#      target untouched) until -Force is passed; the forced run backs the
+#      file up, refreshes it to stock, and lists it (with its backup path)
+#      in the post-setup summary (issue #138)
 #   5. Legacy migration targets are reported as migrations, not as custom
 #      files, and are backed up before removal
-#   6. An identical re-run creates no new backup directory
+#   6. An identical re-run creates no new backup directory and never
+#      triggers the overwrite gate
+#   7. A manifest (.claude\.toolkit-manifest.json) is written on every real
+#      run, never on -DryRun, and carries per-file sha256 entries
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -60,7 +66,11 @@ function Test-FilesEqual {
 function Invoke-Setup {
   param([string[]]$SetupArgs, [string]$LogFile)
   $setupPath = Join-Path $ScriptDir "setup.ps1"
-  & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPath @SetupArgs *> $LogFile
+  # Piping empty input redirects the child's stdin, so the overwrite gate
+  # (issue #138) always detects a non-interactive host and takes the abort
+  # path instead of blocking on Read-Host. The suite exercises the abort
+  # path and the -Force path, never a live prompt.
+  "" | & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPath @SetupArgs *> $LogFile
 }
 
 try {
@@ -87,6 +97,11 @@ try {
     Ok "install completed"
   } else {
     Failed "install did not complete"
+  }
+  if (Test-Path -LiteralPath (Join-Path $Scratch ".claude\.toolkit-manifest.json") -PathType Leaf) {
+    Ok "manifest written on fresh install"
+  } else {
+    Failed "manifest missing after fresh install"
   }
 
   # --- [3] plant custom files + edit a managed file ------------
@@ -133,6 +148,7 @@ try {
   Assert-Contains "upgrade (v4.0.0 -> v" (Join-Path $Log "dryrun.log") "reports the version gap"
   Assert-Contains "Legacy command cleanup" (Join-Path $Log "dryrun.log") "announces the legacy migration"
   Assert-Contains ".claude\commands\$EditedCmd" (Join-Path $Log "dryrun.log") "lists the locally edited managed file"
+  Assert-Contains "LOCALLY MODIFIED" (Join-Path $Log "dryrun.log") "shows the locally modified classification"
   foreach ($rel in $CustomFiles) {
     Assert-Contains $rel (Join-Path $Log "dryrun.log") "lists custom file $rel"
   }
@@ -143,9 +159,36 @@ try {
     Ok "legacy file not listed as custom"
   }
 
-  # --- [5] real upgrade run ------------------------------------
-  Write-Host "[5] real upgrade run"
-  Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "upgrade.log")
+  # --- [5] non-interactive upgrade aborts on modified files ----
+  # The overwrite gate (issue #138): a locally modified managed file plus
+  # no -Force plus redirected stdin must abort with exit 1 before any
+  # filesystem write.
+  Write-Host "[5] upgrade without -Force aborts (modified file, non-interactive)"
+  $beforeAbort = Get-ChildItem -Path $Scratch -Recurse -Force | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object
+  Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "abort.log")
+  $abortExit = $LASTEXITCODE
+  $afterAbort = Get-ChildItem -Path $Scratch -Recurse -Force | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object
+  if ($abortExit -eq 1) {
+    Ok "aborted with exit 1"
+  } else {
+    Failed "expected exit 1, got $abortExit"
+  }
+  Assert-Contains ".claude\commands\$EditedCmd" (Join-Path $Log "abort.log") "abort lists the modified file"
+  Assert-Contains "-Force" (Join-Path $Log "abort.log") "abort points at -Force"
+  if ((Get-Content -LiteralPath (Join-Path $Scratch (Join-Path ".claude\commands" $EditedCmd)) -Raw).Contains("LOCAL EDIT MARKER")) {
+    Ok "modified file untouched by the aborted run"
+  } else {
+    Failed "aborted run replaced the modified file"
+  }
+  if (($beforeAbort -join "`n") -eq ($afterAbort -join "`n")) {
+    Ok "aborted run changed nothing"
+  } else {
+    Failed "aborted run modified the target"
+  }
+
+  # --- [6] real upgrade run (-Force) ---------------------------
+  Write-Host "[6] real upgrade run (-Force)"
+  Invoke-Setup -SetupArgs @("-Target", $Scratch, "-Force") -LogFile (Join-Path $Log "upgrade.log")
 
   foreach ($rel in $CustomFiles) {
     if (Test-FilesEqual (Join-Path $Scratch $rel) (Join-Path $Snap $rel)) {
@@ -183,15 +226,49 @@ try {
     Failed "VERSION not updated"
   }
 
-  # --- [6] identical re-run is clean ---------------------------
-  Write-Host "[6] identical re-run"
+  Assert-Contains "Locally modified file(s) replaced with stock versions:" (Join-Path $Log "upgrade.log") "summary announces replaced modified files"
+  $upgradeLog = Get-Content -LiteralPath (Join-Path $Log "upgrade.log") -Raw
+  $backupLine = @($upgradeLog -split "`n" | Where-Object { $_ -match "backup: " -and $_ -match [regex]::Escape((Join-Path ".claude\commands" $EditedCmd)) })
+  if ($backupLine.Count -gt 0) {
+    Ok "summary pairs the modified file with its backup path"
+  } else {
+    Failed "backup path for the modified file missing from summary"
+  }
+
+  # Manifest guarantees (issue #138): written on the real run, one
+  # plausible sha256 entry per managed file (forward-slash keys).
+  $manifestPath = Join-Path $Scratch ".claude\.toolkit-manifest.json"
+  $manifestRaw = ""
+  if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+    $manifestRaw = Get-Content -LiteralPath $manifestPath -Raw
+  }
+  if ($manifestRaw -match ('"' + [regex]::Escape(".claude/commands/$EditedCmd") + '": "[0-9a-f]{64}"')) {
+    Ok "manifest has a plausible entry for the refreshed file"
+  } else {
+    Failed "manifest entry for .claude/commands/$EditedCmd missing or malformed"
+  }
+
+  # --- [7] identical re-run is clean ---------------------------
+  Write-Host "[7] identical re-run"
   $backupsBefore = @(Get-ChildItem -Path $Scratch -Directory -Force -Filter ".toolkit-backup-*").Count
   Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "rerun.log")
+  $rerunExit = $LASTEXITCODE
   $backupsAfter = @(Get-ChildItem -Path $Scratch -Directory -Force -Filter ".toolkit-backup-*").Count
+  if ($rerunExit -eq 0) {
+    Ok "clean re-run exited 0"
+  } else {
+    Failed "clean re-run exited $rerunExit"
+  }
   if ($backupsBefore -eq $backupsAfter) {
     Ok "no new backup dir on identical re-run"
   } else {
     Failed "identical re-run created a backup dir"
+  }
+  $rerunLog = Get-Content -LiteralPath (Join-Path $Log "rerun.log") -Raw
+  if ($rerunLog -match '(?i)locally modified') {
+    Failed "clean re-run triggered the overwrite gate"
+  } else {
+    Ok "clean re-run did not trigger the overwrite gate"
   }
   foreach ($rel in $CustomFiles) {
     if (Test-FilesEqual (Join-Path $Scratch $rel) (Join-Path $Snap $rel)) {

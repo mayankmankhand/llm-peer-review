@@ -138,7 +138,7 @@ Then try running a debate from inside Claude Code or Cursor:
 
 ## Changing the Model
 
-By default, `/ask-gpt` uses `gpt-5.5` and `/ask-gemini` uses `gemini-3.1-pro-preview`. You can change these with additional environment variables or `.env.local` entries:
+By default, `/ask-gpt` uses `gpt-5.6-sol` and `/ask-gemini` uses `gemini-3.6-flash`. You can change these with additional environment variables or `.env.local` entries:
 
 ```bash
 # Environment variable (add to ~/.bashrc or ~/.zshrc):
@@ -152,7 +152,7 @@ GEMINI_MODEL=gemini-2.0-flash
 
 ### What if I see a "deprecated model" warning?
 
-Starting in v4.5.0, the scripts protect you from running on an outdated default model. If your `.env.local` still has an old toolkit default (for example `GPT_MODEL=gpt-5.4` or `GEMINI_MODEL=gemini-3-flash-preview`) from a setup you did months ago, the script ignores that value, uses the current default instead, and prints a one-line warning like `Note: GPT_MODEL=gpt-5.4 in .env.local is deprecated. Using gpt-5.5.` This only affects a short list of previous toolkit defaults. Any other model name you set (such as `GPT_MODEL=gpt-4o`) is treated as a deliberate choice and used silently. To silence the warning, open `.env.local` and either update the value to a current model name or delete the line.
+Starting in v4.5.0, the scripts protect you from running on an outdated default model. If your `.env.local` still has an old toolkit default (for example `GPT_MODEL=gpt-5.4` or `GEMINI_MODEL=gemini-3-flash-preview`) from a setup you did months ago, the script ignores that value, uses the current default instead, and prints a one-line warning like `Note: GPT_MODEL=gpt-5.4 in .env.local is deprecated. Using gpt-5.6-sol.` This only affects a short list of previous toolkit defaults. Any other model name you set (such as `GPT_MODEL=gpt-4o`) is treated as a deliberate choice and used silently. To silence the warning, open `.env.local` and either update the value to a current model name or delete the line.
 
 ---
 

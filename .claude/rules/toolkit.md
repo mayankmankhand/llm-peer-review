@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 5.4.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 5.5.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
@@ -242,7 +242,7 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
 | `Skill(review-commands)`, `Skill(review-commands:*)` | Allow the `/review-commands` skill to be invoked without a prompt |
 | `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |
-| `cp` | Copying files (e.g. `.env.local` into worktrees) |
+| `cp` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
 | `ls`, `diff`, `echo`, `mkdir`, `cat` | Reading directories, comparing files, writing output, creating folders |
 | `cd` | **Not included by default.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access. |
 
