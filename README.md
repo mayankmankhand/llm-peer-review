@@ -141,14 +141,14 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's New
 
-**Latest release: v5.2.0** (June 2026). Highlights:
+**Latest release: v5.5.0** (August 2026). Highlights:
 
-- **Installers you can preview and trust.** Every setup run now prints a pre-flight report (what will change, what is yours and stays untouched, where backups go) before touching anything, and `--dry-run` shows an upgrade with zero changes. The "your custom files are never modified" guarantee is enforced by a test suite.
-- **Faster, cheaper sessions.** Commands start with one startup call instead of several file reads, `/review` dispatches leaner specialist payloads, `/index` runs its heavy lifting on a cheaper model, and plan HTML renders about 2x faster.
-- **Lessons feed back into new work.** The learning log is an always-read index with on-demand detail, read at the start of every workflow command - so past mistakes inform future sessions instead of sitting in a file.
-- **Plans include test steps when the work warrants them** - and skip them when it does not.
+- **Your local edits are guarded.** Setup now detects when you edited a toolkit-managed file (via a hash manifest) and asks before overwriting - a terminal prompts, scripts and AI-agent runs stop with the file list and a `--force` escape hatch. Every replaced file is still backed up and listed after the run.
+- **Debates run on the current flagship models.** `/ask-gpt` pins `gpt-5.6-sol` and `/ask-gemini` pins `gemini-3.6-flash`; old pinned models in `.env.local` auto-override with a notice.
+- **HTML artifacts open reliably on modern WSL.** The opener no longer depends on wslview (whose interop detection broke on newer WSL builds); it goes PowerShell-first and, when genuinely headless, prints the Windows-side path you can paste into a browser.
+- **Worktrees start ready.** `/worktree` carries your codebase map into the new worktree, so parallel sessions no longer regenerate it from scratch.
 
-Upgrading from v5.0.0 or earlier? This release also carries everything from v5.0.1 (reliable HTML opening on WSL, Windows installer fixes) and v5.1.0 (the HTML render pipeline) - one re-run of setup picks up all of it.
+Upgrading from v5.2.0 or earlier? This release also carries everything from v5.3.0 (the application-security review domain and sharper reviewers) and v5.4.0 (bounded, verifier-gated loops) - one re-run of setup picks up all of it.
 
 Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
 

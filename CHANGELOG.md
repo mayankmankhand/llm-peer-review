@@ -14,6 +14,8 @@ If you last installed v4.3.3, twelve releases have shipped on top of it. v4.4.0 
 
 ## v5.5.0 - Installer Guardrails + Model Refresh (2026-08-05)
 
+> **First GitHub release since v5.2.0 - cumulative, not breaking.** This release rolls up v5.3.0 (security review domain + sharper reviewers) and v5.4.0 (bounded verifier-gated loops), neither of which was published to GitHub, plus the v5.5.0 changes below. Re-running setup once picks up all three versions.
+
 Implements #134, #138, #139, #140. Additive, with one deliberate behavior change in the installers (called out below). Re-run `setup.sh` / `setup.ps1` to pick up the updated scripts, command, and rules files.
 
 ### Added
