@@ -60,6 +60,14 @@ Copy `.env.local` from the main repo root into the worktree root:
 - If `.env.local` does not exist in the main repo, skip and note it.
 - If it already exists in the worktree, skip (don't overwrite).
 
+Copy `CODEBASE_MAP.md` from the main repo root into the worktree root the same way:
+`cp CODEBASE_MAP.md .claude/worktrees/worktree-N/CODEBASE_MAP.md`
+
+- If `CODEBASE_MAP.md` does not exist in the main repo, skip and note it -
+  /explore in the worktree will detect the missing map and generate one
+  automatically via /index (one-time, may take a minute).
+- If it already exists in the worktree, skip (don't overwrite).
+
 ### Step 7: Print summary
 
 </procedure>
@@ -76,6 +84,7 @@ Worktree ready!
   Host npm:     installed (or: failed - run manually / skipped - no package.json)
   Toolkit npm:  installed (or: failed - run manually / skipped - no .claude/scripts/package.json)
   .env:         copied (or: skipped - not found / already exists)
+  Map:          copied (or: skipped - not found / already exists)
 
 Next steps:
   1. Open that path in a new Cursor window
