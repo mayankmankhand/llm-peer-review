@@ -54,6 +54,10 @@ For each changed file:
 
 If you're unsure about intent behind a change or user-facing impact, **ask the user** - don't guess.
 
+**Host CLI (used by Sections 6 and 7).** Both sections call the issue/PR CLI, but Section 6 is skipped when you are not in a worktree while Section 7 always runs. Detect the host here, outside that conditional, and reuse the result in both.
+
+!`cat .claude/skills/shared/host-cli.md`
+
 ## 6. Worktree Cleanup
 
 Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree.
@@ -67,14 +71,11 @@ Walk the user through each step one at a time, confirming before proceeding to t
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote.
 3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" Follow the worktree naming convention in toolkit.md if they say yes.
-4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR:
-   ```
-   gh pr create --base main --title "..." --body "..."
-   ```
+4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR using the **"Create PR / MR" row** for the detected host. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab.
 5. Show the user the PR URL.
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
-8. The branch stays alive on GitHub until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.
+8. The branch stays alive on the remote until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.
 
 ## 7. Cycle Summary (HTML, default-on)
 
@@ -86,7 +87,7 @@ The "cycle" is everything since the last `/document` run, tracked by a marker fi
 
 1. Read `artifacts/html/.last-cycle` (a single line: the last summarized commit SHA).
 2. **If the marker exists** and the SHA is still in history: window = `<marker>..HEAD`.
-3. **If the marker is absent** (first run / fresh clone) **or the SHA is missing** (rebased/force-pushed, or the marker belongs to a different branch after a worktree switch): fall back to the last merged PR's merge commit (`gh pr list --state merged --limit 1 --json mergeCommit`, or the most recent merge in `git log`). Window = `<last-merge>..HEAD`. If no merged PR exists, use the last 20 commits.
+3. **If the marker is absent** (first run / fresh clone) **or the SHA is missing** (rebased/force-pushed, or the marker belongs to a different branch after a worktree switch): fall back to the last merged PR's merge commit, using the **"Most recently merged"** fenced block for the detected host (or the most recent merge in `git log` if that CLI call fails). Run it exactly as written there: it sorts on the merge date on purpose, because taking the first row of a merged list sorts by CREATION date on BOTH hosts and hands back a stale PR that was opened long ago and merged late. Window = `<last-merge>..HEAD`. If no merged PR exists, use the last 20 commits.
 4. **State the chosen window in plain English** before generating, especially on any fallback: e.g., "Summarizing commits since `<ref>` (cycle marker found)." or "The cycle marker was missing or stale, so I am summarizing since `<ref>` instead - check that scope looks right." This lets the user catch a wrong window (for example a marker SHA from a different branch) before trusting the summary.
 
 ### Decide whether to generate
@@ -98,7 +99,7 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
-- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR (`gh pr list`), else omit -> `prLink` / `prNote`
+- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
 Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
