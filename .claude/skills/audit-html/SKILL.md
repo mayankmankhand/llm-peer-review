@@ -35,7 +35,7 @@ The two-layer principle, signals, and hard vetoes this skill applies are documen
 The "Your Own Files (downstream projects)" section above defines:
 - the two layers (toolkit outputs already HTML-render; your own markdown can get optional additive views)
 - the signals (read-every-session tracker, walls of text, hunt-not-read, existing hand-built view)
-- the hard vetoes (Claude-read, canonical/data-source, GitHub-native, lives in `.claude/`)
+- the hard vetoes (Claude-read, canonical/data-source, host-native, lives in `.claude/`)
 
 When in doubt during the audit, defer to those definitions rather than guessing.
 
@@ -92,7 +92,7 @@ Only generate when the user explicitly says yes.
 # /audit-html report
 
 **Scanned:** N markdown files
-**Vetoed:** M files (Claude-read / canonical / GitHub-native / .claude/)
+**Vetoed:** M files (Claude-read / canonical / host-native / .claude/)
 **Existing HTML-generation setup:** yes / no (path if yes)
 
 ## Candidates
@@ -155,7 +155,7 @@ The view is read-only and disposable. It can be regenerated any time the markdow
 
 After implementing or invoking the skill, sanity-check it against this very repo:
 
-- It should flag long human-read files like `LESSONS.md`, `CHANGELOG.md` against signals but then **veto them both** (LESSONS is Claude-read; CHANGELOG is GitHub-native).
+- It should flag long human-read files like `LESSONS.md`, `CHANGELOG.md` against signals but then **veto them both** (LESSONS is Claude-read; CHANGELOG is host-native, rendered by GitHub and GitLab alike).
 - It should veto `CLAUDE.md`, `CODEBASE_MAP.md`, anything in `.claude/`, `PLAN-*.md`.
 - For a downstream project, it should flag a status-board file in the project root and pass it through if no veto applies.
 

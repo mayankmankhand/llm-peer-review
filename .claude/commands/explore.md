@@ -16,13 +16,19 @@ Before diving into questions, pick a gear with the user.
 - **Scoping mode** - the user has a concrete idea and needs help defining scope. Pressure-test, narrow down, get to a clear definition of done.
 - **Vision mode** - the user is thinking big-picture and needs help exploring possibilities. Challenge premises, expand the space, decide what to build before how.
 
+### Issue Host
+
+Two places below read an issue: mode detection here, and the worktree rename in the Worktree Setup phase. Either one can be the first to fire, or the first can never fire at all. So detect the host **once, here, unconditionally**, before Phase 1 begins, and reuse that result for the rest of the session.
+
+!`cat .claude/skills/shared/host-cli.md`
+
 ### Pick a Mode
 Don't try to guess silently. Always ask, but pre-fill your best guess so it's a one-keystroke decision when you guess right.
 
 1. Read the user's input and form a best guess: scoping or vision.
-2. **If the input references a GitHub issue**, run `gh issue view <N> --json title,body` first and let the issue body inform your guess. The issue number alone often looks concrete when the body is exploratory. Recognize all of these forms:
+2. **If the input references an issue**, read it first with the **"Read issue" row** for the detected host, and let the issue body inform your guess. Take the field name from that row too: the issue body is not called the same thing on both hosts. The issue number alone often looks concrete when the body is exploratory. Recognize all of these forms:
    - `issue 88`, `#88`, `ticket 88` -> use the number directly
-   - A GitHub issue URL like `https://github.com/owner/repo/issues/88` -> extract the trailing number
+   - An issue URL -> use the anchoring rule in the "Issue URL" note above: anchor on `/-/issues/<N>` for GitLab and `/issues/<N>` for GitHub, take the LAST such match, and ignore any trailing `/`, query string, or `#` fragment. Do not assume a fixed path depth: GitHub is `https://github.com/owner/repo/issues/88`, but GitLab nests groups arbitrarily and inserts `/-/`, as in `https://gitlab.com/group/subgroup/project/-/issues/88`. Taking the last match is what keeps a project literally named `issues` from breaking the parse
    - A bare number on its own (e.g. just `88`) -> ask "Is that an issue number?" before fetching, since a bare number can mean other things
 3. Ask the user with this exact wording, substituting your guess in the brackets:
    > Scoping or vision? [scoping]
@@ -157,7 +163,7 @@ If they return different values, you are in a worktree. If they match, you are i
 
 **If in a worktree AND an issue number came up during Phase 1:**
 1. Check if the current branch already matches the `worktree-<number>-<label>` pattern. If so, skip - it's already named correctly.
-2. If you only have an issue number (no title), fetch it: `gh issue view <number> --json title`
+2. If you only have an issue number (no title), fetch it with the **"Read issue" row** for the detected host (detect it now if Phase 1 never needed it, per the Issue Host section)
 3. If in detached HEAD state, create a branch instead: `git checkout -b worktree-<issue-number>-<short-label>`
 4. Otherwise, rename the current branch: `git branch -m worktree-<issue-number>-<short-label>`
    - The short label should be 2-3 words from the issue title, lowercase, with only letters, numbers, and hyphens

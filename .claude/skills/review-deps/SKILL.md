@@ -34,7 +34,7 @@ Be thorough but concise.
 
 2. **Run `npm outdated --json`** and flag packages where the installed version is more than one major version behind, or where the latest version includes security fixes.
 
-3. **Check maintainer activity** for any dependency with high or critical vulnerabilities. Use `gh api` to check:
+3. **Check maintainer activity** for any dependency with high or critical vulnerabilities. Use `gh api` to check (this stays `gh` on every host, including GitLab projects - it queries the GitHub repos of the npm dependencies themselves, not the host this project is on, so it is deliberate and not a `glab` port that was missed):
    - Last commit date (stale if no commits in 12+ months)
    - Number of contributors (single-maintainer risk if fewer than 3)
    - Star count (low adoption signal if under 100 stars)

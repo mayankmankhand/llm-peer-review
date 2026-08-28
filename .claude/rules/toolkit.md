@@ -60,7 +60,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/security-audit` | Deep on-demand whole-repo security audit - entry points, authorization, crypto inventory, secret-history scan (skill - run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
-| `/create-issue` | Create GitHub issues (ask questions first, keep short) |
+| `/create-issue` | Create issues on GitHub or GitLab (ask questions first, keep short) |
 | `/ask-gpt` | AI peer review with ChatGPT debate (up to 3 rounds) |
 | `/ask-gemini` | AI peer review with Gemini debate (up to 3 rounds) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
@@ -212,7 +212,11 @@ Ask yourself: "Can I run this command and interpret the result?" If yes, just do
 
 This project uses two settings files. `settings.json` is committed to the repo and provides a shared baseline (temp-file permissions for debate scripts). `settings.local.json` is user-specific and not overwritten on re-setup - your real permissions live here.
 
-These are defined in `.claude/settings.local.json`. Each one exists for a reason:
+These are defined in `.claude/settings.local.json`. Each one exists for a reason.
+
+The `glab` rows below are listed for completeness and are **not** seeded into a fresh install: a GitHub-hosted project never needs them. If your repo is on GitLab, add the `glab` entries you actually use to your own `settings.local.json`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
+
+Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, already covered by the `git config` row. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
 
 | Permission | Why it's here |
 |---|---|
@@ -222,14 +226,17 @@ These are defined in `.claude/settings.local.json`. Each one exists for a reason
 | `git worktree` | Creating, listing, and removing worktrees for parallel sessions |
 | `git rev-parse`, `git rev-list` | Worktree detection, repo path queries, commit-range checks |
 | `git status`, `git log`, `git diff`, `git show` | Inspecting repo state and history |
-| `git config`, `git remote add`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs) |
+| `git config`, `git remote add`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs). `git config --get remote.origin.url` is also how commands detect whether this repo is on GitHub or GitLab |
 | `git check-ignore` | Verifying .gitignore rules before committing |
 | `gh repo create`, `gh repo view`, `gh repo edit`, `gh repo clone` | Repository scaffolding, viewing, cloning, and settings |
 | `gh auth status` | GitHub authentication status check |
-| `gh issue create`, `gh issue view`, `gh issue close`, `gh issue list`, `gh issue reopen` | `/create-issue` command and issue management |
+| `glab auth status` | GitLab authentication status check (GitLab repos only) |
+| `gh issue create`, `gh issue view`, `gh issue close`, `gh issue list`, `gh issue reopen` | `/create-issue` command and issue management (GitHub) |
+| `glab issue create`, `glab issue view`, `glab issue close`, `glab issue list`, `glab issue reopen` | The same, on GitLab repos |
 | `gh label list`, `gh label create` | Managing GitHub labels |
-| `gh pr create`, `gh pr view`, `gh pr diff` | Pull request workflows |
-| `gh api`, `gh release list` | GitHub API calls and release checks |
+| `gh pr create`, `gh pr view`, `gh pr diff`, `gh pr list` | Pull request workflows (GitHub). `/document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
+| `glab mr create`, `glab mr view`, `glab mr list` | Merge request workflows (GitLab) |
+| `gh api`, `gh release list` | GitHub API calls and release checks. `/review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
 | `npm install`, `npm uninstall` | Managing dependencies |
 | `npm audit`, `npm outdated` | Dependency security and freshness checks (used by `/review-deps`) |
 | `node .claude/scripts/ask-gpt.js` | Running the ask-gpt debate script |

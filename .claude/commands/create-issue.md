@@ -1,6 +1,6 @@
 # Create Issue
 
-**Use this when:** Capturing a short bug, feature, or improvement on GitHub - the WHAT, not the HOW.
+**Use this when:** Capturing a short bug, feature, or improvement on GitHub or GitLab - the WHAT, not the HOW.
 **Don't use this when:** You need to plan implementation details (use `/explore` and `/create-plan`).
 
 Hey! I'm ready to help you capture this issue. What's on your mind? Just give me:
@@ -29,10 +29,11 @@ I'll handle the rest.
 
 ## After Getting Answers
 
-Create the issue using this terminal command (from the project directory):
-```bash
-gh issue create --title "TITLE HERE" --body "BODY HERE" --label "LABEL"
-```
+Detect the host first, then create the issue with the matching CLI. These two steps run together: never run the create command without doing the detection above it.
+
+!`cat .claude/skills/shared/host-cli.md`
+
+Then run the **"Create issue" row** from the invocation table above, for the detected host, from the project directory. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host.
 
 ## Issue Body Format (Keep It Short)
 ```
@@ -55,5 +56,5 @@ gh issue create --title "TITLE HERE" --body "BODY HERE" --label "LABEL"
 ## REMEMBER
 - Ask questions first
 - Keep it short (10-15 lines max)
-- Run the `gh issue create` command to actually create the issue
+- Run the create command for the detected host (`gh issue create` or `glab issue create`) to actually create the issue
 - No implementation details - that's for /explore

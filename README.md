@@ -74,9 +74,9 @@ Run a structured debate of up to 3 rounds between Claude and ChatGPT (or Gemini)
 
 Full prompts: [`.claude/commands/ask-gpt.md`](.claude/commands/ask-gpt.md) | [`.claude/commands/ask-gemini.md`](.claude/commands/ask-gemini.md)
 
-### `/create-issue` - GitHub issues that don't bloat
+### `/create-issue` - issues that don't bloat
 
-Asks 2-3 clarifying questions first, then creates a short (10-15 line) GitHub issue via `gh issue create`. No implementation details; that's what `/explore` and `/create-plan` are for. Good for capturing bugs and ideas without context-switching out of your editor.
+Asks 2-3 clarifying questions first, then creates a short (10-15 line) issue via `gh issue create` on GitHub or `glab issue create` on GitLab. It picks the right one by reading your git remote, so there is nothing to configure. No implementation details; that's what `/explore` and `/create-plan` are for. Good for capturing bugs and ideas without context-switching out of your editor.
 
 Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.md)
 
@@ -102,7 +102,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/security-audit` (skill) | Deep on-demand whole-repo security audit - entry points, authorization, crypto, secret-history scan (run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
-| `/create-issue` | Create a GitHub issue (asks you questions first) |
+| `/create-issue` | Create an issue on GitHub or GitLab (asks you questions first) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
 | `/ask-gpt` | Debate your work with ChatGPT (up to 3 rounds) |
 | `/ask-gemini` | Debate your work with Gemini (up to 3 rounds) |
