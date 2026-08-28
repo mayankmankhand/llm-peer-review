@@ -107,3 +107,10 @@
 ### v5.2.0 release + doc audit (issue #128)
 
 - **Self-enforce release-time conventions in the artifact or the checklist, not in memory.**
+
+### Host-agnostic gh/glab (issue #143)
+
+- **Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.**
+- **A co-location rule is only as strong as its weakest call site.**
+- **Inlining a shared fragment AND repeating its content defeats the point of the fragment.**
+- **A permission you cannot self-provision may have an already-permitted equivalent.**
