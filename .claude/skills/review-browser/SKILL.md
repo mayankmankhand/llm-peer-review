@@ -87,7 +87,7 @@ Each session should have a clear purpose. After each session, read the screensho
 
 **When actions fail:** If a session stops on a failed action, run a new session with just a screenshot to see the current state. Adjust your selectors or action sequence. Don't retry the same failing action more than once.
 
-**Note:** Browser sessions are sequential by nature, so this command always runs in single-pass mode (no sub-agents).
+**Note:** Browser sessions are sequential by nature, so the review phase always runs in single-pass mode - no sub-agents ever drive the browser. That constraint is about browser sessions only: the M2 audit tiers below still dispatch their skeptic subagents after the sessions are done.
 
 ### Step 3: Compile findings
 
@@ -109,9 +109,7 @@ Use the evidence you gathered (screenshots, text, console errors, network failur
 
 ## Audit Before the Report (M2)
 
-You are M2's **runner**: audit your own findings before writing the report, then report survivors only, with an Audited out log for the kills. Run every receipt yourself, and dispatch the skeptic tiers to fresh subagents rather than judging your own findings.
-
-Do not improvise a lighter version. A direct run is a deliberate focused check, not a cheaper one, and the Audited out section in the format below is only honest if an audit actually ran. M2 is inlined here rather than cited by path because a pointer to a procedure you cannot read is not an instruction.
+On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
 !`cat .claude/skills/shared/hitl-loop.md`
 

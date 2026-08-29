@@ -48,7 +48,7 @@ These categories have minimum severity floors - never downgrade them:
 The same defect does not carry the same weight everywhere. Before assigning a level, decide which of these you are looking at, and adjust once:
 
 - **Solo or local tool** - a personal script, a toolkit run from one machine, a prototype whose only user is its author. The blast radius is one person who can undo anything. Scale-and-hardening findings (no rate limiting, no retry budget, no audit trail, a single point of failure, missing observability) land a level lower than instinct suggests, and often fail the Skip rule outright.
-- **Production service** - real users, real data, a deploy other people depend on. The same findings land where instinct suggests or higher, because nobody is standing next to the failure when it happens.
+- **Production service** - real users, real data, a deploy other people depend on. The same findings land where instinct suggests. Bump one level only when both halves of the production risk are present: the failure would strike unattended AND it reaches users who cannot undo it themselves. One of the two is not enough - that pairing, not the word "production", is what earns the bump.
 
 Judge this from what is actually in front of you - a deploy config, an auth layer, a database holding real records, a README describing users - not from how polished the code looks. A well-built local tool is still a local tool.
 
@@ -106,11 +106,11 @@ Judge this from what is actually in front of you - a deploy config, an auth laye
 
 ## Boundary Examples
 
-Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `output-template.md` by finding R4; the two below cover the rest and continue that numbering, since both fragments are inlined into the same review context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
+Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `output-template.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the template's own illustrative blocks use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
 
 ### Block vs Warn
 
-- **R5** 🚫 `api/export.ts:64` - CSV export buffers every row in memory before writing, and this change removed the row cap that used to bound it
+- **R10** 🚫 `api/export.ts:64` - CSV export buffers every row in memory before writing, and this change removed the row cap that used to bound it
   - **Why it matters:** An export large enough to exhaust the process heap takes the whole server down, not just the one request that triggered it
   - **Example:** The first account with 200k records clicks Export, the Node process runs out of memory, and every other user on that instance gets a dropped connection until it restarts
   - **Suggested fix:** Stream rows to the response as they are read, or restore a cap with a clear message when a request exceeds it
@@ -118,7 +118,7 @@ Three lines decide most disagreements, and each is taught by one worked example 
 
 ### Warn vs Suggest
 
-- **R6** ⚠️ `settings/ProfileForm.tsx:112` - Save failures are swallowed: the catch block logs to the console and the form clears as though the save succeeded
+- **R11** ⚠️ `settings/ProfileForm.tsx:112` - Save failures are swallowed: the catch block logs to the console and the form clears as though the save succeeded
   - **Why it matters:** The user is actively told the wrong thing, so they walk away believing a change was saved when it was not
   - **Example:** Someone updates the email address their alerts go to, watches the form clear, and stops receiving alerts for a week before working out why
   - **Suggested fix:** Surface the failure in the form - keep the entered values, say what failed, and let them retry

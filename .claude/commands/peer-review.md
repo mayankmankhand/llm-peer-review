@@ -27,7 +27,7 @@ For EACH finding in the pasted feedback:
 
 </procedure>
 
-Severity on every finding below follows the shared rubric, the same one the review skills read. It is not decoration: confirmed findings enter the auto loop's M2 audit, which routes a Block to three independent skeptics and a Warn or Suggest to one, and the Action Plan is ordered by it.
+Severity on every finding below follows the shared rubric, the same one the review skills read. It is not decoration: this evaluation is the audit step those labels feed (M2 names it the deliberate exception - verifying each finding against the code replaces the skeptic tiers), and the Action Plan the auto loop processes is ordered by it.
 
 !`cat .claude/skills/shared/severity-anchors.md`
 
