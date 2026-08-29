@@ -31,7 +31,7 @@ Derive it mechanically from the findings, never by gut feel:
 
 Every finding must include all 4 fields below. No shorthand, no skipping. If a finding is too trivial to justify all 4 fields, do not report it (see the Skip rule in severity-anchors.md).
 
-**Receipt rule (every finding must be provable).** A finding must point at the specific evidence that proves it - the exact `file:line` (already required in the format) and, when the claim is about behavior, the concrete code or pattern you can cite. If you cannot point to the line or snippet that demonstrates the problem, do not report it. This keeps reviews honest: a real issue always has a receipt, and "confident findings that point at nothing" are the fastest way to lose the reader's trust. The receipt grounds the finding; it does not lower its severity (the Universal Anchors in severity-anchors.md still apply).
+**Receipt rule (every finding must be provable).** A finding must point at the specific evidence that proves it - the exact `file:line` (already required in the format) and, when the claim is about behavior, the concrete code or pattern you can cite. If you cannot point to the line or snippet that demonstrates the problem, do not report it. This keeps reviews honest: a real issue always has a receipt, and "confident findings that point at nothing" are the fastest way to lose the reader's trust. The receipt grounds the finding; it does not lower its severity (the Universal Anchors in severity-anchors.md still apply). What you author here is the *check*; the **Receipt** row that reports what the check actually output is audit-time output, defined under "Audit-Aware Report Sections" below.
 
 Whether you write these fields directly (a direct `/review-*` call) or the orchestrator fills them from structured JSON findings (`what` plus the `fields[]` rows, in the `/review` dispatch path), every finding carries all 4 with full prose - the structure is identical, only the serialization differs.
 
@@ -115,8 +115,37 @@ Browser findings use the same 4-field structure plus extra evidence fields:
   - **Expected:** [What should happen]
   - **Actual:** [What actually happens]
   - **Suggested fix:** [The approach to fix it]
+  - **Receipt:** [The check that was run and what its output showed - see "Audit-Aware Report Sections" below]
 
 Browser summary also includes:
 - Pages tested: X
 - Browser sessions run: X
 - Blocks: X | Warns: X | Suggests: X
+
+## Audit-Aware Report Sections
+
+These two additions apply to any run that performs the M2 audit: `/review` after dedup, and a directly-typed `/review-*` skill after its own pass. M2 in `.claude/skills/shared/hitl-loop.md` defines who the runner is and how the tiers work; this section defines only what the resulting report looks like.
+
+They are not part of the 4-field authoring structure above. A receipt's *check* is authored with the finding; the **Receipt** row reports what that check actually output, which does not exist until tier 1 has run.
+
+A debate summary (`/ask-gpt`, `/ask-gemini`) renders neither one. Its Recommended Actions are audited later, by the loop, not by the command that wrote them.
+
+### The Receipt row
+
+Every surviving finding carries one extra sub-bullet, last, after `Suggested fix`:
+
+- **Receipt:** [The check that was run and what its output showed]
+
+When an audit subagent failed twice and its tier could not run (M2), mark that finding `unaudited` next to this row rather than dropping the row.
+
+### Audited out (log exit)
+
+After the findings (and `### More findings`, when present), list every finding the audit killed - one line each, with its M2 verdict and a short evidence clause:
+
+- **R7** `RECEIPT FAILED` - [What] (check output did not show the claim)
+- **R9** `REFUTED` - [What] (skeptic: one-clause reason)
+- **R2** `REFUTED 2/3` - [What] (two of three skeptics refuted: one-clause reason)
+
+When nothing was killed, print `Audited out: none - all findings survived the audit.` **Never omit the section.** It is the run's log exit and M8 requires it stay inspectable; a report with no Audited out section is indistinguishable from a run that never audited at all.
+
+R-IDs stay gap-free across the report and this log together. A finding that exits here keeps the number it was assigned, and the findings list simply skips that number.

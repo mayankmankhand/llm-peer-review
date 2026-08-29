@@ -23,7 +23,7 @@ A deliberate, whole-repository security pass. Slower than `/review-security` and
 <rules>
 
 1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings with exploit receipts are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
-2. **Auto, with pages** - Running this audit stays a deliberate human choice, but its findings do not wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
+2. **Audit, then auto-fix, with pages** - Running this audit stays a deliberate human choice, but its findings are audited before the report per M2 in `.claude/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They do not then wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Recommend tools, do not invent their output** - where a deterministic scanner is the right tool (secret history, dependency CVEs), recommend running it; never fabricate its results
 
@@ -84,6 +84,14 @@ Because an audit can surface many findings, structure the report so the reader g
 ## Noise Control
 
 !`cat .claude/skills/shared/do-not-report.md`
+
+## Audit Before the Report (M2)
+
+You are M2's **runner**: audit your own findings before writing the report, then report survivors only, with an Audited out log for the kills. Run every receipt yourself, and dispatch the skeptic tiers to fresh subagents rather than judging your own findings.
+
+Do not improvise a lighter version. A direct run is a deliberate focused check, not a cheaper one, and the Audited out section in the format below is only honest if an audit actually ran. M2 is inlined here rather than cited by path because a pointer to a procedure you cannot read is not an instruction.
+
+!`cat .claude/skills/shared/hitl-loop.md`
 
 ## Output Format
 

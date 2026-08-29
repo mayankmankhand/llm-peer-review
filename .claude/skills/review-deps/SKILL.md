@@ -21,7 +21,7 @@ Be thorough but concise.
 <rules>
 
 1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files or touches `package.json`; findings are its product. After the report, the same run continues into the auto loop (rule 2), which is what may apply a dependency fix
-2. **Auto, with pages** - Dependency findings do not wait for a human "fix it": after the report, survivors are auto-fixed (e.g. a version bump re-checked with `npm audit`) and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
+2. **Audit, then auto-fix, with pages** - Dependency findings are audited before the report per M2 in `.claude/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They do not then wait for a human "fix it": after the report, survivors are auto-fixed (e.g. a version bump re-checked with `npm audit`) and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
 3. **Explain simply** - Use plain English, avoid jargon
 
 </rules>
@@ -60,6 +60,14 @@ Be thorough but concise.
 ## Finding IDs
 
 !`cat .claude/skills/shared/finding-id-system.md`
+
+## Audit Before the Report (M2)
+
+You are M2's **runner**: audit your own findings before writing the report, then report survivors only, with an Audited out log for the kills. Run every receipt yourself, and dispatch the skeptic tiers to fresh subagents rather than judging your own findings.
+
+Do not improvise a lighter version. A direct run is a deliberate focused check, not a cheaper one, and the Audited out section in the format below is only honest if an audit actually ran. M2 is inlined here rather than cited by path because a pointer to a procedure you cannot read is not an instruction.
+
+!`cat .claude/skills/shared/hitl-loop.md`
 
 ## Output Format
 
