@@ -1,5 +1,16 @@
 # Severity Anchors
 
+## What Severity Decides
+
+Severity is a routing label, not a ranking of how much you care. Four things read it:
+
+- **The M2 audit tier** - a Block gets three independent skeptics, a Warn or Suggest gets one. Over-calling a Block costs two extra subagents on every run that carries it.
+- **The Overall Verdict line** - any surviving Block makes the report `changes-requested`.
+- **The R-ID order** - findings are numbered Blocks first, then Warns, then Suggests.
+- **The readability backstop** - past 7 findings, the 5 highest-severity ones lead the report in full.
+
+Severity does **not** decide whether a human is interrupted. Paging is governed by M1 in `.claude/skills/shared/hitl-loop.md`, which routes on where the answer lives - facts only the user holds, a reversal of deliberate intent, a hard stop - and deliberately ignores severity, because a self-assigned label is unreliable in both directions. Do not reach for a higher level to get someone's attention: it will not, and it will cost the run two extra skeptics.
+
 ## Skip These Entirely
 
 Before assigning severity, decide whether the finding is worth reporting at all.
@@ -31,6 +42,17 @@ These categories have minimum severity floors - never downgrade them:
 - Data loss or irreversible user harm without safeguards = always at least **Warn**
 - Accessibility failures blocking keyboard/screen-reader on primary tasks = always at least **Warn**
 - Committed requirements plainly unmet = always at least **Warn**
+
+## Calibrate to the Project
+
+The same defect does not carry the same weight everywhere. Before assigning a level, decide which of these you are looking at, and adjust once:
+
+- **Solo or local tool** - a personal script, a toolkit run from one machine, a prototype whose only user is its author. The blast radius is one person who can undo anything. Scale-and-hardening findings (no rate limiting, no retry budget, no audit trail, a single point of failure, missing observability) land a level lower than instinct suggests, and often fail the Skip rule outright.
+- **Production service** - real users, real data, a deploy other people depend on. The same findings land where instinct suggests or higher, because nobody is standing next to the failure when it happens.
+
+Judge this from what is actually in front of you - a deploy config, an auth layer, a database holding real records, a README describing users - not from how polished the code looks. A well-built local tool is still a local tool.
+
+**The Universal Anchors above are floors and survive this adjustment.** An exposed secret in a solo tool is still at least a Warn: the secret leaks the same way regardless of who runs the script. Project context moves the ceiling, never the floor.
 
 ## Domain-Specific Weighting
 
@@ -81,3 +103,23 @@ These categories have minimum severity floors - never downgrade them:
 - Reader cannot determine what the content is, who it is for, or what an action means before a consequential action = lean toward **Block**
 - Understanding is possible but delayed, jargon-heavy, or unnecessarily effortful = lean toward **Warn**
 - Wording or structure could be improved but core orientation is intact = lean toward **Suggest**
+
+## Boundary Examples
+
+Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `output-template.md` by finding R4; the two below cover the rest and continue that numbering, since both fragments are inlined into the same review context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
+
+### Block vs Warn
+
+- **R5** 🚫 `api/export.ts:64` - CSV export buffers every row in memory before writing, and this change removed the row cap that used to bound it
+  - **Why it matters:** An export large enough to exhaust the process heap takes the whole server down, not just the one request that triggered it
+  - **Example:** The first account with 200k records clicks Export, the Node process runs out of memory, and every other user on that instance gets a dropped connection until it restarts
+  - **Suggested fix:** Stream rows to the response as they are read, or restore a cap with a clear message when a request exceeds it
+  - *Boundary note (for the reviewer):* This is a **Block**, not a Warn, on three counts: the failure is reachable through a normal user action on data that already exists, it harms users other than the one who triggered it, and there is no workaround available to them. Drop any one of those and it becomes a **Warn** - if the crash were confined to the requesting user's own session, or if it needed a record count no account in the system currently has, it is a real risk that has not yet become a certainty.
+
+### Warn vs Suggest
+
+- **R6** ⚠️ `settings/ProfileForm.tsx:112` - Save failures are swallowed: the catch block logs to the console and the form clears as though the save succeeded
+  - **Why it matters:** The user is actively told the wrong thing, so they walk away believing a change was saved when it was not
+  - **Example:** Someone updates the email address their alerts go to, watches the form clear, and stops receiving alerts for a week before working out why
+  - **Suggested fix:** Surface the failure in the form - keep the entered values, say what failed, and let them retry
+  - *Boundary note (for the reviewer):* This is a **Warn**, not a Suggest, because the user is misinformed and loses input they already typed. That is user frustration with a concrete cost, not polish. It would be a **Suggest** if the failure were already visible - say the form showed a generic "Something went wrong" and kept the values, and the finding were only that the message could name the offending field. A working message that could be better is a Suggest; a message that never appears at all is a Warn.
