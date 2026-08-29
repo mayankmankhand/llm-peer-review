@@ -181,7 +181,7 @@ If they return different values, you are in a worktree. If they match, you are i
 Once you're satisfied with the problem definition, shift to technical exploration.
 
 **If in vision mode:** Phase 2 is optional. Ask the user:
-> "Want me to look at how this connects to the existing codebase, or are we ready for `/create-plan`?"
+> "Want me to look at how this connects to the existing codebase, or should we wrap up here?"
 
 If they say skip, present a vision-mode closing summary before suggesting `/create-plan`:
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/create-plan`'s Goal State section.
@@ -195,7 +195,7 @@ If they say skip, present a vision-mode closing summary before suggesting `/crea
     The helper computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path. This persisted file is the canonical record of the exploration. Open it: `bash .claude/scripts/open-artifact.sh "<printed-path>"`.
   - **Offer an optional playground** - ask "Want this interactive? (drag, toggle, slider)". If yes, dispatch the `playground` skill for a *separate, throwaway* interactive version in `/tmp/` (export-loop only). The playground is disposable; the `artifacts/html/` record above stays canonical.
   - **Detecting a playground reply** - if the user's message starts with `Playground result`, treat the rest as structured state (selection, drag order, slider values, toggle states) and feed it into the closing summary. Otherwise treat the reply as natural-language decision input. `/explore` never modifies the playground output - the export loop is the only path back.
-- **Suggested next step** - "Ready for `/create-plan` when you are"
+- **Chain check (M14)** - the vision-mode gate is countable: chain into `/create-plan` only when the scope dial landed on `Hold` or `Reduce` AND the **Open questions** field above is empty. On `Expand`, or with any open question left, say which condition failed and stay in the conversation. When both hold, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool.
 
 If they say yes, continue with the analysis below.
 
@@ -225,11 +225,13 @@ After the codebase map, use the lesson index from the session-init JSON (`lesson
 - You can explain the approach clearly
 
 ### What to present
-Give the user a brief summary of what you found before moving to `/create-plan`:
+Give the user a brief summary of what you found:
 - Key files involved
 - How the feature integrates
 - Any technical concerns or trade-offs
 - Remaining questions (if any)
+
+**Chain check (M14).** The scoping-mode gate is countable: chain into `/create-plan` only when **Remaining questions** above is empty. If any question remains, ask it and stay in the conversation - an unanswered question is the cheapest thing to fix here and the most expensive to fix after a plan is built on it. When the field is empty, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool.
 
 #### Optional: ASCII diagrams
 Include diagrams as part of your summary above when the feature involves flows, data paths, or multi-step processes. Each arrow is a place where things can break - that's the point. In vision mode, diagrams are especially useful for grounding abstract ideas - but keep them high-level to match the conversation.
