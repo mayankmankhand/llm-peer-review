@@ -75,7 +75,7 @@ The inline path continues into the same auto loop after the report (see "After t
 
 For each selected specialist:
 
-1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, do-not-report list, output template, and reading budget - but NOT `html-render-review.md` and NOT the skill's "Audit Before the Report (M2)" section with its inlined `hitl-loop.md`: rendering HTML and running the audit are both the orchestrator's job. Those two sections exist for the skill's DIRECT invocation path, where the skill is itself M2's runner; here you are, so a dispatched specialist needs neither. Also note the specialist's **expert role** from its Staff Check section (the Staff Check Variants table in the output template lists each: Staff Engineer for code, Staff Security Engineer for security, Staff Designer for ux, etc.) - you pass this to the subagent as a review lens (see the template below).
+1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, do-not-report list, output template, and reading budget - but NOT `html-render-review.md` and NOT the skill's "Audit Before the Report (M2)" section with its inlined `hitl-loop.md`: rendering HTML and running the audit are both the orchestrator's job. Those two sections exist for the skill's DIRECT invocation path, where the skill is itself M2's runner. On this path you are the runner, so a dispatched specialist needs neither. Also note the specialist's **expert role** from its Staff Check section (the Staff Check Variants table in the output template lists each: Staff Engineer for code, Staff Security Engineer for security, Staff Designer for ux, etc.) - you pass this to the subagent as a review lens (see the template below).
 2. Also read `.claude/skills/project-context/SKILL.md` and follow its instructions to gather project context
 3. Read the changed files once, here, so each subagent receives the relevant excerpts instead of re-opening every file (paste-don't-read)
 4. Spawn a subagent using the Agent tool with the prompt template below: the skill's review criteria, the project context summary, and the pre-read file excerpts
@@ -140,7 +140,7 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 
 ### Phase 5: Report
 
-1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and the receipt renders as a final **Receipt:** sub-bullet (the check plus what its output showed). Killed findings render one line each in the Audited out section.
+1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
 2. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written.
 
 </procedure>
