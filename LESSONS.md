@@ -138,3 +138,9 @@
 
 - **A sweep's receipt is its grep patterns and their output, not the word "clean".**
 - **Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.**
+
+### Severity rubric + audit-aware direct runs (issues #150, #151)
+
+- **A "nothing defines X" finding must first refute the generic rule that already covers X.**
+- **Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.**
+- **A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.**
