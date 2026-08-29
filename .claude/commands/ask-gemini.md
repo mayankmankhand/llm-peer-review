@@ -195,7 +195,7 @@ Pass `--name debate-gemini` to the helper.
 
 <rules>
 
-After the summary is presented, the Recommended Actions enter the auto loop. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13); follow them as written there.
+After the summary is presented, the Recommended Actions enter the auto loop. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M14); follow them as written there.
 
 For each Recommended Action, in R-ID order:
 
