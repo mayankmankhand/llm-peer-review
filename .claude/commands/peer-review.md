@@ -59,7 +59,7 @@ Prioritized list of confirmed real problems, ordered by severity. This is the or
 
 ## After the Evaluation
 
-The evaluation above is itself the audit step of the auto loop; keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13). Once the verdicts are in:
+The evaluation above is itself the audit step of the auto loop (M2's skeptical lens applied to external feedback); keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13). Once the verdicts are in:
 
 - **Dismissed** findings go to the log with their evidence. They are never fixed.
 - **Confirmed - opinion, not a bug** findings go to the digest as observations, not fixes.
