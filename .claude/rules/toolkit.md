@@ -30,9 +30,9 @@ We follow this flow for features. You type the steps marked **(you)**; the rest 
 2. `/create-plan` - *chains from `/explore` once the conversation converges* - Create a step-by-step plan with status tracking, then stop for approval
 3. `/execute` - **(you: approve the plan)** Build it, updating the plan as we go
 4. `/review` - *chains from `/execute` on a clean finish* - it finds issues, dedups them, audits them (M2), auto-fixes the survivors, re-verifies, and exits each finding as page, digest, or log - see command table below. Use a specific `/review-*` command instead when you know which lens you need
-5. `/ask-gpt` or `/ask-gemini` - **(you)** Get a second opinion via multi-model debate (human-triggered and never chained into; its Recommended Actions are then auto-processed through the same loop)
-6. `/peer-review` - **(you)** Auto audit step (M2) - evaluate debate findings against the codebase (paste results here)
-7. `/document` - *chains from `/review` once the loop settles* - Update documentation
+5. `/document` - *chains from `/review` once the loop settles* - Update documentation
+
+**Not steps in the chain.** `/ask-gpt`, `/ask-gemini`, and `/peer-review` are human-triggered and never chained into (M14). Because `/review` hands off to `/document` directly, there is no pause between them in which to type one. To get that window: say "no chaining" on the run that reaches `/review`, run the debate, then type `/document` yourself. Their Recommended Actions are auto-processed through the same loop once you do.
 
 The lessons captured at `/document` are read back at the start of the next `/explore`, `/create-plan`, `/execute`, and `/pair-debug` - that feedback loop is what keeps the toolkit from repeating mistakes.
 

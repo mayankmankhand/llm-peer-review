@@ -85,7 +85,7 @@ After completing each step, update the plan file:
 
 ## Chain Into /review (M14)
 
-On a clean finish - every step green, the plan at 100%, each logical unit checkpoint-committed (M4) - announce the handoff in one line ("Execution complete - chaining into `/review` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool.
+On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool.
 
 **Do not chain** when either brake is engaged:
 

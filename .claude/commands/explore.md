@@ -183,7 +183,7 @@ Once you're satisfied with the problem definition, shift to technical exploratio
 **If in vision mode:** Phase 2 is optional. Ask the user:
 > "Want me to look at how this connects to the existing codebase, or should we wrap up here?"
 
-If they say skip, present a vision-mode closing summary before suggesting `/create-plan`:
+If they say skip, present a vision-mode closing summary:
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/create-plan`'s Goal State section.
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
 - **Open questions** - anything unresolved that `/create-plan` should address during execution
@@ -195,7 +195,7 @@ If they say skip, present a vision-mode closing summary before suggesting `/crea
     The helper computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path. This persisted file is the canonical record of the exploration. Open it: `bash .claude/scripts/open-artifact.sh "<printed-path>"`.
   - **Offer an optional playground** - ask "Want this interactive? (drag, toggle, slider)". If yes, dispatch the `playground` skill for a *separate, throwaway* interactive version in `/tmp/` (export-loop only). The playground is disposable; the `artifacts/html/` record above stays canonical.
   - **Detecting a playground reply** - if the user's message starts with `Playground result`, treat the rest as structured state (selection, drag order, slider values, toggle states) and feed it into the closing summary. Otherwise treat the reply as natural-language decision input. `/explore` never modifies the playground output - the export loop is the only path back.
-- **Chain check (M14)** - the vision-mode gate is countable: chain into `/create-plan` only when the scope dial landed on `Hold` or `Reduce` AND the **Open questions** field above is empty. On `Expand`, or with any open question left, say which condition failed and stay in the conversation. When both hold, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool.
+- **Chain check (M14)** - M14 is authoritative for the conditions; this is its vision-mode form. Chain into `/create-plan` only when the **Open questions** field above is empty AND the scope dial landed on `Hold` or `Reduce`. **If the dial was never offered** (Phase 1 offers it only once a direction emerges, so a short session may never reach it): treat a summary naming exactly one direction as `Hold`; if it names more than one, offer the dial now and wait. When the gate passes, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool. When it does not, say which condition failed, then name the two ways forward: answer the open question, or say "plan it anyway" to go to `/create-plan` regardless. Never end an exploration without a next step.
 
 If they say yes, continue with the analysis below.
 
@@ -231,7 +231,12 @@ Give the user a brief summary of what you found:
 - Any technical concerns or trade-offs
 - Remaining questions (if any)
 
-**Chain check (M14).** The scoping-mode gate is countable: chain into `/create-plan` only when **Remaining questions** above is empty. If any question remains, ask it and stay in the conversation - an unanswered question is the cheapest thing to fix here and the most expensive to fix after a plan is built on it. When the field is empty, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool.
+**Chain check (M14).** **Read the mode first, then apply its gate.** A vision-mode run that accepted Phase 2 arrives here too, and the mode is sticky (see Mode Detection), so this check serves both modes:
+
+- **Scoping mode:** chain when **Remaining questions** above is empty.
+- **Vision mode:** chain when **Remaining questions** above is empty AND the scope dial landed on `Hold` or `Reduce`, using the same never-offered handling as the vision-mode chain check earlier in this file.
+
+An unanswered question is the cheapest thing to fix here and the most expensive to fix after a plan is built on it. When the gate passes, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool. When it does not, say which condition failed, ask the outstanding question, and name the next step: answer it, or say "plan it anyway" to go to `/create-plan` regardless.
 
 #### Optional: ASCII diagrams
 Include diagrams as part of your summary above when the feature involves flows, data paths, or multi-step processes. Each arrow is a place where things can break - that's the point. In vision mode, diagrams are especially useful for grounding abstract ideas - but keep them high-level to match the conversation.
