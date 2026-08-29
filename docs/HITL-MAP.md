@@ -4,24 +4,29 @@
 
 **Status:** settles #146. Implemented by #147, which rewrites the 17 files carrying report-only language to match this map. Two sequencing facts before starting #147: it is itself contingent on the #144 architecture answer, and the M2 audit pipeline is built as its own separate issue, not by #147 (both detailed under Scoped-out follow-ups below). This document touches no prompt files itself. Decided 2026-08-28 through an `/explore` session on #146; the evidence behind every verdict is in the appendix.
 
-**How to read it:** the verdict table gives each command a one-line verdict and reason. The numbered rules (M1 to M13) are the shared mechanics the verdicts rely on; #147 should cite rule IDs when rewriting files. Three exit words recur throughout: a **page** interrupts the human now; a **digest** is auto-handled work with receipts attached, read at leisure; a **log** records dropped non-issues, never fixed and never surfaced unless asked. Evidence sources are cited as E1 (downstream mining), E2 (external retrospective), E3 (published research).
+**Amended 2026-08-29 (stage chaining, M14):** the original verdict table answered "who decides the outcome" but never separately answered "who types the command", so every stage transition silently stayed a human keystroke. M14 closes that gap: `/create-plan`, `/review`, and `/document` are now invoked automatically, and M9's outward-send clause is narrowed so a chained `/document` may open a PR. Plan approval remains the cycle's one gate. The original verdicts and all evidence below are unchanged; only the trigger column and the two rules named here were amended.
+
+**How to read it:** the verdict table gives each command a one-line verdict and reason. The numbered rules (M1 to M14) are the shared mechanics the verdicts rely on; #147 should cite rule IDs when rewriting files. Three exit words recur throughout: a **page** interrupts the human now; a **digest** is auto-handled work with receipts attached, read at leisure; a **log** records dropped non-issues, never fixed and never surfaced unless asked. Evidence sources are cited as E1 (downstream mining), E2 (external retrospective), E3 (published research).
 
 ---
 
 ## The loop at a glance
 
 ```
-Human:    /explore -> approve the plan
+Human:    /explore
+Machine:  /create-plan (chains once the conversation converges, M14)
+Human:    approve the plan                       <- the cycle's one gate
 Machine:  /execute
           /review: specialists -> dedup -> audit (M2) -> drop non-issues
                    -> auto-fix survivors -> re-verify (M3, M6)
                       green -> digest with receipts (M8)
                       red after 2 rounds -> revert to last green -> page (M5)
           /document (receipts, M8) -> commit per logical unit
-          -> pre-push tripwire (M11) -> push
+          -> pre-push tripwire (M11) -> push -> PR
           -> /index if 10+ commits behind (M12)
 Human:    pages only (M1): outside-the-repo facts, intent reversals,
           tripwire hits, exhausted fix rounds
+Chaining: automatic per M14; "no chaining" runs one stage and stops
 Opt-out:  "report only" on any run restores today's behavior for that run (M10)
 ```
 
@@ -32,14 +37,16 @@ Opt-out:  "report only" on any run restores today's behavior for that run (M10)
 | Stage | Verdict | Reason |
 |---|---|---|
 | `/explore` | **Human** | The conversation is the product. Scoping and vision decisions depend on goals, constraints, and domain facts that live only with the user (E2: every escaped-defect class traces to outside-the-repo facts). |
-| `/create-plan` | **Human approves** | Plan approval is the release lever for the whole cycle: the cheapest point to catch a wrong direction (E1: plan-stage debates caught rework before it was built; E3: plan-then-apply pattern). Everything downstream executes an approved plan. |
-| `/execute` | **Auto** | Mechanical implementation of an approved plan. Bounded retries already exist; checkpoint commits (M4) make any step reversible. A blocker the run cannot resolve within its retry bound stops it, which is a page (M1 hard-stop list). |
-| `/review` and the `/review-*` family | **Auto, with pages** | Sampled findings are roughly half noise (E1: ~53% real across 348 findings; E3: published precision can be below 10%). Auditing, fixing, and verifying are mechanical (M2, M3). A human reading raw findings audits noise a machine filters better (E2: 5-55% of raw findings die on one skeptical pass). Pages fire only per M1. |
-| `/ask-gpt`, `/ask-gemini` | **Human-triggered, auto-processed** | Running a debate stays a deliberate, costly choice. Its Recommended Actions then enter the same audit pipeline as review findings (M2), because external recommendations systematically over-engineer (E1: rejected-as-over-engineering appears across projects) and cross-model agreement is weaker than it feels (E3: correlated failures). |
+| `/create-plan` | **Auto-invoked, human approves** | M14 chains into it once the conversation converges; the approval, not the typing, is the gate. Plan approval is the release lever for the whole cycle: the cheapest point to catch a wrong direction (E1: plan-stage debates caught rework before it was built; E3: plan-then-apply pattern). Everything downstream executes an approved plan. |
+| `/execute` | **Auto, human-triggered by the plan approval** | Never chained into (M14): saying "go" on the plan is what starts it. Mechanical implementation of an approved plan. Bounded retries already exist; checkpoint commits (M4) make any step reversible. A blocker the run cannot resolve within its retry bound stops it, which is a page (M1 hard-stop list). |
+| `/review` and the `/review-*` family | **Auto, chained, with pages** | Sampled findings are roughly half noise (E1: ~53% real across 348 findings; E3: published precision can be below 10%). Auditing, fixing, and verifying are mechanical (M2, M3). A human reading raw findings audits noise a machine filters better (E2: 5-55% of raw findings die on one skeptical pass). Pages fire only per M1. |
+| `/ask-gpt`, `/ask-gemini` | **Human-triggered, never chained into, auto-processed** | Running a debate stays a deliberate, costly choice. Its Recommended Actions then enter the same audit pipeline as review findings (M2), because external recommendations systematically over-engineer (E1: rejected-as-over-engineering appears across projects) and cross-model agreement is weaker than it feels (E3: correlated failures). |
 | `/peer-review` | **Auto** | It is itself an audit step: evaluating external feedback against the codebase. The human filtering it used to require is exactly what M2 mechanizes; page criterion M1 still applies to what survives. |
-| `/document` | **Auto, receipts required** | Documentation updates are mechanical, but generated bookkeeping drifts from reality (E1: plans marked done for unbuilt work in 5 projects). Every claim of work done carries a receipt (M8). Commit and push run per M4 and M11. |
+| `/document` | **Auto, chained, receipts required** | Documentation updates are mechanical, but generated bookkeeping drifts from reality (E1: plans marked done for unbuilt work in 5 projects). Every claim of work done carries a receipt (M8). Commit and push run per M4 and M11. |
 | `/index` | **Auto, conditional** | Pure generation from the codebase. Runs when `CODEBASE_MAP.md` is 10+ commits behind (M12); skipped otherwise. |
 | `/pair-debug` | **Human** | Debugging is interactive by nature: the bug report, reproduction knowledge, and "that is not what I saw" judgment live with the user. Investigation stays a conversation; fixes that come out of it flow through M3 and M6. |
+
+**Trigger is not the same as gate.** A verdict of **Human** means a human changes the outcome at that stage, not that a human must type the command. The two were fused in the original table, which is why every transition stayed manual even after #147 made the loop auto. M14 separates them: `/explore` and `/pair-debug` are typed, plan approval is the gate, and everything else chains.
 
 ---
 
@@ -84,7 +91,7 @@ Before applying a fix, check whether it would restore or undo something the git 
 Digests and documentation state what ran and show the evidence: the command and its output, the count delta, the diff stat. "All N fixed" without receipts is the failure mode, not the report (E1: generated status records drifted from reality in 5 projects). A doubt closed as "deliberate" carries a pointer to where the human actually decided it; otherwise it stays open (E2: a plausible rationale converted an open question into false certainty that survived several passes).
 
 **M9. Always-ask actions.**
-These stop the loop no matter which stage reaches them: releases and version bumps, edits to prompt files (this toolkit repo's own command, skill, and rules files, and their copies in downstream projects alike), deletions of user data, outward-facing sends (anything leaving the machine for a human audience), force pushes. This list is short on purpose: rare gates stay meaningful (E3: the vigilance trap).
+These stop the loop no matter which stage reaches them: releases and version bumps, edits to prompt files (this toolkit repo's own command, skill, and rules files, and their copies in downstream projects alike), deletions of user data, outward-facing sends (anything leaving the machine for a human audience, except a pull request opened by `/document` at the end of a chained cycle - its plan was human-approved and its push already cleared M11), force pushes. This list is short on purpose: rare gates stay meaningful (E3: the vigilance trap).
 
 **M10. Opt-out is per-run only.**
 Saying "report only" on any invocation restores report-first behavior for that run. The next run is auto again. There is no sticky mode: persistent modes drift silently and get forgotten (E1: automation infrastructure drifting with no failure signal).
@@ -94,6 +101,9 @@ Push runs automatically after a pre-push check, hardened into a script by #149 (
 
 **M12. `/index` refresh trigger.**
 `/index` runs automatically when `CODEBASE_MAP.md` is 10 or more commits behind HEAD, and is skipped otherwise. Single-commit drift is noise.
+
+**M14. Stage chaining.**
+Stages hand off automatically; only `/explore` is typed and only the plan is approved. Four transitions, each with a brake: `/explore` -> `/create-plan` on a countable convergence check (scoping: "Remaining questions" empty; vision: dial on `Hold`/`Reduce` and "Open questions" empty), `/create-plan` -> stop for approval, `/execute` -> `/review` on a clean finish, `/review` -> `/document` once the loop settles. Debates are never chained into. The per-run opt-out is "no chaining", deliberately distinct from M10's "report only": one governs whether the next stage fires, the other whether findings are auto-fixed (E1: automation infrastructure drifting with no failure signal; the #147 finding that call sites paraphrase an underspecified rule into different behaviors on day one).
 
 **M13. Scope of the rewrite.**
 This map governs the toolkit's rules files and skills (the 17 files in #147). The user-level `~/CLAUDE.md` outside this repo stays conservative: projects without the toolkit's audit-and-verify machinery keep report-first. Toolkit projects get the new behavior through the toolkit's own rules files, delivered by the normal update path.
@@ -107,7 +117,8 @@ This map governs the toolkit's rules files and skills (the 17 files in #147). Th
 | What does automatic mean when a fix fails? | M5: two rounds, revert to last green, page. Never a third attempt. |
 | Does the re-verify protocol survive when nobody approved the fix? | Yes, strengthened: M3 (independence) and M6 (claim-level sweep) apply to every auto-fix. |
 | What does `/review` do now that it can write? | Audit (M2), fix survivors, re-verify (M3, M6), then page/digest/log per M1. Non-issues are dropped, never fixed. |
-| Is the opt-out per-run or sticky? | Per-run only (M10). |
+| Is the opt-out per-run or sticky? | Per-run only (M10), and "no chaining" (M14) is per-run too. |
+| Does a **Human** verdict mean a human must type the command? | No. M14 separates the trigger from the gate: only `/explore` and `/pair-debug` are typed. |
 | Does the user-level `CLAUDE.md` outside this repo change too? | No. It stays conservative; toolkit rules carry the change (M13). |
 
 ---
