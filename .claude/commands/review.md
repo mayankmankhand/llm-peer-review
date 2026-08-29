@@ -75,7 +75,7 @@ The inline path continues into the same auto loop after the report (see "After t
 
 For each selected specialist:
 
-1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, do-not-report list, output template, and reading budget - but NOT `html-render-review.md`: rendering HTML is the orchestrator's job, so a dispatched specialist never needs it. Also note the specialist's **expert role** from its Staff Check section (the Staff Check Variants table in the output template lists each: Staff Engineer for code, Staff Security Engineer for security, Staff Designer for ux, etc.) - you pass this to the subagent as a review lens (see the template below).
+1. Read the specialist's SKILL.md for its **review criteria** (subagents cannot discover skills on their own). Resolve the shared review blocks it inlines once - severity anchors, finding-id system, do-not-report list, output template, and reading budget - but NOT `html-render-review.md` and NOT the skill's "Audit Before the Report (M2)" section with its inlined `hitl-loop.md`: rendering HTML and running the audit are both the orchestrator's job. Those two sections exist for the skill's DIRECT invocation path, where the skill is itself M2's runner; here you are, so a dispatched specialist needs neither. Also note the specialist's **expert role** from its Staff Check section (the Staff Check Variants table in the output template lists each: Staff Engineer for code, Staff Security Engineer for security, Staff Designer for ux, etc.) - you pass this to the subagent as a review lens (see the template below).
 2. Also read `.claude/skills/project-context/SKILL.md` and follow its instructions to gather project context
 3. Read the changed files once, here, so each subagent receives the relevant excerpts instead of re-opening every file (paste-don't-read)
 4. Spawn a subagent using the Agent tool with the prompt template below: the skill's review criteria, the project context summary, and the pre-read file excerpts
@@ -86,7 +86,7 @@ For each selected specialist:
 ```
 You are a [PASTE THE SPECIALIST'S EXPERT ROLE, e.g. "Staff Engineer" for code, "Staff Security Engineer" for security, "Staff Designer" for ux - from the skill's Staff Check section / the Staff Check Variants table]. Review through that expert lens. Follow these instructions exactly:
 
-[PASTE THE SKILL'S REVIEW CRITERIA: its "How to Review" body plus the severity anchors, finding-id system, do-not-report list, output template, and reading budget it inlines. SKIP the skill's "HTML Companion" / html-render-review content - as a dispatched subagent you never render HTML.]
+[PASTE THE SKILL'S REVIEW CRITERIA: its "How to Review" body plus the severity anchors, finding-id system, do-not-report list, output template, and reading budget it inlines. SKIP the skill's "HTML Companion" / html-render-review content AND its "Audit Before the Report (M2)" section with the inlined hitl-loop.md - as a dispatched subagent you never render HTML and never audit.]
 
 Review lens (do this first): Before hunting line-level issues, make a one-line design-level judgment through your expert role above - is the overall approach of this change sound? If it is NOT, that is your highest-severity finding; emit it first (as a `what` describing the design problem). Only then look for the specific issues your criteria call out. The lens shapes what you flag and its priority; it does not change the output format.
 
@@ -96,7 +96,7 @@ Project context:
 Files to review (excerpts already read for you):
 [PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
 
-Important (dispatched-subagent contract): You are a single-pass subagent. Do NOT spawn sub-agents - the Agent tool is unavailable to you, so any "run N sub-agents in parallel" instruction in the skill above is for direct invocation only and does not apply to you. Do NOT generate an HTML companion file and do NOT write a prose markdown report. Output your findings as JSONL per "Dispatched findings format" below (or the literal NO FINDINGS). The output template above still governs *what* each finding contains - the 4 fields, the skip rule, the receipt rule, severity, the quality bar in its examples - just serialize each finding as JSON, not markdown bullets. The report-level SECTIONS (Top Issues, Overall Verdict, Looks Good, Summary, and the written Staff Check section) are the orchestrator's job, not yours - but you DO review through the expert lens above and surface a design-level finding when the approach is unsound.
+Important (dispatched-subagent contract): You are a single-pass subagent. Do NOT spawn sub-agents - the Agent tool is unavailable to you, so any "run N sub-agents in parallel" instruction in the skill above is for direct invocation only and does not apply to you. Do NOT generate an HTML companion file and do NOT write a prose markdown report. Output your findings as JSONL per "Dispatched findings format" below (or the literal NO FINDINGS). The output template above still governs *what* each finding contains - the 4 fields, the skip rule, the receipt rule, severity, the quality bar in its examples - just serialize each finding as JSON, not markdown bullets. Do NOT audit your own findings: the orchestrator runs the M2 audit after dedup, and a finding audited by the agent that produced it is not audited at all. Author each finding's `receipt` (the check plus what its output must show) and stop there - running the check and rendering the resulting **Receipt** row are the orchestrator's steps. The report-level SECTIONS (Top Issues, Overall Verdict, Looks Good, Audited out, Summary, and the written Staff Check section) are the orchestrator's job, not yours - but you DO review through the expert lens above and surface a design-level finding when the approach is unsound.
 ```
 
 **Dispatched findings format (JSONL).** A dispatched specialist does NOT write a prose report. It emits its findings as JSONL - one JSON object per line - or the single literal line `NO FINDINGS` if it found nothing. The orchestrator parses these, dedups them, assigns IDs, and derives both the markdown report and the HTML from this one structure: findings are authored once and formatted twice, never re-written.
@@ -129,15 +129,14 @@ Collect the JSONL findings from all subagents (a specialist that emitted `NO FIN
 
 ### Phase 4: Audit (M2)
 
-The three-tier audit defined by M2 in `.claude/skills/shared/hitl-loop.md` runs here, between dedup and the report. Use M2's verdict formats exactly - one verdict line per finding ID per tier. Killed findings exit to the Audited out log (never fixed); survivors proceed to Phase 5 with receipts attached.
+The three-tier audit runs here, between dedup and the report: the orchestrator is M2's *runner*. M2 in `.claude/skills/shared/hitl-loop.md` (inlined under "After the Report") holds every mechanic - the tiers and what each covers, the skeptic instruction, the verdict formats, dispatch hygiene, the concurrency note, and the redispatch-on-failure rule. Do not restate them here and do not improvise a variant.
 
-1. **Tier 1 - run every receipt.** Execute each finding's `receipt.check` yourself (they are read-only greps, file reads, or tests). Compare the output against `receipt.expect`. No match, or no `receipt` field at all: `RN: RECEIPT FAILED` - the finding is killed.
-2. **Tier 2 - one skeptical pass (Warns and Suggests).** Dispatch ONE fresh subagent carrying every surviving Warn and Suggest as verbatim bytes - the original JSONL lines plus each receipt's actual output, never a paraphrase (M2 dispatch hygiene). Instruct it: "Try to refute each finding using its receipt output. The default prior is rejection: when in doubt, refute. Return exactly one line per ID - `RN: REFUTED` or `RN: STANDS` - plus one line of reasoning each."
-3. **Tier 3 - three-vote refute (Blocks).** Dispatch THREE independent skeptic subagents in parallel (they fit the 4-subagent cap), each carrying the surviving Blocks as verbatim bytes plus receipt outputs, with the same refute instruction. Each returns one vote line per Block ID. Two or more refute a Block: `RN: REFUTED 2/3` (or `3/3`) - killed. Otherwise `RN: STANDS`. Blocks skip tier 2: the vote replaces the single pass, so no lone skeptic can kill a Block.
+Two things are specific to this path:
 
-**If an audit subagent fails** (error, timeout, or malformed verdict lines): redispatch it once. Still failing: tier 2 survivors proceed to the report marked `unaudited` next to their Receipt line; a tier 3 vote left with two valid ballots kills the Block only when both refute - a majority of the dispatched three is never assumed.
+- **The bytes are JSONL.** A finding's `receipt.check` is its tier 1 command and `receipt.expect` is the line the output must satisfy. A merged finding carries every source receipt and stands if at least one check passes (Phase 3). What tiers 2 and 3 receive is the original JSONL lines plus each receipt's actual output.
+- **The inline path is not exempt.** When Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh subagents. M2's never-judge-your-own-findings rule applies here exactly as it does to dispatched specialists.
 
-**Inline-path note:** when Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh subagents - audit independence is the point, so the inline path never audits its own findings itself.
+Killed findings exit to the Audited out log (never fixed); survivors proceed to Phase 5 with receipts attached.
 
 ### Phase 5: Report
 
@@ -173,43 +172,26 @@ The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line -
 
 **Suppress the inlined Summary block.** The shared template inside `<shared_template>` includes its own `### Summary` block. Do NOT render it. Use only the orchestrator-specific Summary below (which adds Specialists run and Deduplicated findings). Otherwise the report ends with two Summary blocks and the reader cannot tell which is authoritative.
 
-**Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. Use this field order in the merged finding:
+**Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. The merged finding uses the browser field order from the template, unchanged.
 
-`What -> Why it matters -> Example -> Screenshot -> Evidence -> Expected -> Actual -> Suggested fix -> Receipt`
+The tag is the only thing this section adds to a finding. Every field row - the 4 authored fields, the browser evidence fields, and the audit-time **Receipt** row - is defined by the inlined template and rendered from there:
 
-Example findings with tags applied:
-
-- **R1** [code] 🚫 `file:line` - [What: the issue in plain English]
-  - **Why it matters:** [The harm or risk this creates]
-  - **Example:** [Real-world impact]
-  - **Suggested fix:** [The approach]
-  - **Receipt:** [The check that was run and what its output showed]
+- **R1** [code] 🚫 `file:line` - [What]
+  - [field rows per the template, **Receipt** last]
 
 - **R3** [code, browser] ⚠️ `file:line` - [Issue flagged by both code and browser specialists]
-  - **Why it matters:** [The harm or risk this creates]
-  - **Example:** [Real-world impact]
-  - **Screenshot:** [Path]
-  - **Evidence:** [Console errors, failed API calls, or text output]
-  - **Expected:** [What should happen]
-  - **Actual:** [What actually happens]
-  - **Suggested fix:** [The approach]
+  - [browser field rows per the template, **Receipt** last]
 
 ### Overall Verdict, readability, and the security nudge (orchestrator)
 
-The inlined template defines an **Overall Verdict** line, a **readability backstop**, and the receipt rule. Apply them across the merged run:
+The inlined template defines the **Overall Verdict** line, the **readability backstop**, and the receipt rule. Apply each across the merged run rather than per specialist. Two things are specific to this path:
 
-- **Overall Verdict** leads the report (before Top Issues). Compute it from the audit survivors: any Block -> `changes-requested`; no Blocks but one or more Warn/Suggest -> `approve-with-nits`; nothing -> `approve`. One line, plain reason.
-- **Readability backstop:** when the surviving findings exceed 7, show the 5 highest-severity in full and list the rest one line each under `### More findings`. Nothing is dropped - only demoted - so the headline risks are not buried.
+- **Compute the Verdict from the audit survivors**, not from everything the specialists reported. A Block the Phase 4 audit killed does not make the run `changes-requested`; the same goes for the readability backstop's count.
 - **Security escalation nudge:** if the changed files touch a genuine trust boundary - a new route/endpoint, file upload, or webhook; authentication logic; crypto; or secret handling - append one line after the report: _"Consider `/security-audit`: this change touches [X], which deserves a deeper whole-repo pass."_ Only when a trigger is genuinely present; the Security specialist also emits this when called directly.
 
 ### Audited out (log exit)
 
-After the findings (and `### More findings`, when present), list every finding the Phase 4 audit killed - one line each, with its M2 verdict and a short evidence clause:
-
-- **R7** [code] `RECEIPT FAILED` - [What] (check output did not show the claim)
-- **R9** [ux] `REFUTED` - [What] (skeptic: one-clause reason)
-
-When nothing was killed, print `Audited out: none - all findings survived the audit.` Never omit the section: it is the run's log exit, kept inspectable per M8.
+Rendered exactly as the template's "Audited out (log exit)" section defines it - placement, verdict labels, the `Audited out: none` line, and the never-omit rule. The orchestrator's only addition is the `[specialist]` tag on each ID, as everywhere else: `- **R7** [code] \`RECEIPT FAILED\` - [What] (check output did not show the claim)`.
 
 ### Summary (orchestrator-specific)
 - Specialists run: X of Y
