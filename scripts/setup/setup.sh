@@ -185,6 +185,12 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/session-init.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check pre-push tripwire script (dependency-free; the M11 secret scan run before any push)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/pre-push-check.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/pre-push-check.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -531,7 +537,7 @@ for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
     preflight_record_diff "$pf_src" ".claude/skills/$pf_skill_name/$(basename "$pf_src")"
   done
 done
-for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js; do
+for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1010,6 +1016,13 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/render-html.js" "$TARGET/.claude/script
 # /create-plan, /pair-debug, and /execute read at startup - one call instead of N.
 echo "  Copying .claude/scripts/session-init.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/session-init.js" "$TARGET/.claude/scripts/session-init.js"
+
+# ─── Pre-push tripwire script (upstream-owned - safe_copy handles any customizations) ──
+# Dependency-free like generate-index.js / open-artifact.sh. The M11 tripwire:
+# scans every outgoing commit for secrets, never-push files, and settings
+# changes before any push. Silent when clean; exit 1 blocks the push.
+echo "  Copying .claude/scripts/pre-push-check.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/pre-push-check.js" "$TARGET/.claude/scripts/pre-push-check.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
