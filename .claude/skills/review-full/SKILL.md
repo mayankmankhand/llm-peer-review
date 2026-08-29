@@ -19,8 +19,8 @@ Mile wide, inch deep. Cross-domain release readiness, not a deep specialist revi
 
 <rules>
 
-1. **REPORT ONLY** - Do NOT make any changes or edits to files
-2. **Wait for approval** - Only fix things after I say "fix it"
+1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings and a go/no-go recommendation are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
+2. **Auto, with pages** - Release-readiness findings do not wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1). The release decision itself stays with the user: releases and version bumps are always-ask (M9). Saying "report only" keeps a run report-first (M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Don't duplicate specialist reviews** - Prioritize cross-domain issues, release blockers, and interactions between code, UX, scope, and operations. If something needs deeper investigation, recommend which specialist command to run next.
 
@@ -96,6 +96,6 @@ State one of:
 
 <rules>
 
-## REMEMBER: Report issues only. Do NOT edit any files until I approve.
+## REMEMBER: The review phase reports and never edits files; after the report, the auto loop applies fixes, governed by `.claude/skills/shared/hitl-loop.md` (the release itself always asks, M9).
 
 </rules>

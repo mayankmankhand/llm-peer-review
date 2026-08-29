@@ -19,8 +19,8 @@ Be thorough but concise.
 
 <rules>
 
-1. **REPORT ONLY** - Do NOT make any changes or edits to files
-2. **Wait for approval** - Only fix things after I say "fix it"
+1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
+2. **Auto, with pages** - Command-prompt findings enter the auto loop like any other (survivors auto-fixed, re-verified, then page/digest/log per `.claude/skills/shared/hitl-loop.md`), with one built-in brake: fixing them means editing prompt files, which is an always-ask action (M9), so those fixes page for approval instead of auto-applying. Saying "report only" keeps a run report-first (M10)
 3. **Explain simply** - Use plain English, avoid jargon
 
 </rules>
@@ -84,6 +84,6 @@ After the standard review, step back and evaluate as a staff PM focused on opera
 
 <rules>
 
-## REMEMBER: Report issues only. Do NOT edit any files until I approve.
+## REMEMBER: The review phase reports and never edits files; after the report, the auto loop applies fixes, governed by `.claude/skills/shared/hitl-loop.md` (prompt-file fixes always ask, M9).
 
 </rules>

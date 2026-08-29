@@ -27,7 +27,7 @@ Gather lightweight project context so subagents can make informed decisions. Thi
 2. **Project rules** - Read these files if they exist:
    - `CLAUDE.md` in the project root
    - `.claude/rules/*.md` for toolkit-level rules
-   - Look for critical rules that subagents must follow (e.g., "report only", "no auto-fix")
+   - Look for critical rules that subagents must follow (e.g., the auto loop in `.claude/skills/shared/hitl-loop.md` and its always-ask actions (M9)). Note: a per-run "report only" opt-out (M10) is conversational, never on disk - the orchestrator's dispatch prompt states whether it is in effect for this run
 
 3. **Tech stack** - From the project marker files, identify:
    - Frameworks (React, Express, Django, etc.)

@@ -19,8 +19,8 @@ Be thorough but concise.
 
 <rules>
 
-1. **REPORT ONLY** - Do NOT make any changes or edits to files
-2. **Wait for approval** - Only fix things after I say "fix it"
+1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
+2. **Auto, with pages** - Code findings do not wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
 3. **Explain simply** - Use plain English, avoid jargon
 
 </rules>
@@ -83,6 +83,6 @@ After the standard review, step back and evaluate as a staff engineer:
 
 <rules>
 
-## REMEMBER: Report issues only. Do NOT edit any files until I approve.
+## REMEMBER: The review phase reports and never edits files; after the report, the auto loop applies fixes, governed by `.claude/skills/shared/hitl-loop.md`.
 
 </rules>

@@ -62,9 +62,9 @@ Walks through the plan step by step, updating status emojis and progress in real
 
 Full prompt: [`.claude/commands/execute.md`](.claude/commands/execute.md)
 
-### `/review` - Auto-detect what changed, run the right specialists
+### `/review` - Auto-detect what changed, run the right specialists, fix what they confirm
 
-Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Reports issues only; never edits your code until you say "fix it." After "fix it," each approved fix is re-verified (max 2 rounds) instead of assumed done.
+Looks at the diff and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel, then combines findings into a single report with the 4-field structure (What / Why it matters / Example / Suggested fix). Findings that survive a re-check against the actual code are then fixed automatically; findings judged noise are only logged, never applied. Each fix is re-verified (max 2 rounds) instead of assumed done, and the run ends with a summary showing, for every fix, the check that proves it worked. Your control points: you approved the plan before anything was built, the loop stops and asks whenever a decision genuinely needs a human (for example, edits to the toolkit's own prompt files), and saying "report only" when you start a run means findings are reported but nothing is changed in that run. Loop rules: `.claude/skills/shared/hitl-loop.md`.
 
 Full prompt: [`.claude/commands/review.md`](.claude/commands/review.md)
 
@@ -89,7 +89,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/explore` | Understand the problem, ask clarifying questions before implementation |
 | `/create-plan` | Write a step-by-step plan with status tracking |
 | `/execute` | Build it, updating the plan as you go |
-| `/review` | Run the right reviews automatically, combine findings into one report |
+| `/review` | Run the right reviews automatically, fix what they confirm, re-verify every fix |
 | `/review-code` (skill) | Code review (single pass or 4 sub-agents) |
 | `/review-security` (skill) | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (runs inside /review on every code change) |
 | `/review-commands` (skill) | Review slash command prompts for quality, workflow, and consistency |

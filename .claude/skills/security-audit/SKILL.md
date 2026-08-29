@@ -22,8 +22,8 @@ A deliberate, whole-repository security pass. Slower than `/review-security` and
 
 <rules>
 
-1. **REPORT ONLY** - Do NOT make any changes or edits to files
-2. **Wait for approval** - Only fix things after I say "fix it"
+1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings with exploit receipts are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
+2. **Auto, with pages** - Running this audit stays a deliberate human choice, but its findings do not wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Recommend tools, do not invent their output** - where a deterministic scanner is the right tool (secret history, dependency CVEs), recommend running it; never fabricate its results
 
@@ -113,6 +113,6 @@ After the standard audit, step back and evaluate as a staff security architect:
 
 <rules>
 
-## REMEMBER: Report issues only. Do NOT edit any files until I approve.
+## REMEMBER: The review phase reports and never edits files; the auto loop applies fixes after the report, governed by `.claude/skills/shared/hitl-loop.md`.
 
 </rules>

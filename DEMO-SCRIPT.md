@@ -86,7 +86,7 @@
 ## 5. Review (~45 seconds)
 
 **SAY:**
-> Before we ship anything, we review. The toolkit has a critical rule: report first, fix later. The review command finds issues but never changes your code without permission.
+> Before we ship anything, we review. The review finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I say "report only" before it starts, it reports the findings and does not change the code at all.
 
 **TYPE:**
 ```
@@ -96,7 +96,7 @@
 **WAIT** for the review report.
 
 **SAY:**
-> `/review` auto-detects what changed and dispatches the right specialist reviews. This is a written report - bugs, style issues, suggestions. Nothing gets changed until you say "fix it." That keeps you in control.
+> `/review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, the toolkit stops and asks when a decision needs a human, and "report only" before a run means nothing gets changed.
 
 **TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may open in the browser - narrate it as the rendered view of the same findings.
 

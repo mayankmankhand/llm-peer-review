@@ -191,19 +191,20 @@ After presenting the markdown summary, evaluate whether to also generate an HTML
 
 Pass `--name debate-gpt` to the helper.
 
-## Step 7: Await Approval
+## Step 7: Process Recommended Actions
 
 <rules>
-Ask the user:
 
-> Would you like me to implement these recommendations?
-> - **Yes** - I'll implement all recommended actions
-> - **Partial** - Tell me which actions to implement
-> - **No** - We'll discuss further or skip implementation
+After the summary is presented, the Recommended Actions enter the auto loop. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13); follow them as written there.
 
-**CRITICAL**: Do NOT implement anything until the user explicitly approves.
+For each Recommended Action, in R-ID order:
 
-When the user approves (Yes or Partial), implementing those actions counts as "fix it": after implementing, re-verify them per the re-verify protocol in `.claude/rules/toolkit.md` (max 2 rounds).
+1. **Check it against the codebase.** External recommendations systematically over-engineer, which is why `docs/HITL-MAP.md` routes them through the same loop as review findings. An action that fails its check is dropped to the log with its evidence, not applied.
+2. **Gate it.** An action whose fix would reverse deliberate work pages instead of applying (M7). An always-ask action pages for approval per M9, batched with any others, while the loop continues with the rest.
+3. **Apply and re-verify** the survivors per M3, M5, and M6.
+4. **Exit.** Each action takes exactly one exit: page (only per M1), digest with receipts (M8), or log.
+
+Saying **"report only"** on this run keeps the old present-and-wait behavior for that run (M10).
 
 </rules>
 
