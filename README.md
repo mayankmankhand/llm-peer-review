@@ -35,7 +35,9 @@ flowchart TD
 >
 > If the diagram doesn't render: you type `/explore` -> `/create-plan` writes the plan -> **you approve it** -> `/execute` -> `/review` -> `/document`. Optional and typed by you: `/worktree` before the run, `/ask-gpt` or `/ask-gemini` after the review.
 
-You don't have to use every command every time. Following the order prevents the most common mistake: coding before you've thought it through. Say "no chaining" on any run if you'd rather drive each step yourself.
+You don't have to use every command every time. Following the order prevents the most common mistake: coding before you've thought it through.
+
+**Two ways to take back control, and they do different things.** Say **"no chaining"** to stop the *handoff*: that run finishes its own stage and does not start the next one. Say **"report only"** to stop the *changing*: the run tells you what it found and edits nothing. They are deliberately separate, so you can have either without the other, and both last for one run only.
 
 > **Want to see this in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)**.
 

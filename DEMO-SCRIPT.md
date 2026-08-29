@@ -48,14 +48,9 @@
 ## 3. Create Plan (~45 seconds)
 
 **SAY:**
-> Now that Claude understands the feature, we create a plan. This produces a markdown file with tracked steps - so you always know where you are.
+> Now that Claude understands the feature, the plan writes itself - I don't type anything here. Once the exploration has converged, `/create-plan` fires on its own. This produces a markdown file with tracked steps, so you always know where you are.
 
-**TYPE:**
-```
-/create-plan
-```
-
-**WAIT** for the plan to be generated. An HTML view of the plan will also open in your default browser - that is expected, not a glitch.
+**WAIT** for `/create-plan` to fire on its own, then for the plan to be generated. An HTML view of the plan will also open in your default browser - that is expected, not a glitch.
 
 **SAY:**
 > Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. And that page that just opened in the browser? That's the same plan rendered as HTML, so you can scan it without reading raw markdown.
@@ -86,17 +81,12 @@
 ## 5. Review (~45 seconds)
 
 **SAY:**
-> Before we ship anything, we review. The review finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I say "report only" before it starts, it reports the findings and does not change the code at all.
+> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I had said "report only" when I approved the plan, it would report the findings and change nothing.
 
-**TYPE:**
-```
-/review
-```
-
-**WAIT** for the review report.
+**WAIT** for `/review` to chain from `/execute` and produce its report.
 
 **SAY:**
-> `/review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, the toolkit stops and asks when a decision needs a human, and "report only" before a run means nothing gets changed.
+> `/review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, and the toolkit stops and asks when a decision needs a human. Two phrases give me the wheel back: "no chaining" stops it handing off to the next stage, and "report only" means it tells me what it found without changing anything.
 
 **TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may open in the browser - narrate it as the rendered view of the same findings.
 
@@ -135,9 +125,9 @@
 | Step | Command | Time |
 |------|---------|------|
 | Explore the problem | `/explore` | ~60s |
-| Create a plan | `/create-plan` | ~45s |
+| Create a plan | *chains automatically* | ~45s |
 | Build it | `/execute` | ~60s |
-| Review the code | `/review` | ~45s |
+| Review the code | *chains automatically* | ~45s |
 | AI debate | `/ask-gpt` | ~45s |
 | Wrap-up (narrate) | `/peer-review`, `/document` | ~15s |
 
