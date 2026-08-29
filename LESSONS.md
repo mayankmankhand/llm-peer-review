@@ -123,3 +123,7 @@
 
 - **A checked subtask means its wording shipped, not that the nearby diff did.**
 - **Call sites paraphrase a shared rule into different behaviors on day one.**
+
+### M2 audit tiers (issue #148)
+
+- **Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.**
