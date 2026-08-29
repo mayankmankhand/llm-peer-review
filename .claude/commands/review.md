@@ -247,9 +247,10 @@ Once the report (and the HTML, when the gate fired) is out, continue without wai
 3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6.
 4. **Route each finding to its exit** - page only per M1; everything else lands in the digest or the log.
 5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what the audit and the loop dropped, and any page that needs the user.
+6. **Chain into `/document`** (M14) - once the loop has settled, announce the handoff in one line and invoke `/document` through the Skill tool. **Do not chain** after an M5 revert to the last green checkpoint, or after any M1 page: a cycle summary written over a reverted state is exactly the bookkeeping drift M8 exists to prevent. The debate stages are never chained into - if you want `/ask-gpt` or `/ask-gemini` on this change, run one before `/document`.
 
-Saying "report only" on the invocation keeps the entire run report-first (M10).
+Two separate per-run opt-outs: saying "report only" on the invocation keeps the entire run report-first (M10), and saying "no chaining" runs the review and stops without invoking `/document` (M14).
 
 <rules>
-## REMEMBER: Specialists report; the loop fixes. After the report, continue per the auto loop above; "report only" keeps a run report-first (M10).
+## REMEMBER: Specialists report; the loop fixes. After the report, continue per the auto loop above and chain into `/document` (M14); "report only" keeps a run report-first (M10), "no chaining" stops after this stage.
 </rules>

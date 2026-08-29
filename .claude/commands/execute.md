@@ -5,7 +5,7 @@
 
 Now implement precisely as planned, in full.
 
-Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate. The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` (rationale in `docs/HITL-MAP.md`). Saying "report only" on this run restores report-first behavior for the run (M10).
+Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/execute` is never chained into automatically (M14). The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` (rationale in `docs/HITL-MAP.md`). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/review` (M14).
 
 ## Implementation Requirements
 
@@ -80,3 +80,18 @@ After completing each step, update the plan file:
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 </procedure>
+
+---
+
+## Chain Into /review (M14)
+
+On a clean finish - every step green, the plan at 100%, each logical unit checkpoint-committed (M4) - announce the handoff in one line ("Execution complete - chaining into `/review` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool.
+
+**Do not chain** when either brake is engaged:
+
+- The critical-blocker path above fired. A blocker is a hard stop that pages the human (M1); chaining past it would review work that was never finished.
+- A step exhausted its 3-attempt retry bound. Same reasoning: the bound exists to stop the run, not to hand a broken state to the next stage.
+
+In both cases, stop and page as described above. The chain resumes only after the human decides what to do.
+
+Saying "no chaining" on this run stops here (M14). That is a different opt-out from "report only" (M10), which governs whether findings get auto-fixed rather than whether the next stage fires.

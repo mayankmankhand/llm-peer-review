@@ -196,3 +196,13 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
 ```bash
 bash .claude/scripts/open-artifact.sh "<printed-path>"
 ```
+
+---
+
+## The Chain Stops Here (M14)
+
+Present the plan and stop. Plan approval is the cycle's one human gate, so **`/execute` is never invoked automatically**, however clear the plan looks (M14 in `.claude/skills/shared/hitl-loop.md`).
+
+This is the loop's one deliberate non-chaining handoff. It is written down precisely because chaining is the norm everywhere else: an unstated exception drifts into a chain.
+
+Close by telling the user the plan is ready, and that saying "go" runs `/execute`.
