@@ -57,7 +57,7 @@ If you're unsure about intent behind a change or user-facing impact, **ask the u
 ## 6. Commit and Push
 
 - **Commit** the documentation updates automatically: one checkpoint commit per logical unit, per M4. Follow the commit message conventions in toolkit.md.
-- **Push** behind the M11 tripwire (interim prose run): a secret grep of the outgoing diff plus a diff of the two settings files for unexpected permission changes. If clean, push without ceremony; on a hit, block the push and page.
+- **Push** behind the M11 tripwire: run `node .claude/scripts/pre-push-check.js` and follow M11's exit-code consequences (`.claude/skills/shared/hitl-loop.md`).
 
 This covers every push in this command, including the branch push in Section 7.
 

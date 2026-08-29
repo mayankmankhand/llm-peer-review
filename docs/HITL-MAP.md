@@ -90,7 +90,7 @@ These stop the loop no matter which stage reaches them: releases and version bum
 Saying "report only" on any invocation restores report-first behavior for that run. The next run is auto again. There is no sticky mode: persistent modes drift silently and get forgotten (E1: automation infrastructure drifting with no failure signal).
 
 **M11. Pre-push tripwire.**
-Push runs automatically after a pre-push check: a secret scan plus a diff of settings files. Silent when clean; a hit blocks the push and pages (E1: personal data sat tracked for weeks; a credential exposure forced a history rewrite; subagents silently added permission grants caught only by a human pre-commit diff).
+Push runs automatically after a pre-push check, hardened into a script by #149 (`.claude/scripts/pre-push-check.js`): a per-commit secret scan of the outgoing range (per-commit because an added-then-removed secret is invisible in the endpoint diff yet still publishes in history), a never-push file check, and a settings diff. Silent when clean; a hit blocks the push and pages (E1: personal data sat tracked for weeks; a credential exposure forced a history rewrite; subagents silently added permission grants caught only by a human pre-commit diff). The prose checks remain the fallback when the script is absent or errors.
 
 **M12. `/index` refresh trigger.**
 `/index` runs automatically when `CODEBASE_MAP.md` is 10 or more commits behind HEAD, and is skipped otherwise. Single-commit drift is noise.
