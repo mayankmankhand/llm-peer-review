@@ -97,6 +97,6 @@ After the standard review, step back and evaluate as a staff designer:
 
 <rules>
 
-## REMEMBER: The review phase reports and never edits files; after the report, the auto loop applies fixes, governed by `.claude/skills/shared/hitl-loop.md`.
+## REMEMBER: The review phase reports and never edits files; findings are audited before the report (M2) and the auto loop applies fixes after it, both governed by `.claude/skills/shared/hitl-loop.md`.
 
 </rules>

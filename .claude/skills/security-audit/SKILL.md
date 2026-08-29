@@ -121,6 +121,6 @@ After the standard audit, step back and evaluate as a staff security architect:
 
 <rules>
 
-## REMEMBER: The review phase reports and never edits files; the auto loop applies fixes after the report, governed by `.claude/skills/shared/hitl-loop.md`.
+## REMEMBER: The review phase reports and never edits files; findings are audited before the report (M2) and the auto loop applies fixes after it, both governed by `.claude/skills/shared/hitl-loop.md`.
 
 </rules>
