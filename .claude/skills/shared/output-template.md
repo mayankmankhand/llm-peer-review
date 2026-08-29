@@ -116,6 +116,8 @@ Browser findings use the same 4-field structure plus extra evidence fields:
   - **Actual:** [What actually happens]
   - **Suggested fix:** [The approach to fix it]
 
+(At audit time the **Receipt:** row is appended last, after `Suggested fix` - defined once under "Audit-Aware Report Sections" below, not part of this authoring list.)
+
 Browser summary also includes:
 - Pages tested: X
 - Browser sessions run: X
@@ -123,7 +125,7 @@ Browser summary also includes:
 
 ## Audit-Aware Report Sections
 
-These two additions apply to any run that performs the M2 audit: `/review` after dedup, and a directly-typed `/review-*` skill after its own pass. M2 in `.claude/skills/shared/hitl-loop.md` defines who the runner is and how the tiers work; this section defines only what the resulting report looks like.
+These two additions apply to any run that performs the M2 audit: `/review` after dedup, a directly-typed `/review-*` skill after its own pass, and the session auditing a debate's Recommended Actions - whose report surface is the in-chat audit result M2 defines, not a rendered file. M2 in `.claude/skills/shared/hitl-loop.md` defines who the runner is and how the tiers work; this section defines only what the resulting report looks like.
 
 They are not part of the 4-field authoring structure above. A receipt's *check* is authored with the finding; the **Receipt** row reports what that check actually output, which does not exist until tier 1 has run.
 
