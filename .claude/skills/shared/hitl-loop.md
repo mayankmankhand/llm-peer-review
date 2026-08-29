@@ -9,8 +9,8 @@ The loop runs automatically by default. A human is brought in only where a human
 ```
 Human:    /explore -> approve the plan
 Machine:  /execute -> checkpoint commit per green unit (M4)
-          /review: specialists -> dedup -> drop non-issues
-                   -> auto-fix survivors -> re-verify (M3, M6)
+          /review: specialists -> dedup -> audit (M2) -> kills to log
+                   -> report survivors -> auto-fix -> re-verify (M3, M6)
                       green -> digest with receipts (M8)
                       red after 2 rounds -> revert to last green -> page (M5)
           /document (receipts, M8) -> commit per logical unit
@@ -36,6 +36,18 @@ Every finding or event leaves the loop through exactly one exit:
 
 Everything else exits as digest or log. Cap pages at 2-3 per cycle: rank and truncate rather than forwarding everything above a threshold. A truncated page-candidate lands in the digest explicitly marked as needing the user, never silently dropped; always-ask approvals (M9) are exempt from the cap and batch into a single page. Phrase every page as a decision a non-engineer can make: what happened, what the options are, what happens if we ship anyway, and a recommended default.
 
+## The audit (M2)
+
+**M2. Three-tier audit before any fix.** Deduplicated findings (two specialists reporting the same issue is one finding with more confidence) are audited before the report is written. The report shows survivors only, each with its receipt; every finding the audit kills goes to the log with its verdict line, never fixed.
+
+1. **Receipts** (every finding, nearly free). Every finding carries a runnable check - a grep, a file read, a test, an exit code - plus one line stating what the check's output must show for the finding to stand. The orchestrator runs the check. Output does not show it: `RN: RECEIPT FAILED`. Even a judgment finding (quality, clarity, UX) has a mechanical receipt: the file read showing the cited pattern actually exists as described.
+2. **One skeptical pass** (surviving Warns and Suggests). One fresh subagent tries to refute each finding from its receipt output. The default prior is rejection: when in doubt, refute. Verdict per finding: `RN: REFUTED` or `RN: STANDS`.
+3. **Three-vote refute** (surviving Blocks). Three independent skeptics each judge the Block from its receipt output; the vote replaces the single pass for Blocks, so no lone skeptic can kill one. Majority refute: `RN: REFUTED 2/3` (or `3/3`). Otherwise `RN: STANDS`. Reserved for Blocks because a wrong drop or a wrong page is costliest there, and voting gains plateau.
+
+One verdict line per finding ID per tier, in exactly these formats - countable against the run's real output. The consequence is uniform: `RECEIPT FAILED` and `REFUTED` findings are logged with their verdict line and never fixed; `STANDS` findings proceed to auto-fix under the mechanics below.
+
+**Dispatch hygiene:** everything handed to an audit or verify agent is verbatim bytes - the finding's original JSON and the receipt's actual output - never a paraphrase or summary. A reviewer can only judge the bytes it is given; a paraphrased finding produces a verdict about the paraphrase, not the artifact.
+
 ## Auto-fix mechanics
 
 - **M3. The fixer never verifies.** Trust order for verification signals: a runnable check first, a different model second, a fresh same-model context last. The agent or conversation that produced a fix never declares it verified. In practice: a mechanical finding (a test, build, script exit code, or specific browser action demonstrated it) is re-verified by re-running that exact check, and the check's result is the verdict; a judgment finding (quality, clarity, UX - nothing runnable proves it) is re-verified by one fresh subagent per round, given the finding IDs, the original finding text, each finding's file:line, and the diff of the fixes, and it returns one line per ID - "R3: FIXED" or "R3: NOT FIXED" - plus a one-line receipt.
@@ -44,8 +56,6 @@ Everything else exits as digest or log. Cap pages at 2-3 per cycle: rank and tru
 - **M6. Re-verify the claim, not the instance.** A finding names one occurrence; what it reports is a claim that can have several. Before declaring a fix done, sweep the touched files for other instances of the same claim. A fix is new work and meets the same evidence bar as the finding that prompted it.
 - **M7. Intent-reversal guard.** Before applying a fix, check whether it would restore or undo something the git history or diff shows was deliberately changed or removed. If so, page instead of applying, even when the finding is technically correct.
 - **M8. Receipts, not claims.** Digests and documentation state what ran and show the evidence: the command and its output, the count delta, the diff stat. "All N fixed" without receipts is the failure mode, not the report. A doubt closed as "deliberate" carries a pointer to where the human actually decided it; otherwise it stays open.
-
-**Interim note on auditing:** the three-tier audit (M2: receipts, one skeptical pass, three-vote refute for Blocks) is built as its own follow-up issue. Until it lands, the loop uses specialist dedup plus the M3/M5/M6 re-verify mechanics above. Do not describe or invoke audit tiers that do not exist yet.
 
 ## Gates and triggers
 
