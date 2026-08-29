@@ -127,3 +127,9 @@
 ### M2 audit tiers (issue #148)
 
 - **Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.**
+
+### M11 tripwire hardening (issue #149)
+
+- **A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.**
+- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.**
+- **Masking the match that triggered the report is not masking the line.**
