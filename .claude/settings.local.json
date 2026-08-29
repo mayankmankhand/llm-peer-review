@@ -51,6 +51,8 @@
       "Bash(cat * | node .claude/scripts/browse.js *)",
       "Bash(node .claude/scripts/generate-index.js *)",
       "Bash(node .claude/scripts/render-html.js *)",
+      "Bash(node .claude/scripts/pre-push-check.js)",
+      "Bash(node .claude/scripts/pre-push-check.js *)",
       "Read",
       "Edit",
       "Write",
