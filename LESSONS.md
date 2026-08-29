@@ -133,3 +133,8 @@
 - **A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.**
 - **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.**
 - **Masking the match that triggered the report is not masking the line.**
+
+### Stage chaining (M14)
+
+- **A sweep's receipt is its grep patterns and their output, not the word "clean".**
+- **Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.**
