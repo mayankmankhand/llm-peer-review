@@ -69,7 +69,7 @@ Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum th
 
 **Never-gate specialists:** Dependency Security (selected when a `package.json`/lockfile changed) and Security (selected whenever code changes). Either one's presence disables the size gate for the whole run - diff size is not a proxy for risk. A one-line change can introduce a severe vulnerability or pull in a bad dependency, so neither security pass is ever skipped for being small. (Trade-off: because Security is selected on any code change, code reviews fan out to subagents rather than taking the fast inline path - the deliberate cost of never size-gating security.)
 
-The inline path continues into the same auto loop after the report (see "After the Report" below) and still obeys the HTML gate; it simply has no subagents to dispatch.
+The inline path continues into the same auto loop after the report (see "After the Report" below) and still obeys the HTML gate; it simply has no specialist subagents to dispatch - the Phase 4 audit still dispatches its skeptics per the inline-path note.
 
 ### Phase 2: Dispatch
 
@@ -124,7 +124,7 @@ Example line:
 
 Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none). Then:
 
-1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). This is a free, mechanical pass over structured data - no re-judging.
+1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). Keep every merged finding's `receipt`: tier 1 runs each of them, and the finding stands if at least one check passes - a corroborated finding never dies on a single badly-written check. This is a free, mechanical pass over structured data - no re-judging.
 2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence across ALL deduped findings. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`. The audit runs next, so some IDs will exit to the Audited out log rather than the report; the sequence stays gap-free across report plus log, and audit verdict lines reference these IDs.
 
 ### Phase 4: Audit (M2)
@@ -134,6 +134,8 @@ The three-tier audit defined by M2 in `.claude/skills/shared/hitl-loop.md` runs 
 1. **Tier 1 - run every receipt.** Execute each finding's `receipt.check` yourself (they are read-only greps, file reads, or tests). Compare the output against `receipt.expect`. No match, or no `receipt` field at all: `RN: RECEIPT FAILED` - the finding is killed.
 2. **Tier 2 - one skeptical pass (Warns and Suggests).** Dispatch ONE fresh subagent carrying every surviving Warn and Suggest as verbatim bytes - the original JSONL lines plus each receipt's actual output, never a paraphrase (M2 dispatch hygiene). Instruct it: "Try to refute each finding using its receipt output. The default prior is rejection: when in doubt, refute. Return exactly one line per ID - `RN: REFUTED` or `RN: STANDS` - plus one line of reasoning each."
 3. **Tier 3 - three-vote refute (Blocks).** Dispatch THREE independent skeptic subagents in parallel (they fit the 4-subagent cap), each carrying the surviving Blocks as verbatim bytes plus receipt outputs, with the same refute instruction. Each returns one vote line per Block ID. Two or more refute a Block: `RN: REFUTED 2/3` (or `3/3`) - killed. Otherwise `RN: STANDS`. Blocks skip tier 2: the vote replaces the single pass, so no lone skeptic can kill a Block.
+
+**If an audit subagent fails** (error, timeout, or malformed verdict lines): redispatch it once. Still failing: tier 2 survivors proceed to the report marked `unaudited` next to their Receipt line; a tier 3 vote left with two valid ballots kills the Block only when both refute - a majority of the dispatched three is never assumed.
 
 **Inline-path note:** when Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh subagents - audit independence is the point, so the inline path never audits its own findings itself.
 
@@ -157,7 +159,7 @@ The three-tier audit defined by M2 in `.claude/skills/shared/hitl-loop.md` runs 
 
 The orchestrator report uses the standard 4-field finding structure (What / Why it matters / Example / Suggested fix) inlined below from the shared template. This is the single source of truth - do not duplicate it elsewhere. The `<shared_template>` tags isolate the inlined content from this file's own heading hierarchy so the template's headings do not collide with the orchestrator's structure.
 
-The orchestrator fills this structure from the deduped JSON findings (Phase 3): each finding's `what` becomes the dash summary line, and its `fields[]` rows become the labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
+The orchestrator fills this structure from the surviving JSON findings (Phases 3-4): each finding's `what` becomes the dash summary line, and its `fields[]` rows become the labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
 
 <shared_template>
 !`cat .claude/skills/shared/output-template.md`
