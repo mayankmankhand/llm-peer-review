@@ -12,7 +12,7 @@ Run the right reviews automatically, combine findings into one report.
 <rules>
 
 1. **REVIEWERS NEVER EDIT** - Specialists and the report phase never modify files; findings are their product
-2. **Continue into the auto loop** - After the report, do not wait for a human "fix it": dedup, drop non-issues to the log, auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, inlined under "After the Report" below. Saying "report only" keeps this run report-first (M10)
+2. **Audit, then continue into the auto loop** - Findings are deduped and audited (M2: receipts, skeptical pass, three-vote for Blocks) BEFORE the report, so the report shows survivors only. After the report, do not wait for a human "fix it": auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, inlined under "After the Report" below. Saying "report only" keeps this run report-first (M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Respect the concurrency cap** - Max 4 parallel subagents per run
 
@@ -65,7 +65,7 @@ Categorize the changes and pick relevant specialists:
 
 This gate applies only to the auto-detect path. (Explicit focus calls like `/review code` and `/review full` skip detection entirely, so they never reach this gate - the specialist you named always runs, regardless of size.)
 
-Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum the added + removed columns across all changed files. **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged.
+Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum the added + removed columns across all changed files. **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged. Author a `receipt` for each inline finding and run the Phase 4 audit before writing the report - tier 1 inline, tiers 2 and 3 via fresh subagents per the inline-path note in Phase 4.
 
 **Never-gate specialists:** Dependency Security (selected when a `package.json`/lockfile changed) and Security (selected whenever code changes). Either one's presence disables the size gate for the whole run - diff size is not a proxy for risk. A one-line change can introduce a severe vulnerability or pull in a bad dependency, so neither security pass is ever skipped for being small. (Trade-off: because Security is selected on any code change, code reviews fan out to subagents rather than taking the fast inline path - the deliberate cost of never size-gating security.)
 
@@ -109,12 +109,13 @@ Each finding object (the field names match the HTML shell's finding schema, so t
 - `what`: one-line summary of the issue (plain English; trusted inline HTML like `<code>` allowed)
 - `fields`: an ordered array of `{ "label": "...", "value": "..." }` rows carrying the SAME depth the markdown would. For most reviews: `Why it matters`, `Example`, `Suggested fix`. Browser findings add `Screenshot`, `Evidence`, `Expected`, `Actual`. Each `value` is full prose, not a stub - a thin Example here becomes a thin Example in the report.
 - `key`: a dedup key = `relPath:line:` followed by the first few normalized (lowercased) words of `what`. Two specialists flagging the same issue at the same spot emit the same key.
+- `receipt`: `{ "check": "...", "expect": "..." }` - the finding's runnable proof (M2 tier 1). `check` is one safe, read-only command (a grep, a file read, a test run) executable from the project root; `expect` is one line stating what the check's output must show for the finding to stand. Every finding has one - even a judgment finding's receipt is the file read showing the cited pattern exists as described. A finding without a `receipt` fails tier 1 by definition.
 
 Do NOT include an `id` field - the orchestrator assigns R1, R2, ... after dedup (IDs must be sequential and gap-free across the whole run).
 
 Example line:
 ```
-{"severity":"warn","specialist":"code","file":{"relPath":"auth/login.ts","absPath":"/abs/auth/login.ts","line":42},"what":"Session token logged on failed login","fields":[{"label":"Why it matters","value":"Tokens in logs let anyone with log access impersonate the user."},{"label":"Example","value":"An attacker reading the support log dashboard gets every active session token from the last hour."},{"label":"Suggested fix","value":"Log only that a failed attempt occurred, never the credential payload."}],"key":"auth/login.ts:42:session-token-logged"}
+{"severity":"warn","specialist":"code","file":{"relPath":"auth/login.ts","absPath":"/abs/auth/login.ts","line":42},"what":"Session token logged on failed login","fields":[{"label":"Why it matters","value":"Tokens in logs let anyone with log access impersonate the user."},{"label":"Example","value":"An attacker reading the support log dashboard gets every active session token from the last hour."},{"label":"Suggested fix","value":"Log only that a failed attempt occurred, never the credential payload."}],"key":"auth/login.ts:42:session-token-logged","receipt":{"check":"grep -n 'logger' auth/login.ts","expect":"the failed-login path logs the token variable at line 42"}}
 ```
 
 **If a subagent fails** (error, timeout, or empty response), note it in the final report: "Note: [Specialist name] review did not complete. Run `/review [type]` to retry."
@@ -124,9 +125,22 @@ Example line:
 Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none). Then:
 
 1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). This is a free, mechanical pass over structured data - no re-judging.
-2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`.
-3. **Derive the markdown report** from the deduped findings using the format below: each finding's `what` becomes the dash summary line and each `fields[]` row becomes a labeled sub-bullet, in order.
-4. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written.
+2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence across ALL deduped findings. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`. The audit runs next, so some IDs will exit to the Audited out log rather than the report; the sequence stays gap-free across report plus log, and audit verdict lines reference these IDs.
+
+### Phase 4: Audit (M2)
+
+The three-tier audit defined by M2 in `.claude/skills/shared/hitl-loop.md` runs here, between dedup and the report. Use M2's verdict formats exactly - one verdict line per finding ID per tier. Killed findings exit to the Audited out log (never fixed); survivors proceed to Phase 5 with receipts attached.
+
+1. **Tier 1 - run every receipt.** Execute each finding's `receipt.check` yourself (they are read-only greps, file reads, or tests). Compare the output against `receipt.expect`. No match, or no `receipt` field at all: `RN: RECEIPT FAILED` - the finding is killed.
+2. **Tier 2 - one skeptical pass (Warns and Suggests).** Dispatch ONE fresh subagent carrying every surviving Warn and Suggest as verbatim bytes - the original JSONL lines plus each receipt's actual output, never a paraphrase (M2 dispatch hygiene). Instruct it: "Try to refute each finding using its receipt output. The default prior is rejection: when in doubt, refute. Return exactly one line per ID - `RN: REFUTED` or `RN: STANDS` - plus one line of reasoning each."
+3. **Tier 3 - three-vote refute (Blocks).** Dispatch THREE independent skeptic subagents in parallel (they fit the 4-subagent cap), each carrying the surviving Blocks as verbatim bytes plus receipt outputs, with the same refute instruction. Each returns one vote line per Block ID. Two or more refute a Block: `RN: REFUTED 2/3` (or `3/3`) - killed. Otherwise `RN: STANDS`. Blocks skip tier 2: the vote replaces the single pass, so no lone skeptic can kill a Block.
+
+**Inline-path note:** when Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh subagents - audit independence is the point, so the inline path never audits its own findings itself.
+
+### Phase 5: Report
+
+1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and the receipt renders as a final **Receipt:** sub-bullet (the check plus what its output showed). Killed findings render one line each in the Audited out section.
+2. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written.
 
 </procedure>
 
@@ -159,7 +173,7 @@ The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line -
 
 **Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. Use this field order in the merged finding:
 
-`What -> Why it matters -> Example -> Screenshot -> Evidence -> Expected -> Actual -> Suggested fix`
+`What -> Why it matters -> Example -> Screenshot -> Evidence -> Expected -> Actual -> Suggested fix -> Receipt`
 
 Example findings with tags applied:
 
@@ -167,6 +181,7 @@ Example findings with tags applied:
   - **Why it matters:** [The harm or risk this creates]
   - **Example:** [Real-world impact]
   - **Suggested fix:** [The approach]
+  - **Receipt:** [The check that was run and what its output showed]
 
 - **R3** [code, browser] ⚠️ `file:line` - [Issue flagged by both code and browser specialists]
   - **Why it matters:** [The harm or risk this creates]
@@ -181,15 +196,24 @@ Example findings with tags applied:
 
 The inlined template defines an **Overall Verdict** line, a **readability backstop**, and the receipt rule. Apply them across the merged run:
 
-- **Overall Verdict** leads the report (before Top Issues). Compute it from the deduped findings: any Block -> `changes-requested`; no Blocks but one or more Warn/Suggest -> `approve-with-nits`; nothing -> `approve`. One line, plain reason.
-- **Readability backstop:** when the deduped findings exceed 7, show the 5 highest-severity in full and list the rest one line each under `### More findings`. Nothing is dropped - only demoted - so the headline risks are not buried.
+- **Overall Verdict** leads the report (before Top Issues). Compute it from the audit survivors: any Block -> `changes-requested`; no Blocks but one or more Warn/Suggest -> `approve-with-nits`; nothing -> `approve`. One line, plain reason.
+- **Readability backstop:** when the surviving findings exceed 7, show the 5 highest-severity in full and list the rest one line each under `### More findings`. Nothing is dropped - only demoted - so the headline risks are not buried.
 - **Security escalation nudge:** if the changed files touch a genuine trust boundary - a new route/endpoint, file upload, or webhook; authentication logic; crypto; or secret handling - append one line after the report: _"Consider `/security-audit`: this change touches [X], which deserves a deeper whole-repo pass."_ Only when a trigger is genuinely present; the Security specialist also emits this when called directly.
+
+### Audited out (log exit)
+
+After the findings (and `### More findings`, when present), list every finding the Phase 4 audit killed - one line each, with its M2 verdict and a short evidence clause:
+
+- **R7** [code] `RECEIPT FAILED` - [What] (check output did not show the claim)
+- **R9** [ux] `REFUTED` - [What] (skeptic: one-clause reason)
+
+When nothing was killed, print `Audited out: none - all findings survived the audit.` Never omit the section: it is the run's log exit, kept inspectable per M8.
 
 ### Summary (orchestrator-specific)
 - Specialists run: X of Y
 - Files reviewed: X
-- Blocks: X | Warns: X | Suggests: X
-- Deduplicated findings: X (Y raw findings from specialists)
+- Blocks: X | Warns: X | Suggests: X (audit survivors)
+- Deduplicated findings: X (Y raw findings from specialists); audited out: Z
 
 End the report with one line so the user knows what happens next: _"The loop now auto-fixes and re-verifies the surviving findings (auto loop in `.claude/skills/shared/hitl-loop.md`); saying 'report only' at the start would have kept this run report-first."_
 
@@ -204,7 +228,9 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 For orchestrator output specifically:
 - Pass `--name review-orchestrator` to the helper
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
-- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the deduped Phase 3 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
+- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
+- Each surviving finding carries its receipt as a final field row: `{"label": "Receipt", "value": "<code>check</code> - what the output showed"}`
+- Append one extra group after the specialist groups: `{label: "Audited out"}`, containing the killed findings with their assigned `id` and an added field row `{"label": "Audit verdict", "value": "RECEIPT FAILED" / "REFUTED" / "REFUTED 2/3"}`. No shell change: `groups[]` and `fields[]` are generic.
 
 ## After the Report (auto loop)
 
@@ -214,11 +240,11 @@ What happens after the report is governed by the shared auto-loop fragment (the 
 
 Once the report (and the HTML, when the gate fired) is out, continue without waiting for a human "fix it":
 
-1. **Drop non-issues to the log** - deduped findings judged not real are logged, never fixed.
+1. **Non-issues are already gone** - the Phase 4 audit (M2) dropped them to the Audited out log with their verdict lines; do not re-litigate them here.
 2. **Auto-fix the survivors** - subject to the intent-reversal guard (M7) and the always-ask actions (M9).
 3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6.
 4. **Route each finding to its exit** - page only per M1; everything else lands in the digest or the log.
-5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what was dropped, and any page that needs the user.
+5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what the audit and the loop dropped, and any page that needs the user.
 
 Saying "report only" on the invocation keeps the entire run report-first (M10).
 
