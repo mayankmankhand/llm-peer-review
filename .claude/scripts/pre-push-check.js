@@ -11,9 +11,15 @@
 //                      pattern list. Per-commit on purpose: a secret added in
 //                      one commit and removed in a later one is invisible in
 //                      the endpoint diff but still lands in public history.
-//   2. Never-push    - .claude/settings.local.json, .env, .env.local appearing
-//                      anywhere in the outgoing commits (they must never leave
-//                      the machine).
+//   2. Never-push    - .claude/settings.local.json, .env, .env.local NEWLY
+//                      introduced by the outgoing commits (they must never
+//                      leave the machine). A path that already exists at the
+//                      range base is published history rather than news - this
+//                      repo tracks settings.local.json as the seed template -
+//                      and re-alarming on it every time would train the
+//                      override reflex the tripwire exists to prevent. With no
+//                      remote base nothing can be proven published, so every
+//                      match blocks.
 //   3. Settings diff - .claude/settings.json changed in this push: the hunks
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
@@ -136,6 +142,14 @@ function unquotePath(p) {
   return Buffer.from(bytes).toString("utf8");
 }
 
+// Does this path already exist at the range base? If so a push cannot leak it:
+// it is already on the remote. Returns false when there is no base, so an
+// unprovable case still blocks (fail closed).
+function existsInBase(path, base) {
+  if (base === null) return false;
+  return git(["cat-file", "-e", base + ":" + path]) !== null;
+}
+
 // Mask EVERY secret on the line, not just the match that triggered the report:
 // one line can carry two credentials, and a separate report line is emitted per
 // matching pattern - so masking only the trigger republishes its neighbour.
@@ -253,7 +267,7 @@ function scanCommit(sha, hits) {
   for (const f of new Set(names.split("\0").filter(Boolean))) {
     const basename = f.split("/").pop();
     if (NEVER_PUSH_PATHS.includes(f) || NEVER_PUSH_BASENAMES.includes(basename)) {
-      hits.neverPush.push(f + " @ " + short);
+      hits.neverPushRaw.push({ path: f, short: short });
     }
     if (f === SETTINGS_PATH) hits.settingsCommits.add(short);
   }
@@ -263,8 +277,20 @@ function scanCommit(sha, hits) {
 const { commits, base } = outgoingCommits();
 if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
 
-const hits = { secrets: [], neverPush: [], unscannable: [], settingsCommits: new Set() };
+const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set() };
 for (const sha of commits) scanCommit(sha, hits);
+
+// Keep only never-push paths this push would actually publish for the first
+// time; one base lookup per distinct path, after the walk rather than inside it.
+const publishedAlready = new Map();
+for (const candidate of hits.neverPushRaw) {
+  if (!publishedAlready.has(candidate.path)) {
+    publishedAlready.set(candidate.path, existsInBase(candidate.path, base));
+  }
+  if (!publishedAlready.get(candidate.path)) {
+    hits.neverPush.push(candidate.path + " @ " + candidate.short);
+  }
+}
 
 const clean =
   hits.secrets.length === 0 &&
