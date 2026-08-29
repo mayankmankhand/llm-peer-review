@@ -27,6 +27,10 @@ For EACH finding in the pasted feedback:
 
 </procedure>
 
+Severity on every finding below follows the shared rubric, the same one the review skills read. It is not decoration: confirmed findings enter the auto loop's M2 audit, which routes a Block to three independent skeptics and a Warn or Suggest to one, and the Action Plan is ordered by it.
+
+!`cat .claude/skills/shared/severity-anchors.md`
+
 ## Output Format
 
 <output_format>
@@ -35,7 +39,7 @@ For EACH finding in the pasted feedback:
 
 | Finding | Status | Severity | Notes |
 |---------|--------|----------|-------|
-| R1 - [short description] | Confirmed / Dismissed | High / Medium / Low | [one-liner] |
+| R1 - [short description] | Confirmed / Dismissed | 🚫 Block / ⚠️ Warn / 💡 Suggest | [one-liner] |
 | R2 - ... | ... | ... | ... |
 
 ### Confirmed Findings (real problems)
