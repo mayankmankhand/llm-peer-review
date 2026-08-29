@@ -118,3 +118,8 @@
 ### Human-in-the-loop map (issue #146)
 
 - **A self-run consistency check passes while the scoped thing is missing entirely.**
+
+### Auto-by-default rewrite (issue #147)
+
+- **A checked subtask means its wording shipped, not that the nearby diff did.**
+- **Call sites paraphrase a shared rule into different behaviors on day one.**
