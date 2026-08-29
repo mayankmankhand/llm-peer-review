@@ -18,6 +18,19 @@
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
 //
+// Fail closed, never open. A file this script cannot parse is REPORTED as
+// unscannable, not skipped: a scanner that stays silent about what it could
+// not read manufactures false confidence, and its exit 0 is what authorizes
+// the push. Two parsing hazards are handled explicitly:
+//   - Quoted paths. git C-quotes a path containing a non-ASCII byte (unless
+//     core.quotePath=false, which git() sets), or a quote, backslash, or
+//     control character (which stay quoted regardless). Both the patch header
+//     and the file list decode such paths instead of dropping them.
+//   - Content that looks like structure. An added line whose text begins with
+//     "++ " renders as "+++ ..." - indistinguishable from a file header by
+//     prefix alone. The parser tracks hunk line counts, so a line is only ever
+//     read as a header when it is genuinely outside a hunk.
+//
 // Contract (mirrors session-init.js / generate-index.js):
 //   - stdout = the hit report, and ONLY on a hit. Clean runs print nothing.
 //   - stderr = diagnostics only (LESSONS: stdout may be captured by an LLM).
@@ -64,11 +77,19 @@ const PATTERNS = [
   },
 ];
 
-// Run git with an argument ARRAY (never a shell string). Returns stdout, or
-// null on any failure - callers decide whether null is benign or fatal.
+// Global twins of the patterns above, used only for masking: replace() with a
+// non-global regex rewrites one occurrence, which would leave a second secret
+// on the same line readable in the report.
+const MASK_PATTERNS = PATTERNS.map((p) => new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"));
+
+// Run git with an argument ARRAY (never a shell string). core.quotePath=false
+// keeps non-ASCII paths unescaped; paths containing a quote, backslash, or
+// control character are still C-quoted and are decoded by unquotePath below.
+// Returns stdout, or null on any failure - callers decide whether null is
+// benign or fatal.
 function git(args) {
   try {
-    return execFileSync("git", args, {
+    return execFileSync("git", ["-c", "core.quotePath=false", ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
@@ -84,18 +105,54 @@ function fail(msg) {
   process.exit(2);
 }
 
-// Mask a matched secret: keep the first 4 characters, replace the rest, so the
-// report (which lands in chat logs) never republishes the secret it caught.
-function mask(line, re) {
-  return line.replace(re, (m) => m.slice(0, 4) + "****").trim().slice(0, 200);
+// Decode a path git wrapped in double quotes with C-style escapes. Returns the
+// real path, the input unchanged when it was not quoted, or null when the
+// quoted form cannot be decoded - callers treat null as unscannable (a hit),
+// never as "nothing to see here".
+function unquotePath(p) {
+  if (!p.startsWith('"')) return p;
+  if (p.length < 2 || !p.endsWith('"')) return null;
+  const body = p.slice(1, -1);
+  const SIMPLE = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 };
+  const bytes = [];
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] !== "\\") {
+      bytes.push(...Buffer.from(body[i], "utf8"));
+      continue;
+    }
+    const esc = body[++i];
+    if (esc === undefined) return null;
+    if (esc >= "0" && esc <= "7") {
+      const oct = body.slice(i, i + 3);
+      if (!/^[0-7]{3}$/.test(oct)) return null;
+      bytes.push(parseInt(oct, 8));
+      i += 2;
+    } else if (Object.prototype.hasOwnProperty.call(SIMPLE, esc)) {
+      bytes.push(SIMPLE[esc]);
+    } else {
+      return null;
+    }
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+// Mask EVERY secret on the line, not just the match that triggered the report:
+// one line can carry two credentials, and a separate report line is emitted per
+// matching pattern - so masking only the trigger republishes its neighbour.
+function mask(line) {
+  let out = line;
+  for (const re of MASK_PATTERNS) out = out.replace(re, (m) => m.slice(0, 4) + "****");
+  return out.trim().slice(0, 200);
 }
 
 // --- 1. Which commits would a push publish? -------------------------------
 // Preference order for the range base:
 //   upstream (@{u})       - the branch has been pushed before: exactly what
 //                           `git push` would send.
-//   merge-base w/ default - never-pushed branch: everything since it forked
-//                           from the remote default branch.
+//   remote default branch - never-pushed branch: everything since it forked.
+//                           origin/HEAD exists after a clone but NOT after a
+//                           hand-added remote, so the common default branch
+//                           names are probed too.
 //   nothing               - empty/new remote: every commit on HEAD is outgoing.
 function outgoingCommits() {
   if (git(["symbolic-ref", "--quiet", "--short", "HEAD"]) === null) {
@@ -106,11 +163,16 @@ function outgoingCommits() {
   if (upstream !== null) {
     base = upstream.trim();
   } else {
+    const candidates = [];
     const remoteHead = git(["symbolic-ref", "refs/remotes/origin/HEAD"]);
-    if (remoteHead !== null) {
-      const def = remoteHead.trim().replace("refs/remotes/", "");
-      const mb = git(["merge-base", "HEAD", def]);
-      if (mb !== null) base = mb.trim();
+    if (remoteHead !== null) candidates.push(remoteHead.trim().replace("refs/remotes/", ""));
+    candidates.push("origin/main", "origin/master");
+    for (const candidate of candidates) {
+      const mergeBase = git(["merge-base", "HEAD", candidate]);
+      if (mergeBase !== null) {
+        base = mergeBase.trim();
+        break;
+      }
     }
   }
   const range = base === null ? ["HEAD"] : [base + "..HEAD"];
@@ -131,35 +193,64 @@ function scanCommit(sha, hits) {
 
   let file = null; // repo-relative path of the file the current hunk touches
   let newLine = 0; // line number in the NEW file, tracked from @@ headers
+  let pending = 0; // added lines still expected in the current hunk
 
   for (const line of patch.split("\n")) {
-    if (line.startsWith("+++ ")) {
-      file = line.startsWith("+++ b/") ? line.slice(6) : null; // null = /dev/null (deletion)
+    // A "diff --git" line always starts a new file section: use it to resync
+    // in case a malformed hunk left a stale count behind.
+    if (line.startsWith("diff --git ")) {
+      pending = 0;
+      file = null;
       continue;
     }
-    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)/);
+
+    if (pending > 0) {
+      // Inside a hunk, every line is content - never structure. This is what
+      // stops an added line reading "++ foo" from impersonating a header.
+      if (line.startsWith("+")) {
+        pending--;
+        const added = line.slice(1);
+        if (file !== null && file !== SELF_PATH) {
+          for (const p of PATTERNS) {
+            if (p.re.test(added)) {
+              hits.secrets.push("[" + p.name + "] " + file + " @ " + short + " line " + newLine + ": " + mask(added));
+            }
+          }
+        }
+        newLine++;
+      }
+      continue; // removed lines and "\ No newline" markers carry no new content
+    }
+
+    // Outside a hunk: headers and hunk starts only.
+    if (line.startsWith("+++ ")) {
+      const raw = line.slice(4);
+      if (raw === "/dev/null") {
+        file = null; // deletion: nothing added to scan
+        continue;
+      }
+      const decoded = unquotePath(raw);
+      if (decoded === null || !decoded.startsWith("b/")) {
+        // Unparseable path: report it rather than silently skipping the file.
+        hits.unscannable.push(raw + " @ " + short);
+        file = null;
+      } else {
+        file = decoded.slice(2);
+      }
+      continue;
+    }
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
     if (hunk) {
       newLine = parseInt(hunk[1], 10);
-      continue;
+      pending = hunk[2] === undefined ? 1 : parseInt(hunk[2], 10);
     }
-    if (!line.startsWith("+") || line.startsWith("+++")) continue;
-    const added = line.slice(1);
-    if (file !== null && file !== SELF_PATH) {
-      for (const p of PATTERNS) {
-        if (p.re.test(added)) {
-          hits.secrets.push(
-            "[" + p.name + "] " + file + " @ " + short + " line " + newLine + ": " + mask(added, p.re)
-          );
-        }
-      }
-    }
-    newLine++;
   }
 
-  // File-level checks ride on the same commit walk.
-  const names = git(["diff-tree", "-r", "--name-only", "--no-commit-id", "--root", "-m", sha]);
+  // File-level checks ride on the same commit walk. -z keeps paths raw and
+  // NUL-separated, so nothing here needs unquoting.
+  const names = git(["diff-tree", "-r", "--name-only", "--no-commit-id", "--root", "-m", "-z", sha]);
   if (names === null) fail("git diff-tree --name-only failed on commit " + sha + ".");
-  for (const f of new Set(names.split("\n").filter(Boolean))) {
+  for (const f of new Set(names.split("\0").filter(Boolean))) {
     const basename = f.split("/").pop();
     if (NEVER_PUSH_PATHS.includes(f) || NEVER_PUSH_BASENAMES.includes(basename)) {
       hits.neverPush.push(f + " @ " + short);
@@ -172,10 +263,14 @@ function scanCommit(sha, hits) {
 const { commits, base } = outgoingCommits();
 if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
 
-const hits = { secrets: [], neverPush: [], settingsCommits: new Set() };
+const hits = { secrets: [], neverPush: [], unscannable: [], settingsCommits: new Set() };
 for (const sha of commits) scanCommit(sha, hits);
 
-const clean = hits.secrets.length === 0 && hits.neverPush.length === 0 && hits.settingsCommits.size === 0;
+const clean =
+  hits.secrets.length === 0 &&
+  hits.neverPush.length === 0 &&
+  hits.unscannable.length === 0 &&
+  hits.settingsCommits.size === 0;
 if (clean) process.exit(0); // silent when clean, by contract
 
 const out = [];
@@ -189,6 +284,11 @@ if (hits.secrets.length > 0) {
 if (hits.neverPush.length > 0) {
   out.push("Never-push files in outgoing commits:");
   for (const s of hits.neverPush) out.push("  " + s);
+  out.push("");
+}
+if (hits.unscannable.length > 0) {
+  out.push("Files whose path could not be parsed - NOT scanned, check them by hand:");
+  for (const s of hits.unscannable) out.push("  " + s);
   out.push("");
 }
 if (hits.settingsCommits.size > 0) {
