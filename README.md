@@ -22,17 +22,20 @@ This is the same consensus/divergence synthesis that [Perplexity's Model Council
 flowchart TD
     W(["/worktree (optional)"]) -.-> A(["/explore"])
     A --> B(["/create-plan"])
-    B --> C(["/execute"])
+    B --> G{"You approve the plan"}
+    G --> C(["/execute"])
     C --> D(["/review"])
-    D --> E(["/ask-gpt or /ask-gemini"])
-    E --> F(["Agreed · Disagreed · Actions"])
-    F --> G{"You approve"}
-    G --> H(["/document"])
+    D --> H(["/document"])
+    D -.-> E(["/ask-gpt or /ask-gemini"])
+    E -.-> F(["Agreed · Disagreed · Actions"])
+    F -.-> H
 ```
 
-> If the diagram doesn't render: `/worktree` (optional) -> `/explore` -> `/create-plan` -> `/execute` -> `/review` -> `/ask-gpt` or `/ask-gemini` -> `/document`
+> **Solid arrows run on their own; dotted arrows you start yourself.** You type `/explore` and approve the plan. From there `/create-plan`, `/execute`, `/review`, and `/document` chain automatically. `/worktree` and the AI debates stay optional and always start with you.
+>
+> If the diagram doesn't render: you type `/explore` -> `/create-plan` writes the plan -> **you approve it** -> `/execute` -> `/review` -> `/document`. Optional and typed by you: `/worktree` before the run, `/ask-gpt` or `/ask-gemini` after the review.
 
-You don't have to use every command every time. Following the order prevents the most common mistake: coding before you've thought it through.
+You don't have to use every command every time. Following the order prevents the most common mistake: coding before you've thought it through. Say "no chaining" on any run if you'd rather drive each step yourself.
 
 > **Want to see this in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)**.
 

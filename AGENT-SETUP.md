@@ -194,8 +194,12 @@ Toolkit workflow rules are in `.claude/rules/toolkit.md` (auto-loaded, managed b
 The user can now open their project in Cursor or Claude Code and type `/` to see the available commands. The recommended workflow order is:
 
 ```
-/explore  →  /create-plan  →  /execute  →  /review  →  /ask-gpt or /ask-gemini  →  /document
+/explore  →  /create-plan  →  [user approves]  →  /execute  →  /review  →  /document
+                                                                   ↓ (optional, user-triggered)
+                                                       /ask-gpt or /ask-gemini
 ```
+
+The user types `/explore` and approves the plan; the rest chain automatically (rule M14 in `.claude/skills/shared/hitl-loop.md`). Saying "no chaining" on any run stops after that stage. The AI debates are never chained into - the user starts one deliberately.
 
 On any install or update, `/audit-html` can scan the user's own markdown for files that would benefit from an HTML view (report-only). Toolkit outputs already render HTML automatically.
 

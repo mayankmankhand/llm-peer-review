@@ -8,7 +8,7 @@
 
 <rules>
 
-1. **Auto by default** - The loop runs automatically per the shared fragment `.claude/skills/shared/hitl-loop.md`; a human is paged only per M1, and saying "report only" on any run restores report-first behavior for that run (M10)
+1. **Auto by default** - The loop runs automatically per the shared fragment `.claude/skills/shared/hitl-loop.md`; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Show your work** - Tell me what you're doing and why
@@ -18,21 +18,21 @@
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M13); the rationale and per-stage verdicts live in `docs/HITL-MAP.md`.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M14); the rationale and per-stage verdicts live in `docs/HITL-MAP.md`.
 
 ### Our Workflow
 
 <procedure>
 
-We follow this flow for features:
-0. `/worktree` - (Optional) Create an isolated worktree for parallel work
-1. `/explore` - Understand the problem, ask clarifying questions
-2. `/create-plan` - Create a step-by-step plan with status tracking
-3. `/execute` - Build it, updating the plan as we go
-4. Run `/review` for auto-detected review, or a specific `/review-*` command - it finds issues, dedups them, audits them (M2), auto-fixes the survivors, re-verifies, and exits each finding as page, digest, or log - see command table below
-5. `/ask-gpt` or `/ask-gemini` - Get a second opinion via multi-model debate (human-triggered; its Recommended Actions are then auto-processed through the same loop)
-6. `/peer-review` - Auto audit step (M2) - evaluate debate findings against the codebase (paste results here)
-7. `/document` - Update documentation
+We follow this flow for features. You type the steps marked **(you)**; the rest chain automatically per M14, and "no chaining" on any run stops after that stage:
+0. `/worktree` - **(you, optional)** Create an isolated worktree for parallel work
+1. `/explore` - **(you)** Understand the problem, ask clarifying questions
+2. `/create-plan` - *chains from `/explore` once the conversation converges* - Create a step-by-step plan with status tracking, then stop for approval
+3. `/execute` - **(you: approve the plan)** Build it, updating the plan as we go
+4. `/review` - *chains from `/execute` on a clean finish* - it finds issues, dedups them, audits them (M2), auto-fixes the survivors, re-verifies, and exits each finding as page, digest, or log - see command table below. Use a specific `/review-*` command instead when you know which lens you need
+5. `/ask-gpt` or `/ask-gemini` - **(you)** Get a second opinion via multi-model debate (human-triggered and never chained into; its Recommended Actions are then auto-processed through the same loop)
+6. `/peer-review` - **(you)** Auto audit step (M2) - evaluate debate findings against the codebase (paste results here)
+7. `/document` - *chains from `/review` once the loop settles* - Update documentation
 
 The lessons captured at `/document` are read back at the start of the next `/explore`, `/create-plan`, `/execute`, and `/pair-debug` - that feedback loop is what keeps the toolkit from repeating mistakes.
 
@@ -269,6 +269,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 
 - I'm learning - explain what you do
 - The loop runs auto by default; say "report only" on any run to get report-first behavior for that run (M10)
+- Stages chain automatically (M14); say "no chaining" on any run to stop after that stage. Different knob from "report only": one governs whether the next stage fires, the other whether findings are auto-fixed
 - Ask if unsure
 - After non-trivial corrections, update the learning log: a one-liner in `LESSONS.md` plus the full write-up in `LESSONS-detail.md`. Capture a lesson when Claude makes the same mistake a second time, when a review catches something Claude should have known, or when you type the same correction you typed before.
 
