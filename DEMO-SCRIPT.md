@@ -81,7 +81,7 @@
 ## 5. Review (~45 seconds)
 
 **SAY:**
-> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I had said "report only" when I approved the plan, it would report the findings and change nothing.
+> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I want it to look without touching anything, I say "report only" on the run - that opt-out applies to the run it is said on.
 
 **WAIT** for `/review` to chain from `/execute` and produce its report.
 
@@ -114,9 +114,9 @@
 ## 7. Wrap-up (~15 seconds)
 
 **SAY:**
-> After the debate, you'd run `/peer-review` to evaluate the findings and decide what to act on. Then `/document` updates your README and docs to match what was built.
+> `/document` has already run by this point - it chained from `/review` and updated the README and docs to match what was built. So a debate here is a second opinion on a finished cycle, and you'd run `/peer-review` to evaluate its findings and feed the real ones back through the same loop.
 >
-> That's the full loop: explore, plan, build, review, debate, document. Every step has a command. You stay in control the whole time.
+> That's the full loop: explore, plan, build, review, document - all of it chaining after I approve the plan. The debate is the optional extra I reach for deliberately. Two phrases give me the wheel back at any point: "no chaining" and "report only".
 
 ---
 
@@ -129,7 +129,8 @@
 | Build it | `/execute` | ~60s |
 | Review the code | *chains automatically* | ~45s |
 | AI debate | `/ask-gpt` | ~45s |
-| Wrap-up (narrate) | `/peer-review`, `/document` | ~15s |
+| Documentation | *chains automatically* | ~15s |
+| Wrap-up (narrate) | `/peer-review` | ~15s |
 
 ---
 
