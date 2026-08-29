@@ -114,3 +114,7 @@
 - **A co-location rule is only as strong as its weakest call site.**
 - **Inlining a shared fragment AND repeating its content defeats the point of the fragment.**
 - **A permission you cannot self-provision may have an already-permitted equivalent.**
+
+### Human-in-the-loop map (issue #146)
+
+- **A self-run consistency check passes while the scoped thing is missing entirely.**
