@@ -156,7 +156,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 - After commits you want to keep (backup)
 - When you're done for the day
 - Before asking for feedback
-- In the auto loop, pushes happen automatically after a pre-push tripwire (M11): a secret grep of the outgoing diff plus a diff of the settings files. A hit blocks the push and pages you.
+- In the auto loop, pushes happen automatically after the pre-push tripwire (M11): `node .claude/scripts/pre-push-check.js` scans every outgoing commit for secrets, never-push files, and settings changes. A hit blocks the push and pages you; if the script is absent, M11's prose fallback runs instead.
 
 ### Commit Messages
 - Start with a verb: "Add", "Fix", "Update", "Remove", "Refactor"
@@ -247,6 +247,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `node .claude/scripts/browse.js` | Running the headless browser QA script |
 | `echo/cat * \| node .claude/scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants pointing at the current project's `.claude/scripts/browse.js` are injected by setup.sh per project; stale `scripts/browse.js` entries from older installs are removed automatically on the next setup run. |
 | `node .claude/scripts/generate-index.js` | Running the codebase scanner that emits the file manifest consumed by `/index` to build `CODEBASE_MAP.md` |
+| `node .claude/scripts/pre-push-check.js` | Running the M11 pre-push tripwire (per-commit secret scan, never-push files, settings diff) before any push |
 | `bash scripts/setup/bump-version.sh` | Running the version-bump script during release prep |
 | `bash -n scripts/setup/setup.sh`, `bash -n scripts/setup/bump-version.sh` | Syntax-checking setup scripts before release |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
