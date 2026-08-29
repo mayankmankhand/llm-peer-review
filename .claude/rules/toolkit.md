@@ -103,11 +103,11 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 **When Running any /review-* command or skill:**
 - Output a written report using the format in the corresponding skill's `SKILL.md` or `.claude/commands/review-*.md`
 - Specialist reviewers never modify files themselves - their job is to report findings into the loop
-- Nothing waits for human approval: after the M2 audit (preceded by dedup on an orchestrated `/review`; a direct `/review-*` run audits its own findings with no dedup phase), surviving findings flow into the auto-fix loop below, unless this run was started with "report only" (M10)
+- Nothing waits for human approval: after the M2 audit (preceded by dedup on an orchestrated `/review`; a direct `/review-*` run that fanned out sub-agents dedups their combined findings first, and a single-pass run has nothing to dedup), surviving findings flow into the auto-fix loop below, unless this run was started with "report only" (M10)
 - Use the "Use this when / Don't use this when" guidance at the top of each command to pick the right one
 
 **Auto-fix loop for review findings and debate Recommended Actions (mechanics in `.claude/skills/shared/hitl-loop.md`):**
-- After the M2 audit (receipts, skeptical pass, three-vote for Blocks - kills go to the log), survivors are auto-fixed, subject to the intent-reversal guard (M7) and the always-ask actions (M9). Every runner audits: the `/review` orchestrator after dedup, and a directly-typed `/review-*` skill after its own pass
+- After the M2 audit (receipts, skeptical pass, three-vote for Blocks - kills go to the log), survivors are auto-fixed, subject to the intent-reversal guard (M7) and the always-ask actions (M9). Every runner audits - M2's who-runs-it list covers the orchestrator, direct `/review-*` runs, and the session processing debate Recommended Actions, with `/peer-review`'s code-verifying evaluation as the stated exception
 - Every fix is re-verified per M3 (which defines the mechanical-vs-judgment split and the countable "R3: FIXED" / "R3: NOT FIXED" verdict format) and M6 (sweep for other instances of the same claim) - a fix is not done until its check passes
 - Failure handling follows M5: max 2 fix rounds, then revert to the last green checkpoint and page
 - Anything NEW discovered while re-verifying follows M5's one-generation rule: fixed and re-verified once, then further discoveries land in the digest as open items

@@ -199,7 +199,7 @@ Pass `--name debate-gpt` to the helper.
 
 <rules>
 
-After the summary is presented, the Recommended Actions enter the auto loop. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M14); follow them as written there.
+After the summary is presented, the Recommended Actions enter the auto loop, and you are M2's **runner** for them: audit them per M2 before any fix. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M14); follow them as written there.
 
 For each Recommended Action, in R-ID order:
 

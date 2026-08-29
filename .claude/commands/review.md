@@ -189,9 +189,9 @@ The inlined template defines the **Overall Verdict** line, the **readability bac
 - **Compute the Verdict from the audit survivors**, not from everything the specialists reported. A Block the Phase 4 audit killed does not make the run `changes-requested`; the same goes for the readability backstop's count.
 - **Security escalation nudge:** if the changed files touch a genuine trust boundary - a new route/endpoint, file upload, or webhook; authentication logic; crypto; or secret handling - append one line after the report: _"Consider `/security-audit`: this change touches [X], which deserves a deeper whole-repo pass."_ Only when a trigger is genuinely present; the Security specialist also emits this when called directly.
 
-### Audited out (log exit)
+### Audited out
 
-Rendered exactly as the template's "Audited out (log exit)" section defines it - placement, verdict labels, the `Audited out: none` line, and the never-omit rule. The orchestrator's only addition is the `[specialist]` tag on each ID, as everywhere else: `- **R7** [code] \`RECEIPT FAILED\` - [What] (check output did not show the claim)`.
+Rendered exactly as the template's "Audited out" section defines it - placement, verdict labels, the `Audited out: none` line, the empty-run rule, and the never-omit rule. The orchestrator's only addition is the `[specialist]` tag on each ID, as everywhere else: `- **R7** [code] \`RECEIPT FAILED\` - [What] (check output did not show the claim)`.
 
 ### Summary (orchestrator-specific)
 - Specialists run: X of Y
@@ -213,8 +213,7 @@ For orchestrator output specifically:
 - Pass `--name review-orchestrator` to the helper
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
 - Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
-- Each surviving finding carries its receipt as a final field row: `{"label": "Receipt", "value": "<code>check</code> - what the output showed"}`
-- Append one extra group after the specialist groups: `{label: "Audited out"}`, containing the killed findings with their assigned `id` and an added field row `{"label": "Audit verdict", "value": "RECEIPT FAILED" / "REFUTED" / "REFUTED 2/3"}`. No shell change: `groups[]` and `fields[]` are generic.
+- The Receipt field rows and the Audited out group render per the audit rows rule in the shared HTML fragment above; the orchestrator's only addition is the `[specialist]` tag carried inside each finding's `what`/`id` as everywhere else.
 
 ## After the Report (auto loop)
 
