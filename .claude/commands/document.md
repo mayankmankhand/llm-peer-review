@@ -3,7 +3,7 @@
 **Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or INDEX after code changes have shipped.
 **Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
 
-You are updating documentation after code changes.
+You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
 
 ## Primary Documentation Files
 
@@ -34,7 +34,7 @@ For each changed file:
 - **README.md** - New features, changed behavior, setup instructions, new commands
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
-- **LESSONS.md** / **LESSONS-detail.md** - First show the user the current lesson index (`LESSONS.md`) so nothing gets duplicated, then prompt: "Did you learn anything this session worth logging?" Capture a lesson when Claude repeated a mistake, a review caught something Claude should have known, or the user typed the same correction twice. When adding one, write the one-liner to `LESSONS.md` (under the right section) AND the full write-up to `LESSONS-detail.md` (same bold lead). Then do a quick cleanup pass: dedupe near-duplicate lessons, mark superseded ones, and keep the index short. Capture stays user-approved - do not auto-write lessons.
+- **LESSONS.md** / **LESSONS-detail.md** - Read the current lesson index (`LESSONS.md`) first so nothing gets duplicated, then auto-draft this session's lessons and write them per M8: each entry carries its receipt (what happened, where). Capture a lesson when Claude repeated a mistake, a review caught something Claude should have known, or the user typed the same correction twice. When adding one, write the one-liner to `LESSONS.md` (under the right section) AND the full write-up to `LESSONS-detail.md` (same bold lead). Then do a quick cleanup pass: dedupe near-duplicate lessons, mark superseded ones, and keep the index short.
 - **CODEBASE_MAP.md** - Regenerate by invoking `/index` (the command orchestrates the scanner and parallel subagents to produce a fresh semantic map). For projects over 500k tokens or with per-chunk overflow, `/index` will prompt for cost confirmation before spending API tokens - tell the user this may happen and that they can decline to skip the refresh (the prior map remains intact). If `/index` fails or the user declines, leave the existing map untouched and continue with the rest of `/document`. Do not write the map file manually.
 
 ## 4. Documentation Style Rules
@@ -54,11 +54,18 @@ For each changed file:
 
 If you're unsure about intent behind a change or user-facing impact, **ask the user** - don't guess.
 
-**Host CLI (used by Sections 6 and 7).** Both sections call the issue/PR CLI, but Section 6 is skipped when you are not in a worktree while Section 7 always runs. Detect the host here, outside that conditional, and reuse the result in both.
+## 6. Commit and Push
+
+- **Commit** the documentation updates automatically: one checkpoint commit per logical unit, per M4. Follow the commit message conventions in toolkit.md.
+- **Push** behind the M11 tripwire (interim prose run): a secret grep of the outgoing diff plus a diff of the two settings files for unexpected permission changes. If clean, push without ceremony; on a hit, block the push and page.
+
+This covers every push in this command, including the branch push in Section 7.
+
+**Host CLI (used by Sections 7 and 8).** Both sections call the issue/PR CLI, but Section 7 is skipped when you are not in a worktree while Section 8 always runs. Detect the host here, outside that conditional, and reuse the result in both.
 
 !`cat .claude/skills/shared/host-cli.md`
 
-## 6. Worktree Cleanup
+## 7. Worktree Cleanup
 
 Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree.
 
@@ -66,7 +73,7 @@ Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-
 
 **If in a worktree:**
 
-Walk the user through each step one at a time, confirming before proceeding to the next.
+Run the steps below automatically, attaching a receipt to each per M8 (what ran, plus the evidence: command output, count delta, diff stat). The receipts land in the end-of-run digest. Three steps are deliberate exceptions that still ask the user: step 1 (uncommitted changes - their intent is a fact only the user holds, M1), step 3 (branch naming), and step 6 (removing a worktree folder sits next to the M9 data-deletion gate). In step 4, showing the PR draft is an announcement, not a wait.
 
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote.
@@ -77,7 +84,7 @@ Walk the user through each step one at a time, confirming before proceeding to t
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
 8. The branch stays alive on the remote until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.
 
-## 7. Cycle Summary (HTML, default-on)
+## 8. Cycle Summary (HTML, default-on)
 
 Generate a one-page HTML summary of what shipped this cycle. Runs on every `/document`, per `.claude/rules/html-outputs.md` (default-on).
 
@@ -99,7 +106,7 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
-- **PR link** - the PR from Section 6 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
+- **PR link** - the PR from Section 7 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
 Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):

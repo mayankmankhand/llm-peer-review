@@ -11,8 +11,8 @@ Run the right reviews automatically, combine findings into one report.
 
 <rules>
 
-1. **REPORT ONLY** - Do NOT make any changes or edits to files
-2. **Wait for approval** - Only fix things after I say "fix it"
+1. **REVIEWERS NEVER EDIT** - Specialists and the report phase never modify files; findings are their product
+2. **Continue into the auto loop** - After the report, do not wait for a human "fix it": dedup, drop non-issues to the log, auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, inlined under "After the Report" below. Saying "report only" keeps this run report-first (M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Respect the concurrency cap** - Max 4 parallel subagents per run
 
@@ -69,7 +69,7 @@ Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum th
 
 **Never-gate specialists:** Dependency Security (selected when a `package.json`/lockfile changed) and Security (selected whenever code changes). Either one's presence disables the size gate for the whole run - diff size is not a proxy for risk. A one-line change can introduce a severe vulnerability or pull in a bad dependency, so neither security pass is ever skipped for being small. (Trade-off: because Security is selected on any code change, code reviews fan out to subagents rather than taking the fast inline path - the deliberate cost of never size-gating security.)
 
-The inline path still obeys the report-only rule and the HTML gate; it simply has no subagents to dispatch.
+The inline path continues into the same auto loop after the report (see "After the Report" below) and still obeys the HTML gate; it simply has no subagents to dispatch.
 
 ### Phase 2: Dispatch
 
@@ -191,7 +191,7 @@ The inlined template defines an **Overall Verdict** line, a **readability backst
 - Blocks: X | Warns: X | Suggests: X
 - Deduplicated findings: X (Y raw findings from specialists)
 
-End the report with one line so the user knows what happens after approval: _"After 'fix it', I will apply the approved fixes and then re-verify each one (re-verify protocol in `.claude/rules/toolkit.md`, max 2 rounds)."_
+End the report with one line so the user knows what happens next: _"The loop now auto-fixes and re-verifies the surviving findings (auto loop in `.claude/skills/shared/hitl-loop.md`); saying 'report only' at the start would have kept this run report-first."_
 
 </output_format>
 
@@ -206,6 +206,22 @@ For orchestrator output specifically:
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
 - Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the deduped Phase 3 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
 
+## After the Report (auto loop)
+
+What happens after the report is governed by the shared auto-loop fragment (the M-rule IDs cited in this file refer to it):
+
+!`cat .claude/skills/shared/hitl-loop.md`
+
+Once the report (and the HTML, when the gate fired) is out, continue without waiting for a human "fix it":
+
+1. **Drop non-issues to the log** - deduped findings judged not real are logged, never fixed.
+2. **Auto-fix the survivors** - subject to the intent-reversal guard (M7) and the always-ask actions (M9).
+3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6.
+4. **Route each finding to its exit** - page only per M1; everything else lands in the digest or the log.
+5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what was dropped, and any page that needs the user.
+
+Saying "report only" on the invocation keeps the entire run report-first (M10).
+
 <rules>
-## REMEMBER: Report issues only. Do NOT edit any files until I approve.
+## REMEMBER: Specialists report; the loop fixes. After the report, continue per the auto loop above; "report only" keeps a run report-first (M10).
 </rules>

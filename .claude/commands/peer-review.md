@@ -53,6 +53,16 @@ For each dismissed finding:
 
 ### Action Plan
 
-Prioritized list of confirmed findings to fix, ordered by severity.
+Prioritized list of confirmed real problems, ordered by severity. This is the order the auto loop processes them in (see After the Evaluation below).
 
 </output_format>
+
+## After the Evaluation
+
+The evaluation above is itself the audit step of the auto loop; keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M13). Once the verdicts are in:
+
+- **Dismissed** findings go to the log with their evidence. They are never fixed.
+- **Confirmed - opinion, not a bug** findings go to the digest as observations, not fixes.
+- **Confirmed - real problem** findings enter the auto loop: fix them (the M7 and M9 gates still apply), then re-verify per M3, M5, and M6. Each exits as page (only per M1), digest with receipts (M8), or log.
+
+Saying **"report only"** on this run keeps evaluate-and-wait behavior for that run (M10).

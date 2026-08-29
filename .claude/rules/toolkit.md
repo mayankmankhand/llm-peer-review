@@ -8,7 +8,7 @@
 
 <rules>
 
-1. **Never auto-fix** - Report issues first, wait for my approval before editing files
+1. **Auto by default** - The loop runs automatically per the shared fragment `.claude/skills/shared/hitl-loop.md`; a human is paged only per M1, and saying "report only" on any run restores report-first behavior for that run (M10)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Show your work** - Tell me what you're doing and why
@@ -17,6 +17,8 @@
 7. **Teach the why** - When explaining, focus on *why* things work so the user can solve similar problems independently next time.
 
 </rules>
+
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M13); the rationale and per-stage verdicts live in `docs/HITL-MAP.md`.
 
 ### Our Workflow
 
@@ -27,9 +29,9 @@ We follow this flow for features:
 1. `/explore` - Understand the problem, ask clarifying questions
 2. `/create-plan` - Create a step-by-step plan with status tracking
 3. `/execute` - Build it, updating the plan as we go
-4. Run `/review` for auto-detected review, or a specific `/review-*` command (report only, don't fix) - see command table below
-5. `/ask-gpt` or `/ask-gemini` - Get a second opinion via multi-model debate
-6. `/peer-review` - Evaluate debate findings (paste results here)
+4. Run `/review` for auto-detected review, or a specific `/review-*` command - it finds issues, dedups them, auto-fixes the survivors, re-verifies, and exits each finding as page, digest, or log - see command table below
+5. `/ask-gpt` or `/ask-gemini` - Get a second opinion via multi-model debate (human-triggered; its Recommended Actions are then auto-processed through the same loop)
+6. `/peer-review` - Auto audit step - evaluate debate findings against the codebase (paste results here)
 7. `/document` - Update documentation
 
 The lessons captured at `/document` are read back at the start of the next `/explore`, `/create-plan`, `/execute`, and `/pair-debug` - that feedback loop is what keeps the toolkit from repeating mistakes.
@@ -48,7 +50,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/create-plan` | Create a step-by-step implementation plan with status tracking |
 | `/execute` | Build the feature, updating the plan as you go |
 | `/review` | Run the right reviews automatically, combine findings into one report |
-| `/review-code` | Review code - report issues only, don't fix (skill - also invoked by /review) |
+| `/review-code` | Review code - the specialist reports findings into the auto loop (skill - also invoked by /review) |
 | `/review-security` | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (skill - also invoked by /review on every code change) |
 | `/review-commands` | Review slash command prompts for quality and consistency (skill - also invoked by /review) |
 | `/review-plan` | Check if implementation matches the plan (skill - also invoked by /review) |
@@ -100,16 +102,15 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 
 **When Running any /review-* command or skill:**
 - Output a written report using the format in the corresponding skill's `SKILL.md` or `.claude/commands/review-*.md`
-- Do NOT modify any files
-- Wait for me to say "fix it" before making changes
+- Specialist reviewers never modify files themselves - their job is to report findings into the loop
+- Nothing waits for human approval: after dedup, surviving findings flow into the auto-fix loop below, unless this run was started with "report only" (M10)
 - Use the "Use this when / Don't use this when" guidance at the top of each command to pick the right one
 
-**After "fix it" on review findings or approved debate Recommended Actions (re-verify protocol):**
-- Once the approved fixes are applied, re-verify each approved finding - a fix is not done until its check passes:
-  - **Mechanical findings** (a test, build, script exit code, or specific browser action demonstrated the issue): re-run that exact check inline. The tool's result is the verdict - no subagent needed.
-  - **Judgment findings** (quality, clarity, UX - nothing runnable proves them): dispatch ONE fresh subagent per round to verify. Give it the approved finding IDs, the original finding text, each finding's file:line, and the diff of the fixes. It verifies only those findings, and it must return one line per finding ID - "R3: FIXED" or "R3: NOT FIXED" plus a one-line receipt. Anything else it says falls under the report-only rule below.
-- Hard limit: max 2 verification rounds. If round 1 returns any NOT FIXED items, make one more fix attempt on just those items; round 2 then re-checks only them. After round 2, stop and report status honestly - which findings verified as fixed and which did not.
-- Anything NEW discovered while re-verifying is report-only: list it and wait for my approval - never fix it without approval.
+**Auto-fix loop for review findings and debate Recommended Actions (mechanics in `.claude/skills/shared/hitl-loop.md`):**
+- After dedup, survivors are auto-fixed, subject to the intent-reversal guard (M7) and the always-ask actions (M9)
+- Every fix is re-verified per M3 (which defines the mechanical-vs-judgment split and the countable "R3: FIXED" / "R3: NOT FIXED" verdict format) and M6 (sweep for other instances of the same claim) - a fix is not done until its check passes
+- Failure handling follows M5: max 2 fix rounds, then revert to the last green checkpoint and page
+- Anything NEW discovered while re-verifying follows M5's one-generation rule: fixed and re-verified once, then further discoveries land in the digest as open items
 
 **When Running /create-issue:**
 - Ask 2-3 clarifying questions first
@@ -125,7 +126,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 - **Use subagents for research and exploration** freely - no need to ask
 - **One focused task per subagent** - don't bundle unrelated work
 - **Don't duplicate work** - if a subagent is researching something, don't also do it yourself
-- **Parallelize independent plan steps** - tell the user what each parallel task will do and wait for approval before starting
+- **Parallelize independent plan steps** - announce what each parallel task will do, then proceed without waiting (matches the auto verdict for /execute)
 
 </guidelines>
 
@@ -147,6 +148,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 
 ### When to Commit
 - After completing a logical unit of work
+- After each green logical unit in the auto loop (M4) - these checkpoints are what make an auto-fix safe to undo one at a time
 - Before switching to a different task
 - When you want a checkpoint you can return to
 
@@ -154,6 +156,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 - After commits you want to keep (backup)
 - When you're done for the day
 - Before asking for feedback
+- In the auto loop, pushes happen automatically after a pre-push tripwire (M11): a secret grep of the outgoing diff plus a diff of the settings files. A hit blocks the push and pages you.
 
 ### Commit Messages
 - Start with a verb: "Add", "Fix", "Update", "Remove", "Refactor"
@@ -185,7 +188,7 @@ When running multiple Claude Code sessions in parallel (via Cursor windows or Re
 
 <guidelines>
 
-If Claude can do it, Claude should do it. Do not ask the user to run commands that you are capable of running yourself. Act first, report what you did. (This applies to running commands and checks - Critical Rule #1 still governs code changes: report first, fix later.)
+If Claude can do it, Claude should do it. Do not ask the user to run commands that you are capable of running yourself. Act first, report what you did. (This covers running commands and checks; file edits follow the auto loop in Critical Rule #1, with the always-ask actions per M9 as the exception.)
 
 ### Do it yourself
 - **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
@@ -264,7 +267,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 <rules>
 
 - I'm learning - explain what you do
-- Report first, fix later
+- The loop runs auto by default; say "report only" on any run to get report-first behavior for that run (M10)
 - Ask if unsure
 - After non-trivial corrections, update the learning log: a one-liner in `LESSONS.md` plus the full write-up in `LESSONS-detail.md`. Capture a lesson when Claude makes the same mistake a second time, when a review catches something Claude should have known, or when you type the same correction you typed before.
 

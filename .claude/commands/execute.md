@@ -5,6 +5,8 @@
 
 Now implement precisely as planned, in full.
 
+Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate. The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` (rationale in `docs/HITL-MAP.md`). Saying "report only" on this run restores report-first behavior for the run (M10).
+
 ## Implementation Requirements
 
 <rules>
@@ -13,6 +15,8 @@ Now implement precisely as planned, in full.
 - Include thorough, clear comments/documentation within the code
 - As you implement each step:
   - Update the markdown tracking document with emoji status and overall progress percentage dynamically
+- After each step's work is green, make a checkpoint commit of that logical unit (M4) before moving on
+- Always-ask actions page for approval before applying, per M9 - during /execute that is most often an edit to a prompt file; the full list lives in `.claude/skills/shared/hitl-loop.md`
 </rules>
 
 ## Read Past Lessons
@@ -29,10 +33,10 @@ When the plan has steps tagged `[parallel]`, follow these rules:
 ### Pre-flight Check
 Before spawning parallel agents, list the files each agent will touch. If any files overlap between agents, downgrade the overlapping steps to `[sequential]`. Non-overlapping steps can still run in parallel.
 
-### User Confirmation
+### Kickoff Announcement
 Before starting parallel work, tell the user what each task will do:
-> "Running two tasks in parallel: Task 1 does [X], Task 2 does [Y]. OK to proceed?"
-Wait for approval before continuing.
+> "Running two tasks in parallel: Task 1 does [X], Task 2 does [Y]."
+Then start. Do not wait for a reply: executing an approved plan is the auto stage, and spawning agents for approved steps is not a page (M1).
 
 ### Agent Contract
 Each parallel agent must:
@@ -52,8 +56,8 @@ After all parallel steps finish, always run a sequential checkpoint:
 ## When to Stop
 
 <rules>
-If you hit a critical blocker, **stop executing**. Don't push through a broken plan. Instead:
-1. Explain what went wrong and why
+If you hit a critical blocker, **stop executing**. Don't push through a broken plan. A blocker unresolved within the retry bound is a hard stop that pages the human (M1 in `.claude/skills/shared/hitl-loop.md`) - phrase it as a decision a non-engineer can make. Instead:
+1. Explain what went wrong and why, what the options are, and a recommended default
 2. Suggest re-running `/create-plan` with what you've learned
 
 **Critical blocker examples:** the plan assumed an API supports a feature it doesn't, a core dependency is incompatible with the project, or the planned architecture can't work as designed.

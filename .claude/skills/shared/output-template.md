@@ -52,7 +52,7 @@ Whether you write these fields directly (a direct `/review-*` call) or the orche
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X
 
-End the report with one line so the user knows what happens after approval: _"After 'fix it', I will apply the approved fixes and then re-verify each one (re-verify protocol in `.claude/rules/toolkit.md`, max 2 rounds)."_
+End the report with one line so the user knows what happens next: _"Fixes for surviving findings apply automatically and are re-verified per the auto loop in `.claude/skills/shared/hitl-loop.md`; saying 'report only' at the start would have kept this run report-first, and works the same on any future run."_
 
 ## Illustrative Examples
 
