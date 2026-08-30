@@ -80,7 +80,7 @@ For each selected specialist:
 3. Read the changed files once, here, so each subagent receives the relevant excerpts instead of re-opening every file (paste-don't-read)
 4. Spawn a subagent using the Agent tool with `subagent_type=review-finder` - the pinned finder agent, whose model and effort come from its frontmatter per the routing rule in `.claude/skills/shared/model-routing.md` (fallback per that rule: if the agent type is unavailable in this install, use `general-purpose` with no model parameter) - and the prompt template below: the skill's review criteria, the project context summary, and the pre-read file excerpts
 
-**Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder. Browser QA is always sequential (it drives a browser), so it runs last if included.
+**Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder - in practice most runs select 1 to 4 specialists, so the second wave is the exception, not the norm. Browser QA is always sequential (it drives a browser), so it runs last if included. As each specialist returns, run its findings' receipt checks right away instead of waiting for the whole wave - M2's Concurrency note (inlined under "After the Report") is authoritative for this tier-1 overlap.
 
 **Subagent prompt template:**
 ```
