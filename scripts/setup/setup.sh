@@ -521,12 +521,16 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
   done
 fi
 if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
-  shopt -s nullglob
+  # failglob (set globally at the top) takes precedence over nullglob, so
+  # nullglob alone does NOT stop an empty directory from aborting the run with
+  # "no match" - failglob must be turned OFF for the duration of the loop and
+  # restored afterward. Verified on bash 5.2 (issue #152).
+  shopt -u failglob; shopt -s nullglob
   for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/shells/"*; do
     [ -f "$pf_src" ] || continue
     preflight_record_diff "$pf_src" ".claude/skills/shared/shells/$(basename "$pf_src")"
   done
-  shopt -u nullglob
+  shopt -u nullglob; shopt -s failglob
 fi
 for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   [ -d "$pf_skill_dir" ] || continue
@@ -538,12 +542,13 @@ for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   done
 done
 if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
-  shopt -s nullglob
+  # failglob off for the loop, then restored - see the shells/ block above.
+  shopt -u failglob; shopt -s nullglob
   for pf_src in "$TOOLKIT_ROOT/.claude/agents/"*.md; do
     [ -f "$pf_src" ] || continue
     preflight_record_diff "$pf_src" ".claude/agents/$(basename "$pf_src")"
   done
-  shopt -u nullglob
+  shopt -u nullglob; shopt -s failglob
 fi
 for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
@@ -893,17 +898,18 @@ done
 # Agent files carry the model/effort pins for worker subagents (the roster in
 # .claude/skills/shared/model-routing.md). Guarded: an older toolkit checkout
 # may not have the directory, and an absent roster just means dispatch falls
-# back to inherit. nullglob for the same failglob reason as shells/ below.
+# back to inherit. Empty-directory handling as in the shells/ block below:
+# failglob off for the loop, then restored.
 if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   echo "  Copying .claude/agents/ ..."
   mkdir -p "$TARGET/.claude/agents"
-  shopt -s nullglob
+  shopt -u failglob; shopt -s nullglob
   for src in "$TOOLKIT_ROOT/.claude/agents/"*.md; do
     [ -f "$src" ] || continue
     fname="$(basename "$src")"
     safe_copy "$src" "$TARGET/.claude/agents/$fname"
   done
-  shopt -u nullglob
+  shopt -u nullglob; shopt -s failglob
 fi
 
 # ─── Skill files (upstream-owned - always copy) ─────────────
@@ -927,17 +933,18 @@ fi
 # any nested directories. A plain * glob avoids the failglob abort that separate
 # *.html / *.css patterns would trigger if one extension were ever absent - but
 # only when files are present. An empty shells/ dir would still trigger failglob,
-# so the loop is guarded by nullglob (restored afterward) to yield zero
-# iterations instead of a "no match" abort.
+# so the loop turns failglob OFF and nullglob ON for its duration (restoring both
+# afterward) to yield zero iterations instead of a "no match" abort. nullglob
+# alone is not enough: failglob takes precedence over it (verified, issue #152).
 if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
   mkdir -p "$TARGET/.claude/skills/shared/shells"
-  shopt -s nullglob
+  shopt -u failglob; shopt -s nullglob
   for src in "$TOOLKIT_ROOT/.claude/skills/shared/shells/"*; do
     [ -f "$src" ] || continue
     fname="$(basename "$src")"
     safe_copy "$src" "$TARGET/.claude/skills/shared/shells/$fname" || { echo "  Error: failed to copy shells/$fname"; exit 1; }
   done
-  shopt -u nullglob
+  shopt -u nullglob; shopt -s failglob
 fi
 
 # Copy each skill directory (contains SKILL.md and optional supporting files)
