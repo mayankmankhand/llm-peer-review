@@ -43,4 +43,6 @@ Steps:
    bash .claude/scripts/open-artifact.sh "<printed-path>"
    ```
 
+5. **Publish it as a second viewport.** Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+
 The debate cards reuse the same severity scale, file-link scheme, and field format as the review shell for visual consistency across the toolkit.

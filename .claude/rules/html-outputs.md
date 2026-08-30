@@ -62,6 +62,7 @@ The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-
 | `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
 | `artifacts/html/` | Cycle-bound artifacts (review reports, document summaries, debate views, explore option comparisons, audit reports) - timestamped. Also: `/audit-html` static views (via `--stable`, not timestamped). Gitignored. |
+| `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. Gitignored with the rest of `artifacts/html/`. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
 
@@ -96,6 +97,44 @@ Pass the absolute path `render-html.js` printed (the script resolves either an a
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
 
 The `/playground` skill does NOT auto-open (its output is throwaway `/tmp/` HTML the user pastes back, per the Playground Export-Loop Rule); it emits a clickable `file://` link in chat instead (see `.claude/skills/playground/SKILL.md`).
+
+## Publishing the Artifact (second viewport)
+
+Opening the file locally, above, always happens. This section adds a *second* place the same artifact can be viewed: a private Claude-hosted page. It is additive and never a replacement. If anything here is skipped or fails, the user still has the local file and the local open already succeeded.
+
+**The gate is countable.** Publish only when a tool for publishing a file to a hosted artifact page is present in this session's tool list. When it is not (Cursor, or the feature is off for that user), skip this section silently. Do not mention it, do not apologise, do not suggest switching editors. They already have the artifact.
+
+**Consent, once per session.** Publishing sends the rendered file to a Claude-hosted URL. Before the FIRST publish of a session, ask once. A yes covers every artifact type for the rest of that session, including review reports carrying security findings. A no holds for the session too: skip silently thereafter. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
+
+**Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
+
+**Two publish modes, matching how the file is named.**
+
+| Types | File naming | Publish behavior |
+|---|---|---|
+| review, document, explore, debate, audit | timestamped, one file per run | publish a new page each run |
+| plan, docview | `--stable`, one file per identity | update the one page for that identity |
+
+For a stable type, look up its recorded page first:
+
+```bash
+node .claude/scripts/render-html.js --index-url --name <name>
+```
+
+It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page.
+
+**Record every publish.** Immediately after a successful publish:
+
+```bash
+node .claude/scripts/render-html.js --index-add --type <shell> --name <name> \
+     --local <path> --url <url>
+```
+
+`<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
+
+**Failure is not an error.** If a publish does not go through, say so in at most one line and move on. Do not retry in a loop. Nothing is lost.
+
+**What to tell the user.** One line with the link, alongside the local path you already reported: "Also published it: <url>".
 
 ## Visual Look
 

@@ -197,6 +197,8 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
 bash .claude/scripts/open-artifact.sh "<printed-path>"
 ```
 
+Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`. This is a `--stable` type: look up its recorded page with `--index-url` first and update that page rather than creating a new one, then record it with `--index-add`. Silently skipped when the session cannot publish.
+
 ---
 
 ## The Chain Stops Here (M14)
