@@ -134,6 +134,25 @@ const INDEX_PATH = path.resolve(process.cwd(), 'artifacts/html', 'index.jsonl');
 
 if (opts.indexAdd && opts.indexUrl) die('--index-add and --index-url are mutually exclusive');
 
+// The index modes return early, before any render validation, so a command line
+// that mixes them with render flags would silently win: exit 0, nothing rendered,
+// and an index path printed on stdout - which callers feed straight to
+// open-artifact.sh, opening a JSONL file in the browser instead of an artifact.
+// Every caller here is a model composing a command from a prompt file, which is
+// exactly where two documented invocations get merged into one, so fail loudly
+// rather than half-succeeding. (issue #154 review, R11)
+if (opts.indexAdd || opts.indexUrl) {
+  const renderFlags = [];
+  if (opts.shell) renderFlags.push('--shell');
+  if (opts.data) renderFlags.push('--data');
+  if (opts.stable) renderFlags.push('--stable');
+  if (opts.outDir !== 'artifacts/html') renderFlags.push('--out-dir');
+  if (renderFlags.length) {
+    die('index modes take no render arguments (got ' + renderFlags.join(', ') +
+        '); run the render and the index step as separate commands');
+  }
+}
+
 if (opts.indexAdd) {
   if (!opts.name) die('--index-add requires --name');
   if (!opts.url) die('--index-add requires --url');
