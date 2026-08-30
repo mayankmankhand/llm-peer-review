@@ -34,7 +34,7 @@ Read the changed files. Then pick one of two modes:
 
 **Small change** (1-2 files): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or significant logic): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool, then combine their results:
+**Bigger change** (3+ files or significant logic): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-finder`, the pinned finder agent per the routing rule in `.claude/skills/shared/model-routing.md`; fallback per that rule: `general-purpose` with no model parameter), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|

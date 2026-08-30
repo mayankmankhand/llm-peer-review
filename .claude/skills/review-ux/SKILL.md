@@ -37,7 +37,7 @@ Read the UI-related files (components, templates, styles, markup). Then pick one
 
 **Small change** (1-2 files, minor UI tweak): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or new user-facing feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool, then combine their results:
+**Bigger change** (3+ files or new user-facing feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-finder`, the pinned finder agent per the routing rule in `.claude/skills/shared/model-routing.md`; fallback per that rule: `general-purpose` with no model parameter), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
