@@ -537,6 +537,14 @@ for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
     preflight_record_diff "$pf_src" ".claude/skills/$pf_skill_name/$(basename "$pf_src")"
   done
 done
+if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
+  shopt -s nullglob
+  for pf_src in "$TOOLKIT_ROOT/.claude/agents/"*.md; do
+    [ -f "$pf_src" ] || continue
+    preflight_record_diff "$pf_src" ".claude/agents/$(basename "$pf_src")"
+  done
+  shopt -u nullglob
+fi
 for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
@@ -565,7 +573,7 @@ fi
 # above. node_modules/ (created by npm install under .claude/scripts/)
 # is skipped - it is machine-generated, not a customization.
 PF_CUSTOM=()
-for pf_dir_name in commands rules scripts skills; do
+for pf_dir_name in agents commands rules scripts skills; do
   pf_dir="$TARGET/.claude/$pf_dir_name"
   [ -d "$pf_dir" ] || continue
   while IFS= read -r pf_file; do
@@ -879,6 +887,24 @@ for src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   fname="$(basename "$src")"
   safe_copy "$src" "$TARGET/.claude/commands/$fname"
 done
+
+# ─── Agent definitions (upstream-owned - safe_copy backs up customizations) ─
+# PARITY: .claude/agents/ must be copied by BOTH setup.sh and setup.ps1 (issue #152).
+# Agent files carry the model/effort pins for worker subagents (the roster in
+# .claude/skills/shared/model-routing.md). Guarded: an older toolkit checkout
+# may not have the directory, and an absent roster just means dispatch falls
+# back to inherit. nullglob for the same failglob reason as shells/ below.
+if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
+  echo "  Copying .claude/agents/ ..."
+  mkdir -p "$TARGET/.claude/agents"
+  shopt -s nullglob
+  for src in "$TOOLKIT_ROOT/.claude/agents/"*.md; do
+    [ -f "$src" ] || continue
+    fname="$(basename "$src")"
+    safe_copy "$src" "$TARGET/.claude/agents/$fname"
+  done
+  shopt -u nullglob
+fi
 
 # ─── Skill files (upstream-owned - always copy) ─────────────
 echo "  Copying .claude/skills/ ..."

@@ -473,6 +473,12 @@ if (Test-Path -LiteralPath $pfSkillsRoot -PathType Container) {
     }
   }
 }
+$pfAgentsDir = Join-Path $ToolkitRoot ".claude\agents"
+if (Test-Path -LiteralPath $pfAgentsDir -PathType Container) {
+  foreach ($src in Get-ChildItem -Path $pfAgentsDir -Filter *.md -File) {
+    Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\agents" $src.Name)
+  }
+}
 foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js")) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
 }
@@ -510,7 +516,7 @@ $pfPrefix = $Target
 if (-not $pfPrefix.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
   $pfPrefix = $pfPrefix + [System.IO.Path]::DirectorySeparatorChar
 }
-foreach ($pfDirName in @("commands", "rules", "scripts", "skills")) {
+foreach ($pfDirName in @("agents", "commands", "rules", "scripts", "skills")) {
   $pfDir = Join-Path $Target (Join-Path ".claude" $pfDirName)
   if (-not (Test-Path -LiteralPath $pfDir -PathType Container)) { continue }
   foreach ($pfFile in Get-ChildItem -Path $pfDir -Recurse -File -Force) {
@@ -845,6 +851,28 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
   } catch {
     Write-Host "  Error: Failed to copy $($src.Name): $_"
     exit 1
+  }
+}
+
+# --- Agent definitions (upstream-owned - Invoke-SafeCopy backs up customizations) ---
+# PARITY: .claude/agents/ must be copied by BOTH setup.sh and setup.ps1 (issue #152).
+# Agent files carry the model/effort pins for worker subagents (the roster in
+# .claude/skills/shared/model-routing.md). Guarded: an older toolkit checkout
+# may not have the directory, and an absent roster just means dispatch falls
+# back to inherit. Mirrors the agents block in setup.sh.
+$agentsDir = Join-Path $ToolkitRoot ".claude\agents"
+if (Test-Path -LiteralPath $agentsDir -PathType Container) {
+  Write-Host "  Copying .claude\agents\ ..."
+  $agentsDest = Join-Path $Target ".claude\agents"
+  New-Item -ItemType Directory -Force -Path $agentsDest | Out-Null
+  foreach ($src in Get-ChildItem -Path $agentsDir -Filter *.md -File) {
+    $dest = Join-Path $agentsDest $src.Name
+    try {
+      Invoke-SafeCopy -Source $src.FullName -Destination $dest
+    } catch {
+      Write-Host "  Error: Failed to copy agents\$($src.Name): $_"
+      exit 1
+    }
   }
 }
 
