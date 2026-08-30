@@ -177,7 +177,7 @@ Re-running setup is how you get toolkit updates, and it is also where custom wor
 
 **Prefix your own files, or put them in a subfolder.** `.claude/commands/myteam/deploy.md` survives an upgrade byte for byte, and a prefix also protects you from names the toolkit adds in future versions.
 
-**Check your root `package.json`.** Every setup run removes these five entries if it finds them: `openai`, `@google/generative-ai`, `@google/genai`, `playwright-core`, `@axe-core/playwright`. They belong to the toolkit and live in `.claude/scripts/` instead. If your own code genuinely imports one of them, re-add it after setup or restore it from the timestamped backup folder setup leaves behind.
+**Check your root `package.json`.** Every setup run removes these five dependencies if it finds them: `openai`, `@google/generative-ai`, `@google/genai`, `playwright-core`, `@axe-core/playwright`. They belong to the toolkit and live in `.claude/scripts/` instead. It also removes `ask-gpt` and `ask-gemini` from your `scripts` block, but only when they still point at the retired `scripts/ask-gpt.js` path; a script of your own by that name pointing anywhere else is left alone. If your own code genuinely imports one of the five, re-add it after setup or restore it from the timestamped backup folder setup leaves behind.
 
 **See all of this before it happens.** Run the installer with `--dry-run`. It changes nothing and prints what would happen:
 
