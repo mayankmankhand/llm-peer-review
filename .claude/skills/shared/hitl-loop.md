@@ -1,6 +1,6 @@
 # The Auto Loop (Human-in-the-Loop Rules)
 
-Shared reference for every command in the toolkit loop. Inlined via `` !`cat .claude/skills/shared/hitl-loop.md` `` or read directly by orchestrators that dispatch subagents. This file is operational rules only; the rationale and evidence behind every rule live in `docs/HITL-MAP.md`, which settles issue #146 and which this file cites by rule ID (M1 to M14).
+Shared reference for every command in the toolkit loop. Inlined via `` !`cat .claude/skills/shared/hitl-loop.md` `` or read directly by orchestrators that dispatch subagents. This file is operational rules only; the rationale and evidence behind every rule live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo, which settles issue #146 and which this file cites by rule ID (M1 to M14).
 
 The loop runs automatically by default. A human is brought in only where a human changes the outcome. Stages also hand off to each other automatically (M14): the human types `/explore` and approves the plan. Two per-run opt-outs, deliberately separate: saying **"report only"** restores report-first behavior for that run (M10), and saying **"no chaining"** runs one stage and stops (M14).
 
@@ -79,7 +79,7 @@ One verdict line per finding ID per tier, in exactly these formats - countable a
 
 ## Stage verdicts and scope
 
-Each command carries its own one-line verdict (human, auto, or human-triggered) next to its pointer at this file; this fragment is the shared mechanics those verdicts rely on. The full verdict table with evidence is in `docs/HITL-MAP.md`.
+Each command carries its own one-line verdict (human, auto, or human-triggered) next to its pointer at this file; this fragment is the shared mechanics those verdicts rely on. The full verdict table with evidence is in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 **M13. Scope.** The auto loop is carried by the toolkit's own rules and skill files, in this repo and in downstream projects that install the toolkit. A user-level `~/CLAUDE.md` outside a toolkit project stays conservative (report-first): projects without the loop's re-verify machinery keep the old behavior.
 

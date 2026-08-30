@@ -18,7 +18,7 @@
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M14); the rationale and per-stage verdicts live in `docs/HITL-MAP.md`.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M14); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 ### Our Workflow
 
@@ -213,7 +213,7 @@ Ask yourself: "Can I run this command and interpret the result?" If yes, just do
 
 <reference>
 
-This project uses two settings files. `settings.json` is committed to the repo and provides a shared baseline (temp-file permissions for debate scripts). `settings.local.json` is user-specific and not overwritten on re-setup - your real permissions live here.
+This project uses two settings files. `settings.json` is committed to the toolkit repo and holds a shared baseline that currently contains only a context-autocompact threshold override, no permissions. Neither installer copies it, so a downstream project has one only if it creates its own. `settings.local.json` is user-specific and not overwritten on re-setup - your real permissions live here.
 
 These are defined in `.claude/settings.local.json`. Each one exists for a reason.
 

@@ -203,7 +203,7 @@ After the summary is presented, the Recommended Actions enter the auto loop, and
 
 For each Recommended Action, in R-ID order:
 
-1. **Check it against the codebase.** External recommendations systematically over-engineer, which is why `docs/HITL-MAP.md` routes them through the same loop as review findings. An action that fails its check is dropped to the log with its evidence, not applied.
+1. **Check it against the codebase.** External recommendations systematically over-engineer, which is why [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) routes them through the same loop as review findings. An action that fails its check is dropped to the log with its evidence, not applied.
 2. **Gate it.** An action whose fix would reverse deliberate work pages instead of applying (M7). An always-ask action pages for approval per M9, batched with any others, while the loop continues with the rest.
 3. **Apply and re-verify** the survivors per M3, M5, and M6.
 4. **Exit.** Each action takes exactly one exit: page (only per M1), digest with receipts (M8), or log.

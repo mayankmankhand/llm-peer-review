@@ -17,6 +17,14 @@
 #      triggers the overwrite gate
 #   7. A manifest (.claude/.toolkit-manifest.json) is written on every real
 #      run, never on --dry-run, and carries per-file sha256 entries
+#   8. Every path an installed file READS at runtime resolves in the installed
+#      tree, and no installed file points at docs/, which neither installer
+#      copies (issue #153). Scoped deliberately: it checks the `!`cat ...``
+#      inline directives, which are real filesystem reads, plus the docs/
+#      class that caused the HITL-MAP.md dead links. It does NOT try to
+#      resolve every path-shaped string in prose - most of those are
+#      illustrative examples, literal placeholders, or runtime-generated
+#      files, so a blanket check would be noise rather than signal.
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -247,6 +255,58 @@ for rel in "${CUSTOM_FILES[@]}"; do
   fi
 done
 assert_grep "older .toolkit-backup-" "$LOG/rerun.log" "re-run notes the stale backup dir"
+
+# ─── [8] referenced paths resolve in the INSTALLED tree ──────
+# Runs against $SCRATCH (a real install by this point), never against the
+# toolkit source. That distinction is the whole point: every gap issue #153
+# found resolved fine in the source repo and only broke once installed.
+echo "[8] referenced-path resolution (installed tree)"
+
+# 8a. Inline `!`cat <path>`` directives are executed at skill-load time, so a
+#     missing target is a real break rather than a dead link in prose.
+INLINE_MISSING=0
+INLINE_TOTAL=0
+while IFS= read -r ref; do
+  [ -z "$ref" ] && continue
+  # Skip angle-bracket placeholders (e.g. .claude/skills/shared/<file>), which
+  # are prose showing the syntax rather than a path anything reads.
+  case "$ref" in *"<"*|*">"*) continue ;; esac
+  INLINE_TOTAL=$((INLINE_TOTAL + 1))
+  if [ ! -f "$SCRATCH/$ref" ]; then
+    fail "inline-read target missing from install: $ref"
+    INLINE_MISSING=$((INLINE_MISSING + 1))
+  fi
+done <<EOF
+$(grep -rhoE '!`cat [^`]+`' "$SCRATCH/.claude" 2>/dev/null | sed 's/^!`cat //; s/`$//' | sort -u)
+EOF
+if [ "$INLINE_TOTAL" -eq 0 ]; then
+  fail "found no inline-read directives to check - the extraction pattern is probably broken"
+elif [ "$INLINE_MISSING" -eq 0 ]; then
+  ok "all $INLINE_TOTAL inline-read targets resolve in the installed tree"
+fi
+
+# 8b. docs/ is not copied by either installer, so an installed file citing a
+#     docs/ path is a dead link by construction. This is the exact bug class
+#     that shipped seven HITL-MAP.md citations to downstream projects.
+# Only a docs/ path that EXISTS in the toolkit source is a real dead link: it
+# is a file that should have reached the install and did not. A docs/ path
+# present in neither tree (docs/runbook.md in audit-html's sample report) is an
+# illustrative example, so cross-referencing the source is what separates the
+# two without an allowlist to maintain.
+DOCS_BROKEN=""
+while IFS= read -r ref; do
+  [ -z "$ref" ] && continue
+  if [ -f "$TOOLKIT_ROOT/$ref" ] && [ ! -f "$SCRATCH/$ref" ]; then
+    DOCS_BROKEN="$DOCS_BROKEN $ref"
+  fi
+done <<EOF
+$(grep -rhoE '(^|[^A-Za-z0-9_./-])docs/[A-Za-z0-9._/-]+\.md' "$SCRATCH/.claude" 2>/dev/null | sed 's/^[^d]*//' | sort -u)
+EOF
+if [ -z "$DOCS_BROKEN" ]; then
+  ok "no installed file cites a docs/ file that exists in the toolkit but was not copied"
+else
+  fail "installed file(s) cite docs/ files present in the toolkit but not installed:$DOCS_BROKEN"
+fi
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

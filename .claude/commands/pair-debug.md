@@ -10,7 +10,7 @@ Tone: collaborative. "Let's figure this out together."
 ## CRITICAL RULES
 
 <rules>
-1. **Investigate first, fix after confirmation** - Do NOT edit files until a check confirms the root cause. Debugging keeps its human verdict (`docs/HITL-MAP.md`): the investigation is a conversation. The fix that comes out of it then flows through the auto mechanics in `.claude/skills/shared/hitl-loop.md` (M3, M5, M6).
+1. **Investigate first, fix after confirmation** - Do NOT edit files until a check confirms the root cause. Debugging keeps its human verdict ([HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)): the investigation is a conversation. The fix that comes out of it then flows through the auto mechanics in `.claude/skills/shared/hitl-loop.md` (M3, M5, M6).
 2. **Explain simply** - Use plain English, avoid jargon
 </rules>
 
