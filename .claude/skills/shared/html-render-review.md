@@ -51,7 +51,9 @@ Steps:
    bash .claude/scripts/open-artifact.sh "<printed-path>"
    ```
 
-5. **Publish it as a second viewport.** Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+5. **Publish it as a second viewport** per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+
+   **Screenshots do not survive publishing.** `browse.js` writes each screenshot to disk and returns its filesystem path (`{ type: 'screenshot', path }`); nothing in the pipeline encodes the image into the page. A local file resolves those paths, a hosted page cannot, so a published browser QA report shows broken images. When the report contains screenshots, either skip the publish for that report, or say in the link line that the images only appear in the local copy. Do not publish it silently and let the user find the gaps.
 
 ## Subagent Rule (orchestrator dispatch only)
 
