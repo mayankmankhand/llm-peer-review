@@ -4,7 +4,12 @@
      commands read at session start; this file is opened on demand when a specific lesson is
      relevant. To add a lesson: put the one-liner in LESSONS.md under the right section, and the
      full write-up here under the matching section with the SAME bold lead so the two stay linked.
-     Keep entries concise. For deep dives into why a concept works, use /learning-opportunity instead. -->
+     Keep entries concise. For deep dives into why a concept works, use /learning-opportunity instead.
+
+     Note on receipts: some entries cite a review artifact such as
+     artifacts/html/review-orchestrator-<date>.html. Those are the toolkit maintainer's local
+     records - artifacts/html/ is gitignored, so they are not present in your install and are not
+     meant to be opened. The commit SHAs cited alongside them are the durable reference. -->
 
 ## What I Learned
 <!-- Add entries after each session where you learned something new -->

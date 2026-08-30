@@ -10,7 +10,7 @@ const fs = require("fs");
 
 const cwd = process.cwd();
 
-// Tunables (defaults documented in plans/PLAN-issue-97.md)
+// Tunables
 const CHUNK_TARGET_TOKENS = 250_000;
 const MAX_CHUNKS = 5;
 const CONFIRM_THRESHOLD_TOKENS = 500_000;
