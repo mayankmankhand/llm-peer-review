@@ -12,6 +12,26 @@ If you last installed v4.3.3, twelve releases have shipped on top of it. v4.4.0 
 
 ---
 
+## Unreleased
+
+Implements #152 (subagent model pinning). Additive, plus one bug fix in `setup.sh`. No version bump yet.
+
+### Added
+- **A written model-routing rule** (`.claude/skills/shared/model-routing.md`) - Until now only `/index` chose a model for its workers, and it did so in prose that nothing enforced. There is now one rule covering every dispatch: worker "finders" may pin a cheaper model, while judges (the M2 skeptics and voters, the M3 verifier), code-writing agents, and the main loop always stay on your session model. A judge never runs below the tier of the work it judges. The rule also carries its own guardrails, including the requirement that no pin ships without a measured A/B receipt.
+- **Agent definitions in `.claude/agents/`** - Worker roles (`review-finder`, `index-mapper`) are now real files whose model, effort, and tool access are applied by Claude Code on every dispatch, replacing prose instructions that could silently do nothing (the #131 failure). Both installers copy the new folder, and custom files you add there are protected by the same guarantee as `commands/` and `skills/`.
+
+### Changed
+- **The audit no longer bottlenecks on one agent** - M2's skeptical pass and M3's judgment re-verification used to hand every finding to a single subagent, whose runtime grew with the finding count (measured at 15-20 seconds per finding, up to 7 minutes on a big report). Both now split across parallel agents, one per 7 findings, with verdict formats unchanged. Receipt checks also run as each reviewer returns instead of waiting for the whole wave.
+- **`/index` chunk workers pin through frontmatter** - Same Sonnet tier as before, now enforced by the agent file rather than a sentence in the prompt, so the cost message you approve is the model that actually runs.
+
+### Fixed
+- **`setup.sh` could abort on an empty directory** - The script enables `failglob` globally, which overrides the `nullglob` guards that eight of its file-copy loops relied on. An existing-but-empty managed directory (for example `.claude/skills/shared/`) would kill setup with a bare `no match` error instead of copying nothing and moving on. All eight loops now disable `failglob` for their duration and restore it afterward. Two code comments that asserted the wrong behavior were corrected. Verified with real installs at both commits; the installer guarantee suite passes 49/49.
+
+### Notes
+- **A pin was tested and revoked.** The headline proposal of #152 was to run `/review`'s specialists one tier down for speed. It was measured the way the new rule requires: the same diff reviewed twice, pinned and inherited, survivors compared after the audit. The pinned arm was 15% faster and missed a real bug in installer code that the inherited arm caught, so the pin was dropped and the receipt recorded in the routing rule under "Tested and revoked". Review specialists continue to run on your session model. The mechanism stays in place for a future pin that earns its receipt.
+
+---
+
 ## v5.5.0 - Installer Guardrails + Model Refresh (2026-08-05)
 
 > **First GitHub release since v5.2.0 - cumulative, not breaking.** This release rolls up v5.3.0 (security review domain + sharper reviewers) and v5.4.0 (bounded verifier-gated loops), neither of which was published to GitHub, plus the v5.5.0 changes below. Re-running setup once picks up all three versions.
