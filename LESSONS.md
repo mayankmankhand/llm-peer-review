@@ -151,3 +151,9 @@
 - **A missing finding is invisible to the audit; a wrong one is not.**
 - **`failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.**
 - **Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.**
+
+### Second-viewport publishing (issue #154)
+
+- **Check the permission allow-list before designing a mechanism out of shell commands.**
+- **`<title>` is RCDATA, so escaping markup inside it changes nothing visible except entities.**
+- **A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.**
