@@ -515,10 +515,15 @@ for pf_src in "$TOOLKIT_ROOT/.claude/commands/"*.md; do
   preflight_record_diff "$pf_src" ".claude/commands/$(basename "$pf_src")"
 done
 if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
+  # failglob off for the loop, then restored - see the shells/ block below.
+  # Pre-flight verifies commands/*.md is non-empty but never checks shared/,
+  # so an existing-but-empty shared/ would otherwise abort the run here.
+  shopt -u failglob; shopt -s nullglob
   for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
     [ -f "$pf_src" ] || continue
     preflight_record_diff "$pf_src" ".claude/skills/shared/$(basename "$pf_src")"
   done
+  shopt -u nullglob; shopt -s failglob
 fi
 if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
   # failglob (set globally at the top) takes precedence over nullglob, so
@@ -532,6 +537,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
+shopt -u failglob; shopt -s nullglob
 for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   [ -d "$pf_skill_dir" ] || continue
   pf_skill_name="$(basename "$pf_skill_dir")"
@@ -541,6 +547,7 @@ for pf_skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
     preflight_record_diff "$pf_src" ".claude/skills/$pf_skill_name/$(basename "$pf_src")"
   done
 done
+shopt -u nullglob; shopt -s failglob
 if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   # failglob off for the loop, then restored - see the shells/ block above.
   shopt -u failglob; shopt -s nullglob
@@ -918,11 +925,14 @@ echo "  Copying .claude/skills/ ..."
 # Copy shared supporting files first
 if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
   mkdir -p "$TARGET/.claude/skills/shared"
+  # failglob off for the loop, then restored - see the shells/ block below.
+  shopt -u failglob; shopt -s nullglob
   for src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
     [ -f "$src" ] || continue
     fname="$(basename "$src")"
     safe_copy "$src" "$TARGET/.claude/skills/shared/$fname"
   done
+  shopt -u nullglob; shopt -s failglob
 fi
 
 # PARITY: shared/shells/ must be copied by BOTH setup.sh and setup.ps1 (issue #126).
@@ -948,6 +958,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
 fi
 
 # Copy each skill directory (contains SKILL.md and optional supporting files)
+shopt -u failglob; shopt -s nullglob
 for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
   [ -d "$skill_dir" ] || continue
   skill_name="$(basename "$skill_dir")"
@@ -960,6 +971,7 @@ for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
     safe_copy "$src" "$TARGET/.claude/skills/$skill_name/$fname"
   done
 done
+shopt -u nullglob; shopt -s failglob
 
 # ─── Runtime scripts and quarantined package.json (issue #91) ────────────────
 # Runtime scripts and their deps live under .claude/scripts/ so they don't
