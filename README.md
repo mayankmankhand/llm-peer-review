@@ -217,14 +217,15 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's New
 
-**Latest release: v5.5.0** (August 2026). Highlights:
+**Latest release: v6.0.0** (August 2026). **This one changes behavior**, so read the first item before upgrading.
 
-- **Your local edits are guarded.** Setup now detects when you edited a toolkit-managed file (via a hash manifest) and asks before overwriting - a terminal prompts, scripts and AI-agent runs stop with the file list and a `--force` escape hatch. Every replaced file is still backed up and listed after the run.
-- **Debates run on the current flagship models.** `/ask-gpt` pins `gpt-5.6-sol` and `/ask-gemini` pins `gemini-3.6-flash`; old pinned models in `.env.local` auto-override with a notice.
-- **HTML artifacts open reliably on modern WSL.** The opener no longer depends on wslview (whose interop detection broke on newer WSL builds); it goes PowerShell-first and, when genuinely headless, prints the Windows-side path you can paste into a browser.
-- **Worktrees start ready.** `/worktree` carries your codebase map into the new worktree, so parallel sessions no longer regenerate it from scratch.
+- **The loop no longer stops at a report.** A review used to hand you a list and wait for "fix it". It now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and starts the next stage on its own. Two per-run phrases take control back, and they do different things: say **"report only"** and the run changes nothing, say **"no chaining"** and it finishes its stage without starting the next. Nothing was renamed or removed; what changed is what a command does once it starts.
+- **Findings have to prove themselves before you see them.** Every finding now ships with a receipt (a read-only command, plus what its output must show), and the run executes it. What survives goes to a fresh skeptic told to refute it, and a Block-severity finding faces three. Expect shorter reports: the first live run killed four of seven findings. What was thrown out is listed rather than hidden.
+- **Nothing gets pushed without a secret scan.** A tripwire reads every outgoing commit before any push the loop makes, looking for secrets, never-push files, and changes to shared settings. It reads commit by commit rather than the final diff, because a secret added and then removed leaves no trace at the end but still lands in history.
+- **It works on GitLab now, not just GitHub.** Commands read your git remote and pick `gh` or `glab` from what they find. Worth knowing: the GitLab path was written from documentation and has never been executed, so treat it as untested. GitHub is unchanged.
+- **HTML artifacts get a second viewport.** Plans, reviews, and cycle summaries still open in your local browser exactly as before, and are now also published to a private Claude-hosted page when your session can. Purely additive. Note that published pages embed the absolute paths of files on your machine, which is why the consent ask says so.
 
-Upgrading from v5.2.0 or earlier? This release also carries everything from v5.3.0 (the application-security review domain and sharper reviewers) and v5.4.0 (bounded, verifier-gated loops) - one re-run of setup picks up all of it.
+Upgrading from v5.2.0 or earlier? This release also carries v5.3.0 (the application-security review domain) and v5.4.0 (bounded, verifier-gated loops) - one re-run of setup picks up all of it.
 
 Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
 
