@@ -25,6 +25,11 @@
 //   The output is a single self-contained file: inline CSS, inline JSON, inline
 //   renderer JS. No CDN, works offline on file://.
 //
+//   The page's <title> is taken from the payload ("title", or "topic" for the
+//   debate and explore shells) so each artifact carries its own name rather than
+//   the shell's generic default. That tag is the page identity in a browser tab
+//   and, when the artifact is published to a hosted page, its name there too.
+//
 // Usage:
 //   node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit|plan|docview> \
 //                                       --name <basename> [--data <file>] \
@@ -141,6 +146,50 @@ const out = shellHtml
   .replace('/*__TOKENS__*/', function () { return tokensCss; })
   .replace('__RENDER_DATA__', function () { return safeJson; });
 
+// --- name the page from the payload (issue #154) ---
+// The <title> tag is the page's identity wherever it is viewed: the browser tab
+// locally, and the hosted page's name when the artifact is published. A publish
+// cannot override it - a title supplied alongside the file is only a fallback
+// for a file that has none, and the tag always wins - so the tag is the ONLY
+// place a per-artifact name can come from. Without this, every published review
+// is called "Review" and every plan "Plan", which makes a list of them useless.
+//
+// Each shell ships a sensible static default in its <head>; this swaps in the
+// payload's own name when it has one. Two field names cover all seven shells:
+//   review, document, audit, docview, plan -> "title"
+//   debate, explore                        -> "topic"
+// When the payload carries neither, the shell's default stands and the output is
+// byte-identical to what it was before this step.
+function escapeHtmlText(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+const rawTitle = [parsed.title, parsed.topic].find(function (t) {
+  return typeof t === 'string' && t.trim() !== '';
+});
+
+let finalHtml = out;
+if (rawTitle) {
+  // Every shell carries exactly one <title> in its <head>, so a first-occurrence
+  // replace is unambiguous. Non-greedy so a malformed shell cannot swallow the
+  // rest of the document. Function-form replacement so "$" sequences in the
+  // title are inserted literally, matching the two slot injections above.
+  let replaced = false;
+  finalHtml = out.replace(/<title>[\s\S]*?<\/title>/, function () {
+    replaced = true;
+    return '<title>' + escapeHtmlText(rawTitle.trim()) + '</title>';
+  });
+  // Not fatal: a missing <title> costs the page its name, not its content. Warn
+  // on stderr so stdout stays the output path and nothing downstream breaks.
+  if (!replaced) {
+    console.error('render-html.js: warning: no <title> found in ' + opts.shell +
+                  '-shell.html; page keeps the shell default');
+  }
+}
+
 // --- compute the output path ---
 function pad(n) { return String(n).padStart(2, '0'); }
 const d = new Date();
@@ -170,5 +219,5 @@ if (opts.stable) {
   }
 }
 
-fs.writeFileSync(outPath, out, 'utf-8');
+fs.writeFileSync(outPath, finalHtml, 'utf-8');
 process.stdout.write(outPath + '\n'); // stdout = the path only; callers capture it
