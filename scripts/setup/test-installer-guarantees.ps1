@@ -18,6 +18,14 @@
 #      triggers the overwrite gate
 #   7. A manifest (.claude\.toolkit-manifest.json) is written on every real
 #      run, never on -DryRun, and carries per-file sha256 entries
+#   8. Every path an installed file READS at runtime resolves in the installed
+#      tree, and no installed file points at docs/, which neither installer
+#      copies (issue #153). Scoped deliberately: it checks the inline
+#      `cat ...` directives, which are real filesystem reads, plus the docs/
+#      class that caused the HITL-MAP.md dead links. It does NOT try to
+#      resolve every path-shaped string in prose - most of those are
+#      illustrative examples, literal placeholders, or runtime-generated
+#      files, so a blanket check would be noise rather than signal.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -278,6 +286,74 @@ try {
     }
   }
   Assert-Contains "older .toolkit-backup-" (Join-Path $Log "rerun.log") "re-run notes the stale backup dir"
+
+  # --- [8] referenced paths resolve in the INSTALLED tree ------------------
+  # Mirror of scenario 8 in test-installer-guarantees.sh. Runs against
+  # $Scratch (a real install by this point), never the toolkit source: every
+  # gap issue #153 found resolved fine in the source and only broke once
+  # installed.
+  Write-Host "[8] referenced-path resolution (installed tree)"
+
+  $ClaudeDir = Join-Path $Scratch ".claude"
+  $InstalledFiles = @()
+  if (Test-Path -LiteralPath $ClaudeDir) {
+    $InstalledFiles = Get-ChildItem -LiteralPath $ClaudeDir -Recurse -File -ErrorAction SilentlyContinue
+  }
+
+  # 8a. Inline cat directives are executed at skill-load time, so a missing
+  #     target is a real break rather than a dead link in prose.
+  $InlineRefs = @{}
+  foreach ($f in $InstalledFiles) {
+    $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $text) { continue }
+    foreach ($m in [regex]::Matches($text, '!`cat ([^`]+)`')) {
+      $InlineRefs[$m.Groups[1].Value.Trim()] = $true
+    }
+  }
+  $InlineTotal = 0
+  $InlineMissing = 0
+  foreach ($ref in $InlineRefs.Keys) {
+    # Skip angle-bracket placeholders (e.g. .claude/skills/shared/<file>),
+    # which are prose showing the syntax rather than a path anything reads.
+    if ($ref -match '[<>]') { continue }
+    $InlineTotal++
+    $native = $ref -replace '/', '\'
+    if (-not (Test-Path -LiteralPath (Join-Path $Scratch $native) -PathType Leaf)) {
+      Failed "inline-read target missing from install: $ref"
+      $InlineMissing++
+    }
+  }
+  if ($InlineTotal -eq 0) {
+    Failed "found no inline-read directives to check - the extraction pattern is probably broken"
+  } elseif ($InlineMissing -eq 0) {
+    Ok "all $InlineTotal inline-read targets resolve in the installed tree"
+  }
+
+  # 8b. Only a docs/ path that EXISTS in the toolkit source is a real dead
+  #     link: a file that should have reached the install and did not. A docs/
+  #     path in neither tree (docs/runbook.md in audit-html's sample report) is
+  #     an illustrative example, so cross-referencing the source separates the
+  #     two without an allowlist to maintain.
+  $DocsRefs = @{}
+  foreach ($f in $InstalledFiles) {
+    $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $text) { continue }
+    foreach ($m in [regex]::Matches($text, '(?<![A-Za-z0-9_./-])docs/[A-Za-z0-9._/-]+\.md')) {
+      $DocsRefs[$m.Value] = $true
+    }
+  }
+  $DocsBroken = @()
+  foreach ($ref in $DocsRefs.Keys) {
+    $native = $ref -replace '/', '\'
+    $inSource = Test-Path -LiteralPath (Join-Path $ToolkitRoot $native) -PathType Leaf
+    $inInstall = Test-Path -LiteralPath (Join-Path $Scratch $native) -PathType Leaf
+    if ($inSource -and (-not $inInstall)) { $DocsBroken += $ref }
+  }
+  if ($DocsBroken.Count -eq 0) {
+    Ok "no installed file cites a docs/ file that exists in the toolkit but was not copied"
+  } else {
+    Failed ("installed file(s) cite docs/ files present in the toolkit but not installed: " + ($DocsBroken -join " "))
+  }
 
 } finally {
   if (Test-Path -LiteralPath $Work) {
