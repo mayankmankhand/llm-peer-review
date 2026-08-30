@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v5.5.0)
+# AI Agent Setup Instructions (v6.0.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -112,7 +112,15 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v5.5.0:** Installer guardrails + model refresh (#134, #138, #139, #140). After re-running setup:
+**What's new in v6.0.0:** Auto by default - a breaking behavior change (#143, #145 through #152, #154). After re-running setup:
+- The loop no longer stops at a report. A review now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and hands off to the next stage. Tell the user this plainly: it is the reason for the major version. Two per-run phrases take it back, and they do different things - "report only" stops the changing, "no chaining" stops the handoff.
+- Findings must prove themselves first. Each carries a receipt (a read-only command plus what its output must show), the run executes it, and survivors face a skeptic; a Block-severity finding faces three. Reports are shorter, and what was thrown out is listed rather than hidden.
+- A pre-push tripwire (`.claude/scripts/pre-push-check.js`) reads every outgoing commit for secrets, never-push files, and shared-settings changes before any push the loop makes. It fails closed. Note it is a rule the toolkit follows, not a git hook, so a `git push` typed by hand is unscanned.
+- Five kinds of action still always ask: releases and version bumps, prompt-file edits, deleting user data, sending anything off the machine, and force pushes.
+- The toolkit now works on GitLab as well as GitHub, detected from the git remote at the moment it is needed. The `glab` path has never been executed - warn the user it is untested and that GitHub remains the tested path.
+- HTML artifacts still open locally and are now also published to a private Claude-hosted page when the session can. Published pages embed absolute local file paths; the consent ask must say so.
+
+**What was new in v5.5.0:** Installer guardrails + model refresh (#134, #138, #139, #140). After re-running setup:
 - Setup detects local edits inside toolkit-managed files via a hash manifest (`.claude/.toolkit-manifest.json`). Locally modified files gate the run: an interactive terminal prompts, a non-interactive run (you, most likely) exits 1 listing the files. If that happens, show the list to the user and confirm before re-running Step 1 with the force flag added INSIDE the quoted one-liner, right after the target path: change `bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH"` to `bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH" --force` (PowerShell: add `-Force` after `` -Target `"TARGET_PROJECT_PATH`" `` in the Step 1 command). Appending `--force` after the one-liner's closing quote does nothing - `bash -c` swallows it. Every replaced file is backed up first and listed after setup.
 - `/ask-gpt` defaults to `gpt-5.6-sol` and `/ask-gemini` to `gemini-3.6-flash`; an old pinned model in `.env.local` auto-overrides with a stderr notice.
 - HTML artifacts on WSL open PowerShell-first (wslview dropped); a genuinely headless failure prints the Windows-side UNC path that can be pasted into a Windows browser.
@@ -124,13 +132,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - `/ask-gpt` and `/ask-gemini` debates run up to 3 rounds: a countable convergence gate ends the debate after round 2 when the reviewer's "Still Discussing" and "New Observations" sections are both settled. The maximum never extends.
 - `/index` retries a failed chunk once silently before asking you; oversized chunks skip the doomed retry; if every chunk fails, it stops and leaves the existing map untouched.
 
-**What was new in v5.3.0:** Security review domain + sharper reviewers (#136). After re-running setup:
-- `/review` runs a dedicated application-security pass (`review-security`) on every code change: it hunts the diff-catchable vulnerability classes (secrets, injection, XSS, path traversal, SSRF, weak crypto) through an adversarial lens, requires a source-to-sink exploit sentence per finding, and stays silent via a danger-spot gate when nothing security-sensitive changed.
-- New standalone `/security-audit` for a deep, on-demand whole-repo pass (entry points, per-route authorization, crypto inventory, recommended `gitleaks` history scan). Both defer dependency CVEs to `/review-deps`.
-- Reviewers are sharper: each expert persona is now passed to the dispatched subagent (design verdict before nits), every finding must carry a `file:line` receipt or it is dropped, and a new near-empty shared `do-not-report.md` suppresses known-noise classes once you add them.
-- Review reports open with an Overall Verdict line and apply a readability backstop (lead with the top 5, collapse the rest, past 7 findings).
-
-See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.2.0 and earlier).
+See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.3.0 and earlier).
 
 ---
 
