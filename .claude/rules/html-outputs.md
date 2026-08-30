@@ -104,7 +104,13 @@ Opening the file locally, above, always happens. This section adds a *second* pl
 
 **The gate is countable.** Publish only when a tool for publishing a file to a hosted artifact page is present in this session's tool list. When it is not (Cursor, or the feature is off for that user), skip this section silently. Do not mention it, do not apologise, do not suggest switching editors. They already have the artifact.
 
-**Consent, once per session.** Publishing sends the rendered file to a Claude-hosted URL. Before the FIRST publish of a session, ask once. A yes covers every artifact type for the rest of that session, including review reports carrying security findings. A no holds for the session too: skip silently thereafter. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
+**Consent, and what a yes actually covers.** Publishing sends the rendered file to a Claude-hosted URL, which is an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`. Before the FIRST publish of a session, ask once.
+
+That yes covers **plan, document, explore, docview, and audit** for the rest of the session. Their contents are already on the user's screen, or are a view of a file the user chose, so consenting to send them is consenting to something known.
+
+It does **not** cover **review or debate** artifacts. Those ask again, every time. A consent granted at plan time is granted before any finding exists, and a review report can quote code, file paths, and security findings the user has not read yet - so a blanket yes would authorize sending content nobody has seen. This is deliberately narrower than "once per session" and is the reason M9 tolerates the exception at all.
+
+A no holds for the whole session across every type: skip silently thereafter. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
 
 **Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
 
