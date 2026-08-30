@@ -115,7 +115,7 @@ Write the JSON to a temp file, then run the helper from the project root (it com
 node .claude/scripts/render-html.js --shell document --name document --data /tmp/document-data.json
 ```
 
-Open the printed path per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`. You do not name, read, or clean up any prior file - the helper handles naming and overwrites.
+Open the printed path per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`. You do not name, read, or clean up any prior file - the helper handles naming and overwrites. Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
 
 ### Advance the marker (LAST step)
 

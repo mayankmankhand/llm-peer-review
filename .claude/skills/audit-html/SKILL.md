@@ -135,7 +135,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 
 `node .claude/scripts/render-html.js --shell audit --name audit-html --data /tmp/audit-data.json`
 
-Open the printed path in the user's browser per the opening rules in `html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`.
+Open the printed path in the user's browser per the opening rules in `html-outputs.md`: `bash .claude/scripts/open-artifact.sh "<printed-path>"`. Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
 
 ## Static View Generation (opt-in, on request only)
 
@@ -146,7 +146,7 @@ When the user says "yes, generate the view" after seeing the report:
 3. Run the helper from the project root:
    `node .claude/scripts/render-html.js --shell docview --name <source-basename> --stable --data /tmp/docview-data.json`
    `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
-4. Open the printed path in the user's browser: `bash .claude/scripts/open-artifact.sh "<printed-path>"` (per the opening rules in `html-outputs.md`).
+4. Open the printed path in the user's browser: `bash .claude/scripts/open-artifact.sh "<printed-path>"` (per the opening rules in `html-outputs.md`). Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`. This is a `--stable` type: look up its recorded page with `--index-url` first and update that page rather than creating a new one, then record it with `--index-add`. Silently skipped when the session cannot publish.
 5. Confirm in chat: "Opened the view in your browser: `artifacts/html/<basename>.html`. The source markdown is unchanged."
 
 The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them in v1.

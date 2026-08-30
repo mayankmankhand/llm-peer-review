@@ -51,6 +51,8 @@ Steps:
    bash .claude/scripts/open-artifact.sh "<printed-path>"
    ```
 
+5. **Publish it as a second viewport.** Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+
 ## Subagent Rule (orchestrator dispatch only)
 
 When the orchestrator (`/review`) dispatches specialist subagents, those subagents MUST NOT emit their own HTML companion. Only the orchestrator produces HTML for an orchestrator run - this guarantees one combined HTML file per cycle rather than several overlapping ones. Specialist skills only generate HTML when called directly (e.g., `/review-code` on its own).
