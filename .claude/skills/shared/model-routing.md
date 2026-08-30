@@ -17,10 +17,10 @@ The pin lives in agent frontmatter under `.claude/agents/`, never in prose. A pr
 
 | Agent | Model | Effort | Used by |
 |---|---|---|---|
-| `review-finder` | sonnet | high | `/review` Phase 2 dispatch; the direct-run fan-outs inside the review skills |
-| `index-mapper` | haiku | low | `/index` Step 3 chunk analysis |
+| `review-finder` | inherit | high | `/review` Phase 2 dispatch; the direct-run fan-outs inside the review skills |
+| `index-mapper` | sonnet | low | `/index` Step 3 chunk analysis |
 
-Why these tiers: reviewer workers one tier down is the documented consensus (Anthropic's own example agent is a code reviewer on sonnet at high effort, and its research system ran a frontier lead over sonnet workers), and mechanical read-and-extract behind a strict output contract is the established bottom-tier sweet spot.
+Why these tiers: `index-mapper` runs the tier issue #131 chose for chunk analysis and has run live since, moved here from prose into frontmatter so the cost message is enforced rather than aspirational; low effort matches mechanical read-and-extract behind a strict output contract. `review-finder` inherits because a Sonnet pin was tested on this exact job and failed its receipt - see "Tested and revoked" below. Both agents declare a read-only `tools` list: a finder that could write would apply changes before the M2 audit judged them, bypassing the loop.
 
 Everything else inherits: the M2 and M3 audit and verify agents, `/execute` implementers, `/security-audit` area agents, ad hoc research subagents, and every main-loop stage. When dispatching an inherit role, omit the model parameter entirely rather than pinning a top-tier ID - a hardcoded top-tier pin goes stale across model generations and can be blocked by an org policy.
 
@@ -35,4 +35,10 @@ Models are named by alias (`sonnet`, `haiku`), never by dated model IDs, so the 
 
 ## Fallback
 
-If a named agent type from the roster is unavailable (an older install that predates `.claude/agents/`), dispatch `subagent_type=general-purpose` with no model parameter. Inheriting is always safe; a silent wrong pin is not.
+If a named agent type from the roster is unavailable (an older install that predates `.claude/agents/`), dispatch `subagent_type=general-purpose` carrying exactly what that agent's row declares: its model when the row names one, and no model parameter at all when the row reads inherit. Mirroring the roster is what keeps behavior identical on old and new installs. Inventing a different tier at the call site is the #131 bug in a new costume - the roster, not the call site, decides.
+
+## Tested and revoked
+
+Pins that were measured and dropped. A revoked pin stays listed so nobody re-proposes it from memory.
+
+- **`review-finder` on sonnet (tested 2026-08-29, revoked).** The same 16-file diff was reviewed twice in report-only mode by five specialists each, identical prompts, session model Fable 5 for both arms. Pinned: 450s wall clock, 6 findings. Inherited: 530s, 13 findings. After tier-1 receipts and a sharded tier-2 audit, 4 findings survived: each arm found one the other missed, but the one the pinned arm missed was a real bug in shipped installer code (`failglob` overriding `nullglob`, aborting setup on an empty directory), confirmed by an executed receipt. One pinned worker also broke the JSONL output contract, the failure mode guardrail 1 exists to catch. Guardrail 3's bar is "misses nothing real", so the pin was revoked; 15% wall clock was never going to pay for it. Re-test before proposing it again, and note that a single A/B is a smoke test, not statistics.
