@@ -140,6 +140,75 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 
 ---
 
+## Already Have Your Own Workflow?
+
+The toolkit now runs as a **loop** rather than a set of one-shot commands, and that is the change most likely to affect you if you arrive with your own commands, scripts, or way of working.
+
+**What "a loop" means here.** The old behavior was report-first: a command found problems, showed you a list, and waited. The new behavior is that a command finds problems, checks them, fixes the ones that survive the check, verifies the fixes, and hands off to the next stage on its own. You type `/explore` and approve the plan. The rest runs. Two words stop it on any run: say **"report only"** and it reports without changing anything, or **"no chaining"** and it finishes that one stage without starting the next.
+
+You do not have to give up what you already have. The loop is a pattern you can add to your own commands, and the rest of this section is how to do that safely, followed by what to check so your files survive an upgrade.
+
+### Adding the loop to your own workflow
+
+Automatic fixing is only safe because of what sits around it. If you take the "fix it automatically" half without these, you get the risk with none of the protection. In rough order of how much they matter:
+
+| Add this | Why | Check your command |
+|---|---|---|
+| **An escape phrase** | Some runs you want to look before anything moves | Does your command honor "report only" by producing its report and changing nothing? If the phrase does nothing, you have no brake |
+| **Proof attached to every finding** | A finding with no proof cannot be checked, so fixing it is guesswork | Does each finding carry a read-only command someone could run, plus a line saying what that output showed? |
+| **A second opinion before the fix** | The thing that found a problem is the worst judge of whether it is real | Does anything with a fresh view check a finding before it gets fixed? Finder and judge must not be the same actor |
+| **A different checker after the fix** | Models favor their own output and will not reliably catch their own mistakes | Does whatever wrote the fix also declare it verified? If yes, that verification is worth very little |
+| **A retry limit and somewhere to fall back to** | Unbounded retrying is how an automatic command turns a small problem into a large one | Is there a number on the attempts, and a commit or checkpoint to revert to when they run out? |
+| **A deletion guard** | A fix that restores something a person removed on purpose is a correct-looking regression | Before re-adding anything, does your command check whether a human deleted it deliberately? |
+
+The short version: **auto-fixing is a privilege earned by verification.** Add the verification first and the automation second.
+
+### Keeping your own files through an upgrade
+
+Re-running setup is how you get toolkit updates, and it is also where custom work quietly disappears. These are worth checking once, before your next upgrade.
+
+**Do not customize by editing a toolkit file.** Editing `.claude/commands/review.md` to add your own step works until the next upgrade copies the toolkit's version back over it. Put your customization in a file the toolkit does not ship.
+
+**Do not use a name the installer reclaims.** These names were toolkit locations once, so setup backs them up and removes them without checking whose they are:
+
+- In `.claude/commands/`: `review-code.md`, `review-ux.md`, `review-plan.md`, `review-commands.md`, `review-browser.md`, `review-full.md`, `learning-opportunity.md`, `dev-lead-gpt.md`, `dev-lead-gemini.md`
+- In your project's top-level `scripts/`: `ask-gpt.js`, `ask-gemini.js`, `browse.js`, `dev-lead-gpt.js`, `dev-lead-gemini.js`
+- At the root: `INDEX.md`
+
+**Prefix your own files, or put them in a subfolder.** `.claude/commands/myteam/deploy.md` survives an upgrade byte for byte, and a prefix also protects you from names the toolkit adds in future versions.
+
+**Check your root `package.json`.** Every setup run removes these five entries if it finds them: `openai`, `@google/generative-ai`, `@google/genai`, `playwright-core`, `@axe-core/playwright`. They belong to the toolkit and live in `.claude/scripts/` instead. If your own code genuinely imports one of them, re-add it after setup or restore it from the timestamped backup folder setup leaves behind.
+
+**See all of this before it happens.** Run the installer with `--dry-run`. It changes nothing and prints what would happen:
+
+```bash
+bash /path/to/llm-peer-review/scripts/setup/setup.sh /path/to/your-project --dry-run
+```
+
+Your files listed under "Custom files detected" are safe. Anything under "Managed toolkit files that differ" is about to be replaced.
+
+### If your command spawns subagents
+
+**Give finder workers no ability to edit.** A worker that can both find problems and change files will apply its findings before anything has judged them, which removes the check that makes the loop safe.
+
+**Send everything in the prompt.** A subagent starts blank. It does not inherit your conversation, and it does not discover skills on its own, so the criteria and the file excerpts have to be in the message you send it.
+
+**Have a branch for the worker that fails.** Decide in advance what happens when one errors, times out, or returns something you cannot parse.
+
+### A few things that will bite regardless
+
+**Give temp files a per-run unique suffix.** Two tabs open on the same project will otherwise overwrite each other's working files.
+
+**Never read a credentials file into the conversation.** Anything read becomes part of the transcript, and transcripts get written to temp files, sent to other AI models by the debate commands, and rendered into HTML. Copy such files with `cp`, which moves the bytes without putting them in context.
+
+**Put permissions in `.claude/settings.local.json`.** That file is yours and survives upgrades. The committed `.claude/settings.json` does not.
+
+**Do not overwrite a file a toolkit command opens by name:** `plans/PLAN-*.md`, `CODEBASE_MAP.md`, `LESSONS.md`, `LESSONS-detail.md`.
+
+**One thing to expect rather than fix:** `/review` will not pick up your own reviewer automatically. Its specialist list is fixed, and subagents do not discover skills on their own. Type your command alongside it, or ask for it by name in the session.
+
+---
+
 ## Requirements
 
 This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-a-bash-workflow) first. Native Windows PowerShell also works for setup and all non-debate commands; only `/ask-gpt` and `/ask-gemini` require bash/WSL.
