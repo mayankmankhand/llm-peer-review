@@ -106,6 +106,8 @@ Opening the file locally, above, always happens. This section adds a *second* pl
 
 **Consent, and what a yes actually covers.** Publishing sends the rendered file to a Claude-hosted URL, which is an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`. Before the FIRST publish of a session, ask once.
 
+**Say what is actually being sent.** These pages embed the **absolute paths of files on this machine**: five of the seven shells turn each file reference into an editor link built from the full path, so a published page carries the directory layout and the account name along with its content. Those links also only resolve on the machine that made them, so they are dead for anyone else. The pages are private by default, but this is what the user is consenting to send, and a yes given without knowing it is not informed. Mention it in the first ask of a session, in one short clause.
+
 That yes covers **plan, document, explore, docview, and audit** for the rest of the session. Their contents are already on the user's screen, or are a view of a file the user chose, so consenting to send them is consenting to something known.
 
 It does **not** cover **review or debate** artifacts. Those ask again, every time. A consent granted at plan time is granted before any finding exists, and a review report can quote code, file paths, and security findings the user has not read yet - so a blanket yes would authorize sending content nobody has seen. This is deliberately narrower than "once per session" and is the reason M9 tolerates the exception at all.
@@ -113,6 +115,20 @@ It does **not** cover **review or debate** artifacts. Those ask again, every tim
 A no holds for the whole session across every type: skip silently thereafter. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
 
 **Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
+
+**Use a fixed icon per artifact type.** Publishing takes a tab icon, and the icon is how a user finds the page again among open tabs. Use the same one every time for a given type, so an updated plan does not read as a different page:
+
+| Type | Icon |
+|---|---|
+| review | 🔍 |
+| document | 📋 |
+| explore | 🧭 |
+| debate | 💬 |
+| audit | 📊 |
+| plan | 🗺️ |
+| docview | 📄 |
+
+Only change a type's icon if that type's purpose changes, never as part of an ordinary update.
 
 **Two publish modes, matching how the file is named.**
 
