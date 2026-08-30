@@ -206,8 +206,8 @@ Every real run prints the same pre-flight report before it touches anything.
 **Local edits are guarded:** if you edited a toolkit-managed file, setup detects it (via a hash manifest at `.claude/.toolkit-manifest.json`) and asks before overwriting - in a terminal it prompts, in scripts and AI-agent runs it stops and lists the files. Add `--force` (bash) or `-Force` (PowerShell) after the target path to proceed without the prompt; every replaced file is still backed up first and listed at the end of the run.
 
 **What setup does:**
-- **Copies into your project:** commands, skills (including the prebuilt HTML shells), both rules files (`toolkit.md`, `html-outputs.md`), and all runtime and helper scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `render-html.js`, `session-init.js`, `pre-push-check.js`, `open-artifact.sh`), plus `VERSION` and `.env.local.example`. Detects and removes any legacy `INDEX.md`. `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
-- **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize. Custom files you add inside `.claude/commands/`, `.claude/skills/`, `.claude/scripts/`, or `.claude/rules/` are never modified or deleted (this guarantee is covered by the toolkit's installer test suite), and anything setup does overwrite is backed up to a timestamped `.toolkit-backup-*` folder first.
+- **Copies into your project:** commands, skills (including the prebuilt HTML shells), agent definitions (`.claude/agents/` - the worker roles `/review` and `/index` dispatch, carrying their model, effort, and tool settings), both rules files (`toolkit.md`, `html-outputs.md`), and all runtime and helper scripts (`ask-gpt.js`, `ask-gemini.js`, `browse.js`, `generate-index.js`, `render-html.js`, `session-init.js`, `pre-push-check.js`, `open-artifact.sh`), plus `VERSION` and `.env.local.example`. Detects and removes any legacy `INDEX.md`. `CODEBASE_MAP.md` (a semantic map of your project) is generated on your first `/explore` run, when Claude auto-invokes `/index`.
+- **Preserves your work:** `CLAUDE.md`, `LESSONS.md` (plus its companion `LESSONS-detail.md`), and `settings.local.json` are skipped if they already exist - those are yours to customize. Custom files you add inside `.claude/commands/`, `.claude/skills/`, `.claude/agents/`, `.claude/scripts/`, or `.claude/rules/` are never modified or deleted (this guarantee is covered by the toolkit's installer test suite), and anything setup does overwrite is backed up to a timestamped `.toolkit-backup-*` folder first.
 - **Always updates:** the managed rules files (`.claude/rules/toolkit.md`, `.claude/rules/html-outputs.md`).
 - **Stays in the toolkit repo:** setup scripts (`setup.sh`, `setup.ps1`, `install-alias.*`) are never copied.
 
@@ -248,6 +248,7 @@ Copy these into your project:
 |---|---|
 | `.claude/commands/` (whole folder) | `your-project/.claude/commands/` |
 | `.claude/skills/` (whole folder) | `your-project/.claude/skills/` |
+| `.claude/agents/` (whole folder) | `your-project/.claude/agents/` |
 | `.claude/rules/toolkit.md` | `your-project/.claude/rules/toolkit.md` |
 | `.claude/rules/html-outputs.md` | `your-project/.claude/rules/html-outputs.md` |
 | `.claude/settings.local.json` | `your-project/.claude/settings.local.json` |
