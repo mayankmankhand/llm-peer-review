@@ -24,6 +24,11 @@ npm-debug.log*
 plans/PLAN-*.md
 plans/PLAN-*.html
 
+# Research and review reports (local working docs, stored in reports/)
+# Matches the pairing html-outputs.md already documents: plans/ and reports/
+# are both user-facing working dirs. Existing tracked reports are unaffected.
+reports/
+
 # IDE (local Cursor settings - shared commands are in .claude/commands/)
 .cursor/
 
