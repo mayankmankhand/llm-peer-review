@@ -40,7 +40,7 @@ If the JSON has an `error` field, show the message to the user and stop.
 If `manifest.needsConfirm === true`, prompt before spending API tokens. The exact message depends on why confirmation is needed:
 
 **If `totalTokens > 500_000` (project is large):**
-> "Your project has ~{totalTokens} tokens across {totalFiles} files. Generating the codebase map will spawn {chunks.length} parallel subagents (Haiku via the index-mapper agent). Estimated one-time cost: under a dollar for most projects. Proceed?"
+> "Your project has ~{totalTokens} tokens across {totalFiles} files. Generating the codebase map will spawn {chunks.length} parallel subagents (Sonnet via the index-mapper agent). Estimated one-time cost: a few dollars. Proceed?"
 
 **If `anyChunkOverflows === true` (a chunk is oversized despite chunking):**
 > "Your largest chunk is ~{largestChunkTokens} tokens, which exceeds the per-chunk target of {chunkTargetTokens}. This usually means one or more files slipped past the size filter. The oversized subagent may truncate or fail. You can proceed (risky), or stop and add the offending files to the skip list. Proceed?"
@@ -48,7 +48,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` - the pinned mapper agent, whose model and effort (Haiku at low effort) come from `.claude/agents/index-mapper.md` per the routing rule in `.claude/skills/shared/model-routing.md`. The frontmatter pin is what makes the Step 2 cost message ("Haiku via the index-mapper agent") true rather than aspirational - without it the chunks silently inherit the session model. Pinning subagents is safe and carries no prompt-cache penalty: they build their context from scratch. Do NOT pin Step 4 (synthesis) - that runs on the main loop and must stay on the session model ("pin down, inherit up" per the routing rule). Fallback per that rule: if the `index-mapper` agent type is unavailable (older install), use `subagent_type=general-purpose` with `model=haiku`. Use this prompt template, substituting the chunk's file list:
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` - the pinned mapper agent, whose model and effort (Sonnet at low effort) come from `.claude/agents/index-mapper.md` per the routing rule in `.claude/skills/shared/model-routing.md`. The frontmatter pin is what makes the Step 2 cost message ("Sonnet via the index-mapper agent") true rather than aspirational - without it the chunks silently inherit the session model. Pinning subagents is safe and carries no prompt-cache penalty: they build their context from scratch. Do NOT pin Step 4 (synthesis) - that runs on the main loop and must stay on the session model ("pin down, inherit up" per the routing rule). Fallback per that rule: if the `index-mapper` agent type is unavailable (older install), use `subagent_type=general-purpose` carrying the model its roster row declares, `model=sonnet`. Use this prompt template, substituting the chunk's file list:
 
 <template>
 
@@ -82,7 +82,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 
 Launch all subagents in parallel (one Agent tool call per chunk in a single message). Wait for all to return.
 
-If any subagent fails or returns an empty response, retry that chunk once automatically (same prompt, same model pin) - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If the retry also fails or comes back malformed, re-spawn that chunk once one tier up (`subagent_type=general-purpose`, `model=sonnet`) per the routing rule's guardrail; if that also fails, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 7. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
+If any subagent fails or returns an empty response, retry that chunk once automatically (same prompt, same model pin) - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If the retry also fails or comes back malformed, re-spawn that chunk once one tier up (`subagent_type=general-purpose`, no model parameter, so it inherits the session model) per the routing rule's guardrail; if that also fails, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 7. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
 
 ### Step 4: Synthesize the map content
 Combine the subagent responses into a single map content string (do NOT write the file yet - Step 5 handles the write atomically). Use this structure:
