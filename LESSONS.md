@@ -144,3 +144,10 @@
 - **A "nothing defines X" finding must first refute the generic rule that already covers X.**
 - **Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.**
 - **A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.**
+
+### Subagent model pinning (issue #152)
+
+- **Write the validation bar before the result, then honor it when the result is inconvenient.**
+- **A missing finding is invisible to the audit; a wrong one is not.**
+- **`failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.**
+- **Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.**
