@@ -6,7 +6,7 @@ Shared reference for every command that spawns a subagent. Decided in issue #152
 
 **Pin down, inherit up, never pin the judges or the code-writers.**
 
-- **Finders pin one tier down.** A finder reads material and reports findings that a stronger judge audits afterward. The review specialists and the index chunk mappers are finders; they run on the pinned agents in the roster below.
+- **Finders may pin one tier down, once a receipt says they can.** A finder reads material and reports findings that a stronger judge audits afterward, which is what makes a cheaper finder thinkable at all. It is a candidate, not an entitlement: guardrail 3 decides, and it has already revoked one. The review specialists and the index chunk mappers are the finders; the roster below records where each one actually landed.
 - **Judges and synthesis inherit.** The M2 skeptics and voters, the M3 verifier, and all main-loop orchestration run on the session model. A judge never runs below the tier of the work it judges: a weaker judge cannot reliably recognize quality above its own ceiling. The strong audit is exactly what makes cheap finders safe - a weak finding from a pinned finder dies in the session-model audit before the user sees it.
 - **Code-writers never pin.** `/execute` implementation agents edit real files; they stay on the session model.
 - **The main loop never pins.** Every model keeps its own prompt cache, so a main-loop model switch forces an uncached re-read of the whole conversation, twice (switch and revert). Subagents build their context from scratch, so pinning them costs nothing.
@@ -28,8 +28,8 @@ Models are named by alias (`sonnet`, `haiku`), never by dated model IDs, so the 
 
 ## Guardrails
 
-1. **Structured output contracts.** Every pinned worker returns a checkable format (JSONL findings, fixed module blocks), so weak or malformed output is visible rather than silent.
-2. **One-tier-up re-spawn.** When a pinned worker's output is weak or malformed, re-dispatch that one worker one tier up, once. Bounded worst case: one extra spawn.
+1. **Structured output contracts.** Every worker in the roster returns a checkable format (JSONL findings, fixed module blocks), so weak or malformed output is visible rather than silent. This holds whether or not the worker is pinned: a malformed return is the cheapest signal either way, and the A/B that revoked the review pin caught one.
+2. **Bounded re-dispatch.** When a roster worker's output is weak or malformed, re-dispatch that one worker once - one tier up when it was pinned, same tier when it inherits (there is nothing above the session model to escalate to). Bounded worst case: one extra spawn.
 3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
 4. **Rollback is one line.** Delete the `model:` line from the agent file (or dispatch `general-purpose` with no model parameter); everything reverts to inherit.
 
