@@ -36,6 +36,18 @@
 //                                       [--out-dir <dir>] [--stable]
 //   echo '<json>' | node .claude/scripts/render-html.js --shell review --name review-orchestrator
 //
+//   Artifact index (issue #154) - two extra modes that do not render anything:
+//   node .claude/scripts/render-html.js --index-add --type <shell> --name <name> \
+//                                       --local <path> --url <url>
+//   node .claude/scripts/render-html.js --index-url --name <name>
+//
+//   --index-add  append one JSONL record to artifacts/html/index.jsonl (the log
+//                of every artifact published to a hosted page). Timestamps
+//                itself, so callers never shell out to `date`.
+//   --index-url  print the most recently recorded URL for --name, or nothing at
+//                all when there is no record. Exit 0 either way, so an absent
+//                index reads as "no record" rather than an error.
+//
 //   --shell    which template under .claude/skills/shared/shells/ to use
 //   --name     filename prefix, e.g. review-orchestrator, review-code, debate-gpt,
 //              document, explore-<slug>, audit-html, PLAN-issue-<n>. The timestamp
@@ -70,7 +82,11 @@ function die(msg) {
 
 // --- parse args (no dependency on an arg-parsing library) ---
 const argv = process.argv.slice(2);
-const opts = { shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false };
+const opts = {
+  shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false,
+  // index modes (issue #154)
+  indexAdd: false, indexUrl: false, type: '', local: '', url: ''
+};
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--shell') opts.shell = argv[++i] || '';
@@ -78,7 +94,85 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--out-dir') opts.outDir = argv[++i] || '';
   else if (a === '--stable') opts.stable = true; // boolean flag, takes no value
+  else if (a === '--index-add') opts.indexAdd = true; // boolean flag
+  else if (a === '--index-url') opts.indexUrl = true; // boolean flag
+  else if (a === '--type') opts.type = argv[++i] || '';
+  else if (a === '--local') opts.local = argv[++i] || '';
+  else if (a === '--url') opts.url = argv[++i] || '';
   else die('unknown argument: ' + a);
+}
+
+// ==========================================================================
+// Index modes (issue #154). These run INSTEAD of a render and return early.
+//
+// Why the index lives in this script rather than a shell one-liner or a new
+// file: an `echo ... >>` append plus a `grep`/`tail` lookup would each need
+// their own permission entry, and a brand-new script would need a permission
+// entry AND matching copy steps in both installers (setup.sh and setup.ps1),
+// which is exactly the mirror-drift trap that has bitten this repo before.
+// This script is already permitted and already propagated, so extending it
+// costs nothing downstream. It also keeps structural data in deterministic
+// code rather than in model-composed shell.
+//
+//   Append one record (after a successful publish):
+//     node .claude/scripts/render-html.js --index-add --type review \
+//          --name review-orchestrator --local <path> --url <url>
+//
+//   Look up the most recent URL recorded for a name (used by the identity-keyed
+//   types, plan and docview, to update their existing page instead of making a
+//   new one). Prints the URL, or NOTHING when there is no record yet, so a
+//   caller can branch on empty output. Exit 0 either way; a missing index file
+//   is "no record", not an error.
+//     node .claude/scripts/render-html.js --index-url --name PLAN-issue-154
+//
+// The file is append-only JSONL at artifacts/html/index.jsonl - one self-
+// contained JSON object per line. It is never read-then-rewritten, so two
+// sessions publishing at once cannot clobber each other's history, and it never
+// grows a re-read cost the way a markdown table would.
+// ==========================================================================
+const INDEX_PATH = path.resolve(process.cwd(), 'artifacts/html', 'index.jsonl');
+
+if (opts.indexAdd && opts.indexUrl) die('--index-add and --index-url are mutually exclusive');
+
+if (opts.indexAdd) {
+  if (!opts.name) die('--index-add requires --name');
+  if (!opts.url) die('--index-add requires --url');
+  // Timestamp is produced here so callers never have to shell out to `date`.
+  const record = {
+    at: new Date().toISOString(),
+    type: opts.type || '',
+    name: opts.name,
+    local: opts.local || '',
+    url: opts.url
+  };
+  // JSON.stringify handles quoting/escaping, so a name or path containing a
+  // quote or backslash cannot corrupt the line.
+  fs.mkdirSync(path.dirname(INDEX_PATH), { recursive: true });
+  fs.appendFileSync(INDEX_PATH, JSON.stringify(record) + '\n', 'utf-8');
+  process.stdout.write(INDEX_PATH + '\n');
+  process.exit(0);
+}
+
+if (opts.indexUrl) {
+  if (!opts.name) die('--index-url requires --name');
+  let found = '';
+  if (fs.existsSync(INDEX_PATH)) {
+    const lines = fs.readFileSync(INDEX_PATH, 'utf-8').split('\n');
+    // Scan forward and keep the last match: the newest record for a name wins,
+    // which is what makes a re-published stable artifact resolve to its current
+    // page. A malformed line is skipped rather than fatal - a half-written line
+    // from an interrupted run must not break every later lookup.
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let rec;
+      try { rec = JSON.parse(line); } catch (e) { continue; }
+      if (rec && rec.name === opts.name && typeof rec.url === 'string' && rec.url) {
+        found = rec.url;
+      }
+    }
+  }
+  if (found) process.stdout.write(found + '\n');
+  process.exit(0);
 }
 
 if (!opts.shell) die('missing --shell <review|debate|document|explore|audit|plan|docview>');
