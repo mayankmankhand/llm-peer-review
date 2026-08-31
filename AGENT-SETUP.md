@@ -112,6 +112,13 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
+**What's new (unreleased, ships in the next version):** The correction ledger (#157). After re-running setup:
+- `/document` now has a capture stage. At the end of a cycle it finds the moments the user stepped in, has a fresh subagent read those exchanges cold, and asks the user to confirm or rewrite a short note about each one before anything is recorded. Nothing is written without their say-so. It explains itself the first time it runs in a project, so you do not need to introduce it.
+- A new `/error-analysis` command groups those notes into categories and ranks them by count. It is user-triggered and never chained into. It refuses to rank on fewer than ten rows.
+- Data lives at `~/.claude/`, per machine, append-only, outside every repo. Tell the user plainly: the mechanism ships to every install, the data never leaves their machine, it is never published, and it is never sent to another model. They can turn it off for a repo with `touch .claude/.no-correction-log`.
+- **If the user kept a customized `.claude/commands/document.md`:** the capture stage is a new Section 6 in that file, and Sections 6 through 8 were renumbered to 7 through 9. Declining setup's overwrite prompt aborts the whole run, so if they take the update, point them at the backup setup made and tell them the capture stage is what to merge their edits around.
+- **If a global `~/.claude/commands/document.md` exists**, it shadows the project copy and capture silently never runs. Setup already warns about the name conflict; tell the user what is lost, not just that a conflict exists.
+
 **What's new in v6.0.0:** Auto by default - a breaking behavior change (#143, #145 through #152, #154). After re-running setup:
 - The loop no longer stops at a report. A review now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and hands off to the next stage. Tell the user this plainly: it is the reason for the major version. Two per-run phrases take it back, and they do different things - "report only" stops the changing, "no chaining" stops the handoff.
 - Findings must prove themselves first. Each carries a receipt (a read-only command plus what its output must show), the run executes it, and survivors face a skeptic; a Block-severity finding faces three. Reports are shorter, and what was thrown out is listed rather than hidden.
