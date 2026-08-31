@@ -54,18 +54,106 @@ For each changed file:
 
 If you're unsure about intent behind a change or user-facing impact, **ask the user** - don't guess.
 
-## 6. Commit and Push
+## 6. Capture Corrections (the ledger)
+
+Records the times the user stepped in during this cycle, so the toolkit can eventually
+count what it keeps getting wrong instead of fixing each instance and forgetting it.
+Issue #157. Full rationale in `.claude/rules/toolkit.md`.
+
+This complements the LESSONS work in Section 3 rather than repeating it. A lesson is a
+judgment worth remembering; a ledger row is one data point. The lesson rule in Section 3
+already says to capture when "the user typed the same correction twice" - this is what
+makes that countable instead of remembered.
+
+### Find the candidates
+
+```bash
+node .claude/scripts/correction-ledger.js --candidates
+```
+
+A deterministic pre-filter, no model involved. It reads this project's session
+transcripts, excludes subagent transcripts, and windows to everything since this repo
+last captured. It removes machine text and bare acknowledgments and keeps everything
+else: the filter deliberately does not try to guess which turns were corrections,
+because a candidate wrongly dropped here is invisible to every later step.
+
+**If `optedOut` is true, stop.** The repo has `.claude/.no-correction-log` and nothing is
+recorded. Say nothing.
+
+**If `candidates` is empty, skip to "Record the heartbeat" and say nothing to the user.**
+The stage is silent when there is nothing to capture.
+
+### Explain it, the first time only
+
+When `everCaptured` is false, this is the first capture in this project. Before showing
+anything, tell the user in a few lines:
+
+- Every time they corrected Claude or asked for something different, that becomes one row.
+- Only their own interventions are recorded. Reviews are not: those already go to LESSONS.
+- The data lives at `~/.claude/`, per machine, and never leaves it. It is never published
+  and never sent to another model.
+- They can turn it off for this repo with `touch .claude/.no-correction-log`.
+
+Nobody reads a rules file to discover a feature they do not know exists, so this is the
+primary way the feature introduces itself. Say it once, then never again in this project.
+
+### Read the candidates cold
+
+Dispatch the `correction-extractor` agent (`.claude/agents/correction-extractor.md`) with
+the candidate list. It has no memory of this session, which is the point: a participant
+has a stake in reading a correction as a clarification, the same reason the M2 audit never
+lets anything judge its own output.
+
+Pass it the candidates JSON and nothing else. Do not summarize the session for it, and do
+not tell it what you think happened.
+
+### Confirm every open code with the user
+
+Show the drafted rows: for each one, what it thinks happened and the open code it wrote.
+
+**Nothing is written until the user accepts it.** They can accept, rewrite the open code in
+their own words, or drop the row. Their wording is better than a paraphrase, and their
+words are the entire value of the data: an open code Claude wrote about Claude's own
+mistake is a different and weaker kind of evidence.
+
+Keep this short. A list they can scan and correct, not a report.
+
+### Append what they accepted
+
+Write the accepted rows to a temp JSON array and append them:
+
+```bash
+node .claude/scripts/correction-ledger.js --add --data /tmp/correction-rows.json
+```
+
+The script stamps `at`, `repo`, and `kind` itself and hard-truncates the private fields,
+so those cannot be got wrong from here.
+
+### Record the heartbeat (always)
+
+```bash
+node .claude/scripts/correction-ledger.js --heartbeat --candidate-count <N> --added-count <M>
+```
+
+**Run this even when nothing was captured.** It is what separates "capture has never run
+here" from "capture ran and found nothing", and without it an empty ledger silently looks
+like a user who never corrected anything.
+
+Do not run `/error-analysis` from here. Grouping and ranking is a deliberate, user-triggered
+step, and it needs more rows than one cycle produces.
+
+## 7. Commit and Push
 
 - **Commit** the documentation updates automatically: one checkpoint commit per logical unit, per M4. Follow the commit message conventions in toolkit.md.
 - **Push** behind the M11 tripwire: run `node .claude/scripts/pre-push-check.js` and follow M11's exit-code consequences (`.claude/skills/shared/hitl-loop.md`).
 
-This covers every push in this command, including the branch push in Section 7.
+This covers every push in this command, including the branch push in Section 8.
 
-**Host CLI (used by Sections 7 and 8).** Both sections call the issue/PR CLI, but Section 7 is skipped when you are not in a worktree while Section 8 always runs. Detect the host here, outside that conditional, and reuse the result in both.
+**Host CLI (used by Sections 8 and 9).** Both sections call the issue/PR CLI, but Section 8 is skipped when you are not in a worktree while Section 9 always runs. Detect the host here, outside that conditional, and reuse the result in both.
 
 !`cat .claude/skills/shared/host-cli.md`
 
-## 7. Worktree Cleanup
+## 8. Worktree Cleanup
 
 Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree.
 
@@ -84,7 +172,7 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
 8. The branch stays alive on the remote until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.
 
-## 8. Cycle Summary (HTML, default-on)
+## 9. Cycle Summary (HTML, default-on)
 
 Generate a one-page HTML summary of what shipped this cycle. Runs on every `/document`, per `.claude/rules/html-outputs.md` (default-on).
 
@@ -106,7 +194,7 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
-- **PR link** - the PR from Section 7 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
+- **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
 Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
