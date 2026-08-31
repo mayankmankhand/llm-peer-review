@@ -58,8 +58,18 @@ const SELF_PATH = ".claude/scripts/pre-push-check.js";
 // Files that must never appear in a push, checked against every outgoing
 // commit's file list. settings.local.json is matched by full repo path;
 // .env / .env.local by basename so they are caught in any subdirectory.
+//
+// The correction-* files are the issue #157 ledger. They normally live at
+// ~/.claude/, outside every repo, so git cannot commit them and .gitignore has
+// nothing to act on. They are listed here anyway because this is the layer that
+// still catches them: .gitignore does not stop `git add -f`, and a copy made into
+// a repo for any reason would carry verbatim fragments of what the user typed.
 const NEVER_PUSH_PATHS = [".claude/settings.local.json"];
-const NEVER_PUSH_BASENAMES = [".env", ".env.local"];
+const NEVER_PUSH_BASENAMES = [
+  ".env", ".env.local",
+  "correction-ledger.jsonl", "correction-heartbeat.jsonl",
+  "correction-rollup.json", "correction-axial-map.json"
+];
 
 // The shared settings file: legitimate to push, but a change rides along
 // silently far too easily - so any change in the outgoing range is a hit

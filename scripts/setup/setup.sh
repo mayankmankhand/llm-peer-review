@@ -191,6 +191,12 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/pre-push-check.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check correction-ledger script (dependency-free; the issue #157 capture + rollup helper)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/correction-ledger.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -557,7 +563,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js; do
+for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1068,6 +1074,14 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/session-init.js" "$TARGET/.claude/scrip
 # changes before any push. Silent when clean; exit 1 blocks the push.
 echo "  Copying .claude/scripts/pre-push-check.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/pre-push-check.js" "$TARGET/.claude/scripts/pre-push-check.js"
+
+# ─── Correction ledger script (upstream-owned - safe_copy handles any customizations) ──
+# Dependency-free. Writes ONLY to ~/.claude/ (per machine, outside every repo), so its
+# data files are never inside $TARGET and never enter the toolkit manifest. Nothing here
+# creates or touches an existing ledger: installing into a new repo cannot disturb data
+# another repo wrote. (issue #157)
+echo "  Copying .claude/scripts/correction-ledger.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/scripts/correction-ledger.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
