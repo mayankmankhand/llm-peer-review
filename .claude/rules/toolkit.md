@@ -62,6 +62,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/security-audit` | Deep on-demand whole-repo security audit - entry points, authorization, crypto inventory, secret-history scan (skill - run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update documentation after changes |
+| `/error-analysis` | Group the correction ledger's open codes into categories, count them, and rank what you keep correcting (skill - user-triggered, never chained into) |
 | `/create-issue` | Create issues on GitHub or GitLab (ask questions first, keep short) |
 | `/ask-gpt` | AI peer review with ChatGPT debate (up to 3 rounds) |
 | `/ask-gemini` | AI peer review with Gemini debate (up to 3 rounds) |
@@ -85,6 +86,42 @@ Plans are saved in `plans/` at the project root as `PLAN-*.md` files. They are g
 ### Lessons
 
 `LESSONS.md` is the user-owned learning log, split in two: `LESSONS.md` is a short index (one line per lesson) and `LESSONS-detail.md` holds the full write-ups. `/explore`, `/create-plan`, `/execute`, and `/pair-debug` read the index at session start (`/explore`, `/create-plan`, and `/pair-debug` read it at the same point they read `CODEBASE_MAP.md`; `/execute` reads it too, though it does not read the map); when a one-line lesson is relevant, they open the matching entry in `LESSONS-detail.md` on demand. This closes the loop: lessons captured at `/document` time are read back into future work instead of sitting unused. Backward compatible: if `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format and is read whole. Lessons guide Claude; they are context, not enforced rules.
+
+### Correction Ledger
+
+Every time you step in during a cycle - correcting Claude, or asking for something
+different from what it produced - `/document` records that as one row in a ledger. The
+point is to stop fixing at the first sighting and start seeing which problems are
+actually frequent. The lesson rule in this file already assumes counting ("the user
+typed the same correction twice") while having no counter; this is the counter.
+
+**Two-stage coding.** At capture time you write an **open code**: free text, your own
+words, describing what went wrong. Later, `/error-analysis` does the **axial coding**:
+grouping those open codes into categories and ranking them by count. The split exists
+because a category invented from one instance is a guess.
+
+**What is recorded.** Only your own interventions. Review findings are deliberately not
+logged: they already reach `LESSONS.md`, and a review writes a durable report every run,
+so "have I seen this before?" is already answerable for findings and unanswerable for
+corrections. This ledger instruments the half that has no instrument.
+
+**Where the data lives.** `~/.claude/correction-ledger.jsonl`, per machine, outside every
+repo, append-only. Each row carries the repo it came from, so repo-specific and
+cross-repo questions are both a filter rather than a decision made at write time. The
+mechanism ships to every install; the data never leaves the machine that wrote it.
+
+**Privacy.** Two fields (`produced`, `correction`) hold near-verbatim fragments and are a
+private layer: the rollup is built from an explicit whitelist projection that cannot read
+them, and `/error-analysis` never publishes and never sends anything to an external
+model. That is a flat rule with no consent path.
+
+**Turning it off for a repo:** `touch .claude/.no-correction-log`. Nothing is captured at
+all for that repo, rather than captured and redacted.
+
+**If the ledger is empty**, `/error-analysis` distinguishes "capture has never run here"
+from "capture ran and found nothing". Capture fires at `/document`, so a project that
+never runs `/document`, or whose copy is shadowed by a global
+`~/.claude/commands/document.md`, silently records nothing.
 
 ### Skills
 

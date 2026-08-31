@@ -12,6 +12,21 @@ If you last installed v4.3.3, twelve releases have shipped on top of it. v4.4.0 
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Correction ledger (#157).** `/document` gains a capture stage: it finds the moments you stepped in during the cycle, has a fresh subagent read them cold, and records each one as a row with an open code you write in your own words. A new `/error-analysis` command groups those open codes into categories, counts them, and ranks them. The point is to replace fixing-at-first-sighting with knowing which problems are frequent. `LESSONS.md`'s own capture rule already assumed counting ("the user typed the same correction twice") without having a counter; this is the counter.
+- New `.claude/scripts/correction-ledger.js` (dependency-free) and `.claude/agents/correction-extractor.md`, both shipped by the installers.
+
+### Notes
+
+- Data lives at `~/.claude/`, per machine, append-only, outside every repo. The mechanism ships to every install; the data never leaves the machine that wrote it. Two fields hold near-verbatim fragments and are structurally excluded from every rollup; `/error-analysis` never publishes and never sends anything to an external model.
+- Opt out per repo with `touch .claude/.no-correction-log`. Nothing is captured at all for that repo.
+- Review findings are deliberately not logged here. They already reach `LESSONS.md`, and a review writes a durable report every run, so recurrence is already answerable for findings and unanswerable for corrections.
+
+---
+
 ## v6.0.0 - Auto by Default (2026-08-30)
 
 **Breaking: the toolkit now runs auto by default.** A command that used to hand you a report and wait now fixes what it found, re-verifies its own fixes, and starts the next stage on its own, which is why this release is 6.0.0 and not 5.6.0. Two per-run phrases put you back in charge: say "report only" and the run tells you what it found without changing anything, or say "no chaining" and it finishes the stage it is on without starting the next. Implements #143, #145, #146, #147, #148, #149, #150, #151, #152, and #154, plus a stage-chaining cycle that shipped without an issue number. Re-run `setup.sh` / `setup.ps1` to pick it up.

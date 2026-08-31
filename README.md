@@ -81,6 +81,14 @@ Run a structured debate of up to 3 rounds between Claude and ChatGPT (or Gemini)
 
 Full prompts: [`.claude/commands/ask-gpt.md`](.claude/commands/ask-gpt.md) | [`.claude/commands/ask-gemini.md`](.claude/commands/ask-gemini.md)
 
+### `/error-analysis` - find out what you keep correcting
+
+Every time you step in during a cycle, correcting Claude or asking for something different, `/document` records it as one row in a ledger with a short note in your own words about what went wrong. `/error-analysis` reads those notes across every cycle, groups them into categories, counts them, and ranks them, so the thing you fix is the one that actually keeps happening rather than the one that happened most recently. It refuses to rank on fewer than ten rows, because a ranking built on two data points is the exact mistake it exists to prevent.
+
+The data lives at `~/.claude/`, per machine, outside every repo. It is never published and never sent to another model. Turn it off for a repo with `touch .claude/.no-correction-log`.
+
+Full prompt: [`.claude/skills/error-analysis/SKILL.md`](.claude/skills/error-analysis/SKILL.md)
+
 ### `/create-issue` - issues that don't bloat
 
 Asks 2-3 clarifying questions first, then creates a short (10-15 line) issue via `gh issue create` on GitHub or `glab issue create` on GitLab. It picks the right one by reading your git remote, so there is nothing to configure. No implementation details; that's what `/explore` and `/create-plan` are for. Good for capturing bugs and ideas without context-switching out of your editor.
@@ -109,6 +117,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 | `/security-audit` (skill) | Deep on-demand whole-repo security audit - entry points, authorization, crypto, secret-history scan (run deliberately, not part of /review) |
 | `/peer-review` | Evaluate feedback from other AI models |
 | `/document` | Update your README and docs to match what was built |
+| `/error-analysis` (skill) | Group the correction ledger's open codes into categories, count them, and rank what you keep correcting |
 | `/create-issue` | Create an issue on GitHub or GitLab (asks you questions first) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
 | `/ask-gpt` | Debate your work with ChatGPT (up to 3 rounds) |
