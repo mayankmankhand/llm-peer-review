@@ -158,6 +158,16 @@
 - **`<title>` is RCDATA, so escaping markup inside it changes nothing visible except entities.**
 - **A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.**
 
+### Viewport inversion + dark mode (issues #155, #156)
+
+- **Mutation-testing a group of assertions is not mutation-testing each assertion.**
+- **Tokenising the shared layer does not tokenise its consumers.**
+- **A prose sweep needs the wordings that actually occur, not the one you remember writing.**
+- **A measurable claim in a commit message is a claim until you measure it.**
+- **A pipeline's exit status is the last command's, so `grep | head` always succeeds.**
+- **"Falls back" is not "degrades to nothing" - read what the fallback actually produces.**
+- **An audit with only pass and kill discards correct findings that carry the wrong label.**
+
 ### Correction ledger (issue #157)
 
 - **A filter whose misses are undetectable must reject only the certain non-matches, never guess the matches.**
