@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 //
-// test-render-html.js - assertions for the payload transforms and the
-// repository-keyed artifact index in .claude/scripts/render-html.js.
-// (issues #155 items 2, 3, 5)
+// test-render-html.js - assertions for the payload transforms, the
+// repository-keyed artifact index, and the hosted stamp / --index-sync modes
+// in .claude/scripts/render-html.js.
+// (issues #155 items 2, 3, 5; holistic pass, plan Step 3)
 //
 // Maintainer-only: lives under scripts/, which the installers never propagate, so
 // downstream projects do not inherit it.
@@ -12,12 +13,13 @@
 // scripts/test-correction-ledger.js): assert, print, exit non-zero on any
 // failure. No test framework, nothing added to .claude/scripts/package.json.
 //
-// Every test renders into a throwaway temp directory, and the worktree test
-// builds its own git repo, so a run never touches the real artifacts/html/.
+// Every test renders into a throwaway temp directory, and the index and stamp
+// tests build their own git repos, so a run never touches the real
+// artifacts/html/ or stamps a real mirror.
 //
 // Usage: node scripts/test-render-html.js
 
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -144,9 +146,9 @@ function noAbsTests() {
   check('index-mode rejection names the flag', msg.indexOf('--no-abs') !== -1, msg.trim());
 
   // --no-abs must scrub absolute paths out of ORDINARY TEXT too, not just the
-  // absPath key - the consent copy promises the page carries no machine-
-  // identifying paths, and a key-name denylist cannot deliver that
-  // (issue #155 review, R6).
+  // absPath key - the --no-abs rule in html-outputs.md promises the page
+  // carries no machine-identifying paths, and a key-name denylist cannot
+  // deliver that (issue #155 review, R6).
   const HOME = require('os').homedir();
   const prose = {
     title: 'Prose',
@@ -269,7 +271,7 @@ function indexTests() {
     const mainOut = execFileSync('node',
       [SCRIPT, '--index-add', '--type', 'plan', '--name', 'probe',
        '--local', 'p.html', '--url', 'https://example.com/probe'],
-      { cwd: main, encoding: 'utf-8' }).trim();
+      { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     check('main copy writes into its own repo root',
           mainOut === path.join(main, 'artifacts/html/index.jsonl'), mainOut);
 
@@ -280,7 +282,7 @@ function indexTests() {
     const wtOut = execFileSync('node',
       [SCRIPT, '--index-add', '--type', 'plan', '--name', 'probe2',
        '--local', 'q.html', '--url', 'https://example.com/probe2'],
-      { cwd: wt, encoding: 'utf-8' }).trim();
+      { cwd: wt, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     check('a worktree writes into the MAIN repo index, not its own',
           wtOut === path.join(main, 'artifacts/html/index.jsonl'), wtOut);
 
@@ -290,6 +292,38 @@ function indexTests() {
           lookup === 'https://example.com/probe', lookup || '(empty)');
     check('the worktree did NOT create its own index',
           !fs.existsSync(path.join(wt, 'artifacts/html/index.jsonl')));
+
+    // A worktree's own artifact lives under the WORKTREE, not the main copy,
+    // and the render prints that absolute path. Refusing it as "outside the
+    // repo" was the first design flaw the holistic-pass review caught: the
+    // row landed in the shared index and the mirror stayed unstamped.
+    const wtFile = path.join(wt, 'plans', 'PLAN-wt.html');
+    fs.mkdirSync(path.dirname(wtFile), { recursive: true });
+    fs.writeFileSync(wtFile, '<!doctype html>\n<title>wt</title>\n');
+    const wtStamp = spawnSync('node',
+      [SCRIPT, '--index-add', '--type', 'plan', '--name', 'PLAN-wt',
+       '--local', wtFile, '--url', 'https://example.com/wt'],
+      { cwd: wt, encoding: 'utf-8' });
+    check('a worktree can stamp its own artifact by absolute path',
+          wtStamp.status === 0 && fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!-- hosted: https://example.com/wt -->',
+          (wtStamp.stderr || '').trim() || fs.readFileSync(wtFile, 'utf-8').split('\n')[0]);
+    const wtRel = spawnSync('node',
+      [SCRIPT, '--index-add', '--type', 'plan', '--name', 'PLAN-wt',
+       '--local', 'plans/PLAN-wt.html', '--url', 'https://example.com/wt2'],
+      { cwd: wt, encoding: 'utf-8' });
+    check('a relative --local from a worktree resolves to the worktree file',
+          wtRel.status === 0 && fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!-- hosted: https://example.com/wt2 -->',
+          (wtRel.stderr || '').trim());
+    const wtSync = spawnSync('node', [SCRIPT, '--index-sync'], { cwd: wt, encoding: 'utf-8' });
+    check('--index-sync from a worktree keeps the worktree stamp',
+          wtSync.status === 0 && fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!-- hosted: https://example.com/wt2 -->',
+          (wtSync.stdout || '').trim() + ' ' + (wtSync.stderr || '').trim());
+    const outside = spawnSync('node',
+      [SCRIPT, '--index-add', '--type', 'plan', '--name', 'PLAN-out',
+       '--local', path.join(root, 'elsewhere.html'), '--url', 'https://example.com/out'],
+      { cwd: wt, encoding: 'utf-8' });
+    check('a path outside both roots is still refused from a worktree',
+          outside.status !== 0 && /inside the repository/.test(outside.stderr || ''), (outside.stderr || '').trim());
 
     git(main, ['worktree', 'remove', '--force', wt]);
   } catch (e) {
@@ -303,7 +337,8 @@ function indexTests() {
     const out = execFileSync('node',
       [SCRIPT, '--index-add', '--type', 'plan', '--name', 'n',
        '--local', 'n.html', '--url', 'https://example.com/n'],
-      { cwd: bare, encoding: 'utf-8', env: Object.assign({}, process.env, { GIT_CEILING_DIRECTORIES: root }) }).trim();
+      { cwd: bare, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
+        env: Object.assign({}, process.env, { GIT_CEILING_DIRECTORIES: root }) }).trim();
     // No `|| out.length > 0` escape hatch: --index-add always prints a non-empty
     // path on success, so that disjunct was unconditionally true and the named
     // behavior was never asserted (issue #155 review, R22).
@@ -316,9 +351,179 @@ function indexTests() {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Hosted stamp and --index-sync (holistic pass, plan Step 3)
+//
+// Every case runs inside its own temp git repo: --local is resolved against
+// the repo root the index is keyed to, and the stamp is WRITTEN to that file,
+// so a case that ran from this repo would rewrite a real mirror.
+// ---------------------------------------------------------------------------
+const STAMP_LINE = /^<!-- hosted: .* -->$/;
+
+function stampTests() {
+  console.log('\nhosted stamp and --index-sync (holistic pass, Step 3)');
+  const root = tmpdir('stamp');
+  const main = path.join(root, 'main');
+  fs.mkdirSync(main);
+  const INDEX = path.join(main, 'artifacts/html/index.jsonl');
+
+  function git(args) {
+    return execFileSync('git', args, { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+  // Status, stdout and stderr together: the warnings under test go to stderr
+  // on a SUCCESSFUL run, which execFileSync does not hand back.
+  function run(args) {
+    const r = spawnSync('node', [SCRIPT].concat(args), { cwd: main, encoding: 'utf-8' });
+    return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
+  }
+  function lines(file) { return fs.readFileSync(file, 'utf-8').split('\n'); }
+  function stampCount(file) { return lines(file).filter(function (l) { return STAMP_LINE.test(l); }).length; }
+  function rowCount() {
+    return fs.existsSync(INDEX) ? fs.readFileSync(INDEX, 'utf-8').split('\n').filter(Boolean).length : 0;
+  }
+  function addArgs(name, local, url) {
+    const a = ['--index-add', '--type', 'plan', '--name', name, '--url', url];
+    return local ? a.concat(['--local', local]) : a;
+  }
+
+  try {
+    git(['init', '-q']);
+    git(['config', 'user.email', 't@example.com']);
+    git(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n');
+    git(['add', '.']);
+    git(['commit', '-qm', 'init']);
+
+    // No index yet: sync has nothing to do and must say so rather than fail.
+    const s0 = run(['--index-sync']);
+    check('--index-sync with no index exits 0 and reports zero counts',
+          s0.status === 0 && s0.out.trim() === 'index-sync: 0 stamped, 0 missing', s0.out.trim() || s0.err.trim());
+
+    // A real plan render, so the stamp lands on a real mirror and the <title>
+    // check below measures the real shell, not a stub.
+    const dataPath = path.join(root, 'plan.json');
+    fs.writeFileSync(dataPath, JSON.stringify({
+      title: 'Stamp Plan', tldr: 'x', steps: [{ name: 's1', subtasks: ['a'] }]
+    }), 'utf-8');
+    const planPath = execFileSync('node',
+      [SCRIPT, '--shell', 'plan', '--name', 'PLAN-stamp', '--out-dir', 'plans', '--stable', '--data', dataPath],
+      { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const original = fs.readFileSync(planPath, 'utf-8');
+    check('control: the rendered plan starts with the doctype and carries no stamp',
+          original.split('\n')[0] === '<!doctype html>' && stampCount(planPath) === 0);
+
+    // (a) first publish: one stamp on line 1, doctype on line 2.
+    const a = run(addArgs('PLAN-stamp', 'plans/PLAN-stamp.html', 'https://example.com/one'));
+    check('--index-add exits 0 with an existing --local', a.status === 0, a.err.trim());
+    const la = lines(planPath);
+    check('--index-add puts the stamp on line 1',
+          la[0] === '<!-- hosted: https://example.com/one -->', la[0]);
+    check('--index-add keeps the doctype on line 2', la[1] === '<!doctype html>', la[1]);
+    check('--index-add writes exactly one stamp line', stampCount(planPath) === 1, 'found ' + stampCount(planPath));
+
+    // (b) re-publish under a new URL: the stamp is REPLACED, never doubled.
+    const b = run(addArgs('PLAN-stamp', 'plans/PLAN-stamp.html', 'https://example.com/two'));
+    check('re-publish exits 0', b.status === 0, b.err.trim());
+    const lb = lines(planPath);
+    check('re-publish replaces the stamp instead of adding a second',
+          stampCount(planPath) === 1, 'found ' + stampCount(planPath));
+    check('re-publish carries the NEW url', lb[0] === '<!-- hosted: https://example.com/two -->', lb[0]);
+    check('re-publish leaves everything after line 1 byte-identical to the render',
+          fs.readFileSync(planPath, 'utf-8').slice(lb[0].length + 1) === original);
+
+    // (c) the hosted publisher reads only the first 8KB for the <title>.
+    const html = fs.readFileSync(planPath, 'utf-8');
+    const titleEnd = html.indexOf('</title>') + '</title>'.length;
+    check('the <title> tag is still within the first 8192 bytes after stamping',
+          titleEnd > 8 && Buffer.byteLength(html.slice(0, titleEnd), 'utf-8') <= 8192,
+          'title ends at byte ' + Buffer.byteLength(html.slice(0, titleEnd), 'utf-8'));
+    check('the title inside that window is the payload title',
+          /<title>Stamp Plan<\/title>/.test(html.slice(0, 8192)));
+
+    // (d) a --local that names no file: warn, still record, still exit 0.
+    const before = rowCount();
+    const d = run(addArgs('gone', 'artifacts/html/gone.html', 'https://example.com/gone'));
+    check('a missing --local still exits 0', d.status === 0, d.err.trim());
+    check('a missing --local still appends the row', rowCount() === before + 1);
+    check('a missing --local warns on stderr',
+          d.err.indexOf('index-add: local file not found, row recorded without a stamp: ') !== -1 &&
+          d.err.indexOf('gone.html') !== -1, d.err.trim() || '(no stderr)');
+    check('a missing --local keeps stdout as the index path', d.out.trim() === INDEX, d.out.trim());
+
+    // (e) a --local that escapes the repo root: refuse, and write nothing.
+    const before2 = rowCount();
+    const e = run(addArgs('esc', '../escape.html', 'https://example.com/esc'));
+    check('a relative --local outside the repo root is rejected', e.status !== 0);
+    check('the rejection says why', e.err.indexOf('inside the repository') !== -1, e.err.trim());
+    check('a rejected --local appends nothing', rowCount() === before2, 'rows ' + rowCount() + ' vs ' + before2);
+    const e2 = run(addArgs('esc', path.join(root, 'escape.html'), 'https://example.com/esc'));
+    check('an absolute --local outside the repo root is rejected too', e2.status !== 0 && rowCount() === before2);
+    const e3 = run(addArgs('nolocal', '', 'https://example.com/nolocal'));
+    check('--local stays optional', e3.status === 0 && rowCount() === before2 + 1, e3.err.trim());
+
+    // (f) two rows share a name; the lookup must return the later one.
+    const f = run(['--index-url', '--name', 'PLAN-stamp']);
+    check('--index-url returns the newest of two rows sharing a name',
+          f.out.trim() === 'https://example.com/two', f.out.trim() || '(empty)');
+
+    // Two TIMESTAMPED runs under one shared name, each with its own mirror and
+    // its own page - the shape every review and document row has. Sync must
+    // give each mirror its own URL; "newest per name" would hand the older
+    // mirror the newer run's page.
+    const reviewData = path.join(root, 'review.json');
+    fs.writeFileSync(reviewData, JSON.stringify({ title: 'Review', findings: [] }), 'utf-8');
+    function renderReview() {
+      return execFileSync('node', [SCRIPT, '--shell', 'review', '--name', 'review-orchestrator', '--data', reviewData],
+        { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    }
+    const rev1 = renderReview();
+    const rev2 = renderReview(); // same second: the -2 guard names it, so the two never collide
+    check('control: two timestamped renders under one name are two files', rev1 !== rev2, rev1 + ' vs ' + rev2);
+    run(['--index-add', '--type', 'review', '--name', 'review-orchestrator', '--local', rev1, '--url', 'https://example.com/rev1']);
+    run(['--index-add', '--type', 'review', '--name', 'review-orchestrator', '--local', rev2, '--url', 'https://example.com/rev2']);
+    check('control: --index-add gave each timestamped mirror its own url',
+          lines(rev1)[0] === '<!-- hosted: https://example.com/rev1 -->' && lines(rev2)[0] === '<!-- hosted: https://example.com/rev2 -->');
+
+    // (g) sync: a stamp that was stripped (a re-render, or a hand edit) comes
+    // back from the index, and the missing mirror is counted, not fatal.
+    fs.writeFileSync(planPath, original, 'utf-8');
+    fs.writeFileSync(rev1, lines(rev1).slice(1).join('\n'), 'utf-8');
+    check('control: the stamps were removed before sync', stampCount(planPath) === 0 && stampCount(rev1) === 0);
+    const g = run(['--index-sync']);
+    check('--index-sync exits 0 with a missing mirror in the index', g.status === 0, g.err.trim());
+    check('--index-sync re-stamps the file from the index',
+          lines(planPath)[0] === '<!-- hosted: https://example.com/two -->', lines(planPath)[0]);
+    check('--index-sync writes exactly one stamp line', stampCount(planPath) === 1);
+    check('--index-sync gives each timestamped mirror ITS OWN url, not the newest under that name',
+          lines(rev1)[0] === '<!-- hosted: https://example.com/rev1 -->' && lines(rev2)[0] === '<!-- hosted: https://example.com/rev2 -->',
+          lines(rev1)[0] + ' | ' + lines(rev2)[0]);
+    check('--index-sync reports the counts', g.out.trim() === 'index-sync: 3 stamped, 1 missing', g.out.trim());
+    check('--index-sync lists the missing path on stderr',
+          g.err.indexOf('index-sync: local file not found: ') !== -1 && g.err.indexOf('gone.html') !== -1,
+          g.err.trim() || '(no stderr)');
+    const snap = fs.readFileSync(planPath, 'utf-8');
+    const g2 = run(['--index-sync']);
+    check('--index-sync is idempotent',
+          fs.readFileSync(planPath, 'utf-8') === snap && g2.out.trim() === 'index-sync: 3 stamped, 1 missing');
+
+    // (h) the index modes take no render arguments, and only one runs at a time.
+    const h = run(['--index-sync', '--stable']);
+    check('--index-sync rejects a render flag', h.status !== 0);
+    check('--index-sync rejection names the flag', h.err.indexOf('--stable') !== -1, h.err.trim());
+    const hx = run(['--index-sync', '--index-add', '--name', 'x', '--url', 'https://example.com/x']);
+    check('--index-sync and --index-add are mutually exclusive',
+          hx.status !== 0 && hx.err.indexOf('mutually exclusive') !== -1, hx.err.trim());
+  } catch (err) {
+    check('stamp test set up a git repo and rendered a plan', false, err.message);
+  }
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 noAbsTests();
 imageTests();
 indexTests();
+stampTests();
 
 console.log('');
 if (failures.length === 0) {

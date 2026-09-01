@@ -36,17 +36,38 @@
 //                                       [--out-dir <dir>] [--stable] [--no-abs]
 //   echo '<json>' | node .claude/scripts/render-html.js --shell review --name review-orchestrator
 //
-//   Artifact index (issue #154) - two extra modes that do not render anything:
+//   Artifact index (issue #154; stamp and sync from the holistic pass) - three
+//   extra modes that do not render anything:
 //   node .claude/scripts/render-html.js --index-add --type <shell> --name <name> \
-//                                       --local <path> --url <url>
+//                                       [--local <path>] --url <url>
 //   node .claude/scripts/render-html.js --index-url --name <name>
+//   node .claude/scripts/render-html.js --index-sync
 //
-//   --index-add  append one JSONL record to artifacts/html/index.jsonl (the log
-//                of every artifact published to a hosted page). Timestamps
-//                itself, so callers never shell out to `date`.
-//   --index-url  print the most recently recorded URL for --name, or nothing at
-//                all when there is no record. Exit 0 either way, so an absent
-//                index reads as "no record" rather than an error.
+//   --index-add   append one JSONL row {at, type, name, local, url} to
+//                 artifacts/html/index.jsonl (the log of every artifact
+//                 published to a hosted page). Timestamps itself, so callers
+//                 never shell out to `date`. When --local names a file that
+//                 exists, it also stamps that file (see "The hosted stamp"
+//                 below); a missing file is a one-line stderr warning and the
+//                 row is still appended. --local is optional, but when given it
+//                 must resolve under the repo root or the command fails before
+//                 anything is written.
+//   --index-url   print the most recently recorded URL for --name, or nothing at
+//                 all when there is no record. Exit 0 either way, so an absent
+//                 index reads as "no record" rather than an error.
+//   --index-sync  regenerate every stamp from the index: newest row per local
+//                 file wins, one stamp per file that still exists. Prints
+//                 "index-sync: <n> stamped, <m> missing" on stdout, lists the
+//                 missing paths on stderr, and exits 0 either way.
+//
+//   The hosted stamp. After a publish, line 1 of the local mirror is
+//     <!-- hosted: <url> -->
+//   and the file's own first line (the doctype) becomes line 2. The index row
+//   is the record; the stamp is a derived copy of it, there so anyone opening
+//   the local file finds its hosted page without opening the index. Mirrors
+//   are never hand-edited: a URL changes by appending a row (--index-add), and
+//   --index-sync catches every mirror up to the index. The stamp is one short
+//   line so the <title> stays inside the first 8KB the hosted publisher scans.
 //
 //   --shell    which template under .claude/skills/shared/shells/ to use
 //   --name     filename prefix, e.g. review-orchestrator, review-code, debate-gpt,
@@ -96,8 +117,8 @@ const argv = process.argv.slice(2);
 const opts = {
   shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false,
   noAbs: false,
-  // index modes (issue #154)
-  indexAdd: false, indexUrl: false, type: '', local: '', url: ''
+  // index modes (issue #154; --index-sync from the holistic pass)
+  indexAdd: false, indexUrl: false, indexSync: false, type: '', local: '', url: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -109,6 +130,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--no-abs') opts.noAbs = true; // boolean flag, takes no value
   else if (a === '--index-add') opts.indexAdd = true; // boolean flag
   else if (a === '--index-url') opts.indexUrl = true; // boolean flag
+  else if (a === '--index-sync') opts.indexSync = true; // boolean flag
   else if (a === '--type') opts.type = argv[++i] || '';
   else if (a === '--local') opts.local = argv[++i] || '';
   else if (a === '--url') opts.url = argv[++i] || '';
@@ -137,6 +159,10 @@ for (let i = 0; i < argv.length; i++) {
 //   caller can branch on empty output. Exit 0 either way; a missing index file
 //   is "no record", not an error.
 //     node .claude/scripts/render-html.js --index-url --name PLAN-issue-154
+//
+//   Regenerate every mirror's line-1 stamp from the index (after a re-render
+//   dropped one, a restored backup, or a row appended by hand):
+//     node .claude/scripts/render-html.js --index-sync
 //
 // The file is append-only JSONL at artifacts/html/index.jsonl - one self-
 // contained JSON object per line. It is never read-then-rewritten, so two
@@ -168,9 +194,114 @@ function mainRepoRoot() {
     return process.cwd(); // not a repo, or no git on PATH
   }
 }
-const INDEX_PATH = path.resolve(mainRepoRoot(), 'artifacts/html', 'index.jsonl');
+const REPO_ROOT = mainRepoRoot();
+const INDEX_PATH = path.resolve(REPO_ROOT, 'artifacts/html', 'index.jsonl');
 
-if (opts.indexAdd && opts.indexUrl) die('--index-add and --index-url are mutually exclusive');
+// The working copy this command runs in. In the main copy it IS the repo root;
+// in a worktree it is the worktree, whose own plans/ and artifacts/html/ hold
+// the files a render there wrote. The index is shared (above), but the mirror
+// is local to the copy that rendered it, so stamping must accept both roots:
+// a worktree's artifact refused as "outside the repo" was the first thing the
+// holistic-pass review caught in this design.
+function workRoot() {
+  try {
+    const top = require('child_process')
+      .execFileSync('git', ['rev-parse', '--show-toplevel'],
+                    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .trim();
+    return top ? path.resolve(top) : process.cwd();
+  } catch (e) {
+    return process.cwd();
+  }
+}
+const WORK_ROOT = workRoot();
+
+// ==========================================================================
+// The hosted stamp (holistic pass, plan Step 3). The index row is the record;
+// line 1 of the local mirror carries a DERIVED copy of its URL:
+//     <!-- hosted: https://claude.ai/code/artifact/... -->
+// so anyone opening the local file, or grepping the directory, finds the page
+// it was published to without opening the index. Mirrors are never hand-
+// edited: a URL changes by appending a row (--index-add), and --index-sync
+// regenerates every stamp from the index. Markdown twins (PLAN-*.md) are not
+// stamped: Claude reads those.
+//
+// One short line, always the FIRST line. The hosted publisher scans only the
+// first 8KB of a file for its <title>, so a stamp anywhere else, or a long
+// one, could push the title out of that window and rename the page.
+// ==========================================================================
+const STAMP_RE = /^<!-- hosted: .* -->$/;
+
+function hostedStamp(url) { return '<!-- hosted: ' + url + ' -->'; }
+
+// The stamp is one line inside an HTML comment, so a URL carrying whitespace
+// or "-->" could split the line or close the comment early and inject markup
+// into every mirror. A real hosted URL has neither.
+function stampableUrl(url) {
+  return typeof url === 'string' && url !== '' && !/\s|-->/.test(url);
+}
+
+// --index-sync rewrites whichever files the index names, so a --local must
+// never be able to point it at a file elsewhere on the disk: anything that
+// resolves outside the repository is refused, at --index-add time (a die,
+// before the row is written) and at sync time (skipped with a note). "The
+// repository" means the main copy OR the working copy this command runs in.
+//
+// An absolute --local stands as-is: it is the path the render printed. A
+// relative one is resolved against the working copy that rendered it. At sync
+// time a relative row is tried against the main root first and then this
+// working copy, so a row written from a worktree still finds its file when
+// synced from that worktree.
+function resolveLocal(local) { return path.resolve(WORK_ROOT, local); }
+function resolveForSync(local) {
+  if (path.isAbsolute(local)) return local;
+  const inMain = path.resolve(REPO_ROOT, local);
+  if (REPO_ROOT === WORK_ROOT || fs.existsSync(inMain)) return inMain;
+  return path.resolve(WORK_ROOT, local);
+}
+function underRoot(abs, root) {
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+  return abs.startsWith(prefix);
+}
+function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs, WORK_ROOT); }
+
+// Put the stamp on line 1 of one file, replacing an existing stamp rather
+// than adding a second, and leaving everything after it byte-identical.
+// Returns true when the file carries the stamp, false when it could not be
+// read (missing or unreadable) - the caller decides whether that is a warning
+// (--index-add) or a count (--index-sync). A write failure is fatal: the file
+// was there and readable a moment ago, so something is genuinely wrong.
+function stampFile(abs, url) {
+  let content;
+  try { content = fs.readFileSync(abs, 'utf-8'); } catch (e) { return false; }
+  const nl = content.indexOf('\n');
+  const first = nl === -1 ? content : content.slice(0, nl);
+  const stamped = STAMP_RE.test(first)
+    ? hostedStamp(url) + (nl === -1 ? '\n' : content.slice(nl))
+    : hostedStamp(url) + '\n' + content;
+  if (stamped === content) return true; // already current: no write, no mtime churn
+  try { fs.writeFileSync(abs, stamped, 'utf-8'); }
+  catch (e) { die('could not write the hosted stamp to ' + abs + ': ' + e.message); }
+  return true;
+}
+
+// Every parseable row of the index, in file order; [] when there is no index.
+// A malformed line is skipped rather than fatal - a half-written line from an
+// interrupted run must not break every later lookup or sync.
+function readIndexRows() {
+  if (!fs.existsSync(INDEX_PATH)) return [];
+  const rows = [];
+  for (const line of fs.readFileSync(INDEX_PATH, 'utf-8').split('\n')) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch (e) { continue; }
+    if (rec && typeof rec === 'object') rows.push(rec);
+  }
+  return rows;
+}
+
+const indexModes = [opts.indexAdd, opts.indexUrl, opts.indexSync].filter(Boolean).length;
+if (indexModes > 1) die('--index-add, --index-url, and --index-sync are mutually exclusive');
 
 // The index modes return early, before any render validation, so a command line
 // that mixes them with render flags would silently win: exit 0, nothing rendered,
@@ -179,7 +310,7 @@ if (opts.indexAdd && opts.indexUrl) die('--index-add and --index-url are mutuall
 // Every caller here is a model composing a command from a prompt file, which is
 // exactly where two documented invocations get merged into one, so fail loudly
 // rather than half-succeeding. (issue #154 review, R11)
-if (opts.indexAdd || opts.indexUrl) {
+if (indexModes) {
   const renderFlags = [];
   if (opts.shell) renderFlags.push('--shell');
   if (opts.data) renderFlags.push('--data');
@@ -195,6 +326,17 @@ if (opts.indexAdd || opts.indexUrl) {
 if (opts.indexAdd) {
   if (!opts.name) die('--index-add requires --name');
   if (!opts.url) die('--index-add requires --url');
+  if (!stampableUrl(opts.url)) die('--url must be one token with no whitespace and no "-->": ' + opts.url);
+  // --local stays optional (older callers omit it). When given, it is checked
+  // BEFORE the row is written, so a bad path leaves the index untouched.
+  let localAbs = '';
+  if (opts.local) {
+    localAbs = resolveLocal(opts.local);
+    if (!underRepoRoot(localAbs)) {
+      die('--local must resolve inside the repository (main copy ' + REPO_ROOT +
+          (WORK_ROOT !== REPO_ROOT ? ' or this working copy ' + WORK_ROOT : '') + '); got ' + localAbs);
+    }
+  }
   // Timestamp is produced here so callers never have to shell out to `date`.
   const record = {
     at: new Date().toISOString(),
@@ -207,29 +349,61 @@ if (opts.indexAdd) {
   // quote or backslash cannot corrupt the line.
   fs.mkdirSync(path.dirname(INDEX_PATH), { recursive: true });
   fs.appendFileSync(INDEX_PATH, JSON.stringify(record) + '\n', 'utf-8');
+  // The row is the record and the stamp is derived from it, so the row goes in
+  // first and a file that cannot be stamped costs the stamp, never the record.
+  // Missing is ordinary, not an error: a worktree caller passing a relative
+  // path names a file the main copy does not have, and a timestamped artifact
+  // may already have been cleaned up. Warn on stderr; stdout stays the index
+  // path so callers that capture it are unaffected.
+  if (localAbs && !stampFile(localAbs, opts.url)) {
+    process.stderr.write('index-add: local file not found, row recorded without a stamp: ' +
+                         localAbs + '\n');
+  }
   process.stdout.write(INDEX_PATH + '\n');
   process.exit(0);
 }
 
 if (opts.indexUrl) {
   if (!opts.name) die('--index-url requires --name');
+  // Scan forward and keep the last match: the newest record for a name wins,
+  // which is what makes a re-published stable artifact resolve to its current
+  // page.
   let found = '';
-  if (fs.existsSync(INDEX_PATH)) {
-    const lines = fs.readFileSync(INDEX_PATH, 'utf-8').split('\n');
-    // Scan forward and keep the last match: the newest record for a name wins,
-    // which is what makes a re-published stable artifact resolve to its current
-    // page. A malformed line is skipped rather than fatal - a half-written line
-    // from an interrupted run must not break every later lookup.
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      let rec;
-      try { rec = JSON.parse(line); } catch (e) { continue; }
-      if (rec && rec.name === opts.name && typeof rec.url === 'string' && rec.url) {
-        found = rec.url;
-      }
-    }
+  for (const rec of readIndexRows()) {
+    if (rec.name === opts.name && typeof rec.url === 'string' && rec.url) found = rec.url;
   }
   if (found) process.stdout.write(found + '\n');
+  process.exit(0);
+}
+
+if (opts.indexSync) {
+  // One stamp per FILE, newest row for that file wins. For the identity-keyed
+  // types (plan, docview) every row names the same mirror, so this is "newest
+  // URL per name" - the rule --index-url applies - and a stamp can never
+  // disagree with a lookup. For the timestamped types every run has its own
+  // mirror AND its own page under a shared name ("document",
+  // "review-orchestrator"), so keying by name would stamp each older mirror
+  // with the newest run's URL. Keying by file is right for both, and it is
+  // what --index-add already does one row at a time. Null-prototype map, so a
+  // path can never read a value off Object.prototype.
+  const byFile = Object.create(null);
+  for (const rec of readIndexRows()) {
+    if (typeof rec.local === 'string' && rec.local && stampableUrl(rec.url)) {
+      byFile[resolveForSync(rec.local)] = rec.url;
+    }
+  }
+  let stamped = 0, missing = 0;
+  for (const abs of Object.keys(byFile)) {
+    if (!underRepoRoot(abs)) {
+      process.stderr.write('index-sync: skipped, resolves outside the repository: ' + abs + '\n');
+    } else if (stampFile(abs, byFile[abs])) {
+      stamped++;
+    } else {
+      missing++;
+      process.stderr.write('index-sync: local file not found: ' + abs + '\n');
+    }
+  }
+  process.stdout.write('index-sync: ' + stamped + ' stamped, ' + missing + ' missing\n');
   process.exit(0);
 }
 
@@ -318,11 +492,13 @@ function scrubAbsInString(str) {
 }
 
 // Deleting the absPath KEY is what triggers each shell's plain-text branch, so
-// that stays. But a key-name denylist alone cannot support what the consent copy
-// promises: absolute paths also appear as ordinary TEXT inside prose fields,
-// receipt commands, and <pre> evidence blocks, and those shipped untouched
-// (issue #155 review, R6). Publishing is an always-ask outward send, so the
-// user's yes is given against this function's behavior - it has to be true.
+// that stays. But a key-name denylist alone cannot support what the --no-abs
+// description in html-outputs.md promises: absolute paths also appear as
+// ordinary TEXT inside prose fields, receipt commands, and <pre> evidence
+// blocks, and those shipped untouched (issue #155 review, R6). The page is
+// published to a private hosted page without an ask, so this function is the
+// only thing standing between the page and this machine's paths - it has to
+// be true.
 function stripAbsPaths(node) {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
