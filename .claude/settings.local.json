@@ -53,6 +53,7 @@
       "Bash(node .claude/scripts/render-html.js *)",
       "Bash(node .claude/scripts/pre-push-check.js)",
       "Bash(node .claude/scripts/pre-push-check.js *)",
+      "Bash(node .claude/scripts/correction-ledger.js *)",
       "Read",
       "Edit",
       "Write",
