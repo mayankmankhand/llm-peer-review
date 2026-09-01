@@ -24,7 +24,7 @@ The split exists because a category invented at n=1 is a guess. You cannot see a
 <rules>
 
 1. **Never publish, and never send anything off this machine.** No HTML artifact, no second-viewport publish, never fed to `/ask-gpt`, `/ask-gemini`, or any other external model. This is a flat rule with no consent path and no "ask the user first" exception. The ledger is a private per-machine record of things the user said, and a consent prompt would be an invitation to leak it. If a future session finds a reason this rule should not apply, the reason is wrong.
-2. **Print only the shareable layer.** Open codes, counts, scope splits, repo names, dates. Never the `produced` or `correction` fields. The rollup helper already projects those out, so read the rollup rather than the raw ledger.
+2. **Print only the shareable layer.** Open codes, counts, scope splits, repo names, dates. Never the `produced` or `correction` fields. The rollup helper already projects those out, so read the rollup rather than the raw ledger. The rollup carries the open codes themselves: each bucket has an `open_codes` array of `{open_code, count}`, so everything you need for the coding below is in the rollup and nothing is in the private layer.
 3. **Rank within a kind, never across kinds.** Only `human` rows exist today, so this is one ranking. The rule is written now because a second kind added later would carry machine-written labels, and pooling human-labeled with machine-labeled rows makes a count meaningless.
 4. **Never invent a count.** Every number you show comes from the rollup helper. If you find yourself estimating, stop and run the helper.
 5. **User-triggered only.** This command is never chained into (M14). Running it is a deliberate choice.
@@ -61,11 +61,11 @@ Naming a "top problem" from thin data is the exact mistake this whole mechanism 
 
 ### 4. Do the axial coding
 
-Read the open codes from the rollup's buckets (everything not yet categorized lands in the `(unlabeled)` bucket).
+Read the open codes from each bucket's `open_codes` array in the rollup (everything not yet categorized lands in the `(unlabeled)` bucket, which on a first run is all of them). The counts beside each open code tell you which wordings already recur before you group anything.
 
 Group them by **what went wrong**, not by which file or feature was involved. Two corrections about different files are the same category when the underlying gap is the same; two corrections about the same file are different categories when they are not.
 
-Write the mapping to `~/.claude/correction-axial-map.json`, a flat object of open code to category name:
+Write your assignments to a temp file as a flat object of open code to category name, then hand it to the helper:
 
 ```json
 {
@@ -74,7 +74,13 @@ Write the mapping to `~/.claude/correction-axial-map.json`, a flat object of ope
 }
 ```
 
-The ledger itself is append-only and is never rewritten. The map is joined to it at rollup time, so re-categorizing later is a new map rather than an edit to history. Keep existing assignments stable unless the category is genuinely wrong: a category that changes name every run cannot be counted over time.
+```bash
+node .claude/scripts/correction-ledger.js --set-axial --data /tmp/axial-map.json
+```
+
+**Write only the assignments you are making now. Do not restate the existing ones.** The helper merges into the stored map and reports how many existed, how many arrived, and the new total. Two reasons it goes through the helper rather than a direct file write: merging in code means a run that covers only the newest open codes cannot silently drop every earlier assignment, and the stored map lives outside the project where a direct write would be refused on a default install.
+
+The ledger itself is append-only and is never rewritten. The map is joined to it at rollup time, so re-categorizing later is a new assignment rather than an edit to history. Keep existing assignments stable unless a category is genuinely wrong: a category that changes name every run cannot be counted over time.
 
 ### 5. Recompute and present
 

@@ -47,7 +47,7 @@ You don't have to use every command every time. Following the order prevents the
 
 ## How key commands work
 
-Six commands carry most of the workflow. Each has its own file in `.claude/commands/` with the full prompt; the summaries below are the "what is this, when do I use it" view.
+These commands carry most of the workflow. Each has its own file in `.claude/commands/` with the full prompt; the summaries below are the "what is this, when do I use it" view.
 
 ### `/explore` - Understand before you build
 
@@ -85,7 +85,7 @@ Full prompts: [`.claude/commands/ask-gpt.md`](.claude/commands/ask-gpt.md) | [`.
 
 Every time you step in during a cycle, correcting Claude or asking for something different, `/document` records it as one row in a ledger with a short note in your own words about what went wrong. `/error-analysis` reads those notes across every cycle, groups them into categories, counts them, and ranks them, so the thing you fix is the one that actually keeps happening rather than the one that happened most recently. It refuses to rank on fewer than ten rows, because a ranking built on two data points is the exact mistake it exists to prevent.
 
-The data lives at `~/.claude/`, per machine, outside every repo. It is never published and never sent to another model. Turn it off for a repo with `touch .claude/.no-correction-log`.
+Everything is recorded at `~/.claude/correction-ledger.jsonl`, per machine, outside every repo, so you can open it and read exactly what is stored. A row holds your note plus two short fields quoting what was said, capped at 300 characters each. Those two never leave your machine: they are excluded from every summary by construction, and this command never publishes and never sends anything to another model. To stop future capture in a repo, `touch .claude/.no-correction-log`. That records nothing further; rows already written stay until you delete the file yourself.
 
 Full prompt: [`.claude/skills/error-analysis/SKILL.md`](.claude/skills/error-analysis/SKILL.md)
 
