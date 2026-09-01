@@ -81,12 +81,12 @@ const PNG_1X1 = Buffer.from(
 function noAbsTests() {
   console.log('\n--no-abs (issue #155 item 2)');
   const dir = tmpdir('noabs');
-  const SECRET = '/home/someone/private-dir/src/a.js';
+  const FAKE_ABS_PATH = '/home/someone/private-dir/src/a.js';
   const payload = {
     title: 'AbsPath',
     findings: [{
       id: 'R1', severity: 'blocks', what: 'top level',
-      file: { relPath: 'src/a.js', absPath: SECRET, line: 7 },
+      file: { relPath: 'src/a.js', absPath: FAKE_ABS_PATH, line: 7 },
       fields: [{ label: 'Nested', value: 'see below' }]
     }, {
       id: 'R2', severity: 'warns', what: 'deeply nested',
@@ -101,7 +101,7 @@ function noAbsTests() {
   check('control: absPath key is present without --no-abs', control.indexOf('absPath') !== -1);
 
   const stripped = dataIsland(render(dir, 'strip', payload, ['--no-abs']).html);
-  check('--no-abs removes the top-level absPath', stripped.indexOf(SECRET) === -1);
+  check('--no-abs removes the top-level absPath', stripped.indexOf(FAKE_ABS_PATH) === -1);
   check('--no-abs removes every absPath, not just the first',
         stripped.indexOf('private-dir') === -1);
   check('--no-abs leaves no absPath key at all', stripped.indexOf('absPath') === -1);
