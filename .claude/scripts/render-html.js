@@ -62,10 +62,11 @@
 //              carries this machine's directory layout and account name. That is
 //              harmless in a local file and is a disclosure once the page is
 //              published, so the publish path passes this flag and the local
-//              fallback does not. No shell change is needed: each of the five
-//              documents that its file-link falls back to relPath when absPath
-//              is missing, so removing the field degrades to a plain relative
-//              path. See "Publishing the Artifact" in .claude/rules/html-outputs.md.
+//              fallback does not. Each of the five shells treats a missing
+//              absPath as "render this reference as plain text" rather than
+//              building an editor link from the relative path, which would leak
+//              nothing but be dead for every viewer. See "Viewing the Artifact"
+//              in .claude/rules/html-outputs.md.
 //   --stable   write exactly <name>.html in the out dir - no timestamp, no -N
 //              collision guard - overwriting any existing file. This exists for
 //              identity-keyed outputs that pair with a markdown file and are

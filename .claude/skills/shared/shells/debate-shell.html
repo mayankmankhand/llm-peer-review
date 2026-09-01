@@ -39,7 +39,7 @@
           "severity": "block" | "warn" | "suggest",  // -> badge + card class + emoji
           "file": {                   // optional file reference
             "relPath": "src/foo.js",  // visible link text
-            "absPath": "/abs/src/foo.js", // used in vscode://file/ href (falls back to relPath)
+            "absPath": "/abs/src/foo.js", // vscode://file/ href; omitted by --no-abs, and then the reference is plain text
             "line":    42             // optional; appended as :line to text and href
           },
           "what": "string - one-line summary of the action (trusted inline HTML ok)",
@@ -140,10 +140,18 @@ ul.points li{margin-bottom:.35rem;font-size:.95rem;}
   function fileLink(file) {
     if (!file || (!file.relPath && !file.absPath)) return null;
     var rel = file.relPath || file.absPath;
-    var abs = file.absPath || file.relPath;
     var suffix = (file.line || file.line === 0) ? (':' + file.line) : '';
+    // No absPath means the payload was rendered with --no-abs, i.e. this page is
+    // destined for a hosted viewer (issue #155 item 2). A vscode://file/ link
+    // built from the RELATIVE path would not leak anything, but it is dead for
+    // every viewer, so render the reference as plain text instead of a link.
+    if (!file.absPath) {
+      var span = el('span', 'file-link');
+      span.textContent = rel + suffix;
+      return span;
+    }
     var a = el('a', 'file-link');
-    a.href = 'vscode://file/' + abs + suffix;
+    a.href = 'vscode://file/' + file.absPath + suffix;
     a.textContent = rel + suffix;
     return a;
   }
