@@ -81,7 +81,7 @@
 ## 5. Review (~45 seconds)
 
 **SAY:**
-> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I want it to look without touching anything, I say "report only" on the run - that opt-out applies to the run it is said on.
+> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I want it to look without touching anything, I say "no chaining" when I approve the plan and then type `/review report only` myself - "report only" applies to a run you start, and a chained review is not one.
 
 **WAIT** for `/review` to chain from `/execute` and produce its report.
 
