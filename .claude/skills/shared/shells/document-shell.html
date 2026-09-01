@@ -92,7 +92,7 @@
 
 /* ---- document-specific layout (everything NOT already in tokens.css) ---- */
 header.page{padding:2rem 0 .5rem;}
-h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:var(--bg-muted);color:var(--accent);border:1px solid var(--border);vertical-align:middle;margin-left:.5rem;}
+h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);vertical-align:middle;margin-left:.5rem;} /* tinted, not --bg-muted (holistic review, R30) */
 .sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
 
 /* h2 section headers get the gold's underline rule. */
@@ -108,9 +108,12 @@ h2{font-size:1.25rem;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px 
 .file-row{display:flex;align-items:center;gap:.5rem;font-family:ui-monospace,Consolas,monospace;font-size:.83rem;}
 .file-note{color:var(--text-muted);font-family:system-ui,-apple-system,sans-serif;}
 .tag{font-size:.68rem;font-weight:700;padding:.05rem .4rem;border-radius:3px;width:2.4rem;text-align:center;flex:none;}
-.tag-new{background:var(--bg-muted);color:var(--positive);}
-.tag-mod{background:var(--bg-muted);color:var(--warn-strong);}
-.tag-del{background:var(--bg-muted);color:var(--block-strong);}
+/* Status tags sit on their own tint, not on --bg-muted, which the dark-mode
+   sweep had flattened them to (holistic review, R30). Each text-on-tint
+   pairing clears AA in both palettes; see tokens.css for the numbers. */
+.tag-new{background:var(--positive-soft);color:var(--positive);}
+.tag-mod{background:var(--warn-soft);color:var(--warn-strong);}
+.tag-del{background:var(--block-soft);color:var(--block-strong);}
 
 /* Documentation deltas list. */
 .deltas{margin:.3rem 0;padding-left:1.2rem;}

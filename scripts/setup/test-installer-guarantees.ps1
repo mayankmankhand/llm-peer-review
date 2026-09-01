@@ -74,6 +74,14 @@
 #      (the absent half is checked in 7)
 #  20. (sh only) see test-installer-guarantees.sh - an unusable TMPDIR must
 #      not abort the run; setup.ps1 has no temp-dir dependency
+#  21. A settings.local.json the target already TRACKS gets a warning that
+#      names git rm --cached instead of "(machine-specific, never pushed)":
+#      an ignore line never untracks a file, and the tripwire exempts a
+#      never-push path the remote already has, so the file kept going out
+#      on every push while the installer said the opposite (holistic
+#      review, R3). The file stays tracked and keeps every committed entry
+#      (setup never runs git rm); an untracked copy in a repo and a
+#      non-repo target keep the normal message
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -95,6 +103,11 @@ $Snap = Join-Path $Work "snapshot"
 $Log = Join-Path $Work "logs"
 New-Item -ItemType Directory -Force -Path $Scratch | Out-Null
 New-Item -ItemType Directory -Force -Path $Log | Out-Null
+# An empty git config for the scratch-repo seeding in scenario 21, standing
+# in for the user's global one so a signing key or hooks path on this
+# machine cannot fail the commit; see Invoke-TestGit.
+$GitEmptyConfig = Join-Path $Work "gitconfig-empty"
+[System.IO.File]::WriteAllText($GitEmptyConfig, "")
 
 $script:Pass = 0
 $script:Fail = 0
@@ -172,6 +185,40 @@ function Edit-PermEntry {
   $code = $LASTEXITCODE
   Remove-Item -Path Env:PERM_FILE, Env:PERM_ENTRY, Env:PERM_REMOVE -ErrorAction SilentlyContinue
   if ($code -ne 0) { Failed "test setup: node could not edit $File (exit $code)" }
+}
+
+# Invoke-TestGit <repo> <args...>: git against a scratch repo with the user's
+# global and system config masked ($GitEmptyConfig stands in for the global
+# one) and a fixed identity supplied, so a signing key, a hooks path, or a
+# missing identity on this machine cannot fail the seeding. Same stderr
+# rule as Invoke-ToolkitNode in setup.ps1: Windows PowerShell 5.1 turns
+# every stderr line of a native command into an ErrorRecord, and under
+# Stop the first one terminates the script, so the preference is relaxed
+# for the call only. Returns the exit code and the stdout lines; the env
+# vars are removed again so setup.ps1 runs with the real config, as it
+# would downstream.
+function Invoke-TestGit {
+  param([string]$Repo, [string[]]$GitArgs)
+  $env:GIT_CONFIG_GLOBAL = $GitEmptyConfig
+  $env:GIT_CONFIG_NOSYSTEM = "1"
+  $env:GIT_AUTHOR_NAME = "test"
+  $env:GIT_AUTHOR_EMAIL = "test@example.com"
+  $env:GIT_COMMITTER_NAME = "test"
+  $env:GIT_COMMITTER_EMAIL = "test@example.com"
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $raw = @(& git -C $Repo @GitArgs 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+    Remove-Item -Path Env:GIT_CONFIG_GLOBAL, Env:GIT_CONFIG_NOSYSTEM, Env:GIT_AUTHOR_NAME, Env:GIT_AUTHOR_EMAIL, Env:GIT_COMMITTER_NAME, Env:GIT_COMMITTER_EMAIL -ErrorAction SilentlyContinue
+  }
+  $lines = @()
+  foreach ($item in $raw) {
+    if ($item -isnot [System.Management.Automation.ErrorRecord]) { $lines += [string]$item }
+  }
+  return [pscustomobject]@{ Code = $code; Output = $lines }
 }
 
 # Scenario 18 installs into a second, UNC-addressed scratch target when the
@@ -1109,6 +1156,122 @@ try {
 
   # Scenario 20 is sh-only (see test-installer-guarantees.sh): an unusable
   # TMPDIR; setup.ps1 has no temp-dir dependency.
+
+  # --- [21] tracked settings.local.json is warned about, not called "never pushed" ---
+  # The ignore line cannot untrack a file git already holds in its index,
+  # and pre-push-check.js deliberately exempts a never-push path that
+  # already exists at the remote base, so a downstream copy committed
+  # before this install kept going out on every push while the installer
+  # printed "(machine-specific, never pushed)" (holistic review, R3). The
+  # installer now asks the index when the target is a git repo and git is
+  # on PATH, and warns instead; the untrack itself stays with the user.
+  # Two fresh targets: one that committed the seed before setup (must get
+  # the warning, stay tracked, and keep every committed entry - the merge
+  # adds, never replaces) and a control repo whose copy is untracked (must
+  # get the normal message). Mirrors scenario 21 of the bash suite.
+  Write-Host "[21] tracked settings.local.json gets a warning, untracked gets the normal message"
+  $trackedMsg = "already tracked by git"
+  $untrackCmd = "git rm --cached .claude/settings.local.json"
+  $normalMsg = "(machine-specific, never pushed)"
+  if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "  skip: git is not on PATH, so there is no index to seed here"
+  } else {
+    $seedSettings = Join-Path $ToolkitRoot ".claude\settings.local.json"
+    $tracked = Join-Path $Work "tracked"
+    New-Item -ItemType Directory -Force -Path (Join-Path $tracked ".claude") | Out-Null
+    $trackedSettings = Join-Path $tracked ".claude\settings.local.json"
+    Copy-Item -LiteralPath $seedSettings -Destination $trackedSettings -Force
+    # The committed content, kept aside so "every committed entry survived"
+    # can be checked without a second git call.
+    $committedSettings = Join-Path $Work "committed-settings.json"
+    Copy-Item -LiteralPath $trackedSettings -Destination $committedSettings -Force
+    # add -f: a global excludes file (which the config masking does not
+    # cover) may already ignore this path, and a downstream copy that got
+    # committed anyway is exactly the case here.
+    $seeded = (Invoke-TestGit -Repo $tracked -GitArgs @("init", "-q")).Code -eq 0
+    if ($seeded) { $seeded = (Invoke-TestGit -Repo $tracked -GitArgs @("add", "-f", "--", ".claude/settings.local.json")).Code -eq 0 }
+    if ($seeded) { $seeded = (Invoke-TestGit -Repo $tracked -GitArgs @("commit", "-q", "-m", "seed settings.local.json")).Code -eq 0 }
+    if ($seeded) {
+      Ok "test setup: committed settings.local.json in a scratch repo"
+    } else {
+      Failed "test setup: could not commit settings.local.json in a scratch repo"
+    }
+    Invoke-Setup -SetupArgs @("-Target", $tracked) -LogFile (Join-Path $Log "tracked.log")
+    $trackedExit = $LASTEXITCODE
+    if ($trackedExit -eq 0) {
+      Ok "run on the tracked repo exited 0"
+    } else {
+      Failed "run on the tracked repo exited $trackedExit"
+    }
+    Assert-Contains $trackedMsg (Join-Path $Log "tracked.log") "tracked run warns that settings.local.json is already tracked"
+    Assert-Contains $untrackCmd (Join-Path $Log "tracked.log") "tracked run names the untrack command"
+    if ((Get-Content -LiteralPath (Join-Path $Log "tracked.log") -Raw).Contains($normalMsg)) {
+      Failed "tracked run still claims `"never pushed`""
+    } else {
+      Ok "tracked run does not claim `"never pushed`""
+    }
+    if ((Invoke-TestGit -Repo $tracked -GitArgs @("ls-files", "--error-unmatch", "--", ".claude/settings.local.json")).Code -eq 0) {
+      Ok "settings.local.json is still tracked (setup never ran git rm)"
+    } else {
+      Failed "settings.local.json is no longer tracked"
+    }
+    # "Unchanged beyond the merge": the merge adds this target's browse.js
+    # entries and may reformat, so the check is that the file is still a
+    # regular file git sees as modified in place (not deleted or replaced)
+    # and that every entry that was committed is still in it.
+    $trackedStatus = Invoke-TestGit -Repo $tracked -GitArgs @("status", "--porcelain", "--", ".claude/settings.local.json")
+    if ($trackedStatus.Output.Count -eq 1 -and $trackedStatus.Output[0].StartsWith(" M ")) {
+      Ok "git sees settings.local.json as modified in place by the merge"
+    } else {
+      Failed "unexpected git status for settings.local.json: '$($trackedStatus.Output -join '|')'"
+    }
+    $js = @'
+      const fs = require('fs');
+      const was = JSON.parse(fs.readFileSync(process.env.COMMITTED_FILE, 'utf-8')).permissions.allow;
+      const now = JSON.parse(fs.readFileSync(process.env.LIVE_FILE, 'utf-8')).permissions.allow;
+      process.exit(was.every(p => now.includes(p)) ? 0 : 1);
+'@
+    $env:COMMITTED_FILE = $committedSettings
+    $env:LIVE_FILE = $trackedSettings
+    & node -e $js
+    $survived = ($LASTEXITCODE -eq 0)
+    Remove-Item -Path Env:COMMITTED_FILE, Env:LIVE_FILE -ErrorAction SilentlyContinue
+    if ((Test-Path -LiteralPath $trackedSettings -PathType Leaf) -and $survived) {
+      Ok "every committed permission entry survived the merge"
+    } else {
+      Failed "a committed permission entry is missing after the merge"
+    }
+    # Control: the same seed, untracked, in a repo of its own.
+    $untracked = Join-Path $Work "untracked"
+    New-Item -ItemType Directory -Force -Path (Join-Path $untracked ".claude") | Out-Null
+    Copy-Item -LiteralPath $seedSettings -Destination (Join-Path $untracked ".claude\settings.local.json") -Force
+    if ((Invoke-TestGit -Repo $untracked -GitArgs @("init", "-q")).Code -eq 0) {
+      Ok "test setup: scratch repo with an untracked settings.local.json"
+    } else {
+      Failed "test setup: could not init the untracked scratch repo"
+    }
+    Invoke-Setup -SetupArgs @("-Target", $untracked) -LogFile (Join-Path $Log "untracked.log")
+    $untrackedExit = $LASTEXITCODE
+    if ($untrackedExit -eq 0) {
+      Ok "run on the untracked repo exited 0"
+    } else {
+      Failed "run on the untracked repo exited $untrackedExit"
+    }
+    Assert-Contains $normalMsg (Join-Path $Log "untracked.log") "untracked copy in a repo gets the normal message"
+    if ((Get-Content -LiteralPath (Join-Path $Log "untracked.log") -Raw).Contains($trackedMsg)) {
+      Failed "untracked copy was warned about as tracked"
+    } else {
+      Ok "untracked copy is not warned about"
+    }
+    if ((Invoke-TestGit -Repo $untracked -GitArgs @("ls-files", "--error-unmatch", "--", ".claude/settings.local.json")).Code -eq 0) {
+      Failed "untracked copy became tracked (setup must never run git add)"
+    } else {
+      Ok "untracked copy is still untracked (setup never ran git add)"
+    }
+    # A target that is not a repo at all keeps the normal message too: the
+    # scenario 2 fresh install ran on one.
+    Assert-Contains $normalMsg (Join-Path $Log "install.log") "non-repo target gets the normal message (scenario 2 log)"
+  }
 
 } finally {
   if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {

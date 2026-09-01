@@ -113,9 +113,12 @@ header.page .sub{color:var(--text-muted);font-size:.9rem;margin:.3rem 0 0;}
 }
 .option > header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;}
 .option > header h3{margin:0;font-size:1.1rem;font-weight:600;}
+/* The recommended card is itself --bg-muted, so a --bg-muted badge vanished
+   into its own ground: the same flattening as review's .chip.on (holistic
+   review, R30 sweep). Tint plus accent ring keeps it a visible marker. */
 .option .pick-badge{
   font-size:.7rem;font-weight:600;padding:.16rem .5rem;border-radius:999px;
-  background:var(--bg-muted);color:var(--accent);border:1px solid var(--border);white-space:nowrap;
+  background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);white-space:nowrap;
 }
 .option .summary{font-size:.95rem;color:var(--text);margin:.1rem 0 .7rem;}
 

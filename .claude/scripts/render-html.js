@@ -84,17 +84,26 @@
 //   --out-dir  output directory. Default: artifacts/html. Resolved against the
 //              current working directory (relative or absolute both work) and
 //              created if missing. Lets plan views land in plans/ instead.
-//   --no-abs   strip every absolute local path from the payload before rendering
-//              (issue #155 item 2). Five shells turn a finding's file reference
-//              into a vscode://file/<absPath> editor link, so a rendered page
-//              carries this machine's directory layout and account name. That is
+//   --no-abs   strip the paths that identify this machine out of the payload
+//              before rendering (issue #155 item 2): every absPath key goes, and
+//              in ordinary text the repo root becomes a relative path and the
+//              home directory becomes "~", both as a prefix (~/...) and as a
+//              bare whole token (holistic review, R14); /tmp and /usr are left
+//              alone. Five shells turn a finding's file reference into a
+//              vscode://file/<absPath> editor link, so a rendered page carries
+//              this machine's directory layout and account name. That is
 //              harmless in a local file and is a disclosure once the page is
 //              published, so the publish path passes this flag and the local
 //              fallback does not. Each of the five shells treats a missing
 //              absPath as "render this reference as plain text" rather than
 //              building an editor link from the relative path, which would leak
-//              nothing but be dead for every viewer. See "Viewing the Artifact"
-//              in .claude/rules/html-outputs.md.
+//              nothing but be dead for every viewer. A file object that carried
+//              only absPath gets a relPath derived from it first - repo-relative
+//              under the main or working copy, "external file" elsewhere - so
+//              the reference is not hidden (holistic review, R27). Images are
+//              embedded as data: URIs BEFORE the strip runs, so a screenshot
+//              under the home directory still embeds (holistic review, R1). See
+//              "Viewing the Artifact" in .claude/rules/html-outputs.md.
 //   --stable   write exactly <name>.html in the out dir - no timestamp, no -N
 //              collision guard - overwriting any existing file. This exists for
 //              identity-keyed outputs that pair with a markdown file and are
@@ -529,7 +538,8 @@ try {
 // ==========================================================================
 // Payload transforms (issue #155 items 2 and 3). Both rewrite the parsed data
 // in place, before it is serialized into the page, so every shell gets the same
-// treatment without any shell knowing these exist.
+// treatment without any shell knowing these exist. Item 3 (images) runs before
+// item 2 (the strip); the call site at the end of this section says why.
 // ==========================================================================
 
 // --- item 2: strip absolute local paths when the page is destined to be published ---
@@ -554,30 +564,75 @@ try {
 // paths under /tmp are the common case, and their images are inlined as data
 // URIs anyway. Say "removes the paths that identify this machine", never "removes
 // every absolute path", wherever this flag is described.
+const HOME_DIR = (function () {
+  try { const h = require('os').homedir(); return h && h !== '/' ? h : ''; } catch (e) { return ''; }
+})();
+
 const ABS_PREFIXES = (function () {
   const out = [];
   try { const r = mainRepoRoot(); if (r && r !== '/') out.push([r + path.sep, '']); } catch (e) {}
-  try { const h = require('os').homedir(); if (h && h !== '/') out.push([h + path.sep, '~' + path.sep]); } catch (e) {}
+  if (HOME_DIR) out.push([HOME_DIR + path.sep, '~' + path.sep]);
   // Longest first, so the repo root (usually inside home) wins over the home prefix.
   return out.sort(function (a, b) { return b[0].length - a[0].length; });
 })();
+
+// Both prefix pairs end in a separator, so a BARE home path with nothing after
+// it - a shell prompt, "HOME=/home/user", "$HOME is /home/user" - slid through
+// and leaked the account name (holistic review, R14). This second pass turns
+// the bare form into "~", and only as a whole token: when the next character
+// continues the same path segment (/home/user2, /home/user-old, /home/user.bak
+// are other directories) the match is refused, while a sentence-ending period
+// is part of no path and does not block it. It runs AFTER the prefix pairs,
+// longest-first order intact, so anything under home is already ~/... by the
+// time it looks; and it names only the home directory, so /tmp and /usr stay
+// untouched as promised above.
+function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+const BARE_HOME_RE = HOME_DIR
+  ? new RegExp(escapeRegExp(HOME_DIR) + '(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])', 'g')
+  : null;
 
 function scrubAbsInString(str) {
   let out = str;
   for (const [prefix, replacement] of ABS_PREFIXES) {
     if (out.indexOf(prefix) !== -1) out = out.split(prefix).join(replacement);
   }
+  if (BARE_HOME_RE && out.indexOf(HOME_DIR) !== -1) out = out.replace(BARE_HOME_RE, '~');
   return out;
 }
 
+// A file object that carried only absPath (no relPath) lost its whole reference
+// here: the key was deleted, the object shrank to {line}, and every shell's
+// `relPath || absPath` guard then hid it entirely (holistic review, R27). So
+// before the key goes, a missing relPath is derived from it: the path made
+// relative to whichever repository root contains it - the main copy or this
+// working copy, longest first so a worktree nested inside the main copy strips
+// its own root - or the literal "external file" when it is under neither. That
+// text carries no path at all on purpose: a bare basename would read like a
+// repo-relative reference and point at nothing. path.resolve first, so a ".."
+// after the root prefix cannot pass as inside it; pathKey folds case on win32
+// the way the containment checks above do.
+const REL_ROOTS = [REPO_ROOT, WORK_ROOT]
+  .filter(function (r, i, all) { return r && r !== '/' && all.indexOf(r) === i; })
+  .sort(function (a, b) { return b.length - a.length; });
+
+function relPathFromAbs(abs) {
+  const candidate = path.resolve(abs);
+  for (const root of REL_ROOTS) {
+    const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+    if (pathKey(candidate).startsWith(pathKey(prefix))) return candidate.slice(prefix.length);
+  }
+  return 'external file';
+}
+
 // Deleting the absPath KEY is what triggers each shell's plain-text branch, so
-// that stays. But a key-name denylist alone cannot support what the --no-abs
-// description in html-outputs.md promises: absolute paths also appear as
-// ordinary TEXT inside prose fields, receipt commands, and <pre> evidence
-// blocks, and those shipped untouched (issue #155 review, R6). The page is
-// published to a private hosted page without an ask, so this function is the
-// only thing standing between the page and this machine's paths - it has to
-// be true.
+// that stays - provided relPath is there for the shell to fall back to, which
+// relPathFromAbs above guarantees. But a key-name denylist alone cannot support
+// what the --no-abs description in html-outputs.md promises: absolute paths
+// also appear as ordinary TEXT inside prose fields, receipt commands, and <pre>
+// evidence blocks, and those shipped untouched (issue #155 review, R6). The
+// page is published to a private hosted page without an ask, so this function
+// is the only thing standing between the page and this machine's paths - it
+// has to be true.
 function stripAbsPaths(node) {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
@@ -588,9 +643,21 @@ function stripAbsPaths(node) {
   }
   if (node === null || typeof node !== 'object') return;
   for (const key of Object.keys(node)) {
-    if (key === 'absPath') delete node[key];
-    else if (typeof node[key] === 'string') node[key] = scrubAbsInString(node[key]);
-    else stripAbsPaths(node[key]);
+    if (key === 'absPath') {
+      // A relPath the payload already carries wins; only a missing or blank
+      // one is derived (holistic review, R27). Object.keys was snapshotted
+      // above, so the derived value is not re-visited by the scrub - and it
+      // needs no scrub, being repo-relative or a fixed label.
+      if (typeof node.absPath === 'string' && node.absPath &&
+          !(typeof node.relPath === 'string' && node.relPath.trim())) {
+        node.relPath = relPathFromAbs(node.absPath);
+      }
+      delete node[key];
+    } else if (typeof node[key] === 'string') {
+      node[key] = scrubAbsInString(node[key]);
+    } else {
+      stripAbsPaths(node[key]);
+    }
   }
 }
 
@@ -691,8 +758,14 @@ function embedInString(str) {
   return out;
 }
 
-if (opts.noAbs) stripAbsPaths(parsed);
+// Embed FIRST, then strip. The scrub rewrites the home-directory prefix to ~/,
+// and a screenshot left under the home directory but outside the repo was
+// rewritten before the embedder read it, so the publish-bound render alone
+// showed "image unavailable" while the local render embedded it fine
+// (holistic review, R1). A data: URI carries no path, so once the image is
+// inline there is nothing left for the scrub to touch.
 embedImages(parsed);
+if (opts.noAbs) stripAbsPaths(parsed);
 
 // Re-stringify with every "<" escaped to < so the JSON can live inside a
 // <script> block without "</script>" ever terminating it early. JSON.parse in

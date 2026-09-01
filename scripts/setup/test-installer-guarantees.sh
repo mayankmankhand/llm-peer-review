@@ -62,6 +62,14 @@
 #  20. (sh only) An unusable TMPDIR does not abort the run: the settings
 #      merge keeps node's stderr beside its own .tmp in the target instead
 #      of in mktemp, so the run exits 0 and still writes the manifest
+#  21. A settings.local.json the target already TRACKS gets a warning that
+#      names git rm --cached instead of "(machine-specific, never pushed)":
+#      an ignore line never untracks a file, and the tripwire exempts a
+#      never-push path the remote already has, so the file kept going out
+#      on every push while the installer said the opposite (holistic
+#      review, R3). The file stays tracked and keeps every committed entry
+#      (setup never runs git rm); an untracked copy in a repo and a
+#      non-repo target keep the normal message
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -876,6 +884,130 @@ if [ ! -e "$SCRATCH/.claude/settings.local.json.tmp.err" ]; then
   ok "no settings.local.json.tmp.err left behind"
 else
   fail "settings.local.json.tmp.err left behind"
+fi
+
+# ─── [21] tracked settings.local.json is warned about, not called "never pushed" ───
+# The ignore line cannot untrack a file git already holds in its index, and
+# pre-push-check.js deliberately exempts a never-push path that already
+# exists at the remote base, so a downstream copy committed before this
+# install kept going out on every push while the installer printed
+# "(machine-specific, never pushed)" (holistic review, R3). The installer
+# now asks the index when the target is a git repo and git is on PATH, and
+# warns instead; the untrack itself stays with the user. Two fresh targets:
+# one that committed the seed before setup (must get the warning, stay
+# tracked, and keep every committed entry - the merge adds, never replaces)
+# and a control repo whose copy is untracked (must get the normal message).
+# The user's own git config is masked for the seeding, so a signing key or
+# hooks path on this machine cannot fail the commit; setup itself runs with
+# the real config, as it would downstream.
+echo "[21] tracked settings.local.json gets a warning, untracked gets the normal message"
+TRACKED_MSG="already tracked by git"
+UNTRACK_CMD="git rm --cached .claude/settings.local.json"
+NORMAL_MSG="(machine-specific, never pushed)"
+if ! command -v git > /dev/null 2>&1; then
+  echo "  skip: git is not on PATH, so there is no index to seed here"
+else
+  GIT_EMPTY_CONFIG="$WORK/gitconfig-empty"
+  : > "$GIT_EMPTY_CONFIG"
+  # tgit <repo> <git args...>: git against a scratch repo with the global
+  # and system config masked and a fixed identity supplied.
+  tgit() {
+    local repo="$1"
+    shift
+    GIT_CONFIG_GLOBAL="$GIT_EMPTY_CONFIG" GIT_CONFIG_NOSYSTEM=1 \
+    GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com \
+    GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com \
+    git -C "$repo" "$@"
+  }
+  TRACKED="$WORK/tracked"
+  mkdir -p "$TRACKED/.claude"
+  cp "$TOOLKIT_ROOT/.claude/settings.local.json" "$TRACKED/.claude/settings.local.json"
+  # The committed content, kept aside so "every committed entry survived"
+  # can be checked without a second git call.
+  cp "$TRACKED/.claude/settings.local.json" "$WORK/committed-settings.json"
+  # add -f: a global excludes file (~/.config/git/ignore, which the config
+  # masking above does not cover) may already ignore this path, and a
+  # downstream copy that got committed anyway is exactly the case here.
+  if tgit "$TRACKED" init -q > "$LOG/tracked-seed.log" 2>&1 \
+     && tgit "$TRACKED" add -f -- .claude/settings.local.json >> "$LOG/tracked-seed.log" 2>&1 \
+     && tgit "$TRACKED" commit -q -m "seed settings.local.json" >> "$LOG/tracked-seed.log" 2>&1; then
+    ok "test setup: committed settings.local.json in a scratch repo"
+  else
+    fail "test setup: could not commit settings.local.json in a scratch repo (log: $LOG/tracked-seed.log)"
+  fi
+  set +e
+  bash "$SCRIPT_DIR/setup.sh" "$TRACKED" < /dev/null > "$LOG/tracked.log" 2>&1
+  TRACKED_RC=$?
+  set -e
+  if [ "$TRACKED_RC" -eq 0 ]; then
+    ok "run on the tracked repo exited 0"
+  else
+    fail "run on the tracked repo exited $TRACKED_RC"
+  fi
+  assert_grep "$TRACKED_MSG" "$LOG/tracked.log" "tracked run warns that settings.local.json is already tracked"
+  assert_grep "$UNTRACK_CMD" "$LOG/tracked.log" "tracked run names the untrack command"
+  if grep -qF "$NORMAL_MSG" "$LOG/tracked.log"; then
+    fail "tracked run still claims \"never pushed\""
+  else
+    ok "tracked run does not claim \"never pushed\""
+  fi
+  if tgit "$TRACKED" ls-files --error-unmatch -- .claude/settings.local.json > /dev/null 2>&1; then
+    ok "settings.local.json is still tracked (setup never ran git rm)"
+  else
+    fail "settings.local.json is no longer tracked"
+  fi
+  # "Unchanged beyond the merge": the merge adds this target's browse.js
+  # entries and may reformat, so the check is that the file is still a
+  # regular file git sees as modified in place (not deleted or replaced)
+  # and that every entry that was committed is still in it.
+  TRACKED_STATUS="$(tgit "$TRACKED" status --porcelain -- .claude/settings.local.json 2>/dev/null)"
+  case "$TRACKED_STATUS" in
+    " M "*) ok "git sees settings.local.json as modified in place by the merge" ;;
+    *) fail "unexpected git status for settings.local.json: '$TRACKED_STATUS'" ;;
+  esac
+  if [ -f "$TRACKED/.claude/settings.local.json" ] \
+     && COMMITTED_FILE="$WORK/committed-settings.json" node -e '
+       const fs = require("fs");
+       const was = JSON.parse(fs.readFileSync(process.env.COMMITTED_FILE, "utf-8")).permissions.allow;
+       const now = JSON.parse(fs.readFileSync(process.argv[1], "utf-8")).permissions.allow;
+       process.exit(was.every(p => now.includes(p)) ? 0 : 1);
+     ' "$TRACKED/.claude/settings.local.json"; then
+    ok "every committed permission entry survived the merge"
+  else
+    fail "a committed permission entry is missing after the merge"
+  fi
+  # Control: the same seed, untracked, in a repo of its own.
+  UNTRACKED="$WORK/untracked"
+  mkdir -p "$UNTRACKED/.claude"
+  cp "$TOOLKIT_ROOT/.claude/settings.local.json" "$UNTRACKED/.claude/settings.local.json"
+  if tgit "$UNTRACKED" init -q > "$LOG/untracked-seed.log" 2>&1; then
+    ok "test setup: scratch repo with an untracked settings.local.json"
+  else
+    fail "test setup: could not init the untracked scratch repo (log: $LOG/untracked-seed.log)"
+  fi
+  set +e
+  bash "$SCRIPT_DIR/setup.sh" "$UNTRACKED" < /dev/null > "$LOG/untracked.log" 2>&1
+  UNTRACKED_RC=$?
+  set -e
+  if [ "$UNTRACKED_RC" -eq 0 ]; then
+    ok "run on the untracked repo exited 0"
+  else
+    fail "run on the untracked repo exited $UNTRACKED_RC"
+  fi
+  assert_grep "$NORMAL_MSG" "$LOG/untracked.log" "untracked copy in a repo gets the normal message"
+  if grep -qF "$TRACKED_MSG" "$LOG/untracked.log"; then
+    fail "untracked copy was warned about as tracked"
+  else
+    ok "untracked copy is not warned about"
+  fi
+  if tgit "$UNTRACKED" ls-files --error-unmatch -- .claude/settings.local.json > /dev/null 2>&1; then
+    fail "untracked copy became tracked (setup must never run git add)"
+  else
+    ok "untracked copy is still untracked (setup never ran git add)"
+  fi
+  # A target that is not a repo at all keeps the normal message too: the
+  # scenario 2 fresh install ran on one.
+  assert_grep "$NORMAL_MSG" "$LOG/install.log" "non-repo target gets the normal message (scenario 2 log)"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────

@@ -106,7 +106,10 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
 .chips{margin-top:.8rem;display:flex;gap:.4rem;flex-wrap:wrap;}
 .chip{font-family:ui-monospace,Consolas,monospace;font-size:.75rem;background:var(--bg-muted);border:1px solid var(--border);color:var(--text-muted);padding:.2rem .55rem;border-radius:999px;}
-.chip.on{background:var(--bg-muted);border-color:var(--border);color:var(--accent);}
+/* An "on" chip sits on its own tint with an accent ring. The dark-mode sweep
+   had flattened it to --bg-muted, leaving it .chip plus a text color
+   (holistic review, R30). --accent on --accent-soft clears AA in both palettes. */
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
 .top-issues{position:sticky;top:0;background:var(--bg);padding:.8rem 0;border-bottom:1px solid var(--border);z-index:10;max-height:40vh;overflow-y:auto;}
 .top-row{font-size:.9rem;padding:.15rem 0;}
 .top-row--block{color:var(--block);font-weight:600;}

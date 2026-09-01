@@ -4,7 +4,8 @@
 // test-render-html.js - assertions for the payload transforms, the
 // repository-keyed artifact index, and the hosted stamp / --index-sync modes
 // in .claude/scripts/render-html.js.
-// (issues #155 items 2, 3, 5; holistic pass, plan Step 3)
+// (issues #155 items 2, 3, 5; holistic pass, plan Step 3; holistic review
+// R1, R14, R27)
 //
 // Maintainer-only: lives under scripts/, which the installers never propagate, so
 // downstream projects do not inherit it.
@@ -40,13 +41,17 @@ function tmpdir(label) {
 }
 
 // Render a payload and return the page text. cwd defaults to the repo root.
-function render(dir, name, data, extraArgs, cwd) {
+// `env` is merged over the real environment, the way the hardening cases do
+// it: the home-directory image case (holistic review, R1) points HOME at a
+// fixture so nothing is ever written under the real home directory.
+function render(dir, name, data, extraArgs, cwd, env) {
   const dataPath = path.join(dir, name + '.json');
   fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
   const args = [SCRIPT, '--shell', 'review', '--name', name,
                 '--out-dir', dir, '--stable', '--data', dataPath].concat(extraArgs || []);
   const out = execFileSync('node', args,
-    { encoding: 'utf-8', cwd: cwd || REPO, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    { encoding: 'utf-8', cwd: cwd || REPO, stdio: ['ignore', 'pipe', 'pipe'],
+      env: Object.assign({}, process.env, env || {}) }).trim();
   return { path: out, html: fs.readFileSync(out, 'utf-8') };
 }
 
@@ -172,7 +177,115 @@ function noAbsTests() {
   check('control: prose paths survive WITHOUT --no-abs',
         unscrubbed.indexOf(REPO) !== -1);
 
+  // The home prefix pair is HOME + path.sep, so a BARE home path with nothing
+  // after it (a shell prompt, "HOME=/home/user", "$HOME is /home/user")
+  // survived the scrub and leaked the account name (holistic review, R14).
+  // The bare form is replaced only as a whole token: a sibling directory that
+  // merely starts with the same characters is a different path and stays, and
+  // /tmp and /usr are never touched.
+  const bare = {
+    title: 'BareHome',
+    findings: [{
+      id: 'R1', severity: 'warns', what: 'home is ' + HOME,
+      fields: [
+        { label: 'Prompt',  value: 'user@host:' + HOME + '$ ls' },
+        { label: 'Env',     value: 'HOME=' + HOME },
+        { label: 'Sibling', value: 'sibling ' + HOME + '2/x.txt' },
+        { label: 'Dotted',  value: 'dotted ' + HOME + '.bak/y.txt' },
+        { label: 'Period',  value: 'it lives in ' + HOME + '.' },
+        { label: 'Tmp',     value: 'tmp /tmp/render-x/shot.png and /usr/bin/node' }
+      ]
+    }]
+  };
+  const bareOut = dataIsland(render(dir, 'bare', bare, ['--no-abs']).html);
+  check('--no-abs elides a bare home directory to ~ (R14)',
+        bareOut.indexOf('home is ~') !== -1 && bareOut.indexOf('home is ' + HOME) === -1,
+        bareOut.slice(0, 200));
+  check('--no-abs elides the home directory inside a shell prompt (R14)',
+        bareOut.indexOf('user@host:~$ ls') !== -1);
+  check('--no-abs elides the home directory in an env assignment (R14)',
+        bareOut.indexOf('HOME=~') !== -1);
+  check('a sibling path that merely starts with the home directory is left alone',
+        bareOut.indexOf(HOME + '2/x.txt') !== -1 && bareOut.indexOf(HOME + '.bak/y.txt') !== -1);
+  check('a sentence-ending period after the bare home directory does not block the elision',
+        bareOut.indexOf('it lives in ~.') !== -1 && bareOut.indexOf('it lives in ' + HOME) === -1);
+  check('paths under /tmp and /usr are still left alone',
+        bareOut.indexOf('/tmp/render-x/shot.png') !== -1 && bareOut.indexOf('/usr/bin/node') !== -1);
+
+  // A file object that carried only absPath (no relPath) was reduced to {line}
+  // by the strip, and every shell's `relPath || absPath` guard then hid the
+  // reference entirely (holistic review, R27). The strip now derives relPath
+  // from absPath before deleting it: repo-relative when the path is under the
+  // main copy or the working copy, the literal "external file" when it is
+  // under neither. The worktree half of that rule is exercised in
+  // relPathWorktreeTest below.
+  const onlyAbs = {
+    title: 'OnlyAbs',
+    findings: [{
+      id: 'R1', severity: 'warns', what: 'only abs, under the repo',
+      file: { absPath: path.join(REPO, 'src', 'only-abs.js'), line: 3 }
+    }, {
+      id: 'R2', severity: 'warns', what: 'only abs, external',
+      file: { absPath: '/usr/lib/node_modules/x/index.js' }
+    }, {
+      id: 'R3', severity: 'warns', what: 'relPath already given wins',
+      file: { relPath: 'src/given.js', absPath: path.join(REPO, 'src', 'other.js') }
+    }]
+  };
+  const onlyOut = dataIsland(render(dir, 'only-abs', onlyAbs, ['--no-abs']).html);
+  check('--no-abs derives a repo-relative relPath from a lone absPath (R27)',
+        onlyOut.indexOf('"relPath":"src/only-abs.js"') !== -1, onlyOut.slice(0, 300));
+  check('the derived reference keeps its line number', onlyOut.indexOf('"line":3') !== -1);
+  check('a lone absPath outside every repo root becomes "external file", not nothing (R27)',
+        onlyOut.indexOf('"relPath":"external file"') !== -1, onlyOut.slice(0, 300));
+  check('a relPath the payload already carried is not overwritten',
+        onlyOut.indexOf('"relPath":"src/given.js"') !== -1 && onlyOut.indexOf('src/other.js') === -1);
+  check('the lone absPath itself is still gone from the page',
+        onlyOut.indexOf('absPath') === -1 && onlyOut.indexOf(REPO) === -1);
+
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// R27 from a worktree: the derived relPath must strip the WORKING copy's root,
+// not only the main copy's, or a worktree render would call every one of its
+// own files "external file". Own temp repo, because a worktree is needed.
+// ---------------------------------------------------------------------------
+function relPathWorktreeTest() {
+  console.log('\nderived relPath from a worktree (holistic review, R27)');
+  const root = tmpdir('relwt');
+  const main = path.join(root, 'main');
+  fs.mkdirSync(main);
+
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+
+  try {
+    git(main, ['init', '-q']);
+    git(main, ['config', 'user.email', 't@example.com']);
+    git(main, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n');
+    git(main, ['add', '.']);
+    git(main, ['commit', '-qm', 'init']);
+    const wt = path.join(root, 'wt');
+    git(main, ['worktree', 'add', '-q', '--detach', wt, 'HEAD']);
+
+    const out = dataIsland(render(root, 'wt-abs', {
+      title: 'WtAbs',
+      findings: [{ id: 'R1', severity: 'warns', what: 'wt',
+                   file: { absPath: path.join(wt, 'src', 'wt-only.js'), line: 2 } }]
+    }, ['--no-abs'], wt).html);
+    check('a lone absPath under the WORKING copy derives a relPath from that root (R27)',
+          out.indexOf('"relPath":"src/wt-only.js"') !== -1, out.slice(0, 300));
+    check('the worktree path is gone from the page', out.indexOf(wt) === -1);
+
+    git(main, ['worktree', 'remove', '--force', wt]);
+  } catch (e) {
+    check('worktree relPath test set up a git repo and worktree', false, e.message);
+  }
+
+  fs.rmSync(root, { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +355,35 @@ function imageTests() {
   check('an over-budget image is dropped', rb.html.indexOf('data:image/png;base64,') === -1);
   check('an over-budget image says so visibly', rb.html.indexOf('image omitted') !== -1);
   check('an over-budget image reports its size', /over the embed budget/.test(rb.html));
+
+  // A screenshot under the HOME directory but outside the repo. Under --no-abs
+  // the path scrub ran BEFORE the embedder, so the src was rewritten to ~/...
+  // first and the embedder then could not read it: "image unavailable" on the
+  // publish-bound render only, while the local render embedded it fine
+  // (holistic review, R1). HOME is pointed at a fixture directory rather than
+  // the real one - os.homedir() reads HOME on posix and USERPROFILE on win32,
+  // and the script takes its home prefix from os.homedir() - so the fixture
+  // lives in the temp dir and the real home directory is never written to.
+  const fakeHome = path.join(dir, 'home');
+  const homeShot = path.join(fakeHome, 'shots', 'page.png');
+  fs.mkdirSync(path.dirname(homeShot), { recursive: true });
+  fs.writeFileSync(homeShot, PNG_1X1);
+  const homeEnv = { HOME: fakeHome, USERPROFILE: fakeHome };
+  const homePayload = {
+    title: 'HomeShot',
+    findings: [{ id: 'R1', severity: 'warns', what: 'home shot',
+                 fields: [{ label: 'Shot', value: '<img src="' + homeShot + '" alt="h">' }] }]
+  };
+  const hc = render(dir, 'home-ctl', homePayload, [], null, homeEnv);
+  check('control: a home-directory image embeds WITHOUT --no-abs',
+        hc.html.indexOf('data:image/png;base64,') !== -1 && hc.html.indexOf('image unavailable') === -1);
+  const hs = render(dir, 'home-strip', homePayload, ['--no-abs'], null, homeEnv);
+  check('a home-directory image still embeds as a data: URI under --no-abs (R1)',
+        hs.html.indexOf('data:image/png;base64,') !== -1);
+  check('--no-abs does not turn a readable home-directory image into "image unavailable" (R1)',
+        hs.html.indexOf('image unavailable') === -1);
+  check('the home-directory path is gone from the --no-abs page',
+        hs.html.indexOf(fakeHome) === -1);
 
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -730,11 +872,183 @@ function hardeningTests() {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Color scheme, tint tokens, and measured contrast (holistic review: R28,
+// R30, R31)
+//
+// Every case reads a RENDERED page, because tokens.css only reaches a shell
+// through render-html.js. Contrast is measured with the WCAG relative-
+// luminance formula against the token values the page actually carries, and
+// the text/background pairing under test is read out of the shell's own rule
+// rather than assumed, so a tone change that pushes a state under AA fails
+// here instead of in a reader's browser. The audit veto case composites the
+// card's opacity over the page ground first, the way a browser paints it:
+// that is what turned a 7:1 pairing into the 4.06:1 the finding measured.
+// ---------------------------------------------------------------------------
+function themeContrastTests() {
+  console.log('\ncolor scheme, tint tokens, and contrast (holistic review: R28, R30, R31)');
+  const dir = tmpdir('theme');
+  const SHELLS = ['review', 'debate', 'document', 'explore', 'audit', 'plan', 'docview'];
+  const SOFT = ['--accent-soft', '--positive-soft', '--warn-soft', '--block-soft'];
+
+  // Render one shell from the minimal payload every shell accepts.
+  function renderShell(shell) {
+    const dataPath = path.join(dir, shell + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify({ title: 'Theme ' + shell }), 'utf-8');
+    const out = execFileSync('node',
+      [SCRIPT, '--shell', shell, '--name', 'theme-' + shell, '--out-dir', dir, '--stable', '--data', dataPath],
+      { encoding: 'utf-8', cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return fs.readFileSync(out, 'utf-8');
+  }
+  // Body of the first CSS rule with exactly this selector, comments stripped.
+  // The selector must be followed by "{" directly, so ".chip" does not match
+  // ".chip.on" or ".chips", and it must start a selector, so ":root" does not
+  // match inside ":root[data-theme=...]".
+  function ruleBody(css, selector) {
+    const esc = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m = new RegExp('(?:^|[\\s}])' + esc + '\\{([^}]*)\\}').exec(css);
+    return m ? m[1].replace(/\/\*[\s\S]*?\*\//g, '') : null;
+  }
+  // { '--bg': '#ffffff', ... } from a rule body.
+  function tokens(body) {
+    const out = {};
+    (body || '').replace(/(--[\w-]+)\s*:\s*(#[0-9a-fA-F]{3,6})\b/g, function (_, k, v) { out[k] = v; });
+    return out;
+  }
+  // The declared value of one property in a rule body, or null when absent.
+  function prop(body, name) {
+    const m = new RegExp('(?:^|;)\\s*' + name + '\\s*:\\s*([^;]+)').exec(body || '');
+    return m ? m[1].trim() : null;
+  }
+  function tokenName(value) {
+    const m = /var\((--[\w-]+)\)/.exec(value || '');
+    return m ? m[1] : null;
+  }
+
+  // WCAG 2.x: relative luminance per sRGB channel, ratio (L1 + .05) / (L2 + .05).
+  function rgb(hex) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join('');
+    return [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16); });
+  }
+  function lum(hex) {
+    const c = rgb(hex).map(function (v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function contrast(a, b) {
+    const la = lum(a), lb = lum(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+  // `hex` painted at `alpha` over `ground`, per channel.
+  function over(hex, alpha, ground) {
+    const f = rgb(hex), g = rgb(ground);
+    return '#' + f.map(function (v, i) {
+      return ('0' + Math.round(alpha * v + (1 - alpha) * g[i]).toString(16)).slice(-2);
+    }).join('');
+  }
+  function palettes(page) {
+    return {
+      light: tokens(ruleBody(page, ':root')),
+      darkMedia: tokens(ruleBody(page, ':root:not([data-theme="light"])')),
+      darkAttr: tokens(ruleBody(page, ':root[data-theme="dark"]'))
+    };
+  }
+
+  const pages = {};
+  SHELLS.forEach(function (s) { pages[s] = renderShell(s); });
+  const pal = palettes(pages.review);
+  check('control: the light palette parsed out of the rendered page',
+        pal.light['--bg'] === '#ffffff' && pal.light['--text-muted'] === '#52525b', JSON.stringify(pal.light));
+  check('control: both dark blocks parsed out of the rendered page',
+        pal.darkMedia['--bg'] === '#18181b' && pal.darkAttr['--bg'] === '#18181b');
+
+  // R28: color-scheme, so the parts the browser draws itself (scrollbars,
+  // form controls) follow the palette instead of staying light in dark mode.
+  SHELLS.forEach(function (s) {
+    const p = pages[s];
+    check(s + '-shell declares color-scheme: light dark on bare :root (R28)',
+          /color-scheme\s*:\s*light dark\s*(;|$)/.test(ruleBody(p, ':root') || ''));
+    check(s + '-shell declares color-scheme: dark in both dark blocks (R28)',
+          /color-scheme\s*:\s*dark\s*(;|$)/.test(ruleBody(p, ':root:not([data-theme="light"])') || '') &&
+          /color-scheme\s*:\s*dark\s*(;|$)/.test(ruleBody(p, ':root[data-theme="dark"]') || ''));
+    check(s + '-shell pins color-scheme: light under an explicit light choice (R28)',
+          /color-scheme\s*:\s*light\s*(;|$)/.test(ruleBody(p, ':root[data-theme="light"]') || ''));
+  });
+
+  // R30: the tint tokens exist in every rendered shell, in all three blocks.
+  SHELLS.forEach(function (s) {
+    const q = palettes(pages[s]);
+    const missing = SOFT.filter(function (t) { return !(q.light[t] && q.darkMedia[t] && q.darkAttr[t]); });
+    check(s + '-shell carries every tint token in the light palette and both dark blocks (R30)',
+          missing.length === 0, 'missing ' + missing.join(' '));
+  });
+  check('the two dark blocks agree on every tint token',
+        SOFT.every(function (t) { return pal.darkMedia[t] === pal.darkAttr[t]; }));
+  check('a tint is a tint: no tint token repeats --bg-muted in either palette',
+        SOFT.every(function (t) {
+          return pal.light[t] && pal.darkAttr[t] &&
+                 pal.light[t] !== pal.light['--bg-muted'] && pal.darkAttr[t] !== pal.darkAttr['--bg-muted'];
+        }));
+
+  // The exact regression R30 named: .chip.on had become .chip plus a text color.
+  const chip = ruleBody(pages.review, '.chip'), chipOn = ruleBody(pages.review, '.chip.on');
+  check('control: review-shell has both the .chip and .chip.on rules', !!chip && !!chipOn);
+  check('review .chip.on background differs from .chip (R30)',
+        !!chip && !!chipOn && prop(chipOn, 'background') !== null &&
+        prop(chip, 'background') !== prop(chipOn, 'background'),
+        prop(chip, 'background') + ' vs ' + prop(chipOn, 'background'));
+
+  // Every text-on-tint state, measured from the rule the shell ships. The
+  // background must be one of the tint tokens (a state drawn on --bg-muted is
+  // the flattening R30 reported, however readable) and the pairing must clear
+  // AA in both palettes.
+  const PAIRS = [
+    ['review', '.chip.on'], ['audit', '.tag--signal'], ['audit', '.tag--veto'],
+    ['document', '.tag-new'], ['document', '.tag-mod'], ['document', '.tag-del'],
+    ['document', 'h1 .pill'], ['explore', '.option .pick-badge']
+  ];
+  PAIRS.forEach(function (pair) {
+    const body = ruleBody(pages[pair[0]], pair[1]);
+    const fg = tokenName(prop(body, 'color')), bg = tokenName(prop(body, 'background'));
+    [['light', pal.light], ['dark', pal.darkAttr]].forEach(function (p) {
+      const t = p[1];
+      const ok = !!(fg && bg && SOFT.indexOf(bg) !== -1 && t[fg] && t[bg]);
+      const r = ok ? contrast(t[fg], t[bg]) : 0;
+      check(pair[0] + ' ' + pair[1] + ' is a tint and its text clears AA 4.5:1 in ' + p[0] + ' (R30): ' + r.toFixed(2),
+            ok && r >= 4.5, fg + ' on ' + bg + (ok ? '' : ' (not a tint token, or undefined)'));
+    });
+  });
+
+  // R31: the vetoed audit card. The reason text is read from its own rule and
+  // the card's opacity, when it has one, is composited over --bg first.
+  const veto = ruleBody(pages.audit, '.cand--veto');
+  const reason = ruleBody(pages.audit, '.cand--veto .cand-reason');
+  check('control: audit-shell has the .cand--veto and .cand--veto .cand-reason rules', !!veto && !!reason);
+  const alpha = prop(veto, 'opacity') === null ? 1 : parseFloat(prop(veto, 'opacity'));
+  const vetoBg = tokenName(prop(veto, 'background')), vetoFg = tokenName(prop(reason, 'color'));
+  [['light', pal.light], ['dark', pal.darkAttr]].forEach(function (p) {
+    const t = p[1];
+    const ok = !!(vetoFg && vetoBg && t[vetoFg] && t[vetoBg] && t['--bg']);
+    const r = ok ? contrast(over(t[vetoFg], alpha, t['--bg']), over(t[vetoBg], alpha, t['--bg'])) : 0;
+    check('audit vetoed-card reason text clears AA 4.5:1 in ' + p[0] + ' as painted (R31): ' + r.toFixed(2),
+          ok && r >= 4.5, vetoFg + ' on ' + vetoBg + ' at opacity ' + alpha);
+  });
+  check('the vetoed card no longer fades its text with opacity (R31)',
+        prop(veto, 'opacity') === null, 'opacity ' + prop(veto, 'opacity'));
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 noAbsTests();
+relPathWorktreeTest();
 imageTests();
 indexTests();
 stampTests();
 hardeningTests();
+themeContrastTests();
 
 console.log('');
 if (failures.length === 0) {
