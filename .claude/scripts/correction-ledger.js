@@ -119,10 +119,20 @@ const repoRoot = git(['rev-parse', '--show-toplevel']) || cwd;
 // The MAIN working copy, which is where an opt-out marker lives even when this
 // run is inside a linked worktree. `--git-common-dir` points at the main repo's
 // .git, so its parent is that working copy. In the main copy it equals repoRoot.
+//
+// The answer is resolved against cwd here rather than requested absolute with
+// `--path-format=absolute`. That flag only exists from git 2.31, and an older
+// rev-parse does not reject an option it does not know: it echoes it on its own
+// line and carries on, so the answer here became two lines, its dirname pointed
+// nowhere, and the main copy's marker was never looked at from a worktree - the
+// same privacy control failing open, this time keyed to the git version
+// (holistic review, R22). git prints ".git" from the top of the main copy,
+// "../.git" from a subdirectory, and an absolute path from inside a worktree;
+// path.resolve() accepts all three, exactly as render-html.js does for its index.
 function mainWorktreeRoot() {
-  const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  const common = git(['rev-parse', '--git-common-dir']);
   if (!common) return repoRoot;
-  return path.dirname(common);
+  return path.dirname(path.resolve(cwd, common));
 }
 
 // Identity. `repo` stays the readable folder name because it is what a human
@@ -173,6 +183,36 @@ function readJsonl(file) {
 function appendJsonl(file, record) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf-8');
+}
+
+// Remove the caller's hand-off file, but ONLY when it lives in the temp
+// directory. The file holds both private fields UNtruncated, and its path is
+// chosen by whoever called this rather than fixed here, so deleting it the
+// moment it has been consumed is the cheapest way to keep it from lingering
+// somewhere it should not. The same two facts cut the other way, though: the
+// script runs under a pre-approved permission, any JSON array reads cleanly,
+// and an unguarded unlink turned `--data package.json` typed by mistake into a
+// deleted project file (holistic review, R2). The documented hand-off location
+// is /tmp/correction-rows.json (document.md), so the temp directory is the only
+// place this script is entitled to delete from. Anywhere else the file is left
+// alone and one stderr line says so, because the private layer in it is still
+// worth cleaning up by hand. Both sides are compared as real paths so a
+// symlinked temp directory (macOS) compares equal to itself. A failure to
+// unlink is not worth failing the write over.
+function removeHandoff(file) {
+  let real;
+  try { real = fs.realpathSync(file); } catch (e) { return; } // already gone
+  const inTemp = [os.tmpdir(), '/tmp'].some(function (root) {
+    let base;
+    try { base = fs.realpathSync(root); } catch (e) { return false; }
+    const rel = path.relative(base, real);
+    return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+  });
+  if (!inTemp) {
+    console.error('correction-ledger.js: left ' + file + ' in place: it is outside the temp directory, so it is not this script\'s to delete');
+    return;
+  }
+  try { fs.unlinkSync(file); } catch (e) { /* best effort */ }
 }
 
 function truncate(value, max) {
@@ -530,12 +570,8 @@ function runAdd() {
     added++;
   }
 
-  // Delete the caller's temp file. It holds both private fields UNtruncated, and
-  // its path is chosen by whoever called this rather than fixed here, so it is the
-  // one file in this feature that can end up somewhere it should not. Removing it
-  // the moment it is no longer needed is cheaper than guarding every place it
-  // might land. A failure to unlink is not worth failing the append over.
-  try { fs.unlinkSync(opts.data); } catch (e) { /* best effort */ }
+  // Delete the caller's hand-off file, temp directory only: see removeHandoff().
+  removeHandoff(opts.data);
 
   process.stdout.write(JSON.stringify({ added: added, ledger: LEDGER_PATH }) + '\n');
 }
@@ -710,7 +746,7 @@ function runSetAxial() {
   const merged = Object.assign({}, existing, incoming);   // incoming wins on conflict
   fs.mkdirSync(path.dirname(AXIAL_MAP_PATH), { recursive: true });
   fs.writeFileSync(AXIAL_MAP_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  try { fs.unlinkSync(opts.data); } catch (e) { /* best effort */ }
+  removeHandoff(opts.data); // temp directory only, same guard as --add
 
   process.stdout.write(JSON.stringify({
     existing: before,

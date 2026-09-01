@@ -27,7 +27,7 @@
 // Fail closed, never open. A file this script cannot parse is REPORTED as
 // unscannable, not skipped: a scanner that stays silent about what it could
 // not read manufactures false confidence, and its exit 0 is what authorizes
-// the push. Two parsing hazards are handled explicitly:
+// the push. Three parsing hazards are handled explicitly:
 //   - Quoted paths. git C-quotes a path containing a non-ASCII byte (unless
 //     core.quotePath=false, which git() sets), or a quote, backslash, or
 //     control character (which stay quoted regardless). Both the patch header
@@ -36,6 +36,11 @@
 //     "++ " renders as "+++ ..." - indistinguishable from a file header by
 //     prefix alone. The parser tracks hunk line counts, so a line is only ever
 //     read as a header when it is genuinely outside a hunk.
+//   - Binary files. git prints one "Binary files ... differ" line and no
+//     hunks, so there are no added lines to scan. A binary whose name marks it
+//     as a secret container (see SECRET_CONTAINER_* below) is reported as
+//     unscannable; other binaries stay silent, with the line drawn there on
+//     purpose.
 //
 // Contract (mirrors session-init.js / generate-index.js):
 //   - stdout = the hit report, and ONLY on a hit. Clean runs print nothing.
@@ -81,6 +86,23 @@ const NEVER_PUSH_BASENAMES = [
 // silently far too easily - so any change in the outgoing range is a hit
 // and the human approves it by saying "push anyway".
 const SETTINGS_PATH = ".claude/settings.json";
+
+// Binary files whose NAME says they hold key material. The line scanner cannot
+// read a binary at all: git emits a single "Binary files ... differ" line for
+// it and no hunks, and until the holistic review (R20) the parser had no branch
+// for that line, so a committed .pfx passed in silence - the opposite of the
+// fail-closed contract above. Reporting every binary would re-alarm on each
+// icon and font and train the "push anyway" reflex the tripwire exists to
+// prevent; reporting none is the silence being fixed. So the line is drawn at
+// the name: an added or modified binary matching one of these is reported as
+// unscannable (exit 1, check it by hand), any other binary stays silent. A
+// TEXT file under one of these names (a PEM .key, an armored .asc) never reaches
+// this list - it has hunks, and the private-key-block pattern is the better
+// check for it.
+const SECRET_CONTAINER_EXTENSIONS = [
+  ".pfx", ".p12", ".jks", ".keystore", ".kdbx", ".gpg", ".asc", ".der", ".key",
+];
+const SECRET_CONTAINER_BASENAMES = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"];
 
 // Secret patterns scanned against ADDED lines only. Hand-picked common
 // formats, not exhaustive by design (decision: self-contained beats a
@@ -158,6 +180,35 @@ function unquotePath(p) {
   return Buffer.from(bytes).toString("utf8");
 }
 
+// Split a "diff --git a/P b/P" header into its two raw sides plus the decoded
+// path. P appears twice, so the split point is the MIDDLE of the text rather
+// than a space: a path may contain spaces, and "a and b.pfx" is a legal name
+// that also defeats splitting the binary notice below on " and ". Returns null
+// when the halves do not decode to the same path - diff-tree without -M never
+// reports a rename, so that is a parse failure, and the caller reports it
+// rather than guessing (holistic review, R20).
+function headerSides(rest) {
+  if (rest.length % 2 === 0) return null; // "X X" is always odd in length
+  const mid = (rest.length - 1) / 2;
+  if (rest[mid] !== " ") return null;
+  const sides = { a: rest.slice(0, mid), b: rest.slice(mid + 1) };
+  const a = unquotePath(sides.a);
+  const b = unquotePath(sides.b);
+  if (a === null || b === null) return null;
+  if (!a.startsWith("a/") || !b.startsWith("b/") || a.slice(2) !== b.slice(2)) return null;
+  sides.path = b.slice(2);
+  return sides;
+}
+
+// Is this repo path named like a secret container? Basename first (id_rsa has
+// no extension), then extension, both case-insensitive so Client.PFX counts.
+function isSecretContainer(repoPath) {
+  const basename = repoPath.split("/").pop().toLowerCase();
+  if (SECRET_CONTAINER_BASENAMES.includes(basename)) return true;
+  const dot = basename.lastIndexOf(".");
+  return dot !== -1 && SECRET_CONTAINER_EXTENSIONS.includes(basename.slice(dot));
+}
+
 // Does this path already exist at the range base? If so a push cannot leak it:
 // it is already on the remote. Returns false when there is no base, so an
 // unprovable case still blocks (fail closed).
@@ -224,6 +275,7 @@ function scanCommit(sha, hits) {
   let file = null; // repo-relative path of the file the current hunk touches
   let newLine = 0; // line number in the NEW file, tracked from @@ headers
   let pending = 0; // added lines still expected in the current hunk
+  let section = null; // the current "diff --git" header's sides, for binary notices
 
   for (const line of patch.split("\n")) {
     // A "diff --git" line always starts a new file section: use it to resync
@@ -231,6 +283,7 @@ function scanCommit(sha, hits) {
     if (line.startsWith("diff --git ")) {
       pending = 0;
       file = null;
+      section = headerSides(line.slice(11));
       continue;
     }
 
@@ -252,7 +305,7 @@ function scanCommit(sha, hits) {
       continue; // removed lines and "\ No newline" markers carry no new content
     }
 
-    // Outside a hunk: headers and hunk starts only.
+    // Outside a hunk: headers, hunk starts, and the one-line binary notice.
     if (line.startsWith("+++ ")) {
       const raw = line.slice(4);
       if (raw === "/dev/null") {
@@ -262,10 +315,33 @@ function scanCommit(sha, hits) {
       const decoded = unquotePath(raw);
       if (decoded === null || !decoded.startsWith("b/")) {
         // Unparseable path: report it rather than silently skipping the file.
-        hits.unscannable.push(raw + " @ " + short);
+        hits.unscannable.push(raw + " @ " + short + " (path could not be parsed)");
         file = null;
       } else {
         file = decoded.slice(2);
+      }
+      continue;
+    }
+    if (line.startsWith("Binary files ")) {
+      // A binary section has this line instead of "+++" and hunks, so nothing
+      // above ever sees it. The notice is matched EXACTLY against the header's
+      // sides rather than split on " and ", which a path can contain; the three
+      // shapes git prints are add, modify and delete. Anything else is a parse
+      // failure and is reported, never skipped (holistic review, R20).
+      const notice = line.slice(13);
+      if (section === null) {
+        hits.unscannable.push(notice + " @ " + short + " (binary; path could not be parsed)");
+        continue;
+      }
+      const added = notice === "/dev/null and " + section.b + " differ";
+      const modified = notice === section.a + " and " + section.b + " differ";
+      const deleted = notice === section.a + " and /dev/null differ";
+      if (!added && !modified && !deleted) {
+        hits.unscannable.push(notice + " @ " + short + " (binary; path could not be parsed)");
+      } else if (!deleted && isSecretContainer(section.path)) {
+        // Deleting a binary publishes nothing new. Adding or changing one that
+        // is named like key material cannot be read here, so the human must.
+        hits.unscannable.push(section.path + " @ " + short + " (binary secret container; cannot be scanned)");
       }
       continue;
     }
@@ -329,7 +405,7 @@ if (hits.neverPush.length > 0) {
   out.push("");
 }
 if (hits.unscannable.length > 0) {
-  out.push("Files whose path could not be parsed - NOT scanned, check them by hand:");
+  out.push("Files this scanner could not read - NOT scanned, check them by hand:");
   for (const s of hits.unscannable) out.push("  " + s);
   out.push("");
 }

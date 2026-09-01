@@ -16,7 +16,7 @@
 //
 // Usage: node scripts/test-correction-ledger.js
 
-const { execFileSync, spawn } = require('child_process');
+const { execFileSync, spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -46,9 +46,21 @@ function run(sb, args, opts) {
   const o = opts || {};
   return execFileSync('node', [SCRIPT].concat(args), {
     cwd: o.cwd || sb.proj,
-    env: Object.assign({}, process.env, { HOME: sb.home }),
+    env: Object.assign({}, process.env, { HOME: sb.home }, o.env || {}),
     encoding: 'utf-8'
   });
+}
+
+// Same, but never throws: returns exit status, stdout and stderr together, for
+// the checks that read a note the script wrote to stderr on a run that succeeded.
+function runRaw(sb, args, opts) {
+  const o = opts || {};
+  const r = spawnSync('node', [SCRIPT].concat(args), {
+    cwd: o.cwd || sb.proj,
+    env: Object.assign({}, process.env, { HOME: sb.home }, o.env || {}),
+    encoding: 'utf-8'
+  });
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
 function ledgerFile(sb) { return path.join(sb.home, '.claude', 'correction-ledger.jsonl'); }
@@ -390,6 +402,123 @@ console.log('\ncorrection-ledger.js\n');
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- the hand-off file is deleted only from the temp directory ---------------
+// --add and --set-axial remove the --data file after reading it, because it
+// carries the private layer untruncated. The path is the caller's and the script
+// runs under a pre-approved permission, so the unlink has to stay inside the
+// documented hand-off location (/tmp/correction-rows.json, per document.md), or
+// a typo like `--data package.json` reads a project file and then deletes it
+// (holistic review, R2).
+{
+  const sb = makeSandbox('handoff');
+  const inside = writeRows(sb, [{ scope: 'toolkit', open_code: 'inside the temp directory' }]);
+  run(sb, ['--add', '--data', inside]);
+  check('--add removes a hand-off file that lives in the temp directory',
+    !fs.existsSync(inside), 'the consumed file is still there');
+
+  // The outside fixture must be under neither os.tmpdir() nor /tmp, and every
+  // sandbox is under os.tmpdir(), so it lands in a gitignored corner of this
+  // repo instead and is removed on the way out. It is named like the realistic
+  // typo. A checkout that itself lives under /tmp fails the precondition check
+  // by name rather than passing the wrong test.
+  const outsideParent = path.resolve(__dirname, '..', 'artifacts', 'html');
+  fs.mkdirSync(outsideParent, { recursive: true });
+  const outsideDir = fs.mkdtempSync(path.join(outsideParent, 'ledger-handoff-'));
+  try {
+    const outside = path.join(outsideDir, 'package.json');
+    fs.writeFileSync(outside, JSON.stringify([{ scope: 'toolkit', open_code: 'outside the temp directory' }]), 'utf-8');
+    const realOutside = fs.realpathSync(outsideDir);
+    const underTemp = [os.tmpdir(), '/tmp'].some(function (root) {
+      let base;
+      try { base = fs.realpathSync(root); } catch (e) { return false; }
+      const rel = path.relative(base, realOutside);
+      return rel === '' || !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel));
+    });
+    check('the outside fixture really is outside the temp directory', !underTemp, realOutside);
+
+    const res = runRaw(sb, ['--add', '--data', outside]);
+    check('--add still appends from a --data file outside the temp directory',
+      res.status === 0 && JSON.parse(res.stdout || '{}').added === 1, res.stderr || ('exit ' + res.status));
+    check('--add leaves a --data file outside the temp directory in place',
+      fs.existsSync(outside), 'the file was deleted: `--data package.json` typed in a project would remove that file');
+    check('--add says on stderr that it left the file alone',
+      /left .+ in place/.test(res.stderr), JSON.stringify(res.stderr));
+  } finally {
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the main copy's opt-out is honored from a worktree, on any git -----------
+// The marker is untracked and /worktree does not copy it, so from a worktree the
+// script has to find the MAIN copy, via `git rev-parse --git-common-dir`. The
+// old form added --path-format=absolute, which only exists from git 2.31, and
+// rev-parse echoes an option it does not know on its own line and carries on:
+// an older git turned the answer into two lines whose dirname pointed nowhere,
+// and the main copy was silently never checked (holistic review, R22). The shim
+// below reproduces that echo exactly, because a stub that merely rejected the
+// flag would test a failure shape old git never produces.
+{
+  const sb = makeSandbox('worktree');
+  const main = path.join(sb.root, 'main');
+  const wt = path.join(sb.root, 'wt');
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    fs.mkdirSync(main, { recursive: true });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    g(['worktree', 'add', wt, '-b', 'side']);
+    fs.mkdirSync(path.join(main, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(main, '.claude', '.no-correction-log'), '', 'utf-8');
+    // Deliberately no marker in the worktree, matching what /worktree produces.
+
+    const rows = function () { return writeRows(sb, [{ scope: 'toolkit', open_code: 'WORKTREE_LEAK_MARKER' }]); };
+    const modern = JSON.parse(run(sb, ['--add', '--data', rows()], { cwd: wt }));
+    check('the main copy opt-out is honored from a worktree',
+      modern.added === 0 && modern.optedOut === true, JSON.stringify(modern));
+
+    const shimDir = path.join(sb.root, 'old-git');
+    fs.mkdirSync(shimDir);
+    const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf-8' }).trim();
+    fs.writeFileSync(path.join(shimDir, 'git'), [
+      '#!/bin/sh',
+      '# A git older than 2.31: rev-parse echoes --path-format instead of knowing it.',
+      'n=$#; i=0',
+      'while [ $i -lt $n ]; do',
+      '  a=$1; shift',
+      '  case "$a" in',
+      '    --path-format*) printf \'%s\\n\' "$a" ;;',
+      '    *) set -- "$@" "$a" ;;',
+      '  esac',
+      '  i=$((i+1))',
+      'done',
+      'exec "' + realGit + '" "$@"',
+      ''
+    ].join('\n'), 'utf-8');
+    fs.chmodSync(path.join(shimDir, 'git'), 0o755);
+    const oldEnv = { PATH: shimDir + path.delimiter + process.env.PATH };
+    const echoed = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { cwd: wt, env: Object.assign({}, process.env, oldEnv), encoding: 'utf-8' });
+    check('the old-git shim echoes --path-format the way rev-parse does',
+      echoed.split('\n')[0] === '--path-format=absolute', JSON.stringify(echoed));
+
+    const old = JSON.parse(run(sb, ['--add', '--data', rows()], { cwd: wt, env: oldEnv }));
+    check('the main copy opt-out is honored from a worktree on a git without --path-format',
+      old.added === 0 && old.optedOut === true,
+      JSON.stringify(old) + ' - the main copy marker was skipped, a privacy control failing open');
+    check('an opted-out worktree wrote nothing to the ledger on either git',
+      !fs.existsSync(ledgerFile(sb)), 'a ledger file was created');
+  } catch (e) {
+    check('worktree opt-out test set up a repo and a worktree', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- 3. concurrent appends -------------------------------------------------
 {
   const sb = makeSandbox('concurrent');
@@ -455,8 +584,55 @@ function tripwireTest() {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- the tripwire reads binary sections, not just text hunks -----------------
+// git prints one "Binary files ... differ" line for a binary and no hunks, and
+// the parser had no branch for it, so a committed .pfx passed in silence against
+// the fail-closed contract (holistic review, R20). The line is drawn at the
+// name: a binary named like a secret container blocks; an image does not.
+function tripwireBinaryTest() {
+  const sb = makeSandbox('binary');
+  const repo = path.join(sb.root, 'repo');
+  fs.mkdirSync(path.join(repo, 'certs'), { recursive: true });
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  const tripwire = function () {
+    const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8' });
+    return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+  };
+  // A NUL byte among the first bytes is what makes git treat a file as binary.
+  const blob = Buffer.alloc(64, 0); blob[0] = 0x30; blob[1] = 0x82;
+  try {
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'logo.png'), blob);
+    g(['add', 'logo.png']); g(['commit', '-qm', 'add image']);
+    const quiet = tripwire();
+    check('tripwire stays silent on an added binary that is not a secret container',
+      quiet.status === 0 && quiet.stdout === '', 'exit ' + quiet.status + ' ' + quiet.stdout);
+
+    // The same bytes under secret-container names, one of them containing the
+    // " and " that the binary notice itself is written around.
+    fs.writeFileSync(path.join(repo, 'certs', 'client.pfx'), blob);
+    fs.writeFileSync(path.join(repo, 'certs', 'staging and prod.p12'), blob);
+    g(['add', 'certs']); g(['commit', '-qm', 'add certs']);
+    const loud = tripwire();
+    check('tripwire blocks an added binary secret container (.pfx)',
+      loud.status === 1, 'exit ' + loud.status + ' - a binary the scanner cannot read passed in silence');
+    check('tripwire names the binary it could not scan',
+      loud.stdout.indexOf('certs/client.pfx') !== -1, loud.stdout);
+    check('tripwire resolves a binary name containing " and "',
+      loud.stdout.indexOf('certs/staging and prod.p12') !== -1, loud.stdout);
+  } catch (e) {
+    check('tripwire binary test set up a git repo', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 function finish() {
   tripwireTest();
+  tripwireBinaryTest();
   console.log('');
   if (failures.length === 0) {
     console.log(passed + ' checks passed.\n');

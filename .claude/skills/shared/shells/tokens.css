@@ -13,6 +13,7 @@
  * never inside a media query - and the dark blocks below redefine only tokens.
  * No color is given its sole definition in a conditional block. */
 :root{
+  color-scheme:light dark; /* the parts the browser draws itself (scrollbars, form controls) follow the palette instead of staying light in dark mode; the dark blocks and the explicit-light block below pin it (holistic review, R28) */
   --bg:#ffffff; --bg-muted:#f4f4f5; --border:#e4e4e7;
   --text:#18181b; --text-muted:#52525b; --accent:#2563eb;
   --block:#dc2626; --warn:#d97706; --suggest:#2563eb;
@@ -20,6 +21,15 @@
   --block-strong:#b91c1c; /* AA variant of --block for red TEXT on --bg-muted (5.9:1); --block itself is 4.4:1 there and fails */
   --badge-text:#fff;     /* text ON a severity badge; a token because dark mode inverts it */
   --positive:#15803d;    /* keep / added / pro. NOT a severity - severities are block/warn/suggest */
+  /* Tint surfaces for a state drawn ON a card or chip: an "on" chip, a signal
+   * or veto tag, a NEW/MOD/DEL file tag. The dark-mode sweep had flattened
+   * these to --bg-muted, which left .chip.on identical to .chip except for
+   * its text (holistic review, R30). Each is the 100-level tone of its hue,
+   * stepping to the 50-level only where the state's TEXT token would fall
+   * under AA: --accent on blue-100 measures 4.24:1, so blue steps down.
+   * Measured text-on-tint: accent 4.75, positive 4.57, warn-strong 4.68,
+   * block-strong 5.30. Every pairing is asserted in scripts/test-render-html.js. */
+  --accent-soft:#eff6ff; --positive-soft:#dcfce7; --warn-soft:#fef9c3; --block-soft:#fee2e2;
 }
 
 /* Dark palette (issue #155 item 4).
@@ -42,6 +52,7 @@
  * no longer needs a separate strong variant, so --warn-strong tracks --warn. */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
+    color-scheme:dark;
     --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
     --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
     --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
@@ -49,9 +60,15 @@
     --badge-text:#18181b;
     --positive:#4ade80;
     --block-strong:#f87171; /* on a dark muted surface --block already clears AA, so it needs no darker variant */
+    /* Tints are the 900-level tone of each hue, stepping to 950 where the
+     * state text falls under AA: --accent on blue-900 is 4.07:1 and
+     * --block-strong on red-900 is 3.62:1. Measured text-on-tint: accent 5.78,
+     * positive 5.23, warn-strong 5.43, block-strong 5.84 (holistic review, R30). */
+    --accent-soft:#172554; --positive-soft:#14532d; --warn-soft:#78350f; --block-soft:#450a0a;
   }
 }
 :root[data-theme="dark"]{
+  color-scheme:dark;
   --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
   --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
   --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
@@ -59,7 +76,14 @@
   --badge-text:#18181b;
   --positive:#4ade80;
   --block-strong:#f87171;
+  --accent-soft:#172554; --positive-soft:#14532d; --warn-soft:#78350f; --block-soft:#450a0a;
 }
+/* An explicit light choice on a machine set to dark. The tokens already win
+ * there (the media block is guarded against it), but color-scheme on bare
+ * :root says "light dark", which lets the browser follow the OS for the parts
+ * it draws itself - so a light page would get dark scrollbars and controls.
+ * Pin those to light as well (holistic review, R28). */
+:root[data-theme="light"]{color-scheme:light;}
 *{box-sizing:border-box;}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:16px;}
 h1{font-size:1.875rem;font-weight:600;line-height:1.3;margin:0 0 .25rem;}

@@ -1077,7 +1077,31 @@ if ! grep -qxF "$SETTINGS_IGNORE_LINE" "$TARGET/.gitignore"; then
   fi
   [ -n "$(tail -c 1 "$TARGET/.gitignore")" ] && echo "" >> "$TARGET/.gitignore"
   printf '%s\n' "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" "$SETTINGS_IGNORE_LINE" >> "$TARGET/.gitignore"
-  echo "  Added $SETTINGS_IGNORE_LINE to .gitignore (machine-specific, never pushed)"
+  # PARITY: mirrored in setup.ps1 (tracked settings.local.json warning) - change both together
+  # An ignore line never untracks a file git already holds in its index, and
+  # pre-push-check.js deliberately exempts a never-push path that already
+  # exists at the remote base, so a downstream copy committed before this
+  # install kept going out on every push while the line below claimed
+  # "never pushed" (holistic review, R3). When git is on PATH, ask the
+  # index and warn instead: ls-files --error-unmatch exits 0 only for a
+  # tracked path, and fails the same way on a plain folder as on an
+  # untracked file, so a non-repo target keeps the plain message (stderr
+  # silenced so it does not print "fatal:"). The untrack itself is the
+  # user's call - git rm --cached keeps the file on disk, but it is still a
+  # change to their repo - so setup never runs it.
+  SETTINGS_TRACKED=0
+  if command -v git > /dev/null 2>&1 \
+     && git -C "$TARGET" ls-files --error-unmatch -- "$SETTINGS_IGNORE_LINE" > /dev/null 2>&1; then
+    SETTINGS_TRACKED=1
+  fi
+  if [ "$SETTINGS_TRACKED" -eq 1 ]; then
+    echo "  Added $SETTINGS_IGNORE_LINE to .gitignore"
+    echo "  WARNING: $SETTINGS_IGNORE_LINE is already tracked by git, and an ignore line does not untrack it."
+    echo "           It will keep being pushed until you run: git rm --cached $SETTINGS_IGNORE_LINE"
+    echo "           (the file stays on disk; git just stops tracking it)"
+  else
+    echo "  Added $SETTINGS_IGNORE_LINE to .gitignore (machine-specific, never pushed)"
+  fi
 fi
 
 echo "  Copying .gitattributes ..."

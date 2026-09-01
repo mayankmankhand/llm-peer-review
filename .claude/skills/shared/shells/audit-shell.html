@@ -77,7 +77,10 @@
 
   Verdict treatment:
     - candidate -> accent/positive: green left border + "CANDIDATE" badge.
-    - veto      -> muted/struck:   grey, reduced opacity, struck filename + "VETO" badge.
+    - veto      -> muted/struck:   grey surface and left border, struck filename,
+                   muted text at FULL opacity + "VETO" badge. Never an opacity
+                   fade: a .78 fade on the card dropped the reason text to
+                   about 4.06:1 and failed AA (holistic review, R31).
   ==========================================================================
 -->
 <style>
@@ -92,7 +95,10 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 /* Each scanned file is a card. Verdict drives the left-border + tone. */
 .cand{border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;margin-bottom:.9rem;border-left-width:5px;border-left-style:solid;}
 .cand--candidate{border-left-color:var(--positive);}                     /* green = keep/positive */
-.cand--veto{border-left-color:var(--border);background:var(--bg-muted);opacity:.78;}
+/* Muted surface, never an opacity fade: the fade composited the text over the
+   page and dropped it to 4.06:1 light / 4.12:1 dark. --text-muted on --bg-muted
+   at full opacity measures 7.03:1 / 5.81:1 (holistic review, R31). */
+.cand--veto{border-left-color:var(--border);background:var(--bg-muted);}
 
 .cand header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;}
 
@@ -112,8 +118,11 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .chip-row{display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline;margin-bottom:.35rem;}
 .chip-row-label{font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-right:.15rem;}
 .tag{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;padding:.18rem .5rem;border-radius:999px;border:1px solid var(--border);background:var(--bg-muted);color:var(--text-muted);}
-.tag--signal{background:var(--bg-muted);border-color:var(--border);color:var(--accent);}   /* signals that fired */
-.tag--veto{background:var(--bg-muted);border-color:var(--border);color:var(--block-strong);}     /* veto reasons */
+/* Signal and veto tags sit on their own tints, not on --bg-muted, which the
+   dark-mode sweep had flattened them to (holistic review, R30). Both text-on-
+   tint pairings clear AA in both palettes; see tokens.css for the numbers. */
+.tag--signal{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}          /* signals that fired */
+.tag--veto{background:var(--block-soft);border-color:var(--block-strong);color:var(--block-strong);} /* veto reasons */
 .cand--veto .tag--signal{background:var(--bg-muted);border-color:var(--border);color:var(--text-muted);}
 
 .empty{margin-top:1.6rem;color:var(--text-muted);font-size:.95rem;}

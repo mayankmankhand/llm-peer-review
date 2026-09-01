@@ -1218,7 +1218,39 @@ if (-not (@($giNow -split "`r?`n") -ccontains $settingsIgnoreLine)) {
   if ($giNow.Length -gt 0 -and -not $giNow.EndsWith("`n")) { $giNow += $giNl }
   $giNow += "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" + $giNl + $settingsIgnoreLine + $giNl
   Write-ToolkitText -Path $gitignoreDest -Text $giNow
-  Write-Host "  Added $settingsIgnoreLine to .gitignore (machine-specific, never pushed)"
+  # PARITY: mirrors the tracked settings.local.json warning in setup.sh - change both together
+  # An ignore line never untracks a file git already holds in its index, and
+  # pre-push-check.js deliberately exempts a never-push path that already
+  # exists at the remote base, so a downstream copy committed before this
+  # install kept going out on every push while the line below claimed
+  # "never pushed" (holistic review, R3). When git is on PATH, ask the
+  # index and warn instead: ls-files --error-unmatch exits 0 only for a
+  # tracked path, and fails the same way on a plain folder as on an
+  # untracked file, so a non-repo target keeps the plain message. Same
+  # stderr rule as Invoke-ToolkitNode: git's "fatal: not a git repository"
+  # would terminate the script under Stop, so the preference is relaxed
+  # for the call only. The untrack itself is the user's call - git rm
+  # --cached keeps the file on disk, but it is still a change to their
+  # repo - so setup never runs it.
+  $settingsTracked = $false
+  if ($null -ne (Get-Command git -ErrorAction SilentlyContinue)) {
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      & git -C $Target ls-files --error-unmatch -- $settingsIgnoreLine 2>&1 | Out-Null
+      $settingsTracked = ($LASTEXITCODE -eq 0)
+    } finally {
+      $ErrorActionPreference = $prevEap
+    }
+  }
+  if ($settingsTracked) {
+    Write-Host "  Added $settingsIgnoreLine to .gitignore"
+    Write-Host "  WARNING: $settingsIgnoreLine is already tracked by git, and an ignore line does not untrack it."
+    Write-Host "           It will keep being pushed until you run: git rm --cached $settingsIgnoreLine"
+    Write-Host "           (the file stays on disk; git just stops tracking it)"
+  } else {
+    Write-Host "  Added $settingsIgnoreLine to .gitignore (machine-specific, never pushed)"
+  }
 }
 
 # --- .gitattributes (upstream-owned - Invoke-SafeCopy handles any customizations) ---
