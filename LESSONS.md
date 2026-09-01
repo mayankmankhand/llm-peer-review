@@ -41,6 +41,9 @@
 - **The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.**
 - **A prompt's user-facing message is not enforcement.**
 - **Pin subagents freely; never switch the main-loop model mid-session.**
+- **A release needs one review of the whole range, not the sum of its per-issue reviews.**
+- **A version block describes what that version shipped; point at what changed since, never rewrite it.**
+- **Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.**
 
 ## Mistakes to Avoid
 
@@ -75,6 +78,9 @@
 - **Verify impact, not just existence, before scoping a fix.**
 - **A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.**
 - **Replacing LLM-run prose with a script removes non-determinism and shrinks the permission surface.**
+- **A containment check that compares path strings is not containment.**
+- **A test must plant the state a failure actually leaves, not a convenient stand-in.**
+- **A file that is both the maintainer's live config and the downstream seed leaks in both directions.**
 
 ## Patterns That Work
 
@@ -176,3 +182,4 @@
 - **Harden every field on a whitelist, or the whitelist is not a boundary.**
 - **A test whose fixture is rejected by two code paths cannot detect either one breaking.**
 - **When storage is append-only, validate the whole batch before writing any of it.**
+- **Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.**
