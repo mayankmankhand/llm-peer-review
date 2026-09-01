@@ -80,7 +80,7 @@ Use the format below. For each candidate, state which signals fired and one shor
 
 **If step 4 reported zero candidates, skip this step.** Close with one line like "No candidates this pass; rerun /audit-html after adding new long-form docs." Do not ask about generating a view there is no source for.
 
-Otherwise, after the report, ask: "Want me to generate a static HTML view of the top candidate? It writes to `artifacts/html/`, opens in your browser, and leaves the markdown untouched. Otherwise this is report-only."
+Otherwise, after the report, ask: "Want me to generate a static HTML view of the top candidate? It writes to `artifacts/html/`, publishes it to a private hosted page (or opens it in your browser when this session cannot publish), and leaves the markdown untouched. Otherwise this is report-only."
 
 Only generate when the user explicitly says yes.
 
