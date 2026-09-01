@@ -113,14 +113,24 @@ function noAbsTests() {
   // Every shell that builds an editor link must render plain text instead when
   // absPath is absent. This is a source assertion because the branch it guards
   // only runs in a browser.
+  // Assert the real shape POSITIVELY. The previous form here tested two regexes
+  // that matched no shell at all, so `!a || !b` was always true and the check
+  // could not fail - it reported PASS for the exact regression it named
+  // (issue #155 review, R9). Every vscode://file/ concatenation must reference
+  // file.absPath and nothing else.
   ['review', 'document', 'explore', 'debate', 'audit'].forEach(function (shell) {
     const src = fs.readFileSync(
       path.join(REPO, '.claude/skills/shared/shells', shell + '-shell.html'), 'utf-8');
     check(shell + '-shell renders plain text when absPath is absent',
           /if \(!file\.absPath\)/.test(src));
-    check(shell + '-shell never builds an editor link from relPath',
-          !/vscode:\/\/file\/["'\s]*\+\s*(abs|target)\b/.test(src) ||
-          !/var abs = file\.absPath \|\| file\.relPath/.test(src));
+
+    // Find every place the shell BUILDS the scheme (concatenation, not prose).
+    const builds = src.match(/["']vscode:\/\/file\/["']\s*\+\s*[A-Za-z_$][\w.$]*/g) || [];
+    check(shell + '-shell builds at least one editor link (control)', builds.length > 0,
+          'found ' + builds.length);
+    check(shell + '-shell builds every editor link from file.absPath only',
+          builds.every(function (b) { return /\+\s*file\.absPath$/.test(b); }),
+          builds.join(' | '));
   });
 
   // The index modes take no render arguments; --no-abs must be rejected there
@@ -132,6 +142,33 @@ function noAbsTests() {
   } catch (e) { rejected = true; msg = String(e.stderr || ''); }
   check('index mode rejects --no-abs', rejected);
   check('index-mode rejection names the flag', msg.indexOf('--no-abs') !== -1, msg.trim());
+
+  // --no-abs must scrub absolute paths out of ORDINARY TEXT too, not just the
+  // absPath key - the consent copy promises the page carries no machine-
+  // identifying paths, and a key-name denylist cannot deliver that
+  // (issue #155 review, R6).
+  const HOME = require('os').homedir();
+  const prose = {
+    title: 'Prose',
+    findings: [{
+      id: 'R1', severity: 'warns', what: 'see ' + path.join(REPO, 'src/x.js'),
+      fields: [
+        { label: 'Receipt', value: 'grep -n q ' + path.join(REPO, 'src/x.js') },
+        { label: 'Elsewhere', value: 'also ' + path.join(HOME, 'Desktop/notes.txt') }
+      ]
+    }]
+  };
+  const scrubbed = dataIsland(render(dir, 'prose', prose, ['--no-abs']).html);
+  check('--no-abs scrubs the repo root out of prose text',
+        scrubbed.indexOf(REPO) === -1);
+  check('--no-abs scrubs the repo root out of a receipt command',
+        scrubbed.indexOf('grep -n q src/x.js') !== -1, scrubbed.slice(0, 200));
+  check('--no-abs elides the home directory to ~',
+        scrubbed.indexOf(HOME) === -1 && scrubbed.indexOf('~/Desktop/notes.txt') !== -1);
+
+  const unscrubbed = dataIsland(render(dir, 'prose-ctl', prose).html);
+  check('control: prose paths survive WITHOUT --no-abs',
+        unscrubbed.indexOf(REPO) !== -1);
 
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -172,6 +209,28 @@ function imageTests() {
         r.html.indexOf('shots') !== -1);
   check('a remote URL is left untouched',
         r.html.indexOf('https://example.com/x.png') !== -1);
+
+  // Markup shapes that previously fell through the regex with no data URI, no
+  // note, and no stderr line (issue #155 review, R20). Also asserts the swap is
+  // anchored to src: a duplicate path in alt must not absorb the data URI.
+  const shapes = render(dir, 'shapes', {
+    title: 'Shapes',
+    findings: [{ id: 'R1', severity: 'warns', what: 'x', fields: [
+      { label: 'GtInAlt',  value: '<img alt="cart > checkout" src="' + small + '">' },
+      { label: 'Unquoted', value: '<img src=' + small + '>' },
+      { label: 'DupInAlt', value: '<img alt="' + small + '" src="' + small + '">' }
+    ] }]
+  });
+  const uriCount = (shapes.html.match(/data:image\/png;base64,/g) || []).length;
+  check('a ">" inside an attribute no longer breaks the match', uriCount >= 1);
+  check('all three img shapes embed (quoted-with-gt, unquoted, duplicated)',
+        uriCount === 3, 'embedded ' + uriCount + ' of 3');
+  // The payload lives in a JSON island, so its quotes arrive backslash-escaped:
+  // src="  is written as  src=\".  Match either form rather than assuming.
+  check('the data URI lands in src, not in a duplicate alt',
+        /src=\\?["']data:image\/png;base64,/.test(shapes.html));
+  check('a duplicated path in alt is NOT the one that got the data URI',
+        !/alt=\\?["']data:image/.test(shapes.html));
 
   const rb = render(dir, 'big', {
     title: 'Big',
@@ -245,8 +304,11 @@ function indexTests() {
       [SCRIPT, '--index-add', '--type', 'plan', '--name', 'n',
        '--local', 'n.html', '--url', 'https://example.com/n'],
       { cwd: bare, encoding: 'utf-8', env: Object.assign({}, process.env, { GIT_CEILING_DIRECTORIES: root }) }).trim();
+    // No `|| out.length > 0` escape hatch: --index-add always prints a non-empty
+    // path on success, so that disjunct was unconditionally true and the named
+    // behavior was never asserted (issue #155 review, R22).
     check('outside a repo it falls back to the working directory rather than failing',
-          out.indexOf(bare) === 0 || out.length > 0, out);
+          out === path.join(bare, 'artifacts/html/index.jsonl'), out);
   } catch (e) {
     check('outside a repo it does not throw', false, e.message);
   }

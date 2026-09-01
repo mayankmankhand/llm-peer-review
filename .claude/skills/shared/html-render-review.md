@@ -40,7 +40,9 @@ Steps:
 2. **Write the JSON to a temp file**, e.g. `/tmp/review-data.json`.
 
 3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
-   ```
+   Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+
+      ```
    node .claude/scripts/render-html.js --shell review --name review-<type> --data /tmp/review-data.json
    ```
    - `<type>` = the skill name (`code`, `ux`, `browser`, `plan`, `full`, `deps`, `copy`, `commands`) when a specialist is called directly, or `orchestrator` when called via `/review`. So `--name review-orchestrator`, `--name review-code`, etc.

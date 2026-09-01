@@ -226,6 +226,8 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 
 Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 
+Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+
 ```
 node .claude/scripts/render-html.js --shell document --name document --data /tmp/document-data.json
 ```
