@@ -158,6 +158,13 @@ if [ -z "$(list_backup_dirs)" ]; then
 else
   fail "fresh install created a backup dir"
 fi
+# The seeded settings.local.json carries machine paths and is never-push for the
+# tripwire, so a fresh install must ignore it downstream (holistic pass, W1).
+if grep -qxF ".claude/settings.local.json" "$SCRATCH/.gitignore"; then
+  ok "fresh install ignores the seeded settings.local.json"
+else
+  fail "fresh install does not ignore .claude/settings.local.json"
+fi
 
 # ─── [3] plant custom files + edit a managed file ────────────
 echo "[3] plant custom files in every managed directory"
@@ -317,6 +324,11 @@ if [ "$BACKUPS_BEFORE" = "$BACKUPS_AFTER" ]; then
   ok "no new backup dir on identical re-run"
 else
   fail "identical re-run created a backup dir"
+fi
+if [ "$(grep -cxF ".claude/settings.local.json" "$SCRATCH/.gitignore")" -eq 1 ]; then
+  ok "settings.local.json ignore line appears exactly once after the re-run"
+else
+  fail "settings.local.json ignore line missing or duplicated after the re-run"
 fi
 if grep -qi "locally modified" "$LOG/rerun.log"; then
   fail "clean re-run triggered the overwrite gate"

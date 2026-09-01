@@ -1028,6 +1028,13 @@ safe_copy "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
 # checks it, so a second backup_file call can never overwrite the pre-run
 # copy with a post-merge one.
 GITIGNORE_BACKED_UP=0
+# GITIGNORE_PREEXISTED: whether the target brought its own .gitignore. The
+# ignore-line block after the merge backs the file up only when it did; a
+# copy this run just made has nothing of the user's to preserve.
+GITIGNORE_PREEXISTED=0
+if [ -f "$TARGET/.gitignore" ]; then
+  GITIGNORE_PREEXISTED=1
+fi
 if [ -f "$TARGET/.gitignore" ]; then
   echo "  Merging .gitignore (preserving your entries) ..."
   while IFS= read -r line; do
@@ -1050,6 +1057,27 @@ if [ -f "$TARGET/.gitignore" ]; then
 else
   echo "  Copying .gitignore ..."
   cp "$TOOLKIT_ROOT/.gitignore" "$TARGET/.gitignore"
+fi
+
+# ─── Ignore the seeded settings.local.json downstream ───────
+# PARITY: mirrored in setup.ps1 (settings.local.json ignore line) - change both together
+# The toolkit repo tracks .claude/settings.local.json as the SEED for the
+# permission merge, so its own .gitignore cannot list the file and the merge
+# above never adds the line. Downstream the file carries this machine's
+# absolute paths and the M11 tripwire refuses to push it, so a target that
+# does not ignore it trips the tripwire on its first "git add -A" (holistic
+# pass, fresh-install walk). Appended once as an install-time extra, to a
+# fresh copy and a merged file alike; an identical re-run finds it and
+# writes nothing.
+SETTINGS_IGNORE_LINE=".claude/settings.local.json"
+if ! grep -qxF "$SETTINGS_IGNORE_LINE" "$TARGET/.gitignore"; then
+  if [ "$GITIGNORE_BACKED_UP" -eq 0 ] && [ "$GITIGNORE_PREEXISTED" -eq 1 ]; then
+    backup_file "$TARGET/.gitignore"
+    GITIGNORE_BACKED_UP=1
+  fi
+  [ -n "$(tail -c 1 "$TARGET/.gitignore")" ] && echo "" >> "$TARGET/.gitignore"
+  printf '%s\n' "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" "$SETTINGS_IGNORE_LINE" >> "$TARGET/.gitignore"
+  echo "  Added $SETTINGS_IGNORE_LINE to .gitignore (machine-specific, never pushed)"
 fi
 
 echo "  Copying .gitattributes ..."

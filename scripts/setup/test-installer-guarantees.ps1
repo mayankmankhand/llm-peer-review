@@ -216,6 +216,13 @@ try {
   } else {
     Failed "fresh install created a backup dir"
   }
+  # The seeded settings.local.json carries machine paths and is never-push for the
+  # tripwire, so a fresh install must ignore it downstream (holistic pass, W1).
+  if (@(Get-Content -LiteralPath (Join-Path $Scratch ".gitignore")) -ccontains ".claude/settings.local.json") {
+    Ok "fresh install ignores the seeded settings.local.json"
+  } else {
+    Failed "fresh install does not ignore .claude/settings.local.json"
+  }
 
   # --- [3] plant custom files + edit a managed file ------------
   Write-Host "[3] plant custom files in every managed directory"
@@ -390,6 +397,11 @@ try {
     Ok "no new backup dir on identical re-run"
   } else {
     Failed "identical re-run created a backup dir"
+  }
+  if (@(Get-Content -LiteralPath (Join-Path $Scratch ".gitignore") | Where-Object { $_ -ceq ".claude/settings.local.json" }).Count -eq 1) {
+    Ok "settings.local.json ignore line appears exactly once after the re-run"
+  } else {
+    Failed "settings.local.json ignore line missing or duplicated after the re-run"
   }
   $rerunLog = Get-Content -LiteralPath (Join-Path $Log "rerun.log") -Raw
   if ($rerunLog -match '(?i)locally modified') {

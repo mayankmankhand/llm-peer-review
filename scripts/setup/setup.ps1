@@ -1166,6 +1166,8 @@ try {
 # can never be appended twice.
 $gitignoreSrc = Join-Path $ToolkitRoot ".gitignore"
 $gitignoreDest = Join-Path $Target ".gitignore"
+# Whether the target brought its own .gitignore (mirrors GITIGNORE_PREEXISTED).
+$gitignorePreexisted = Test-Path -LiteralPath $gitignoreDest -PathType Leaf
 if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
   Write-Host "  Merging .gitignore (preserving your entries) ..."
   $giText = Read-ToolkitText -Path $gitignoreDest
@@ -1196,6 +1198,27 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
     Write-Host "  Error: Failed to copy .gitignore: $_"
     exit 1
   }
+}
+
+# --- Ignore the seeded settings.local.json downstream ---------
+# PARITY: mirrors the settings.local.json ignore line in setup.sh - change both together
+# The toolkit repo tracks .claude\settings.local.json as the SEED for the
+# permission merge, so its own .gitignore cannot list the file and the merge
+# above never adds the line. Downstream the file carries machine-specific
+# absolute paths and the M11 tripwire refuses to push it. Appended once, to a
+# fresh copy and a merged file alike; an identical re-run writes nothing.
+$settingsIgnoreLine = ".claude/settings.local.json"
+$giNow = Read-ToolkitText -Path $gitignoreDest
+if (-not (@($giNow -split "`r?`n") -ccontains $settingsIgnoreLine)) {
+  if (-not $script:GitignoreBackedUp -and $gitignorePreexisted) {
+    Backup-File -Original $gitignoreDest
+    $script:GitignoreBackedUp = $true
+  }
+  $giNl = Get-ToolkitNewline -Text $giNow
+  if ($giNow.Length -gt 0 -and -not $giNow.EndsWith("`n")) { $giNow += $giNl }
+  $giNow += "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" + $giNl + $settingsIgnoreLine + $giNl
+  Write-ToolkitText -Path $gitignoreDest -Text $giNow
+  Write-Host "  Added $settingsIgnoreLine to .gitignore (machine-specific, never pushed)"
 }
 
 # --- .gitattributes (upstream-owned - Invoke-SafeCopy handles any customizations) ---
