@@ -153,7 +153,7 @@ Full prompt: [`.claude/commands/create-issue.md`](.claude/commands/create-issue.
 
 The toolkit now runs as a **loop** rather than a set of one-shot commands, and that is the change most likely to affect you if you arrive with your own commands, scripts, or way of working.
 
-**What "a loop" means here.** The old behavior was report-first: a command found problems, showed you a list, and waited. The new behavior is that a command finds problems, checks them, fixes the ones that survive the check, verifies the fixes, and hands off to the next stage on its own. You type `/explore` and approve the plan. The rest runs. Two words stop it on any run: say **"report only"** and it reports without changing anything, or **"no chaining"** and it finishes that one stage without starting the next.
+**What "a loop" means here.** The old behavior was report-first: a command found problems, showed you a list, and waited. The new behavior is that a command finds problems, checks them, fixes the ones that survive the check, verifies the fixes, and hands off to the next stage on its own. You type `/explore` and approve the plan. The rest runs. Two phrases take control back: say **"report only"** on a run you start and it reports without changing anything (for the review that chains from `/execute`, see the note under "How key commands work"), or **"no chaining"** and it finishes that one stage without starting the next.
 
 You do not have to give up what you already have. The loop is a pattern you can add to your own commands, and the rest of this section is how to do that safely, followed by what to check so your files survive an upgrade.
 
