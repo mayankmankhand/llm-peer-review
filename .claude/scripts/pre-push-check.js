@@ -343,5 +343,7 @@ if (hits.settingsCommits.size > 0) {
   out.push("");
 }
 out.push("Commits scanned: " + commits.length + (base === null ? " (no remote base - full history)" : ""));
-process.stdout.write(out.join("\n") + "\n");
+// Silent when clean, by contract: an empty report writes nothing, not a bare
+// newline, so a caller capturing stdout sees exactly what the report holds.
+if (out.length) process.stdout.write(out.join("\n") + "\n");
 process.exit(1);
