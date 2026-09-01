@@ -93,7 +93,19 @@ function seedTranscripts(sb) {
       { type: 'text', text: 'TOOL_RESULT_LEAK_MARKER this text rides along with a tool result' }
     ] } }),
     // 6. bare acknowledgment phrase: must be excluded
-    user('sounds good, thanks', '2026-08-31T10:05:00.000Z')
+    user('sounds good, thanks', '2026-08-31T10:05:00.000Z'),
+    // 7. a background-task notification. The harness injects these with type
+    //    "user", so they look exactly like a human turn. On the first live capture
+    //    run 11 of 18 candidates were these.
+    user('<task-notification><task-id>abc123</task-id><result>NOTIFICATION_LEAK_MARKER '
+       + 'the agent reported that this is not correct and should be undone</result></task-notification>',
+       '2026-08-31T10:08:00.000Z'),
+    // 8. an IDE event PREPENDED to a real human turn. The event must be stripped
+    //    and the human's own words must survive, which is why these are stripped
+    //    rather than used to reject the whole entry.
+    user('<ide_opened_file>The user opened the file /tmp/x.js in the IDE.</ide_opened_file>'
+       + 'IDE_EVENT_SURVIVOR_MARKER actually, do not do it that way',
+       '2026-08-31T10:09:00.000Z')
   ];
   fs.writeFileSync(path.join(dir, 'sess-1.jsonl'), lines.join('\n') + '\n', 'utf-8');
 
@@ -130,6 +142,14 @@ console.log('\ncorrection-ledger.js\n');
   check('pre-filter excludes tool results even when text rides along',
     JSON.stringify(out).indexOf('TOOL_RESULT_LEAK_MARKER') === -1,
     'the tool_result guard did not reject an entry carrying a text block');
+
+  check('pre-filter excludes harness task notifications',
+    JSON.stringify(out).indexOf('NOTIFICATION_LEAK_MARKER') === -1,
+    'a background-task notification was offered as a human intervention');
+
+  check('pre-filter keeps the human turn an IDE event was prepended to',
+    said.some(function (t) { return t.indexOf('IDE_EVENT_SURVIVOR_MARKER') !== -1; }),
+    'stripping the IDE event also discarded what the human actually typed');
 
   check('pre-filter reads nothing from subagent transcripts',
     JSON.stringify(out).indexOf('SUBAGENT_LEAK_MARKER') === -1,
