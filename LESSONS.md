@@ -157,3 +157,12 @@
 - **Check the permission allow-list before designing a mechanism out of shell commands.**
 - **`<title>` is RCDATA, so escaping markup inside it changes nothing visible except entities.**
 - **A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.**
+
+### Correction ledger (issue #157)
+
+- **A filter whose misses are undetectable must reject only the certain non-matches, never guess the matches.**
+- **Run your own receipt before you report it as confirmation.**
+- **Two halves of one feature, written in one session, can each be right and still not meet.**
+- **Harden every field on a whitelist, or the whitelist is not a boundary.**
+- **A test whose fixture is rejected by two code paths cannot detect either one breaking.**
+- **When storage is append-only, validate the whole batch before writing any of it.**

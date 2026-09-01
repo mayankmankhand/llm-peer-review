@@ -22,7 +22,7 @@ If you last installed v4.3.3, twelve releases have shipped on top of it. v4.4.0 
 ### Notes
 
 - Data lives at `~/.claude/`, per machine, append-only, outside every repo. The mechanism ships to every install; the data never leaves the machine that wrote it. Two fields hold near-verbatim fragments and are structurally excluded from every rollup; `/error-analysis` never publishes and never sends anything to an external model.
-- Opt out per repo with `touch .claude/.no-correction-log`. Nothing is captured at all for that repo.
+- Opt out per repo with `touch .claude/.no-correction-log`. Nothing is captured at all for that repo, and the marker applies repo-wide: it is honored from any subdirectory and from a linked worktree, not just from the directory holding it.
 - Review findings are deliberately not logged here. They already reach `LESSONS.md`, and a review writes a durable report every run, so recurrence is already answerable for findings and unanswerable for corrections.
 
 ---

@@ -266,6 +266,22 @@ function sessionFiles(dir) {
   return out;
 }
 
+// Wrapper tags the harness injects into entries that carry type "user". None of
+// them are typed by a human: they are system reminders, slash-command expansion
+// metadata, IDE events, and background-task notifications. They arrive in the same
+// shape as a real turn, so without stripping them a single cycle's candidate list
+// is mostly the toolkit talking to itself. Found on the first live capture run,
+// where 11 of 18 candidates were task notifications.
+//
+// Stripped rather than rejected outright, because a real message can carry one of
+// these alongside genuine text: an IDE "opened file" event is prepended to whatever
+// the user actually typed in that turn, and that turn is a real intervention.
+const HARNESS_TAGS = [
+  'system-reminder', 'task-notification', 'command-message', 'command-name',
+  'command-args', 'command-contents', 'ide_selection', 'ide_opened_file',
+  'ide_diagnostics', 'local-command-stdout', 'local-command-stderr'
+];
+
 // Strip harness-inserted markup so only what the human actually typed is examined.
 function humanText(entry) {
   const content = entry.message && entry.message.content;
@@ -278,11 +294,14 @@ function humanText(entry) {
                   .map(function (c) { return c.text; }).join(' ');
   }
   if (!text) return null;
-  const clean = text
-    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '')
-    .replace(/<command-[a-z]+>[\s\S]*?<\/command-[a-z]+>/g, '')
-    .replace(/<ide_selection>[\s\S]*?<\/ide_selection>/g, '')
-    .trim();
+  let clean = text;
+  for (let i = 0; i < HARNESS_TAGS.length; i++) {
+    const tag = HARNESS_TAGS[i];
+    // Paired form first, then any self-closing or unclosed remnant of the same tag.
+    clean = clean.replace(new RegExp('<' + tag + '(\\s[^>]*)?>[\\s\\S]*?<\\/' + tag + '>', 'g'), ' ');
+    clean = clean.replace(new RegExp('<\\/?' + tag + '(\\s[^>]*)?\\/?>', 'g'), ' ');
+  }
+  clean = clean.replace(/\s+/g, ' ').trim();
   return clean || null;
 }
 
