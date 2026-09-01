@@ -68,7 +68,13 @@ const NEVER_PUSH_PATHS = [".claude/settings.local.json"];
 const NEVER_PUSH_BASENAMES = [
   ".env", ".env.local",
   "correction-ledger.jsonl", "correction-heartbeat.jsonl",
-  "correction-rollup.json", "correction-axial-map.json"
+  "correction-rollup.json", "correction-axial-map.json",
+  // The load-bearing one. Every name above lives at ~/.claude/, outside any repo,
+  // so git could not commit it anyway. correction-rows.json is the hand-off file
+  // /document writes before --add, it carries both private fields UNtruncated, and
+  // its path is chosen at runtime rather than fixed in code. The script deletes it
+  // after a successful append; this catches the run where that did not happen.
+  "correction-rows.json"
 ];
 
 // The shared settings file: legitimate to push, but a change rides along

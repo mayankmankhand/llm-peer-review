@@ -60,6 +60,24 @@ Records the times the user stepped in during this cycle, so the toolkit can even
 count what it keeps getting wrong instead of fixing each instance and forgetting it.
 Issue #157. Full rationale in `.claude/rules/toolkit.md`.
 
+**Containment rule, read this before running anything below.** This stage is the only
+place in the toolkit that pulls near-verbatim fragments of what the user typed into
+context. Those fragments - the `human_said` and `assistant_said` text in the candidate
+list, and the `produced` and `correction` fields you draft from them - **stay in this
+stage.** They never enter:
+
+- the Section 9 cycle summary or its JSON payload, and never any HTML artifact or
+  published page
+- a commit message or a PR body
+- `LESSONS.md` or `LESSONS-detail.md`
+- `/ask-gpt`, `/ask-gemini`, `/peer-review`, or any other external model
+
+Only counts and the user's own open codes may cross that line. This matters because
+Section 9 of this same command publishes to a hosted URL under a consent the user gave
+at the start of the run, before any of this text existed, so nothing downstream will ask
+again. There is no exception and no "ask the user first" path: a summary of the data is
+still the data.
+
 This complements the LESSONS work in Section 3 rather than repeating it. A lesson is a
 judgment worth remembering; a ledger row is one data point. The lesson rule in Section 3
 already says to capture when "the user typed the same correction twice" - this is what
@@ -80,8 +98,14 @@ because a candidate wrongly dropped here is invisible to every later step.
 **If `optedOut` is true, stop.** The repo has `.claude/.no-correction-log` and nothing is
 recorded. Say nothing.
 
-**If `candidates` is empty, skip to "Record the heartbeat" and say nothing to the user.**
-The stage is silent when there is nothing to capture.
+**If `scanned` is false, stop here and record NO heartbeat.** The script could not find a
+transcript directory for this project, so nothing was examined. Recording a heartbeat
+would permanently certify a scan that never ran, and `/error-analysis` would later tell
+the user capture had run and found nothing. Say one line: capture could not find this
+project's transcripts, so nothing was scanned.
+
+**If `scanned` is true and `candidates` is empty, skip to "Record the heartbeat" and say
+nothing to the user.** The stage is silent when there was genuinely nothing to capture.
 
 ### Explain it, the first time only
 
@@ -126,8 +150,9 @@ Write the accepted rows to a temp JSON array and append them:
 node .claude/scripts/correction-ledger.js --add --data /tmp/correction-rows.json
 ```
 
-The script stamps `at`, `repo`, and `kind` itself and hard-truncates the private fields,
-so those cannot be got wrong from here.
+The script derives `repo`, `repo_path`, and `kind` itself, so those cannot be got wrong
+from here, and it hard-truncates the private fields. It accepts the `at` you pass, but
+only after checking it is a real ISO timestamp, falling back to now if it is not.
 
 ### Record the heartbeat (always)
 
@@ -135,9 +160,11 @@ so those cannot be got wrong from here.
 node .claude/scripts/correction-ledger.js --heartbeat --candidate-count <N> --added-count <M>
 ```
 
-**Run this even when nothing was captured.** It is what separates "capture has never run
-here" from "capture ran and found nothing", and without it an empty ledger silently looks
-like a user who never corrected anything.
+**Run this even when nothing was captured**, as long as `scanned` was true. It is what
+separates "capture has never run here" from "capture ran and found nothing", and without
+it an empty ledger silently looks like a user who never corrected anything. The one case
+where you do NOT run it is the `scanned: false` branch above: a heartbeat there would
+claim a scan that never happened, which is the same lie in the opposite direction.
 
 Do not run `/error-analysis` from here. Grouping and ranking is a deliberate, user-triggered
 step, and it needs more rows than one cycle produces.

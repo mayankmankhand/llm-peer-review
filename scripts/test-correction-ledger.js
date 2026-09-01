@@ -84,8 +84,14 @@ function seedTranscripts(sb) {
     asst('Done.'),
     // 4. slash-command expansion: machine text, must be excluded
     user('# Update Documentation Task\n**Use this when:** Updating README after changes.', '2026-08-31T10:03:00.000Z'),
-    // 5. tool result: harness, not human, must be excluded
-    JSON.stringify({ type: 'user', timestamp: '2026-08-31T10:04:00.000Z', message: { content: [{ type: 'tool_result', content: 'ok' }] } }),
+    // 5. tool result: harness, not human, must be excluded. The text block matters:
+    //    with a tool_result alone the entry is rejected by the empty-string path
+    //    underneath, so the assertion could not tell a working guard from a deleted
+    //    one. Pairing them makes the guard the only thing that rejects this entry.
+    JSON.stringify({ type: 'user', timestamp: '2026-08-31T10:04:00.000Z', message: { content: [
+      { type: 'tool_result', content: 'ok' },
+      { type: 'text', text: 'TOOL_RESULT_LEAK_MARKER this text rides along with a tool result' }
+    ] } }),
     // 6. bare acknowledgment phrase: must be excluded
     user('sounds good, thanks', '2026-08-31T10:05:00.000Z')
   ];
@@ -121,8 +127,9 @@ console.log('\ncorrection-ledger.js\n');
   check('pre-filter excludes slash-command expansions',
     !said.some(function (t) { return t.indexOf('**Use this when:**') !== -1; }));
 
-  check('pre-filter excludes tool results',
-    !said.some(function (t) { return t.indexOf('ok') === 0; }));
+  check('pre-filter excludes tool results even when text rides along',
+    JSON.stringify(out).indexOf('TOOL_RESULT_LEAK_MARKER') === -1,
+    'the tool_result guard did not reject an entry carrying a text block');
 
   check('pre-filter reads nothing from subagent transcripts',
     JSON.stringify(out).indexOf('SUBAGENT_LEAK_MARKER') === -1,
@@ -209,6 +216,157 @@ console.log('\ncorrection-ledger.js\n');
 
   const cand = JSON.parse(run(sb, ['--candidates']));
   check('opt-out is reported by --candidates so a caller can say why', cand.optedOut === true);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- privacy: the truncation cap is a named structural protection ----------
+{
+  const sb = makeSandbox('caps');
+  const long = 'X'.repeat(2000);
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', stage: 'execute', produced: long, correction: long, open_code: 'Y'.repeat(2000) }
+  ])]);
+  const row = JSON.parse(fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n')[0]);
+  check('produced is truncated to the private-field cap', row.produced.length <= 300, String(row.produced.length));
+  check('correction is truncated to the private-field cap', row.correction.length <= 300, String(row.correction.length));
+  check('a truncated field is marked as truncated', /\.\.\.$/.test(row.produced));
+  check('open_code is truncated to its own cap', row.open_code.length <= 400, String(row.open_code.length));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the `at` field is validated, not trusted ------------------------------
+{
+  const sb = makeSandbox('at');
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', stage: 'execute', at: 'AT_FIELD_LEAK_MARKER not a timestamp', open_code: 'a' },
+    { scope: 'toolkit', stage: 'execute', at: '2026-01-01T09:00:00.000Z', open_code: 'b' }
+  ])]);
+  const raw = fs.readFileSync(ledgerFile(sb), 'utf-8');
+  check('a non-timestamp `at` is rejected, not stored',
+    raw.indexOf('AT_FIELD_LEAK_MARKER') === -1,
+    'free text in `at` reached the ledger, and `at` is on the shareable whitelist');
+  check('a valid `at` is preserved', raw.indexOf('2026-01-01T09:00:00.000Z') !== -1);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the rollup window is computed, not assumed ----------------------------
+{
+  const sb = makeSandbox('window');
+  run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'toolkit', at: '2026-08-31T11:00:00.000Z', open_code: 'later row first' }])]);
+  run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'toolkit', at: '2026-01-01T09:00:00.000Z', open_code: 'earlier row second' }])]);
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  check('rollup window is not backwards when rows arrive out of order',
+    r.window.from < r.window.to, r.window.from + ' -> ' + r.window.to);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the rollup surfaces open codes, which axial coding needs ---------------
+{
+  const sb = makeSandbox('opencodes');
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', open_code: 'trusted prose as a control' },
+    { scope: 'project', open_code: 'trusted prose as a control' },
+    { scope: 'project', open_code: 'scoped bigger than asked' }
+  ])]);
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  const codes = r.kinds.human.buckets[0].open_codes;
+  check('rollup carries the open codes themselves', Array.isArray(codes) && codes.length === 2, JSON.stringify(codes));
+  check('open codes carry their own counts, most frequent first',
+    codes[0].open_code === 'trusted prose as a control' && codes[0].count === 2,
+    JSON.stringify(codes[0]));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- --add is all-or-nothing -----------------------------------------------
+{
+  const sb = makeSandbox('atomic');
+  run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'toolkit', open_code: 'a good row' }])]);
+  const before = fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n').filter(Boolean).length;
+  let failed = false;
+  try {
+    run(sb, ['--add', '--data', writeRows(sb, [
+      { scope: 'toolkit', open_code: 'ATOMIC_LEAK_MARKER should not land' },
+      { scope: 'toolkit', produced: 'this row has no open_code' }
+    ])]);
+  } catch (e) { failed = true; }
+  const after = fs.readFileSync(ledgerFile(sb), 'utf-8');
+  check('an invalid batch exits non-zero', failed);
+  check('an invalid batch writes nothing at all',
+    after.split('\n').filter(Boolean).length === before && after.indexOf('ATOMIC_LEAK_MARKER') === -1,
+    'a partial batch landed, so a corrected re-run would double-count it');
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- two projects sharing a folder name stay separate -----------------------
+{
+  const sb = makeSandbox('identity');
+  const a = path.join(sb.root, 'work', 'api');
+  const b = path.join(sb.root, 'personal', 'api');
+  fs.mkdirSync(path.join(a, '.claude'), { recursive: true });
+  fs.mkdirSync(path.join(b, '.claude'), { recursive: true });
+  run(sb, ['--heartbeat', '--candidate-count', '3', '--added-count', '2'], { cwd: a });
+  const inB = JSON.parse(run(sb, ['--candidates'], { cwd: b }));
+  check('a same-named sibling project does not inherit the heartbeat',
+    inB.everCaptured === false,
+    'one project read another project\'s capture window because identity is the folder name');
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- a failed scan is distinguishable from an empty one ---------------------
+{
+  const sb = makeSandbox('scanned');
+  const out = JSON.parse(run(sb, ['--candidates']));
+  check('--candidates reports whether it had anything to scan',
+    out.scanned === false && out.candidates.length === 0,
+    'no transcript directory exists for this sandbox, so scanned must be false');
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- non-Latin scripts are not discarded as acknowledgments -----------------
+{
+  const sb = makeSandbox('unicode');
+  const dir = seedTranscripts(sb);
+  const asst = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } });
+  const user = JSON.stringify({ type: 'user', timestamp: '2026-08-31T10:07:00.000Z', sessionId: 'sess-2',
+    message: { content: 'UNICODE_MARKER यह गलत है, कृपया इसे वापस लें और दूसरा तरीका आजमाएं' } });
+  fs.writeFileSync(path.join(dir, 'sess-2.jsonl'), asst + '\n' + user + '\n', 'utf-8');
+  const out = JSON.parse(run(sb, ['--candidates', '--since', '2026-08-31T00:00:00.000Z']));
+  check('a correction in a non-Latin script is not dropped as procedural',
+    JSON.stringify(out).indexOf('UNICODE_MARKER') !== -1,
+    'stripping non-ASCII emptied the word list and the message was called an acknowledgment');
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- a project whose own path contains "subagents" still captures -----------
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-subagents-lab-'));
+  const sb = { root: root, home: path.join(root, 'home'), proj: path.join(root, 'subagents-lab') };
+  fs.mkdirSync(sb.home, { recursive: true });
+  fs.mkdirSync(path.join(sb.proj, '.claude'), { recursive: true });
+  seedTranscripts(sb);
+  const out = JSON.parse(run(sb, ['--candidates']));
+  check('a project whose path contains "subagents" is not silently zeroed',
+    out.candidates.length > 0,
+    'the exclusion matched the project\'s own directory name and dropped every file');
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+// --- the axial map merges instead of overwriting ----------------------------
+{
+  const sb = makeSandbox('axial');
+  const f1 = path.join(sb.root, 'm1.json');
+  const f2 = path.join(sb.root, 'm2.json');
+  fs.writeFileSync(f1, JSON.stringify({ 'first code': 'category A' }), 'utf-8');
+  fs.writeFileSync(f2, JSON.stringify({ 'second code': 'category B' }), 'utf-8');
+  run(sb, ['--set-axial', '--data', f1]);
+  const res = JSON.parse(run(sb, ['--set-axial', '--data', f2]));
+  const map = JSON.parse(fs.readFileSync(path.join(sb.home, '.claude', 'correction-axial-map.json'), 'utf-8'));
+  check('a second axial pass keeps the first pass assignments',
+    map['first code'] === 'category A' && map['second code'] === 'category B',
+    JSON.stringify(map));
+  check('--set-axial reports what it merged', res.existing === 1 && res.incoming === 1 && res.total === 2,
+    JSON.stringify(res));
+  check('--set-axial removes the temp file it consumed', !fs.existsSync(f2));
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 

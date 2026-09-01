@@ -44,6 +44,7 @@
 // Zero external dependencies (Node built-ins only), so it adds nothing to the
 // quarantined .claude/scripts/package.json.
 
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -76,7 +77,7 @@ const MAX_OPEN_CODE = 400;
 const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
-  rollup: false, showRollup: false, status: false,
+  rollup: false, showRollup: false, setAxial: false,
   data: '', since: '', session: '', candidateCount: '', addedCount: ''
 };
 for (let i = 0; i < argv.length; i++) {
@@ -86,7 +87,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--heartbeat') opts.heartbeat = true;
   else if (a === '--rollup') opts.rollup = true;
   else if (a === '--show-rollup') opts.showRollup = true;
-  else if (a === '--status') opts.status = true;
+  else if (a === '--set-axial') opts.setAxial = true;
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--since') opts.since = argv[++i] || '';
   else if (a === '--session') opts.session = argv[++i] || '';
@@ -95,20 +96,64 @@ for (let i = 0; i < argv.length; i++) {
   else die('unknown argument: ' + a);
 }
 
-const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'status']
+const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial']
   .filter(function (m) { return opts[m]; });
-if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --status');
+if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial');
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
-const repoName = path.basename(cwd);
+
+// Run a git command from cwd, returning trimmed stdout or null on any failure.
+// Mirrors the pattern in session-init.js: argument array (never an interpolated
+// string), stderr discarded, and a null return rather than a throw.
+function git(args) {
+  try {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch (e) { return null; }
+}
+
+// The working copy's root, so a run started from a subdirectory behaves the same
+// as one started from the top. Falls back to cwd outside a git checkout.
+const repoRoot = git(['rev-parse', '--show-toplevel']) || cwd;
+
+// The MAIN working copy, which is where an opt-out marker lives even when this
+// run is inside a linked worktree. `--git-common-dir` points at the main repo's
+// .git, so its parent is that working copy. In the main copy it equals repoRoot.
+function mainWorktreeRoot() {
+  const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (!common) return repoRoot;
+  return path.dirname(common);
+}
+
+// Identity. `repo` stays the readable folder name because it is what a human
+// reads in a rollup. It is NOT unique: two projects can share a basename, and
+// before repo_path existed that collision let one project's heartbeat set
+// another's capture window. `repo_path` is the real key; `repo` is the label.
+const repoName = path.basename(repoRoot);
+const repoPath = repoRoot;
 
 // ==========================================================================
 // Shared helpers
 // ==========================================================================
 
+// Opt out is checked at the repo root AND at the main working copy's root, not
+// at cwd. The marker is untracked by design and `/worktree` does not copy it, so
+// a cwd-only check let an opted-out repo produce opted-in worktrees - a privacy
+// control failing open, silently, which is the worst way for one to fail.
 function optedOut() {
-  return fs.existsSync(path.join(cwd, OPT_OUT_MARKER));
+  const roots = [repoRoot, mainWorktreeRoot(), cwd];
+  for (let i = 0; i < roots.length; i++) {
+    if (roots[i] && fs.existsSync(path.join(roots[i], OPT_OUT_MARKER))) return true;
+  }
+  return false;
+}
+
+// A heartbeat belongs to this project when its recorded path matches. Rows
+// written before repo_path existed carry only a name, so they fall back to the
+// name comparison rather than being silently dropped from the history.
+function isThisRepo(record) {
+  if (record.repo_path) return record.repo_path === repoPath;
+  return record.repo === repoName;
 }
 
 function readJsonl(file) {
@@ -135,9 +180,27 @@ function truncate(value, max) {
   return s.length <= max ? s : s.slice(0, max - 3) + '...';
 }
 
+// Accept a timestamp only when it really is one, otherwise fall back.
+//
+// This matters more than it looks. `at` is the one whitelisted field whose value
+// comes from outside the script, so without this check it is a free-text channel
+// straight through the projection below: the whitelist only holds if every field
+// inside it is either derived here or format-validated on write.
+function isoOrNull(value) {
+  if (typeof value !== 'string') return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/.test(value)) return null;
+  return Number.isNaN(Date.parse(value)) ? null : value;
+}
+
 // THE privacy boundary. Everything downstream of the ledger reads rows through
 // this projection, so `produced` and `correction` cannot reach a rollup, a report,
-// or anything that gets displayed. Adding a field here is a deliberate act.
+// or anything that gets displayed. Adding a field here is a deliberate act, and
+// every field added must be derived in this script or validated on write.
+//
+// `repo_path` is deliberately NOT here. It is an absolute path on this machine,
+// which is exactly the kind of thing that should not travel into a rendered view.
+// It exists only to tell two same-named projects apart when filtering heartbeats,
+// which is done against raw records, never through this projection.
 function shareable(row) {
   return {
     at: row.at,
@@ -189,7 +252,13 @@ function sessionFiles(dir) {
       if (entries[i].isDirectory()) {
         if (entries[i].name === 'subagents') continue; // never descend
         walk(p);
-      } else if (entries[i].name.endsWith('.jsonl') && p.indexOf('subagents') === -1) {
+      } else if (entries[i].name.endsWith('.jsonl')) {
+        // Defence in depth, tested RELATIVE to the scan root. Testing the whole
+        // absolute path would also match a project whose own directory is named
+        // something like "subagents-lab", excluding every file and reporting the
+        // result as "captured and found nothing" - a silent, permanent zero that
+        // is indistinguishable from the honest answer.
+        if (path.relative(dir, p).split(path.sep).indexOf('subagents') !== -1) continue;
         out.push(p);
       }
     }
@@ -260,8 +329,15 @@ const PROCEDURAL = [
 ];
 
 function isProcedural(text) {
-  const words = text.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
-  if (words.length === 0) return true;
+  // \p{L} rather than a-z: stripping non-ASCII would empty the word list for any
+  // message written in a non-Latin script, and the branch below would then call a
+  // real correction in Hindi, Japanese or Cyrillic a bare acknowledgment. That is
+  // the failure this filter's whole design forbids, not the cheap one it accepts.
+  const words = text.toLowerCase().replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+  // Fail OPEN on no recognizable words. A message this long made only of symbols
+  // or digits is unusual enough to be worth one extra read, and the asymmetry
+  // that governs this whole file says a dropped candidate is the costlier error.
+  if (words.length === 0) return false;
   if (words.length > 4) return false;   // long enough to be saying something
   return words.every(function (w) { return PROCEDURAL.indexOf(w) !== -1; });
 }
@@ -286,6 +362,12 @@ function assistantText(entry) {
 function runCandidates() {
   const result = {
     repo: repoName, optedOut: optedOut(), everCaptured: false,
+    // `scanned` separates "there was nothing to find" from "there was nothing to
+    // look in". Both produce an empty candidate list, and without this field a
+    // caller cannot tell them apart, so it records a heartbeat for a scan that
+    // never happened and the ledger permanently reports a failed scan as a clean
+    // one. A stderr line is not countable; this is.
+    scanned: false,
     window: { from: null, to: new Date().toISOString() },
     candidates: []
   };
@@ -302,11 +384,12 @@ function runCandidates() {
     console.error('correction-ledger.js: no transcript directory for this project; nothing to scan');
     return;
   }
+  result.scanned = true;
 
   // Window. Default is everything since this repo last captured, which is exactly
   // "not yet looked at". With no prior capture, fall back to the CURRENT session
   // only: this is forward-only by design and must not mine the whole backlog.
-  const beats = readJsonl(HEARTBEAT_PATH).filter(function (b) { return b.repo === repoName; });
+  const beats = readJsonl(HEARTBEAT_PATH).filter(isThisRepo);
   result.everCaptured = beats.length > 0;
   let files = sessionFiles(dir);
   let since = opts.since || null;
@@ -363,9 +446,13 @@ function runCandidates() {
 // ==========================================================================
 // Mode: --add (append accepted rows)
 //
-// Input is a JSON array of objects on --data, so nine fields never have to survive
-// shell quoting. The script stamps the fields it can derive itself (at, repo, kind,
-// axial_code) rather than trusting a caller to supply them correctly.
+// Input is a JSON array of objects on --data, so the fields never have to survive
+// shell quoting. `repo`, `repo_path`, `kind` and `axial_code` are derived here and
+// a caller cannot influence them. `at` IS taken from the caller when it supplies
+// one, because the original exchange's timestamp is more useful than the moment of
+// writing, but only after isoOrNull() confirms it is a timestamp. Say this
+// accurately: an earlier version of this comment claimed the script stamped `at`
+// itself, and a comment that overstates a guarantee is worse than none.
 // ==========================================================================
 
 function runAdd() {
@@ -386,15 +473,30 @@ function runAdd() {
     return;
   }
 
+  // Validate the WHOLE batch before writing anything, so --add is all-or-nothing.
+  // Validating inside the append loop left earlier rows permanently written when a
+  // later one failed, and the natural response to the error - fix that row and run
+  // again - then re-appended them. Append-only storage has no rollback, so a
+  // duplicated row is indistinguishable afterwards from a genuine recurrence, and
+  // recurrence count is the single number this whole feature exists to produce.
+  for (let i = 0; i < rows.length; i++) {
+    if (!(rows[i] || {}).open_code) {
+      die('row ' + i + ' has no open_code; the open code is the whole point of a row. Nothing was written.');
+    }
+  }
+
   const now = new Date().toISOString();
   let added = 0;
   for (let i = 0; i < rows.length; i++) {
-    const r = rows[i] || {};
-    if (!r.open_code) die('row ' + i + ' has no open_code; the open code is the whole point of a row');
+    const r = rows[i];
     const scope = r.scope === 'toolkit' ? 'toolkit' : 'project';
     appendJsonl(LEDGER_PATH, {
-      at: r.at || now,
+      // Accepted from the caller because the original exchange's timestamp is the
+      // more useful one, but only when it really is a timestamp: this field is on
+      // the shareable whitelist, so an unvalidated one is a text channel through it.
+      at: isoOrNull(r.at) || now,
       repo: repoName,                        // derived, never taken from input
+      repo_path: repoPath,                   // derived; the real identity, not shareable
       kind: 'human',                         // one value today; the extension point
       scope: scope,
       stage: truncate(r.stage || 'unknown', 40),
@@ -408,6 +510,14 @@ function runAdd() {
     });
     added++;
   }
+
+  // Delete the caller's temp file. It holds both private fields UNtruncated, and
+  // its path is chosen by whoever called this rather than fixed here, so it is the
+  // one file in this feature that can end up somewhere it should not. Removing it
+  // the moment it is no longer needed is cheaper than guarding every place it
+  // might land. A failure to unlink is not worth failing the append over.
+  try { fs.unlinkSync(opts.data); } catch (e) { /* best effort */ }
+
   process.stdout.write(JSON.stringify({ added: added, ledger: LEDGER_PATH }) + '\n');
 }
 
@@ -428,6 +538,7 @@ function runHeartbeat() {
   appendJsonl(HEARTBEAT_PATH, {
     at: new Date().toISOString(),
     repo: repoName,
+    repo_path: repoPath,   // the real key; `repo` alone collides across projects
     session: opts.session || '',
     candidates: Number(opts.candidateCount || 0),
     added: Number(opts.addedCount || 0)
@@ -436,7 +547,7 @@ function runHeartbeat() {
 }
 
 // ==========================================================================
-// Modes: --rollup / --show-rollup / --status
+// Modes: --rollup / --show-rollup
 //
 // The rollup groups by `kind` FIRST, even though only one kind exists today, so a
 // second kind added later cannot be silently pooled into the same ranking. Pooling
@@ -456,14 +567,19 @@ function buildRollup() {
   const beats = readJsonl(HEARTBEAT_PATH);
   const axial = readAxialMap();
 
+  // Compute the range; do not assume it. Rows arrive in append order while `at`
+  // carries the original exchange's timestamp, and appends from different repos
+  // interleave, so first-and-last produced windows that ended before they began.
+  const ats = rows.map(function (r) { return r.at; }).filter(Boolean).sort();
+
   const out = {
     generated_at: new Date().toISOString(),
     rows: rows.length,
     ever_captured: beats.length > 0,
     repos_captured: Array.from(new Set(beats.map(function (b) { return b.repo; }))).sort(),
     window: {
-      from: rows.length ? rows[0].at : null,
-      to: rows.length ? rows[rows.length - 1].at : null
+      from: ats.length ? ats[0] : null,
+      to: ats.length ? ats[ats.length - 1] : null
     },
     kinds: {}
   };
@@ -478,20 +594,38 @@ function buildRollup() {
     const k = out.kinds[kind];
     k.total++;
     if (!k.buckets[label]) {
-      k.buckets[label] = { axial_code: label, count: 0, scope_split: { toolkit: 0, project: 0 }, repos: [], last_seen: null };
+      k.buckets[label] = {
+        axial_code: label, count: 0, scope_split: { toolkit: 0, project: 0 },
+        repos: [], last_seen: null,
+        // The open codes themselves, with how often each occurs. Without these the
+        // rollup carried only labels and counts, so axial coding - whose entire
+        // job is reading open codes and grouping them - had no data source, and on
+        // a first run every label is "(unlabeled)". They are on the shareable
+        // whitelist already, so surfacing them costs nothing and stays inside the
+        // privacy boundary; `produced` and `correction` remain unreachable.
+        open_codes: {}
+      };
     }
     const b = k.buckets[label];
     b.count++;
     if (r.scope === 'toolkit') b.scope_split.toolkit++; else b.scope_split.project++;
     if (b.repos.indexOf(r.repo) === -1) b.repos.push(r.repo);
     if (!b.last_seen || String(r.at) > String(b.last_seen)) b.last_seen = r.at;
+    if (r.open_code) b.open_codes[r.open_code] = (b.open_codes[r.open_code] || 0) + 1;
   }
 
-  // Buckets become a ranked array per kind, biggest first.
+  // Buckets become a ranked array per kind, biggest first, and each bucket's open
+  // codes become a ranked array too so the most frequent wording leads.
   Object.keys(out.kinds).forEach(function (kind) {
     const k = out.kinds[kind];
     k.buckets = Object.keys(k.buckets)
-      .map(function (label) { return k.buckets[label]; })
+      .map(function (label) {
+        const b = k.buckets[label];
+        b.open_codes = Object.keys(b.open_codes)
+          .map(function (text) { return { open_code: text, count: b.open_codes[text] }; })
+          .sort(function (x, y) { return y.count - x.count; });
+        return b;
+      })
       .sort(function (a, b) { return b.count - a.count; });
   });
 
@@ -530,17 +664,41 @@ function runRollup(writeIt) {
   process.stdout.write(JSON.stringify(rollup, null, 2) + '\n');
 }
 
-function runStatus() {
-  const beats = readJsonl(HEARTBEAT_PATH).filter(function (b) { return b.repo === repoName; });
+// ==========================================================================
+// Mode: --set-axial (merge open-code to category assignments)
+//
+// The axial map is a full-file overwrite, so a caller that wrote only its newest
+// assignments silently dropped every earlier one and the counts this feature
+// exists to produce quietly shrank. Merging in code rather than asking a prompt to
+// remember to read first makes that impossible.
+//
+// It also keeps every write in this feature behind the one Bash permission the
+// script already needs. Writing ~/.claude/ directly from a skill would need a
+// filesystem permission no install grants, so the write would simply be refused.
+// ==========================================================================
+
+function runSetAxial() {
+  if (!opts.data) die('--set-axial requires --data <file> containing a JSON object of open_code to category');
+  let incoming;
+  try { incoming = JSON.parse(fs.readFileSync(opts.data, 'utf-8')); }
+  catch (e) { die('could not read --data as JSON: ' + e.message); }
+  if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+    die('--data must contain a JSON object mapping open codes to category names');
+  }
+
+  const existing = readAxialMap();
+  const before = Object.keys(existing).length;
+  const merged = Object.assign({}, existing, incoming);   // incoming wins on conflict
+  fs.mkdirSync(path.dirname(AXIAL_MAP_PATH), { recursive: true });
+  fs.writeFileSync(AXIAL_MAP_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  try { fs.unlinkSync(opts.data); } catch (e) { /* best effort */ }
+
   process.stdout.write(JSON.stringify({
-    repo: repoName,
-    opted_out: optedOut(),
-    opt_out_marker: OPT_OUT_MARKER,
-    ledger: LEDGER_PATH,
-    ledger_exists: fs.existsSync(LEDGER_PATH),
-    captures_here: beats.length,
-    last_capture: beats.length ? beats[beats.length - 1].at : null
-  }, null, 2) + '\n');
+    existing: before,
+    incoming: Object.keys(incoming).length,
+    total: Object.keys(merged).length,
+    map: AXIAL_MAP_PATH
+  }) + '\n');
 }
 
 // --- dispatch ---
@@ -549,4 +707,4 @@ else if (opts.add) runAdd();
 else if (opts.heartbeat) runHeartbeat();
 else if (opts.rollup) runRollup(true);
 else if (opts.showRollup) runRollup(false);
-else if (opts.status) runStatus();
+else if (opts.setAxial) runSetAxial();
