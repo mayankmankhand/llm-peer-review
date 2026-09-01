@@ -17,7 +17,9 @@
   --text:#18181b; --text-muted:#52525b; --accent:#2563eb;
   --block:#dc2626; --warn:#d97706; --suggest:#2563eb;
   --warn-strong:#b45309; /* AA text/badge variant of --warn (~5:1 contrast); --warn stays for decorative borders only */
+  --block-strong:#b91c1c; /* AA variant of --block for red TEXT on --bg-muted (5.9:1); --block itself is 4.4:1 there and fails */
   --badge-text:#fff;     /* text ON a severity badge; a token because dark mode inverts it */
+  --positive:#15803d;    /* keep / added / pro. NOT a severity - severities are block/warn/suggest */
 }
 
 /* Dark palette (issue #155 item 4).
@@ -36,7 +38,7 @@
  * AA. On a dark ground that trade inverts - the readable badge is a LIGHT fill
  * with near-black text - so dark mode lightens every severity fill to the
  * 400-level tone and flips --badge-text to the page's dark ink. Each pairing
- * clears AA comfortably (~7.5:1 for red and blue, ~11:1 for amber), and amber
+ * clears AA comfortably (6.4:1 red, 7.0:1 blue, 10.6:1 amber), and amber
  * no longer needs a separate strong variant, so --warn-strong tracks --warn. */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -45,6 +47,8 @@
     --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
     --warn-strong:#fbbf24;
     --badge-text:#18181b;
+    --positive:#4ade80;
+    --block-strong:#f87171; /* on a dark muted surface --block already clears AA, so it needs no darker variant */
   }
 }
 :root[data-theme="dark"]{
@@ -53,6 +57,8 @@
   --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
   --warn-strong:#fbbf24;
   --badge-text:#18181b;
+  --positive:#4ade80;
+  --block-strong:#f87171;
 }
 *{box-sizing:border-box;}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:16px;}

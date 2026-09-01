@@ -30,9 +30,10 @@ Pick from this neutral palette unless an element calls for a severity color (see
 
 ## Dark Mode
 
-Supported since issue #155. Artifacts are published to a hosted page as well as
-opened locally, and a published page renders inside the **viewer's** theme, so a
-light-only stylesheet hands a dark-mode reader a white slab.
+Supported since issue #155. The hosted page is now the primary place an artifact
+is read, and it renders inside the **viewer's** theme, so a light-only stylesheet
+hands a dark-mode reader a white slab. The local fallback needs the same
+treatment, since a browser there follows the OS theme too.
 
 The light palette above is the unconditional default and lives on bare `:root`.
 Dark mode redefines only the tokens, in two places carrying identical
@@ -54,6 +55,8 @@ only definition inside a conditional block.
 | `--warn` | `#d97706` | `#fbbf24` |
 | `--warn-strong` | `#b45309` | `#fbbf24` |
 | `--suggest` | `#2563eb` | `#60a5fa` |
+| `--block-strong` | `#b91c1c` | `#f87171` |
+| `--positive` | `#15803d` | `#4ade80` |
 | `--badge-text` | `#fff` | `#18181b` |
 
 **The severity colors are re-derived, not reused**, and the reasoning below
@@ -61,9 +64,22 @@ inverts. In light mode a badge is white text on the severity fill, which is
 exactly why `--warn-strong` exists. On a dark ground the readable badge is a
 light fill with near-black text, so every severity fill moves to its 400-level
 tone and `--badge-text` flips to the page's dark ink. Each dark pairing clears
-AA comfortably: about 7.5:1 for red and blue, about 11:1 for amber. Amber no
-longer needs a separate strong variant in dark mode, so `--warn-strong` tracks
-`--warn` there.
+AA: 6.4:1 for red, 7.0:1 for blue, 10.6:1 for amber. Amber no longer needs a
+separate strong variant in dark mode, so `--warn-strong` tracks `--warn` there.
+
+**Two tokens exist so shells never reach for a literal.** `--positive` (keep,
+added, pro) is not a severity - the severities are block, warn, and suggest -
+but four shells were hardcoding a green for it. `--block-strong` is to `--block`
+what `--warn-strong` is to `--warn`: the AA-safe variant for red TEXT on
+`--bg-muted`, where plain `--block` measures 4.4:1 and fails.
+
+**Shell CSS must use these tokens, never a literal.** `tokens.css` holds the
+shared layer; each shell's own `<style>` holds its layout. A hex literal in a
+shell survives the theme switch unchanged, which is how this feature's first
+pass shipped two shells whose text rendered at 1.05:1 in dark mode. The only
+legitimate literals are decorative borders and markers, where contrast rules do
+not apply. Every pairing above is measured, not assumed - recheck with the WCAG
+relative-luminance formula whenever a tone changes.
 
 ## Severity Badge Colors
 
@@ -75,6 +91,8 @@ Maps to the existing 🚫⚠️💡 scale used in markdown reports. Use these he
 | Warn (border) | ⚠️ | `#d97706` | Amber. Decorative card left-border only, where contrast rules do not apply. Distinct weight from red, not pale yellow (low contrast). |
 | Warn (text/badge) | ⚠️ | `#b45309` | Darker amber for white-text surfaces (badge backgrounds, severity chips). About 5:1 contrast, AA-compliant. |
 | Suggest | 💡 | `#2563eb` | Blue, not green. Green reads as "success/pass". |
+
+These are the **light-mode** values; the Dark Mode table above re-derives all of them.
 
 Block (`#dc2626`) and Suggest (`#2563eb`) pass WCAG AA contrast (>= 4.5:1) with white text. The base Warn amber `#d97706` does NOT (about 3.2:1 white-on-it), so it is used only for the decorative card left-border, where contrast rules do not apply. Any Warn text or badge surface uses the darker variant `#b45309` (about 5:1, AA-compliant) instead. These are Tailwind 600/700-level tones, chosen for visual consistency and readability across light backgrounds.
 

@@ -107,15 +107,15 @@ header.page .sub{color:var(--text-muted);font-size:.9rem;margin:.3rem 0 0;}
   flex-direction:column;
 }
 .option.recommended{
-  border-color:#c7d2fe;
-  background:#f8faff;
-  box-shadow:0 0 0 1px #c7d2fe;
+  border-color:var(--accent);
+  background:var(--bg-muted);
+  box-shadow:0 0 0 1px var(--accent);
 }
 .option > header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.4rem;}
 .option > header h3{margin:0;font-size:1.1rem;font-weight:600;}
 .option .pick-badge{
   font-size:.7rem;font-weight:600;padding:.16rem .5rem;border-radius:999px;
-  background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;white-space:nowrap;
+  background:var(--bg-muted);color:var(--accent);border:1px solid var(--border);white-space:nowrap;
 }
 .option .summary{font-size:.95rem;color:var(--text);margin:.1rem 0 .7rem;}
 
@@ -128,7 +128,7 @@ header.page .sub{color:var(--text-muted);font-size:.9rem;margin:.3rem 0 0;}
 }
 .option ul{margin:0;padding-left:1.1rem;}
 .option li{margin-bottom:.25rem;font-size:.9rem;}
-.option li.pro::marker{color:#15803d;}
+.option li.pro::marker{color:var(--positive);}
 .option li.con::marker{color:var(--block);}
 .option li.consideration::marker{color:var(--warn);}
 .option .notes{font-size:.88rem;color:var(--text-muted);margin:.4rem 0 0;font-style:italic;}
