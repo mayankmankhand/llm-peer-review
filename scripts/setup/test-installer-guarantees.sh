@@ -33,14 +33,35 @@
 #      "[LOCALLY MODIFIED]", gates the run (exit 1 without --force), and is
 #      replaced only with --force
 #  11. A run that died after some copies but before the manifest write is
-#      recovered by the next run: every file restored, the manifest rebuilt
-#      whole, and no .toolkit-manifest.json.tmp left behind
+#      recovered by the next run. The manifest write is atomic, so what a
+#      crash actually leaves is the OLD manifest intact plus a partial
+#      .toolkit-manifest.json.tmp beside it: the next run must restore every
+#      file, rebuild the manifest whole, and leave no .tmp behind
 #  12. The line-merged files (.gitignore, .claude/settings.local.json) and
 #      the regenerated manifest each land in the backup dir as their
 #      pre-merge copies whenever a run rewrites them
 #  13. A settings.local.json node cannot parse produces a warning naming the
 #      error, leaves the file untouched, and never prints the error text as
 #      a "+" permission line
+#  14. (ps1 only) see test-installer-guarantees.ps1 - numbers are kept
+#      aligned so the same scenario carries the same number in both suites
+#  15. (ps1 only) see test-installer-guarantees.ps1
+#  16. With node absent from PATH the pre-flight says the permission merge
+#      will be skipped (one --dry-run, PATH untouched for the rest); a dry
+#      run with node present does not carry the note
+#  17. A symlinked .claude/settings.local.json (a dotfiles setup) survives
+#      the permission merge: it is still a symlink afterwards, the link
+#      target received the merged content, and its file mode is preserved
+#  18. Each installer manages only the browse.js path form it can vouch
+#      for: setup.sh leaves a UNC-form (//server/...) entry alone, which
+#      setup.ps1 owns, while still retiring a stale POSIX-form one
+#  19. The version-neutral "new this version" box fires only when the
+#      installed version actually changes: present when the target's
+#      VERSION differs from the toolkit's, absent on an identical re-run
+#      (the absent half is checked in 7)
+#  20. (sh only) An unusable TMPDIR does not abort the run: the settings
+#      merge keeps node's stderr beside its own .tmp in the target instead
+#      of in mktemp, so the run exits 0 and still writes the manifest
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -74,6 +95,20 @@ assert_grep() {
   else
     fail "$3 (not found in $(basename "$2"): $1)"
   fi
+}
+
+# remove_perm <settings-file> <entry>: drop one permissions.allow entry
+# through node, so the JSON stays valid wherever the entry sits. A
+# trailing-comma sed (scenario 12 uses one while the entry is still
+# mid-list) silently misses an entry that a previous merge appended last.
+remove_perm() {
+  PERM_TO_REMOVE="$2" node -e '
+    const fs = require("fs");
+    const file = process.argv[1];
+    const j = JSON.parse(fs.readFileSync(file, "utf-8"));
+    j.permissions.allow = j.permissions.allow.filter(p => p !== process.env.PERM_TO_REMOVE);
+    fs.writeFileSync(file, JSON.stringify(j, null, 2) + "\n");
+  ' "$1"
 }
 
 # list_backup_dirs: one absolute path per line, sorted, so a before/after
@@ -254,6 +289,16 @@ if grep -qE "\"\.claude/commands/$EDITED_CMD\": \"[0-9a-f]{64}\"" "$SCRATCH/.cla
 else
   fail "manifest entry for .claude/commands/$EDITED_CMD missing or malformed"
 fi
+# Keys in byte order (LC_ALL=C), the same order setup.ps1 writes: the two
+# installers used to write enumeration order (glob order here, Get-ChildItem
+# order there), so a target set up from both sides saw a different byte
+# order every time and backed the manifest up on every alternating run.
+MF_KEYS="$(sed -n 's/^    "\([^"]*\)": "[0-9a-f]\{64\}".*/\1/p' "$SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null)"
+if [ -n "$MF_KEYS" ] && [ "$MF_KEYS" = "$(printf '%s\n' "$MF_KEYS" | LC_ALL=C sort)" ]; then
+  ok "manifest keys are in sorted (byte) order"
+else
+  fail "manifest keys are not in sorted (byte) order"
+fi
 
 # ─── [7] identical re-run is clean ───────────────────────────
 echo "[7] identical re-run"
@@ -277,6 +322,14 @@ if grep -qi "locally modified" "$LOG/rerun.log"; then
   fail "clean re-run triggered the overwrite gate"
 else
   ok "clean re-run did not trigger the overwrite gate"
+fi
+# The "new this version" box is for upgrades. IS_UPGRADE is true whenever
+# toolkit.md exists, so without a version-changed guard the box fired on
+# every same-version re-run too. The positive half is scenario 19.
+if grep -qF "new this version:" "$LOG/rerun.log"; then
+  fail "identical re-run printed the \"new this version\" box"
+else
+  ok "identical re-run did not print the \"new this version\" box"
 fi
 for rel in "${CUSTOM_FILES[@]}"; do
   if cmp -s "$SCRATCH/$rel" "$SNAP/$rel"; then
@@ -437,11 +490,14 @@ fi
 
 # ─── [11] interrupted run recovery ───────────────────────────
 # Simulates a run that died after some copies but before the manifest
-# write: manifest gone, three managed files gone. The re-run must restore
-# every file, write a whole manifest (byte-identical to the one the last
-# clean run wrote, since nothing else changed), and leave no .tmp behind.
-# The manifest is built in a .tmp sibling and moved into place so it is
-# always whole or absent, never partial.
+# write. The manifest is built in a .tmp sibling and moved into place, so
+# a real crash never leaves a missing or truncated manifest: it leaves the
+# OLD manifest intact plus, at most, a partial .tmp beside it. The old
+# shape of this scenario (manifest deleted, three files deleted) could not
+# tell an atomic writer from a plain redirect - both rebuild a whole file
+# when nothing crashes. The stale .tmp is what separates them: an atomic
+# writer necessarily passes through that path and replaces it, a plain
+# redirect never touches it and leaves the fragment behind.
 echo "[11] interrupted run recovery"
 LOST_SHELL="$(basename "$(ls "$TOOLKIT_ROOT/.claude/skills/shared/shells/"* | head -1)")"
 LOST_FILES=(
@@ -450,8 +506,13 @@ LOST_FILES=(
   ".claude/skills/shared/shells/$LOST_SHELL"
 )
 cp "$MANIFEST" "$WORK/manifest-before-interrupt.json"
-rm -f "$MANIFEST"
+# A truncated JSON fragment, cut mid-key: exactly what a crash mid-write
+# leaves in the .tmp slot.
+printf '{\n  "toolkitVersion": "0.0.0-partial",\n  "files": {\n    ".claude/commands/' > "$MANIFEST.tmp"
 for rel in "${LOST_FILES[@]}"; do rm -f "$SCRATCH/$rel"; done
+if [ ! -f "$MANIFEST" ] || [ ! -s "$MANIFEST.tmp" ] || [ -f "$SCRATCH/.claude/scripts/render-html.js" ]; then
+  fail "test setup: expected the manifest in place, a partial .tmp beside it, and the three files gone"
+fi
 set +e
 bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/interrupted.log" 2>&1
 INT_RC=$?
@@ -468,14 +529,22 @@ for rel in "${LOST_FILES[@]}"; do
     fail "not restored: $rel"
   fi
 done
+if [ ! -e "$MANIFEST.tmp" ]; then
+  ok "partial .toolkit-manifest.json.tmp replaced, none left behind"
+else
+  fail ".toolkit-manifest.json.tmp left behind (writer did not go through the .tmp)"
+fi
 # Completeness is checked three ways, because the first alone cannot catch a
 # writer that truncates consistently (both manifests would then match): the
 # rebuilt file equals the last clean run's, every restored file has an entry
-# (two of the three sit far down the list), and the file is closed properly.
+# (the keys are sorted, so two of the three sit well past the commands
+# block), and the file is closed properly.
 if cmp -s "$MANIFEST" "$WORK/manifest-before-interrupt.json"; then
   ok "manifest rebuilt whole (identical to the last clean run's)"
 else
-  fail "rebuilt manifest differs from the last clean run's (partial or missing entries)"
+  # The differing lines are named so a changed hash (a toolkit source file
+  # edited between the two runs) is told apart from a missing entry.
+  fail "rebuilt manifest differs from the last clean run's (partial or missing entries): $(diff "$WORK/manifest-before-interrupt.json" "$MANIFEST" 2>&1 | grep -E '^[<>]' | head -4 | tr '\n' ' ')"
 fi
 for rel in "${LOST_FILES[@]}"; do
   if grep -qE "\"$rel\": \"[0-9a-f]{64}\"" "$MANIFEST" 2>/dev/null; then
@@ -489,11 +558,6 @@ if [ "$(tail -n 1 "$MANIFEST" 2>/dev/null)" = "}" ]; then
 else
   fail "manifest is not well-formed (no closing brace - partial write?)"
 fi
-if [ ! -e "$MANIFEST.tmp" ]; then
-  ok "no .toolkit-manifest.json.tmp left behind"
-else
-  fail ".toolkit-manifest.json.tmp left behind"
-fi
 
 # ─── [12] backup completeness for merged files ───────────────
 # .gitignore and settings.local.json are line-merged rather than copied,
@@ -506,6 +570,16 @@ echo "[12] backup completeness for merged files"
 GI_LINE="artifacts/html/"
 PERM_ENTRY="Bash(git worktree *)"
 sed -i.bak '\#^artifacts/html/$#d' "$SCRATCH/.gitignore"; rm -f "$SCRATCH/.gitignore.bak"
+# Strip the trailing newline too, so the merge's newline guard is actually
+# exercised: sed alone leaves the file newline-terminated and the guard has
+# nothing to do. Command substitution drops trailing newlines, which is the
+# portable way to do this (no GNU-only head -c -1 or truncate). Without the
+# guard the restored line is glued onto the last line and the exact-line
+# grep below fails.
+printf '%s' "$(cat "$SCRATCH/.gitignore")" > "$SCRATCH/.gitignore.tmp" && mv "$SCRATCH/.gitignore.tmp" "$SCRATCH/.gitignore"
+if [ -z "$(tail -c 1 "$SCRATCH/.gitignore")" ]; then
+  fail "test setup: .gitignore still ends in a newline, so the newline guard is not exercised"
+fi
 sed -i.bak '/"Bash(git worktree \*)",/d' "$SCRATCH/.claude/settings.local.json"; rm -f "$SCRATCH/.claude/settings.local.json.bak"
 sed -i.bak 's/"toolkitVersion": "[^"]*"/"toolkitVersion": "0.0.0-test"/' "$MANIFEST"; rm -f "$MANIFEST.bak"
 if grep -qxF "$GI_LINE" "$SCRATCH/.gitignore" || grep -qF "$PERM_ENTRY" "$SCRATCH/.claude/settings.local.json" || ! grep -qF '0.0.0-test' "$MANIFEST"; then
@@ -579,7 +653,10 @@ else
   fail "run with unparseable settings exited $BAD_RC"
 fi
 assert_grep "Warning: could not merge permissions into .claude/settings.local.json (" "$LOG/bad-settings.log" "warns that the merge was skipped"
-assert_grep "SyntaxError" "$LOG/bad-settings.log" "warning names the error"
+# The error name must sit inside the warning's parentheses. A bare
+# "SyntaxError" anywhere in the log was satisfied by the old bug's output
+# too (the stack trace printed as "+ SyntaxError ..." lines).
+assert_grep "could not merge permissions into .claude/settings.local.json (SyntaxError" "$LOG/bad-settings.log" "warning names the error"
 assert_grep "add new entries by hand from the permissions" "$LOG/bad-settings.log" "warning points at the permissions table"
 if grep -E '^[[:space:]]+\+ ' "$LOG/bad-settings.log" | grep -qE 'Error|^[[:space:]]+\+ +at '; then
   fail "error text printed as a + permission line"
@@ -597,6 +674,197 @@ else
   fail "settings.local.json.tmp left behind"
 fi
 cp "$WORK/settings-good.json" "$SCRATCH/.claude/settings.local.json"
+
+# Scenarios 14 and 15 are ps1-only (see test-installer-guarantees.ps1);
+# the numbers are kept aligned so the same scenario carries the same
+# number in both suites.
+
+# ─── [16] node-absent pre-flight note ────────────────────────
+# The permission merge needs node. When it is missing the pre-flight must
+# say so up front rather than letting the merge silently not happen. PATH
+# is rebuilt without every directory holding a node executable for one
+# --dry-run (nothing is written); the suite's own PATH is untouched. The
+# negative control reads the populated dry run from scenario 4, where node
+# was present, and expects no note there.
+echo "[16] node-absent pre-flight note"
+NO_NODE_PATH=""
+IFS=':' read -r -a PATH_DIRS <<< "$PATH"
+for d in "${PATH_DIRS[@]}"; do
+  [ -n "$d" ] || continue
+  [ -x "$d/node" ] && continue
+  NO_NODE_PATH="${NO_NODE_PATH:+$NO_NODE_PATH:}$d"
+done
+# The dry run still needs the coreutils setup.sh calls (sed, grep, find,
+# diff, ...). If node shares a directory with them (an apt install puts
+# node in /usr/bin), trimming that directory would break the run for the
+# wrong reason, so the scenario is skipped with a note rather than failing.
+if PATH="$NO_NODE_PATH" command -v node > /dev/null 2>&1; then
+  fail "test setup: node is still on the trimmed PATH"
+elif ! PATH="$NO_NODE_PATH" command -v sed > /dev/null 2>&1 || ! PATH="$NO_NODE_PATH" command -v grep > /dev/null 2>&1; then
+  echo "  skip: node shares a PATH directory with sed/grep here, so a node-free PATH cannot be built"
+else
+  # $BASH (this interpreter's absolute path) sidesteps a bash lookup on the
+  # trimmed PATH.
+  PATH="$NO_NODE_PATH" "$BASH" "$SCRIPT_DIR/setup.sh" "$SCRATCH" --dry-run < /dev/null > "$LOG/no-node.log" 2>&1
+  assert_grep "Note: node was not found, so the .claude/settings.local.json permission" "$LOG/no-node.log" "pre-flight notes that node is missing"
+  assert_grep "Dry run complete" "$LOG/no-node.log" "dry run without node still completes"
+fi
+if grep -qF "Note: node was not found" "$LOG/dryrun.log"; then
+  fail "dry run with node present carried the node-absent note"
+else
+  ok "dry run with node present does not carry the node-absent note"
+fi
+
+# ─── [17] symlinked settings.local.json survives the merge ───
+# A dotfiles setup keeps settings.local.json elsewhere and symlinks it into
+# .claude/. The merge used to mv a fresh .tmp over the path, which swaps
+# the inode: the link is severed (the dotfiles copy stops receiving
+# updates) and the file mode is reset to the .tmp's. It must write through
+# the link instead, so the link survives, the link target gets the merged
+# content, and a 600 mode stays 600. Reuses PERM_ENTRY from scenario 12 to
+# make the merge write.
+echo "[17] symlinked settings.local.json survives the merge"
+DOTFILES="$WORK/dotfiles"
+mkdir -p "$DOTFILES"
+cp "$SCRATCH/.claude/settings.local.json" "$DOTFILES/settings.local.json"
+remove_perm "$DOTFILES/settings.local.json" "$PERM_ENTRY"
+chmod 600 "$DOTFILES/settings.local.json"
+rm -f "$SCRATCH/.claude/settings.local.json"
+ln -s "$DOTFILES/settings.local.json" "$SCRATCH/.claude/settings.local.json"
+if grep -qF "$PERM_ENTRY" "$DOTFILES/settings.local.json" || [ ! -L "$SCRATCH/.claude/settings.local.json" ]; then
+  fail "test setup: could not stage the symlinked settings.local.json without $PERM_ENTRY"
+fi
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/symlink.log" 2>&1
+SYM_RC=$?
+set -e
+if [ "$SYM_RC" -eq 0 ]; then
+  ok "symlink run exited 0"
+else
+  fail "symlink run exited $SYM_RC"
+fi
+if [ -L "$SCRATCH/.claude/settings.local.json" ]; then
+  ok "settings.local.json is still a symlink after the merge"
+else
+  fail "settings.local.json is no longer a symlink (merge replaced the link)"
+fi
+if grep -qF "$PERM_ENTRY" "$DOTFILES/settings.local.json"; then
+  ok "symlink target received the merged content"
+else
+  fail "symlink target did not receive the restored entry: $PERM_ENTRY"
+fi
+# ls -l's mode column is the portable read (stat's flags differ between GNU
+# and BSD); the target is read directly so a severed link cannot mask a
+# reset mode.
+SYM_MODE="$(ls -l "$DOTFILES/settings.local.json" | cut -c1-10)"
+if [ "$SYM_MODE" = "-rw-------" ]; then
+  ok "file mode preserved (600)"
+else
+  fail "file mode changed: $SYM_MODE (expected -rw-------)"
+fi
+# Back to a regular file so the remaining scenarios see the usual layout.
+rm -f "$SCRATCH/.claude/settings.local.json"
+cp "$DOTFILES/settings.local.json" "$SCRATCH/.claude/settings.local.json"
+chmod 644 "$SCRATCH/.claude/settings.local.json"
+
+# ─── [18] foreign-form browse.js entries are left alone ──────
+# The absolute-path browse.js entries carry whichever path form wrote them:
+# setup.sh writes POSIX paths, setup.ps1 writes drive-letter paths, and a
+# target reached over UNC from PowerShell (\\wsl.localhost\...) would have
+# become a //wsl.localhost/... entry. Each installer now manages only the
+# form it can vouch for, so setup.sh must leave a UNC-form entry alone
+# (never delete it, never add one) while still retiring a stale POSIX-form
+# one - otherwise two installers took turns undoing each other and every
+# alternating run created a backup.
+echo "[18] UNC-form browse.js entry left alone, stale POSIX-form one retired"
+UNC_ENTRY="Bash(echo * | node //wsl.localhost/Ubuntu/home/someone/project/.claude/scripts/browse.js *)"
+STALE_POSIX_ENTRY="Bash(echo * | node /home/someone/old-project/.claude/scripts/browse.js *)"
+awk -v unc="$UNC_ENTRY" -v stale="$STALE_POSIX_ENTRY" '
+  { print }
+  /"allow": \[/ { printf "      \"%s\",\n      \"%s\",\n", unc, stale }
+' "$SCRATCH/.claude/settings.local.json" > "$SCRATCH/.claude/settings.local.json.seeded"
+mv "$SCRATCH/.claude/settings.local.json.seeded" "$SCRATCH/.claude/settings.local.json"
+if ! grep -qF "$UNC_ENTRY" "$SCRATCH/.claude/settings.local.json" || ! grep -qF "$STALE_POSIX_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
+  fail "test setup: could not seed the UNC-form and stale POSIX-form entries"
+fi
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/unc-entry.log" 2>&1
+UNC_RC=$?
+set -e
+if [ "$UNC_RC" -eq 0 ]; then
+  ok "path-form run exited 0"
+else
+  fail "path-form run exited $UNC_RC"
+fi
+if grep -qF "$UNC_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
+  ok "UNC-form browse.js entry left alone"
+else
+  fail "UNC-form browse.js entry was removed"
+fi
+if grep -qF "$STALE_POSIX_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
+  fail "stale POSIX-form browse.js entry was not retired"
+else
+  ok "stale POSIX-form browse.js entry retired"
+fi
+if grep -qF "Bash(echo * | node $SCRATCH/.claude/scripts/browse.js *)" "$SCRATCH/.claude/settings.local.json"; then
+  ok "this target's own POSIX-form entry is still present"
+else
+  fail "this target's own POSIX-form entry is missing"
+fi
+
+# ─── [19] "new this version" box fires on a version change ───
+# The positive half of the guard checked in scenario 7: with the target's
+# VERSION stamped to something else, the version-neutral box must print.
+# The stamp is a managed-file change (VERSION is refreshed and backed up),
+# so this run legitimately creates a backup dir.
+echo "[19] \"new this version\" box fires on a version change"
+printf '0.0.0-test\n' > "$SCRATCH/VERSION"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/version-box.log" 2>&1
+VB_RC=$?
+set -e
+if [ "$VB_RC" -eq 0 ]; then
+  ok "version-change run exited 0"
+else
+  fail "version-change run exited $VB_RC"
+fi
+assert_grep "upgrade (v0.0.0-test -> v" "$LOG/version-box.log" "pre-flight reports the version gap"
+assert_grep "new this version:" "$LOG/version-box.log" "version-change run printed the \"new this version\" box"
+if cmp -s "$SCRATCH/VERSION" "$TOOLKIT_ROOT/VERSION"; then
+  ok "VERSION refreshed to the toolkit's"
+else
+  fail "VERSION not refreshed"
+fi
+
+# ─── [20] unusable TMPDIR does not abort the run (sh only) ───
+# The settings merge captured node's stderr in a mktemp file under TMPDIR,
+# inside an assignment - fatal under set -e, so a bad TMPDIR aborted the
+# run after every copy and before the manifest write, leaving a half-done
+# upgrade with no manifest. The stderr file now sits beside the merge's
+# own .tmp in the target's .claude/, which is already known to be
+# writable. The manifest is removed first so "present afterwards" proves
+# this run wrote it. setup.ps1 has no TMPDIR dependency, hence sh only.
+echo "[20] unusable TMPDIR does not abort the run (sh only)"
+rm -f "$MANIFEST"
+set +e
+TMPDIR=/nonexistent-dir-xyz bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/bad-tmpdir.log" 2>&1
+TMPDIR_RC=$?
+set -e
+if [ "$TMPDIR_RC" -eq 0 ]; then
+  ok "run with an unusable TMPDIR exited 0"
+else
+  fail "run with an unusable TMPDIR exited $TMPDIR_RC"
+fi
+if [ -f "$MANIFEST" ]; then
+  ok "manifest written despite the unusable TMPDIR"
+else
+  fail "manifest missing after the run with an unusable TMPDIR"
+fi
+if [ ! -e "$SCRATCH/.claude/settings.local.json.tmp.err" ]; then
+  ok "no settings.local.json.tmp.err left behind"
+else
+  fail "settings.local.json.tmp.err left behind"
+fi
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

@@ -1328,9 +1328,9 @@ if ($LessonsPreexisted) {
 # The same node logic as setup.sh. node never touches the live file:
 # when the merge changes anything it writes the result to a .tmp sibling
 # and prints the change list; PowerShell then backs up the live file (a
-# pre-existing one - see $SettingsPreexisted) and moves the .tmp into
-# place. A no-op merge writes nothing, so an identical re-run makes no
-# backup. A non-zero exit leaves the file untouched and prints a warning
+# pre-existing one - see $SettingsPreexisted) and copies the .tmp onto it
+# (why a copy and not a move is explained at that step). A no-op merge
+# writes nothing, so an identical re-run makes no backup. A non-zero exit leaves the file untouched and prints a warning
 # naming the error - stderr is kept apart from the change list, so a
 # parse error can never print as a "+" permission line. Paths reach node
 # through environment variables, never by interpolating them into the
@@ -1338,8 +1338,12 @@ if ($LessonsPreexisted) {
 # The script uses single quotes only: Windows PowerShell 5.1 drops
 # embedded double quotes from arguments handed to native commands.
 # Windows targets are C:\... paths, so the browse.js entries use forward
-# slashes (the form a bash-style command line carries) and the stale-
-# entry pattern accepts a drive letter as well as a leading slash.
+# slashes (the form a bash-style command line carries). Each installer
+# manages only the path form it can vouch for (holistic-pass review): the
+# stale-entry pattern is drive-letter only, so the POSIX-form entries
+# setup.sh writes are left alone, and on a UNC target (\\wsl.localhost\...,
+# whose flipped form //wsl.localhost/... never matches a real command
+# line) no absolute entry is added or removed at all.
 $settingsDest = Join-Path $Target ".claude\settings.local.json"
 if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
   $settingsTmp = $settingsDest + ".tmp"
@@ -1380,15 +1384,21 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
     // then drops anything that doesn't equal one of the two correct entries
     // for the current target. Using exact equality (not substring .includes())
     // avoids accidentally over-keeping unusual hand-edited entries that happen
-    // to contain the target prefix. A Windows target is C:\... - forward
-    // slashes for the entries, and a drive-letter alternative in the pattern.
+    // to contain the target prefix. Drive-letter roots only: each installer
+    // manages the path form it can vouch for, so the POSIX-form entries
+    // setup.sh writes are left alone here, as setup.sh leaves the drive-letter
+    // and UNC forms alone. A UNC target (\\server\share\...) is skipped
+    // entirely - its flipped //server/share/... form never matches a real
+    // command line, and removing the POSIX entries there was what set the two
+    // installers undoing each other on alternating runs (holistic-pass review).
     const targetFwd = targetDir.replace(/\\/g, '/');
-    const browsePattern = /^Bash\((echo|cat) \* \| node (\/|[A-Za-z]:\/).*\/(\.claude\/)?scripts\/browse\.js \*\)$/;
+    const targetIsUnc = targetDir.startsWith('\\\\');
+    const browsePattern = /^Bash\((echo|cat) \* \| node [A-Za-z]:\/.*\/(\.claude\/)?scripts\/browse\.js \*\)$/;
     const correctAbsEntries = new Set([
       'Bash(echo * | node ' + targetFwd + '/.claude/scripts/browse.js *)',
       'Bash(cat * | node ' + targetFwd + '/.claude/scripts/browse.js *)'
     ]);
-    const staleAbs = tgtPerms.filter(p => browsePattern.test(p) && !correctAbsEntries.has(p));
+    const staleAbs = targetIsUnc ? [] : tgtPerms.filter(p => browsePattern.test(p) && !correctAbsEntries.has(p));
 
     const stale = [...staleRel, ...staleAbs];
     tgtPerms = tgtPerms.filter(p => !stale.includes(p));
@@ -1399,7 +1409,7 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
       'Bash(echo * | node ' + targetFwd + '/.claude/scripts/browse.js *)',
       'Bash(cat * | node ' + targetFwd + '/.claude/scripts/browse.js *)'
     ];
-    const absNew = absPerms.filter(p => !tgtPerms.includes(p));
+    const absNew = targetIsUnc ? [] : absPerms.filter(p => !tgtPerms.includes(p));
 
     const allNew = [...missing, ...absNew];
     if (allNew.length > 0 || stale.length > 0) {
@@ -1429,7 +1439,15 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
     if ($SettingsPreexisted) {
       Backup-File -Original $settingsDest
     }
-    Move-Item -LiteralPath $settingsTmp -Destination $settingsDest -Force
+    # Copy-Item onto the live file, then drop the .tmp - not Move-Item over
+    # it. A move replaces the directory entry, which severs a symlinked (or
+    # hard-linked) settings.local.json - a dotfiles setup - so the link
+    # target stopped receiving the merge. Copy-Item writes into the existing
+    # file, so a link is written through. The manifest keeps its atomic
+    # move: it is setup's own file, and atomicity matters more there
+    # (holistic-pass review).
+    Copy-Item -LiteralPath $settingsTmp -Destination $settingsDest -Force
+    Remove-Item -LiteralPath $settingsTmp -Force
     Write-Host "  Updating permissions in .claude\settings.local.json ..."
     foreach ($perm in $permsRun.Lines) {
       if ($perm.StartsWith("removed: ")) {
@@ -1487,14 +1505,22 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
 # no gate. ManagedRels is accumulated by the pre-flight enumeration,
 # which mirrors the copy blocks exactly. Forward-slash keys and BOM-less
 # UTF-8 with LF newlines keep it portable with setup.sh.
+# Keys are written in ordinal order, which setup.sh matches with LC_ALL=C
+# sort. Enumeration order differed between the two installers
+# (Get-ChildItem order here - unsorted over UNC - and glob order there), so
+# a target set up from both sides saw a different byte order every run and
+# backed the manifest up each time (holistic-pass review). Sorted on the
+# forward-slash key, the form both installers write.
+$manifestKeys = [string[]]@($script:ManagedRels | ForEach-Object { $_.Replace('\', '/') })
+[System.Array]::Sort($manifestKeys, [System.StringComparer]::Ordinal)
 $manifestEntries = @()
-foreach ($rel in $script:ManagedRels) {
-  $p = Join-Path $Target $rel
+foreach ($key in $manifestKeys) {
+  $p = Join-Path $Target $key.Replace('/', '\')
   # Tolerate conditionally-shipped files (e.g. package-lock.json) that
   # were enumerated but not written this run.
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
   $h = Get-ToolkitFileHash -Path $p
-  $manifestEntries += "    `"$($rel.Replace('\', '/'))`": `"$h`""
+  $manifestEntries += "    `"$key`": `"$h`""
 }
 $manifestBody = "{`n"
 $manifestBody += "  `"toolkitVersion`": `"$Version`",`n"
@@ -1606,16 +1632,20 @@ if ($LegacyCleaned -gt 0 -or $PlansMigrated -gt 0) {
 }
 
 # --- New-this-version announcement (upgrades only) -----------
-# Fires on any upgrade the upgrade notes box above did not cover, so a
-# plain version bump never lands silently. Version-neutral on purpose:
-# the old text described one release (the v5.0 HTML viewing feature)
+# Fires on any upgrade that actually changed the version and that the
+# upgrade notes box above did not cover, so a plain version bump never
+# lands silently. $IsUpgrade alone is not enough: it is true whenever
+# toolkit.md exists, so the box fired on every same-version re-run too.
+# An empty $OldVersion (a pre-VERSION install) still differs, so that
+# upgrade still gets the box (holistic-pass review). Version-neutral on
+# purpose: the old text described one release (the v5.0 HTML viewing feature)
 # and went stale on the next bump, so a v5.5 -> v6.0 upgrade read about
 # HTML instead of auto-by-default. CHANGELOG.md and AGENT-SETUP.md are
 # kept current by bump-version.sh, so this box only points at them;
 # neither file is copied into the target, hence "in the toolkit repo".
 # Mirrors the Bash block in setup.sh, gate included, now that the
 # $LegacyCleaned and $PlansMigrated counters exist on this side too.
-if ($IsUpgrade -and $LegacyCleaned -eq 0 -and $PlansMigrated -eq 0) {
+if ($IsUpgrade -and $OldVersion -ne $Version -and $LegacyCleaned -eq 0 -and $PlansMigrated -eq 0) {
   Write-Host "    +------------------------------------------------+"
   Write-Host "    |  Upgraded to v$Version - new this version:        |"
   Write-Host "    +------------------------------------------------+"

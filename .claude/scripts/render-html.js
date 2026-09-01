@@ -50,15 +50,22 @@
 //                 exists, it also stamps that file (see "The hosted stamp"
 //                 below); a missing file is a one-line stderr warning and the
 //                 row is still appended. --local is optional, but when given it
-//                 must resolve under the repo root or the command fails before
-//                 anything is written.
+//                 must name an .html (or .htm) mirror and resolve under the
+//                 repo root, through any symlink, or the command fails before
+//                 anything is written. --url must be an https:// URL with no
+//                 whitespace, quotes, backslash, or angle brackets: it is
+//                 written into an HTML comment, so nothing that could close
+//                 the comment is admitted.
 //   --index-url   print the most recently recorded URL for --name, or nothing at
 //                 all when there is no record. Exit 0 either way, so an absent
 //                 index reads as "no record" rather than an error.
 //   --index-sync  regenerate every stamp from the index: newest row per local
 //                 file wins, one stamp per file that still exists. Prints
-//                 "index-sync: <n> stamped, <m> missing" on stdout, lists the
-//                 missing paths on stderr, and exits 0 either way.
+//                 "index-sync: <n> stamped, <m> missing" on stdout, with
+//                 ", <k> skipped" appended only when a row was refused (not an
+//                 .html mirror, or resolving outside the repository), lists
+//                 the missing and skipped paths on stderr, and exits 0 either
+//                 way.
 //
 //   The hosted stamp. After a publish, line 1 of the local mirror is
 //     <!-- hosted: <url> -->
@@ -230,15 +237,34 @@ const WORK_ROOT = workRoot();
 // first 8KB of a file for its <title>, so a stamp anywhere else, or a long
 // one, could push the title out of that window and rename the page.
 // ==========================================================================
-const STAMP_RE = /^<!-- hosted: .* -->$/;
+// Admits a trailing CR: a mirror re-saved with CRLF line endings keeps its
+// stamp, and without this the next publish saw no stamp and added a second one
+// (holistic-pass review, R15).
+const STAMP_RE = /^<!-- hosted: \S+ -->\r?$/;
 
 function hostedStamp(url) { return '<!-- hosted: ' + url + ' -->'; }
 
 // The stamp is one line inside an HTML comment, so a URL carrying whitespace
-// or "-->" could split the line or close the comment early and inject markup
-// into every mirror. A real hosted URL has neither.
+// or a comment-closing sequence could split the line or close the comment
+// early and inject markup into every mirror. The old denylist named "-->" and
+// missed "--!>", which browsers also treat as closing a comment (holistic-pass
+// review, R12), so this is an allowlist instead: https, then no whitespace, no
+// angle brackets, no quotes, no backslash. No caller in this repo publishes
+// over plain http, and the hosted pages the stamp exists for are https only,
+// so http is not admitted.
+const STAMPABLE_URL_RE = /^https:\/\/[^\s<>"'`\\]+$/;
 function stampableUrl(url) {
-  return typeof url === 'string' && url !== '' && !/\s|-->/.test(url);
+  return typeof url === 'string' && STAMPABLE_URL_RE.test(url);
+}
+
+// A stamp is an HTML comment on line 1, so it only belongs in an HTML file: a
+// markdown twin, a JSON payload, or a script with a shebang would be corrupted
+// by it, and nothing stopped a --local or a hand-written row from naming one
+// (holistic-pass review, R14, R18). --index-add refuses anything else before
+// the row is written; --index-sync skips such a row with a note.
+function htmlMirror(p) {
+  const ext = path.extname(p).toLowerCase();
+  return ext === '.html' || ext === '.htm';
 }
 
 // --index-sync rewrites whichever files the index names, so a --local must
@@ -247,21 +273,50 @@ function stampableUrl(url) {
 // before the row is written) and at sync time (skipped with a note). "The
 // repository" means the main copy OR the working copy this command runs in.
 //
-// An absolute --local stands as-is: it is the path the render printed. A
-// relative one is resolved against the working copy that rendered it. At sync
-// time a relative row is tried against the main root first and then this
-// working copy, so a row written from a worktree still finds its file when
-// synced from that worktree.
+// An absolute --local is the path the render printed, but it is normalized
+// rather than trusted as-is: an absolute row carrying ".." after the root
+// prefix passed the old string-prefix test and stamped a file outside the
+// repository (holistic-pass review, R11). Normalizing also makes two spellings
+// of one file ("/a/./b.html" and "/a/b.html") one sync key. A relative path is
+// resolved against the working copy that rendered it. At sync time a relative
+// row is tried against the main root first and then this working copy, so a
+// row written from a worktree still finds its file when synced from that
+// worktree.
 function resolveLocal(local) { return path.resolve(WORK_ROOT, local); }
 function resolveForSync(local) {
-  if (path.isAbsolute(local)) return local;
+  if (path.isAbsolute(local)) return path.resolve(local);
   const inMain = path.resolve(REPO_ROOT, local);
   if (REPO_ROOT === WORK_ROOT || fs.existsSync(inMain)) return inMain;
   return path.resolve(WORK_ROOT, local);
 }
-function underRoot(abs, root) {
-  const prefix = root.endsWith(path.sep) ? root : root + path.sep;
-  return abs.startsWith(prefix);
+
+// Windows compares paths case-insensitively, and the cwd and git's canonical
+// spelling of one directory can differ in case there, so a worktree publish
+// died before the append (holistic-pass review, R16). The comparison folds
+// case on win32 only; posix behavior is unchanged. The platform is a parameter
+// so the suite can exercise the win32 branch from Linux, and
+// RENDER_HTML_PLATFORM is the hook that feeds it; nothing else reads it.
+const PLATFORM = process.env.RENDER_HTML_PLATFORM || process.platform;
+function pathKey(p, platform) {
+  return (platform || PLATFORM) === 'win32' ? p.toLowerCase() : p;
+}
+
+// A candidate that exists is resolved through the filesystem, and so is the
+// root, before the prefix test: a symlink inside the repository pointing at a
+// file outside it is judged by where it lands (holistic-pass review, R17),
+// and realpath on BOTH sides keeps a root reached through a symlink (/tmp
+// against /private/tmp on macOS) from false-negating. A candidate that does
+// not exist has nothing to resolve and is checked on its normalized string
+// form alone; stampFile cannot write a file that is not there anyway.
+function realOrSelf(p) { try { return fs.realpathSync(p); } catch (e) { return p; } }
+function underRoot(abs, root, platform) {
+  let candidate = path.resolve(abs);
+  let base = path.resolve(root);
+  if (fs.existsSync(candidate)) { candidate = realOrSelf(candidate); base = realOrSelf(base); }
+  candidate = pathKey(candidate, platform);
+  base = pathKey(base, platform);
+  const prefix = base.endsWith(path.sep) ? base : base + path.sep;
+  return candidate.startsWith(prefix);
 }
 function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs, WORK_ROOT); }
 
@@ -272,14 +327,23 @@ function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs,
 // (--index-add) or a count (--index-sync). A write failure is fatal: the file
 // was there and readable a moment ago, so something is genuinely wrong.
 function stampFile(abs, url) {
-  let content;
-  try { content = fs.readFileSync(abs, 'utf-8'); } catch (e) { return false; }
+  let raw;
+  try { raw = fs.readFileSync(abs, 'utf-8'); } catch (e) { return false; }
+  // A UTF-8 BOM is dropped rather than carried along. Kept, it landed on line
+  // 2 in front of the doctype, where a browser sees it as text before the
+  // doctype (holistic-pass review, R19). Every shell declares its charset in
+  // a <meta>, so the BOM was never doing anything. `raw` stays as read so the
+  // no-change test below still writes when only the BOM went.
+  const content = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
   const nl = content.indexOf('\n');
   const first = nl === -1 ? content : content.slice(0, nl);
+  // When line 1 is a stamp, the WHOLE line is replaced, a trailing CR from a
+  // CRLF re-save included: the stamp is always written in its own LF form,
+  // and everything from the first "\n" on is left byte-identical.
   const stamped = STAMP_RE.test(first)
     ? hostedStamp(url) + (nl === -1 ? '\n' : content.slice(nl))
     : hostedStamp(url) + '\n' + content;
-  if (stamped === content) return true; // already current: no write, no mtime churn
+  if (stamped === raw) return true; // already current: no write, no mtime churn
   try { fs.writeFileSync(abs, stamped, 'utf-8'); }
   catch (e) { die('could not write the hosted stamp to ' + abs + ': ' + e.message); }
   return true;
@@ -326,11 +390,14 @@ if (indexModes) {
 if (opts.indexAdd) {
   if (!opts.name) die('--index-add requires --name');
   if (!opts.url) die('--index-add requires --url');
-  if (!stampableUrl(opts.url)) die('--url must be one token with no whitespace and no "-->": ' + opts.url);
+  if (!stampableUrl(opts.url)) {
+    die('--url must be an https:// URL with no whitespace, quotes, backslash, or angle brackets: ' + opts.url);
+  }
   // --local stays optional (older callers omit it). When given, it is checked
   // BEFORE the row is written, so a bad path leaves the index untouched.
   let localAbs = '';
   if (opts.local) {
+    if (!htmlMirror(opts.local)) die('--local must name an .html mirror, not ' + opts.local);
     localAbs = resolveLocal(opts.local);
     if (!underRepoRoot(localAbs)) {
       die('--local must resolve inside the repository (main copy ' + REPO_ROOT +
@@ -385,25 +452,37 @@ if (opts.indexSync) {
   // "review-orchestrator"), so keying by name would stamp each older mirror
   // with the newest run's URL. Keying by file is right for both, and it is
   // what --index-add already does one row at a time. Null-prototype map, so a
-  // path can never read a value off Object.prototype.
+  // path can never read a value off Object.prototype. The key is the
+  // normalized path, case-folded on win32 (holistic-pass review, R16); the
+  // value keeps the row's own spelling for the stamp and the messages.
   const byFile = Object.create(null);
   for (const rec of readIndexRows()) {
     if (typeof rec.local === 'string' && rec.local && stampableUrl(rec.url)) {
-      byFile[resolveForSync(rec.local)] = rec.url;
+      const abs = resolveForSync(rec.local);
+      byFile[pathKey(abs)] = { abs: abs, url: rec.url };
     }
   }
-  let stamped = 0, missing = 0;
-  for (const abs of Object.keys(byFile)) {
-    if (!underRepoRoot(abs)) {
+  let stamped = 0, missing = 0, skipped = 0;
+  for (const key of Object.keys(byFile)) {
+    const abs = byFile[key].abs;
+    if (!htmlMirror(abs)) {
+      skipped++;
+      process.stderr.write('index-sync: skipped, not an .html mirror: ' + abs + '\n');
+    } else if (!underRepoRoot(abs)) {
+      skipped++;
       process.stderr.write('index-sync: skipped, resolves outside the repository: ' + abs + '\n');
-    } else if (stampFile(abs, byFile[abs])) {
+    } else if (stampFile(abs, byFile[key].url)) {
       stamped++;
     } else {
       missing++;
       process.stderr.write('index-sync: local file not found: ' + abs + '\n');
     }
   }
-  process.stdout.write('index-sync: ' + stamped + ' stamped, ' + missing + ' missing\n');
+  // "<n> stamped, <m> missing" is the line the docs quote; the skip count is
+  // appended only when there is one, so that line stays exact whenever
+  // nothing was refused.
+  process.stdout.write('index-sync: ' + stamped + ' stamped, ' + missing + ' missing' +
+                       (skipped ? ', ' + skipped + ' skipped' : '') + '\n');
   process.exit(0);
 }
 

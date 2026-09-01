@@ -666,6 +666,7 @@ if [ "$PF_STALE_BACKUPS" -gt 0 ]; then
   echo "    Note: $PF_STALE_BACKUPS older .toolkit-backup-* folder(s) from previous runs are"
   echo "    still in the project root. Delete them when no longer needed."
 fi
+# PARITY: mirrored in setup.ps1 (node-absent pre-flight note) - change both together
 # The two node-dependent steps (the settings.local.json permission merge
 # and the issue #91 package.json cleanup) skip silently inside their own
 # blocks when node is absent. Say so here, once, so a permission that never
@@ -1033,6 +1034,7 @@ if [ -f "$TARGET/.gitignore" ]; then
     # Skip blank lines and comments to avoid accumulating duplicates on repeated runs
     [ -z "$line" ] || [[ "$line" == \#* ]] && continue
     if ! grep -qxF "$line" "$TARGET/.gitignore"; then
+      # PARITY: mirrored in setup.ps1 (lazy .gitignore backup) - change both together
       # Back up right before the FIRST append, not before the loop: the
       # merge was the one write path with no backup, and doing it lazily
       # keeps an identical re-run from creating a backup dir for a no-op.
@@ -1124,6 +1126,7 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/
 # Written as an if-statement (not `&&`) so it is safe under `set -e`.
 LESSONS_PREEXISTED=false
 if [ -f "$TARGET/LESSONS.md" ]; then LESSONS_PREEXISTED=true; fi
+# PARITY: mirrored in setup.ps1 (SETTINGS_PREEXISTED capture) - change both together
 # Same capture for settings.local.json: the permission merge below backs the
 # file up before rewriting it, but only when it is the user's own copy. A
 # template this run just copied carries nothing of theirs, and backing it up
@@ -1173,15 +1176,21 @@ fi
 #
 # node never touches the live file. When the merge changes anything it writes
 # the result to a .tmp sibling and prints the change list; bash then backs up
-# the live file (a pre-existing one - see SETTINGS_PREEXISTED) and moves the
-# .tmp into place. A no-op merge writes nothing, so an identical re-run makes
-# no backup. node's stderr goes to its own file, never into the change list -
+# the live file (a pre-existing one - see SETTINGS_PREEXISTED) and copies the
+# .tmp onto it (why a copy and not a move is explained at that step). A no-op
+# merge writes nothing, so an identical re-run makes no backup. node's stderr goes to its own file, never into the change list -
 # with 2>&1 a parse error used to print as a "+ SyntaxError" permission line.
 # A non-zero exit leaves the file untouched and prints a warning instead.
 if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2>&1; then
   SETTINGS_TMP="$TARGET/.claude/settings.local.json.tmp"
   rm -f "$SETTINGS_TMP"
-  PERMS_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/toolkit-settings-merge-XXXXXX")"
+  # node's stderr is captured beside the .tmp, inside the target's .claude/
+  # (already written to by this point), not in a mktemp file under TMPDIR:
+  # that mktemp sat inside an assignment, so an unusable TMPDIR was fatal
+  # under set -e and aborted the run after every copy and before the
+  # manifest write (holistic-pass review).
+  PERMS_ERR_FILE="$SETTINGS_TMP.err"
+  rm -f "$PERMS_ERR_FILE"
   PERMS_RC=0
   PERMS_ADDED=$(TOOLKIT_SRC="$TOOLKIT_ROOT" TARGET_DIR="$TARGET" node -e "
     const fs = require('fs');
@@ -1217,8 +1226,14 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     // then drops anything that doesn't equal one of the two correct entries
     // for the current target. Using exact equality (not substring .includes())
     // avoids accidentally over-keeping unusual hand-edited entries that happen
-    // to contain the target prefix.
-    const browsePattern = /^Bash\\((echo|cat) \\* \\| node \\/.*\\/(\\.claude\\/)?scripts\\/browse\\.js \\*\\)$/;
+    // to contain the target prefix. Only the POSIX form (a single leading
+    // slash) is matched: each installer manages the path form it can vouch
+    // for. A UNC-form entry (//server/share/..., a target reached from
+    // PowerShell over wsl.localhost) is left alone here, just as setup.ps1
+    // leaves the POSIX form alone - otherwise the two installers took turns
+    // undoing each other, with a backup on every alternating run
+    // (holistic-pass review).
+    const browsePattern = /^Bash\\((echo|cat) \\* \\| node \\/[^/].*\\/(\\.claude\\/)?scripts\\/browse\\.js \\*\\)$/;
     const correctAbsEntries = new Set([
       'Bash(echo * | node ' + targetDir + '/.claude/scripts/browse.js *)',
       'Bash(cat * | node ' + targetDir + '/.claude/scripts/browse.js *)'
@@ -1246,7 +1261,7 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     }
   " 2> "$PERMS_ERR_FILE") || PERMS_RC=$?
   # Read and delete the stderr file straight away, so it lives only for the
-  # node call and nothing that fails below can leave it behind in the temp dir.
+  # node call and nothing that fails below can leave it behind in .claude/.
   PERMS_ERR="$(cat "$PERMS_ERR_FILE" 2>/dev/null)"
   rm -f "$PERMS_ERR_FILE"
   if [ "$PERMS_RC" -ne 0 ]; then
@@ -1264,7 +1279,15 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     if [ "$SETTINGS_PREEXISTED" = true ]; then
       backup_file "$TARGET/.claude/settings.local.json"
     fi
-    mv -f "$SETTINGS_TMP" "$TARGET/.claude/settings.local.json"
+    # cp onto the live file, then drop the .tmp - not mv over it. A rename
+    # swaps the inode, which resets the file mode and severs a symlinked
+    # settings.local.json (a dotfiles setup): the link target stopped
+    # receiving the merge. cp truncates the existing file in place, so the
+    # mode survives and a symlink is written through. The manifest keeps its
+    # atomic rename: it is setup's own file, and atomicity matters more
+    # there (holistic-pass review).
+    cp "$SETTINGS_TMP" "$TARGET/.claude/settings.local.json"
+    rm -f "$SETTINGS_TMP"
     echo "  Updating permissions in .claude/settings.local.json ..."
     echo "$PERMS_ADDED" | while IFS= read -r perm; do
       case "$perm" in
@@ -1323,21 +1346,28 @@ fi
 # which mirrors the copy blocks exactly. Written with printf (no node
 # dependency); forward-slash keys keep it portable with setup.ps1.
 #
+# PARITY: mirrored in setup.ps1 (atomic manifest write) - change both together
 # Built in a .tmp sibling and moved into place, so the manifest on disk is
 # always whole or absent. A plain redirect truncates first, and a crash
 # mid-write would leave a partial file that the next run reads as "no
 # entry" for every path past the cut - misclassifying files setup itself
 # wrote. The previous manifest is backed up first when the new one differs,
 # so a rollback has the old hashes; an identical re-run makes no backup.
+#
+# Keys are written in byte order (LC_ALL=C), which setup.ps1 matches with
+# an ordinal sort. Enumeration order differed between the two installers
+# (glob order here, Get-ChildItem order there - unsorted over UNC), so a
+# target set up from both sides saw a different byte order every run and
+# backed the manifest up each time (holistic-pass review).
 MANIFEST_TMP="$MANIFEST_FILE.tmp"
 MANIFEST_ENTRIES=()
-for i in "${!MANAGED_RELS[@]}"; do
-  rel="${MANAGED_RELS[$i]}"
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
   # Tolerate conditionally-shipped files (e.g. package-lock.json) that
   # were enumerated but not written this run.
   [ -f "$TARGET/$rel" ] || continue
   MANIFEST_ENTRIES+=("    \"$rel\": \"$(toolkit_hash "$TARGET/$rel")\"")
-done
+done < <(printf '%s\n' "${MANAGED_RELS[@]}" | LC_ALL=C sort)
 MANIFEST_LAST=$(( ${#MANIFEST_ENTRIES[@]} - 1 ))
 {
   printf '{\n'
@@ -1445,14 +1475,18 @@ if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
 fi
 
 # ─── New-this-version announcement (upgrades only) ───────────
-# Fires on any upgrade, independent of the LEGACY_CLEANED/PLANS_MIGRATED
-# gate above, so a plain version bump (e.g. 4.6 -> 4.7) never lands
-# silently. The text is deliberately version-neutral: a hardcoded feature
+# Fires on any upgrade that actually changed the version, independent of
+# the LEGACY_CLEANED/PLANS_MIGRATED gate above, so a plain version bump
+# (e.g. 4.6 -> 4.7) never lands silently. IS_UPGRADE alone is not enough:
+# it is true whenever toolkit.md exists, so the box fired on every
+# same-version re-run too. An empty OLD_VERSION (a pre-VERSION install)
+# still differs, so that upgrade still gets the box (holistic-pass
+# review). The text is deliberately version-neutral: a hardcoded feature
 # list goes stale the release after it is written (the v5.0 HTML-viewing
 # blurb was still printing on 5.5 -> 6.0 upgrades), so this points at the
 # two places bump-version.sh keeps current instead. Neither file is copied
 # into the target, hence "in the toolkit repo".
-if [ "$IS_UPGRADE" -eq 1 ] && [ "$LEGACY_CLEANED" -eq 0 ] && [ "$PLANS_MIGRATED" -eq 0 ]; then
+if [ "$IS_UPGRADE" -eq 1 ] && [ "$OLD_VERSION" != "$VERSION" ] && [ "$LEGACY_CLEANED" -eq 0 ] && [ "$PLANS_MIGRATED" -eq 0 ]; then
   echo "    ┌────────────────────────────────────────────────┐"
   echo "    │  Upgraded to v$VERSION - new this version:        │"
   echo "    └────────────────────────────────────────────────┘"

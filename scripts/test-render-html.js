@@ -314,8 +314,15 @@ function indexTests() {
     check('a relative --local from a worktree resolves to the worktree file',
           wtRel.status === 0 && fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!-- hosted: https://example.com/wt2 -->',
           (wtRel.stderr || '').trim());
+    // Strip the stamp before syncing. The previous form of this check asserted
+    // a stamp the --index-add just above had already written, so a sync that
+    // did nothing at all still passed it (holistic-pass review, R7). The
+    // control proves the stamp is really gone; the sync must bring it back.
+    fs.writeFileSync(wtFile, '<!doctype html>\n<title>wt</title>\n', 'utf-8');
+    check('control: the worktree stamp was stripped before sync',
+          fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!doctype html>');
     const wtSync = spawnSync('node', [SCRIPT, '--index-sync'], { cwd: wt, encoding: 'utf-8' });
-    check('--index-sync from a worktree keeps the worktree stamp',
+    check('--index-sync from a worktree re-stamps the worktree file with the newest url',
           wtSync.status === 0 && fs.readFileSync(wtFile, 'utf-8').split('\n')[0] === '<!-- hosted: https://example.com/wt2 -->',
           (wtSync.stdout || '').trim() + ' ' + (wtSync.stderr || '').trim());
     const outside = spawnSync('node',
@@ -358,7 +365,9 @@ function indexTests() {
 // the repo root the index is keyed to, and the stamp is WRITTEN to that file,
 // so a case that ran from this repo would rewrite a real mirror.
 // ---------------------------------------------------------------------------
-const STAMP_LINE = /^<!-- hosted: .* -->$/;
+// Tolerates a trailing CR so a count over a CRLF-saved mirror sees its stamp,
+// which is what the duplicate-stamp check below needs to measure (R15).
+const STAMP_LINE = /^<!-- hosted: \S+ -->\r?$/;
 
 function stampTests() {
   console.log('\nhosted stamp and --index-sync (holistic pass, Step 3)');
@@ -520,10 +529,212 @@ function stampTests() {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Containment, stamp targets, and stamp parsing (holistic-pass review:
+// R11, R12, R14, R15, R16, R17, R18, R19)
+//
+// Own temp repo once more: every case here either tries to make a stamp land
+// OUTSIDE the repo or hands the stamper a file it must refuse, so a case that
+// escaped from this repo would rewrite something real.
+// ---------------------------------------------------------------------------
+function hardeningTests() {
+  console.log('\ncontainment and stamp hardening (holistic-pass review)');
+  const root = tmpdir('harden');
+  const main = path.join(root, 'main');
+  fs.mkdirSync(path.join(main, 'plans'), { recursive: true });
+  const INDEX = path.join(main, 'artifacts/html/index.jsonl');
+  const DOC = '<!doctype html>\n<title>h</title>\n';
+
+  function git(args) {
+    return execFileSync('git', args, { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+  // `env` is merged over the real environment: the win32 cases below set the
+  // platform hook, and every other case must see it unset.
+  function run(args, env) {
+    const r = spawnSync('node', [SCRIPT].concat(args),
+      { cwd: main, encoding: 'utf-8', env: Object.assign({}, process.env, env || {}) });
+    return { status: r.status, out: r.stdout || '', err: r.stderr || '' };
+  }
+  function add(name, local, url, env) {
+    return run(['--index-add', '--type', 'plan', '--name', name, '--local', local, '--url', url], env);
+  }
+  function lines(file) { return fs.readFileSync(file, 'utf-8').split('\n'); }
+  function stampCount(file) { return lines(file).filter(function (l) { return STAMP_LINE.test(l); }).length; }
+  function rowCount() {
+    return fs.existsSync(INDEX) ? fs.readFileSync(INDEX, 'utf-8').split('\n').filter(Boolean).length : 0;
+  }
+  // A row written by hand, the way --index-sync's header says the index can
+  // be appended to. Bypasses every --index-add check on purpose: sync has to
+  // hold its own line against whatever the index contains.
+  function appendRow(local, url) {
+    fs.mkdirSync(path.dirname(INDEX), { recursive: true });
+    fs.appendFileSync(INDEX, JSON.stringify({
+      at: new Date().toISOString(), type: 'plan', name: 'hand', local: local, url: url
+    }) + '\n', 'utf-8');
+  }
+  // path.join would collapse the "." and ".." segments these cases depend on,
+  // so the spellings are built by plain concatenation.
+  const plansDir = path.join(main, 'plans');
+  const dotted = function (file) { return plansDir + path.sep + '.' + path.sep + file; };
+
+  try {
+    git(['init', '-q']);
+    git(['config', 'user.email', 't@example.com']);
+    git(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n');
+    git(['add', '.']);
+    git(['commit', '-qm', 'init']);
+
+    // (a) R11: an absolute row whose path carries ".." after the repo-root
+    // prefix passed the old string-prefix test and stamped a file outside
+    // the repository.
+    const outside = path.join(root, 'outside.html');
+    fs.writeFileSync(outside, DOC, 'utf-8');
+    appendRow(plansDir + path.sep + '..' + path.sep + '..' + path.sep + 'outside.html', 'https://example.com/dotdot');
+    const s1 = run(['--index-sync']);
+    check('--index-sync skips an absolute row with ".." after the repo root',
+          s1.status === 0 && s1.err.indexOf('resolves outside the repository') !== -1, s1.err.trim() || s1.out.trim());
+    check('the file that ".." pointed at outside the repo is untouched',
+          fs.readFileSync(outside, 'utf-8') === DOC, lines(outside)[0]);
+
+    // (b) R17: a symlink inside plans/ that resolves to a file outside.
+    const target = path.join(root, 'target.html');
+    fs.writeFileSync(target, DOC, 'utf-8');
+    const link = path.join(plansDir, 'link.html');
+    let linked = false;
+    try { fs.symlinkSync(target, link); linked = true; }
+    catch (err) { check('symlink fixture could be created', false, err.message); }
+    if (linked) {
+      const beforeLink = rowCount();
+      const l = add('link', 'plans/link.html', 'https://example.com/link');
+      check('--index-add refuses a symlink that resolves outside the repository',
+            l.status !== 0 && /inside the repository/.test(l.err), l.err.trim() || '(exit ' + l.status + ')');
+      check('the refused symlink appends no row', rowCount() === beforeLink);
+      check('the symlink target outside the repo is untouched by --index-add',
+            fs.readFileSync(target, 'utf-8') === DOC, lines(target)[0]);
+      appendRow('plans/link.html', 'https://example.com/link-hand');
+      const s2 = run(['--index-sync']);
+      check('--index-sync skips a symlink row that resolves outside the repository',
+            s2.status === 0 && /resolves outside the repository: .*link\.html/.test(s2.err), s2.err.trim());
+      check('the symlink target outside the repo is untouched by --index-sync',
+            fs.readFileSync(target, 'utf-8') === DOC, lines(target)[0]);
+    }
+
+    // (c) R11: two spellings of one file must be one byFile key. The dotted
+    // spelling is the OLDEST and the NEWEST row with the plain one between,
+    // so two keys would stamp the newest url first and the middle one last.
+    const twin = path.join(plansDir, 'twin.html');
+    fs.writeFileSync(twin, DOC, 'utf-8');
+    appendRow(dotted('twin.html'), 'https://example.com/twin-a');
+    appendRow(twin, 'https://example.com/twin-b');
+    appendRow(dotted('twin.html'), 'https://example.com/twin-c');
+    const s3 = run(['--index-sync']);
+    check('two spellings of one file collapse to one byFile key (newest row wins)',
+          s3.status === 0 && lines(twin)[0] === '<!-- hosted: https://example.com/twin-c -->', lines(twin)[0]);
+    check('--index-sync counts one file for the two spellings and reports the skips',
+          s3.out.trim() === 'index-sync: 1 stamped, 0 missing, 2 skipped', s3.out.trim());
+
+    // (d) R14 / R18: only an HTML mirror may be stamped.
+    const md = path.join(plansDir, 'PLAN-x.md');
+    fs.writeFileSync(md, '# Plan\n', 'utf-8');
+    const beforeMd = rowCount();
+    const m = add('PLAN-x', 'plans/PLAN-x.md', 'https://example.com/md');
+    check('--index-add refuses a --local that is not an .html mirror',
+          m.status !== 0 && m.err.indexOf('must name an .html mirror') !== -1, m.err.trim() || '(exit ' + m.status + ')');
+    check('a refused .md --local appends no row', rowCount() === beforeMd);
+    check('the .md file is untouched by --index-add', fs.readFileSync(md, 'utf-8') === '# Plan\n', lines(md)[0]);
+    appendRow('plans/PLAN-x.md', 'https://example.com/md-hand');
+    const s4 = run(['--index-sync']);
+    check('--index-sync skips a hand-written row that names a non-html file',
+          s4.status === 0 && /skipped, not an \.html mirror: .*PLAN-x\.md/.test(s4.err), s4.err.trim());
+    check('the .md file is untouched by --index-sync', fs.readFileSync(md, 'utf-8') === '# Plan\n', lines(md)[0]);
+    check('--index-sync counts the non-html row as skipped',
+          s4.out.trim() === 'index-sync: 1 stamped, 0 missing, 3 skipped', s4.out.trim());
+    const htm = path.join(plansDir, 'p.htm');
+    fs.writeFileSync(htm, DOC, 'utf-8');
+    const h = add('htm', 'plans/p.htm', 'https://example.com/htm');
+    check('control: .htm is accepted as an HTML mirror', h.status === 0 && stampCount(htm) === 1, h.err.trim());
+
+    // (e) R12: the url guard is an allowlist. "--!>" closes an HTML comment
+    // just as "-->" does, and the old denylist let it through.
+    ['https://example.com/x--!>', 'https://example.com/<x', 'http://example.com/x'].forEach(function (bad) {
+      const beforeUrl = rowCount();
+      const u = add('bad-url', 'plans/twin.html', bad);
+      check('--url is refused: ' + bad, u.status !== 0 && rowCount() === beforeUrl, u.err.trim() || '(exit ' + u.status + ')');
+    });
+    check('a refused --url never reaches the mirror',
+          lines(twin)[0] === '<!-- hosted: https://example.com/twin-c -->', lines(twin)[0]);
+    appendRow(twin, 'https://example.com/x--!>');
+    const s5 = run(['--index-sync']);
+    check('--index-sync ignores a hand-written row whose url could close the comment',
+          s5.status === 0 && lines(twin)[0] === '<!-- hosted: https://example.com/twin-c -->', lines(twin)[0]);
+
+    // (f) R15: a mirror re-saved with CRLF ends its stamp line in "\r".
+    const crlf = path.join(plansDir, 'crlf.html');
+    fs.writeFileSync(crlf, '<!-- hosted: https://example.com/crlf-old -->\r\n<!doctype html>\r\n<title>c</title>\r\n', 'utf-8');
+    const c = add('crlf', 'plans/crlf.html', 'https://example.com/crlf-new');
+    const crlfText = fs.readFileSync(crlf, 'utf-8');
+    check('a CRLF-terminated stamp is replaced, not duplicated',
+          c.status === 0 && stampCount(crlf) === 1, 'found ' + stampCount(crlf));
+    check('the replaced CRLF stamp carries the new url',
+          /^<!-- hosted: https:\/\/example\.com\/crlf-new -->\r?\n/.test(crlfText), JSON.stringify(crlfText.split('\n')[0]));
+    check('everything after the replaced CRLF stamp is byte-identical',
+          crlfText.slice(crlfText.indexOf('\n')) === '\n<!doctype html>\r\n<title>c</title>\r\n', JSON.stringify(crlfText));
+
+    // (g) R19: a UTF-8 BOM must not be pushed to line 2, in front of the doctype.
+    const bom = path.join(plansDir, 'bom.html');
+    fs.writeFileSync(bom, '\uFEFF<!doctype html>\n<title>b</title>\n', 'utf-8');
+    const bb = add('bom', 'plans/bom.html', 'https://example.com/bom');
+    const bomText = fs.readFileSync(bom, 'utf-8');
+    check('a BOM file ends up with the stamp at byte 0 and no U+FEFF before the doctype',
+          bb.status === 0 && bomText.indexOf('<!-- hosted: https://example.com/bom -->') === 0 &&
+          bomText.slice(0, bomText.indexOf('<!doctype')).indexOf('\uFEFF') === -1,
+          JSON.stringify(bomText.slice(0, 60)));
+    check('the BOM is dropped, not moved', bomText.indexOf('\uFEFF') === -1 && bomText.indexOf('<!doctype html>') !== -1);
+
+    // (h) R16: on win32 the cwd and git's canonical path can differ only in
+    // case. RENDER_HTML_PLATFORM=win32 is the script's hook for exercising
+    // that branch from here; the flipped path exists only case-insensitively.
+    const WIN = { RENDER_HTML_PLATFORM: 'win32' };
+    const flipped = main.replace(/[a-z]/i, function (ch) {
+      return ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase();
+    });
+    check('control: the case-flipped root really differs from the root', flipped !== main, flipped);
+    const winLocal = path.join(flipped, 'plans', 'win.html');
+    if (process.platform !== 'win32') {
+      const beforeWin = rowCount();
+      const w0 = add('win', winLocal, 'https://example.com/win');
+      check('control: a case-flipped root is outside the repo on posix',
+            w0.status !== 0 && rowCount() === beforeWin, w0.err.trim());
+    }
+    const beforeW1 = rowCount();
+    const w1 = add('win', winLocal, 'https://example.com/win', WIN);
+    check('under win32 a case-flipped root still counts as inside the repo',
+          w1.status === 0 && rowCount() === beforeW1 + 1, w1.err.trim() || '(exit ' + w1.status + ')');
+    const winFile = path.join(plansDir, 'win.html');
+    fs.writeFileSync(winFile, DOC, 'utf-8');
+    appendRow(path.join(plansDir, 'WIN.html'), 'https://example.com/win-upper');
+    appendRow(winFile, 'https://example.com/win-lower');
+    const s6 = run(['--index-sync']);
+    check('control: on posix the upper-case spelling is a second, missing file',
+          / 1 missing/.test(s6.out), s6.out.trim());
+    const s7 = run(['--index-sync'], WIN);
+    check('under win32 the byFile key folds case, so the two spellings are one file',
+          s7.status === 0 && / 0 missing/.test(s7.out), s7.out.trim());
+    check('under win32 the newest row for the folded key wins',
+          lines(winFile)[0] === '<!-- hosted: https://example.com/win-lower -->', lines(winFile)[0]);
+  } catch (err) {
+    check('hardening test set up a git repo', false, err.message);
+  }
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 noAbsTests();
 imageTests();
 indexTests();
 stampTests();
+hardeningTests();
 
 console.log('');
 if (failures.length === 0) {
