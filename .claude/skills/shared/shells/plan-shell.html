@@ -14,6 +14,13 @@
   markdown twin plans/PLAN-<basename>.md, and is REPLACED whenever the plan
   is re-rendered (stable mode: no timestamp, no collision suffix).
 
+  After a publish, the helper's --index-add puts one line ABOVE the doctype:
+    <!-- hosted: <url> -->
+  That stamp is a derived copy of the file's row in artifacts/html/index.jsonl
+  (the record), never hand-edited: a re-render drops it, and the next publish
+  or a run of --index-sync puts it back from the index. The markdown twin is
+  not stamped, because Claude reads that one.
+
   The helper inlines two things:
     1. tokens.css  -> the tokens slot inside the <style> block below
     2. the JSON payload -> the render-data block (the application/json
