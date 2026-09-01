@@ -33,7 +33,7 @@
 // Usage:
 //   node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit|plan|docview> \
 //                                       --name <basename> [--data <file>] \
-//                                       [--out-dir <dir>] [--stable]
+//                                       [--out-dir <dir>] [--stable] [--no-abs]
 //   echo '<json>' | node .claude/scripts/render-html.js --shell review --name review-orchestrator
 //
 //   Artifact index (issue #154) - two extra modes that do not render anything:
@@ -56,6 +56,16 @@
 //   --out-dir  output directory. Default: artifacts/html. Resolved against the
 //              current working directory (relative or absolute both work) and
 //              created if missing. Lets plan views land in plans/ instead.
+//   --no-abs   strip every absolute local path from the payload before rendering
+//              (issue #155 item 2). Five shells turn a finding's file reference
+//              into a vscode://file/<absPath> editor link, so a rendered page
+//              carries this machine's directory layout and account name. That is
+//              harmless in a local file and is a disclosure once the page is
+//              published, so the publish path passes this flag and the local
+//              fallback does not. No shell change is needed: each of the five
+//              documents that its file-link falls back to relPath when absPath
+//              is missing, so removing the field degrades to a plain relative
+//              path. See "Publishing the Artifact" in .claude/rules/html-outputs.md.
 //   --stable   write exactly <name>.html in the out dir - no timestamp, no -N
 //              collision guard - overwriting any existing file. This exists for
 //              identity-keyed outputs that pair with a markdown file and are
@@ -84,6 +94,7 @@ function die(msg) {
 const argv = process.argv.slice(2);
 const opts = {
   shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false,
+  noAbs: false,
   // index modes (issue #154)
   indexAdd: false, indexUrl: false, type: '', local: '', url: ''
 };
@@ -94,6 +105,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--out-dir') opts.outDir = argv[++i] || '';
   else if (a === '--stable') opts.stable = true; // boolean flag, takes no value
+  else if (a === '--no-abs') opts.noAbs = true; // boolean flag, takes no value
   else if (a === '--index-add') opts.indexAdd = true; // boolean flag
   else if (a === '--index-url') opts.indexUrl = true; // boolean flag
   else if (a === '--type') opts.type = argv[++i] || '';
@@ -130,7 +142,32 @@ for (let i = 0; i < argv.length; i++) {
 // sessions publishing at once cannot clobber each other's history, and it never
 // grows a re-read cost the way a markdown table would.
 // ==========================================================================
-const INDEX_PATH = path.resolve(process.cwd(), 'artifacts/html', 'index.jsonl');
+// The index is keyed to the REPOSITORY, not the working directory (issue #155
+// item 5). A worktree is a second working copy of the same repo, so resolving
+// against process.cwd() gave each worktree its own empty index: the --index-url
+// lookup found no record for a plan that had already been published, and the
+// identity-keyed types created a duplicate hosted page instead of updating the
+// one that existed. `git rev-parse --git-common-dir` names the SHARED .git for
+// the whole repo (".git" in the main copy, an absolute path to it from inside a
+// worktree), so its parent is the main working copy in both cases.
+//
+// Falling back to cwd is deliberate rather than fatal: this script must stay
+// usable outside a repo, and an index in the wrong place is a far smaller
+// failure than a render that refuses to run. child_process is core Node, so
+// this keeps the zero-dependency promise above.
+function mainRepoRoot() {
+  try {
+    const common = require('child_process')
+      .execFileSync('git', ['rev-parse', '--git-common-dir'],
+                    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .trim();
+    if (!common) return process.cwd();
+    return path.dirname(path.resolve(process.cwd(), common));
+  } catch (e) {
+    return process.cwd(); // not a repo, or no git on PATH
+  }
+}
+const INDEX_PATH = path.resolve(mainRepoRoot(), 'artifacts/html', 'index.jsonl');
 
 if (opts.indexAdd && opts.indexUrl) die('--index-add and --index-url are mutually exclusive');
 
@@ -146,6 +183,7 @@ if (opts.indexAdd || opts.indexUrl) {
   if (opts.shell) renderFlags.push('--shell');
   if (opts.data) renderFlags.push('--data');
   if (opts.stable) renderFlags.push('--stable');
+  if (opts.noAbs) renderFlags.push('--no-abs');
   if (opts.outDir !== 'artifacts/html') renderFlags.push('--out-dir');
   if (renderFlags.length) {
     die('index modes take no render arguments (got ' + renderFlags.join(', ') +
@@ -233,6 +271,112 @@ try {
 } catch (e) {
   die('data is not valid JSON: ' + e.message);
 }
+
+// ==========================================================================
+// Payload transforms (issue #155 items 2 and 3). Both rewrite the parsed data
+// in place, before it is serialized into the page, so every shell gets the same
+// treatment without any shell knowing these exist.
+// ==========================================================================
+
+// --- item 2: strip absolute local paths when the page is destined to be published ---
+//
+// Five shells (review, document, explore, debate, audit) render a finding's file
+// reference as <a href="vscode://file/<absPath>"><relPath></a>, and each one
+// documents that the href falls back to relPath when absPath is absent. So the
+// whole fix is to delete the field: the link degrades to plain relative text and
+// nothing else in the page changes. Deleting the KEY (rather than blanking it)
+// is what triggers each shell's `file.absPath || file.relPath` fallback.
+//
+// Recursive because the field is nested at different depths per shell - inside
+// findings, inside change rows, inside audit candidates - and a top-level-only
+// walk would silently miss most of them.
+function stripAbsPaths(node) {
+  if (Array.isArray(node)) { node.forEach(stripAbsPaths); return; }
+  if (node === null || typeof node !== 'object') return;
+  for (const key of Object.keys(node)) {
+    if (key === 'absPath') delete node[key];
+    else stripAbsPaths(node[key]);
+  }
+}
+
+// --- item 3: embed local images as data: URIs ---
+//
+// browse.js writes screenshots to /tmp and returns the filesystem path, which a
+// review payload carries inside a trusted-HTML field as <img src="/tmp/...">.
+// That renders locally (a file:// page can reach /tmp) and is always broken once
+// the page is published, because a hosted page cannot read this machine's disk
+// and the artifact CSP blocks off-origin images regardless. A data: URI is the
+// only form that works in BOTH viewports, and it also makes the local file
+// genuinely self-contained, which is what the shells claim to be.
+//
+// Budget: published artifacts cap at 16MB and base64 inflates by ~4/3. A single
+// `responsive` action produces three full-page PNGs, so a naive embed can blow
+// the cap on its own. Everything over budget is dropped with a VISIBLE note -
+// the failure this replaces was a silently broken image, and swapping it for a
+// silently missing one would be no improvement.
+const EMBED_BUDGET_BYTES = 12 * 1024 * 1024; // encoded; leaves headroom for the page itself
+let embedBudgetLeft = EMBED_BUDGET_BYTES;
+
+const MIME_BY_EXT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml'
+};
+
+function humanSize(bytes) { return (bytes / (1024 * 1024)).toFixed(1) + 'MB'; }
+
+// Replace one <img src="..."> whose src is a local file. Returns the tag to use.
+function embedOneImage(tag, quote, src) {
+  // Anything already inline or remote is left exactly as it is.
+  if (/^(data:|https?:|file:)/i.test(src)) return tag;
+  const ext = path.extname(src).toLowerCase();
+  const mime = MIME_BY_EXT[ext];
+  if (!mime) return tag; // not an image type we can inline; leave it alone
+  let buf;
+  try {
+    buf = fs.readFileSync(src);
+  } catch (e) {
+    // Missing or unreadable: never abort the render over one screenshot.
+    process.stderr.write('note: image not readable, omitted: ' + src + '\n');
+    return '<em class="img-omitted">image unavailable (' + path.basename(src) + ')</em>';
+  }
+  const encodedSize = Math.ceil(buf.length / 3) * 4;
+  if (encodedSize > embedBudgetLeft) {
+    process.stderr.write('note: image over embed budget, omitted: ' + src +
+                         ' (' + humanSize(buf.length) + ')\n');
+    return '<em class="img-omitted">image omitted (' + path.basename(src) +
+           ', ' + humanSize(buf.length) + ' - over the embed budget)</em>';
+  }
+  embedBudgetLeft -= encodedSize;
+  return tag.replace(quote + src + quote,
+                     quote + 'data:' + mime + ';base64,' + buf.toString('base64') + quote);
+}
+
+// Walk every string in the payload looking for <img> tags. Strings are where
+// these live: the shells take "trusted inline HTML" in field values, so an
+// image arrives as markup inside a value, not as a structured path field.
+function embedImages(node) {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      if (typeof node[i] === 'string') node[i] = embedInString(node[i]);
+      else embedImages(node[i]);
+    }
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  for (const key of Object.keys(node)) {
+    if (typeof node[key] === 'string') node[key] = embedInString(node[key]);
+    else embedImages(node[key]);
+  }
+}
+
+function embedInString(str) {
+  if (str.indexOf('<img') === -1) return str;
+  return str.replace(/<img\b[^>]*?\ssrc=(["'])(.*?)\1[^>]*>/gi,
+                     function (tag, quote, src) { return embedOneImage(tag, quote, src); });
+}
+
+if (opts.noAbs) stripAbsPaths(parsed);
+embedImages(parsed);
 
 // Re-stringify with every "<" escaped to < so the JSON can live inside a
 // <script> block without "</script>" ever terminating it early. JSON.parse in
