@@ -44,9 +44,13 @@ Read the UI-related files (components, templates, styles, markup). Then pick one
 | **Usability** | Nielsen's heuristics - feedback, user control, error prevention, consistent language |
 | **Accessibility** | WCAG AA - keyboard navigation, contrast, focus indicators, semantic HTML, screen-reader support |
 | **User Flows** | Happy path completeness, error states, destructive action confirmations, empty states |
-| **Research** | Web search for how leading products handle similar UX patterns (max 2 searches, focus on established design systems like Material, Apple HIG, GOV.UK) |
+| **Research** | How leading products handle similar UX patterns, against established design systems like Material, Apple HIG, GOV.UK |
 
-The Research sub-agent should keep findings lightweight and evidence-linked. Clearly separate research-backed findings from heuristic findings. If search results are weak, move on - research should not block the review.
+**Run the Research searches yourself, before dispatching, and paste the results into that sub-agent's prompt.** This skill grants `WebSearch`; the `review-finder` agent the sub-agents run as does not (`Read, Grep, Glob, Bash`), so a Research sub-agent asked to search cannot do the one thing it was dispatched for - it would return heuristics dressed as research, with nothing to signal the difference. Do at most 2 searches, and dispatch the sub-agent with the findings already in hand so its job is applying them, not fetching them.
+
+Do not "fix" this by granting `WebSearch` to `review-finder`. That agent is shared by every specialist in every `/review` dispatch, so widening its tool list to serve one row of one skill widens the tool surface of the whole review system. Narrowing or widening an agent's tools is a behavior change, not an annotation.
+
+The Research sub-agent should keep findings lightweight and evidence-linked. Clearly separate research-backed findings from heuristic findings. If the searches came back weak, say so and move on - research should not block the review.
 
 Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
 
