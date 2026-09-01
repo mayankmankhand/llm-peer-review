@@ -186,6 +186,8 @@ Write the payload to a temp file (e.g. `/tmp/plan-data.json`).
 
 From the project root:
 
+Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+
 ```bash
 node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
      --out-dir plans --stable --data /tmp/plan-data.json

@@ -291,11 +291,50 @@ try {
 // Recursive because the field is nested at different depths per shell - inside
 // findings, inside change rows, inside audit candidates - and a top-level-only
 // walk would silently miss most of them.
+// The repo root and the home directory, computed once. Anything under them that
+// appears as literal text in a payload string is rewritten; the repo prefix
+// becomes a relative path and the home prefix becomes "~".
+//
+// These two prefixes are the scope on purpose: together they are what identifies
+// the machine and its owner. A path elsewhere on the filesystem (/tmp, /usr) is
+// left alone because it discloses nothing about this user - browse.js screenshot
+// paths under /tmp are the common case, and their images are inlined as data
+// URIs anyway. Say "removes the paths that identify this machine", never "removes
+// every absolute path", wherever this flag is described.
+const ABS_PREFIXES = (function () {
+  const out = [];
+  try { const r = mainRepoRoot(); if (r && r !== '/') out.push([r + path.sep, '']); } catch (e) {}
+  try { const h = require('os').homedir(); if (h && h !== '/') out.push([h + path.sep, '~' + path.sep]); } catch (e) {}
+  // Longest first, so the repo root (usually inside home) wins over the home prefix.
+  return out.sort(function (a, b) { return b[0].length - a[0].length; });
+})();
+
+function scrubAbsInString(str) {
+  let out = str;
+  for (const [prefix, replacement] of ABS_PREFIXES) {
+    if (out.indexOf(prefix) !== -1) out = out.split(prefix).join(replacement);
+  }
+  return out;
+}
+
+// Deleting the absPath KEY is what triggers each shell's plain-text branch, so
+// that stays. But a key-name denylist alone cannot support what the consent copy
+// promises: absolute paths also appear as ordinary TEXT inside prose fields,
+// receipt commands, and <pre> evidence blocks, and those shipped untouched
+// (issue #155 review, R6). Publishing is an always-ask outward send, so the
+// user's yes is given against this function's behavior - it has to be true.
 function stripAbsPaths(node) {
-  if (Array.isArray(node)) { node.forEach(stripAbsPaths); return; }
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      if (typeof node[i] === 'string') node[i] = scrubAbsInString(node[i]);
+      else stripAbsPaths(node[i]);
+    }
+    return;
+  }
   if (node === null || typeof node !== 'object') return;
   for (const key of Object.keys(node)) {
     if (key === 'absPath') delete node[key];
+    else if (typeof node[key] === 'string') node[key] = scrubAbsInString(node[key]);
     else stripAbsPaths(node[key]);
   }
 }
@@ -348,8 +387,14 @@ function embedOneImage(tag, quote, src) {
            ', ' + humanSize(buf.length) + ' - over the embed budget)</em>';
   }
   embedBudgetLeft -= encodedSize;
-  return tag.replace(quote + src + quote,
-                     quote + 'data:' + mime + ';base64,' + buf.toString('base64') + quote);
+  // Anchor the swap to the src attribute. A plain string replace hits the FIRST
+  // occurrence anywhere in the tag, so a duplicate path in an earlier attribute
+  // would take the data URI and leave src pointing at the local file.
+  const uri = 'data:' + mime + ';base64,' + buf.toString('base64');
+  const q = quote || '"';
+  return tag.replace(/(\ssrc=)(?:(["']).*?\2|[^\s>]+)/i, function (m, lead) {
+    return lead + q + uri + q;
+  });
 }
 
 // Walk every string in the payload looking for <img> tags. Strings are where
@@ -370,10 +415,25 @@ function embedImages(node) {
   }
 }
 
+// Attributes are consumed as (quoted-value | non-'>') so a ">" INSIDE a quoted
+// value (alt="cart > checkout") no longer ends the tag early, and src accepts an
+// unquoted value. Both shapes previously fell through with no data URI, no note,
+// and no stderr line - the silent breakage this feature exists to remove
+// (issue #155 review, R20).
+const IMG_RE = /<img\b(?:"[^"]*"|'[^']*'|[^>])*?\ssrc=(?:(["'])(.*?)\1|([^\s>]+))(?:"[^"]*"|'[^']*'|[^>])*>/gi;
+
 function embedInString(str) {
   if (str.indexOf('<img') === -1) return str;
-  return str.replace(/<img\b[^>]*?\ssrc=(["'])(.*?)\1[^>]*>/gi,
-                     function (tag, quote, src) { return embedOneImage(tag, quote, src); });
+  const out = str.replace(IMG_RE, function (tag, quote, quoted, bare) {
+    return embedOneImage(tag, quote || '', quoted !== undefined ? quoted : bare);
+  });
+  // A tag the regex still cannot parse must not fail silently: say so once.
+  if (out.indexOf('<img') !== -1 && !/<img\b[^>]*src=(?:["']?)data:/i.test(out)) {
+    IMG_RE.lastIndex = 0;
+    if (!IMG_RE.test(out)) process.stderr.write('note: an <img> tag could not be parsed for embedding\n');
+    IMG_RE.lastIndex = 0;
+  }
+  return out;
 }
 
 if (opts.noAbs) stripAbsPaths(parsed);

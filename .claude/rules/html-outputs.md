@@ -71,7 +71,7 @@ The `artifacts/html/` directory lives at the project root. It parallels `plans/`
 The seven helper-rendered output types (review, document, explore, debate, audit, plan, docview) are NOT hand-written. Each command produces a compact JSON payload and runs the shared helper, which injects that JSON plus the shared `tokens.css` into a prebuilt shell and writes the file:
 
 ```
-node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit|plan|docview> --name <basename> --data <json-file> [--out-dir <dir>] [--stable]
+node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit|plan|docview> --name <basename> --data <json-file> [--out-dir <dir>] [--stable] [--no-abs]
 ```
 
 By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-HHMMSS.html` (with a `-N` guard for same-second runs), creates `artifacts/html/`, overwrites freely, and prints the output path to stdout. This is what keeps the open fast and collision-free (issues #120, #127): the command emits only the small JSON, never the boilerplate, and there is never a read-then-overwrite cycle. The prebuilt shells live in `.claude/skills/shared/shells/`; each documents its own JSON schema in a header comment.
@@ -100,6 +100,8 @@ A user is never left with only a file path. Whichever branch runs, exactly one v
 
 ### Render for the viewport
 
+**Decide this BEFORE you run the render, not after.** The flag cannot be added to a file that is already written, and every call site below prints a copy-ready command; check the publish gate first, then run the command with or without the flag accordingly.
+
 **When the session can publish, pass `--no-abs` to `render-html.js`.** Five of the seven shells turn a file reference into a `vscode://file/<absPath>` editor link, so without the flag a published page carries this machine's directory layout and account name. The flag deletes those absolute paths, and each of the five shells then renders that file reference as plain text rather than as a link - an editor link built from a relative path would leak nothing but be dead for every viewer. Those editor links only ever resolved on the machine that made them anyway, so they were dead for any other viewer.
 
 The flag is keyed to the **capability gate, not to the consent answer**, and the ordering is the reason: the flag is chosen at render time, and consent is asked at publish time, which is after. Asking for consent earlier would mean asking before a review's findings exist on screen - the exact thing the per-type consent rule below is protecting. So a publish-capable session renders without absolute paths either way, and a declined publish simply opens a page whose file references are relative. That is a small, safe loss; the alternative is a second render or a premature ask.
@@ -127,7 +129,7 @@ The `/playground` skill sits outside all of this: it never publishes and never a
 
 **Consent, and what a yes actually covers.** Publishing sends the rendered file to a Claude-hosted URL, which is an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`. Before the FIRST publish of a session, ask once.
 
-**Say what is actually being sent.** The page carries its own content: for a plan or a cycle summary that is text already on the user's screen; for a review it can be code excerpts, file paths, and security findings. Absolute local paths are no longer among it - `--no-abs` strips them before the render, so the page carries repo-relative paths only. Pages are private by default. Say in one short clause what this particular artifact contains, so a yes is informed about the thing being sent rather than about publishing in general.
+**Say what is actually being sent.** The page carries its own content: for a plan or a cycle summary that is text already on the user's screen; for a review it can be code excerpts, file paths, and security findings. `--no-abs` removes the paths that identify this machine - the editor links, plus the repo root and home directory wherever they appear as text - so file references read as repo-relative. It does not claim to remove every absolute path anywhere on the filesystem. Pages are private by default. Say in one short clause what this particular artifact contains, so a yes is informed about the thing being sent rather than about publishing in general.
 
 That yes covers **plan, document, explore, docview, and audit** for the rest of the session. Their contents are already on the user's screen, or are a view of a file the user chose, so consenting to send them is consenting to something known.
 

@@ -32,7 +32,9 @@ Steps:
 2. **Write the JSON to a temp file**, e.g. `/tmp/debate-data.json`.
 
 3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
-   ```
+   Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+
+      ```
    node .claude/scripts/render-html.js --shell debate --name debate-<model> --data /tmp/debate-data.json
    ```
    - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.

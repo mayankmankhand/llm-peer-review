@@ -131,7 +131,7 @@ No new view will be built.
 
 The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed (the same "3+ findings" gate for `/review-*`, raised to 5 here because audit candidates are softer than review findings).
 
-Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a temp file. Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 
 `node .claude/scripts/render-html.js --shell audit --name audit-html --data /tmp/audit-data.json`
 
@@ -143,7 +143,7 @@ When the user says "yes, generate the view" after seeing the report:
 
 1. Read the source markdown for the top candidate.
 2. Do NOT hand-write the HTML. Convert the markdown's structure into a JSON payload matching the schema documented in the header of `.claude/skills/shared/shells/docview-shell.html` (sections with heading/level/blocks; block types: prose, list, table, code). The shell builds the viewing behaviors in once: tables are sortable, long sections collapse automatically (explicit `collapsed: true/false` overrides). Write the payload to a temp file (e.g. `/tmp/docview-data.json`).
-3. Run the helper from the project root:
+3. Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
    `node .claude/scripts/render-html.js --shell docview --name <source-basename> --stable --data /tmp/docview-data.json`
    `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
 4. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
