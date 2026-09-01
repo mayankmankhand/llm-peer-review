@@ -1533,9 +1533,9 @@ if ($script:BackupCount -gt 0) {
   Write-Host "    Backed up $($script:BackupCount) file(s) to:"
   Write-Host "      $($script:BackupDir)"
   Write-Host ""
-  Write-Host "    New in v4.2 - setup now preserves any file it would overwrite"
-  Write-Host "    or delete. If you customized a toolkit file, your original is"
-  Write-Host "    safe in the directory above. Delete when you are done."
+  Write-Host "    Setup preserves any file it would overwrite or delete. If you"
+  Write-Host "    customized a toolkit file, your original is safe in the directory"
+  Write-Host "    above. Delete it when you are done."
   Write-Host ""
 }
 
@@ -1595,7 +1595,13 @@ if ($LegacyCleaned -gt 0 -or $PlansMigrated -gt 0) {
     Write-Host "        Your existing plans were moved automatically."
     Write-Host ""
   }
-  Write-Host "      See CHANGELOG.md for full details."
+  # PARITY: same pointer lines as setup.sh's legacy box (holistic pass, S1):
+  # a pre-manifest upgrader is the reader who most needs "what changed since".
+  Write-Host "      Everything since then, in the toolkit repo:"
+  Write-Host ""
+  Write-Host "      - CHANGELOG.md: the `"What's new since`" rollup at the top,"
+  Write-Host "        then the newest version section right below it."
+  Write-Host "      - AGENT-SETUP.md: the `"What's new in v$Version`" block."
   Write-Host ""
 }
 

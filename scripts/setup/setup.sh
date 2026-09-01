@@ -1373,9 +1373,9 @@ if [ "$BACKUP_COUNT" -gt 0 ]; then
   echo "    Backed up $BACKUP_COUNT file(s) to:"
   echo "      $BACKUP_DIR"
   echo ""
-  echo "    New in v4.2 - setup now preserves any file it would overwrite"
-  echo "    or delete. If you customized a toolkit file, your original is"
-  echo "    safe in the directory above. Delete when you are done."
+  echo "    Setup preserves any file it would overwrite or delete. If you"
+  echo "    customized a toolkit file, your original is safe in the directory"
+  echo "    above. Delete it when you are done."
   echo ""
 fi
 
@@ -1432,7 +1432,15 @@ if [ "$LEGACY_CLEANED" -gt 0 ] || [ "$PLANS_MIGRATED" -gt 0 ]; then
     echo "        Your existing plans were moved automatically."
     echo ""
   fi
-  echo "      See CHANGELOG.md for full details."
+  # The migration notes above describe the v3.5 and v4.0 moves; the owner of
+  # a pre-manifest install is exactly the reader who most needs to know what
+  # changed since, so point at the same two places the box below does
+  # (holistic pass, sweep observation S1).
+  echo "      Everything since then, in the toolkit repo:"
+  echo ""
+  echo "      - CHANGELOG.md: the \"What's new since\" rollup at the top,"
+  echo "        then the newest version section right below it."
+  echo "      - AGENT-SETUP.md: the \"What's new in v$VERSION\" block."
   echo ""
 fi
 
