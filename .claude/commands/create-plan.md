@@ -193,7 +193,7 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
      --out-dir plans --stable --data /tmp/plan-data.json
 ```
 
-`<basename>` is the plan identifier *without* the `PLAN-` prefix (e.g. `issue-129` for the markdown plan `PLAN-issue-129.md`, or `auth-flow` for `PLAN-auth-flow.md`) - the template already supplies `PLAN-`, so do not repeat it or the filename doubles to `PLAN-PLAN-`. `--stable` writes exactly `plans/PLAN-<basename>.html` - no timestamp - and a re-plan for the same issue replaces the old view. Malformed JSON dies before any file is written, so there is never a broken page. The helper prints the output path to stdout; open it:
+`<basename>` is the plan identifier *without* the `PLAN-` prefix (e.g. `issue-129` for the markdown plan `PLAN-issue-129.md`, or `auth-flow` for `PLAN-auth-flow.md`) - the template already supplies `PLAN-`, so do not repeat it or the filename doubles to `PLAN-PLAN-`. `--stable` writes exactly `plans/PLAN-<basename>.html` - no timestamp - and a re-plan for the same issue replaces the old view. Malformed JSON dies before any file is written, so there is never a broken page. The helper prints the output path to stdout.
 
 Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
 
