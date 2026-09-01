@@ -46,12 +46,7 @@ Steps:
    - `<type>` = the skill name (`code`, `ux`, `browser`, `plan`, `full`, `deps`, `copy`, `commands`) when a specialist is called directly, or `orchestrator` when called via `/review`. So `--name review-orchestrator`, `--name review-code`, etc.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
-4. **Open the printed path** in the browser per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`:
-   ```
-   bash .claude/scripts/open-artifact.sh "<printed-path>"
-   ```
-
-5. **Publish it as a second viewport** per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. A review artifact asks for publish consent every run, per that section.
 
    **Screenshots do not survive publishing.** `browse.js` writes each screenshot to disk and returns its filesystem path (`{ type: 'screenshot', path }`); nothing in the pipeline encodes the image into the page. A local file resolves those paths, a hosted page cannot, so a published browser QA report shows broken images. When the report contains screenshots, either skip the publish for that report, or say in the link line that the images only appear in the local copy. Do not publish it silently and let the user find the gaps.
 

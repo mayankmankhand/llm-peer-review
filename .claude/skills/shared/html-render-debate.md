@@ -38,11 +38,6 @@ Steps:
    - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
-4. **Open the printed path** in the browser per the "Opening the Artifact" rules in `.claude/rules/html-outputs.md`:
-   ```
-   bash .claude/scripts/open-artifact.sh "<printed-path>"
-   ```
-
-5. **Publish it as a second viewport.** Then publish it as a second viewport per the "Publishing the Artifact" rules in `.claude/rules/html-outputs.md`, and record it with `--index-add`. Silently skipped when the session cannot publish.
+4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. A debate artifact asks for publish consent every run, per that section.
 
 The debate cards reuse the same severity scale, file-link scheme, and field format as the review shell for visual consistency across the toolkit.
