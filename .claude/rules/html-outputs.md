@@ -39,7 +39,6 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 - `/review` family: 3+ findings, OR visual evidence (browser screenshots), OR severity mix spans 2+ levels (e.g., both Blocks and Warns present)
 - `/explore` vision-mode summary: 2+ options being compared
 - `/ask-gpt` / `/ask-gemini`: 3+ Recommended Actions in the final summary
-- `/peer-review`: paired with an `/ask-*` debate that already produced HTML (mirror the upstream decision)
 - `/audit-html`: 5+ candidates listed in the report
 - `/learning-opportunity` (planned - not yet wired): 3+ depth levels with concrete examples at each, OR the concept is interactive (state machines, hashing, retries, etc.)
 - `/pair-debug` (planned - not yet wired): 3+ hypotheses tracked
@@ -62,7 +61,7 @@ The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-
 | `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
 | `artifacts/html/` | Cycle-bound artifacts (review reports, document summaries, debate views, explore option comparisons, audit reports) - timestamped. Also: `/audit-html` static views (via `--stable`, not timestamped). Gitignored. |
-| `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. Gitignored with the rest of `artifacts/html/`. |
+| `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. It is the record; each published local file also carries its URL on line 1 as `<!-- hosted: <url> -->`, a derived copy that `--index-sync` regenerates from the newest record per file. Gitignored with the rest of `artifacts/html/`. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
 
@@ -89,26 +88,26 @@ There are two viewports. **The hosted page is the primary one; the local browser
 ```
 render-html.js has printed a path
   -> Can this session publish? (the countable gate below)
-    -> NO:  re-render nothing. Open it locally. Done - this is the whole flow.
+    -> NO:  open it locally with open-artifact.sh. Done - this is the whole flow.
     -> YES: the render should have used --no-abs (see "Render for the viewport")
-      -> Ask consent, per the per-type rules below
-        -> granted:  publish, record it, give the user the URL
-        -> declined: open it locally instead
+      -> publish to the private claude.ai page, record it (which stamps the local file), hand over the URL.
 ```
 
-A user is never left with only a file path. Whichever branch runs, exactly one viewport opens.
+A user is never left with only a file path. Whichever branch runs, exactly one viewport opens, and neither branch asks the user for permission first; "Publishing the Artifact" below says why, and lists what is still gated.
 
 ### Render for the viewport
 
 **Decide this BEFORE you run the render, not after.** The flag cannot be added to a file that is already written, and every call site below prints a copy-ready command; check the publish gate first, then run the command with or without the flag accordingly.
 
-**When the session can publish, pass `--no-abs` to `render-html.js`.** Five of the seven shells turn a file reference into a `vscode://file/<absPath>` editor link, so without the flag a published page carries this machine's directory layout and account name. The flag deletes those absolute paths, and each of the five shells then renders that file reference as plain text rather than as a link - an editor link built from a relative path would leak nothing but be dead for every viewer. Those editor links only ever resolved on the machine that made them anyway, so they were dead for any other viewer.
+**When the session can publish, pass `--no-abs` to `render-html.js`.** Five of the seven shells turn a file reference into a `vscode://file/<absPath>` editor link, so without the flag a published page carries this machine's directory layout and account name. The flag deletes those absolute paths, and each of the five shells then renders that file reference as plain text rather than as a link - an editor link built from a relative path would leak nothing but be dead for every viewer. Those editor links only ever resolved on the machine that made them anyway, so they were dead for any other viewer. It also rewrites the repo root and home directory out of the page text wherever they appear as prose, so file references read as repo-relative; it does not claim to remove every absolute path on the filesystem.
 
-The flag is keyed to the **capability gate, not to the consent answer**, and the ordering is the reason: the flag is chosen at render time, and consent is asked at publish time, which is after. Asking for consent earlier would mean asking before a review's findings exist on screen - the exact thing the per-type consent rule below is protecting. So a publish-capable session renders without absolute paths either way, and a declined publish simply opens a page whose file references are relative. That is a small, safe loss; the alternative is a second render or a premature ask.
+The flag is keyed to the **capability gate** alone. A session that can publish renders without absolute paths, full stop: there is no later answer that could change where the page goes, so there is nothing to wait for and no second render to avoid.
 
 A session that cannot publish renders normally and keeps its editor links, which is where they are actually useful.
 
 ### Opening it locally (the fallback)
+
+Handing the file to the browser is not an outward-facing send: the file stays on this machine, and the browser is simply a different application opening it. This branch never asks the user for permission. If Claude Code itself asks permission to run `open-artifact.sh`, that is a `settings.local.json` allow-list matter (setup seeds the entry), not something this rule can grant or withhold.
 
 Use the toolkit's opener script, which tries each platform launcher in order with real fallback and only fails when the environment is genuinely headless:
 
@@ -127,15 +126,18 @@ The `/playground` skill sits outside all of this: it never publishes and never a
 
 **The gate is countable.** Publish only when a tool for publishing a file to a hosted artifact page is present in this session's tool list. When it is not (Cursor, or the feature is off for that user), skip this section silently and open locally instead. Do not mention it, do not apologise, do not suggest switching editors. The local open is a complete outcome, not a degraded one.
 
-**Consent, and what a yes actually covers.** Publishing sends the rendered file to a Claude-hosted URL, which is an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`. Before the FIRST publish of a session, ask once.
+**No consent ask.** Publishing sends the rendered file to a page under `claude.ai` that is private by default, and the toolkit never touches a page's sharing setting. That is not an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`: the page reaches no one the user has not chosen themselves. So a publish-capable session publishes every artifact type - plan, document, explore, docview, audit, review, and debate alike - without asking first, exactly as the local fallback opens a file without asking. M9 names this exemption; it is one of the two outward sends M9 exempts, the other being the chained `/document` PR.
 
-**Say what is actually being sent.** The page carries its own content: for a plan or a cycle summary that is text already on the user's screen; for a review it can be code excerpts, file paths, and security findings. `--no-abs` removes the paths that identify this machine - the editor links, plus the repo root and home directory wherever they appear as text - so file references read as repo-relative. It does not claim to remove every absolute path anywhere on the filesystem. Pages are private by default. Say in one short clause what this particular artifact contains, so a yes is informed about the thing being sent rather than about publishing in general.
+**Say what a review or debate page holds.** A review or debate page can quote code excerpts and security findings the user has not read yet, and under this rule they reach the private page before the user sees them. The previous rule asked for consent at publish time on every review and debate run; on 2026-08-31 the owner judged that ask unnecessary because the page is private to their own account. The cost is that findings can land on the page before they are read, which is why, when you hand over such a link, you say in one clause what the page contains. The link is never a surprise.
 
-That yes covers **plan, document, explore, docview, and audit** for the rest of the session. Their contents are already on the user's screen, or are a view of a file the user chose, so consenting to send them is consenting to something known.
+**What remains gated.** Everything else in M9 stands:
 
-It does **not** cover **review or debate** artifacts. Those ask again, every time. A consent granted at plan time is granted before any finding exists, and a review report can quote code, file paths, and security findings the user has not read yet - so a blanket yes would authorize sending content nobody has seen. This is deliberately narrower than "once per session" and is the reason M9 tolerates the exception at all.
-
-**A no is not a dead end.** Declining sends nothing, and the artifact opens locally instead per the fallback above - so a "no" costs the hosted link, never the report itself. A no holds for the whole session across every type: skip the ask thereafter and go straight to the local open. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
+- Every other M9 always-ask action: edits to prompt files, releases and version bumps, deletions of user data, force pushes.
+- Any send the loop would make on its own to a destination that is not a private `claude.ai` page: an issue or PR comment, email, a shared drive. Those still ask; M9's other named exemption, the chained `/document` PR, is unchanged. (`/ask-gpt`, `/ask-gemini`, and `/peer-review` are a different gate: they run only when a human types them and are never chained into, per M14.)
+- Sharing. The toolkit never changes a page from private to shared and never hands a link to anyone but the user. A request to share a page is an outward send and asks. An update to a `--stable` page the user has since shared reaches whoever they shared it with; that is the user's sharing choice, not a toolkit send.
+- `/error-analysis` output. It is never published and never sent anywhere, with no consent path at all; that rule is stronger than this one and is untouched.
+- The M11 pre-push tripwire. Publishing an artifact is not a push; every push is still scanned.
+- The `--no-abs` render for publish-capable sessions, which still runs on every render bound for a page.
 
 **Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
 
@@ -175,11 +177,13 @@ node .claude/scripts/render-html.js --index-add --type <shell> --name <name> \
      --local <path> --url <url>
 ```
 
-`<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
+`<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. `<path>` must be the path `render-html.js` printed for that render. It has to lie inside the working copy the render ran in (a worktree's own `artifacts/html/` qualifies), and the helper refuses anything outside it. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
+
+**The record stamps the file.** In the same call, the helper writes the hosted URL onto the first line of that local file as `<!-- hosted: <url> -->`, before the doctype, so the file on disk names the page it mirrors. The index is the record; the stamp is a derived copy of it. A missing local file is a stderr warning, not a failure: the record still lands. To change a URL, append a new record with `--index-add`; it re-stamps the file. A stamp can also go missing on its own: a `--stable` re-render overwrites the file, and a file published before stamping existed never had one. `node .claude/scripts/render-html.js --index-sync` re-derives every stamp from the newest record per local file and prints `index-sync: N stamped, M missing` (plus `, K skipped` when a row was refused: a path outside the repository, a non-HTML file, or a URL that is not a plain `https://` link). Only `.html` mirrors are ever stamped, and only `https://` URLs are accepted. Never edit a stamp by hand, and never stamp a markdown twin: `PLAN-*.md` is read by Claude, and the HTML file is the mirror of the page.
 
 **Failure is not an error.** If a publish does not go through, say so in at most one line, open the file locally instead, and move on. Do not retry in a loop. Nothing is lost.
 
-**What to tell the user.** One line with the link and the local path: "Published the review: <url> (local copy: `artifacts/html/...`)".
+**What to tell the user.** One line with the link and the local path: "Published the review: <url> (local copy: `artifacts/html/...`)". For a review or debate page, add the one clause about what it holds.
 
 ## Visual Look
 

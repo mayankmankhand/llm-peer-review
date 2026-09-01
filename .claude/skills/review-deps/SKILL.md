@@ -30,7 +30,7 @@ Be thorough but concise.
 
 <procedure>
 
-1. **Run `npm audit --json`** and categorize findings by severity (critical, high, moderate, low). If the project has no lockfile, note that as a finding - audits require one.
+1. **Run `npm audit --json`** in the folder that holds the lockfile (`--prefix .claude/scripts` for the toolkit's quarantined runtime deps, which every install has; the project root for the project's own dependencies; both when both exist) and categorize findings by severity (critical, high, moderate, low). If the project has no lockfile, note that as a finding - audits require one.
 
 2. **Run `npm outdated --json`** and flag packages where the installed version is more than one major version behind, or where the latest version includes security fixes.
 

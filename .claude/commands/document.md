@@ -73,10 +73,10 @@ stage.** They never enter:
 - `/ask-gpt`, `/ask-gemini`, `/peer-review`, or any other external model
 
 Only counts and the user's own open codes may cross that line. This matters because
-Section 9 of this same command publishes to a hosted URL under a consent the user gave
-at the start of the run, before any of this text existed, so nothing downstream will ask
-again. There is no exception and no "ask the user first" path: a summary of the data is
-still the data.
+Section 9 of this same command publishes to a hosted URL without asking anyone (a
+private claude.ai page is not an outward send under M9), so nothing downstream would
+ever stop this text from leaving the ledger. There is no exception and no "ask the user
+first" path: a summary of the data is still the data.
 
 This complements the LESSONS work in Section 3 rather than repeating it. A lesson is a
 judgment worth remembering; a ledger row is one data point. The lesson rule in Section 3
@@ -144,11 +144,13 @@ Keep this short. A list they can scan and correct, not a report.
 
 ### Append what they accepted
 
-Write the accepted rows to a temp JSON array and append them:
+Write the accepted rows to a temp JSON array under a name unique to this session, then append them. Two parallel sessions must never share the file: the script deletes it after a successful `--add`, so a shared name lets one session eat the other's rows (holistic review, R21).
 
 ```bash
-node .claude/scripts/correction-ledger.js --add --data /tmp/correction-rows.json
+node .claude/scripts/correction-ledger.js --add --data /tmp/correction-rows-<session>.json
 ```
+
+`<session>` is the `session` value the `--candidates` output carried for this cycle; any token unique to this session works.
 
 The script derives `repo`, `repo_path`, and `kind` itself, so those cannot be got wrong
 from here, and it hard-truncates the private fields. It accepts the `at` you pass, but

@@ -40,6 +40,6 @@ Steps:
    - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
-4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. A debate artifact asks for publish consent every run, per that section.
+4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause that the page holds the debate's recommendations.
 
 The debate cards reuse the same severity scale, file-link scheme, and field format as the review shell for visual consistency across the toolkit.

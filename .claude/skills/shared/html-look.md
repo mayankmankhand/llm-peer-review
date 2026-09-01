@@ -27,6 +27,10 @@ Pick from this neutral palette unless an element calls for a severity color (see
 | `--text-muted` | `#52525b` | Secondary text, captions |
 | `--accent` | `#2563eb` | Links, interactive elements (matches Suggest severity for visual unity) |
 | `--badge-text` | `#fff` | Text on a severity badge. A token rather than a literal because dark mode inverts it |
+| `--accent-soft` | `#eff6ff` | Tint surface under an accent-colored state: an on chip, a signal tag, the version pill, the recommended-option badge |
+| `--positive-soft` | `#dcfce7` | Tint surface under a NEW file tag |
+| `--warn-soft` | `#fef9c3` | Tint surface under a MOD file tag |
+| `--block-soft` | `#fee2e2` | Tint surface under a DEL file tag or a veto tag |
 
 ## Dark Mode
 
@@ -58,6 +62,16 @@ only definition inside a conditional block.
 | `--block-strong` | `#b91c1c` | `#f87171` |
 | `--positive` | `#15803d` | `#4ade80` |
 | `--badge-text` | `#fff` | `#18181b` |
+| `--accent-soft` | `#eff6ff` | `#172554` |
+| `--positive-soft` | `#dcfce7` | `#14532d` |
+| `--warn-soft` | `#fef9c3` | `#78350f` |
+| `--block-soft` | `#fee2e2` | `#450a0a` |
+
+**Tint surfaces.** The `-soft` tokens are the 100-level tone of the state's hue in light mode and the 900-level in dark, stepping to the 50 or 950 tone only where the state's text token would fall under AA (blue in light: `--accent` on blue-100 is 4.24:1; blue and red in dark: 4.07:1 and 3.62:1). Measured text on tint, light / dark: `--accent` on `--accent-soft` 4.75 / 5.78; `--positive` on `--positive-soft` 4.57 / 5.23; `--warn-strong` on `--warn-soft` 4.68 / 5.43; `--block-strong` on `--block-soft` 5.30 / 5.84. A state sits on its tint token, never on `--bg-muted`: there an on chip is the off chip plus a text color (holistic review, R30).
+
+**Browser-drawn parts follow the palette.** `tokens.css` declares `color-scheme: light dark` on bare `:root`, `color-scheme: dark` inside both dark blocks, and `color-scheme: light` under `:root[data-theme="light"]`, so scrollbars and form controls follow the tokens; without it they stay light in dark mode, and the explicit-light block is needed because `light dark` on `:root` otherwise lets the browser follow the OS (holistic review, R28).
+
+**Never mute text with opacity** on an element that contains it; mute with a muted surface and `--text-muted` at full opacity. The audit shell's vetoed card at opacity .78 measured 4.06:1 light / 4.12:1 dark; the same text at full opacity measures 7.03 / 5.81 (holistic review, R31).
 
 **The severity colors are re-derived, not reused**, and the reasoning below
 inverts. In light mode a badge is white text on the severity fill, which is
