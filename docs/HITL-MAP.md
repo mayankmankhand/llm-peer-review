@@ -130,9 +130,9 @@ Stages hand off automatically. The human types `/explore` and approves the plan;
 
 ## Scoped-out follow-ups
 
-- **Verify-before-report stage in `/review` (M2) is a pipeline change, not a rules rewrite.** Recommendation: its own issue, separate from #147. #147 rewrites language to match this map; building the audit tiers into the `/review` orchestrator is implementation work with its own testing surface.
+- **Verify-before-report stage in `/review` (M2) is a pipeline change, not a rules rewrite.** Recommendation: its own issue, separate from #147. #147 rewrites language to match this map; building the audit tiers into the `/review` orchestrator is implementation work with its own testing surface. Resolved by #148 item 1 (the M2 audit tiers, shipped 2026-08-29) and #151 (the same audit on direct `/review-*` runs).
 - **Shared severity rubric.** Evidence E1 showed every project judging "critical" differently and severity labels unreliable in both directions. The map sidesteps severity as a gate input (M1), but the review skills would still benefit from one calibrated rubric. **Resolved by #150:** `severity-anchors.md` now opens with what severity actually decides (audit tier, verdict line, R-ID order, readability backstop) and what it explicitly does not (paging, which stays on M1's information locus), carries a solo-tool-versus-production calibration rule, and teaches the Block/Warn and Warn/Suggest lines by worked example. The two debates (`/ask-gpt`, `/ask-gemini`) inline it too, since their Recommended Actions are audit-routed by the same label, and so does `/peer-review`, whose confirmed findings carry the same Block/Warn/Suggest labels through its own evaluation.
-- **Sequencing.** #147 remains contingent on the #144 architecture answer (one shared source of truth per command vs a copy per tool), exactly as #147 already records.
+- **Sequencing.** #147 remains contingent on the #144 architecture answer (one shared source of truth per command vs a copy per tool), exactly as #147 already records. Resolved: #147 shipped 2026-08-29 as the auto-by-default rewrite (0fe3f33); the #144 architecture question stays open on its own.
 
 ---
 
