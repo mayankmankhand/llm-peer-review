@@ -34,8 +34,10 @@
 #      "[LOCALLY MODIFIED]", gates the run (exit 1 without -Force), and is
 #      replaced only with -Force
 #  11. A run that died after some copies but before the manifest write is
-#      recovered by the next run: every file restored, the manifest rebuilt
-#      whole, and no .toolkit-manifest.json.tmp left behind
+#      recovered by the next run. The manifest write is atomic, so what a
+#      crash actually leaves is the OLD manifest intact plus a partial
+#      .toolkit-manifest.json.tmp beside it: the next run must restore every
+#      file, rebuild the manifest whole, and leave no .tmp behind
 #  12. The line-merged files (.gitignore, .claude\settings.local.json) and
 #      the regenerated manifest each land in the backup dir as their
 #      pre-merge copies whenever a run rewrites them
@@ -51,8 +53,27 @@
 #      summary uses Compare-Object, which is order-insensitive, and an early
 #      return on its empty result used to skip the hash classification.
 #      setup.sh's diff is order-sensitive, so no counterpart there either.
-#  16. (ps1 only) With node absent from PATH the pre-flight says the
-#      permission merge will be skipped (one -DryRun, PATH restored after).
+#  16. With node absent from PATH the pre-flight says the permission merge
+#      will be skipped (one -DryRun, PATH restored after); a dry run with
+#      node present does not carry the note
+#  17. A linked .claude\settings.local.json (a dotfiles setup) survives the
+#      permission merge: it is still a link afterwards and the link target
+#      received the merged content. A symbolic link when this account can
+#      create one, a hard link otherwise (same guarantee - the merge writes
+#      into the existing file rather than swapping it - and no privilege
+#      needed); the file-mode half of the bash scenario has no Windows
+#      counterpart
+#  18. Each installer manages only the browse.js path form it can vouch
+#      for: on a UNC target setup.ps1 neither adds a //server/... entry nor
+#      removes the POSIX-form ones setup.sh wrote, and on any target its
+#      stale pattern is drive-letter only (a stale C:/... entry is still
+#      retired, a POSIX-form one is left alone)
+#  19. The version-neutral "new this version" box fires only when the
+#      installed version actually changes: present when the target's
+#      VERSION differs from the toolkit's, absent on an identical re-run
+#      (the absent half is checked in 7)
+#  20. (sh only) see test-installer-guarantees.sh - an unusable TMPDIR must
+#      not abort the run; setup.ps1 has no temp-dir dependency
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -121,6 +142,42 @@ function Invoke-Setup {
   # path and the -Force path, never a live prompt.
   "" | & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPath @SetupArgs *> $LogFile
 }
+
+# Edit-PermEntry: add (default) or -Remove one permissions.allow entry
+# through node, so the JSON stays valid wherever the entry sits - a
+# trailing-comma line filter (scenario 12 uses one while the entry is still
+# mid-list) silently misses an entry that a previous merge appended last -
+# and the file keeps the exact shape the merge itself writes. ConvertTo-Json
+# would do the job but escapes the quotes and ampersands the template
+# carries. Single quotes only in the script: Windows PowerShell 5.1 drops
+# embedded double quotes from native-command arguments (the rule setup.ps1
+# follows too). Paths and entries travel through environment variables.
+function Edit-PermEntry {
+  param([string]$File, [string]$Entry, [switch]$Remove)
+  $js = @'
+    const fs = require('fs');
+    const file = process.env.PERM_FILE;
+    const entry = process.env.PERM_ENTRY;
+    const j = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    let allow = j.permissions.allow.filter(p => p !== entry);
+    if (process.env.PERM_REMOVE !== '1') allow = [entry, ...allow];
+    j.permissions.allow = allow;
+    fs.writeFileSync(file, JSON.stringify(j, null, 2) + '\n');
+'@
+  $env:PERM_FILE = $File
+  $env:PERM_ENTRY = $Entry
+  $env:PERM_REMOVE = "0"
+  if ($Remove) { $env:PERM_REMOVE = "1" }
+  & node -e $js
+  $code = $LASTEXITCODE
+  Remove-Item -Path Env:PERM_FILE, Env:PERM_ENTRY, Env:PERM_REMOVE -ErrorAction SilentlyContinue
+  if ($code -ne 0) { Failed "test setup: node could not edit $File (exit $code)" }
+}
+
+# Scenario 18 installs into a second, UNC-addressed scratch target when the
+# toolkit itself sits on a UNC share; tracked here so the finally block can
+# remove it even if a scenario throws.
+$uncScratch = $null
 
 try {
   Write-Host ""
@@ -304,6 +361,19 @@ try {
   } else {
     Failed "manifest entry for .claude/commands/$EditedCmd missing or malformed"
   }
+  # Keys in ordinal order, the same order setup.sh writes (LC_ALL=C sort):
+  # the two installers used to write enumeration order (Get-ChildItem order
+  # here - unsorted over UNC - and glob order there), so a target set up
+  # from both sides saw a different byte order every time and backed the
+  # manifest up on every alternating run.
+  $mfKeys = @([regex]::Matches($manifestRaw, '(?m)^    "([^"]+)": "[0-9a-f]{64}"') | ForEach-Object { $_.Groups[1].Value })
+  $mfSorted = [string[]]@($mfKeys | ForEach-Object { $_ })
+  [System.Array]::Sort($mfSorted, [System.StringComparer]::Ordinal)
+  if ($mfKeys.Count -gt 0 -and (($mfKeys -join "`n") -ceq ($mfSorted -join "`n"))) {
+    Ok "manifest keys are in sorted (ordinal) order"
+  } else {
+    Failed "manifest keys are not in sorted (ordinal) order"
+  }
 
   # --- [7] identical re-run is clean ---------------------------
   Write-Host "[7] identical re-run"
@@ -326,6 +396,14 @@ try {
     Failed "clean re-run triggered the overwrite gate"
   } else {
     Ok "clean re-run did not trigger the overwrite gate"
+  }
+  # The "new this version" box is for upgrades. $IsUpgrade is true whenever
+  # toolkit.md exists, so without a version-changed guard the box fired on
+  # every same-version re-run too. The positive half is scenario 19.
+  if ($rerunLog.Contains("new this version:")) {
+    Failed "identical re-run printed the `"new this version`" box"
+  } else {
+    Ok "identical re-run did not print the `"new this version`" box"
   }
   foreach ($rel in $CustomFiles) {
     if (Test-FilesEqual (Join-Path $Scratch $rel) (Join-Path $Snap $rel)) {
@@ -459,8 +537,9 @@ try {
   # toolkit now ships. It must gate exactly like a local edit: exit 1 without
   # -Force, replaced (and backed up) with it. The second command file is
   # used so this cannot interact with $EditedCmd's history above. Its entry
-  # sits mid-manifest (commands are enumerated first), so dropping the line
-  # keeps the JSON valid for setup.ps1's ConvertFrom-Json.
+  # sits mid-manifest (keys are sorted, and .claude/commands/ sorts before
+  # the .claude/rules/, .claude/scripts/ and .claude/skills/ keys), so
+  # dropping the line keeps the JSON valid for setup.ps1's ConvertFrom-Json.
   Write-Host "[10] manifest collision gate (entry missing, file differs)"
   $CollideCmd = (Get-ChildItem -Path (Join-Path $ToolkitRoot ".claude\commands") -Filter *.md -File | Select-Object -Skip 1 -First 1).Name
   $collideRel = Join-Path ".claude\commands" $CollideCmd
@@ -513,11 +592,14 @@ try {
 
   # --- [11] interrupted run recovery -----------------------------
   # Simulates a run that died after some copies but before the manifest
-  # write: manifest gone, three managed files gone. The re-run must restore
-  # every file, write a whole manifest (byte-identical to the one the last
-  # clean run wrote, since nothing else changed), and leave no .tmp behind.
-  # The manifest is built in a .tmp sibling and moved into place so it is
-  # always whole or absent, never partial.
+  # write. The manifest is built in a .tmp sibling and moved into place, so
+  # a real crash never leaves a missing or truncated manifest: it leaves the
+  # OLD manifest intact plus, at most, a partial .tmp beside it. The old
+  # shape of this scenario (manifest deleted, three files deleted) could not
+  # tell an atomic writer from a direct Set-Content - both rebuild a whole
+  # file when nothing crashes. The stale .tmp is what separates them: an
+  # atomic writer necessarily passes through that path and replaces it, a
+  # direct write never touches it and leaves the fragment behind.
   Write-Host "[11] interrupted run recovery"
   $LostShell = (Get-ChildItem -Path (Join-Path $ToolkitRoot ".claude\skills\shared\shells") -File | Select-Object -First 1).Name
   $LostFiles = @(
@@ -527,8 +609,14 @@ try {
   )
   $manifestBeforeInterrupt = Join-Path $Work "manifest-before-interrupt.json"
   Copy-Item -LiteralPath $manifestPath -Destination $manifestBeforeInterrupt -Force
-  Remove-Item -LiteralPath $manifestPath -Force
+  # A truncated JSON fragment, cut mid-key: exactly what a crash mid-write
+  # leaves in the .tmp slot. UTF-8 without BOM, like the real writer.
+  $manifestTmpPath = $manifestPath + ".tmp"
+  [System.IO.File]::WriteAllText($manifestTmpPath, "{`n  `"toolkitVersion`": `"0.0.0-partial`",`n  `"files`": {`n    `".claude/commands/", $utf8NoBom)
   foreach ($rel in $LostFiles) { Remove-Item -LiteralPath (Join-Path $Scratch $rel) -Force }
+  if ((-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) -or (-not (Test-Path -LiteralPath $manifestTmpPath -PathType Leaf)) -or (Test-Path -LiteralPath (Join-Path $Scratch ".claude\scripts\render-html.js"))) {
+    Failed "test setup: expected the manifest in place, a partial .tmp beside it, and the three files gone"
+  }
   Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "interrupted.log")
   $intExit = $LASTEXITCODE
   if ($intExit -eq 0) {
@@ -543,14 +631,23 @@ try {
       Failed "not restored: $rel"
     }
   }
+  if (-not (Test-Path -LiteralPath $manifestTmpPath)) {
+    Ok "partial .toolkit-manifest.json.tmp replaced, none left behind"
+  } else {
+    Failed ".toolkit-manifest.json.tmp left behind (writer did not go through the .tmp)"
+  }
   # Completeness is checked three ways, because the first alone cannot catch a
   # writer that truncates consistently (both manifests would then match): the
   # rebuilt file equals the last clean run's, every restored file has an entry
-  # (two of the three sit far down the list), and the file is closed properly.
+  # (the keys are sorted, so two of the three sit well past the commands
+  # block), and the file is closed properly.
   if (Test-FilesEqual $manifestPath $manifestBeforeInterrupt) {
     Ok "manifest rebuilt whole (identical to the last clean run's)"
   } else {
-    Failed "rebuilt manifest differs from the last clean run's (partial or missing entries)"
+    # The differing lines are named so a changed hash (a toolkit source file
+    # edited between the two runs) is told apart from a missing entry.
+    $mfDiff = @(Compare-Object @(Get-Content -LiteralPath $manifestBeforeInterrupt) @(Get-Content -LiteralPath $manifestPath) | Select-Object -First 4 | ForEach-Object { $_.SideIndicator + " " + $_.InputObject.Trim() })
+    Failed ("rebuilt manifest differs from the last clean run's (partial or missing entries): " + ($mfDiff -join " "))
   }
   $intManifest = ""
   if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
@@ -569,11 +666,6 @@ try {
     Ok "manifest is well-formed (closing brace present)"
   } else {
     Failed "manifest is not well-formed (no closing brace - partial write?)"
-  }
-  if (-not (Test-Path -LiteralPath ($manifestPath + ".tmp"))) {
-    Ok "no .toolkit-manifest.json.tmp left behind"
-  } else {
-    Failed ".toolkit-manifest.json.tmp left behind"
   }
 
   # --- [12] backup completeness for merged files -----------------
@@ -667,7 +759,10 @@ try {
     Failed "run with unparseable settings exited $badExit"
   }
   Assert-Contains "Warning: could not merge permissions into .claude\settings.local.json (" (Join-Path $Log "bad-settings.log") "warns that the merge was skipped"
-  Assert-Contains "SyntaxError" (Join-Path $Log "bad-settings.log") "warning names the error"
+  # The error name must sit inside the warning's parentheses. A bare
+  # "SyntaxError" anywhere in the log was satisfied by the old bug's output
+  # too (the stack trace printed as "+ SyntaxError ..." lines).
+  Assert-Contains "could not merge permissions into .claude\settings.local.json (SyntaxError" (Join-Path $Log "bad-settings.log") "warning names the error"
   Assert-Contains "add new entries by hand from the permissions" (Join-Path $Log "bad-settings.log") "warning points at the permissions table"
   $badLog = Get-Content -LiteralPath (Join-Path $Log "bad-settings.log") -Raw
   $badPlus = @($badLog -split "`n" | Where-Object { $_ -match '^\s+\+ ' -and ($_ -match 'Error' -or $_ -match '^\s+\+\s+at ') })
@@ -801,12 +896,14 @@ try {
     Failed "-Force did not restore the reordered file"
   }
 
-  # --- [16] ps1 only: node-absent pre-flight note ------------------
+  # --- [16] node-absent pre-flight note ----------------------------
   # The permission merge needs node. When it is missing the pre-flight must
   # say so up front rather than letting the merge silently not happen. PATH
   # is trimmed of every directory holding node.exe or node.cmd for one
-  # -DryRun (nothing is written), then restored.
-  Write-Host "[16] node-absent pre-flight note (ps1 only)"
+  # -DryRun (nothing is written), then restored. The negative control reads
+  # the populated dry run from scenario 4, where node was present, and
+  # expects no note there.
+  Write-Host "[16] node-absent pre-flight note"
   $savedPath = $env:PATH
   try {
     $env:PATH = (@($env:PATH -split ';' | Where-Object {
@@ -824,8 +921,187 @@ try {
   }
   Assert-Contains "Note: node was not found, so the .claude\settings.local.json permission" (Join-Path $Log "no-node.log") "pre-flight notes that node is missing"
   Assert-Contains "Dry run complete" (Join-Path $Log "no-node.log") "dry run without node still completes"
+  $dryrunWithNode = Get-Content -LiteralPath (Join-Path $Log "dryrun.log") -Raw
+  if ($dryrunWithNode.Contains("Note: node was not found")) {
+    Failed "dry run with node present carried the node-absent note"
+  } else {
+    Ok "dry run with node present does not carry the node-absent note"
+  }
+
+  # --- [17] linked settings.local.json survives the merge ----------
+  # A dotfiles setup keeps settings.local.json elsewhere and links it into
+  # .claude\. The merge used to Move-Item a fresh .tmp over the path, which
+  # replaces the directory entry: a symlink is severed and the dotfiles
+  # copy stops receiving updates. It must write into the existing file
+  # instead. A symbolic link needs Developer Mode or an elevated shell on
+  # Windows; when this account cannot create one, a hard link stands in -
+  # the guarantee under test (write through the existing entry, never swap
+  # it) is the same, a hard link needs no privilege, and the note says
+  # which link kind ran. The bash suite also checks the file mode; Windows
+  # has no mode bits to preserve. Reuses $PermEntry from scenario 12 to
+  # make the merge write.
+  Write-Host "[17] linked settings.local.json survives the merge"
+  $dotfiles = Join-Path $Work "dotfiles"
+  New-Item -ItemType Directory -Force -Path $dotfiles | Out-Null
+  $dotSettings = Join-Path $dotfiles "settings.local.json"
+  Copy-Item -LiteralPath $settingsPath -Destination $dotSettings -Force
+  Edit-PermEntry -File $dotSettings -Entry $PermEntry -Remove
+  Remove-Item -LiteralPath $settingsPath -Force
+  $linkKind = $null
+  try {
+    New-Item -ItemType SymbolicLink -Path $settingsPath -Value $dotSettings -ErrorAction Stop | Out-Null
+    $linkKind = "SymbolicLink"
+  } catch {
+    try {
+      New-Item -ItemType HardLink -Path $settingsPath -Value $dotSettings -ErrorAction Stop | Out-Null
+      $linkKind = "HardLink"
+      Write-Host "  note: this account cannot create symbolic links (Developer Mode or an elevated shell is needed); checking with a hard link instead"
+    } catch {
+      $linkKind = $null
+    }
+  }
+  if (-not $linkKind) {
+    Write-Host "  skip: this account can create neither a symbolic link nor a hard link here, so the linked-file guarantee is not checked"
+    Copy-Item -LiteralPath $dotSettings -Destination $settingsPath -Force
+  } else {
+    if ((Get-Content -LiteralPath $dotSettings -Raw).Contains($PermEntry)) {
+      Failed "test setup: could not stage the linked settings.local.json without $PermEntry"
+    }
+    Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "symlink.log")
+    $linkExit = $LASTEXITCODE
+    if ($linkExit -eq 0) {
+      Ok "linked-file run exited 0"
+    } else {
+      Failed "linked-file run exited $linkExit"
+    }
+    $linkItem = Get-Item -LiteralPath $settingsPath -Force
+    if ($linkItem.LinkType -eq $linkKind) {
+      Ok "settings.local.json is still a $linkKind after the merge"
+    } else {
+      Failed "settings.local.json is no longer a $linkKind (merge replaced the directory entry)"
+    }
+    if ((Get-Content -LiteralPath $dotSettings -Raw).Contains($PermEntry)) {
+      Ok "link target received the merged content"
+    } else {
+      Failed "link target did not receive the restored entry: $PermEntry"
+    }
+    # Back to a regular file so the remaining scenarios see the usual layout.
+    Remove-Item -LiteralPath $settingsPath -Force
+    Copy-Item -LiteralPath $dotSettings -Destination $settingsPath -Force
+  }
+
+  # --- [18] foreign-form browse.js entries are left alone ----------
+  # The absolute-path browse.js entries carry whichever path form wrote
+  # them: setup.ps1 writes drive-letter paths, setup.sh writes POSIX paths.
+  # A target reached over UNC (\\wsl.localhost\...) used to get the worst of
+  # both: the merge flipped the backslashes into a //wsl.localhost/... entry
+  # that never matches a real command line, and its stale pattern accepted
+  # any single-slash root, so it also deleted the POSIX entries setup.sh had
+  # written - which setup.sh then reversed on its next run, with a backup on
+  # every alternating run. Each installer now manages only the form it can
+  # vouch for: on a UNC target setup.ps1 neither adds nor removes absolute
+  # entries, and on any target its stale pattern is drive-letter only. The
+  # UNC half needs a UNC target: one is carved out under the toolkit's own
+  # share when the toolkit sits on one (the WSL layout this suite runs
+  # from), and skipped with a note otherwise. The drive-letter half runs
+  # against the usual scratch target either way.
+  Write-Host "[18] foreign-form browse.js entries left alone, stale drive-letter one retired"
+  $posixEntry = "Bash(echo * | node /home/someone/project/.claude/scripts/browse.js *)"
+  if ($ToolkitRoot -match '^\\\\[^\\]+\\[^\\]+\\') {
+    $uncScratch = Join-Path (Join-Path $Matches[0] "tmp") ("toolkit-guarantee-unc-" + [System.IO.Path]::GetRandomFileName())
+    try {
+      New-Item -ItemType Directory -Force -Path (Join-Path $uncScratch ".claude") -ErrorAction Stop | Out-Null
+    } catch {
+      $uncScratch = $null
+    }
+  }
+  if (-not $uncScratch) {
+    Write-Host "  skip: the toolkit is not on a UNC share, so there is no UNC target to install into here"
+  } else {
+    $uncSettings = Join-Path $uncScratch ".claude\settings.local.json"
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".claude\settings.local.json") -Destination $uncSettings -Force
+    Edit-PermEntry -File $uncSettings -Entry $posixEntry
+    Invoke-Setup -SetupArgs @("-Target", $uncScratch) -LogFile (Join-Path $Log "unc-target.log")
+    $uncExit = $LASTEXITCODE
+    if ($uncExit -eq 0) {
+      Ok "UNC-target run exited 0"
+    } else {
+      Failed "UNC-target run exited $uncExit"
+    }
+    $uncText = Get-Content -LiteralPath $uncSettings -Raw
+    if ($uncText.Contains($posixEntry)) {
+      Ok "POSIX-form browse.js entry left alone on a UNC target"
+    } else {
+      Failed "POSIX-form browse.js entry was removed on a UNC target"
+    }
+    if ($uncText.Contains("node //")) {
+      Failed "a UNC-form (//server/...) browse.js entry was added"
+    } else {
+      Ok "no UNC-form browse.js entry added on a UNC target"
+    }
+    Remove-Item -LiteralPath $uncScratch -Recurse -Force -ErrorAction SilentlyContinue
+    $uncScratch = $null
+  }
+  # Drive-letter half: a stale drive-letter entry is still retired (the
+  # narrowed pattern did not switch the cleanup off), a POSIX-form entry on
+  # a drive-letter target is left alone, and this target's own entry stays.
+  $staleDriveEntry = "Bash(echo * | node C:/someone/old-project/.claude/scripts/browse.js *)"
+  Edit-PermEntry -File $settingsPath -Entry $staleDriveEntry
+  Edit-PermEntry -File $settingsPath -Entry $posixEntry
+  Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "drive-entry.log")
+  $driveExit = $LASTEXITCODE
+  if ($driveExit -eq 0) {
+    Ok "path-form run exited 0"
+  } else {
+    Failed "path-form run exited $driveExit"
+  }
+  $driveText = Get-Content -LiteralPath $settingsPath -Raw
+  if ($driveText.Contains($staleDriveEntry)) {
+    Failed "stale drive-letter browse.js entry was not retired"
+  } else {
+    Ok "stale drive-letter browse.js entry retired"
+  }
+  if ($driveText.Contains($posixEntry)) {
+    Ok "POSIX-form browse.js entry left alone on a drive-letter target"
+  } else {
+    Failed "POSIX-form browse.js entry was removed on a drive-letter target"
+  }
+  $ownEntry = "Bash(echo * | node " + $Scratch.Replace("\", "/") + "/.claude/scripts/browse.js *)"
+  if ($driveText.IndexOf($ownEntry, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    Ok "this target's own drive-letter entry is still present"
+  } else {
+    Failed "this target's own drive-letter entry is missing"
+  }
+
+  # --- [19] "new this version" box fires on a version change -------
+  # The positive half of the guard checked in scenario 7: with the target's
+  # VERSION stamped to something else, the version-neutral box must print.
+  # The stamp is a managed-file change (VERSION is refreshed and backed up),
+  # so this run legitimately creates a backup dir.
+  Write-Host "[19] `"new this version`" box fires on a version change"
+  [System.IO.File]::WriteAllText((Join-Path $Scratch "VERSION"), "0.0.0-test`n", $utf8NoBom)
+  Invoke-Setup -SetupArgs @("-Target", $Scratch) -LogFile (Join-Path $Log "version-box.log")
+  $vbExit = $LASTEXITCODE
+  if ($vbExit -eq 0) {
+    Ok "version-change run exited 0"
+  } else {
+    Failed "version-change run exited $vbExit"
+  }
+  Assert-Contains "upgrade (v0.0.0-test -> v" (Join-Path $Log "version-box.log") "pre-flight reports the version gap"
+  Assert-Contains "new this version:" (Join-Path $Log "version-box.log") "version-change run printed the `"new this version`" box"
+  if ((Get-Content -LiteralPath (Join-Path $Scratch "VERSION") -Raw).Trim() -eq (Get-Content -LiteralPath (Join-Path $ToolkitRoot "VERSION") -Raw).Trim()) {
+    Ok "VERSION refreshed to the toolkit's"
+  } else {
+    Failed "VERSION not refreshed"
+  }
+
+  # Scenario 20 is sh-only (see test-installer-guarantees.sh): an unusable
+  # TMPDIR; setup.ps1 has no temp-dir dependency.
 
 } finally {
+  if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {
+    Remove-Item -LiteralPath $uncScratch -Recurse -Force -ErrorAction SilentlyContinue
+  }
   if (Test-Path -LiteralPath $Work) {
     Remove-Item -LiteralPath $Work -Recurse -Force -ErrorAction SilentlyContinue
   }
