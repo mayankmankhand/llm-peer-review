@@ -26,8 +26,44 @@ Pick from this neutral palette unless an element calls for a severity color (see
 | `--text` | `#18181b` | Primary text |
 | `--text-muted` | `#52525b` | Secondary text, captions |
 | `--accent` | `#2563eb` | Links, interactive elements (matches Suggest severity for visual unity) |
+| `--badge-text` | `#fff` | Text on a severity badge. A token rather than a literal because dark mode inverts it |
 
-Dark mode is out of scope for v1. Downstream projects may add their own.
+## Dark Mode
+
+Supported since issue #155. Artifacts are published to a hosted page as well as
+opened locally, and a published page renders inside the **viewer's** theme, so a
+light-only stylesheet hands a dark-mode reader a white slab.
+
+The light palette above is the unconditional default and lives on bare `:root`.
+Dark mode redefines only the tokens, in two places carrying identical
+declarations: `@media (prefers-color-scheme: dark)` guarded as
+`:root:not([data-theme="light"])` for a viewer whose theme is "system", and
+`:root[data-theme="dark"]` for an explicit choice. The guard is what lets an
+explicit light choice win on a machine set to dark. No color is ever given its
+only definition inside a conditional block.
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg` | `#ffffff` | `#18181b` |
+| `--bg-muted` | `#f4f4f5` | `#27272a` |
+| `--border` | `#e4e4e7` | `#3f3f46` |
+| `--text` | `#18181b` | `#f4f4f5` |
+| `--text-muted` | `#52525b` | `#a1a1aa` |
+| `--accent` | `#2563eb` | `#60a5fa` |
+| `--block` | `#dc2626` | `#f87171` |
+| `--warn` | `#d97706` | `#fbbf24` |
+| `--warn-strong` | `#b45309` | `#fbbf24` |
+| `--suggest` | `#2563eb` | `#60a5fa` |
+| `--badge-text` | `#fff` | `#18181b` |
+
+**The severity colors are re-derived, not reused**, and the reasoning below
+inverts. In light mode a badge is white text on the severity fill, which is
+exactly why `--warn-strong` exists. On a dark ground the readable badge is a
+light fill with near-black text, so every severity fill moves to its 400-level
+tone and `--badge-text` flips to the page's dark ink. Each dark pairing clears
+AA comfortably: about 7.5:1 for red and blue, about 11:1 for amber. Amber no
+longer needs a separate strong variant in dark mode, so `--warn-strong` tracks
+`--warn` there.
 
 ## Severity Badge Colors
 

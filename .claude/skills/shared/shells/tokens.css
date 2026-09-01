@@ -9,11 +9,50 @@
  * layout (sticky bars, chips, two-column rounds, charts) lives in each shell's
  * own <style>; this file holds only the tokens and the cross-shell card system. */
 
+/* Light palette. Defined on BARE :root so it is the unconditional default -
+ * never inside a media query - and the dark blocks below redefine only tokens.
+ * No color is given its sole definition in a conditional block. */
 :root{
   --bg:#ffffff; --bg-muted:#f4f4f5; --border:#e4e4e7;
   --text:#18181b; --text-muted:#52525b; --accent:#2563eb;
   --block:#dc2626; --warn:#d97706; --suggest:#2563eb;
   --warn-strong:#b45309; /* AA text/badge variant of --warn (~5:1 contrast); --warn stays for decorative borders only */
+  --badge-text:#fff;     /* text ON a severity badge; a token because dark mode inverts it */
+}
+
+/* Dark palette (issue #155 item 4).
+ *
+ * Why this exists: these pages used to be local-only, where they inherited
+ * nothing from the viewer. Published to a hosted page they render inside the
+ * VIEWER's theme, so a light-only stylesheet gives a dark-mode reader a white
+ * slab. Both selectors below carry the SAME declarations - the media query
+ * handles a viewer whose theme is "system", the attribute handles an explicit
+ * choice - and the media query is guarded with :not([data-theme="light"]) so an
+ * explicit light choice still wins on a machine set to dark.
+ *
+ * The severity colors are re-derived, not reused. In light mode a badge is
+ * WHITE text on the severity color, which is the whole reason --warn-strong
+ * (#b45309) exists: base amber #d97706 is only ~3.2:1 against white and fails
+ * AA. On a dark ground that trade inverts - the readable badge is a LIGHT fill
+ * with near-black text - so dark mode lightens every severity fill to the
+ * 400-level tone and flips --badge-text to the page's dark ink. Each pairing
+ * clears AA comfortably (~7.5:1 for red and blue, ~11:1 for amber), and amber
+ * no longer needs a separate strong variant, so --warn-strong tracks --warn. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
+    --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
+    --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
+    --warn-strong:#fbbf24;
+    --badge-text:#18181b;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
+  --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
+  --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
+  --warn-strong:#fbbf24;
+  --badge-text:#18181b;
 }
 *{box-sizing:border-box;}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:16px;}
@@ -32,7 +71,7 @@ a:hover{text-decoration:underline;}
 .finding header,.action header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;}
 
 /* Severity badges. */
-.badge{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:#fff;white-space:nowrap;}
+.badge{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:var(--badge-text);white-space:nowrap;}
 .badge--block{background:var(--block);}
 .badge--warn{background:var(--warn-strong);}
 .badge--suggest{background:var(--suggest);}
@@ -44,6 +83,11 @@ a:hover{text-decoration:underline;}
 .what{font-size:1rem;font-weight:500;margin:.1rem 0 .55rem;}
 .field{font-size:.92rem;margin-bottom:.35rem;}
 .field strong{color:var(--text);}
+
+/* Placeholder left by render-html.js when a payload image could not be inlined -
+   unreadable, or over the embed budget. Visible on purpose: the bug this
+   replaces was a silently broken image. */
+.img-omitted{color:var(--text-muted);font-size:.85rem;}
 
 /* Summary footer - shared by review and any report that ends with a count strip. */
 footer.summary{margin-top:2rem;border-top:1px solid var(--border);padding-top:1rem;display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.9rem;color:var(--text-muted);}
