@@ -408,12 +408,19 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
   function fileLink(file) { // eslint-disable-line no-unused-vars
     if (!file || (!file.relPath && !file.absPath)) return null;
     var rel = file.relPath || file.absPath;
-    var abs = file.absPath || file.relPath;
     var hasLine = file.line != null && file.line !== "";
     var visible = rel + (hasLine ? ":" + file.line : "");
-    var target = abs + (hasLine ? ":" + file.line : "");
+    // No absPath means the payload was rendered with --no-abs, i.e. this page is
+    // destined for a hosted viewer (issue #155 item 2). A vscode://file/ link
+    // built from the RELATIVE path would not leak anything, but it is dead for
+    // every viewer, so render the reference as plain text instead of a link.
+    if (!file.absPath) {
+      var span = el("span", "file-link");
+      text(span, visible);
+      return span;
+    }
     var a = el("a", "file-link");
-    a.setAttribute("href", "vscode://file/" + target);
+    a.setAttribute("href", "vscode://file/" + file.absPath + (hasLine ? ":" + file.line : ""));
     text(a, visible);
     return a;
   }

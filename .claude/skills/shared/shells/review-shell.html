@@ -92,8 +92,10 @@
 
   File-reference rendering: <a class="file-link"
     href="vscode://file/<absPath>[:<line>]"><relPath>[:<line>]</a>.
-  Visible text = relPath (+ :line if present). href uses absPath (falls back to
-  relPath when absPath is missing).
+  Visible text = relPath (+ :line if present). The href uses absPath; when absPath
+  is absent (a --no-abs render, i.e. a page bound for a hosted viewer) the
+  reference renders as PLAIN TEXT rather than a link, because an editor link
+  built from a relative path is dead for every viewer.
   ==========================================================================
 -->
 <style>
@@ -338,12 +340,19 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
   // ---- file reference -> clickable vscode:// link -----------------------
   function fileLink(file) {
     var rel = file.relPath || file.absPath || "";
-    var abs = file.absPath || file.relPath || "";
     var hasLine = file.line != null && file.line !== "";
     var visible = rel + (hasLine ? ":" + file.line : "");
-    var target = abs + (hasLine ? ":" + file.line : "");
+    // No absPath means the payload was rendered with --no-abs, i.e. this page is
+    // destined for a hosted viewer (issue #155 item 2). A vscode://file/ link
+    // built from the RELATIVE path would not leak anything, but it is dead for
+    // every viewer, so render the reference as plain text instead of a link.
+    if (!file.absPath) {
+      var span = el("span", "file-link");
+      text(span, visible);
+      return span;
+    }
     var a = el("a", "file-link");
-    a.setAttribute("href", "vscode://file/" + target);
+    a.setAttribute("href", "vscode://file/" + file.absPath + (hasLine ? ":" + file.line : ""));
     text(a, visible);
     return a;
   }
