@@ -226,21 +226,21 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's New
 
-**Latest release: v6.0.0** (August 2026). **This one changes behavior**, so read the first item before upgrading.
+**Latest release: v6.1.0** (September 2026), additive on top of **v6.0.0** (August 2026). **v6.0.0 is the one that changed behavior** and is still the release to read first: if you are upgrading from v5.x or earlier, start with its bullets directly below.
 
-Setup installs from `main`, not from a tag, so you get everything on this page, not just the tagged release. The bullets directly below describe v6.0.0 itself; [Since 6.0.0](#since-600) lists what has landed on `main` after it. See the CHANGELOG for the full split.
+Setup installs from `main`, not from a tag, so you get everything on this page, not just the tagged release. The bullets directly below describe v6.0.0; [What v6.1.0 adds](#what-v610-adds) lists what the newer release builds on top of it. See the CHANGELOG for the full split.
 
 - **The loop no longer stops at a report.** A review used to hand you a list and wait for "fix it". It now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and starts the next stage on its own. Two per-run phrases take control back, and they do different things: say **"report only"** and the run changes nothing, say **"no chaining"** and it finishes its stage without starting the next. Nothing was renamed or removed; what changed is what a command does once it starts.
 - **Findings have to prove themselves before you see them.** Every finding now ships with a receipt (a read-only command, plus what its output must show), and the run executes it. What survives goes to a fresh skeptic told to refute it, and a Block-severity finding faces three. Expect shorter reports: the first live run killed four of seven findings. What was thrown out is listed rather than hidden.
 - **Nothing gets pushed without a secret scan.** A tripwire reads every outgoing commit before any push the loop makes, looking for secrets, never-push files, and changes to shared settings. It reads commit by commit rather than the final diff, because a secret added and then removed leaves no trace at the end but still lands in history.
 - **It works on GitLab now, not just GitHub.** Commands read your git remote and pick `gh` or `glab` from what they find, so there is nothing to configure at setup time. GitHub is unchanged.
-- **HTML artifacts gained a second viewport.** Plans, reviews, and cycle summaries still open in your local browser as before; when the session can publish, it asks your consent, then publishes the same file as a private Claude-hosted page and gives you the link. Purely additive in this release: if publishing is unavailable, nothing is lost. Every publish is recorded in `artifacts/html/index.jsonl`, and each page is named from its own title.
+- **HTML artifacts gained a second viewport.** Plans, reviews, and cycle summaries still open in your local browser as before; when the session can publish, it asks your consent, then publishes the same file as a private Claude-hosted page and gives you the link. Purely additive in this release: if publishing is unavailable, nothing is lost. Every publish is recorded in `artifacts/html/index.jsonl`, and each page is named from its own title. (v6.1.0 then made the hosted page the primary viewport and dropped the ask; see [What v6.1.0 adds](#what-v610-adds).)
 
 Upgrading from v5.2.0 or earlier? v6.0.0 also carries v5.3.0 (the application-security review domain) and v5.4.0 (bounded, verifier-gated loops) - one re-run of setup picks up all of it.
 
-### Since 6.0.0
+### What v6.1.0 adds
 
-Landed on `main` after the v6.0.0 tag. A re-run of setup picks all of it up; [Update an Existing Project](#update-an-existing-project) lists what an upgrade touches.
+Released 2026-09-01 on top of v6.0.0. Nothing here changes the auto-by-default behavior above; it builds on it. A re-run of setup picks all of it up; [Update an Existing Project](#update-an-existing-project) lists what an upgrade touches.
 
 - **A correction ledger.** `/document` now records each time you stepped in during a cycle, with a note in your own words about what went wrong, and `/error-analysis` groups and ranks those notes so you fix what keeps happening. Rows live under `~/.claude/` on your machine, outside every repo, are never published or sent to another model, and the two fields that quote what was said stay out of every summary. Opt a repo out with `touch .claude/.no-correction-log`; a one-time backfill of older transcripts also exists, run only when you ask and only for the repo you name (documented in the `error-analysis` skill).
 - **The hosted page is now the primary viewport.** Plans, reviews, cycle summaries and the rest are published to a private Claude-hosted page under claude.ai and you get the link. The local browser open is the fallback for a session that cannot publish (Cursor, or the feature turned off). Exactly one viewport opens either way, never a bare file path.

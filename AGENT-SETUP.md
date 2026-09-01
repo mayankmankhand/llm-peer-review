@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v6.0.0)
+# AI Agent Setup Instructions (v6.1.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -139,7 +139,7 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new (unreleased, ships in the next version):** Since 6.0.0 - the correction ledger (#157), the hosted page as the primary viewport with no consent ask (#155), a hosted-URL stamp on every published file, Windows installer parity plus upgrade safety in both installers, and two review-loop fixes. After re-running setup:
+**What's new in v6.1.0:** Additive on top of v6.0.0 (#155, #156, #157, plus a holistic pass over the whole range) - the correction ledger, the hosted page as the primary viewport with no consent ask, a hosted-URL stamp on every published file, Windows installer parity plus upgrade safety in both installers, and two review-loop fixes. Nothing here changes the auto-by-default behavior v6.0.0 introduced; if the user is upgrading from v5.x or earlier, walk them through the v6.0.0 block below first. After re-running setup:
 - `/document` now has a capture stage. At the end of a cycle it finds the moments the user stepped in, has a fresh subagent read those exchanges cold, and asks the user to confirm or rewrite a short note about each one before anything is recorded. Nothing is written without their say-so. It explains itself the first time it runs in a project, so you do not need to introduce it.
 - A new `/error-analysis` command groups those notes into categories and ranks them by count. It is user-triggered and never chained into. It refuses to rank on fewer than ten rows. A one-time backfill of older transcripts exists (`--since` on the script's `--candidates` mode), run only when the user asks and only for the repo they name.
 - Data lives at `~/.claude/`, per machine, append-only, outside every repo. Tell the user plainly: the mechanism ships to every install, the data never leaves their machine, it is never published, and it is never sent to another model. Two fields hold near-verbatim fragments and are excluded from every rollup. They can turn it off for a repo with `touch .claude/.no-correction-log`. The files that ship it: `.claude/scripts/correction-ledger.js`, `.claude/agents/correction-extractor.md`, and `.claude/skills/error-analysis/SKILL.md`.
@@ -151,13 +151,13 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - **Upgrade safety in both installers.** The manifest is written atomically (temp file, then rename); the previous manifest and the pre-merge `.gitignore` and `settings.local.json` are backed up into the same backup folder as everything else; a user file sitting at a path the toolkit newly ships is treated as locally modified, so it gates the run instead of being silently replaced; the upgrade banner is version-neutral and points at `CHANGELOG.md` and this file instead of stale v5.0 text; and a failed permission merge is reported as a warning that leaves the file unchanged. The guarantee suites grew from 51 to 129 checks (bash) and 51 to 148 (PowerShell), every new check mutation-tested. "Updating an Existing Project" above covers the gate, the backup folder, and the after-upgrade checklist.
 - **Review loop.** A direct `/review-*` run that fans out sub-agents now dedups with the same rule as `/review`: a merged finding keeps the highest severity of its sources. `/peer-review` is no longer listed as an HTML call site. Nothing to do beyond re-running setup.
 
-**What's new in v6.0.0:** Auto by default - a breaking behavior change (#143, #145 through #152, #154). After re-running setup:
+**What was new in v6.0.0:** Auto by default - a breaking behavior change (#143, #145 through #152, #154), and still the block to read first when the user is upgrading from v5.x or earlier. After re-running setup:
 - The loop no longer stops at a report. A review now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and hands off to the next stage. Tell the user this plainly: it is the reason for the major version. Two per-run phrases take it back, and they do different things - "report only" stops the changing, "no chaining" stops the handoff.
 - Findings must prove themselves first. Each carries a receipt (a read-only command plus what its output must show), the run executes it, and survivors face a skeptic; a Block-severity finding faces three. Reports are shorter, and what was thrown out is listed rather than hidden.
 - A pre-push tripwire (`.claude/scripts/pre-push-check.js`) reads every outgoing commit for secrets, never-push files, and shared-settings changes before any push the loop makes. It fails closed. Note it is a rule the toolkit follows, not a git hook, so a `git push` typed by hand is unscanned.
-- Five kinds of action still always ask: releases and version bumps, prompt-file edits, deleting user data, sending anything off the machine (two named exceptions as of 6.0.0: the pull request `/document` opens at the end of a chained cycle, plus an artifact publish the user already consented to that session; this has since changed, see the unreleased block above), and force pushes.
+- Five kinds of action still always ask: releases and version bumps, prompt-file edits, deleting user data, sending anything off the machine (two named exceptions as of 6.0.0: the pull request `/document` opens at the end of a chained cycle, plus an artifact publish the user already consented to that session; this has since changed, see the v6.1.0 block above), and force pushes.
 - The toolkit now works on GitLab as well as GitHub, detected from the git remote at the moment it is needed. The `glab` path has since been executed end to end against a live repo and its three defects are fixed, so do not warn the user it is untested. One caveat remains: `--output json` has moved between glab versions, and older builds want `-F json`.
-- HTML artifacts still open locally and are also published to a private Claude-hosted page when the session can, after a consent ask (this has since changed: see the unreleased block above).
+- HTML artifacts still open locally and are also published to a private Claude-hosted page when the session can, after a consent ask (this has since changed: see the v6.1.0 block above).
 
 **What was new in v5.5.0:** Installer guardrails + model refresh (#134, #138, #139, #140). After re-running setup:
 - Setup detects local edits inside toolkit-managed files via a hash manifest (`.claude/.toolkit-manifest.json`). Locally modified files gate the run: an interactive terminal prompts, a non-interactive run (you, most likely) exits 1 listing the files. If that happens, show the list to the user and confirm before re-running Step 1 with the force flag added INSIDE the quoted one-liner, right after the target path: change `bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH"` to `bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH" --force` (PowerShell: add `-Force` after `` -Target `"TARGET_PROJECT_PATH`" `` in the Step 1 command). Appending `--force` after the one-liner's closing quote does nothing - `bash -c` swallows it. Every replaced file is backed up first and listed after setup.
@@ -165,13 +165,7 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 - HTML artifacts on WSL open PowerShell-first (wslview dropped); a genuinely headless failure prints the Windows-side UNC path that can be pasted into a Windows browser.
 - `/worktree` copies `CODEBASE_MAP.md` into new worktrees (like `.env.local`), so worktree sessions no longer regenerate the map.
 
-**What was new in v5.4.0:** Bounded, verifier-gated loops (#137). After re-running setup:
-- After you approve review fixes ("fix it" on `/review` findings, or Yes/Partial on debate Recommended Actions), the fixes are re-verified instead of assumed done: mechanical checks re-run inline; judgment findings get one fresh subagent per round returning countable verdicts ("R3: FIXED" / "R3: NOT FIXED" plus a receipt). Max 2 rounds; anything new found mid-verification is report-only.
-- `/execute` caps small-failure retries at 3 attempts per step, iterating against real test/build output; a plan's Verify step shares the same budget (no fresh allowance), and parallel step agents carry the bound in their prompts.
-- `/ask-gpt` and `/ask-gemini` debates run up to 3 rounds: a countable convergence gate ends the debate after round 2 when the reviewer's "Still Discussing" and "New Observations" sections are both settled. The maximum never extends.
-- `/index` retries a failed chunk once silently before asking you; oversized chunks skip the doomed retry; if every chunk fails, it stops and leaves the existing map untouched.
-
-See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.3.0 and earlier).
+See [CHANGELOG.md](CHANGELOG.md) for older release notes (v5.4.0 and earlier).
 
 ---
 
