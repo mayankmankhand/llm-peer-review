@@ -50,12 +50,12 @@
 **SAY:**
 > Now that Claude understands the feature, the plan writes itself - I don't type anything here. Once the exploration has converged, `/create-plan` fires on its own. This produces a markdown file with tracked steps, so you always know where you are.
 
-**WAIT** for `/create-plan` to fire on its own, then for the plan to be generated. An HTML view of the plan will also open in your default browser - that is expected, not a glitch.
+**WAIT** for `/create-plan` to fire on its own, then for the plan to be generated. An HTML view of the plan is published to a private Claude-hosted page and the link appears in chat; when the session cannot publish, it opens in your default browser instead. Either way that is expected, not a glitch.
 
 **SAY:**
-> Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. And that page that just opened in the browser? That's the same plan rendered as HTML, so you can scan it without reading raw markdown.
+> Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. And that plan page, whether it arrived as a link in chat or opened in a tab? That's the same plan rendered as HTML, so you can scan it without reading raw markdown.
 
-**TIP:** If the plan is long, just highlight the Tasks section and move on. If the browser tab steals focus, drag it next to the terminal - it makes a nice split-screen for the rest of the demo.
+**TIP:** If the plan is long, just highlight the Tasks section and move on. If a browser tab opened and steals focus, drag it next to the terminal - it makes a nice split-screen for the rest of the demo.
 
 ---
 
@@ -88,7 +88,7 @@
 **SAY:**
 > `/review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, and the toolkit stops and asks when a decision needs a human. Two phrases give me the wheel back: "no chaining" stops it handing off to the next stage, and "report only" means it tells me what it found without changing anything.
 
-**TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may open in the browser - narrate it as the rendered view of the same findings.
+**TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may appear as a link in chat, or open in the browser if this session cannot publish - narrate it as the rendered view of the same findings.
 
 ---
 
@@ -107,7 +107,7 @@
 **SAY** (while waiting):
 > This is running up to 3 rounds of back-and-forth. ChatGPT reviews the work first, then Claude responds as the author - accepting some points, pushing back on others. ChatGPT follows up, and they go back and forth for up to 3 rounds (if they fully agree after round 2, it ends early). At the end you get a summary of what they agreed on, where they disagreed, and a prioritized action list.
 
-**TIP:** If the API is slow, keep narrating: "The models are debating right now - you'll see the rounds appear as they complete." If it errors, say: "In a real session you'd retry - the output is a structured verdict with agreed/disagreed/actions." When the summary has 3+ recommended actions, an HTML view of the debate may open in the browser too.
+**TIP:** If the API is slow, keep narrating: "The models are debating right now - you'll see the rounds appear as they complete." If it errors, say: "In a real session you'd retry - the output is a structured verdict with agreed/disagreed/actions." When the summary has 3+ recommended actions, an HTML view of the debate may appear as a link in chat, or open in the browser if this session cannot publish.
 
 ---
 
@@ -139,7 +139,7 @@
 Checklist:
 - [ ] Claude Code is installed and running
 - [ ] API keys are configured (`.env.local` has OpenAI key for `/ask-gpt`)
-- [ ] Default browser is ready - the plan (and possibly review/debate) HTML views open in it automatically
+- [ ] Decide up front whether the demo session can publish (Claude Code with artifacts on); if not, have the default browser ready, since the HTML views open there instead
 - [ ] Clean git state (no uncommitted changes)
 - [ ] You're in the project directory
 - [ ] Terminal font is large enough for the audience to read
