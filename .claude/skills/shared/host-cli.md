@@ -36,14 +36,18 @@ The merged-PR lookup is the one call where a table cell would mangle the command
 gh pr list --state merged --json number,mergedAt,mergeCommit \
   --jq 'sort_by(.mergedAt)|reverse|.[0].mergeCommit.oid'
 
-# GitLab - same thing. Sort on merged_at; do NOT just take the first row.
-glab mr list --merged --per-page 50 --output json \
-  | jq -r 'sort_by(.merged_at)|reverse|.[0].merge_commit_sha'
+# GitLab - same thing. The server does the sorting, so no jq binary is needed.
+# The `=` in --jq= matters: a space-separated expression can parse as a subcommand.
+glab mr list --merged --order merged_at --sort desc --per-page 1 \
+  --output json --jq='.[0].merge_commit_sha'
+# Empty output means the newest merged MR was IMPORTED and has no merge_commit_sha.
+# Fall back to: git log --merges -1 --format=%H
 ```
 
 ## Notes
 
 - **"PR" throughout the toolkit means "MR" on GitLab.** The prose keeps one word for readability; only the commands differ.
-- **Never take the first row of a merged list.** `gh pr list --limit 1` and `glab mr list --per-page 1` both sort by CREATION date, not merge date, so either one returns a stale entry when an older PR is merged late. Sort on `mergedAt` / `merged_at` explicitly, as the block above does.
-- On a GitLab issue URL, the number is not the last segment of a fixed-depth path: groups nest arbitrarily and `/-/` separates the project path from the resource. Anchor on `/-/issues/<N>` for GitLab and `/issues/<N>` for GitHub, take the LAST such match, and ignore any trailing `/`, query string, or `#` fragment.
-- **The GitLab column has not been executed** (no `glab` on the authoring machine). Two things to check first if it errors: `--output json` has moved between versions (older builds use `-F json`), and `--jq` is a `gh` flag rather than a `glab` one, which is why the GitLab command above pipes into `jq` instead. If both fail, fall back to `git log`.
+- **Never take the first row of a merged list without ordering it first.** Left alone, `gh pr list --limit 1` and `glab mr list --per-page 1` both sort by CREATION date, not merge date, so either one returns a stale entry when an older PR is merged late. The two hosts fix this differently, which is why the block above is not symmetrical: `gh` has no server-side merge-date sort, so it fetches a page and sorts in `--jq`; `glab` takes `--order merged_at --sort desc`, so the server returns the right row and `--per-page 1` is safe.
+- On a GitLab issue URL, the number is not the last segment of a fixed-depth path: groups nest arbitrarily and `/-/` separates the project path from the resource. **GitLab serves the same issue under two paths** and the API returns the second one: `glab issue view <N> --output json --jq='.web_url'` prints `/-/work_items/<N>`, not `/-/issues/<N>`. Anchor on `/-/(issues|work_items)/(\d+)` for GitLab and `/issues/<N>` for GitHub, take the LAST such match, and ignore any trailing `/`, query string, or `#` fragment. `glab issue view` accepts either form and a bare number interchangeably, so the number is all you need once it is extracted.
+- **The GitLab column has been executed** against `glab 1.115.0` on a live repo (~270 issues, 31 merged MRs). Every row above ran as written, and GitHub-style `--body` / `--base` correctly error with `Unknown flag`. One version caveat remains untested: `--output json` has moved between glab builds, and older ones want `-F json`.
+- **Imported MRs carry an empty `merge_commit_sha`.** On a repo migrated from GitHub, MRs created by the import have no merge commit - 29 of 31 in the tested repo. The lookup then returns an empty string rather than an error, which yields a malformed commit range downstream. Treat empty output as "not found" and fall back to `git log --merges -1 --format=%H`, as the block above says.

@@ -28,7 +28,7 @@ Don't try to guess silently. Always ask, but pre-fill your best guess so it's a 
 1. Read the user's input and form a best guess: scoping or vision.
 2. **If the input references an issue**, read it first with the **"Read issue" row** for the detected host, and let the issue body inform your guess. Take the field name from that row too: the issue body is not called the same thing on both hosts. The issue number alone often looks concrete when the body is exploratory. Recognize all of these forms:
    - `issue 88`, `#88`, `ticket 88` -> use the number directly
-   - An issue URL -> use the anchoring rule in the "Issue URL" note above: anchor on `/-/issues/<N>` for GitLab and `/issues/<N>` for GitHub, take the LAST such match, and ignore any trailing `/`, query string, or `#` fragment. Do not assume a fixed path depth: GitHub is `https://github.com/owner/repo/issues/88`, but GitLab nests groups arbitrarily and inserts `/-/`, as in `https://gitlab.com/group/subgroup/project/-/issues/88`. Taking the last match is what keeps a project literally named `issues` from breaking the parse
+   - An issue URL -> extract the number with the **"Issue URL" note** above. Read it rather than parsing by hand: it holds the per-host anchors, the two paths GitLab serves the same issue under, and why the LAST match is the one to take
    - A bare number on its own (e.g. just `88`) -> ask "Is that an issue number?" before fetching, since a bare number can mean other things
 3. Ask the user with this exact wording, substituting your guess in the brackets:
    > Scoping or vision? [scoping]
