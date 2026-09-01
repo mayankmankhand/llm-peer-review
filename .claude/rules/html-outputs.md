@@ -80,12 +80,35 @@ The two identity-keyed types use `--stable`, which writes exactly `<basename>.ht
 
 **Exception** (still hand-rendered, NOT via the helper): `/playground` throwaways (`/tmp/`, interactive).
 
-## Opening the Artifact
+## Viewing the Artifact
 
-HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. After an HTML file is written by `render-html.js` (all seven artifact types - the helper prints the path), open it in the user's default browser. Do not just hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source code, which is exactly the friction this rule removes.
+HTML artifacts are meant to be *viewed rendered in a browser*, not read as source. Do not hand the user a file link and stop: in an editor like Cursor or VS Code, clicking a file link opens the HTML source, which is exactly the friction this rule removes.
 
-Open it with the toolkit's opener script, which tries each platform launcher in
-order with real fallback and only fails when the environment is genuinely headless:
+There are two viewports. **The hosted page is the primary one; the local browser open is the fallback.** This is the one decision, and every command points here rather than restating it:
+
+```
+render-html.js has printed a path
+  -> Can this session publish? (the countable gate below)
+    -> NO:  re-render nothing. Open it locally. Done - this is the whole flow.
+    -> YES: the render should have used --no-abs (see "Render for the viewport")
+      -> Ask consent, per the per-type rules below
+        -> granted:  publish, record it, give the user the URL
+        -> declined: open it locally instead
+```
+
+A user is never left with only a file path. Whichever branch runs, exactly one viewport opens.
+
+### Render for the viewport
+
+**When the session can publish, pass `--no-abs` to `render-html.js`.** Five of the seven shells turn a file reference into a `vscode://file/<absPath>` editor link, so without the flag a published page carries this machine's directory layout and account name. The flag deletes those absolute paths; each of the five documents that its link falls back to `relPath`, so the reference stays readable as plain relative text. Those editor links only ever resolved on the machine that made them anyway, so they were dead for any other viewer.
+
+The flag is keyed to the **capability gate, not to the consent answer**, and the ordering is the reason: the flag is chosen at render time, and consent is asked at publish time, which is after. Asking for consent earlier would mean asking before a review's findings exist on screen - the exact thing the per-type consent rule below is protecting. So a publish-capable session renders without absolute paths either way, and a declined publish simply opens a page whose file references are relative. That is a small, safe loss; the alternative is a second render or a premature ask.
+
+A session that cannot publish renders normally and keeps its editor links, which is where they are actually useful.
+
+### Opening it locally (the fallback)
+
+Use the toolkit's opener script, which tries each platform launcher in order with real fallback and only fails when the environment is genuinely headless:
 
 ```bash
 bash .claude/scripts/open-artifact.sh "<file>"
@@ -96,23 +119,21 @@ Pass the absolute path `render-html.js` printed (the script resolves either an a
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
 
-The `/playground` skill does NOT auto-open (its output is throwaway `/tmp/` HTML the user pastes back, per the Playground Export-Loop Rule); it emits a clickable `file://` link in chat instead (see `.claude/skills/playground/SKILL.md`).
+The `/playground` skill sits outside all of this: it never publishes and never auto-opens, because its output is throwaway `/tmp/` HTML the user pastes back (see the Playground Export-Loop Rule). It emits a clickable `file://` link in chat instead.
 
-## Publishing the Artifact (second viewport)
+## Publishing the Artifact (the primary viewport)
 
-Opening the file locally, above, always happens. This section adds a *second* place the same artifact can be viewed: a private Claude-hosted page. It is additive and never a replacement. If anything here is skipped or fails, the user still has the local file and the local open already succeeded.
-
-**The gate is countable.** Publish only when a tool for publishing a file to a hosted artifact page is present in this session's tool list. When it is not (Cursor, or the feature is off for that user), skip this section silently. Do not mention it, do not apologise, do not suggest switching editors. They already have the artifact.
+**The gate is countable.** Publish only when a tool for publishing a file to a hosted artifact page is present in this session's tool list. When it is not (Cursor, or the feature is off for that user), skip this section silently and open locally instead. Do not mention it, do not apologise, do not suggest switching editors. The local open is a complete outcome, not a degraded one.
 
 **Consent, and what a yes actually covers.** Publishing sends the rendered file to a Claude-hosted URL, which is an outward-facing send under M9 in `.claude/skills/shared/hitl-loop.md`. Before the FIRST publish of a session, ask once.
 
-**Say what is actually being sent.** These pages embed the **absolute paths of files on this machine**: five of the seven shells turn each file reference into an editor link built from the full path, so a published page carries the directory layout and the account name along with its content. Those links also only resolve on the machine that made them, so they are dead for anyone else. The pages are private by default, but this is what the user is consenting to send, and a yes given without knowing it is not informed. Mention it in the first ask of a session, in one short clause.
+**Say what is actually being sent.** The page carries its own content: for a plan or a cycle summary that is text already on the user's screen; for a review it can be code excerpts, file paths, and security findings. Absolute local paths are no longer among it - `--no-abs` strips them before the render, so the page carries repo-relative paths only. Pages are private by default. Say in one short clause what this particular artifact contains, so a yes is informed about the thing being sent rather than about publishing in general.
 
 That yes covers **plan, document, explore, docview, and audit** for the rest of the session. Their contents are already on the user's screen, or are a view of a file the user chose, so consenting to send them is consenting to something known.
 
 It does **not** cover **review or debate** artifacts. Those ask again, every time. A consent granted at plan time is granted before any finding exists, and a review report can quote code, file paths, and security findings the user has not read yet - so a blanket yes would authorize sending content nobody has seen. This is deliberately narrower than "once per session" and is the reason M9 tolerates the exception at all.
 
-A no holds for the whole session across every type: skip silently thereafter. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
+**A no is not a dead end.** Declining sends nothing, and the artifact opens locally instead per the fallback above - so a "no" costs the hosted link, never the report itself. A no holds for the whole session across every type: skip the ask thereafter and go straight to the local open. The answer lives in conversation context, not on disk, so a context compaction can lose it and the next publish asks again. That is expected, not a bug.
 
 **Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
 
@@ -143,7 +164,7 @@ For a stable type, look up its recorded page first:
 node .claude/scripts/render-html.js --index-url --name <name>
 ```
 
-It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page.
+It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page. The index is keyed to the repository rather than the working directory, so this lookup finds the same record from a worktree as from the main copy.
 
 **Record every publish.** Immediately after a successful publish:
 
@@ -154,9 +175,9 @@ node .claude/scripts/render-html.js --index-add --type <shell> --name <name> \
 
 `<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
 
-**Failure is not an error.** If a publish does not go through, say so in at most one line and move on. Do not retry in a loop. Nothing is lost.
+**Failure is not an error.** If a publish does not go through, say so in at most one line, open the file locally instead, and move on. Do not retry in a loop. Nothing is lost.
 
-**What to tell the user.** One line with the link, alongside the local path you already reported: "Also published it: <url>".
+**What to tell the user.** One line with the link and the local path: "Published the review: <url> (local copy: `artifacts/html/...`)".
 
 ## Visual Look
 
