@@ -91,14 +91,14 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 
 /* Each scanned file is a card. Verdict drives the left-border + tone. */
 .cand{border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;margin-bottom:.9rem;border-left-width:5px;border-left-style:solid;}
-.cand--candidate{border-left-color:#15803d;}                     /* green = keep/positive */
+.cand--candidate{border-left-color:var(--positive);}                     /* green = keep/positive */
 .cand--veto{border-left-color:var(--border);background:var(--bg-muted);opacity:.78;}
 
 .cand header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;}
 
 /* Verdict badges (reuse the .badge pill shape from tokens.css). */
-.verdict{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:#fff;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em;}
-.verdict--candidate{background:#15803d;}
+.verdict{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:var(--badge-text);white-space:nowrap;text-transform:uppercase;letter-spacing:.03em;}
+.verdict--candidate{background:var(--positive);}
 .verdict--veto{background:var(--text-muted);}
 
 .cand-file{font-family:ui-monospace,Consolas,monospace;font-weight:600;font-size:.95rem;margin:0;}
@@ -112,8 +112,8 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .chip-row{display:flex;gap:.4rem;flex-wrap:wrap;align-items:baseline;margin-bottom:.35rem;}
 .chip-row-label{font-size:.78rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-right:.15rem;}
 .tag{font-family:ui-monospace,Consolas,monospace;font-size:.74rem;padding:.18rem .5rem;border-radius:999px;border:1px solid var(--border);background:var(--bg-muted);color:var(--text-muted);}
-.tag--signal{background:#eef2ff;border-color:#c7d2fe;color:#3730a3;}   /* signals that fired */
-.tag--veto{background:#fef2f2;border-color:#fecaca;color:#b91c1c;}     /* veto reasons */
+.tag--signal{background:var(--bg-muted);border-color:var(--border);color:var(--accent);}   /* signals that fired */
+.tag--veto{background:var(--bg-muted);border-color:var(--border);color:var(--block-strong);}     /* veto reasons */
 .cand--veto .tag--signal{background:var(--bg-muted);border-color:var(--border);color:var(--text-muted);}
 
 .empty{margin-top:1.6rem;color:var(--text-muted);font-size:.95rem;}

@@ -48,7 +48,7 @@ Steps:
 
 4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. A review artifact asks for publish consent every run, per that section.
 
-   **Screenshots do not survive publishing.** `browse.js` writes each screenshot to disk and returns its filesystem path (`{ type: 'screenshot', path }`); nothing in the pipeline encodes the image into the page. A local file resolves those paths, a hosted page cannot, so a published browser QA report shows broken images. When the report contains screenshots, either skip the publish for that report, or say in the link line that the images only appear in the local copy. Do not publish it silently and let the user find the gaps.
+   **Screenshots publish fine; relay any omission note.** `browse.js` writes each screenshot to disk and returns its filesystem path, and `render-html.js` inlines every readable local image as a base64 `data:` URI before writing the page, so a published browser QA report shows its screenshots and the local file is self-contained. Two cases do not make it: an unreadable file, and an image over the render's encoded-size budget. Both are replaced in the page with a visible note and announced on stderr as a `note:` line. Relay those notes rather than letting the user find the gaps; never claim the images are local-only.
 
 ## Subagent Rule (orchestrator dispatch only)
 
