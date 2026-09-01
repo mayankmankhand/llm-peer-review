@@ -37,7 +37,7 @@ flowchart TD
 
 You don't have to use every command every time. Following the order prevents the most common mistake: coding before you've thought it through.
 
-**Two ways to take back control, and they do different things.** Say **"no chaining"** to stop the *handoff*: that run finishes its own stage and does not start the next one. Say **"report only"** to stop the *changing*: the run tells you what it found and edits nothing. They are deliberately separate, so you can have either without the other, and both last for one run only.
+**Two ways to take back control, and they do different things.** Say **"no chaining"** to stop the *handoff*: that run finishes its own stage and does not start the next one. Say **"report only"** to stop the *changing*: the run tells you what it found and edits nothing. They are deliberately separate, so you can have either without the other, and both last for one run only. One thing to know about a chained cycle: the review that follows `/execute` starts on its own, so there is no moment to type "report only" for it. If you want that review to change nothing, say "no chaining" when you approve the plan, then type `/review report only` yourself.
 
 > **Want to see this in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](DEMO-SCRIPT.md)**.
 
@@ -47,7 +47,7 @@ You don't have to use every command every time. Following the order prevents the
 
 ## How key commands work
 
-These commands carry most of the workflow. Each has its own file in `.claude/commands/` with the full prompt; the summaries below are the "what is this, when do I use it" view.
+These commands carry most of the workflow. Each has its own prompt file with the full prompt (under `.claude/commands/`, or `.claude/skills/` for the ones that are skills, like `/error-analysis`); the summaries below are the "what is this, when do I use it" view.
 
 ### `/explore` - Understand before you build
 
@@ -210,7 +210,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 **Never read a credentials file into the conversation.** Anything read becomes part of the transcript, and transcripts get written to temp files, sent to other AI models by the debate commands, and rendered into HTML. Copy such files with `cp`, which moves the bytes without putting them in context.
 
-**Put permissions in `.claude/settings.local.json`.** That file is yours and survives upgrades. The committed `.claude/settings.json` does not.
+**Put permissions in `.claude/settings.local.json`.** That file is yours and survives upgrades. A project-level `.claude/settings.json` survives too, because setup never touches it; the toolkit keeps its own permissions in `settings.local.json` because that is the file it seeds and merges.
 
 **Do not overwrite a file a toolkit command opens by name:** `plans/PLAN-*.md`, `CODEBASE_MAP.md`, `LESSONS.md`, `LESSONS-detail.md`.
 
