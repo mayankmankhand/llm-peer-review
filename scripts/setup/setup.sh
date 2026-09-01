@@ -377,17 +377,25 @@ manifest_lookup() {
 # preflight_record_diff <src> <rel> [stamped]
 # Compares the incoming file <src> against $TARGET/<rel>. If the target
 # copy exists and differs, records it with a +added/-removed line summary
-# and a manifest-based classification (issue #138):
-#   [LOCALLY MODIFIED]           the user edited the file since setup last
-#                                wrote it - the overwrite gate below will
-#                                prompt (or require --force) before it is
-#                                replaced
-#   [outdated]                   the file matches what setup last wrote,
-#                                the toolkit has just moved on - normal
-#                                overwrite with backup, no gate
-#   [differs, provenance unknown] no manifest entry to compare against
-#                                (pre-manifest install or interrupted run)
-#                                - today's warn+backup behavior, no gate
+# and a manifest-based classification (issue #138). Three cases:
+#   [outdated]                   the manifest has an entry and the file
+#                                still matches it: setup wrote this file
+#                                and the toolkit has since moved on -
+#                                normal overwrite with backup, no gate
+#   [LOCALLY MODIFIED]           the manifest has an entry and the file no
+#                                longer matches it (the user edited it),
+#                                OR the manifest exists but has NO entry
+#                                for this path. The manifest is regenerated
+#                                wholesale on every run and lists everything
+#                                the last run wrote, so a managed path with
+#                                no entry is a file the user created
+#                                themselves that the toolkit now ships
+#                                under the same name. Both gate the run:
+#                                prompt, or require --force, before the
+#                                file is replaced (backed up first)
+#   [differs, provenance unknown] no manifest file at all (a pre-manifest
+#                                install), so there is nothing to compare
+#                                against - warn + backup, no gate
 PF_DIFFS=()
 PF_MODIFIED=()
 MANAGED_RELS=()
@@ -426,6 +434,11 @@ preflight_record_diff() {
         cls_label=" [LOCALLY MODIFIED]"
         PF_MODIFIED+=("$rel")
       fi
+    elif [ -f "$MANIFEST_FILE" ]; then
+      # Manifest present, entry absent: setup never wrote this path, the
+      # user did (see the case list above). Gated like any local edit.
+      cls_label=" [LOCALLY MODIFIED]"
+      PF_MODIFIED+=("$rel")
     else
       cls_label=" [differs, provenance unknown]"
     fi
@@ -653,6 +666,15 @@ if [ "$PF_STALE_BACKUPS" -gt 0 ]; then
   echo "    Note: $PF_STALE_BACKUPS older .toolkit-backup-* folder(s) from previous runs are"
   echo "    still in the project root. Delete them when no longer needed."
 fi
+# The two node-dependent steps (the settings.local.json permission merge
+# and the issue #91 package.json cleanup) skip silently inside their own
+# blocks when node is absent. Say so here, once, so a permission that never
+# arrived is not a mystery later.
+if ! command -v node > /dev/null 2>&1; then
+  echo ""
+  echo "    Note: node was not found, so the .claude/settings.local.json permission"
+  echo "    merge and the package.json cleanup will be skipped this run."
+fi
 echo ""
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -794,6 +816,7 @@ if [ "$RENAMED_CLEANED" -gt 0 ]; then
 fi
 
 # ─── Plan migration (v3.5 -> v4.0) ─────────────────────────
+# PARITY: mirrored in setup.ps1 (plan migration .claude/plans/ -> plans/) - change both together
 # Plans moved from .claude/plans/ to plans/ (top-level) because .claude/
 # is a protected path that always prompts for permission.
 PLANS_MIGRATED=0
@@ -999,14 +1022,26 @@ echo "  Copying .env.local.example ..."
 safe_copy "$TOOLKIT_ROOT/.env.local.example" "$TARGET/.env.local.example"
 
 # ─── .gitignore (merge - preserve user entries, add toolkit lines) ─
+# GITIGNORE_BACKED_UP: set once this run has copied the pre-merge
+# .gitignore into the backup dir. The INDEX.md cleanup sed further down
+# checks it, so a second backup_file call can never overwrite the pre-run
+# copy with a post-merge one.
+GITIGNORE_BACKED_UP=0
 if [ -f "$TARGET/.gitignore" ]; then
   echo "  Merging .gitignore (preserving your entries) ..."
-  # Ensure target ends with a newline before appending
-  [ -n "$(tail -c 1 "$TARGET/.gitignore")" ] && echo "" >> "$TARGET/.gitignore"
   while IFS= read -r line; do
     # Skip blank lines and comments to avoid accumulating duplicates on repeated runs
     [ -z "$line" ] || [[ "$line" == \#* ]] && continue
     if ! grep -qxF "$line" "$TARGET/.gitignore"; then
+      # Back up right before the FIRST append, not before the loop: the
+      # merge was the one write path with no backup, and doing it lazily
+      # keeps an identical re-run from creating a backup dir for a no-op.
+      if [ "$GITIGNORE_BACKED_UP" -eq 0 ]; then
+        backup_file "$TARGET/.gitignore"
+        # Ensure target ends with a newline before appending
+        [ -n "$(tail -c 1 "$TARGET/.gitignore")" ] && echo "" >> "$TARGET/.gitignore"
+        GITIGNORE_BACKED_UP=1
+      fi
       echo "$line" >> "$TARGET/.gitignore"
     fi
   done < "$TOOLKIT_ROOT/.gitignore"
@@ -1089,6 +1124,12 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/
 # Written as an if-statement (not `&&`) so it is safe under `set -e`.
 LESSONS_PREEXISTED=false
 if [ -f "$TARGET/LESSONS.md" ]; then LESSONS_PREEXISTED=true; fi
+# Same capture for settings.local.json: the permission merge below backs the
+# file up before rewriting it, but only when it is the user's own copy. A
+# template this run just copied carries nothing of theirs, and backing it up
+# would give every fresh install a backup dir.
+SETTINGS_PREEXISTED=false
+if [ -f "$TARGET/.claude/settings.local.json" ]; then SETTINGS_PREEXISTED=true; fi
 
 for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
   if [ -f "$TARGET/$f" ]; then
@@ -1120,6 +1161,7 @@ elif [ ! -f "$TARGET/LESSONS-detail.md" ]; then
 fi
 
 # ─── Merge new permissions into existing settings.local.json ─
+# PARITY: mirrored in setup.ps1 (settings.local.json permission merge) - change both together
 # When upgrading, the user's settings.local.json is preserved (not overwritten).
 # But new toolkit versions may require new permissions. This block:
 #   1. Adds any missing permissions from the toolkit's template
@@ -1128,7 +1170,19 @@ fi
 # All three steps happen in one pass to avoid reading/writing the file multiple times.
 # Paths are passed via environment variables to avoid quoting issues with special
 # characters in directory names (spaces, quotes, etc.).
+#
+# node never touches the live file. When the merge changes anything it writes
+# the result to a .tmp sibling and prints the change list; bash then backs up
+# the live file (a pre-existing one - see SETTINGS_PREEXISTED) and moves the
+# .tmp into place. A no-op merge writes nothing, so an identical re-run makes
+# no backup. node's stderr goes to its own file, never into the change list -
+# with 2>&1 a parse error used to print as a "+ SyntaxError" permission line.
+# A non-zero exit leaves the file untouched and prints a warning instead.
 if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2>&1; then
+  SETTINGS_TMP="$TARGET/.claude/settings.local.json.tmp"
+  rm -f "$SETTINGS_TMP"
+  PERMS_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/toolkit-settings-merge-XXXXXX")"
+  PERMS_RC=0
   PERMS_ADDED=$(TOOLKIT_SRC="$TOOLKIT_ROOT" TARGET_DIR="$TARGET" node -e "
     const fs = require('fs');
     const toolkitSrc = process.env.TOOLKIT_SRC;
@@ -1185,12 +1239,32 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     const allNew = [...missing, ...absNew];
     if (allNew.length > 0 || stale.length > 0) {
       tgt.permissions.allow = [...tgtPerms, ...allNew];
-      fs.writeFileSync(targetDir + '/.claude/settings.local.json', JSON.stringify(tgt, null, 2) + '\n');
+      // Written to the .tmp sibling; bash backs up the live file and moves this into place.
+      fs.writeFileSync(targetDir + '/.claude/settings.local.json.tmp', JSON.stringify(tgt, null, 2) + '\n');
       stale.forEach(p => console.log('removed: ' + p));
       allNew.forEach(p => console.log(p));
     }
-  " 2>&1) || true
-  if [ -n "$PERMS_ADDED" ]; then
+  " 2> "$PERMS_ERR_FILE") || PERMS_RC=$?
+  # Read and delete the stderr file straight away, so it lives only for the
+  # node call and nothing that fails below can leave it behind in the temp dir.
+  PERMS_ERR="$(cat "$PERMS_ERR_FILE" 2>/dev/null)"
+  rm -f "$PERMS_ERR_FILE"
+  if [ "$PERMS_RC" -ne 0 ]; then
+    rm -f "$SETTINGS_TMP"
+    # node's first stderr line is a stack location ("[eval]:5" or
+    # "node:internal/..."), not the message, so take the first line that
+    # names the error; fall back to the first non-empty line, then the code.
+    PERMS_ERR_LINE="$(printf '%s\n' "$PERMS_ERR" | grep -E 'Error' | head -1)"
+    [ -n "$PERMS_ERR_LINE" ] || PERMS_ERR_LINE="$(printf '%s\n' "$PERMS_ERR" | grep -v '^[[:space:]]*$' | head -1)"
+    [ -n "$PERMS_ERR_LINE" ] || PERMS_ERR_LINE="node exited $PERMS_RC"
+    echo "  Warning: could not merge permissions into .claude/settings.local.json ($PERMS_ERR_LINE)."
+    echo "    Your file was left unchanged; add new entries by hand from the permissions"
+    echo "    table in .claude/rules/toolkit.md."
+  elif [ -f "$SETTINGS_TMP" ]; then
+    if [ "$SETTINGS_PREEXISTED" = true ]; then
+      backup_file "$TARGET/.claude/settings.local.json"
+    fi
+    mv -f "$SETTINGS_TMP" "$TARGET/.claude/settings.local.json"
     echo "  Updating permissions in .claude/settings.local.json ..."
     echo "$PERMS_ADDED" | while IFS= read -r perm; do
       case "$perm" in
@@ -1212,6 +1286,7 @@ fi
 # Legacy cleanup: prior toolkit versions wrote a flat-tree INDEX.md here.
 # Remove it during upgrade so the user is not left with a stale flat tree
 # alongside the new semantic map.
+# PARITY: mirrored in setup.ps1 (legacy INDEX.md removal) - change both together
 if [ -f "$TARGET/INDEX.md" ]; then
   backup_file "$TARGET/INDEX.md"
   rm -f "$TARGET/INDEX.md"
@@ -1225,6 +1300,12 @@ fi
 # (macOS BSD sed and Linux GNU sed both accept it); the .bak is removed
 # immediately after.
 if [ -f "$TARGET/.gitignore" ] && grep -qxF "INDEX.md" "$TARGET/.gitignore"; then
+  # Back up before the edit unless the merge above already saved the pre-run
+  # copy this run - a second backup_file would overwrite it with a merged one.
+  if [ "$GITIGNORE_BACKED_UP" -eq 0 ]; then
+    backup_file "$TARGET/.gitignore"
+    GITIGNORE_BACKED_UP=1
+  fi
   sed -i.bak '/^# Project index (auto-generated by toolkit)$/d; /^INDEX\.md$/d' "$TARGET/.gitignore"
   rm -f "$TARGET/.gitignore.bak"
   echo "    Cleaned stale INDEX.md entries from .gitignore"
@@ -1241,6 +1322,14 @@ fi
 # no gate. MANAGED_RELS is accumulated by the pre-flight enumeration,
 # which mirrors the copy blocks exactly. Written with printf (no node
 # dependency); forward-slash keys keep it portable with setup.ps1.
+#
+# Built in a .tmp sibling and moved into place, so the manifest on disk is
+# always whole or absent. A plain redirect truncates first, and a crash
+# mid-write would leave a partial file that the next run reads as "no
+# entry" for every path past the cut - misclassifying files setup itself
+# wrote. The previous manifest is backed up first when the new one differs,
+# so a rollback has the old hashes; an identical re-run makes no backup.
+MANIFEST_TMP="$MANIFEST_FILE.tmp"
 MANIFEST_ENTRIES=()
 for i in "${!MANAGED_RELS[@]}"; do
   rel="${MANAGED_RELS[$i]}"
@@ -1263,7 +1352,11 @@ MANIFEST_LAST=$(( ${#MANIFEST_ENTRIES[@]} - 1 ))
   done
   printf '  }\n'
   printf '}\n'
-} > "$MANIFEST_FILE"
+} > "$MANIFEST_TMP"
+if [ -f "$MANIFEST_FILE" ] && ! cmp -s "$MANIFEST_FILE" "$MANIFEST_TMP"; then
+  backup_file "$MANIFEST_FILE"
+fi
+mv -f "$MANIFEST_TMP" "$MANIFEST_FILE"
 echo "  Wrote .claude/.toolkit-manifest.json (${#MANIFEST_ENTRIES[@]} managed file(s) tracked)"
 
 # ─── Summary ─────────────────────────────────────────────────
@@ -1345,25 +1438,22 @@ fi
 
 # ─── New-this-version announcement (upgrades only) ───────────
 # Fires on any upgrade, independent of the LEGACY_CLEANED/PLANS_MIGRATED
-# gate above. Exists because a plain version bump (e.g. 4.6 -> 4.7) would
-# otherwise land silently and users would never learn about the HTML
-# viewing feature their old workflows now produce.
+# gate above, so a plain version bump (e.g. 4.6 -> 4.7) never lands
+# silently. The text is deliberately version-neutral: a hardcoded feature
+# list goes stale the release after it is written (the v5.0 HTML-viewing
+# blurb was still printing on 5.5 -> 6.0 upgrades), so this points at the
+# two places bump-version.sh keeps current instead. Neither file is copied
+# into the target, hence "in the toolkit repo".
 if [ "$IS_UPGRADE" -eq 1 ] && [ "$LEGACY_CLEANED" -eq 0 ] && [ "$PLANS_MIGRATED" -eq 0 ]; then
   echo "    ┌────────────────────────────────────────────────┐"
   echo "    │  Upgraded to v$VERSION - new this version:        │"
   echo "    └────────────────────────────────────────────────┘"
   echo ""
-  echo "      - HTML viewing for human-read outputs."
-  echo "        /create-plan and /document now render an HTML view"
-  echo "        alongside markdown. /review-* and /ask-* may render"
-  echo "        HTML when a finding count or severity mix justifies it."
-  echo "        Markdown stays canonical; HTML is additive."
+  echo "      Upgrade complete. To see what changed, open in the toolkit repo:"
   echo ""
-  echo "      - NEW: /audit-html scans your project's own markdown"
-  echo "        for files that would benefit from an HTML view."
-  echo "        Report-only; opt-in for static view generation."
-  echo ""
-  echo "      See .claude/rules/html-outputs.md and CHANGELOG.md."
+  echo "      - CHANGELOG.md: the \"What's new since\" rollup at the top,"
+  echo "        then the newest version section right below it."
+  echo "      - AGENT-SETUP.md: the \"What's new in v$VERSION\" block."
   echo ""
 fi
 

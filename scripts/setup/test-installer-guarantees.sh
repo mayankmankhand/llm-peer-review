@@ -25,6 +25,22 @@
 #      resolve every path-shaped string in prose - most of those are
 #      illustrative examples, literal placeholders, or runtime-generated
 #      files, so a blanket check would be noise rather than signal.
+#   9. A pre-manifest install (no manifest file) upgrades without a gate:
+#      a differing managed file is "[differs, provenance unknown]", replaced
+#      with the stock copy, and its edited copy lands in the backup dir
+#  10. A managed path with NO manifest entry while a manifest exists is a
+#      user-created file the toolkit now ships under the same name: it is
+#      "[LOCALLY MODIFIED]", gates the run (exit 1 without --force), and is
+#      replaced only with --force
+#  11. A run that died after some copies but before the manifest write is
+#      recovered by the next run: every file restored, the manifest rebuilt
+#      whole, and no .toolkit-manifest.json.tmp left behind
+#  12. The line-merged files (.gitignore, .claude/settings.local.json) and
+#      the regenerated manifest each land in the backup dir as their
+#      pre-merge copies whenever a run rewrites them
+#  13. A settings.local.json node cannot parse produces a warning naming the
+#      error, leaves the file untouched, and never prints the error text as
+#      a "+" permission line
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -60,6 +76,13 @@ assert_grep() {
   fi
 }
 
+# list_backup_dirs: one absolute path per line, sorted, so a before/after
+# comparison (comm -13) isolates the directory a single run created. Name
+# order is not enough: the PID suffix does not sort by time.
+list_backup_dirs() {
+  find "$SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | sort
+}
+
 echo ""
 echo "Toolkit: $TOOLKIT_ROOT"
 echo "Scratch: $SCRATCH"
@@ -93,10 +116,18 @@ if [ -f "$SCRATCH/.claude/.toolkit-manifest.json" ]; then
 else
   fail "manifest missing after fresh install"
 fi
+# The settings merge writes on a fresh install too (it adds the absolute-path
+# browse.js entries), and a template this run just copied must not be backed up.
+if [ -z "$(list_backup_dirs)" ]; then
+  ok "fresh install created no backup dir"
+else
+  fail "fresh install created a backup dir"
+fi
 
 # ─── [3] plant custom files + edit a managed file ────────────
 echo "[3] plant custom files in every managed directory"
 CUSTOM_FILES=(
+  .claude/agents/my-custom-agent.md
   .claude/commands/my-custom-command.md
   .claude/commands/team/nested-custom.md
   .claude/skills/my-custom-skill/SKILL.md
@@ -307,6 +338,265 @@ if [ -z "$DOCS_BROKEN" ]; then
 else
   fail "installed file(s) cite docs/ files present in the toolkit but not installed:$DOCS_BROKEN"
 fi
+
+# ─── [9] pre-manifest upgrade: no manifest, no gate ──────────
+# A target installed before the manifest existed has nothing to compare
+# against, so a differing managed file is "[differs, provenance unknown]":
+# replaced with a backup, never gated. A gate here would block every
+# pre-5.5 upgrade on files setup itself wrote.
+echo "[9] pre-manifest upgrade (manifest absent, edited managed file)"
+MANIFEST="$SCRATCH/.claude/.toolkit-manifest.json"
+rm -f "$MANIFEST"
+printf '\nPRE-MANIFEST EDIT MARKER\n' >> "$SCRATCH/.claude/commands/$EDITED_CMD"
+BACKUPS_BEFORE_LIST="$(list_backup_dirs)"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/premanifest.log" 2>&1
+PRE_RC=$?
+set -e
+if [ "$PRE_RC" -eq 0 ]; then
+  ok "pre-manifest upgrade exited 0 without --force"
+else
+  fail "pre-manifest upgrade exited $PRE_RC (expected 0: no manifest means no gate)"
+fi
+if grep -F ".claude/commands/$EDITED_CMD" "$LOG/premanifest.log" | grep -qF "[differs, provenance unknown]"; then
+  ok "edited file labelled [differs, provenance unknown]"
+else
+  fail "edited file not labelled [differs, provenance unknown]"
+fi
+if cmp -s "$SCRATCH/.claude/commands/$EDITED_CMD" "$TOOLKIT_ROOT/.claude/commands/$EDITED_CMD"; then
+  ok "edited file replaced with the stock copy"
+else
+  fail "edited file not replaced with the stock copy"
+fi
+PRE_BACKUP="$(comm -13 <(echo "$BACKUPS_BEFORE_LIST") <(list_backup_dirs))"
+if [ -n "$PRE_BACKUP" ] && grep -q "PRE-MANIFEST EDIT MARKER" "$PRE_BACKUP/.claude/commands/$EDITED_CMD" 2>/dev/null; then
+  ok "edited copy preserved in the backup dir"
+else
+  fail "edited copy not found in the backup dir"
+fi
+if [ -f "$MANIFEST" ]; then
+  ok "manifest rebuilt after the pre-manifest upgrade"
+else
+  fail "manifest not rebuilt after the pre-manifest upgrade"
+fi
+
+# ─── [10] manifest collision gate ────────────────────────────
+# The manifest lists everything the last run wrote, so a managed path with
+# no entry while a manifest exists is a file the user created at a name the
+# toolkit now ships. It must gate exactly like a local edit: exit 1 without
+# --force, replaced (and backed up) with it. The second command file is
+# used so this cannot interact with EDITED_CMD's history above.
+echo "[10] manifest collision gate (entry missing, file differs)"
+COLLIDE_CMD="$(basename "$(ls "$TOOLKIT_ROOT/.claude/commands/"*.md | sed -n '2p')")"
+# `|| true` keeps a missing manifest (a cascade from [9]) a reported failure
+# rather than a set -e abort with no summary.
+grep -vF "\".claude/commands/$COLLIDE_CMD\": \"" "$MANIFEST" > "$MANIFEST.edited" 2>/dev/null || true
+mv "$MANIFEST.edited" "$MANIFEST"
+if [ ! -s "$MANIFEST" ] || grep -qF "\".claude/commands/$COLLIDE_CMD\"" "$MANIFEST"; then
+  fail "test setup: could not remove the manifest entry for $COLLIDE_CMD"
+fi
+printf '\nUSER-CREATED COLLISION MARKER\n' >> "$SCRATCH/.claude/commands/$COLLIDE_CMD"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/collide.log" 2>&1
+COLLIDE_RC=$?
+set -e
+if [ "$COLLIDE_RC" -eq 1 ]; then
+  ok "collision aborted with exit 1 without --force"
+else
+  fail "collision run exited $COLLIDE_RC (expected 1)"
+fi
+if grep -F ".claude/commands/$COLLIDE_CMD" "$LOG/collide.log" | grep -qF "[LOCALLY MODIFIED]"; then
+  ok "colliding file labelled [LOCALLY MODIFIED]"
+else
+  fail "colliding file not labelled [LOCALLY MODIFIED]"
+fi
+if grep -q "USER-CREATED COLLISION MARKER" "$SCRATCH/.claude/commands/$COLLIDE_CMD"; then
+  ok "colliding file untouched by the aborted run"
+else
+  fail "aborted run replaced the colliding file"
+fi
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" --force < /dev/null > "$LOG/collide-force.log" 2>&1
+COLLIDE_FORCE_RC=$?
+set -e
+if [ "$COLLIDE_FORCE_RC" -eq 0 ]; then
+  ok "--force run exited 0"
+else
+  fail "--force run exited $COLLIDE_FORCE_RC"
+fi
+if cmp -s "$SCRATCH/.claude/commands/$COLLIDE_CMD" "$TOOLKIT_ROOT/.claude/commands/$COLLIDE_CMD"; then
+  ok "--force replaced the colliding file with the stock copy"
+else
+  fail "--force did not replace the colliding file"
+fi
+if grep -F "backup:" "$LOG/collide-force.log" | grep -qF ".claude/commands/$COLLIDE_CMD"; then
+  ok "forced run pairs the colliding file with its backup path"
+else
+  fail "forced run summary missing the colliding file's backup path"
+fi
+
+# ─── [11] interrupted run recovery ───────────────────────────
+# Simulates a run that died after some copies but before the manifest
+# write: manifest gone, three managed files gone. The re-run must restore
+# every file, write a whole manifest (byte-identical to the one the last
+# clean run wrote, since nothing else changed), and leave no .tmp behind.
+# The manifest is built in a .tmp sibling and moved into place so it is
+# always whole or absent, never partial.
+echo "[11] interrupted run recovery"
+LOST_SHELL="$(basename "$(ls "$TOOLKIT_ROOT/.claude/skills/shared/shells/"* | head -1)")"
+LOST_FILES=(
+  ".claude/commands/$EDITED_CMD"
+  .claude/scripts/render-html.js
+  ".claude/skills/shared/shells/$LOST_SHELL"
+)
+cp "$MANIFEST" "$WORK/manifest-before-interrupt.json"
+rm -f "$MANIFEST"
+for rel in "${LOST_FILES[@]}"; do rm -f "$SCRATCH/$rel"; done
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/interrupted.log" 2>&1
+INT_RC=$?
+set -e
+if [ "$INT_RC" -eq 0 ]; then
+  ok "recovery run exited 0"
+else
+  fail "recovery run exited $INT_RC"
+fi
+for rel in "${LOST_FILES[@]}"; do
+  if cmp -s "$SCRATCH/$rel" "$TOOLKIT_ROOT/$rel"; then
+    ok "restored: $rel"
+  else
+    fail "not restored: $rel"
+  fi
+done
+# Completeness is checked three ways, because the first alone cannot catch a
+# writer that truncates consistently (both manifests would then match): the
+# rebuilt file equals the last clean run's, every restored file has an entry
+# (two of the three sit far down the list), and the file is closed properly.
+if cmp -s "$MANIFEST" "$WORK/manifest-before-interrupt.json"; then
+  ok "manifest rebuilt whole (identical to the last clean run's)"
+else
+  fail "rebuilt manifest differs from the last clean run's (partial or missing entries)"
+fi
+for rel in "${LOST_FILES[@]}"; do
+  if grep -qE "\"$rel\": \"[0-9a-f]{64}\"" "$MANIFEST" 2>/dev/null; then
+    ok "manifest has an entry for restored $rel"
+  else
+    fail "manifest missing an entry for restored $rel"
+  fi
+done
+if [ "$(tail -n 1 "$MANIFEST" 2>/dev/null)" = "}" ]; then
+  ok "manifest is well-formed (closing brace present)"
+else
+  fail "manifest is not well-formed (no closing brace - partial write?)"
+fi
+if [ ! -e "$MANIFEST.tmp" ]; then
+  ok "no .toolkit-manifest.json.tmp left behind"
+else
+  fail ".toolkit-manifest.json.tmp left behind"
+fi
+
+# ─── [12] backup completeness for merged files ───────────────
+# .gitignore and settings.local.json are line-merged rather than copied,
+# and the manifest is regenerated; each is rewritten in place, so each
+# needs its pre-merge copy in the backup dir for a rollback to be whole.
+# A missing toolkit line/entry makes both merges write, and an older
+# toolkitVersion stamp (a real upgrade always changes it) makes the
+# manifest differ - so all three must back up in one run.
+echo "[12] backup completeness for merged files"
+GI_LINE="artifacts/html/"
+PERM_ENTRY="Bash(git worktree *)"
+sed -i.bak '\#^artifacts/html/$#d' "$SCRATCH/.gitignore"; rm -f "$SCRATCH/.gitignore.bak"
+sed -i.bak '/"Bash(git worktree \*)",/d' "$SCRATCH/.claude/settings.local.json"; rm -f "$SCRATCH/.claude/settings.local.json.bak"
+sed -i.bak 's/"toolkitVersion": "[^"]*"/"toolkitVersion": "0.0.0-test"/' "$MANIFEST"; rm -f "$MANIFEST.bak"
+if grep -qxF "$GI_LINE" "$SCRATCH/.gitignore" || grep -qF "$PERM_ENTRY" "$SCRATCH/.claude/settings.local.json" || ! grep -qF '0.0.0-test' "$MANIFEST"; then
+  fail "test setup: could not remove the gitignore line / permission entry, or restamp the manifest"
+fi
+BACKUPS_BEFORE_LIST="$(list_backup_dirs)"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/merge-backup.log" 2>&1
+MB_RC=$?
+set -e
+if [ "$MB_RC" -eq 0 ]; then
+  ok "merge-backup run exited 0"
+else
+  fail "merge-backup run exited $MB_RC"
+fi
+MB_BACKUP="$(comm -13 <(echo "$BACKUPS_BEFORE_LIST") <(list_backup_dirs))"
+for rel in .gitignore .claude/settings.local.json .claude/.toolkit-manifest.json; do
+  if [ -n "$MB_BACKUP" ] && [ -f "$MB_BACKUP/$rel" ]; then
+    ok "pre-merge copy backed up: $rel"
+  else
+    fail "pre-merge copy missing from backup: $rel"
+  fi
+done
+if [ -n "$MB_BACKUP" ] && [ -f "$MB_BACKUP/.gitignore" ] && ! grep -qxF "$GI_LINE" "$MB_BACKUP/.gitignore"; then
+  ok "backed-up .gitignore is the pre-merge copy"
+else
+  fail "backed-up .gitignore is not the pre-merge copy"
+fi
+if grep -qxF "$GI_LINE" "$SCRATCH/.gitignore"; then
+  ok "live .gitignore has the restored line"
+else
+  fail "live .gitignore missing the restored line: $GI_LINE"
+fi
+if [ -n "$MB_BACKUP" ] && [ -f "$MB_BACKUP/.claude/settings.local.json" ] && ! grep -qF "$PERM_ENTRY" "$MB_BACKUP/.claude/settings.local.json"; then
+  ok "backed-up settings.local.json is the pre-merge copy"
+else
+  fail "backed-up settings.local.json is not the pre-merge copy"
+fi
+if grep -qF "$PERM_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
+  ok "live settings.local.json has the restored entry"
+else
+  fail "live settings.local.json missing the restored entry: $PERM_ENTRY"
+fi
+if [ -n "$MB_BACKUP" ] && grep -qF '0.0.0-test' "$MB_BACKUP/.claude/.toolkit-manifest.json" 2>/dev/null; then
+  ok "backed-up manifest is the pre-run copy"
+else
+  fail "backed-up manifest is not the pre-run copy"
+fi
+if ! grep -qF '0.0.0-test' "$MANIFEST"; then
+  ok "live manifest restamped with the current version"
+else
+  fail "live manifest still carries the old version stamp"
+fi
+
+# ─── [13] unparseable settings.local.json ────────────────────
+# A settings.local.json node cannot parse used to print its stack trace as
+# a "+ SyntaxError ..." permission line (stderr was merged into the change
+# list). It must now warn, name the error, leave the file untouched, and
+# still exit 0.
+echo "[13] unparseable settings.local.json"
+cp "$SCRATCH/.claude/settings.local.json" "$WORK/settings-good.json"
+printf '{ "permissions": { "allow": [ "Bash(git status *)", ] }\n' > "$WORK/settings-bad.json"
+cp "$WORK/settings-bad.json" "$SCRATCH/.claude/settings.local.json"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SCRATCH" < /dev/null > "$LOG/bad-settings.log" 2>&1
+BAD_RC=$?
+set -e
+if [ "$BAD_RC" -eq 0 ]; then
+  ok "run with unparseable settings still exited 0"
+else
+  fail "run with unparseable settings exited $BAD_RC"
+fi
+assert_grep "Warning: could not merge permissions into .claude/settings.local.json (" "$LOG/bad-settings.log" "warns that the merge was skipped"
+assert_grep "SyntaxError" "$LOG/bad-settings.log" "warning names the error"
+assert_grep "add new entries by hand from the permissions" "$LOG/bad-settings.log" "warning points at the permissions table"
+if grep -E '^[[:space:]]+\+ ' "$LOG/bad-settings.log" | grep -qE 'Error|^[[:space:]]+\+ +at '; then
+  fail "error text printed as a + permission line"
+else
+  ok "no error text printed as a + permission line"
+fi
+if cmp -s "$SCRATCH/.claude/settings.local.json" "$WORK/settings-bad.json"; then
+  ok "unparseable settings.local.json left unchanged"
+else
+  fail "unparseable settings.local.json was modified"
+fi
+if [ ! -e "$SCRATCH/.claude/settings.local.json.tmp" ]; then
+  ok "no settings.local.json.tmp left behind"
+else
+  fail "settings.local.json.tmp left behind"
+fi
+cp "$WORK/settings-good.json" "$SCRATCH/.claude/settings.local.json"
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

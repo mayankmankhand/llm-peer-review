@@ -327,10 +327,16 @@ function Get-ToolkitFileHash {
 }
 
 # Load the existing manifest (if any) into a hashtable keyed by the
-# forward-slash relative path. An unreadable manifest is treated as
-# absent - the pre-manifest warn+backup behavior, never a hard failure.
+# forward-slash relative path. $script:ManifestPresent records whether
+# the FILE exists, independent of whether it parsed: Add-PreflightDiff
+# below treats "manifest present, no entry" differently from "no
+# manifest at all", and setup.sh (which greps the file rather than
+# parsing it) draws that line on file presence too. An unreadable
+# manifest therefore yields no entries but still counts as present, so
+# every differing file is gated (the safe side) - never a hard failure.
 $script:ManifestHashes = @{}
-if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
+$script:ManifestPresent = Test-Path -LiteralPath $script:ManifestPath -PathType Leaf
+if ($script:ManifestPresent) {
   try {
     $mf = (Get-Content -LiteralPath $script:ManifestPath -Raw) | ConvertFrom-Json
     if ($mf.PSObject.Properties.Name -contains "files" -and $mf.files) {
@@ -339,7 +345,8 @@ if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
       }
     }
   } catch {
-    # Corrupt or hand-edited manifest - fall back to pre-manifest behavior
+    # Corrupt or hand-edited manifest - no entries, so every differing
+    # managed file is classified LOCALLY MODIFIED and gated below
   }
 }
 
@@ -347,14 +354,17 @@ if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
 # list when its target copy differs from the incoming version, with a
 # manifest-based classification (issue #138):
 #   [LOCALLY MODIFIED]            the user edited the file since setup
-#                                 last wrote it - the overwrite gate below
-#                                 will prompt (or require -Force)
+#                                 last wrote it, OR the manifest exists
+#                                 but never recorded this file while the
+#                                 target copy differs (a user file at a
+#                                 path the toolkit now ships) - the
+#                                 overwrite gate below will prompt (or
+#                                 require -Force)
 #   [outdated]                    the file matches what setup last wrote,
 #                                 the toolkit has just moved on - normal
 #                                 overwrite with backup, no gate
-#   [differs, provenance unknown] no manifest entry to compare against
-#                                 (pre-manifest install or interrupted
-#                                 run) - warn+backup behavior, no gate
+#   [differs, provenance unknown] no manifest file at all (pre-manifest
+#                                 install) - warn+backup behavior, no gate
 # Every enumerated file also joins $script:ManagedRels, whether or not it
 # exists in the target yet: the manifest write at the end of the run
 # reuses that list, so the two enumerations cannot drift apart.
@@ -367,15 +377,22 @@ function Add-PreflightDiff {
   $script:ManagedRels += $Rel
   if (-not (Test-Path -LiteralPath $dst -PathType Leaf)) { return }
   $summary = Get-PreflightDiffSummary -Source $Source -Destination $dst -IgnoreVersionStamp:$IgnoreVersionStamp
-  if (-not $summary) { return }
+  # No early return on an empty summary: Compare-Object is order-
+  # insensitive, so a reorder-only edit produces no summary while the
+  # bytes (and the hashes below) differ. Invoke-SafeCopy byte-compares
+  # and would overwrite such a file, so it must be hashed and classified
+  # here or the gate never sees it. Only a file that is clean by BOTH
+  # measures is skipped.
+  $curNorm = Get-ToolkitFileHash -Path $dst -IgnoreVersionStamp:$IgnoreVersionStamp
+  $incNorm = Get-ToolkitFileHash -Path $Source -IgnoreVersionStamp:$IgnoreVersionStamp
+  if (-not $summary -and $curNorm -eq $incNorm) { return }
+  if (-not $summary) { $summary = "same lines, order or bytes differ vs incoming" }
   # Classification for the overwrite gate. The clean check (current vs
   # incoming, stamp-normalized for the two rules files) uses the same
   # normalization as the diff summary. The manifest hash was recorded
   # from the FINAL on-disk file of the previous run (after version
   # stamping), so it is compared against the plain EOL-normalized hash.
   $label = ""
-  $curNorm = Get-ToolkitFileHash -Path $dst -IgnoreVersionStamp:$IgnoreVersionStamp
-  $incNorm = Get-ToolkitFileHash -Path $Source -IgnoreVersionStamp:$IgnoreVersionStamp
   if ($curNorm -ne $incNorm) {
     $relKey = $Rel.Replace("\", "/")
     if ($script:ManifestHashes.ContainsKey($relKey)) {
@@ -386,6 +403,14 @@ function Add-PreflightDiff {
         $label = " [LOCALLY MODIFIED]"
         $script:PfModified += $Rel
       }
+    } elseif ($script:ManifestPresent) {
+      # The manifest exists but never recorded this path, and the target
+      # copy is not the incoming one: a user file sitting where the
+      # toolkit now ships a managed file (or a hand-edited manifest).
+      # Gate it - overwriting it silently is exactly what #138 forbids.
+      # Mirrors the same rule in setup.sh's preflight_record_diff.
+      $label = " [LOCALLY MODIFIED]"
+      $script:PfModified += $Rel
     } else {
       $label = " [differs, provenance unknown]"
     }
@@ -409,6 +434,12 @@ foreach ($r in $RenamedFiles) {
 }
 if ($pfCount -gt 0) {
   $PfMigrations += "Renamed-file cleanup (issue #80): $pfCount old-named file(s) backed up, then removed"
+}
+# PARITY: the plan-migration line setup.sh prints (read-only mirror of the
+# plan migration block below).
+$pfCount = @(Get-ChildItem -Path (Join-Path $Target ".claude\plans") -Filter "PLAN-*.md" -File -ErrorAction SilentlyContinue).Count
+if ($pfCount -gt 0) {
+  $PfMigrations += "Plan migration (v4.0): $pfCount plan(s) move from .claude\plans\ to plans\"
 }
 $pfCount = 0
 foreach ($pfRel in $Issue91OldScripts) {
@@ -444,6 +475,11 @@ if (Test-Path -LiteralPath $pfPkgPath -PathType Leaf) {
 }
 if ($Issue91PkgWillChange) {
   $PfMigrations += "package.json cleanup (issue #91): toolkit deps/scripts removed from your package.json (backed up first)"
+}
+# PARITY: the INDEX.md line setup.sh prints (read-only mirror of the legacy
+# INDEX.md cleanup block below).
+if (Test-Path -LiteralPath (Join-Path $Target "INDEX.md") -PathType Leaf) {
+  $PfMigrations += "Legacy INDEX.md removal: backed up, then removed (replaced by CODEBASE_MAP.md)"
 }
 
 # Managed files that differ from the incoming version. The enumeration
@@ -534,6 +570,12 @@ foreach ($pfDirName in @("agents", "commands", "rules", "scripts", "skills")) {
 # linger in project roots for years without anyone noticing).
 $PfStaleBackups = @(Get-ChildItem -Path $Target -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue).Count
 
+# PARITY: mirrors the `command -v node` guard on the settings.local.json
+# permission merge in setup.sh. Detected once here so the pre-flight
+# report can say up front that the merge will be skipped when node is
+# missing, instead of the merge silently not happening further down.
+$NodeAvailable = $null -ne (Get-Command node -ErrorAction SilentlyContinue)
+
 Write-Host "  ----------------------------------------"
 Write-Host "   Pre-flight report (no changes made yet)"
 Write-Host "  ----------------------------------------"
@@ -579,6 +621,15 @@ if ($PfStaleBackups -gt 0) {
   Write-Host ""
   Write-Host "    Note: $PfStaleBackups older .toolkit-backup-* folder(s) from previous runs are"
   Write-Host "    still in the project root. Delete them when no longer needed."
+}
+# The settings.local.json permission merge skips silently inside its own
+# block when node is absent. Say so here, once, so a permission that never
+# arrived is not a mystery later. (setup.sh also names its package.json
+# cleanup here; on this side that step is native PowerShell.)
+if (-not $NodeAvailable) {
+  Write-Host ""
+  Write-Host "    Note: node was not found, so the .claude\settings.local.json permission"
+  Write-Host "    merge will be skipped this run."
 }
 Write-Host ""
 
@@ -710,6 +761,64 @@ function Invoke-SafeCopy {
   Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
+# Read-ToolkitText / Write-ToolkitText: byte-exact text round trip for
+# the line-edited files (.gitignore). Latin-1 (code page 28591) maps
+# every byte to one char and back, so editing a few lines never
+# re-encodes the rest or adds a BOM - the same trick Get-ToolkitFileHash
+# uses. Get-ToolkitNewline reports the newline the file already uses so
+# appended or rewritten lines match it instead of mixing CRLF into an
+# LF file.
+function Read-ToolkitText {
+  param([string]$Path)
+  $enc = [System.Text.Encoding]::GetEncoding(28591)
+  return $enc.GetString([System.IO.File]::ReadAllBytes($Path))
+}
+function Write-ToolkitText {
+  param([string]$Path, [string]$Text)
+  $enc = [System.Text.Encoding]::GetEncoding(28591)
+  [System.IO.File]::WriteAllBytes($Path, $enc.GetBytes($Text))
+}
+function Get-ToolkitNewline {
+  param([string]$Text)
+  if ($Text.Contains("`r`n")) { return "`r`n" }
+  return "`n"
+}
+
+# .gitignore is edited by two blocks below (the toolkit-line merge and
+# the legacy INDEX.md cleanup). Backing it up on the first edit only
+# keeps the backup a true pre-run original; a second Backup-File would
+# overwrite it with the half-edited version.
+$script:GitignoreBackedUp = $false
+
+# Invoke-ToolkitNode: run a `node -e` script and capture stdout, stderr,
+# and the exit code without tripping $ErrorActionPreference = "Stop".
+# Windows PowerShell 5.1 turns every stderr line of a native command
+# into an ErrorRecord, and under Stop the first one terminates the
+# script - even with 2>$null. The preference is relaxed for the call
+# only. Stdout strings and stderr records are returned separately so a
+# node warning on stderr can never be mistaken for a result line.
+function Invoke-ToolkitNode {
+  param([string]$Script)
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $raw = @(& node -e $Script 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
+  $lines = @()
+  $errors = @()
+  foreach ($item in $raw) {
+    if ($item -is [System.Management.Automation.ErrorRecord]) {
+      $errors += [string]$item.Exception.Message
+    } else {
+      $lines += [string]$item
+    }
+  }
+  return @{ ExitCode = $code; Lines = $lines; Errors = $errors }
+}
+
 $Skipped = @()
 
 # --- Legacy cleanup (v3.4 -> v3.5 migration) -------------------
@@ -753,6 +862,43 @@ if ($RenamedCleaned -gt 0) {
   Write-Host "  Cleaned up $RenamedCleaned renamed file(s)"
 }
 
+# --- Plan migration (v3.5 -> v4.0) -----------------------------
+# PARITY: mirrors the "Plan migration (v3.5 -> v4.0)" block in setup.sh.
+# Plans moved from .claude\plans\ to plans\ (top-level) because .claude\
+# is a protected path that always prompts for permission. setup.ps1
+# never carried this migration, so a Windows upgrade from a v3.x install
+# left its plans in the old location. The upgrade notes box at the end
+# reads $PlansMigrated exactly as setup.sh reads PLANS_MIGRATED.
+$PlansMigrated = 0
+$oldPlansDir = Join-Path $Target ".claude\plans"
+$newPlansDir = Join-Path $Target "plans"
+if (Test-Path -LiteralPath $oldPlansDir -PathType Container) {
+  $oldPlans = @(Get-ChildItem -Path $oldPlansDir -Filter "PLAN-*.md" -File)
+  if ($oldPlans.Count -gt 0) {
+    New-Item -ItemType Directory -Force -Path $newPlansDir | Out-Null
+    foreach ($plan in $oldPlans) {
+      $newPlanPath = Join-Path $newPlansDir $plan.Name
+      if (Test-Path -LiteralPath $newPlanPath -PathType Leaf) {
+        Write-Host "  Skipping $($plan.Name) - already in plans\"
+      } else {
+        Move-Item -LiteralPath $plan.FullName -Destination $newPlanPath
+        $PlansMigrated = $PlansMigrated + 1
+      }
+    }
+  }
+  # Clean up the old directory if empty (only .gitkeep or nothing left)
+  $oldGitkeep = Join-Path $oldPlansDir ".gitkeep"
+  if (Test-Path -LiteralPath $oldGitkeep -PathType Leaf) {
+    Remove-Item -LiteralPath $oldGitkeep -Force
+  }
+  if (@(Get-ChildItem -Path $oldPlansDir -Force).Count -eq 0) {
+    Remove-Item -LiteralPath $oldPlansDir -Force
+  }
+}
+if ($PlansMigrated -gt 0) {
+  Write-Host "  Migrated $PlansMigrated plan file(s) from .claude\plans\ to plans\"
+}
+
 # --- Issue #91 migration (v4.2 -> v4.3): toolkit deps in target package.json ---
 # In v4.2.x and earlier, toolkit deps (openai, @google/generative-ai,
 # playwright-core, @axe-core/playwright) were installed at the project root,
@@ -779,13 +925,17 @@ foreach ($oldRel in $Issue91OldScripts) {
 }
 
 # Remove leaked toolkit deps and convenience scripts from $Target\package.json.
-# The four deps are toolkit-owned and always safe to remove. The two
+# Two-phase like setup.sh: the read-only detection ran in the pre-flight
+# section above ($Issue91PkgWillChange) so the report and this action
+# cannot drift; here we back up and write only when it flagged the file.
+# The deps are toolkit-owned and always safe to remove. The two
 # convenience scripts are recognized only when their command body still
 # points at the OLD `scripts/<name>.js` path so we don't clobber a script
 # the user customized to do something else under the same name.
 $Issue91PkgTouched = 0
 $pkgPath = Join-Path $Target "package.json"
-if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
+if ($Issue91PkgWillChange) {
+  Backup-File -Original $pkgPath
   try {
     $pkgRaw = Get-Content -LiteralPath $pkgPath -Raw
     $pkg = $pkgRaw | ConvertFrom-Json
@@ -816,7 +966,6 @@ if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
       }
     }
     if ($touched) {
-      Backup-File -Original $pkgPath
       $newJson = ConvertTo-Json $pkg -Depth 100
       # Write as UTF-8 WITHOUT a BOM. Windows PowerShell 5.1 (the system
       # default on Windows) writes UTF-8-with-BOM via Set-Content; some npm
@@ -827,7 +976,16 @@ if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
       $Issue91PkgTouched = 1
     }
   } catch {
-    # If JSON parsing or editing fails, leave the file alone
+    # PARITY: mirrors the failed-rewrite warning in the issue #91 block
+    # of setup.sh. A migration that fails silently leaves the user with
+    # a backup, an unchanged package.json, and no idea anything went
+    # wrong - the worst combination. Surface it so the user can act.
+    Write-Host "  Warning: could not rewrite $Target\package.json automatically."
+    Write-Host "    Original is preserved in $($script:BackupDir)\package.json."
+    Write-Host "    Manually remove these from your package.json dependencies:"
+    Write-Host "      openai  @google/generative-ai  @google/genai  playwright-core  @axe-core/playwright"
+    Write-Host "    And remove the ask-gpt / ask-gemini script entries if they still"
+    Write-Host "    point at scripts/ask-gpt.js or scripts/ask-gemini.js."
   }
 }
 
@@ -998,18 +1156,37 @@ try {
 }
 
 # ─── .gitignore (merge - preserve user entries, add toolkit lines) ─
+# PARITY: mirrors the .gitignore merge in setup.sh, including its
+# trailing-newline guard: Add-Content used to glue the first appended
+# entry onto a last line that lacked a newline. The lines to append are
+# computed first, so .gitignore is backed up only when something will
+# actually be written (and only once per run - see GitignoreBackedUp).
+# Comparison is exact and case-sensitive like the grep -qxF in setup.sh,
+# and each appended line joins the seen set so a duplicate in the source
+# can never be appended twice.
 $gitignoreSrc = Join-Path $ToolkitRoot ".gitignore"
 $gitignoreDest = Join-Path $Target ".gitignore"
 if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
   Write-Host "  Merging .gitignore (preserving your entries) ..."
-  $existingLines = Get-Content -LiteralPath $gitignoreDest
-  $sourceLines = Get-Content -LiteralPath $gitignoreSrc
-  foreach ($line in $sourceLines) {
+  $giText = Read-ToolkitText -Path $gitignoreDest
+  $giNewline = Get-ToolkitNewline -Text $giText
+  $existingLines = @($giText -split "`r?`n")
+  $giToAppend = @()
+  foreach ($line in Get-Content -LiteralPath $gitignoreSrc) {
     # Skip blank lines and comments to avoid accumulating duplicates on repeated runs
     if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) { continue }
-    if ($existingLines -notcontains $line) {
-      Add-Content -LiteralPath $gitignoreDest -Value $line
+    if ($existingLines -ccontains $line -or $giToAppend -ccontains $line) { continue }
+    $giToAppend += $line
+  }
+  if ($giToAppend.Count -gt 0) {
+    if (-not $script:GitignoreBackedUp) {
+      Backup-File -Original $gitignoreDest
+      $script:GitignoreBackedUp = $true
     }
+    # Ensure the target ends with a newline before appending
+    if ($giText.Length -gt 0 -and -not $giText.EndsWith("`n")) { $giText += $giNewline }
+    foreach ($line in $giToAppend) { $giText += $line + $giNewline }
+    Write-ToolkitText -Path $gitignoreDest -Text $giText
   }
 } else {
   Write-Host "  Copying .gitignore ..."
@@ -1090,6 +1267,11 @@ try {
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
 # LESSONS-detail.md is only seeded on a genuinely fresh install (see the block below).
 $LessonsPreexisted = Test-Path -LiteralPath (Join-Path $Target "LESSONS.md") -PathType Leaf
+# Same capture for settings.local.json: the permission merge below backs the
+# file up before rewriting it, but only when it is the user's own copy. A
+# template this run just copied carries nothing of theirs, and backing it up
+# would give every fresh install a backup dir. Mirrors SETTINGS_PREEXISTED.
+$SettingsPreexisted = Test-Path -LiteralPath (Join-Path $Target ".claude\settings.local.json") -PathType Leaf
 
 foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
   $src = Join-Path $ToolkitRoot $f
@@ -1133,6 +1315,167 @@ if ($LessonsPreexisted) {
   }
 }
 
+# --- Merge new permissions into existing settings.local.json --
+# PARITY: mirrors the "Merge new permissions into existing
+# settings.local.json" block in setup.sh. When upgrading, the user's
+# settings.local.json is preserved (not overwritten), but new toolkit
+# versions may require new permissions. One node pass:
+#   1. Adds any missing permissions from the toolkit's template
+#   2. Removes stale entries the toolkit has retired (the relative-path
+#      v4.2 script layout, the wslview grant) and stale absolute-path
+#      browse.js entries left from old project locations
+#   3. Injects absolute-path browse.js pipe permissions for this $Target
+# The same node logic as setup.sh. node never touches the live file:
+# when the merge changes anything it writes the result to a .tmp sibling
+# and prints the change list; PowerShell then backs up the live file (a
+# pre-existing one - see $SettingsPreexisted) and moves the .tmp into
+# place. A no-op merge writes nothing, so an identical re-run makes no
+# backup. A non-zero exit leaves the file untouched and prints a warning
+# naming the error - stderr is kept apart from the change list, so a
+# parse error can never print as a "+" permission line. Paths reach node
+# through environment variables, never by interpolating them into the
+# -e source (a past quoting bug).
+# The script uses single quotes only: Windows PowerShell 5.1 drops
+# embedded double quotes from arguments handed to native commands.
+# Windows targets are C:\... paths, so the browse.js entries use forward
+# slashes (the form a bash-style command line carries) and the stale-
+# entry pattern accepts a drive letter as well as a leading slash.
+$settingsDest = Join-Path $Target ".claude\settings.local.json"
+if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
+  $settingsTmp = $settingsDest + ".tmp"
+  if (Test-Path -LiteralPath $settingsTmp) { Remove-Item -LiteralPath $settingsTmp -Force }
+  $permsMergeJs = @'
+    const fs = require('fs');
+    const path = require('path');
+    const toolkitSrc = process.env.TOOLKIT_SRC;
+    const targetDir = process.env.TARGET_DIR;
+    const tgtPath = path.join(targetDir, '.claude', 'settings.local.json');
+    const src = JSON.parse(fs.readFileSync(path.join(toolkitSrc, '.claude', 'settings.local.json'), 'utf-8'));
+    const tgt = JSON.parse(fs.readFileSync(tgtPath, 'utf-8'));
+    if (!tgt.permissions) tgt.permissions = {};
+    if (!tgt.permissions.allow) tgt.permissions.allow = [];
+    const srcPerms = (src.permissions && src.permissions.allow) || [];
+    let tgtPerms = tgt.permissions.allow;
+
+    // Step 1: merge missing template permissions (the new .claude/scripts/-prefixed
+    // entries land here automatically once the source template has been updated).
+    const missing = srcPerms.filter(p => !tgtPerms.includes(p));
+
+    // Step 2a: remove stale exact-match entries the toolkit has retired:
+    // relative-path entries for the v4.2-and-earlier script layout (their
+    // .claude/scripts/-prefixed replacements come in via Step 1's merge), and
+    // the wslview grant, unused since the opener went PowerShell-first (#134).
+    const STALE_PERMS = [
+      'Bash(node scripts/ask-gpt.js *)',
+      'Bash(node scripts/ask-gemini.js *)',
+      'Bash(node scripts/browse.js *)',
+      'Bash(echo * | node scripts/browse.js *)',
+      'Bash(cat * | node scripts/browse.js *)',
+      'Bash(wslview *)'
+    ];
+    const staleRel = tgtPerms.filter(p => STALE_PERMS.includes(p));
+
+    // Step 2b: remove stale absolute-path browse.js entries. Matches both old
+    // (.../scripts/browse.js) and new (.../.claude/scripts/browse.js) shapes,
+    // then drops anything that doesn't equal one of the two correct entries
+    // for the current target. Using exact equality (not substring .includes())
+    // avoids accidentally over-keeping unusual hand-edited entries that happen
+    // to contain the target prefix. A Windows target is C:\... - forward
+    // slashes for the entries, and a drive-letter alternative in the pattern.
+    const targetFwd = targetDir.replace(/\\/g, '/');
+    const browsePattern = /^Bash\((echo|cat) \* \| node (\/|[A-Za-z]:\/).*\/(\.claude\/)?scripts\/browse\.js \*\)$/;
+    const correctAbsEntries = new Set([
+      'Bash(echo * | node ' + targetFwd + '/.claude/scripts/browse.js *)',
+      'Bash(cat * | node ' + targetFwd + '/.claude/scripts/browse.js *)'
+    ]);
+    const staleAbs = tgtPerms.filter(p => browsePattern.test(p) && !correctAbsEntries.has(p));
+
+    const stale = [...staleRel, ...staleAbs];
+    tgtPerms = tgtPerms.filter(p => !stale.includes(p));
+
+    // Step 3: add absolute-path browse.js permissions for the current target,
+    // pointing at the new .claude/scripts/ location.
+    const absPerms = [
+      'Bash(echo * | node ' + targetFwd + '/.claude/scripts/browse.js *)',
+      'Bash(cat * | node ' + targetFwd + '/.claude/scripts/browse.js *)'
+    ];
+    const absNew = absPerms.filter(p => !tgtPerms.includes(p));
+
+    const allNew = [...missing, ...absNew];
+    if (allNew.length > 0 || stale.length > 0) {
+      tgt.permissions.allow = [...tgtPerms, ...allNew];
+      // Written to the .tmp sibling; setup.ps1 backs up the live file and moves this into place.
+      fs.writeFileSync(tgtPath + '.tmp', JSON.stringify(tgt, null, 2) + '\n');
+      stale.forEach(p => console.log('removed: ' + p));
+      allNew.forEach(p => console.log(p));
+    }
+'@
+  $env:TOOLKIT_SRC = $ToolkitRoot
+  $env:TARGET_DIR = $Target
+  $permsRun = Invoke-ToolkitNode -Script $permsMergeJs
+  Remove-Item -Path Env:TOOLKIT_SRC, Env:TARGET_DIR -ErrorAction SilentlyContinue
+  if ($permsRun.ExitCode -ne 0) {
+    if (Test-Path -LiteralPath $settingsTmp) { Remove-Item -LiteralPath $settingsTmp -Force }
+    # node's first stderr line is a stack location ("[eval]:5"), not the
+    # message, so take the first line that names the error; fall back to
+    # the first non-empty line, then the exit code.
+    $permsErrLine = @($permsRun.Errors | Where-Object { $_ -match 'Error' }) | Select-Object -First 1
+    if (-not $permsErrLine) { $permsErrLine = @($permsRun.Errors | Where-Object { $_.Trim() -ne "" }) | Select-Object -First 1 }
+    if (-not $permsErrLine) { $permsErrLine = "node exited $($permsRun.ExitCode)" }
+    Write-Host "  Warning: could not merge permissions into .claude\settings.local.json ($permsErrLine)."
+    Write-Host "    Your file was left unchanged; add new entries by hand from the permissions"
+    Write-Host "    table in .claude\rules\toolkit.md."
+  } elseif (Test-Path -LiteralPath $settingsTmp -PathType Leaf) {
+    if ($SettingsPreexisted) {
+      Backup-File -Original $settingsDest
+    }
+    Move-Item -LiteralPath $settingsTmp -Destination $settingsDest -Force
+    Write-Host "  Updating permissions in .claude\settings.local.json ..."
+    foreach ($perm in $permsRun.Lines) {
+      if ($perm.StartsWith("removed: ")) {
+        Write-Host "    - $($perm.Substring(9))"
+      } else {
+        Write-Host "    + $perm"
+      }
+    }
+  }
+}
+
+# --- Legacy INDEX.md cleanup -----------------------------------
+# PARITY: mirrors the INDEX.md removal and .gitignore cleanup in the
+# "Codebase map" block of setup.sh. Prior toolkit versions wrote a
+# flat-tree INDEX.md at the project root; CODEBASE_MAP.md (generated by
+# /index on the first /explore) replaced it. Remove the stale file on
+# upgrade so it does not sit beside the new map, backing it up first.
+$indexMdPath = Join-Path $Target "INDEX.md"
+if (Test-Path -LiteralPath $indexMdPath -PathType Leaf) {
+  Backup-File -Original $indexMdPath
+  Remove-Item -LiteralPath $indexMdPath -Force
+  Write-Host "  Removed legacy INDEX.md (replaced by CODEBASE_MAP.md - generated on first /explore)"
+}
+
+# Also strip stale INDEX.md entries from the target's .gitignore. The
+# merge above only adds lines, never removes retired ones, so without
+# this block downstream users would keep a dangling INDEX.md entry even
+# after the file itself is gone. Exact-line match like grep -qxF; the
+# two lines the old toolkit .gitignore carried are dropped and every
+# other line is kept as it was. .gitignore is backed up first unless the
+# merge above already did.
+if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
+  $giText = Read-ToolkitText -Path $gitignoreDest
+  $giLines = @($giText -split "`r?`n")
+  if ($giLines -ccontains "INDEX.md") {
+    if (-not $script:GitignoreBackedUp) {
+      Backup-File -Original $gitignoreDest
+      $script:GitignoreBackedUp = $true
+    }
+    $giNewline = Get-ToolkitNewline -Text $giText
+    $giKept = @($giLines | Where-Object { $_ -cne "# Project index (auto-generated by toolkit)" -and $_ -cne "INDEX.md" })
+    Write-ToolkitText -Path $gitignoreDest -Text ($giKept -join $giNewline)
+    Write-Host "    Cleaned stale INDEX.md entries from .gitignore"
+  }
+}
+
 # --- Toolkit manifest (issue #138) -----------------------------
 # Wholesale-regenerated on every real run (never on -DryRun, which exits
 # above). Records the EOL-normalized sha256 of every managed file exactly
@@ -1159,8 +1502,22 @@ $manifestBody += "  `"files`": {`n"
 $manifestBody += ($manifestEntries -join ",`n") + "`n"
 $manifestBody += "  }`n"
 $manifestBody += "}`n"
+# PARITY: mirrors the atomic manifest write in setup.sh. The previous
+# manifest is backed up first when the new body differs (an identical
+# re-run backs up nothing, so it still creates no backup dir), then the
+# body is written to a .tmp sibling and moved into place, so a run that
+# dies mid-write leaves the old manifest intact rather than a truncated
+# one that would read as "no entries" on the next run.
 $manifestUtf8NoBom = New-Object System.Text.UTF8Encoding($false)
-[System.IO.File]::WriteAllText($script:ManifestPath, $manifestBody, $manifestUtf8NoBom)
+if (Test-Path -LiteralPath $script:ManifestPath -PathType Leaf) {
+  $prevManifest = [System.IO.File]::ReadAllText($script:ManifestPath)
+  if ($prevManifest -cne $manifestBody) {
+    Backup-File -Original $script:ManifestPath
+  }
+}
+$manifestTmp = $script:ManifestPath + ".tmp"
+[System.IO.File]::WriteAllText($manifestTmp, $manifestBody, $manifestUtf8NoBom)
+Move-Item -LiteralPath $manifestTmp -Destination $script:ManifestPath -Force
 Write-Host "  Wrote .claude\.toolkit-manifest.json ($($manifestEntries.Count) managed file(s) tracked)"
 
 Write-Host ""
@@ -1208,26 +1565,60 @@ if ($Skipped.Count -gt 0) {
   Write-Host ""
 }
 
+# --- Upgrade notes (shown if legacy cleanup or plan migration happened) ---
+# PARITY: mirrors the "Upgrade notes" box in setup.sh, which setup.ps1
+# could not carry while it lacked the plan migration. Fires when the
+# v3.5 legacy-command cleanup or the v4.0 plan migration ran this run.
+if ($LegacyCleaned -gt 0 -or $PlansMigrated -gt 0) {
+  Write-Host "    +------------------------------------------------+"
+  Write-Host "    |  Upgraded to v$Version - here's what changed:     |"
+  Write-Host "    +------------------------------------------------+"
+  Write-Host ""
+  if ($LegacyCleaned -gt 0) {
+    Write-Host "      - Review commands are now skills (.claude\skills\)"
+    Write-Host "        They still work as /review-code, /review-ux, etc."
+    Write-Host ""
+    Write-Host "      - NEW: /review - auto-detects changes, dispatches"
+    Write-Host "        the right review skills, combines findings"
+    Write-Host ""
+    Write-Host "      - NEW: /review-deps - dependency security review"
+    Write-Host "      - NEW: /codebase-to-course - learn any codebase"
+    Write-Host ""
+    Write-Host "      - browse.js now supports accessibility scanning"
+    Write-Host "        and responsive screenshots. The dep ships with"
+    Write-Host "        the toolkit's quarantined .claude\scripts\."
+    Write-Host ""
+  }
+  if ($PlansMigrated -gt 0) {
+    Write-Host "      - Plans moved from .claude\plans\ to plans\"
+    Write-Host "        No more permission prompts for plan files."
+    Write-Host "        Your existing plans were moved automatically."
+    Write-Host ""
+  }
+  Write-Host "      See CHANGELOG.md for full details."
+  Write-Host ""
+}
+
 # --- New-this-version announcement (upgrades only) -----------
-# Fires on any upgrade so a plain version bump no longer lands silently.
-# Mirrors the Bash block in setup.sh. setup.ps1 has no LEGACY_CLEANED /
-# PLANS_MIGRATED counters, so the gate is just $IsUpgrade.
-if ($IsUpgrade) {
+# Fires on any upgrade the upgrade notes box above did not cover, so a
+# plain version bump never lands silently. Version-neutral on purpose:
+# the old text described one release (the v5.0 HTML viewing feature)
+# and went stale on the next bump, so a v5.5 -> v6.0 upgrade read about
+# HTML instead of auto-by-default. CHANGELOG.md and AGENT-SETUP.md are
+# kept current by bump-version.sh, so this box only points at them;
+# neither file is copied into the target, hence "in the toolkit repo".
+# Mirrors the Bash block in setup.sh, gate included, now that the
+# $LegacyCleaned and $PlansMigrated counters exist on this side too.
+if ($IsUpgrade -and $LegacyCleaned -eq 0 -and $PlansMigrated -eq 0) {
   Write-Host "    +------------------------------------------------+"
   Write-Host "    |  Upgraded to v$Version - new this version:        |"
   Write-Host "    +------------------------------------------------+"
   Write-Host ""
-  Write-Host "      - HTML viewing for human-read outputs."
-  Write-Host "        /create-plan and /document now render an HTML view"
-  Write-Host "        alongside markdown. /review-* and /ask-* may render"
-  Write-Host "        HTML when a finding count or severity mix justifies it."
-  Write-Host "        Markdown stays canonical; HTML is additive."
+  Write-Host "      Upgrade complete. To see what changed, open in the toolkit repo:"
   Write-Host ""
-  Write-Host "      - NEW: /audit-html scans your project's own markdown"
-  Write-Host "        for files that would benefit from an HTML view."
-  Write-Host "        Report-only; opt-in for static view generation."
-  Write-Host ""
-  Write-Host "      See .claude\rules\html-outputs.md and CHANGELOG.md."
+  Write-Host "      - CHANGELOG.md: the `"What's new since`" rollup at the top,"
+  Write-Host "        then the newest version section right below it."
+  Write-Host "      - AGENT-SETUP.md: the `"What's new in v$Version`" block."
   Write-Host ""
 }
 
