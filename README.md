@@ -226,7 +226,7 @@ This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Win
 
 ## What's New
 
-**Latest release: v6.1.1** (September 2026), a one-fix patch on **v6.1.0**, which is additive on top of **v6.0.0** (August 2026). **v6.0.0 is the one that changed behavior** and is still the release to read first: if you are upgrading from v5.x or earlier, start with its bullets directly below.
+**Latest release: v6.1.1** (September 2026), a one-fix patch on **v6.1.0**: on v6.1.0, every plan page `/create-plan` rendered opened with the shell's schema documentation printed above the title, and re-running setup picks up the fixed shell. v6.1.0 itself is additive on top of **v6.0.0** (August 2026). **v6.0.0 is the one that changed behavior** and is still the release to read first: if you are upgrading from v5.x or earlier, start with its bullets directly below.
 
 Setup installs from `main`, not from a tag, so you get everything on this page, not just the tagged release. The bullets directly below describe v6.0.0; [What v6.1.0 adds](#what-v610-adds) lists what the newer release builds on top of it. See the CHANGELOG for the full split.
 
