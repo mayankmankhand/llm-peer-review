@@ -784,32 +784,44 @@ const tokensCss = fs.readFileSync(tokensPath, 'utf-8');
 // Each placeholder must appear EXACTLY ONCE. The first-occurrence replace means
 // a duplicate leaves a raw literal in the rendered output with no error signal.
 function countOccurrences(str, sub) { return str.split(sub).length - 1; }
-// Returns the 1-based line of the first "<!--" that sits inside an open HTML
-// comment (between an opener and its closer), or 0 when no comment nests.
-function findNestedComment(html) {
-  let open = html.indexOf('<!--');
-  while (open !== -1) {
-    const close = html.indexOf('-->', open + 4);
-    const end = close === -1 ? html.length : close;
-    const inner = html.indexOf('<!--', open + 4);
-    if (inner !== -1 && inner < end) return html.slice(0, inner).split('\n').length;
-    open = close === -1 ? -1 : html.indexOf('<!--', close + 3);
+// Walks the shell's comment markers as a state machine and returns the first
+// defect as { line, what }, or null when every comment opens once and closes
+// once. Three defects, all with the same symptom: an opener while a comment is
+// already open (HTML comments do not nest - the inner closer ends the OUTER
+// comment), a closer while no comment is open (a stray "-->" typed into prose
+// ends the header just the same), and a comment that never closes. The
+// symptom is what matters, so all three are refused, not just the one that
+// shipped (review of #159, R3).
+function findCommentDefect(html) {
+  const marker = /<!--|-->/g;
+  let open = false, m;
+  while ((m = marker.exec(html)) !== null) {
+    const line = html.slice(0, m.index).split('\n').length;
+    if (m[0] === '<!--') {
+      if (open) return { line: line, what: 'a comment opener inside an open comment' };
+      open = true;
+    } else {
+      if (!open) return { line: line, what: 'a comment closer with no comment open' };
+      open = false;
+    }
   }
-  return 0;
+  if (open) return { line: html.split('\n').length, what: 'a comment that never closes' };
+  return null;
 }
 if (countOccurrences(shellHtml, '/*__TOKENS__*/') !== 1)
   die('shell must contain /*__TOKENS__*/ exactly once: ' + shellPath);
 if (countOccurrences(shellHtml, '__RENDER_DATA__') !== 1)
   die('shell must contain __RENDER_DATA__ exactly once: ' + shellPath);
-// A shell's header comment must not contain another comment opener. HTML
-// comments do not nest: the inner comment's closer ends the OUTER comment, and
-// everything after it renders as visible page text above the title, with no
-// other error signal anywhere - the render succeeds and prints a path
-// (issue #159, v6.1.0 plan-shell regression). Refuse it here, naming the line.
-const nestedAt = findNestedComment(shellHtml);
-if (nestedAt)
-  die('shell has a nested HTML comment (an opener inside an open comment would ' +
-      'end the header early and render it as page text): ' + shellPath + ':' + nestedAt);
+// A shell's header comment must open once and close once. Anything else ends
+// the header early, and everything after that point renders as visible page
+// text above the title with no other error signal anywhere - the render
+// succeeds and prints a path (issue #159, v6.1.0 plan-shell regression).
+// Refuse it here, naming the line.
+const defect = findCommentDefect(shellHtml);
+if (defect)
+  die('shell has a malformed HTML comment - ' + defect.what + ' - which ends the ' +
+      'header comment early and renders the rest as page text: ' +
+      shellPath + ':' + defect.line);
 const out = shellHtml
   .replace('/*__TOKENS__*/', function () { return tokensCss; })
   .replace('__RENDER_DATA__', function () { return safeJson; });

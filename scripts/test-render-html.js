@@ -1042,77 +1042,78 @@ function themeContrastTests() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
-// Structural checks over every shell (issue #159). A nested HTML comment in a
-// shell's header is invisible in the source (it reads as a comment), invisible
-// to the helper's placeholder checks, and invisible to every test that greps
-// the file: it only shows on the rendered page, where the rest of the header
-// lands above the title as visible text. v6.1.0 shipped exactly that in
-// plan-shell.html. So: source assertions over all seven shells, one
-// rendered-page assertion through the plan shell that reads the page the way
-// a browser does, and a negative run proving the helper's runtime guard fires
-// and names the line.
+// Structural checks over every shell (issue #159). A malformed header comment
+// in a shell - a nested opener, a stray closer, an unclosed comment - is
+// invisible in the source (it reads as a comment), invisible to the helper's
+// placeholder checks, and invisible to every test that greps the file: it only
+// shows on the rendered page, where the rest of the header lands above the
+// title as visible text. v6.1.0 shipped exactly that in plan-shell.html.
+//
+// Two rules shape this block (review of #159, R1 and R4). The guard under test
+// is the helper's own, never a copy of it: every shell is rendered THROUGH the
+// helper, so a tightened guard is exercised for all seven and cannot drift
+// from a duplicate here. And the rendered-page assertion reads the whole
+// document the way a browser does, anchored on nothing: the leak lands in
+// <head>, before any <body> tag, and the shells build their <h1> in JS, so a
+// window "between <body> and <h1>" only ever matched by coincidence.
 function shellStructureTests() {
   console.log('\nshell structure (issue #159)');
   const shellsDir = path.join(REPO, '.claude/skills/shared/shells');
   const shells = fs.readdirSync(shellsDir).filter(function (f) { return /-shell\.html$/.test(f); }).sort();
   check('all seven shells are present', shells.length === 7, shells.join(', '));
 
-  // The same walk the helper does: an opener that sits between an opener and
-  // its closer. Returns the inner opener's 1-based line, or 0.
-  function nestedCommentLine(html) {
-    let open = html.indexOf('<!--');
-    while (open !== -1) {
-      const close = html.indexOf('-->', open + 4);
-      const end = close === -1 ? html.length : close;
-      const inner = html.indexOf('<!--', open + 4);
-      if (inner !== -1 && inner < end) return html.slice(0, inner).split('\n').length;
-      open = close === -1 ? -1 : html.indexOf('<!--', close + 3);
-    }
-    return 0;
-  }
+  const dir = tmpdir('shell');
+  const dataPath = path.join(dir, 'probe.json');
+  fs.writeFileSync(dataPath, JSON.stringify({ title: 'Structure probe', steps: [{ name: 'One' }] }));
 
-  shells.forEach(function (shell) {
-    const src = fs.readFileSync(path.join(shellsDir, shell), 'utf-8');
-    const line = nestedCommentLine(src);
-    check(shell + ' has no nested HTML comment', line === 0, 'inner opener at line ' + line);
-    check(shell + ' carries /*__TOKENS__*/ exactly once',
-          src.split('/*__TOKENS__*/').length - 1 === 1);
-    check(shell + ' carries __RENDER_DATA__ exactly once',
-          src.split('__RENDER_DATA__').length - 1 === 1);
-    check(shell + ' carries the render-data island', /id="render-data"/.test(src));
-  });
-
-  // The symptom as the user sees it: text above the title. Strip comments the
-  // way a browser does (so a nested comment leaks here exactly as it would on
-  // screen), take everything between <body> and the first <h1>, drop script,
-  // style, and the noscript fallback, and what is left must be whitespace.
-  function visibleBeforeH1(html) {
-    const noComments = html.replace(/<!--[\s\S]*?-->/g, '');
-    const body = noComments.slice(noComments.indexOf('<body'));
-    return body.slice(0, body.indexOf('<h1'))
+  // What a browser would paint from the static document: strip comments the
+  // way the parser does, then every element the shells keep non-visible
+  // content in, then all tags. A rendered shell draws its entire page from
+  // the data island in JS, so what is left must be whitespace - for the whole
+  // document, not a window. (Every shell was probed to confirm the empty
+  // baseline before this became an assertion.)
+  function staticVisibleText(html) {
+    return html.replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<title[\s\S]*?<\/title>/g, '')
       .replace(/<script[\s\S]*?<\/script>/g, '')
       .replace(/<style[\s\S]*?<\/style>/g, '')
       .replace(/<noscript[\s\S]*?<\/noscript>/g, '')
       .replace(/<[^>]+>/g, '')
       .trim();
   }
-  const dir = tmpdir('shell');
-  const dataPath = path.join(dir, 'plan.json');
-  fs.writeFileSync(dataPath, JSON.stringify({ title: 'Structure probe', steps: [{ name: 'One' }] }));
-  const r = spawnSync('node', [SCRIPT, '--shell', 'plan', '--name', 'PLAN-probe',
-                               '--out-dir', dir, '--stable', '--data', dataPath],
-                      { encoding: 'utf-8', cwd: REPO });
-  check('plan shell renders (control)', r.status === 0, r.stderr);
-  if (r.status === 0) {
-    const leaked = visibleBeforeH1(fs.readFileSync(r.stdout.trim(), 'utf-8'));
-    check('rendered plan page shows nothing above the title', leaked === '',
-          'leaked: ' + JSON.stringify(leaked.slice(0, 80)));
+  function renderShell(script, shellName, name) {
+    return spawnSync('node', [script, '--shell', shellName, '--name', name,
+                              '--out-dir', dir, '--stable', '--data', dataPath],
+                     { encoding: 'utf-8', cwd: REPO });
   }
 
-  // Negative run: copy the helper and the shells into a temp tree that keeps
+  shells.forEach(function (shell) {
+    const src = fs.readFileSync(path.join(shellsDir, shell), 'utf-8');
+    check(shell + ' carries /*__TOKENS__*/ exactly once',
+          src.split('/*__TOKENS__*/').length - 1 === 1);
+    check(shell + ' carries __RENDER_DATA__ exactly once',
+          src.split('__RENDER_DATA__').length - 1 === 1);
+    check(shell + ' carries the render-data island', /id="render-data"/.test(src));
+    check(shell + ' documents its schema in the header (sentinel control)', /SCHEMA/.test(src));
+
+    // The real guard: the helper refuses a malformed comment, so a clean exit
+    // here IS the per-shell comment check.
+    const name = shell.replace(/-shell\.html$/, '');
+    const r = renderShell(SCRIPT, name, 'probe-' + name);
+    check(shell + ' renders through the helper (comment guard included)', r.status === 0, r.stderr);
+    if (r.status !== 0) return;
+    const html = fs.readFileSync(r.stdout.trim(), 'utf-8');
+    const leaked = staticVisibleText(html);
+    check(shell + ' rendered page paints no static text',
+          leaked === '', 'leaked: ' + JSON.stringify(leaked.slice(0, 80)));
+    check(shell + ' header documentation does not survive comment-stripping',
+          !/SCHEMA/.test(html.replace(/<!--[\s\S]*?-->/g, '')));
+  });
+
+  // Negative runs: copy the helper and the shells into a temp tree that keeps
   // their relative layout (the helper locates shells from its own __dirname),
-  // nest a comment in one shell's header, and the copied helper must refuse
-  // it naming that shell and the inner opener's line.
+  // break plan-shell's header three ways, and the copied helper must refuse
+  // each one naming the shell and the line.
   const tree = path.join(dir, 'tree');
   fs.mkdirSync(path.join(tree, '.claude/scripts'), { recursive: true });
   fs.mkdirSync(path.join(tree, '.claude/skills/shared/shells'), { recursive: true });
@@ -1120,21 +1121,31 @@ function shellStructureTests() {
   fs.readdirSync(shellsDir).forEach(function (f) {
     fs.copyFileSync(path.join(shellsDir, f), path.join(tree, '.claude/skills/shared/shells', f));
   });
+  const copiedScript = path.join(tree, '.claude/scripts/render-html.js');
   const brokenPath = path.join(tree, '.claude/skills/shared/shells/plan-shell.html');
-  const lines = fs.readFileSync(brokenPath, 'utf-8').split('\n');
-  lines.splice(17, 0, '    <!-- hosted: <url> -->');   // becomes line 18, inside the header
-  fs.writeFileSync(brokenPath, lines.join('\n'));
-  const bad = spawnSync('node', [path.join(tree, '.claude/scripts/render-html.js'),
-                                 '--shell', 'plan', '--name', 'PLAN-broken',
-                                 '--out-dir', dir, '--stable', '--data', dataPath],
-                        { encoding: 'utf-8', cwd: REPO });
-  check('helper refuses a shell with a nested comment', bad.status === 1, 'exit ' + bad.status);
-  check('the refusal names the shell and the line',
-        bad.stderr.indexOf('plan-shell.html:18') !== -1, bad.stderr.trim());
-  check('the refusal says what a nested comment does',
-        /nested HTML comment/.test(bad.stderr), bad.stderr.trim());
-  check('no file is written for the refused shell',
-        !fs.existsSync(path.join(dir, 'PLAN-broken.html')));
+  const clean = fs.readFileSync(brokenPath, 'utf-8');
+  [
+    { label: 'nested opener', line: '    <!-- hosted: <url> -->', what: 'opener inside an open comment' },
+    { label: 'stray closer',  line: '  flow: render --> publish --> record', what: 'closer with no comment open' },
+  ].forEach(function (mutation) {
+    const lines = clean.split('\n');
+    lines.splice(17, 0, mutation.line);   // becomes line 18, inside the header
+    fs.writeFileSync(brokenPath, lines.join('\n'));
+    const bad = renderShell(copiedScript, 'plan', 'PLAN-broken');
+    check('helper refuses a ' + mutation.label, bad.status === 1, 'exit ' + bad.status);
+    check('the ' + mutation.label + ' refusal names the shell and the line',
+          bad.stderr.indexOf('plan-shell.html:18') !== -1, bad.stderr.trim());
+    check('the ' + mutation.label + ' refusal says which defect it found',
+          bad.stderr.indexOf(mutation.what) !== -1, bad.stderr.trim());
+    check('no file is written for the ' + mutation.label,
+          !fs.existsSync(path.join(dir, 'PLAN-broken.html')));
+  });
+  // Unclosed: drop the header's own closer.
+  fs.writeFileSync(brokenPath, clean.replace(/^-->$/m, '   '));
+  const unclosed = renderShell(copiedScript, 'plan', 'PLAN-broken');
+  check('helper refuses an unclosed comment', unclosed.status === 1, 'exit ' + unclosed.status);
+  check('the unclosed refusal says which defect it found',
+        unclosed.stderr.indexOf('never closes') !== -1, unclosed.stderr.trim());
 
   fs.rmSync(dir, { recursive: true, force: true });
 }
