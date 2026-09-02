@@ -57,6 +57,8 @@
 - **CLI default-acceptance prompts don't fully translate to chat.**
 - **When changing user-facing copy, grep for the same description elsewhere.**
 - **Don't state a cited past lesson as if it happened this session.**
+- **Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.**
+- **Never write a literal HTML comment as an example inside an HTML comment.**
 
 ### Skills migration decisions (issue #71)
 
