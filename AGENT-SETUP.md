@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v6.1.0)
+# AI Agent Setup Instructions (v6.1.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -139,7 +139,9 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v6.1.0:** Additive on top of v6.0.0 (#155, #156, #157, plus a holistic pass over the whole range) - the correction ledger, the hosted page as the primary viewport with no consent ask, a hosted-URL stamp on every published file, Windows installer parity plus upgrade safety in both installers, and two review-loop fixes. Nothing here changes the auto-by-default behavior v6.0.0 introduced; if the user is upgrading from v5.x or earlier, walk them through the v6.0.0 block below first. After re-running setup:
+**What's new in v6.1.1:** A patch on v6.1.0 (#159). The v6.1.0 plan shell carried a nested HTML comment, so every plan page `/create-plan` rendered opened with its schema documentation as visible text above the title. The shell is fixed and `render-html.js` now refuses any shell with a nested comment. Nothing else changed. If the user is on v6.1.0, re-run setup so the fixed shell lands; then the v6.1.0 block below still describes everything else that is current.
+
+**What was new in v6.1.0:** Additive on top of v6.0.0 (#155, #156, #157, plus a holistic pass over the whole range) - the correction ledger, the hosted page as the primary viewport with no consent ask, a hosted-URL stamp on every published file, Windows installer parity plus upgrade safety in both installers, and two review-loop fixes. Nothing here changes the auto-by-default behavior v6.0.0 introduced; if the user is upgrading from v5.x or earlier, walk them through the v6.0.0 block below first. After re-running setup:
 - `/document` now has a capture stage. At the end of a cycle it finds the moments the user stepped in, has a fresh subagent read those exchanges cold, and asks the user to confirm or rewrite a short note about each one before anything is recorded. Nothing is written without their say-so. It explains itself the first time it runs in a project, so you do not need to introduce it.
 - A new `/error-analysis` command groups those notes into categories and ranks them by count. It is user-triggered and never chained into. It refuses to rank on fewer than ten rows. A one-time backfill of older transcripts exists (`--since` on the script's `--candidates` mode), run only when the user asks and only for the repo they name.
 - Data lives at `~/.claude/`, per machine, append-only, outside every repo. Tell the user plainly: the mechanism ships to every install, the data never leaves their machine, it is never published, and it is never sent to another model. Two fields hold near-verbatim fragments and are excluded from every rollup. They can turn it off for a repo with `touch .claude/.no-correction-log`. The files that ship it: `.claude/scripts/correction-ledger.js`, `.claude/agents/correction-extractor.md`, and `.claude/skills/error-analysis/SKILL.md`.
