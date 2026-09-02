@@ -70,6 +70,10 @@
 #      review, R3). The file stays tracked and keeps every committed entry
 #      (setup never runs git rm); an untracked copy in a repo and a
 #      non-repo target keep the normal message
+#  22. DESIGN-PROFILE.md is seeded once from the installed template: a
+#      fresh install creates it, a re-run skips it and keeps a local edit.
+#      gen-media.js is a managed dep-free script and enters the manifest
+#      like its siblings (issue #160)
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -1009,6 +1013,52 @@ else
   # scenario 2 fresh install ran on one.
   assert_grep "$NORMAL_MSG" "$LOG/install.log" "non-repo target gets the normal message (scenario 2 log)"
 fi
+
+# ─── [22] DESIGN-PROFILE.md seeded once, gen-media.js managed ───
+# Its own scratch tree: the main one has been through crash recovery, manifest
+# collisions, and a hand-broken settings file by now, so a clean re-run there
+# would test those scenarios' cleanup rather than the seed-once guarantee.
+echo "[22] DESIGN-PROFILE.md seeded once, gen-media.js managed"
+PROFILE_SCRATCH="$WORK/profile"
+mkdir -p "$PROFILE_SCRATCH"
+bash "$SCRIPT_DIR/setup.sh" "$PROFILE_SCRATCH" < /dev/null > "$LOG/profile-install.log" 2>&1
+if [ -f "$PROFILE_SCRATCH/DESIGN-PROFILE.md" ]; then
+  ok "fresh install seeded DESIGN-PROFILE.md"
+else
+  fail "fresh install did not seed DESIGN-PROFILE.md (log: $LOG/profile-install.log)"
+fi
+if cmp -s "$PROFILE_SCRATCH/DESIGN-PROFILE.md" "$TOOLKIT_ROOT/.claude/skills/shared/design-profile-template.md"; then
+  ok "seeded profile is the template byte-for-byte"
+else
+  fail "seeded profile differs from the template"
+fi
+if [ -f "$PROFILE_SCRATCH/.claude/scripts/gen-media.js" ]; then
+  ok "gen-media.js installed"
+else
+  fail "gen-media.js missing after install"
+fi
+if grep -qE '"\.claude/scripts/gen-media\.js": "[0-9a-f]{64}"' "$PROFILE_SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then
+  ok "manifest carries gen-media.js"
+else
+  fail "manifest lacks gen-media.js"
+fi
+if grep -qF '"DESIGN-PROFILE.md"' "$PROFILE_SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then
+  fail "manifest tracks the user-owned DESIGN-PROFILE.md"
+else
+  ok "manifest does not track the user-owned DESIGN-PROFILE.md"
+fi
+printf '\n- taste note: LOCAL EDIT MARKER\n' >> "$PROFILE_SCRATCH/DESIGN-PROFILE.md"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$PROFILE_SCRATCH" < /dev/null > "$LOG/profile-rerun.log" 2>&1
+PROFILE_RC=$?
+set -e
+if [ "$PROFILE_RC" -eq 0 ]; then
+  ok "re-run after a profile edit exited 0"
+else
+  fail "re-run after a profile edit exited $PROFILE_RC (log: $LOG/profile-rerun.log)"
+fi
+assert_grep "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" "$LOG/profile-rerun.log" "re-run skips the existing profile"
+assert_grep "LOCAL EDIT MARKER" "$PROFILE_SCRATCH/DESIGN-PROFILE.md" "local profile edit survived the re-run"
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

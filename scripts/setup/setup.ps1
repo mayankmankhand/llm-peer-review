@@ -138,8 +138,8 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
   }
 }
 
-# Check dep-free runtime scripts (index generator + artifact opener + HTML renderer + session-init + pre-push tripwire + correction ledger) - must exist.
-foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js")) {
+# Check dep-free runtime scripts (index generator + artifact opener + HTML renderer + session-init + pre-push tripwire + correction ledger + gen-media) - must exist.
+foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -147,7 +147,7 @@ foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "ses
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes")) {
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes", ".claude\skills\shared\design-profile-template.md")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -515,7 +515,7 @@ if (Test-Path -LiteralPath $pfAgentsDir -PathType Container) {
     Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\agents" $src.Name)
   }
 }
-foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js")) {
+foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
 }
 $pfLockSrc = Join-Path $ToolkitRoot ".claude\scripts\package-lock.json"
@@ -1134,8 +1134,8 @@ if (Test-Path -LiteralPath $lockSrc -PathType Leaf) {
 # group above (which carries scripts that need node_modules). Mirrors setup.sh.
 # render-html.js injects a JSON payload into a prebuilt shell under
 # .claude\skills\shared\shells\ (copied with the skills block above).
-Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh, render-html.js, session-init.js, pre-push-check.js, correction-ledger.js) ..."
-foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js")) {
+Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh, render-html.js, session-init.js, pre-push-check.js, correction-ledger.js, gen-media.js) ..."
+foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
   try {
     $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
     $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)
@@ -1370,6 +1370,27 @@ if ($LessonsPreexisted) {
   }
 }
 
+# --- DESIGN-PROFILE.md (seeded once from the installed template, issue #160) --
+# PARITY: mirrors the DESIGN-PROFILE.md seed block in setup.sh - change both
+# together. User-owned like CLAUDE.md and LESSONS.md: seeded on a fresh install,
+# never overwritten. The seed is .claude\skills\shared\design-profile-template.md,
+# which the shared glob above already copied into the target, so /explore can
+# offer to recreate a missing profile from the very same file. Never this repo's
+# own root file: a live profile would carry its answers into every fresh install.
+$designProfileDest = Join-Path $Target "DESIGN-PROFILE.md"
+if (Test-Path -LiteralPath $designProfileDest -PathType Leaf) {
+  Write-Host "  Skipping DESIGN-PROFILE.md - already exists (yours to customize)"
+  $Skipped += "DESIGN-PROFILE.md"
+} else {
+  Write-Host "  Copying DESIGN-PROFILE.md (seeded from .claude\skills\shared\design-profile-template.md) ..."
+  try {
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".claude\skills\shared\design-profile-template.md") -Destination $designProfileDest -Force
+  } catch {
+    Write-Host "  Error: Failed to copy DESIGN-PROFILE.md : $_"
+    exit 1
+  }
+}
+
 # --- Merge new permissions into existing settings.local.json --
 # PARITY: mirrors the "Merge new permissions into existing
 # settings.local.json" block in setup.sh. When upgrading, the user's
@@ -1555,7 +1576,7 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
 # as this run left it on disk - i.e. AFTER the version-stamp rewrites of
 # the two rules files - so stamped files never self-flag on the next run.
 # User-owned skip-if-exists files (CLAUDE.md, LESSONS.md,
-# LESSONS-detail.md, .claude\settings.local.json) and the line-merged
+# LESSONS-detail.md, DESIGN-PROFILE.md, .claude\settings.local.json) and the line-merged
 # .gitignore are NOT tracked: setup never overwrites those, so they need
 # no gate. ManagedRels is accumulated by the pre-flight enumeration,
 # which mirrors the copy blocks exactly. Forward-slash keys and BOM-less
@@ -1727,6 +1748,7 @@ Write-Host "           Copy-Item .env.local.example .env.local"
 Write-Host "         Then open .env.local and paste:"
 Write-Host "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
 Write-Host "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
+Write-Host "           FAL_KEY         ->  https://fal.ai/dashboard/keys  (optional: video in the design workflow)"
 Write-Host ""
 Write-Host "      3. Open the folder in Cursor and run /explore to start your first workflow."
 Write-Host ""
