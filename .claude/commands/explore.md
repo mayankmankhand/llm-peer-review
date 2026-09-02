@@ -124,17 +124,20 @@ Once the user's answers start pointing toward a direction (usually round 2, some
 
 **After the user picks:**
 - **Expand** - continue with vision mode questions, push even bigger. If the user picks Expand twice, re-offer the Scope Dial after one more round. If they pick Expand a third time, gently suggest Hold: "We've explored a lot of territory - want to lock in what we have and move to planning?"
-- **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria) but keep the vision mode tone. This avoids conversational whiplash. Also bring in UI/UX Preferences if the feature involves a UI.
+- **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria) but keep the vision mode tone. This avoids conversational whiplash. Also bring in Design exploration if the feature involves a UI.
 - Phase 2 stays optional regardless of which dial option was chosen
 
-### UI/UX Preferences (scoping mode, or vision mode after Hold/Reduce)
+### Design exploration (scoping mode, or vision mode after Hold/Reduce)
 
-When the feature involves a user interface (a page, dashboard, form, component, etc.):
+Same trigger as before: the feature involves a user interface (a page, dashboard, form, component, screen, anything a human looks at). Announce the step by name and its load level in one line, so it never folds into the other questions: "Design exploration: <new | improve | none>." Every mechanic lives in `.claude/skills/shared/design-rules.md`; read it when this step fires and cite its sections rather than restating them.
 
-1. **Proactively ask** about look and behavior as part of your Phase 1 questions. Don't wait for the user to bring it up.
-2. **Accept any format** - the user might give code, a text description, a design guide, or just a rough idea. All are valid.
-3. **If the user says "you decide"** - don't leave it vague. Propose a specific direction (e.g., "I'm thinking a two-column layout with a sidebar for filters") and get a soft confirmation before moving on.
-4. **Document the outcome** - whether the user gave detailed guidance or approved your proposal, these decisions will feed into `/create-plan`'s UI/UX Design section.
+1. **Read `DESIGN-PROFILE.md`.** Absent means the design system is unknown; offer to create the file from `.claude/skills/shared/design-profile-template.md` (the installer's own seed). While the profile says unknown, run the detection signals, confirm once, and record the answer in the profile (the three-state rule).
+2. **Set the load level** with the countable test in the load dial, confirm it in one line, and honor "treat as new". Load level none ends the step here, silently.
+3. **Improve:** name the surface (file or route) and go to step 6.
+4. **New:** run the idea list and capture the user's reactions in the profile's Taste notes (Technique 2), then generate three seeded directions, one `node .claude/scripts/gen-media.js --kind seed` call each (Technique 1). Accept any format the user offers; when they say "you decide", propose one direction and get a soft confirmation.
+5. **Show the prototypes.** Dispatch the `playground` skill's rendered-prototypes variant with the three directions, announcing it per `.claude/rules/html-outputs.md` (this playground is default-on for load level new). Read the reply: a message starting with `Playground result` carries the pick and notes; anything else is natural-language decision input.
+6. **Check divergence.** When the pick or a refinement would change color, type, spacing, or components inside an existing system, raise the divergence page from the fragment.
+7. **Document the outcome** in the closing summary's Design direction line; `/create-plan` copies it into the UI/UX Design section.
 
 ### Explain the Why
 Briefly explain *why* you're asking when it adds value. Example: "I'm asking about success criteria because unclear goals often lead to scope creep."
@@ -186,6 +189,7 @@ Once you're satisfied with the problem definition, shift to technical exploratio
 If they say skip, present a vision-mode closing summary:
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/create-plan`'s Goal State section.
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
+- **Design direction** - when the design step fired: load level, design system (state and where), direction name, brief, seed, divergence allowed. `/create-plan` copies this line into its UI/UX Design section.
 - **Open questions** - anything unresolved that `/create-plan` should address during execution
 - **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
 - **HTML option comparison - REQUIRED when 2+ options are being compared.** This is not optional when the gate fires. The gate: the exploration surfaced **two or more distinct, named directions the user is actively deciding between**, each with at least one tradeoff or consideration. It does NOT fire for a single recommendation, a set you have already narrowed to one, or open discussion with no competing options. When fewer than 2 options are on the table, skip this entirely. When it fires, you MUST work through these steps:
@@ -229,6 +233,7 @@ Give the user a brief summary of what you found:
 - Key files involved
 - How the feature integrates
 - Any technical concerns or trade-offs
+- Design direction, when the design step fired (load level, design system, direction name, brief, seed, divergence allowed)
 - Remaining questions (if any)
 
 **Chain check (M14).** Apply M14's convergence gate, reading **Remaining questions** above as its open-question field. **Read the mode first:** a vision-mode run that accepted Phase 2 arrives here too and the mode is sticky (see Mode Detection), so a vision run still carries M14's scope-dial condition on this path. M14 holds every condition and the not-passing behavior; do not restate them here. An unanswered question is the cheapest thing to fix at this point and the most expensive to fix after a plan is built on it. When the gate passes, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool.

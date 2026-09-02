@@ -53,6 +53,19 @@ After all parallel steps finish, always run a sequential checkpoint:
 4. Update the plan status
 </conditions>
 
+## Design Steps
+
+When the plan's UI/UX Design section carries a load level of new or improve, the step that builds that surface is a design step. The loop it runs is the "loop procedure" in `.claude/skills/shared/design-rules.md`, bounded by M15 in `.claude/skills/shared/hitl-loop.md`; read the fragment when the step starts and cite it rather than restating it. What is specific to `/execute`:
+
+<conditions>
+- **Pre-flight:** a design step is downgraded to `[sequential]` the same way overlapping files are, so it runs in the main loop. A spawned agent cannot dispatch the critic, cannot page, and must not drive the browser.
+- **Read the profile first:** `DESIGN-PROFILE.md` (Design system, Allowed variance, Baseline images) before the first round.
+- **Divergence:** a critic-round change that would leave the allowed set raises the divergence page from the fragment; the answer lands in the plan's Divergence allowed row.
+- **Media:** run `node .claude/scripts/gen-media.js` through the Bash tool with the tool's maximum timeout. Exit 0 returns the asset path, which the surface's markup or CSS then references; exit 2 returns a handoff prompt to relay verbatim, and the step continues without the asset when the user declines.
+- **Checkpoints and records:** every round is a checkpoint (M4); the score of every round and the kept round land in the plan's Outcomes.
+- **Bounds:** the 3-attempt retry bound in When to Stop covers build failures; the critic rounds are M15's and never borrow from it.
+</conditions>
+
 ## When to Stop
 
 <rules>

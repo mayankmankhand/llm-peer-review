@@ -58,6 +58,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 - `[parallel]` steps: add `→ delivers: [what this step produces]`
 - `[sequential]` steps: add `→ depends on: Step N`
 - Parallel steps must be independent in both **files AND environment** (dependencies, services, migrations, env vars)
+- A step that builds a surface with load level new or improve is tagged `[sequential]`: its design loop runs in the main loop (M15 in `.claude/skills/shared/hitl-loop.md`)
 - Example: "Add button component" + "Write API endpoint" = parallel (different files, no dependency). "Write API endpoint" then "Connect button to API" = sequential (second depends on first).
 - If all steps are sequential, still tag them - the tags confirm you thought about execution order
 
@@ -111,8 +112,14 @@ Short summary of what we're building and why.
 **Goal State:** Where we want to end up.
 
 ## UI/UX Design (optional - only when the feature involves UI)
-<!-- Include this section when the feature has a user interface. Document what was decided during /explore. -->
+<!-- Include this section when the feature has a user interface. Copy the Design direction line /explore produced; the mechanics are in .claude/skills/shared/design-rules.md. -->
 - **Source:** User-provided / AI-proposed, user-approved
+- **Load level:** new / improve (none means this section is omitted)
+- **Design system:** none / exists at [where] - allowed variance: [what may vary]
+- **Direction:** [name] - [the brief] - seed `[the seed string]`
+- **Divergence allowed:** stay inside / this surface only / propose a system change - [what]
+- **Media:** ask at build / none
+- **Critic budget:** per M15 for the load level
 - **Look:** [Layout, style, colors, visual direction - whatever was decided]
 - **Behavior:** [Interactions, flows, states - whatever was decided]
 
