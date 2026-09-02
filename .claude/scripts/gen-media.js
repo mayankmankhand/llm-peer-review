@@ -10,6 +10,8 @@
 //                  fal.ai queue API (FAL_KEY).
 //   --kind matte   background removal on a video (--image is the input clip) through
 //                  the fal.ai queue API (FAL_KEY). Technique 5's second step.
+//   --request-id   with video or matte: collect a job an earlier run submitted (exit 3)
+//                  instead of submitting a new one. --prompt and --image are not needed.
 //
 // Contract (mirrors session-init.js):
 //   - stdout = exactly one JSON object. Nothing else is ever written there, so the
@@ -21,9 +23,11 @@
 //     Exit 2: { ok: false, missingKeys: [...], handoffPrompt, expectedFile } - the
 //             key the kind needs is not set, so the user can run the prompt in
 //             another tool and paste the file back at expectedFile.
-//     Exit 3: { ok: false, timedOut: true, requestId, statusUrl } - the fal.ai queue
-//             did not finish inside --timeout seconds; a later run can resume with
-//             the request id instead of paying for the job twice.
+//     Exit 3: { ok: false, timedOut, requestId, statusUrl, error? } - the fal.ai job was
+//             submitted but not collected: the queue did not finish inside --timeout
+//             seconds (timedOut: true), or a poll, result read, or download failed
+//             after submission. The job is still on fal.ai; rerun the same --kind and
+//             --out with --request-id <requestId> to collect it without paying twice.
 //     Exit 1: { ok: false, error } - anything else (bad flags, API error, Node too old).
 //   - Zero dependencies. Node 18+ for the global fetch.
 //
@@ -191,7 +195,7 @@ async function readJsonResponse(res, what) {
 async function download(url, out, deadline) {
   const res = await fetch(url, { signal: deadline.signal() });
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-  fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()));
+  fs.writeFileSync(out, Buffer.from(await res.arrayBuffer()), { flag: 'wx' });
 }
 
 // ─── Handoff (exit 2) ────────────────────────────────────────────────────────
@@ -222,7 +226,7 @@ async function openaiImage(args, deadline) {
   const item = json.data && json.data[0];
   if (!item) throw new Error('OpenAI Images returned no image');
   if (item.b64_json) {
-    fs.writeFileSync(args.out, Buffer.from(item.b64_json, 'base64'));
+    fs.writeFileSync(args.out, Buffer.from(item.b64_json, 'base64'), { flag: 'wx' });
   } else if (item.url) {
     await download(item.url, args.out, deadline);
   } else {
@@ -247,44 +251,79 @@ async function geminiImage(args, deadline) {
   const parts = (((json.candidates || [])[0] || {}).content || {}).parts || [];
   const part = parts.find((p) => p.inlineData && p.inlineData.data);
   if (!part) throw new Error('Gemini returned no image part');
-  fs.writeFileSync(args.out, Buffer.from(part.inlineData.data, 'base64'));
+  fs.writeFileSync(args.out, Buffer.from(part.inlineData.data, 'base64'), { flag: 'wx' });
   return { provider: 'gemini', model };
 }
 
 // fal.ai queue API: submit, poll the status URL, then read the response URL.
 // https://docs.fal.ai/model-endpoints/queue
+// With --request-id the submit step is skipped and an earlier run's job is collected.
 async function falQueue(model, input, args, deadline) {
   const headers = { 'Content-Type': 'application/json', Authorization: `Key ${process.env.FAL_KEY.trim()}` };
-  diag(`fal.ai queue, model ${model}`);
-  const submit = await fetch(`https://queue.fal.run/${model}`, {
-    method: 'POST', headers, body: JSON.stringify(input), signal: deadline.signal(),
-  });
-  const job = await readJsonResponse(submit, 'fal.ai submit');
-  const requestId = job.request_id;
-  const statusUrl = job.status_url || `https://queue.fal.run/${model}/requests/${requestId}/status`;
-  const responseUrl = job.response_url || `https://queue.fal.run/${model}/requests/${requestId}`;
-  if (!requestId) throw new Error('fal.ai submit returned no request_id');
-  diag(`queued as ${requestId}`);
-
-  for (;;) {
-    if (deadline.expired()) {
-      diag(`timed out waiting for ${requestId}; it is still running on fal.ai`);
-      finish({ ok: false, timedOut: true, requestId, statusUrl }, 3);
-    }
-    const st = await readJsonResponse(await fetch(statusUrl, { headers, signal: deadline.signal() }), 'fal.ai status');
-    const status = String(st.status || '').toUpperCase();
-    if (status === 'COMPLETED') break;
-    if (status === 'FAILED' || status === 'ERROR' || status === 'CANCELLED') {
-      throw new Error(`fal.ai job ${requestId} ended with status ${status}`);
-    }
-    diag(`status ${status || 'unknown'}, waiting`);
-    await new Promise((r) => setTimeout(r, Math.min(POLL_MS, deadline.remainingMs() || 1)));
+  let requestId = args['request-id'] || null;
+  let statusUrl;
+  let responseUrl;
+  if (requestId) {
+    diag(`fal.ai queue, model ${model}, collecting job ${requestId}`);
+    statusUrl = `https://queue.fal.run/${model}/requests/${requestId}/status`;
+    responseUrl = `https://queue.fal.run/${model}/requests/${requestId}`;
+  } else {
+    diag(`fal.ai queue, model ${model}`);
+    const submit = await fetch(`https://queue.fal.run/${model}`, {
+      method: 'POST', headers, body: JSON.stringify(input), signal: deadline.signal(),
+    });
+    const job = await readJsonResponse(submit, 'fal.ai submit');
+    requestId = job.request_id;
+    if (!requestId) throw new Error('fal.ai submit returned no request_id');
+    statusUrl = job.status_url || `https://queue.fal.run/${model}/requests/${requestId}/status`;
+    responseUrl = job.response_url || `https://queue.fal.run/${model}/requests/${requestId}`;
+    diag(`queued as ${requestId}`);
   }
 
-  const result = await readJsonResponse(await fetch(responseUrl, { headers, signal: deadline.signal() }), 'fal.ai result');
-  const url = findMediaUrl(result);
-  if (!url) throw new Error('fal.ai result carried no media URL');
-  await download(url, args.out, deadline);
+  // From here on the job exists on fal.ai and has been paid for, so nothing below is
+  // allowed to end in exit 1: a timeout, an aborted request, a bad poll, or a failed
+  // download all exit 3 with the request id, and a rerun with --request-id collects it.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    let transient = 0;
+    for (;;) {
+      if (deadline.expired()) {
+        diag(`timed out waiting for ${requestId}; it is still running on fal.ai`);
+        finish({ ok: false, timedOut: true, requestId, statusUrl }, 3);
+      }
+      let st;
+      try {
+        st = await readJsonResponse(await fetch(statusUrl, { headers, signal: deadline.signal() }), 'fal.ai status');
+        transient = 0;
+      } catch (e) {
+        // One bad poll (a 502 from the queue, a dropped connection) is not the job
+        // failing. Retry a few times before giving up; a deadline abort is not retried.
+        if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) throw e;
+        transient += 1;
+        if (transient > 5) throw e;
+        diag(`status poll failed (${e.message}); retrying`);
+        await sleep(Math.min(POLL_MS, deadline.remainingMs() || 1));
+        continue;
+      }
+      const status = String(st.status || '').toUpperCase();
+      if (status === 'COMPLETED') break;
+      if (status === 'FAILED' || status === 'ERROR' || status === 'CANCELLED') {
+        throw new Error(`fal.ai job ${requestId} ended with status ${status}`);
+      }
+      diag(`status ${status || 'unknown'}, waiting`);
+      await sleep(Math.min(POLL_MS, deadline.remainingMs() || 1));
+    }
+
+    const result = await readJsonResponse(await fetch(responseUrl, { headers, signal: deadline.signal() }), 'fal.ai result');
+    const url = findMediaUrl(result);
+    if (!url) throw new Error('fal.ai result carried no media URL');
+    await download(url, args.out, deadline);
+  } catch (e) {
+    if (e && e.code === 'EEXIST') throw e; // the overwrite guard, not a queue problem
+    const timedOut = Boolean(e && (e.name === 'TimeoutError' || e.name === 'AbortError'));
+    diag(`could not collect ${requestId} (${e && e.message}); rerun with --request-id ${requestId}`);
+    finish({ ok: false, timedOut, requestId, statusUrl, error: (e && e.message) || String(e) }, 3);
+  }
   return { provider: 'fal', model, requestId };
 }
 
@@ -306,11 +345,20 @@ async function main() {
 
   loadEnvLocal();
 
+  const resuming = Boolean(args['request-id']);
+  if (resuming && kind === 'image') return fail('--request-id applies to video and matte only');
   if (!args.out) return fail('--out is required for image, video, and matte');
   if (fs.existsSync(args.out)) return fail(`refusing to overwrite existing file: ${args.out}`);
-  if (kind !== 'matte' && !args.prompt) return fail('--prompt is required for image and video');
-  if (kind === 'matte' && !args.image) return fail('--image (the input clip) is required for matte');
+  if (!resuming && kind !== 'matte' && !args.prompt) return fail('--prompt is required for image and video');
+  if (!resuming && kind === 'matte' && !args.image) return fail('--image (the input clip) is required for matte');
   if (args.image && !fs.existsSync(args.image)) return fail(`input file not found: ${args.image}`);
+  // The output directory is checked here, before any provider is called, so a missing
+  // asset folder is found while it is still free to fix rather than after the bill.
+  try {
+    fs.mkdirSync(path.dirname(args.out), { recursive: true });
+  } catch (e) {
+    return fail(`cannot create the output directory for --out: ${e.message}`);
+  }
   const timeoutSec = args.timeout === undefined ? 540 : parseInt(args.timeout, 10);
   if (!(timeoutSec > 0)) return fail('--timeout must be a positive number of seconds');
   const deadline = new Deadline(timeoutSec);
@@ -328,7 +376,8 @@ async function main() {
       if (args.image) input.image_url = fileToDataUri(args.image);
       meta = await falQueue(envOr('FAL_VIDEO_MODEL'), input, args, deadline);
     } else {
-      meta = await falQueue(envOr('FAL_MATTE_MODEL'), { video_url: fileToDataUri(args.image) }, args, deadline);
+      const input = resuming ? {} : { video_url: fileToDataUri(args.image) };
+      meta = await falQueue(envOr('FAL_MATTE_MODEL'), input, args, deadline);
     }
   }
 
@@ -338,6 +387,10 @@ async function main() {
 }
 
 main().catch((e) => {
-  const msg = e && e.name === 'TimeoutError' ? 'request timed out' : (e && e.message) || String(e);
+  let msg = (e && e.message) || String(e);
+  if (e && e.name === 'TimeoutError') msg = 'request timed out';
+  // The exclusive write refused an existing file or a symlink at --out (see download
+  // and the two image writers): same refusal as the pre-flight check, one step later.
+  if (e && e.code === 'EEXIST') msg = 'refusing to overwrite an existing file or symlink at --out';
   fail(msg);
 });
