@@ -192,6 +192,8 @@ OPENAI_API_KEY=sk-your-key-here
 GEMINI_API_KEY=AIza-your-key-here
 ```
 
+The design workflow's video generation takes an optional `FAL_KEY` too; leave it out and the workflow hands you the prompt to run elsewhere. See [API-KEYS.md](API-KEYS.md).
+
 ### Step 10: Open in Cursor and Test
 
 - Open Cursor → File → Open Folder
