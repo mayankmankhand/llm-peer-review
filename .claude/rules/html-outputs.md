@@ -29,6 +29,7 @@ HTML is always generated for these. No judgement call.
 | `/codebase-to-course` | Already HTML today |
 | `/create-plan` | Plans are always long. Dual-track (markdown canonical + HTML view) is always worth it |
 | `/document` (cycle summary) | One-page "what shipped this cycle" runs every time `/document` does |
+| `/explore` design step, load level new | The three-prototype playground always fires (`.claude/skills/shared/design-rules.md`): picking between rendered designs is a user-doing-something loop, not a judgement call |
 
 Markdown remains canonical even when HTML is also generated. Claude reads the markdown; HTML is the rendered view for the user.
 
@@ -53,6 +54,8 @@ The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-
 2. Every playground HTML ends with a **"copy as markdown"** or **"copy as prompt"** button that emits text the user can paste back as a new chat message.
 3. Self-contained: one HTML file, inline CSS/JS, no CDN. Works offline.
 4. Disposable: lands in `/tmp/`, never in the repo.
+
+The `/explore` design step dispatches the playground's rendered-prototypes variant with click-to-expand as a fixed primitive; the pick and notes come back through the same copy button as every other playground.
 
 ## Artifact Locations
 
@@ -213,7 +216,7 @@ This is *additive and shape-aware*, never a migration. Every project qualifies f
 
 ### Vetoes (these stay markdown no matter how long)
 
-- **Claude-read files** - `CODEBASE_MAP.md`, `PLAN-*.md`, `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md` (the index is parsed every session, the detail on demand), anything else Claude parses every session. HTML wastes tokens on re-ingestion.
+- **Claude-read files** - `CODEBASE_MAP.md`, `PLAN-*.md`, `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md` (the index is parsed every session, the detail on demand), `DESIGN-PROFILE.md` (read before any design work), anything else Claude parses every session. HTML wastes tokens on re-ingestion.
 - **Canonical / data-source / self-description** - if the file *is* the source of truth that other tools or scripts parse, markdown is the contract.
 - **Host-native** - `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, anything GitHub or GitLab already renders for you.
 - **Lives in `.claude/`** - prompt files, skill files, rules. These are Claude's instructions, not human-read pages.
@@ -228,7 +231,7 @@ These stay markdown regardless of length or complexity:
 
 - `CODEBASE_MAP.md` (Claude reads it, not the user)
 - `README.md`, `SETUP.md`, `API-KEYS.md`, `AGENT-SETUP.md`, `CONTRIBUTING.md`, `DEMO-SCRIPT.md` (GitHub and GitLab render these natively)
-- `CLAUDE.md`, `LESSONS.md` (index, read every session), `LESSONS-detail.md` (read on demand), `.claude/rules/*.md` (read by Claude every session)
+- `CLAUDE.md`, `LESSONS.md` (index, read every session), `LESSONS-detail.md` (read on demand), `DESIGN-PROFILE.md` (read before design work), `.claude/rules/*.md` (read by Claude every session)
 - `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)
 - `CHANGELOG.md` (per-release notes, host-native)
 - `/create-issue` output (issues are markdown on GitHub and GitLab alike)
