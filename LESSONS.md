@@ -187,3 +187,12 @@
 - **A test whose fixture is rejected by two code paths cannot detect either one breaking.**
 - **When storage is append-only, validate the whole batch before writing any of it.**
 - **Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.**
+
+### Design workflow (issue #160)
+
+- **A test fixture must never carry a real-shaped secret; assemble it at runtime, because the tripwire has no allow-list by design.**
+- **A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.**
+- **A prompt cannot declare a user-owned prerequisite done.**
+- **Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.**
+- **A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.**
+- **When inserting a numbered step, grep for every "step N" reference before and after the insertion.**
