@@ -784,10 +784,32 @@ const tokensCss = fs.readFileSync(tokensPath, 'utf-8');
 // Each placeholder must appear EXACTLY ONCE. The first-occurrence replace means
 // a duplicate leaves a raw literal in the rendered output with no error signal.
 function countOccurrences(str, sub) { return str.split(sub).length - 1; }
+// Returns the 1-based line of the first "<!--" that sits inside an open HTML
+// comment (between an opener and its closer), or 0 when no comment nests.
+function findNestedComment(html) {
+  let open = html.indexOf('<!--');
+  while (open !== -1) {
+    const close = html.indexOf('-->', open + 4);
+    const end = close === -1 ? html.length : close;
+    const inner = html.indexOf('<!--', open + 4);
+    if (inner !== -1 && inner < end) return html.slice(0, inner).split('\n').length;
+    open = close === -1 ? -1 : html.indexOf('<!--', close + 3);
+  }
+  return 0;
+}
 if (countOccurrences(shellHtml, '/*__TOKENS__*/') !== 1)
   die('shell must contain /*__TOKENS__*/ exactly once: ' + shellPath);
 if (countOccurrences(shellHtml, '__RENDER_DATA__') !== 1)
   die('shell must contain __RENDER_DATA__ exactly once: ' + shellPath);
+// A shell's header comment must not contain another comment opener. HTML
+// comments do not nest: the inner comment's closer ends the OUTER comment, and
+// everything after it renders as visible page text above the title, with no
+// other error signal anywhere - the render succeeds and prints a path
+// (issue #159, v6.1.0 plan-shell regression). Refuse it here, naming the line.
+const nestedAt = findNestedComment(shellHtml);
+if (nestedAt)
+  die('shell has a nested HTML comment (an opener inside an open comment would ' +
+      'end the header early and render it as page text): ' + shellPath + ':' + nestedAt);
 const out = shellHtml
   .replace('/*__TOKENS__*/', function () { return tokensCss; })
   .replace('__RENDER_DATA__', function () { return safeJson; });
