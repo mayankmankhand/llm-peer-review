@@ -9,6 +9,7 @@
 //   FAKE_FETCH_LOG   append one JSON line per request (url, method, auth scheme, body)
 //   FAKE_FETCH_MODE  "complete" (default): the fal.ai queue finishes on the 2nd poll
 //                    "never": the queue reports IN_QUEUE forever (timeout branch)
+//                    "flaky": the first two status polls answer 502, then it completes
 'use strict';
 
 const fs = require('fs');
@@ -53,6 +54,7 @@ globalThis.fetch = async function fakeFetch(url, init) {
   if (u.endsWith('/requests/req_test_123/status')) {
     statusCalls++;
     if (MODE === 'never') return json({ status: 'IN_QUEUE' });
+    if (MODE === 'flaky' && statusCalls <= 2) return new Response('bad gateway', { status: 502 });
     return json({ status: statusCalls < 2 ? 'IN_PROGRESS' : 'COMPLETED' });
   }
   if (u.endsWith('/requests/req_test_123')) {

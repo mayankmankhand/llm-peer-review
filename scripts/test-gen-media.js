@@ -155,6 +155,53 @@ console.log('gen-media.js');
   check(fs.existsSync(sb.out('loop-matte.mp4')), 'matte: wrote the output clip');
 }
 
+// ─── resume an earlier job with --request-id ─────────────────────────────────
+{
+  const sb = sandbox('resume', { FAL_KEY: FAKE.FAL_KEY });
+  const out = sb.out('loop.mp4');
+  const r = run(sb, ['--kind', 'video', '--request-id', 'req_test_123', '--out', out]);
+  contract(r, 'resume');
+  check(r.status === 0 && r.json.ok === true && r.json.requestId === 'req_test_123', 'resume: exit 0 collecting the earlier job');
+  check(!r.requests.some((q) => q.method === 'POST'), 'resume: submits nothing, so nothing is paid for twice');
+  check(r.requests[0].url.endsWith('/requests/req_test_123/status'), 'resume: goes straight to the status URL');
+  check(fs.readFileSync(out, 'utf8') === 'MP4DATA-fake', 'resume: downloaded the result clip');
+  const m = run(sandbox('resume-matte', { FAL_KEY: FAKE.FAL_KEY }), ['--kind', 'matte', '--request-id', 'req_test_123', '--out', sb.out('m.mp4')]);
+  check(m.status === 0 && m.json.provider === 'fal', 'resume: matte collects without --image');
+  const bad = run(sandbox('resume-image', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY }), ['--kind', 'image', '--request-id', 'x', '--prompt', 'y', '--out', sb.out('i.png')]);
+  check(bad.status === 1 && /request-id/.test(bad.json.error), 'resume: refused for image');
+}
+
+// ─── a flaky status poll is retried, not fatal ───────────────────────────────
+{
+  const sb = sandbox('flaky', { FAL_KEY: FAKE.FAL_KEY });
+  const out = sb.out('loop.mp4');
+  const r = run(sb, ['--kind', 'video', '--prompt', 'spin', '--out', out], 'flaky');
+  contract(r, 'flaky');
+  check(r.status === 0 && fs.existsSync(out), 'flaky: two 502 polls do not abandon the job');
+  check(r.requests.filter((q) => q.url.endsWith('/status')).length >= 3, 'flaky: kept polling through the two bad responses');
+}
+
+// ─── the output directory is created before any provider is called ──────────
+{
+  const sb = sandbox('mkdir', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  const out = sb.out(path.join('public', 'media', 'hero.png'));
+  const r = run(sb, ['--kind', 'image', '--prompt', 'x', '--out', out]);
+  contract(r, 'mkdir');
+  check(r.status === 0 && fs.existsSync(out), 'mkdir: a missing asset folder is created, the image lands');
+}
+
+// ─── a dangling symlink at --out is refused, its target never written ────────
+{
+  const sb = sandbox('symlink', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  const target = sb.out(path.join('nowhere', 'target.png'));
+  const link = sb.out('link.png');
+  fs.symlinkSync(target, link);
+  const r = run(sb, ['--kind', 'image', '--prompt', 'x', '--out', link]);
+  contract(r, 'symlink');
+  check(r.status === 1 && /overwrite/.test(r.json.error), 'symlink: exit 1 with the overwrite refusal');
+  check(!fs.existsSync(target), 'symlink: nothing was written through the link');
+}
+
 // ─── queue never completes: the timeout branch ───────────────────────────────
 {
   const sb = sandbox('timeout', { FAL_KEY: FAKE.FAL_KEY });

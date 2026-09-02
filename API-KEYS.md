@@ -138,7 +138,7 @@ Then try running a debate from inside Claude Code or Cursor:
 
 ## Media Generation (optional)
 
-The design workflow (issue #160) can generate images, video clips, and background-matted video for a design through `.claude/scripts/gen-media.js`. Nothing here is required: when the key a kind needs is missing, the script exits with a ready-to-paste prompt and the file name to paste back, and the design continues without the asset if you decline.
+The design workflow (introduced under `/explore` in the README's [How key commands work](README.md#how-key-commands-work)) can generate images, video clips, and background-matted video for a design through `.claude/scripts/gen-media.js`. Nothing here is required: when the key a kind needs is missing, the script exits with a ready-to-paste prompt and the file name to paste back, and the design continues without the asset if you decline.
 
 | Kind | Key it uses | Where to get it |
 |---|---|---|
