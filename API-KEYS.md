@@ -2,7 +2,7 @@
 
 The `/ask-gpt` and `/ask-gemini` commands need API keys to talk to ChatGPT and Gemini. This guide walks you through getting the keys and setting them up safely.
 
-> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. No other command needs API keys. (`/review-browser` has its own optional Playwright install - see the optional-features block under [Update an Existing Project](README.md#update-an-existing-project) - but no key.)
+> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. The only other place a key is used is optional: the design workflow's media generation (images through the same two keys, video and matting through a `FAL_KEY`), and when a key is absent it hands you the prompt to run elsewhere instead. See [Media Generation](#media-generation-optional) below. (`/review-browser` has its own optional Playwright install - see the optional-features block under [Update an Existing Project](README.md#update-an-existing-project) - but no key.)
 
 ---
 
@@ -135,6 +135,22 @@ Then try running a debate from inside Claude Code or Cursor:
 ```
 
 ---
+
+## Media Generation (optional)
+
+The design workflow (issue #160) can generate images, video clips, and background-matted video for a design through `.claude/scripts/gen-media.js`. Nothing here is required: when the key a kind needs is missing, the script exits with a ready-to-paste prompt and the file name to paste back, and the design continues without the asset if you decline.
+
+| Kind | Key it uses | Where to get it |
+|---|---|---|
+| image | `OPENAI_API_KEY`, or `GEMINI_API_KEY` when the OpenAI key is absent | the two sections above |
+| video | `FAL_KEY` | https://fal.ai/dashboard/keys |
+| matte (video background removal) | `FAL_KEY` | same key |
+
+fal.ai is an aggregator: one key reaches many video models, so the toolkit can pick a current one without a new integration each time. Create a **separate key with a tight spend limit** just for the toolkit, so a leaked or misused key costs a bounded amount and can be revoked without disrupting anything else. Put it in `.env.local` beside the other two keys (Option A or B above both work); `.env.local` is gitignored and the pre-push tripwire recognises the fal.ai key shape.
+
+Model ids change often. The script's defaults are overridable from `.env.local` (`OPENAI_IMAGE_MODEL`, `GEMINI_IMAGE_MODEL`, `FAL_VIDEO_MODEL`, `FAL_MATTE_MODEL`; see `.env.local.example`). When a provider answers 404 or 422 for a default, set the matching variable to a current id. The script needs Node 18 or newer (it uses the built-in `fetch`) and tells you so if it is older.
+
+Claude never reads `.env.local` for this. The script reads it, and the only thing that ever appears in Claude's context is the key *name* that was missing.
 
 ## Changing the Model
 
