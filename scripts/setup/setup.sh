@@ -197,8 +197,14 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check gen-media script (dependency-free; the design workflow's seed + media helper, issue #160)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/gen-media.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes; do
+for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -576,7 +582,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js; do
+for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1172,6 +1178,13 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/pre-push-check.js" "$TARGET/.claude/scr
 echo "  Copying .claude/scripts/correction-ledger.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/scripts/correction-ledger.js"
 
+# ─── Media generation script (upstream-owned - safe_copy handles any customizations) ──
+# Dependency-free. The design workflow's helper (issue #160): seed strings for
+# Technique 1, and image, video, and matting generation behind the user's own keys
+# in .env.local. It is the only place the design workflow reads a key.
+echo "  Copying .claude/scripts/gen-media.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" "$TARGET/.claude/scripts/gen-media.js"
+
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
 # LESSONS-detail.md is only seeded on a genuinely fresh install (see the block below).
@@ -1213,6 +1226,21 @@ if [ "$LESSONS_PREEXISTED" = true ]; then
 elif [ ! -f "$TARGET/LESSONS-detail.md" ]; then
   echo "  Copying LESSONS-detail.md ..."
   cp "$TOOLKIT_ROOT/LESSONS-detail.md" "$TARGET/LESSONS-detail.md"
+fi
+
+# ─── DESIGN-PROFILE.md (seeded once from the installed template, issue #160) ─
+# User-owned like CLAUDE.md and LESSONS.md: seeded on a fresh install, never
+# overwritten. The seed is .claude/skills/shared/design-profile-template.md, which
+# the shared glob above already copied into the target, so /explore can offer to
+# recreate a missing profile from the very same file. Never this repo's own root
+# file: a live profile would carry this repo's answers into every fresh install.
+# PARITY: mirrored in setup.ps1 (DESIGN-PROFILE.md seed) - change both together
+if [ -f "$TARGET/DESIGN-PROFILE.md" ]; then
+  echo "  Skipping DESIGN-PROFILE.md - already exists (yours to customize)"
+  SKIPPED+=("DESIGN-PROFILE.md")
+else
+  echo "  Copying DESIGN-PROFILE.md (seeded from .claude/skills/shared/design-profile-template.md) ..."
+  cp "$TOOLKIT_ROOT/.claude/skills/shared/design-profile-template.md" "$TARGET/DESIGN-PROFILE.md"
 fi
 
 # ─── Merge new permissions into existing settings.local.json ─
@@ -1392,7 +1420,7 @@ fi
 # exactly as this run left it on disk - i.e. AFTER the version-stamp
 # rewrites of the two rules files - so stamped files never self-flag on
 # the next run. User-owned skip-if-exists files (CLAUDE.md, LESSONS.md,
-# LESSONS-detail.md, .claude/settings.local.json) and the line-merged
+# LESSONS-detail.md, DESIGN-PROFILE.md, .claude/settings.local.json) and the line-merged
 # .gitignore are NOT tracked: setup never overwrites those, so they need
 # no gate. MANAGED_RELS is accumulated by the pre-flight enumeration,
 # which mirrors the copy blocks exactly. Written with printf (no node
@@ -1583,6 +1611,7 @@ echo "           cp .env.local.example .env.local"
 echo "         Then open .env.local and paste:"
 echo "           OPENAI_API_KEY  ->  https://platform.openai.com/api-keys"
 echo "           GEMINI_API_KEY  ->  https://aistudio.google.com/apikey"
+echo "           FAL_KEY         ->  https://fal.ai/dashboard/keys  (optional: video in the design workflow)"
 echo ""
 echo "      3. Open the folder in Cursor and run /explore to start your first workflow."
 echo ""

@@ -82,6 +82,10 @@
 #      review, R3). The file stays tracked and keeps every committed entry
 #      (setup never runs git rm); an untracked copy in a repo and a
 #      non-repo target keep the normal message
+#  22. DESIGN-PROFILE.md is seeded once from the installed template: a
+#      fresh install creates it, a re-run skips it and keeps a local edit.
+#      gen-media.js is a managed dep-free script and enters the manifest
+#      like its siblings (issue #160)
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -1272,6 +1276,54 @@ try {
     # scenario 2 fresh install ran on one.
     Assert-Contains $normalMsg (Join-Path $Log "install.log") "non-repo target gets the normal message (scenario 2 log)"
   }
+
+  # --- [22] DESIGN-PROFILE.md seeded once, gen-media.js managed ---
+  # Its own scratch tree: the main one has been through crash recovery, manifest
+  # collisions, and a hand-broken settings file by now, so a clean re-run there
+  # would test those scenarios' cleanup rather than the seed-once guarantee.
+  Write-Host "[22] DESIGN-PROFILE.md seeded once, gen-media.js managed"
+  $profileScratch = Join-Path $Work "profile"
+  New-Item -ItemType Directory -Force -Path $profileScratch | Out-Null
+  Invoke-Setup -SetupArgs @("-Target", $profileScratch) -LogFile (Join-Path $Log "profile-install.log")
+  $profilePath = Join-Path $profileScratch "DESIGN-PROFILE.md"
+  $profileTemplate = Join-Path $ToolkitRoot ".claude\skills\shared\design-profile-template.md"
+  if (Test-Path -LiteralPath $profilePath -PathType Leaf) {
+    Ok "fresh install seeded DESIGN-PROFILE.md"
+  } else {
+    Failed "fresh install did not seed DESIGN-PROFILE.md"
+  }
+  if (Test-FilesEqual $profilePath $profileTemplate) {
+    Ok "seeded profile is the template byte-for-byte"
+  } else {
+    Failed "seeded profile differs from the template"
+  }
+  if (Test-Path -LiteralPath (Join-Path $profileScratch ".claude\scripts\gen-media.js") -PathType Leaf) {
+    Ok "gen-media.js installed"
+  } else {
+    Failed "gen-media.js missing after install"
+  }
+  $profileManifest = Join-Path $profileScratch ".claude\.toolkit-manifest.json"
+  $profileManifestText = if (Test-Path -LiteralPath $profileManifest -PathType Leaf) { Get-Content -LiteralPath $profileManifest -Raw } else { "" }
+  if ($profileManifestText -match '"\.claude/scripts/gen-media\.js": "[0-9a-f]{64}"') {
+    Ok "manifest carries gen-media.js"
+  } else {
+    Failed "manifest lacks gen-media.js"
+  }
+  if ($profileManifestText.Contains('"DESIGN-PROFILE.md"')) {
+    Failed "manifest tracks the user-owned DESIGN-PROFILE.md"
+  } else {
+    Ok "manifest does not track the user-owned DESIGN-PROFILE.md"
+  }
+  [System.IO.File]::AppendAllText($profilePath, "`n- taste note: LOCAL EDIT MARKER`n")
+  Invoke-Setup -SetupArgs @("-Target", $profileScratch) -LogFile (Join-Path $Log "profile-rerun.log")
+  $profileRerunExit = $LASTEXITCODE
+  if ($profileRerunExit -eq 0) {
+    Ok "re-run after a profile edit exited 0"
+  } else {
+    Failed "re-run after a profile edit exited $profileRerunExit"
+  }
+  Assert-Contains "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" (Join-Path $Log "profile-rerun.log") "re-run skips the existing profile"
+  Assert-Contains "LOCAL EDIT MARKER" $profilePath "local profile edit survived the re-run"
 
 } finally {
   if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {
