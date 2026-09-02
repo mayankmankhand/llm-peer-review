@@ -12,6 +12,26 @@ If you last installed v4.3.3, fifteen releases have shipped on top of it. v4.4.0
 
 ---
 
+## Unreleased - The Design Workflow (#160)
+
+**Additive on top of v6.1.1, which stays a patch on v6.1.0 over v6.0.0.** Nothing here changes how the loop runs; it adds a design step to it. Re-run `setup.sh` (or `setup.ps1`) to pick it up.
+
+### Added
+
+- **A design workflow that follows Techniques 1 to 6 of Anshu Chimala's "How to turn your AI into a world-class designer".** When a feature has a look, `/explore` runs a named "Design exploration" step: it checks whether the repo already has a design system (detection signals, then one confirmation, remembered in a user-owned `DESIGN-PROFILE.md`) and sets a load level (none, improve, new). New work gets an idea list you react to, three directions seeded from random strings, three working prototypes side by side in the playground to pick from, and then, in `/execute`, a fresh-context design critic that scores each round until the design clears 9/10 or the round budget runs out. Improve gets one critic pass plus polish. A repo with a design system keeps it: only layout, composition, motion, and copy vary inside one, and going further pages you. Every mechanic lives once in `.claude/skills/shared/design-rules.md`; `/explore`, `/create-plan`, `/execute`, `/document`, and the playground skill cite it. The toolkit's own artifact look is untouched.
+- **M15, the design loop bound.** A round is one screenshot, one critic dispatch, and one fix pass with the polish checklist inside it; new work gets up to 5 rounds with a converging check after round 2, improve gets 2; every round is checkpointed and the best-scoring one is kept; running out is a digest entry, never a hard stop. Media and divergence asks are M1 pages exempt from the page cap. Rationale in `docs/HITL-MAP.md`.
+- **`gen-media.js`** (`.claude/scripts/`, dependency-free, Node 18+): `--kind seed` prints the random string the directions are derived from; `image`, `video`, and `matte` generate media behind your own keys in `.env.local` (images reuse `OPENAI_API_KEY` or `GEMINI_API_KEY`, video and matting take a new optional `FAL_KEY`). With no key it exits 2 with a ready-to-paste prompt and the file to paste back. A submitted fal.ai job that is not collected exits 3 with a request id, and `--request-id` collects it later without paying twice. Sandboxed tests (`scripts/test-gen-media.js`, 89 assertions) run without a network or a key. The pre-push tripwire now recognises the fal.ai key shape.
+- **`design-critic`**, a fourth worker in `.claude/agents/`: Read only, no model pin (a scoring critic whose verdict is final is a judge, and judges inherit), given one screenshot and the fixed contract, returning `Score: N/10` and the gaps.
+- **`DESIGN-PROFILE.md`, seeded once by both installers** from `.claude/skills/shared/design-profile-template.md` and never overwritten, like `CLAUDE.md` and `LESSONS.md`. Scenario 22 in both installer suites covers the seed-once behavior and the new managed script.
+- **Guides:** README introduces the workflow under `/explore` and lists the new file, script, agent, and key everywhere it inventories them; API-KEYS gains a "Media Generation (optional)" section; SETUP and AGENT-SETUP name the optional key.
+
+### Notes from the cycle's review
+
+- The review of this cycle caught 14 issues that were fixed before anything was pushed: the test's fake keys were shaped like real ones and tripped the toolkit's own tripwire (now assembled at runtime, and the local history was replayed so no commit ever carried a key shape); the resume promise had no flag behind it; failures after a fal.ai submission dropped the request id; the output directory was checked only after the provider was paid; polish was placed in a "last round" the loop cannot know in advance; the critic contract asked for text its own return shape had no room for; and nobody was assigned to build the prototypes the playground lays out.
+- Technique 7 onward is not adopted yet. `/review-ux` is deliberately unchanged.
+
+---
+
 ## v6.1.1 - Plan Page Regression Fix (2026-09-01)
 
 **A patch on top of v6.1.0, which stays additive on top of v6.0.0.** Nothing here changes behavior; it fixes one v6.1.0 regression and adds the guard that would have caught it. Re-run `setup.sh` (or `setup.ps1`) to pick up the fixed shell.
