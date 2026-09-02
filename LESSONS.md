@@ -59,6 +59,8 @@
 - **Don't state a cited past lesson as if it happened this session.**
 - **Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.**
 - **Never write a literal HTML comment as an example inside an HTML comment.**
+- **When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.**
+- **A negative-count receipt needs a pattern that cannot match an incidental word.**
 
 ### Skills migration decisions (issue #71)
 
