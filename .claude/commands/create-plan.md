@@ -117,6 +117,7 @@ Short summary of what we're building and why.
 - **Load level:** new / improve (none means this section is omitted)
 - **Design system:** none / exists at [where] - allowed variance: [what may vary]
 - **Direction:** [name] - [the brief] - seed `[the seed string]`
+- **Directions tried:** [name] - seed `[seed]` - dropped at pick; [name] - seed `[seed]` - dropped at pick (new work only)
 - **Divergence allowed:** stay inside / this surface only / propose a system change - [what]
 - **Media:** ask at build / none
 - **Critic budget:** per M15 for the load level

@@ -57,11 +57,11 @@ The countable test: search the repo for the surface the feature names (a route, 
 
 A model cannot act randomly, so variety has to come from outside it. For each of the three directions a new surface gets:
 
-1. Run `node .claude/scripts/gen-media.js --kind seed` and take the `seed` field. The script is already permitted and installer-copied; do not reach for a shell one-liner.
+1. Run `node .claude/scripts/gen-media.js --kind seed` and take the `seed` field. The script is installer-copied and its permission row is documented in `toolkit.md`; if the call prompts for permission, that row is missing from `.claude/settings.local.json` and belongs there (a one-line edit the user makes). Do not reach for a shell one-liner.
 2. Define the creative direction from the string: color scheme, layout, typography, motion. Look past the surface for sub-patterns, repeated characters, special numbers, anything that inspires a choice. Three seeds give three genuinely different directions.
 3. Bring the direction to life with judgment, so it looks great and not merely different.
 
-Never reveal a seed in the design. It is inspiration, not content. Record it in the plan's Direction row so the direction can be reproduced or retried.
+Never reveal a seed in the design. It is inspiration, not content. Record every direction's name and seed: the picked one in the plan's Direction row, the other two in the plan's Directions tried row marked "dropped at pick", so all three can be reproduced or retried later.
 
 ## Technique 2: ambitious briefs
 
@@ -82,13 +82,13 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 
 **The contract.** The dispatcher pastes the prompt below verbatim plus one image path, and nothing else: no code, no plan, no earlier critiques, no round number, no target score. The same prompt every round. Profile "Baseline images", when present, are passed as extra image paths with the sentence "These are a moodboard for the quality bar, not a target to copy."
 
-> You are a design critic at a top design studio. Look at this screenshot of a product design. First, name the aesthetic the design is going for in one line. Then imagine how the best studio in the world would execute that exact aesthetic. Then list the biggest gaps between that and what you see, at two levels: overall structure and composition, and the fine details. Watch for patterns that feel overdone, excessive, or obviously AI-generated (gradient hero blocks, glows, decorative cards that hold nothing, text on the left and a graphic on the right, over-explaining) and penalise them. Be tight and specific, never vague. Be bold and opinionated; do not reward what is safe or easy. Finish with a score out of 10 for how close this design is to that studio-level bar.
+> You are a design critic at a top design studio. Look at this screenshot of a product design. Reason through these steps silently, without writing them out: name the aesthetic the design is going for; imagine how the best studio in the world would execute that exact aesthetic; find the biggest gaps between that and what you see, at two levels, overall structure and composition, and the fine details. Watch for patterns that feel overdone, excessive, or obviously AI-generated (gradient hero blocks, glows, decorative cards that hold nothing, text on the left and a graphic on the right, over-explaining) and penalise them. Be tight and specific, never vague. Be bold and opinionated; do not reward what is safe or easy. Then score how close this design is to that studio-level bar, out of 10.
 >
-> Return exactly this shape and nothing else:
+> Return exactly this shape and nothing else, no preamble and no closing remarks:
 > Score: N/10
-> 1. <biggest gap, one line>
-> 2. <next gap>
-> (up to 6 gaps)
+> 1. Structure: <biggest gap, one line>
+> 2. Detail: <next gap, one line>
+> (up to 6 gaps, each prefixed Structure: or Detail:)
 
 **The judge.** The critic is the `design-critic` agent (`.claude/agents/design-critic.md`), Read only, no model pin: a scoring critic whose verdict is final is a judge, and judges inherit the session model (`model-routing.md`). Fallback per that file: `general-purpose` with no model parameter when the agent type is unavailable.
 
@@ -98,14 +98,13 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 
 ## The loop procedure
 
-One round is one screenshot, one critic dispatch, and one fix pass, with the polish checklist (Technique 6) inside the last round. `/execute` runs it in the main loop under M15:
+One round is one screenshot, one critic dispatch, and one fix pass; the polish checklist (Technique 6) is part of every fix pass, so each polished state is what the next critic scores and no round has to know it is the last. `/execute` runs it in the main loop under M15:
 
 1. **Serve the surface.** `browse.js` navigates `http(s)` only. Start the dev server per the Self-Service rule and probe the common ports the way `/review` does. A surface that cannot be served skips the critic with a digest note; the loop never blocks on it.
 2. **Screenshot** with `browse.js` (`goto`, then `screenshot`); the returned path is the critic's whole input.
 3. **Dispatch the critic** per Technique 3 and read the score and gaps.
-4. **Fix** the gaps that matter most, checkpoint (M4), and go to 1, or stop per M15.
+4. **Fix** the gaps that matter most, run the polish checklist (Technique 6), checkpoint (M4), and go to 1, or stop per M15.
 5. **Media**, once per surface, when the design would gain from an image or a clip: Techniques 4 and 5. A declined ask means continue without the asset.
-6. **Polish** inside the last round: Technique 6.
 
 ## Techniques 4 and 5: image and video
 
@@ -121,7 +120,7 @@ node .claude/scripts/gen-media.js --kind video --prompt "<prompt>" [--image <sti
 node .claude/scripts/gen-media.js --kind matte --image <clip> --out <asset dir>/<surface>-<name>-matte.mp4
 ```
 
-`<asset dir>` is the surface's static asset directory (`public/media/`, `static/`, whatever the repo already uses). Exit 0 returns `path`; reference it from the surface's markup or CSS. Exit 2 means the key is absent: relay `handoffPrompt` to the user verbatim with `expectedFile`, and continue without the asset if they decline. Exit 3 means the queue timed out; the JSON carries a `requestId` to resume with. The script reads `.env.local` itself; Claude never does. Keys and model ids: `API-KEYS.md`.
+`<asset dir>` is the surface's static asset directory (`public/media/`, `static/`, whatever the repo already uses). Exit 0 returns `path`; reference it from the surface's markup or CSS. Exit 2 means the key is absent: relay `handoffPrompt` to the user verbatim with `expectedFile`, and continue without the asset if they decline. Exit 3 means the job was submitted but not collected (a timeout, or a failure after submission); rerun the same `--kind` and `--out` with `--request-id <requestId>` from the JSON to collect it without paying twice. The script reads `.env.local` itself; Claude never does. Keys and model ids: `API-KEYS.md`.
 
 **Two video recipes.**
 - *Animated graphic:* generate a looping clip over a solid or page-colored background so refraction and shadow bake in, then run `--kind matte` to remove the background, and layer the result anywhere in the UI. This matting step is Technique 5's own second step.
@@ -129,7 +128,7 @@ node .claude/scripts/gen-media.js --kind matte --image <clip> --out <asset dir>/
 
 ## Technique 6: cut what does not add value
 
-A model adds and rarely removes. Restraint is what makes a design look premium. Inside the last round, before the final critic score, go through the surface and cut:
+A model adds and rarely removes. Restraint is what makes a design look premium. In every fix pass, after addressing the critic's gaps, go through the surface and cut:
 
 - gradients, glows, and shadows that do not serve a purpose
 - containers, borders, and cards that hold nothing the layout needs
@@ -145,7 +144,8 @@ Ask what really needs to be there. Putting less on the screen communicates more.
 A design run records, in the plan's Outcomes and the run digest:
 
 - load level and the surface
-- the direction name, brief, and seed
+- every direction's name and seed (three for new work) with the picked one's brief; unpicked ones marked dropped at pick
+- which briefs failed: a brief failed when it was dropped at the pick, or when its loop stopped under 9/10
 - the score of every round and which round was kept
 - the gaps left open at the stop
 - media assets by path, or the handoff prompts the user was given
