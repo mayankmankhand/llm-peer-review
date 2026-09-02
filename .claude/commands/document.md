@@ -3,13 +3,14 @@
 **Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or INDEX after code changes have shipped.
 **Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
 
-You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M14). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
+You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
 
 ## Primary Documentation Files
 
 - **CLAUDE.md** - Project-specific instructions: tech stack, preferences, team info (user-owned)
 - **README.md** - Project overview for humans
 - **LESSONS.md** / **LESSONS-detail.md** - Learning log (user-owned): `LESSONS.md` is the one-line index Claude reads each session, `LESSONS-detail.md` holds the full write-ups it opens on demand
+- **DESIGN-PROFILE.md** - The repo's design answers (user-owned): design system state, allowed variance, taste notes, directions tried, prompts to retry. Read by `/explore` and `/execute`; written by `/explore` and this command (see `.claude/skills/shared/design-rules.md`)
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes (update if it exists)
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (toolkit-owned, **do not edit** - overwritten on update)
 
@@ -35,6 +36,7 @@ For each changed file:
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
 - **LESSONS.md** / **LESSONS-detail.md** - Read the current lesson index (`LESSONS.md`) first so nothing gets duplicated, then auto-draft this session's lessons and write them per M8: each entry carries its receipt (what happened, where). Capture a lesson when Claude repeated a mistake, a review caught something Claude should have known, or the user typed the same correction twice. When adding one, write the one-liner to `LESSONS.md` (under the right section) AND the full write-up to `LESSONS-detail.md` (same bold lead). Then do a quick cleanup pass: dedupe near-duplicate lessons, mark superseded ones, and keep the index short.
+- **DESIGN-PROFILE.md** - When this cycle ran a design step, append each direction tried (name, seed, best critic score, kept or dropped) under Directions tried, and each brief that failed under Prompts to retry on newer models, each with its receipt per M8 (the plan's Outcomes and the design digest). Taste notes are written by `/explore` as they happen; do not duplicate them here.
 - **CODEBASE_MAP.md** - Regenerate by invoking `/index` (the command orchestrates the scanner and parallel subagents to produce a fresh semantic map). For projects over 500k tokens or with per-chunk overflow, `/index` will prompt for cost confirmation before spending API tokens - tell the user this may happen and that they can decline to skip the refresh (the prior map remains intact). If `/index` fails or the user declines, leave the existing map untouched and continue with the rest of `/document`. Do not write the map file manually.
 
 ## 4. Documentation Style Rules

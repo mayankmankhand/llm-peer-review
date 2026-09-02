@@ -18,7 +18,7 @@
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M14); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M15); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 ### Our Workflow
 
@@ -122,6 +122,10 @@ all for that repo, rather than captured and redacted.
 from "capture ran and found nothing". Capture fires at `/document`, so a project that
 never runs `/document`, or whose copy is shadowed by a global
 `~/.claude/commands/document.md`, silently records nothing.
+
+### Design Rules and Profile
+
+Design work follows `.claude/skills/shared/design-rules.md` (issue #160): a three-state rule (a repo that already has a design system keeps it; exploration inside one varies only layout, composition, motion, and copy; going further pages you), a load dial (none, improve, new), and six techniques adapted from Anshu Chimala's "How to turn your AI into a world-class designer": seed strings, ambitious briefs, a fresh-context design critic under the M15 bound, image and video generation behind your own keys, and a cut-and-polish pass. `/explore` runs the step when a feature has a look, `/create-plan` records the direction, `/execute` runs the critic loop, `/document` records what was tried. Each repo's answers live in `DESIGN-PROFILE.md`, user-owned and seeded once by setup from `.claude/skills/shared/design-profile-template.md`. The toolkit's own artifact look is never touched.
 
 ### Skills
 
@@ -288,6 +292,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `node .claude/scripts/render-html.js` | Rendering HTML artifacts through the shared shells, plus the artifact index modes (`--index-add`, `--index-url`, `--index-sync`) |
 | `node .claude/scripts/session-init.js` | The one-call session context (map freshness, lessons, plans, worktree state) that `/explore`, `/create-plan`, `/execute`, and `/pair-debug` read at startup. Exact form, no wildcard: the script takes no arguments |
 | `node .claude/scripts/correction-ledger.js` | The correction ledger behind `/document`'s capture stage and `/error-analysis`. The data it writes lives under `~/.claude/`, outside the repo |
+| `node .claude/scripts/gen-media.js` | The design workflow's helper: `--kind seed` for seeded design directions, and image, video, and matte generation behind your own keys in `.env.local`. Prints a handoff prompt when the key is absent; Claude never reads the key |
 | `bash .claude/scripts/open-artifact.sh` | Opening a rendered artifact in the browser (the local viewport fallback) |
 | `open`, `xdg-open`, `powershell.exe`, `explorer.exe`, `wslpath` | The launchers `open-artifact.sh` reaches for per platform: `open` on macOS, `xdg-open` on Linux, `powershell.exe` then `explorer.exe` on WSL, plus `wslpath`, which converts the path for the WSL rungs |
 | `bash scripts/setup/bump-version.sh` | Running the version-bump script during release prep |
