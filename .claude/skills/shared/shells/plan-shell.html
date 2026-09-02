@@ -15,7 +15,12 @@
   is re-rendered (stable mode: no timestamp, no collision suffix).
 
   After a publish, the helper's --index-add puts one line ABOVE the doctype:
-    <!-- hosted: <url> -->
+  an HTML comment whose text reads "hosted: <url>". It is described in prose
+  here, NOT written out literally: an HTML comment cannot nest, so a literal
+  closing marker on this line would end THIS header comment early and dump
+  everything below it onto the rendered page as visible text (issue #159).
+  render-html.js refuses to render a shell with a nested comment, and
+  scripts/test-render-html.js asserts it for every shell.
   That stamp is a derived copy of the file's row in artifacts/html/index.jsonl
   (the record), never hand-edited: a re-render drops it, and the next publish
   or a run of --index-sync puts it back from the index. The markdown twin is
