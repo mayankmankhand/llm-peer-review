@@ -139,6 +139,8 @@ Every surviving finding carries one extra sub-bullet, last, after `Suggested fix
 
 - **Receipt:** [The check that was run and what its output showed]
 
+A finding the tier-3 vote downgraded (M2) renders at its new severity emoji, keeps its R-ID, and its Receipt row ends with the clause `downgraded from Block: <ballots>`, e.g. `downgraded from Block: 1 STANDS, 2 DOWNGRADE Warn`. That clause is why a Warn can carry an early ID.
+
 When an audit subagent failed twice and its tier could not run (M2), mark that finding `unaudited` next to this row rather than dropping the row.
 
 ### Audited out
@@ -148,6 +150,8 @@ After the findings (and `### More findings`, when present), list every finding t
 - **R7** `RECEIPT FAILED` - [What] (check output did not show the claim)
 - **R9** `REFUTED` - [What] (skeptic: one-clause reason)
 - **R2** `REFUTED 2/3` - [What] (two of three skeptics refuted: one-clause reason)
+
+A downgraded finding is a survivor and never appears here. When a skeptic attached a `split:` line to a finding it refuted, list it directly under that finding's Audited out line as an open digest item: `  - split: <the sub-claim>`. It is a note for the human, never a finding: no ID of its own, no fields, no fix.
 
 When nothing was killed, print `Audited out: none - all findings survived the audit.` **Never omit the section.** It is the run's log exit and M8 requires it stay inspectable; a report with no Audited out section is indistinguishable from a run that never audited at all.
 
