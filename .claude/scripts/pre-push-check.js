@@ -113,6 +113,8 @@ const PATTERNS = [
   { name: "github-token", re: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/ },
   { name: "openai-key", re: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
   { name: "google-api-key", re: /\bAIza[0-9A-Za-z\-_]{35}\b/ },
+  // fal.ai keys (the design workflow's FAL_KEY): a UUID, a colon, 32 hex characters.
+  { name: "fal-key", re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/ },
   { name: "slack-token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
   {
