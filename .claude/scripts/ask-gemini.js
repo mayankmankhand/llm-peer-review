@@ -147,7 +147,7 @@ const ERR = {
 };
 
 /**
- * Load the canonical 4-field finding template from the shared /review template.
+ * Load the canonical finding template from the shared /review template.
  *
  * Slices the "Base Format" section out of .claude/skills/shared/output-template.md
  * by splitting on "## Illustrative Examples", so the debate summary prompt gets
@@ -162,7 +162,7 @@ function loadOutputTemplate() {
   if (!fs.existsSync(templatePath)) {
     throw new Error(
       `Shared output template not found at ${templatePath}. ` +
-      `The /ask-gemini summary inlines this file for the 4-field finding format. ` +
+      `The /ask-gemini summary inlines this file for the finding format. ` +
       `Restore it from git with \`git checkout HEAD -- .claude/skills/shared/output-template.md\` or re-run the toolkit installer from your llm-peer-review clone.`
     );
   }
@@ -202,7 +202,7 @@ Structure your review as:
 Brief overall assessment (2-3 sentences)
 
 ## Issues Found
-For each issue, use a sequential R-ID (R1, R2, R3, ...) and a severity emoji. Mid-debate findings stay concise (Problem + Suggestion); the full 4-field structure is only required in the final summary.
+For each issue, use a sequential R-ID (R1, R2, R3, ...) and a severity emoji. Mid-debate findings stay concise (Problem + Suggestion); the full two-sentence contract is only required in the final summary.
 - **R1** 🚫 Issue title (file:line)
   - Problem: What's wrong
   - Suggestion: How to fix it
@@ -260,12 +260,12 @@ A scannable line of finding counts in this format (from the canonical template):
 💡 X Suggests: R4 (file:line - one-line What)
 
 ### 📋 Recommended Actions
-Each action uses the full 4-field structure (What / Why it matters / Example / Suggested fix) from the canonical template below. Use 🚫 (Block), ⚠️ (Warn), or 💡 (Suggest) emojis with sequential R-IDs (R1, R2, R3, ...). Mine the debate transcript (up to 3 rounds) for the reasoning behind each action - this is what makes the summary worth reading versus a terse bullet list. Do NOT use [CRITICAL]/[MAJOR]/[MINOR] tags.
+Each action uses the full two-sentence contract from the canonical template below: sentence one, an optional sentence two, then a fix line. Use 🚫 (Block), ⚠️ (Warn), or 💡 (Suggest) emojis with sequential R-IDs (R1, R2, R3, ...). Mine the debate transcript (up to 3 rounds) for the reasoning behind each action, and spend what you find on picking the right sentence rather than on adding another one. The caps hold here exactly as they do in a review. Do NOT use [CRITICAL]/[MAJOR]/[MINOR] tags.
 
 ### 💬 Key Insights
 Notable observations from the debate worth remembering, as terse bullets.
 
-The canonical /review output template is inlined below in <shared_template> tags. Apply the Top Issues format and the Findings 4-field structure to this debate summary. Ignore the Looks Good, Staff Check, and Files-reviewed Summary sub-sections inside the template - those are for full /review runs, not for debate summaries.
+The canonical /review output template is inlined below in <shared_template> tags. Apply the Top Issues format and the Findings two-sentence contract to this debate summary. Ignore the Looks Good, Staff Check, Files-reviewed Summary, and Where-the-report-is-written sections inside the template - those are for full /review runs, not for debate summaries.
 
 <shared_template>
 ${loadOutputTemplate()}
