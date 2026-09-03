@@ -92,6 +92,17 @@ After completing each step, update the plan file:
 - Change 🟨 to 🟩 when completing a task
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
+
+**Re-render the plan's HTML view** whenever you update the markdown status (issue #161). Rebuild the same payload `/create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`, and run the helper with the same stable name:
+
+```bash
+node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
+     --out-dir plans --stable --data /tmp/plan-data.json
+```
+
+`--stable` replaces the file in place, so the page keeps its URL and its published page updates rather than piling up. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
+
+This exists because the page used to be frozen at creation: a plan page sat beside a markdown file recording 62 completed checkboxes while showing every step as not started. A stable URL whose content is permanently false is worse than no page.
 </procedure>
 
 ---
