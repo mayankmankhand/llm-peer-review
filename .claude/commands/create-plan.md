@@ -174,8 +174,8 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 <rules>
 
-- HTML is generated **only at plan creation**. `/execute` never re-renders it.
-- HTML is a one-time snapshot for the human reader. Markdown remains canonical for `/execute` and `/review-plan`.
+- HTML is generated at plan creation and **re-rendered by `/execute`** as steps complete (issue #161). Markdown remains canonical for `/execute` and `/review-plan`; the page mirrors it.
+- `--stable` means the page keeps one URL for the life of the plan, so a re-render updates the published page rather than creating a second one.
 - This is default-on per `.claude/rules/html-outputs.md`. No judgement call needed.
 - Do NOT hand-write the HTML. Emit a compact JSON payload and run the shared helper, which injects it plus the shared `tokens.css` into the prebuilt plan shell.
 
@@ -186,7 +186,7 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 Produce a JSON payload matching the schema documented in the header comment of `.claude/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `tldr`, `goalState`, `uiux`, `decisions`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
 
 - Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
-- There is no status field. Every step renders with the 🟥 To Do badge: visual scaffolding showing the structure of the work, not live status. The badges never update because the HTML never re-renders; markdown is the source of truth during `/execute`.
+- Each step takes an optional `status` of `todo` | `doing` | `done`. At creation every step is `todo`, so it may be omitted entirely; `/execute` fills it in as it re-renders. Markdown stays the source of truth.
 
 Write the payload to a temp file (e.g. `/tmp/plan-data.json`).
 

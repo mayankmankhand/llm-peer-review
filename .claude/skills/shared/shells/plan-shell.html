@@ -38,11 +38,17 @@
   no CDN, works offline on file://. Reproduces the gold look of the
   hand-written plan HTML files previously emitted by /create-plan.
 
-  STATUS BADGES ARE STATIC SCAFFOLDING. Every step renders with the red
-  square emoji + "To Do" badge unconditionally and there is deliberately NO
-  status field in the schema below. The HTML is a one-time snapshot taken at
-  plan creation; /execute never re-renders it. The markdown plan is the live
-  source of truth for step status.
+  STATUS IS LIVE (issue #161). Each step carries an optional "status" of
+  todo | doing | done, and /execute re-renders this page as it updates the
+  markdown. The markdown plan remains the source of truth: this page is a
+  mirror of it, refreshed, never authored directly.
+
+  It was static scaffolding until #161, and the cost was measurable: a plan
+  page sat beside a markdown file recording 62 completed checkboxes while
+  showing every step as not started. A stable page that never updates is the
+  worst of both worlds - it has one durable URL, and everything at that URL
+  is false. A step with no status still renders as To Do, so an older payload
+  degrades to exactly the previous behavior.
 
   ==========================================================================
   RENDER DATA JSON SCHEMA (what /create-plan produces; the renderer consumes it)
@@ -81,6 +87,9 @@
     "steps": [
       {
         "name": "Extend render-html.js",          // step heading (plain text)
+        "status": "done",                          // "todo" | "doing" | "done"
+                                                   // omitted -> "todo"
+
         "tag":  "parallel",                        // "parallel" | "sequential"
                                                    // order pill (plain text)
         "meta": "delivers: ... OR depends on: Steps 1, 2 (trusted inline HTML ok)",
@@ -138,6 +147,8 @@ th.narrow{width:1%;}
 
 /* Status badge: neutral pill (NOT the tokens.css severity .badge). Static
    scaffolding - always the red square emoji + "To Do". */
+.status-done{color:var(--positive);}
+.status-doing{color:var(--warn-strong);}
 .status-badge{display:inline-block;font-size:.8125rem;font-weight:500;border-radius:999px;padding:.1rem .6rem;white-space:nowrap;background:var(--bg-muted);border:1px solid var(--border);}
 
 /* Order tag pill (parallel / sequential). */
@@ -309,10 +320,17 @@ th.narrow{width:1%;}
       if (!step) return;
       var tr = el('tr', null);
 
-      // Status: static scaffolding, always the red square + "To Do". The
-      // markdown plan tracks real status; this HTML never re-renders.
+      // Status mirrors the markdown plan, which stays the source of truth.
+      // An unknown or absent status falls back to To Do, so a payload written
+      // before #161 renders exactly as it used to.
+      var STATUS = {
+        todo:  { cls: 'status-badge status-todo',  label: '🟥 To Do' },
+        doing: { cls: 'status-badge status-doing', label: '🟨 In Progress' },
+        done:  { cls: 'status-badge status-done',  label: '🟩 Done' }
+      };
+      var st = STATUS[step.status] || STATUS.todo;
       var tdStatus = el('td', null);
-      tdStatus.appendChild(textEl('span', 'status-badge', '🟥 To Do')); // red square emoji
+      tdStatus.appendChild(textEl('span', st.cls, st.label));
       tr.appendChild(tdStatus);
 
       // Step: numbered name + optional amber note + optional why + subtasks.
@@ -349,7 +367,7 @@ th.narrow{width:1%;}
     taskSec.appendChild(table);
 
     taskSec.appendChild(textEl('p', 'small',
-      'Status badges are visual scaffolding frozen at creation time. The markdown plan is the live source of truth during /execute.'));
+      'Status mirrors the markdown plan, which stays the source of truth. This page is re-rendered as steps complete.'));
     body.appendChild(taskSec);
   }
 
