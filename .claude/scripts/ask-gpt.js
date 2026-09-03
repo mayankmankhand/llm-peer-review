@@ -201,7 +201,7 @@ Structure your review as:
 Brief overall assessment (2-3 sentences)
 
 ## Issues Found
-For each issue, use a sequential R-ID (R1, R2, R3, ...) and a severity emoji. Mid-debate findings stay concise (Problem + Suggestion); the full finding shape is only required in the final summary.
+For each issue, use a sequential R-ID (R1, R2, R3, ...) and a severity emoji. Mid-debate findings stay concise (Problem + Suggestion); the full two-sentence contract is only required in the final summary.
 - **R1** 🚫 Issue title (file:line)
   - Problem: What's wrong
   - Suggestion: How to fix it

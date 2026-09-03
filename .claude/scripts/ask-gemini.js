@@ -162,7 +162,7 @@ function loadOutputTemplate() {
   if (!fs.existsSync(templatePath)) {
     throw new Error(
       `Shared output template not found at ${templatePath}. ` +
-      `The /ask-gemini summary inlines this file for the finding format. ` +
+      `The /ask-gemini summary inlines this file for the canonical finding format. ` +
       `Restore it from git with \`git checkout HEAD -- .claude/skills/shared/output-template.md\` or re-run the toolkit installer from your llm-peer-review clone.`
     );
   }
