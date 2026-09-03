@@ -30,8 +30,12 @@ Steps:
 
 1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/review-shell.html`. Read that header comment for the authoritative field list (it is the single source of truth). Compact reference:
    - `title`, `subtitle` (HTML allowed)
+   - `bottomLine`: `[string, string?, string?]` - **the whole first screen.** Two or three sentences, each 25 words or fewer, in fixed slots: (1) is it safe to ship, including "I could not tell, because..."; (2) the one other thing that matters; (3) what happens next. The first renders in display type. Omit the key and the page falls back to the old counter strip.
+   - `disposition`: one sentence stating what was handled without the reader, what was deferred, and what could not be checked. Replaces the severity tally as the thing under the headline.
+   - `alreadyFixed`: `[string]` - one line each, past tense, with the check that confirmed it. This is the base-rate disclosure: a short list of open findings is only believable beside the count of what was handled.
+   - `couldNotCheck`: `[string]` - named limits of this pass, one line each, in plain words. Never omitted when a limit exists; a page that states none is claiming there were none.
    - `chips`: `[{name, on}]` - `on:true` = specialist ran, `on:false` = "(skipped)". Omit for a single-specialist run.
-   - `topIssues`: `{block:[], warn:[], suggest:[]}` - each entry is a short string (e.g. `"R1 [code] (file.sh:91 - desc)"`).
+   - `topIssues`: `{block:[], warn:[], suggest:[]}` - each entry is a short string. **Only rendered when `bottomLine` is absent**; it is the backward-compatible fallback, not something to send alongside.
    - `looksGood`: `[string]` (HTML allowed)
    - `groups`: `[{label, findings:[...]}]` grouped by specialist. Each finding: `{id, severity, specialist, file:{relPath, absPath, line}, what, context, fix, locus, receipt, fields:[{label, value}]}`. `severity` is `"block" | "warn" | "suggest"`.
      - `what` / `context` / `fix` are the two-sentence contract's three prose keys - sentence one, the optional sentence two, and the fix line. **Omit `context` entirely** when there is no second sentence; that is the normal case. All three may carry trusted inline HTML (`<code>`, `<strong>`).

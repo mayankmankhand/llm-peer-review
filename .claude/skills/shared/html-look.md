@@ -11,8 +11,13 @@ This is the minimal v1: typography, colors, severity badges, and the copy-button
 - Body: system font stack: `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`
 - Headings: same stack. Weight 600 for h1/h2, weight 500 for h3 and below
 - Mono (code, IDs, file paths): `ui-monospace, "SF Mono", Menlo, Consolas, monospace`
-- Base size: 16px. Scale: h1 1.875rem, h2 1.5rem, h3 1.25rem, body 1rem, small 0.875rem
-- Line height: 1.6 for body, 1.3 for headings
+- Base size: **17px**. Scale, as tokens: `--text-display` 2.75rem, `--text-h1` 1.875rem, `--text-h2` 1.5rem, `--text-h3` 1.1rem, `--text-body` 1rem, `--text-small` 0.875rem, `--text-micro` 0.75rem
+- Weights: `--weight-normal` 400 and `--weight-strong` 700. The old 500/600 pair is still used by the heading rules; nothing new should reach for it, because a 100-unit step mid-axis is not a visible distinction at these sizes
+- `--measure` 64ch bounds running prose. The page itself stays 940px
+- Line height: 1.6 for body, 1.3 for headings, 1.1 for display
+- Only one element per page takes `--text-display`. A second one means neither is the loudest thing
+
+Two entries here were wrong before issue #161 and are corrected above: h3 was documented as 1.25rem where the code has always set 1.1rem, and a `small 0.875rem` was documented that `tokens.css` never defined. Both files change together; that is the whole point of the mirror.
 
 ## Color Tokens
 

@@ -175,6 +175,31 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .finding--demoted{padding:.45rem .9rem;margin-bottom:.35rem;border-left-width:3px;background:none;}
 .finding--demoted .what{font-size:.92rem;font-weight:400;color:var(--text-muted);margin:.2rem 0 0;}
 .finding--demoted .badge{font-size:.66rem;}
+/* ---- the first screen (issue #161) ---- */
+/* The bottom line is the only element on the page that takes --text-display.
+   A second one would mean neither is the loudest thing present. */
+.bottom-line{margin:2rem 0 0;max-width:var(--measure);}
+.bottom-line .display{margin:0 0 .6rem;}
+.bl-rest{font-size:1.15rem;line-height:1.45;margin:0 0 .6rem;color:var(--text);max-width:var(--measure);}
+.disposition{color:var(--text-muted);font-size:1rem;line-height:1.5;margin:.9rem 0 0;max-width:var(--measure);border-top:1px solid var(--border);padding-top:.9rem;}
+/* Base-rate lists. Quiet by construction: they exist to make the short list of
+   open findings believable, not to compete with it. */
+.aside-list{margin-top:2rem;}
+.aside-list h2{font-size:1rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:0 0 .5rem;}
+.aside-list ul{margin:0;padding-left:1.1rem;}
+.aside-list li{margin-bottom:.3rem;font-size:.95rem;color:var(--text-muted);}
+/* The audited-out log: the one disclosure on the page. Closed by default. */
+details.audited-out{margin:2rem 0 0;border:1px solid var(--border);border-radius:8px;background:var(--bg);}
+details.audited-out > summary{cursor:pointer;padding:.65rem 1rem;color:var(--text-muted);font-size:.95rem;}
+details.audited-out > summary:hover{background:var(--bg-muted);}
+details.audited-out[open] > summary{border-bottom:1px solid var(--border);}
+.audited-body{padding:.6rem 1rem 1rem;}
+/* Findings carry no severity rail. Severity is the first word of the sentence,
+   which survives copy-paste, greyscale, and peripheral vision; 5px of color did
+   none of those. Space does the grouping instead of a border. */
+.finding{border-left-width:0;}
+.what{max-width:var(--measure);}
+.context{max-width:var(--measure);}
 /* Attachment safety: an <img> or a wide <pre> arriving through a field value
    must never push the page sideways. Neither had a rule before (issue #161). */
 .field img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;margin:.4rem 0;}
@@ -249,8 +274,39 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
   }
   body.appendChild(header);
 
+  // ---- the bottom line (issue #161) -------------------------------------
+  // Two or three sentences in the largest type on the page, in fixed slots: is
+  // it safe to ship, the one other thing that matters, what happens next. This
+  // is the whole first screen. It exists because the page previously opened on
+  // a truncated count strip and then finding one out of up to forty-one, and
+  // more than half of a reader's attention is spent above the fold regardless
+  // of what occupies it.
+  if (nonEmpty(data.bottomLine)) {
+    var bl = el("section", "bottom-line");
+    data.bottomLine.slice(0, 3).forEach(function (line, i) {
+      var p = el("p", i === 0 ? "display" : "bl-rest");
+      html(p, line);
+      bl.appendChild(p);
+    });
+    body.appendChild(bl);
+  }
+
+  // ---- disposition ------------------------------------------------------
+  // One sentence: what was handled without the reader, what was deferred, what
+  // could not be checked. It replaces the severity tally row, because "two
+  // things need you today" is a sentence a person can act on and a badge
+  // reading "8" is a number they have to interpret first.
+  if (data.disposition) {
+    var disp = el("p", "disposition");
+    html(disp, data.disposition);
+    body.appendChild(disp);
+  }
+
   // ---- top-issues (sticky) ----------------------------------------------
-  if (data.topIssues) {
+  // Superseded by the bottom line. It still renders for a payload that carries
+  // no bottomLine, so an older payload degrades to exactly its old appearance
+  // rather than to a page with no summary at all.
+  if (data.topIssues && !nonEmpty(data.bottomLine)) {
     var ti = data.topIssues;
     var rows = [
       { key: "block",   word: "Blocks"   },
@@ -304,7 +360,25 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
     groups.forEach(function (group) {
       if (!group || !nonEmpty(group.findings)) return;
 
-      if (group.label) {
+      // The Audited out log is the ONE thing on this page behind a disclosure,
+      // and it is the right one: these are findings the audit killed, so every
+      // card in it asks the reader to load a claim and immediately unload it.
+      // It stays on the page (M8 wants the audit inspectable) and stops being
+      // the first thing between the reader and the findings that survived.
+      // Nothing decision-relevant is ever collapsed - a demoted finding renders
+      // as a visible one-line row, never in here.
+      var isAudit = typeof group.label === "string" && /^audited out$/i.test(group.label.trim());
+      var host = body;
+      if (isAudit) {
+        var det = el("details", "audited-out");
+        var sum = el("summary");
+        text(sum, "Audited out: " + group.findings.length +
+                  (group.findings.length === 1 ? " finding did not survive" : " findings did not survive"));
+        det.appendChild(sum);
+        host = el("div", "audited-body");
+        det.appendChild(host);
+        body.appendChild(det);
+      } else if (group.label) {
         // h2 (not div) so the group label is a heading for SR navigation. The
         // .group-label class outranks the bare h2 rule, so the look is unchanged.
         var gl = el("h2", "group-label");
@@ -322,9 +396,19 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
         // card header: badge, id, specialist tag, file link
         var cardHead = el("header");
 
-        var badge = el("span", "badge badge--" + sev);
-        text(badge, meta.emoji + " " + meta.label);
-        cardHead.appendChild(badge);
+        // The severity word now leads the sentence itself (issue #161), so a
+        // badge repeating it is noise. The badge still renders for a finding
+        // whose text does not carry it - an older payload, or a specialist that
+        // missed the rule - because losing severity entirely is far worse than
+        // showing it twice. The 5px rail is gone either way: it sat below the
+        // size at which a skimming reader resolves anything.
+        var saysSeverity = typeof f.what === "string" &&
+          /^\s*(?:<[^>]+>\s*)?(blocks|should fix|optional)\b/i.test(f.what);
+        if (!saysSeverity) {
+          var badge = el("span", "badge badge--" + sev);
+          text(badge, meta.emoji + " " + meta.label);
+          cardHead.appendChild(badge);
+        }
 
         if (f.id) {
           var idSpan = el("span", "finding-id");
@@ -360,7 +444,7 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
         // still on the page, and the markdown on disk still carries it in full.
         if (f.demoted) {
           card.className += " finding--demoted";
-          body.appendChild(card);
+          host.appendChild(card);
           return;
         }
 
@@ -424,10 +508,33 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
           card.appendChild(fixRow);
         }
 
-        body.appendChild(card);
+        host.appendChild(card);
       });
     });
   }
+
+  // ---- what I already fixed / what I could not check (issue #161) --------
+  // The base-rate disclosure. A short list of open findings is only believable
+  // next to the count of what was handled and the named limits of the pass;
+  // without them a short page reads as a page that did not look hard.
+  [
+    { key: "alreadyFixed", head: "What I already fixed" },
+    { key: "couldNotCheck", head: "What I could not check" }
+  ].forEach(function (sec) {
+    if (!nonEmpty(data[sec.key])) return;
+    var wrap = el("section", "aside-list");
+    var h = el("h2");
+    text(h, sec.head);
+    wrap.appendChild(h);
+    var ul = el("ul");
+    data[sec.key].forEach(function (item) {
+      var li = el("li");
+      html(li, item);
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    body.appendChild(wrap);
+  });
 
   // ---- footer.summary ---------------------------------------------------
   if (nonEmpty(data.summary)) {
