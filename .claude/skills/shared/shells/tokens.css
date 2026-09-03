@@ -85,10 +85,35 @@
  * Pin those to light as well (holistic review, R28). */
 :root[data-theme="light"]{color-scheme:light;}
 *{box-sizing:border-box;}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:16px;}
-h1{font-size:1.875rem;font-weight:600;line-height:1.3;margin:0 0 .25rem;}
-h2{font-size:1.5rem;font-weight:600;line-height:1.3;margin:2rem 0 .8rem;}
-h3{font-size:1.1rem;font-weight:500;margin:0 0 .4rem;}
+/* Type scale (issue #161). The previous scale spanned 2.76x end to end with 17
+ * of its 25 sizes BELOW body size and only 1.34x of headroom above it, which is
+ * a plateau rather than a hierarchy: there was no size available to make one
+ * thing on the page louder than another. Three changes, and only these three,
+ * under the approved type-scale divergence:
+ *   1. body 16px -> 17px. 16px sits at the practical floor for sustained screen
+ *      reading, and these pages are read, not scanned.
+ *   2. a --display step above h1, so a verdict can be the loudest thing present.
+ *   3. weights open from 500/600 to 400/700. A 100-unit step in the middle of
+ *      the axis is an expert-eye distinction that disappears after hinting.
+ * Colors and spacing are untouched: the severity palette is already correct and
+ * already contrast-tested, and the gap was never color. */
+:root{
+  --text-display:2.75rem;   /* the bottom line, and nothing else */
+  --text-h1:1.875rem;
+  --text-h2:1.5rem;
+  --text-h3:1.1rem;
+  --text-body:1rem;
+  --text-small:.875rem;
+  --text-micro:.75rem;      /* labels, tags, chips */
+  --weight-normal:400;
+  --weight-strong:700;
+  --measure:64ch;           /* running prose stays readable; the page stays 940px */
+}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:17px;font-weight:var(--weight-normal);}
+.display{font-size:var(--text-display);font-weight:var(--weight-strong);line-height:1.1;letter-spacing:-.02em;margin:0 0 .5rem;text-wrap:balance;max-width:var(--measure);}
+h1{font-size:var(--text-h1);font-weight:600;line-height:1.3;margin:0 0 .25rem;}
+h2{font-size:var(--text-h2);font-weight:600;line-height:1.3;margin:2rem 0 .8rem;}
+h3{font-size:var(--text-h3);font-weight:500;margin:0 0 .4rem;}
 code,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;background:var(--bg-muted);padding:.1rem .35rem;border-radius:4px;}
 a{color:var(--accent);text-decoration:none;}
 a:hover{text-decoration:underline;}

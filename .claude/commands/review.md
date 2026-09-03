@@ -185,6 +185,14 @@ The tag is the only thing this section adds to a finding. Every field row - the 
 - **R3** [code, browser] ⚠️ `file:line` - [Issue flagged by both code and browser specialists]
   - [browser field rows per the template, **Receipt** last]
 
+### The first screen (orchestrator, HTML only)
+
+The HTML companion opens on a **bottom line**, not on a counter strip. Write two or three sentences, 25 words or fewer each, in fixed slots: is it safe to ship (including "I could not tell, because..." when that is the honest answer), the one other thing that matters, and what happens next. Then one **disposition** sentence saying what was handled without the reader, what was deferred, and what could not be checked.
+
+Also fill **What I already fixed** and **What I could not check**. These are the base-rate disclosure: a short list of open findings reads as a review that did not look hard unless it sits beside the count of what was handled and the named limits of the pass. Never omit the limits when limits exist.
+
+Derive all four from the run you just did. None of them is a new judgement: the bottom line follows the same mechanical rule as the Overall Verdict below, the disposition is a count, and the two lists are records of what the loop already did.
+
 ### Overall Verdict, readability, and the security nudge (orchestrator)
 
 The inlined template defines the **Overall Verdict** line, the **readability backstop**, and the receipt rule. Apply each across the merged run rather than per specialist. Two things are specific to this path:

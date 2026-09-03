@@ -4,7 +4,7 @@ Shared reference for design work in the toolkit loop (issue #160). Read on deman
 
 Adapted from Anshu Chimala's "How to turn your AI into a world-class designer" (Lenny's Newsletter, 2026), Techniques 1 to 6. The premise: a model picks the most predictable design choice at every step, so variety and taste have to be injected from outside it. Technique 7 onward is not adopted yet.
 
-**Out of scope.** The toolkit's own artifact look (`.claude/skills/shared/shells/`, `tokens.css`, `html-look.md`) is an existing design system under the three-state rule and is never touched by design work.
+**The toolkit's own artifact look** (`.claude/skills/shared/shells/`, `tokens.css`, `html-look.md`) is an existing design system in state `exists` under the three-state rule, and the allowed-variance rules apply to it exactly as they do to any other repo's system. It was previously carved out entirely, on the reasoning that the loop should not churn a look every downstream project inherits. That protection now comes from the right place: layout, composition, motion and copy may vary freely, and colors, type, spacing and components still require the divergence page (issue #161). A blanket exemption also blocked fixing the look when it was measurably failing its reader, which is what it turned out to be doing.
 
 ## The three-state rule
 
