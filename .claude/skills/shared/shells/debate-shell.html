@@ -13,8 +13,9 @@
   those literal strings in prose.
 
   Spec: .claude/skills/shared/html-render-debate.md
-  Shared conventions: severity strings, file-link scheme, action fields all match
-  the review shell for cross-toolkit visual consistency.
+  Shared conventions: severity strings, the file-link scheme, an action's three
+  prose keys (what, context, fix) and its attachment rows all match the review
+  shell for cross-toolkit visual consistency.
 
   ===================================================================
   RENDER DATA JSON SCHEMA (what the slash commands must produce):
@@ -42,11 +43,18 @@
             "absPath": "/abs/src/foo.js", // vscode://file/ href; omitted by --no-abs, and then the reference is plain text
             "line":    42             // optional; appended as :line to text and href
           },
-          "what": "string - one-line summary of the action (trusted inline HTML ok)",
-          "fields": [                 // optional ordered detail rows
-            { "label": "Why it matters", "value": "string (trusted inline HTML ok)" },
-            { "label": "Example",        "value": "string (trusted inline HTML ok)" },
-            { "label": "Suggested fix",  "value": "string (trusted inline HTML ok)" }
+          "what":    "string - sentence one (trusted inline HTML ok)",
+          "context": "string - sentence two, optional; omit the key when there is
+                      no second sentence (trusted inline HTML ok)",
+          "fix":     "string - the fix line: a cost and a choice (trusted inline HTML ok)",
+          "fields": [                 // ATTACHMENTS ONLY, optional, in order.
+                                      // Never prose: the three keys above are the
+                                      // whole of an action's argument. E.g. the
+                                      // Expected / Actual / Evidence rows a review
+                                      // finding carries.
+            { "label": "Expected", "value": "string (trusted inline HTML ok)" },
+            { "label": "Actual",   "value": "string (trusted inline HTML ok)" },
+            { "label": "Evidence", "value": "<pre>string</pre> (trusted inline HTML ok)" }
           ]
         }
       ]
@@ -55,10 +63,14 @@
 
   Notes:
   - Severity strings map: block -> 🚫 Block, warn -> ⚠️ Warn, suggest -> 💡 Suggest.
-  - "value", "what", "claude", "model" position text and agreed/disagreed items may
-    contain trusted Claude-generated inline HTML (<code>, <strong>, <a>); rendered
-    via innerHTML. This is review output, not untrusted user input.
+  - "what", "context", "fix", field "value", the "claude" and "model" position
+    text and agreed/disagreed items may contain trusted Claude-generated inline
+    HTML (<code>, <strong>, <a>); rendered via innerHTML. This is review output,
+    not untrusted user input.
   - Any missing or empty section is skipped (no empty headers rendered).
+  - The retired four-field labels (Why it matters / Example / Suggested fix) are
+    refused: render-html.js drops a field row carrying one of them and names the
+    refusal on stderr. The render itself survives, minus those rows.
   ===================================================================
 -->
 <style>
@@ -92,6 +104,13 @@ header.page .subtitle{color:var(--text-muted);font-size:1rem;margin:.15rem 0 0;}
 .synth-group h3{font-size:1.05rem;font-weight:600;margin:0 0 .5rem;}
 ul.points{margin:.2rem 0 0;padding-left:1.2rem;}
 ul.points li{margin-bottom:.35rem;font-size:.95rem;}
+
+/* The two-sentence contract (issue #161), mirrored from the review shell so an
+   action reads like a finding: sentence two unlabeled and one step down from
+   the headline; the fix line closes the card with separation from what
+   precedes it. tokens.css already styles .field and .what for both shells. */
+.context{margin:.45rem 0 0;font-size:.95rem;color:var(--text);max-width:var(--measure);}
+.field.fix{margin-top:.7rem;}
 </style>
 </head>
 <body>
@@ -154,6 +173,20 @@ ul.points li{margin-bottom:.35rem;font-size:.95rem;}
     a.href = 'vscode://file/' + file.absPath + suffix;
     a.textContent = rel + suffix;
     return a;
+  }
+
+  // A labeled detail row, the same markup the review shell uses for an
+  // attachment and for the fix line. One builder for both so they cannot drift.
+  function fieldRow(className, label, value) {
+    var row = el('div', className);
+    var strong = el('strong', null);
+    strong.textContent = label + ':';
+    row.appendChild(strong);
+    row.appendChild(document.createTextNode(' '));
+    var span = el('span', null);
+    span.innerHTML = (value != null) ? String(value) : ''; // trusted inline HTML
+    row.appendChild(span);
+    return row;
   }
 
   // ---- header ------------------------------------------------------------
@@ -263,19 +296,27 @@ ul.points li{margin-bottom:.35rem;font-size:.95rem;}
           card.appendChild(htmlEl('h3', 'what', action.what));
         }
 
+        // context (sentence two) - unlabeled on purpose, exactly as on a review
+        // finding: it earns its place by answering who is hit, when it fires,
+        // or why now, and a label would only repeat what the sentence says.
+        if (isNonEmpty(action.context)) {
+          card.appendChild(htmlEl('p', 'context', action.context));
+        }
+
+        // attachment rows, in order (Expected / Actual / Evidence). Never prose:
+        // the prose keys above are the whole of an action's argument.
         if (Array.isArray(action.fields)) {
           action.fields.forEach(function (f) {
             if (!f || !isNonEmpty(f.label)) return;
-            var field = el('div', 'field');
-            var strong = el('strong', null);
-            strong.textContent = f.label + ':';
-            field.appendChild(strong);
-            field.appendChild(document.createTextNode(' '));
-            var span = el('span', null);
-            span.innerHTML = (f.value != null) ? String(f.value) : '';
-            field.appendChild(span);
-            card.appendChild(field);
+            card.appendChild(fieldRow('field', f.label, f.value));
           });
+        }
+
+        // fix line - a cost and a choice, always last, in the same labeled-row
+        // shape as an attachment and with the review shell's .fix class, so the
+        // two pages close a finding and an action the same way.
+        if (isNonEmpty(action.fix)) {
+          card.appendChild(fieldRow('field fix', 'Fix', action.fix));
         }
 
         actionsGroup.appendChild(card);
