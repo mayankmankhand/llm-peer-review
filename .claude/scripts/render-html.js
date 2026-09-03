@@ -925,6 +925,22 @@ function applyReviewContract(data) {
 
   // Demote from the bottom of the ranking until the page fits.
   const ranked = rankFindings(findings);
+
+  // Write the ranking back into the payload, or it changes nothing: the shell
+  // renders groups[] in the order it receives them, so a ranking computed and
+  // left in a local variable is exactly the "renders in payload order" bug this
+  // is meant to fix. The specialist groups collapse into one ranked list -
+  // grouping by specialist put a Suggest above eight Warns in a real artifact,
+  // and each finding already carries its own [specialist] tag, so nothing is
+  // lost. The Audited out group is preserved untouched, after the survivors.
+  if (Array.isArray(data.groups)) {
+    const audited = data.groups.filter(function (g) {
+      return g && typeof g.label === 'string' && /^audited out$/i.test(g.label.trim());
+    });
+    data.groups = [{ label: '', findings: ranked }].concat(audited);
+  } else if (Array.isArray(data.findings)) {
+    data.findings = ranked;
+  }
   let spent = 0, open = 0, demoted = 0;
   ranked.forEach(function (f) {
     const fits = (spent + f._words) <= REVIEW_CAPS.pageWords && open < REVIEW_CAPS.openFindings;
