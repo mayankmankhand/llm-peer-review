@@ -115,7 +115,7 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat .claude/skills/shared/output-template.md`
 
-Security findings use that shape unchanged: the exploit sentence above is sentence two (it answers when it fires and who is hit), or the receipt when the path can be demonstrated rather than described.
+Security findings use that shape unchanged: the exploit sentence above is sentence two, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described.
 
 ## HTML Companion (when gate fires)
 
@@ -123,7 +123,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-For direct calls to this skill, pass `--name review-security` to the helper and omit the `chips` array (single-specialist context).
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["security"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
 
 ### Security Engineer Check
 

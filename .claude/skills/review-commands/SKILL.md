@@ -75,7 +75,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-For direct calls to this skill, pass `--name review-commands` to the helper and omit the `chips` array (single-specialist context).
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["commands"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
 
 ### Staff PM Check
 
