@@ -63,7 +63,7 @@ The `/explore` design step dispatches the playground's rendered-prototypes varia
 |---|---|
 | `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
-| `artifacts/html/` | Cycle-bound artifacts (review reports, document summaries, debate views, explore option comparisons, audit reports) - timestamped. Also: `/audit-html` static views (via `--stable`, not timestamped). Gitignored. |
+| `artifacts/html/` | Cycle-bound artifacts (document summaries, debate views, explore option comparisons, audit reports) - timestamped. Also the two `--stable` views, not timestamped: the standing review page `review.html` and `/audit-html` static views. Gitignored. |
 | `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. It is the record; each published local file also carries its URL on line 1 as `<!-- hosted: <url> -->`, a derived copy that `--index-sync` regenerates from the newest record per file. Gitignored with the rest of `artifacts/html/`. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
@@ -78,7 +78,7 @@ node .claude/scripts/render-html.js --shell <review|debate|document|explore|audi
 
 By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-HHMMSS.html` (with a `-N` guard for same-second runs), creates `artifacts/html/`, overwrites freely, and prints the output path to stdout. This is what keeps the open fast and collision-free (issues #120, #127): the command emits only the small JSON, never the boilerplate, and there is never a read-then-overwrite cycle. The prebuilt shells live in `.claude/skills/shared/shells/`; each documents its own JSON schema in a header comment.
 
-The two identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for views that pair with a markdown file (issue #129): plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan) and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
+The three identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run (issue #129): plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run; issue #161), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
 
 **Exception** (still hand-rendered, NOT via the helper): `/playground` throwaways (`/tmp/`, interactive).
 
@@ -120,7 +120,7 @@ bash .claude/scripts/open-artifact.sh "<file>"
 
 Pass the absolute path `render-html.js` printed (the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (PowerShell `Start-Process`, located on PATH or by full path, then `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve; on WSL the headless message also prints the Windows-side (UNC) path so it can be pasted into a Windows browser.
 
-- **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review-orchestrator-2026-05-24.html`".
+- **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
 
 The `/playground` skill sits outside all of this: it never publishes and never auto-opens, because its output is throwaway `/tmp/` HTML the user pastes back (see the Playground Export-Loop Rule). It emits a clickable `file://` link in chat instead.
@@ -165,7 +165,7 @@ Only change a type's icon if that type's purpose changes, never as part of an or
 | document, explore, debate, audit | timestamped, one file per run | publish a new page each run |
 | review, plan, docview | `--stable`, one file per identity | update the one page for that identity |
 
-**Review moved to the identity-keyed row in issue #161.** A new page every run is a backlog, and no per-page redesign touches a backlog: cut every page to 600 words and after forty cycles there are forty unread pages, because reading one changes nothing about the next. One standing page per repo replaces itself, carries only what is open, and can go empty. `render-html.js` reads the page it is about to overwrite and states what changed since the reader last opened it, so a finding they already saw does not present itself as news. The identity is the repo, so the name is the bare `review`.
+**Review moved to the identity-keyed row in issue #161.** A new page every run is a backlog, and no per-page redesign touches a backlog: cut every page to 600 words and after forty cycles there are forty unread pages, because reading one changes nothing about the next. One standing page per repo replaces itself, carries only what is open, and can go empty. `render-html.js` reads the page it is about to overwrite and states what changed since the reader last opened it, so a finding they already saw does not present itself as news. The identity is the repo, so the name is the bare `review`. A direct single-lens run names its lens in the payload's `lenses` key, and the helper then replaces only that lens's findings and carries the other lenses' open findings forward, marked, rather than reporting them resolved. The page is rendered once per run, after the auto-fix loop has settled, so what it shows as open is what the loop left open.
 
 For a stable type, look up its recorded page first:
 
