@@ -123,7 +123,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-For direct calls to this skill, pass `--name review-browser` to the helper and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Screenshot as an `<img>` value, Evidence as a `<pre>` value, Expected, Actual); the review shell renders them as extra field rows inside each finding card.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["browser"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Screenshot as an `<img>` value, Evidence as a `<pre>` value, Expected, Actual); the review shell renders them as extra field rows inside each finding card.
 
 ### Staff QA Check
 

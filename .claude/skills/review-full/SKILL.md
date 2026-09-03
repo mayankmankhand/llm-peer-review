@@ -80,7 +80,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-For direct calls to this skill, pass `--name review-full` to the helper. Include the `chips` array with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip purposes.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip purposes.
 
 ### Staff Architect Check
 
