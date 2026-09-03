@@ -99,7 +99,9 @@ End the report with one line so the user knows what happens next: _"Fixes for su
 
 ## Where the report is written
 
-Every review that produces a report writes it to disk before rendering anything: `reports/review-<name>-<YYYY-MM-DD-HHMMSS>.md`, where `<name>` matches the `--name` used for the HTML render (`review-orchestrator` for `/review`, `review-<lens>` for a direct specialist run). Create `reports/` if absent; it is gitignored. Print the path to **stderr**, never stdout, so a caller capturing a render path is unaffected.
+Every review that produces a report writes it to disk before rendering anything: `reports/review-<who>-<YYYY-MM-DD-HHMMSS>.md`, where `<who>` is `orchestrator` for `/review` or the lens name for a direct specialist run. Create `reports/` if absent; it is gitignored. Print the path to **stderr**, never stdout, so a caller capturing a render path is unaffected.
+
+**The markdown and the HTML are named on different principles, deliberately.** The markdown is timestamped per run because it is the archive: every run's full report, kept. The HTML page is `--stable --name review` because it is the standing page: one per repository, replaced in place, carrying only what is still open. One accumulates on purpose; the other refuses to.
 
 This applies to the orchestrator and to a directly-typed `/review-*` run alike, which is why it lives here rather than in either call site.
 

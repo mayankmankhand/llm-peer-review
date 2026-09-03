@@ -162,8 +162,10 @@ Only change a type's icon if that type's purpose changes, never as part of an or
 
 | Types | File naming | Publish behavior |
 |---|---|---|
-| review, document, explore, debate, audit | timestamped, one file per run | publish a new page each run |
-| plan, docview | `--stable`, one file per identity | update the one page for that identity |
+| document, explore, debate, audit | timestamped, one file per run | publish a new page each run |
+| review, plan, docview | `--stable`, one file per identity | update the one page for that identity |
+
+**Review moved to the identity-keyed row in issue #161.** A new page every run is a backlog, and no per-page redesign touches a backlog: cut every page to 600 words and after forty cycles there are forty unread pages, because reading one changes nothing about the next. One standing page per repo replaces itself, carries only what is open, and can go empty. `render-html.js` reads the page it is about to overwrite and states what changed since the reader last opened it, so a finding they already saw does not present itself as news. The identity is the repo, so the name is the bare `review`.
 
 For a stable type, look up its recorded page first:
 

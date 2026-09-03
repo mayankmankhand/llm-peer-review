@@ -948,9 +948,85 @@ function applyReviewContract(data) {
 // showed "image unavailable" while the local render embedded it fine
 // (holistic review, R1). A data: URI carries no path, so once the image is
 // inline there is nothing left for the scrub to touch.
+// --- item 5: the standing review page (issue #161) ---
+//
+// A new timestamped page every run is a backlog, and no per-page redesign
+// touches a backlog: cut every page to 600 words and after forty cycles there
+// are forty unread pages. Reading one changes nothing about the next, so
+// reading is unpaid work with no terminus.
+//
+// So the review page is identity-keyed like a plan view: one page per repo, at
+// one URL, replaced in place. What that buys is a page that can go EMPTY, and
+// going empty means something.
+//
+// The other half is memory. Because the file at the stable path is the previous
+// run's page, this run can read it and say what changed. A finding the reader
+// already saw and left alone should not present itself as news.
+function stableFindingKey(f) {
+  if (f.key) return String(f.key);
+  const loc = f.file ? (f.file.relPath || '') + ':' + (f.file.line == null ? '' : f.file.line) : '';
+  const claim = String(f.what || '').toLowerCase().replace(/[^a-z0-9 ]+/g, '').split(/\s+/).slice(0, 8).join('-');
+  return loc + ':' + claim;
+}
+
+// Pull the payload back out of a page this script wrote earlier. Returns null
+// for anything unexpected - a hand-edited file, a page from an older version,
+// no page at all. A first run in a repo and a run whose predecessor cannot be
+// read are different things, and only the first is worth saying out loud.
+function priorPayload(file) {
+  let html;
+  try { html = fs.readFileSync(file, 'utf-8'); } catch (e) { return null; }
+  const m = html.match(/<script[^>]*id="render-data"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) return null;
+  try { return JSON.parse(m[1]); } catch (e) { return null; }
+}
+
+function markWhatChanged(data, outFile) {
+  const prior = priorPayload(outFile);
+  const findings = openFindings(data);
+  findings.forEach(function (f) { f._key = stableFindingKey(f); });
+
+  if (!prior) {
+    data.sinceLast = findings.length
+      ? 'First review recorded for this repository.'
+      : 'First review recorded for this repository. Nothing open.';
+    return;
+  }
+  const before = {};
+  openFindings(prior).forEach(function (f) { before[stableFindingKey(f)] = true; });
+
+  let fresh = 0;
+  findings.forEach(function (f) { if (!before[f._key]) { f.isNew = true; fresh += 1; } });
+  const carried = findings.length - fresh;
+  const gone = Object.keys(before).filter(function (k) {
+    return !findings.some(function (f) { return f._key === k; });
+  }).length;
+
+  const parts = [];
+  if (fresh) parts.push(fresh + (fresh === 1 ? ' new finding' : ' new findings'));
+  if (carried) parts.push(carried + ' still open from last time');
+  if (gone) parts.push(gone + (gone === 1 ? ' resolved since' : ' resolved since'));
+  data.sinceLast = parts.length
+    ? 'Since you last opened this page: ' + parts.join(', ') + '.'
+    : 'Nothing has changed since you last opened this page.';
+  if (!findings.length) data.sinceLast = 'Nothing open. ' + (gone ? gone + ' resolved since you last looked.' : '');
+}
+
 // The review contract runs FIRST: it reads each receipt's output off disk, and
 // the strip below would rewrite those paths out from under it.
-if (opts.shell === 'review') applyReviewContract(parsed);
+if (opts.shell === 'review') {
+  applyReviewContract(parsed);
+  // In stable mode the output path is deterministic, so the page this run is
+  // about to replace can be read before it is overwritten. That is the whole
+  // memory mechanism: the previous page IS the record of what the reader last
+  // saw. A timestamped run has no predecessor to compare against and simply
+  // skips this, which is why the standing page and the memory are one change
+  // rather than two.
+  if (opts.stable) {
+    markWhatChanged(parsed, path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+    openFindings(parsed).forEach(function (f) { delete f._key; });
+  }
+}
 embedImages(parsed);
 if (opts.noAbs) stripAbsPaths(parsed);
 
