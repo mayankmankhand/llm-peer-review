@@ -79,14 +79,14 @@ A worked pair, so the target is unambiguous. Before, at 321 words across four la
 >   - **Example:** [53 words of invented hypothetical beginning "a future contributor could".]
 >   - **Suggested fix:** [75 words including function arguments, despite this template forbidding code.]
 
-After, at 45 words plus the check's real output:
+After, at 46 words plus the check's real output:
 
 > **R2** ⚠️ `scripts/test-gen-media.js:31` - Should fix. Your own secret scanner will block your next push.
->   - The new test file's fake keys are shaped like real ones, so the scanner counts five and refuses.
+>   - The new test file's fake keys are shaped like real ones, so the scanner counts three and refuses.
 >   - **Fix:** One line in that file: build the fake keys from pieces so they stop matching. Ten minutes.
 >   - **Receipt:** `node .claude/scripts/pre-push-check.js` - tripwire hit, three keys flagged at lines 31 to 33, exit 1.
 
-Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Sixteen in the fix line, carrying a cost. An 86% cut, with evidence added rather than removed.
+Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Seventeen in the fix line, carrying a cost. An 86% cut, with evidence added rather than removed.
 
 ### Staff Check
 [See Staff Check Variants below for the role matching your review type]
@@ -100,6 +100,8 @@ End the report with one line so the user knows what happens next: _"Fixes for su
 ## Where the report is written
 
 Every review that produces a report writes it to disk before rendering anything: `reports/review-<who>-<YYYY-MM-DD-HHMMSS>.md`, where `<who>` is `orchestrator` for `/review` or the lens name for a direct specialist run. Create `reports/` if absent; it is gitignored. Print the path to **stderr**, never stdout, so a caller capturing a render path is unaffected.
+
+**The second thing a run writes is the receipts folder.** Tier 1 saves each check's output to `reports/receipts/<run-stamp>/` as it runs (M2 in `hitl-loop.md`; the orchestrator's Phase 4 shows the form), and the page's receipt slot is filled only from there. The markdown's **Receipt** row and the page's receipt block come from the same file.
 
 **The markdown and the HTML are named on different principles, deliberately.** The markdown is timestamped per run because it is the archive: every run's full report, kept. The HTML page is `--stable --name review` because it is the standing page: one per repository, replaced in place, carrying only what is still open. One accumulates on purpose; the other refuses to.
 
