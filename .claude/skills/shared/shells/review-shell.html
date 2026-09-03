@@ -23,6 +23,16 @@
   ==========================================================================
   All fields optional unless noted; a section is skipped when its data is
   missing or empty. Severity is the string "block" | "warn" | "suggest".
+
+  THE FINDING CONTRACT (issue #161). A finding is prose in three keys - "what",
+  "context", "fix" - plus non-prose attachments. render-html.js counts the words
+  in those three, ranks the findings by locus, and demotes the lowest-ranked to
+  one-line rows once the page budget is spent. It also refuses the retired
+  four-field labels (Why it matters / Example / Suggested fix) by dropping them
+  and naming the refusal on stderr; it does not abort, because a rejected render
+  would leave a run with no artifact at all. Do not put prose in "fields" to get
+  around the caps: attachments are not counted, and that is the one evasion this
+  contract cannot catch by counting.
   Inline trusted HTML (Claude-generated review text) is allowed in: looksGood
   items, a finding's "what", and every field "value". Those render via
   innerHTML. Emoji in the JSON are literal (rendered directly).
@@ -63,16 +73,33 @@
             "file": { "relPath": ".claude/scripts/open-artifact.sh",
                       "absPath": "/home/.../open-artifact.sh",
                       "line": 91 },               // line optional; file optional
-            "what": "One-line summary (HTML allowed).",
-            "fields": [                            // arbitrary label/value rows, in order
-              { "label": "Why it matters", "value": "... <code>x</code> ..." },
-              { "label": "Example",        "value": "..." },
-              { "label": "Suggested fix",  "value": "..." }
-              // Browser findings just add more rows, e.g.:
-              // { "label": "Screenshot", "value": "<img src='...' alt='...'>" },
-              // { "label": "Evidence",   "value": "<pre>console errors</pre>" },
+            "what": "Sentence one: severity spelled out, defect, harm verb (HTML allowed).",
+            "context": "Sentence two. OMIT THE KEY unless it answers who is hit,
+                        when it fires, or why now. Omitted is the normal case.",
+            "fix":     "The fix line: a cost and a choice, not an approach.",
+            "locus":   "user",                     // optional. "user" = only the
+                                                   // human can answer this. Drives
+                                                   // ranking; severity breaks ties.
+            "demoted": false,                      // set by render-html.js, never
+                                                   // by the payload. A demoted
+                                                   // finding renders as its
+                                                   // headline alone.
+            "receipt": {                           // the check's OWN output
+              "cmd":    "node .claude/scripts/pre-push-check.js",
+              "stdout": ["line", "line"],          // filled by render-html.js from
+                                                   // receipt.stdoutFile, which the
+                                                   // tier-1 runner writes. Rendered
+                                                   // via textContent, so it may
+                                                   // contain any characters at all.
+              "exit":   1
+            },
+            "fields": [                            // ATTACHMENTS ONLY, in order.
+                                                   // Most findings emit none.
+              // Browser findings use, in this order:
               // { "label": "Expected",   "value": "..." },
-              // { "label": "Actual",     "value": "..." }
+              // { "label": "Actual",     "value": "..." },
+              // { "label": "Screenshot", "value": "<img src='...' alt='...'>" },
+              // { "label": "Evidence",   "value": "<pre>console errors</pre>" }
             ]
           }
         ]
@@ -121,6 +148,37 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .looks-good li{margin-bottom:.35rem;}
 .group-label{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:1.6rem 0 .6rem;}
 .noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+
+/* ---- the two-sentence contract (issue #161) ---- */
+/* Sentence two. Unlabeled, one step down from the headline, and given real
+   space above it so the eye reads it as a continuation rather than a field. */
+.context{margin:.45rem 0 0;font-size:.95rem;color:var(--text);}
+/* The fix line closes every finding, so it gets separation from what precedes it. */
+.field.fix{margin-top:.7rem;}
+/* The receipt is the ONE tinted, monospaced surface on a finding. That single
+   visual exception is load-bearing: it is how the reader tells the machine's
+   words from the reviewer's. Everything here is defensive against real command
+   output - long lines scroll inside the block rather than pushing the page
+   sideways, and the content arrives via textContent so nothing in it is parsed. */
+.receipt{margin:.7rem 0 0;background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.receipt-label{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:.4rem .8rem 0;}
+.receipt pre{margin:0;padding:.4rem .8rem .6rem;overflow-x:auto;font-family:ui-monospace,Consolas,monospace;font-size:.8rem;line-height:1.5;white-space:pre;color:var(--text);}
+/* tokens.css styles inline `code` with a background and padding; inside a <pre>
+   that would paint a stray pill around nested spans. There are none here today
+   (textContent cannot produce them) - this is a guard for the day something
+   renders a code span into a receipt. */
+.receipt pre code{background:none;padding:0;font-size:inherit;}
+/* A demoted finding: present, countable, and quiet. It carries its headline and
+   nothing else, because the page budget was spent on findings ranked above it.
+   Rendered flat rather than as a card so the eye reads the open findings as the
+   page's content and these as its tail. */
+.finding--demoted{padding:.45rem .9rem;margin-bottom:.35rem;border-left-width:3px;background:none;}
+.finding--demoted .what{font-size:.92rem;font-weight:400;color:var(--text-muted);margin:.2rem 0 0;}
+.finding--demoted .badge{font-size:.66rem;}
+/* Attachment safety: an <img> or a wide <pre> arriving through a field value
+   must never push the page sideways. Neither had a rule before (issue #161). */
+.field img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;margin:.4rem 0;}
+.field pre{margin:.4rem 0;padding:.5rem .7rem;background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;overflow-x:auto;white-space:pre;font-size:.8rem;}
 </style>
 </head>
 <body>
@@ -296,7 +354,48 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
           card.appendChild(what);
         }
 
-        // arbitrary field rows, in order
+        // A demoted finding stops here: severity, id, location and its first
+        // sentence, and nothing else. render-html.js sets the flag when the page
+        // budget is spent (issue #161). Demotion is not omission - the finding is
+        // still on the page, and the markdown on disk still carries it in full.
+        if (f.demoted) {
+          card.className += " finding--demoted";
+          body.appendChild(card);
+          return;
+        }
+
+        // context (sentence two) - unlabeled on purpose. It earns its place by
+        // answering who is hit, when it fires, or why now; a label would only
+        // repeat what the sentence already says.
+        if (f.context) {
+          var ctx = el("p", "context");
+          html(ctx, f.context);
+          card.appendChild(ctx);
+        }
+
+        // receipt - the check's own output. TEXTCONTENT, never innerHTML: this
+        // is machine output, and machine output is made of the characters
+        // innerHTML eats. A probe render through the old field path deleted
+        // "<anonymous>" from the page outright and let "if (a<b)" swallow
+        // everything to the next ">". textContent makes both safe by
+        // construction, which is why the receipt has its own slot rather than
+        // riding fields[] (issue #161).
+        if (f.receipt && (f.receipt.cmd || nonEmpty(f.receipt.stdout))) {
+          var box = el("div", "receipt");
+          var label = el("div", "receipt-label");
+          text(label, "What I ran");
+          box.appendChild(label);
+          var pre = el("pre");
+          var lines = [];
+          if (f.receipt.cmd) lines.push("$ " + f.receipt.cmd);
+          if (nonEmpty(f.receipt.stdout)) lines = lines.concat(f.receipt.stdout);
+          if (f.receipt.exit != null) lines.push("exit " + f.receipt.exit);
+          text(pre, lines.join("\n"));
+          box.appendChild(pre);
+          card.appendChild(box);
+        }
+
+        // attachment rows, in order (Expected / Actual / Screenshot / Evidence)
         if (nonEmpty(f.fields)) {
           f.fields.forEach(function (fld) {
             if (!fld || (fld.label == null && fld.value == null)) return;
@@ -310,6 +409,19 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
             row.appendChild(span);
             card.appendChild(row);
           });
+        }
+
+        // fix line - a cost and a choice, always last
+        if (f.fix) {
+          var fixRow = el("div", "field fix");
+          var fixLabel = el("strong");
+          text(fixLabel, "Fix:");
+          fixRow.appendChild(fixLabel);
+          fixRow.appendChild(document.createTextNode(" "));
+          var fixSpan = document.createElement("span");
+          html(fixSpan, f.fix);
+          fixRow.appendChild(fixSpan);
+          card.appendChild(fixRow);
         }
 
         body.appendChild(card);
