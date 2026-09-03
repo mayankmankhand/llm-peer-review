@@ -758,12 +758,189 @@ function embedInString(str) {
   return out;
 }
 
+// --- item 4: the review finding contract (issue #161) ---
+//
+// Three prompt-side attempts to bound review length have all lost: a ~800-word
+// budget inlined into nine skills, and a "one line" spec for the `what` field,
+// are both ignored by the measured output (2,359 words per page, 61% of `what`
+// fields over 20 words). A cap a model is asked to respect is not a cap. These
+// run here, in code, where the count is mechanical.
+//
+// Two rules, and the second is the one with teeth:
+//   1. Per-field caps are COUNTED and reported to stderr. They are not
+//      annotated onto the page: a page carrying "[24 words, cap 18]" next to
+//      inflated prose is still a page of inflated prose.
+//   2. The PAGE budget is enforced by DEMOTION. Findings are ranked, and the
+//      lowest-ranked are demoted to one-line rows until the page fits. Nothing
+//      is ever truncated and nothing is ever dropped: a demoted finding still
+//      renders, as its first sentence alone, and the markdown on disk carries
+//      every finding in full regardless.
+// So verbosity is paid for in visibility rather than in a footnote: an inflated
+// finding pushes other findings off the open page, which is a cost the author
+// of the payload can see in the stderr line the very next run.
+const REVIEW_CAPS = {
+  what: 18, context: 22, fix: 20,   // per-finding prose, in words
+  pageWords: 700,                    // total open prose on the page
+  openFindings: 9,                   // hard ceiling regardless of word count
+  receiptLines: 6, receiptCols: 160  // the attached machine output
+};
+
+// Labels from the retired four-field template. A payload still carrying them
+// was authored against a contract that no longer exists, so rendering it would
+// silently ship the old format. They are refused - but the RENDER is not, because
+// aborting would leave a 21-finding run with no artifact at all. The fields are
+// dropped, the render continues, and the refusal is named on stderr.
+const RETIRED_FIELD_LABELS = /^\s*(why it matters|example|suggested fix)\s*:?\s*$/i;
+
+const SEV_ORDER = { block: 0, warn: 1, suggest: 2 };
+const reviewNotes = [];
+
+function proseWords(str) {
+  if (typeof str !== 'string') return 0;
+  return str.replace(/<[^>]*>/g, ' ').split(/\s+/).filter(Boolean).length;
+}
+
+// Every finding on the OPEN page. The Audited out group is deliberately excluded:
+// those are findings the audit killed, they are not part of the reader's budget,
+// and they are not ranked against surviving work.
+function openFindings(data) {
+  const out = [];
+  const groups = Array.isArray(data.groups) ? data.groups : [];
+  groups.forEach(function (g) {
+    if (g && typeof g.label === 'string' && /^audited out$/i.test(g.label.trim())) return;
+    (Array.isArray(g && g.findings) ? g.findings : []).forEach(function (f) { if (f) out.push(f); });
+  });
+  if (Array.isArray(data.findings)) data.findings.forEach(function (f) { if (f) out.push(f); });
+  return out;
+}
+
+// Rank by LOCUS, not by the severity label. severity-anchors.md states that a
+// self-assigned severity is unreliable in both directions and that paging
+// deliberately ignores it; ranking the page by it would repeat that mistake.
+// `locus: "user"` marks a finding only the human can answer (a fact they hold,
+// a reversal of intent, a file that always asks). Severity breaks ties, and the
+// payload's own order breaks those - so a payload that sets no locus at all
+// degrades to exactly today's behavior rather than to something surprising.
+function rankFindings(findings) {
+  return findings
+    .map(function (f, i) { return { f: f, i: i }; })
+    .sort(function (a, b) {
+      const al = a.f.locus === 'user' ? 0 : 1, bl = b.f.locus === 'user' ? 0 : 1;
+      if (al !== bl) return al - bl;
+      const as = SEV_ORDER[a.f.severity] === undefined ? 9 : SEV_ORDER[a.f.severity];
+      const bs = SEV_ORDER[b.f.severity] === undefined ? 9 : SEV_ORDER[b.f.severity];
+      if (as !== bs) return as - bs;
+      return a.i - b.i;
+    })
+    .map(function (x) { return x.f; });
+}
+
+// Pull the check's real output in from a file the tier-1 runner wrote.
+//
+// This is the whole point of the slot. Every other byte of the payload was typed
+// by a model, so a pasted stdout is indistinguishable from an invented one - and
+// a fabricated evidence block is worse than a vague paragraph, because it looks
+// authoritative. Reading the bytes here makes the claim true: the renderer, not
+// the model, put those characters on the page. Mirrors how images are embedded.
+//
+// A missing or unreadable file degrades to no receipt. It never fails the render:
+// the evidence is an attachment, and a run that loses one is still a valid report.
+function loadReceipt(f) {
+  const r = f.receipt;
+  if (!r || typeof r !== 'object') return;
+
+  // Inline `stdout` with no file behind it is model-typed text wearing machine
+  // output's clothes, which is the one thing this slot exists to prevent. It is
+  // dropped rather than rendered: a fabricated receipt is strictly worse than no
+  // receipt, because the monospace block is exactly what makes a reader stop
+  // doubting. Only bytes THIS RUN read off disk survive to the page.
+  const hasFile = typeof r.stdoutFile === 'string' && r.stdoutFile;
+  if (!hasFile && r.stdout !== undefined) {
+    reviewNotes.push('receipt for ' + (f.id || '?') + ' supplied stdout inline with no ' +
+                     'stdoutFile; dropped (only output the renderer read off disk is shown)');
+    delete r.stdout;
+  }
+
+  if (hasFile) {
+    let raw = null;
+    try { raw = fs.readFileSync(r.stdoutFile, 'utf-8'); } catch (e) { raw = null; }
+    if (raw === null) {
+      reviewNotes.push('receipt output unreadable, receipt dropped: ' + r.stdoutFile);
+      delete f.receipt;
+      return;
+    }
+    const lines = raw.replace(/\s+$/, '').split('\n');
+    const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
+      .map(function (l) { return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l; });
+    if (lines.length > REVIEW_CAPS.receiptLines) {
+      kept.push('... ' + (lines.length - REVIEW_CAPS.receiptLines) + ' more lines');
+    }
+    r.stdout = kept;
+  }
+  // The path is this machine's and never belongs on the page, published or not.
+  delete r.stdoutFile;
+  if (!Array.isArray(r.stdout) || !r.stdout.length) {
+    // Nothing to show. An authored check with no captured output is not evidence.
+    if (!r.cmd) delete f.receipt;
+  }
+}
+
+function applyReviewContract(data) {
+  const findings = openFindings(data);
+  if (!findings.length) return;
+
+  let retired = 0;
+  const over = [];
+
+  findings.forEach(function (f) {
+    loadReceipt(f);
+
+    // Refuse the retired four-field labels (drop, do not abort).
+    if (Array.isArray(f.fields)) {
+      const before = f.fields.length;
+      f.fields = f.fields.filter(function (row) {
+        return !(row && typeof row.label === 'string' && RETIRED_FIELD_LABELS.test(row.label));
+      });
+      retired += before - f.fields.length;
+      if (!f.fields.length) delete f.fields;
+    }
+
+    // Count the prose. Attachments are evidence, not prose, and never counted.
+    const w = { what: proseWords(f.what), context: proseWords(f.context), fix: proseWords(f.fix) };
+    f._words = w.what + w.context + w.fix;
+    ['what', 'context', 'fix'].forEach(function (k) {
+      if (w[k] > REVIEW_CAPS[k]) over.push((f.id || '?') + ' ' + k + ' ' + w[k] + '/' + REVIEW_CAPS[k]);
+    });
+  });
+
+  // Demote from the bottom of the ranking until the page fits.
+  const ranked = rankFindings(findings);
+  let spent = 0, open = 0, demoted = 0;
+  ranked.forEach(function (f) {
+    const fits = (spent + f._words) <= REVIEW_CAPS.pageWords && open < REVIEW_CAPS.openFindings;
+    if (fits) { spent += f._words; open += 1; delete f.demoted; }
+    else { f.demoted = true; demoted += 1; }
+    delete f._words;
+  });
+
+  if (retired) {
+    reviewNotes.push('refused ' + retired + ' field row(s) using the retired four-field labels ' +
+                     '(Why it matters / Example / Suggested fix); they were dropped, not rendered');
+  }
+  over.forEach(function (o) { reviewNotes.push('over cap: ' + o); });
+  reviewNotes.push('open prose ' + spent + '/' + REVIEW_CAPS.pageWords + ' words, ' +
+                   open + ' open, ' + demoted + ' demoted to one-line rows');
+}
+
 // Embed FIRST, then strip. The scrub rewrites the home-directory prefix to ~/,
 // and a screenshot left under the home directory but outside the repo was
 // rewritten before the embedder read it, so the publish-bound render alone
 // showed "image unavailable" while the local render embedded it fine
 // (holistic review, R1). A data: URI carries no path, so once the image is
 // inline there is nothing left for the scrub to touch.
+// The review contract runs FIRST: it reads each receipt's output off disk, and
+// the strip below would rewrite those paths out from under it.
+if (opts.shell === 'review') applyReviewContract(parsed);
 embedImages(parsed);
 if (opts.noAbs) stripAbsPaths(parsed);
 
@@ -900,4 +1077,13 @@ if (opts.stable) {
 }
 
 fs.writeFileSync(outPath, finalHtml, 'utf-8');
+
+// The contract accounting goes to STDERR, beside the path, never into it.
+// stdout carries the path alone because callers capture it; stderr is where a
+// human (and the session handing over the link) sees a verbosity regression on
+// the run that caused it, rather than six weeks later in an audit nobody runs.
+if (reviewNotes.length) {
+  reviewNotes.forEach(function (n) { console.error('render-html.js: ' + n); });
+}
+
 process.stdout.write(outPath + '\n'); // stdout = the path only; callers capture it
