@@ -835,7 +835,38 @@ function rankFindings(findings) {
     .map(function (x) { return x.f; });
 }
 
-// Pull the check's real output in from a file the tier-1 runner wrote.
+// --- the receipts folder (issue #162: R1, and the wiring the v6.3.0 review found missing) ---
+//
+// The renderer attaches only output it read off disk, but "off disk" alone
+// guaranteed nothing: the first real run of v6.3.0 filled six receipts from
+// files typed by hand, and the page could not tell them from real ones. So the
+// file has to come from where the tier-1 runner saves each check's output as
+// it runs - reports/receipts/ under the working copy, the folder M2 in
+// hitl-loop.md names - and it has to be a plain file of sane size. Anything
+// else is dropped with a note naming the file. The guarantee is process-level:
+// the runner writes there at check time, and nothing here can prove a file was
+// not typed. It is not cryptographic, and the note is what makes a refused
+// file visible instead of silent.
+const RECEIPTS_DIR = path.join('reports', 'receipts');
+const RECEIPT_MAX_BYTES = 64 * 1024;
+
+// Returns null when the file may be read, else one short reason. The folder is
+// judged through realpath on both sides (underRoot), so a symlink inside it
+// that lands outside is refused for where it lands. Either root counts, the
+// main copy's or this working copy's, for the same reason the stamp accepts
+// both: a worktree writes its receipts beside its own artifacts.
+function receiptFileProblem(p) {
+  const abs = path.resolve(WORK_ROOT, p);
+  const roots = [path.join(REPO_ROOT, RECEIPTS_DIR), path.join(WORK_ROOT, RECEIPTS_DIR)];
+  if (!roots.some(function (r) { return underRoot(abs, r); })) return 'outside ' + RECEIPTS_DIR + path.sep;
+  let st;
+  try { st = fs.statSync(abs); } catch (e) { return 'unreadable'; }
+  if (!st.isFile()) return 'not a regular file';
+  if (st.size > RECEIPT_MAX_BYTES) return 'larger than ' + (RECEIPT_MAX_BYTES / 1024) + ' KB';
+  return null;
+}
+
+// Pull the check's real output in from the file the tier-1 runner wrote.
 //
 // This is the whole point of the slot. Every other byte of the payload was typed
 // by a model, so a pasted stdout is indistinguishable from an invented one - and
@@ -843,11 +874,19 @@ function rankFindings(findings) {
 // authoritative. Reading the bytes here makes the claim true: the renderer, not
 // the model, put those characters on the page. Mirrors how images are embedded.
 //
-// A missing or unreadable file degrades to no receipt. It never fails the render:
-// the evidence is an attachment, and a run that loses one is still a valid report.
+// A missing, unreadable, or refused file degrades to no receipt. It never fails
+// the render: the evidence is an attachment, and a run that loses one is still
+// a valid report.
 function loadReceipt(f) {
   const r = f.receipt;
   if (!r || typeof r !== 'object') return;
+
+  // A finding carried forward from the previous page arrives in rendered form:
+  // its stdout is what the run that produced it read off disk, and there is no
+  // file to re-read. The flag is renderer-set (the payload's copy is stripped
+  // before this runs), so it cannot be used to smuggle inline text past the
+  // guard below.
+  if (f.carried) { delete r.stdoutFile; return; }
 
   // Inline `stdout` with no file behind it is model-typed text wearing machine
   // output's clothes, which is the one thing this slot exists to prevent. It is
@@ -862,23 +901,37 @@ function loadReceipt(f) {
   }
 
   if (hasFile) {
+    const problem = receiptFileProblem(r.stdoutFile);
     let raw = null;
-    try { raw = fs.readFileSync(r.stdoutFile, 'utf-8'); } catch (e) { raw = null; }
+    if (!problem) {
+      try { raw = fs.readFileSync(path.resolve(WORK_ROOT, r.stdoutFile), 'utf-8'); } catch (e) { raw = null; }
+    }
+    if (problem && problem !== 'unreadable') {
+      reviewNotes.push('receipt for ' + (f.id || '?') + ' refused (' + problem + '), receipt dropped: ' + r.stdoutFile);
+      delete f.receipt;
+      return;
+    }
     if (raw === null) {
       reviewNotes.push('receipt output unreadable, receipt dropped: ' + r.stdoutFile);
       delete f.receipt;
       return;
     }
     let lines = raw.replace(/\s+$/, '').split('\n');
-    // The runner tees raw stdout, but a hand-written or wrapped capture may
-    // already carry the command line and the exit line. Rendering ours on top
-    // of theirs echoes both twice, which is exactly what an unedited terminal
-    // dump looks like. Drop the duplicates rather than the originals.
+    // The runner saves raw stdout, but a wrapped capture may already carry the
+    // command line. Rendering ours on top of theirs echoes it twice, which is
+    // exactly what an unedited terminal dump looks like. Drop the duplicate.
     if (lines.length && r.cmd && lines[0].replace(/^\$\s*/, '').trim() === String(r.cmd).trim()) {
       lines = lines.slice(1);
     }
-    if (lines.length && /(^|\s)exit\s+\d+\s*$/i.test(lines[lines.length - 1])) {
-      delete r.exit;
+    // The runner appends "exit N" as the file's last line. It is the machine's
+    // own exit status, so it wins over whatever the payload typed, and it comes
+    // off the list BEFORE the six-line cut: testing the last line after the
+    // cut lost the status on exactly the long outputs where it mattered most
+    // (v6.3.0 review, R6).
+    const exitLine = lines.length ? /^\s*exit\s+(\d+)\s*$/i.exec(lines[lines.length - 1]) : null;
+    if (exitLine) {
+      lines.pop();
+      r.exit = Number(exitLine[1]);
     }
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
       .map(function (l) { return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l; });
@@ -895,25 +948,44 @@ function loadReceipt(f) {
   }
 }
 
+// Drop any field row still wearing a retired label. Returns how many went.
+function refuseRetiredLabels(f) {
+  if (!Array.isArray(f.fields)) return 0;
+  const kept = f.fields.filter(function (row) {
+    return !(row && typeof row.label === 'string' && RETIRED_FIELD_LABELS.test(row.label));
+  });
+  const dropped = f.fields.length - kept.length;
+  if (kept.length) f.fields = kept; else delete f.fields;
+  return dropped;
+}
+
+// The Audited out group: findings the audit killed, rendered behind the page's
+// one disclosure. They are not ranked and not budgeted, but they obey the same
+// receipt and label rules as the open page - an invented receipt is likeliest
+// on exactly the finding the audit already rejected (v6.3.0 review, R7).
+function auditedFindings(data) {
+  const out = [];
+  (Array.isArray(data.groups) ? data.groups : []).forEach(function (g) {
+    if (!(g && typeof g.label === 'string' && /^audited out$/i.test(g.label.trim()))) return;
+    (Array.isArray(g.findings) ? g.findings : []).forEach(function (f) { if (f) out.push(f); });
+  });
+  return out;
+}
+
 function applyReviewContract(data) {
   const findings = openFindings(data);
-  if (!findings.length) return;
-
   let retired = 0;
   const over = [];
 
+  // The receipt and label rules run over EVERY finding, killed ones included.
+  auditedFindings(data).forEach(function (f) {
+    loadReceipt(f);
+    retired += refuseRetiredLabels(f);
+  });
+
   findings.forEach(function (f) {
     loadReceipt(f);
-
-    // Refuse the retired four-field labels (drop, do not abort).
-    if (Array.isArray(f.fields)) {
-      const before = f.fields.length;
-      f.fields = f.fields.filter(function (row) {
-        return !(row && typeof row.label === 'string' && RETIRED_FIELD_LABELS.test(row.label));
-      });
-      retired += before - f.fields.length;
-      if (!f.fields.length) delete f.fields;
-    }
+    retired += refuseRetiredLabels(f);
 
     // Count the prose. Attachments are evidence, not prose, and never counted.
     const w = { what: proseWords(f.what), context: proseWords(f.context), fix: proseWords(f.fix) };
@@ -922,6 +994,12 @@ function applyReviewContract(data) {
       if (w[k] > REVIEW_CAPS[k]) over.push((f.id || '?') + ' ' + k + ' ' + w[k] + '/' + REVIEW_CAPS[k]);
     });
   });
+
+  if (retired) {
+    reviewNotes.push('refused ' + retired + ' field row(s) using the retired four-field labels ' +
+                     '(Why it matters / Example / Suggested fix); they were dropped, not rendered');
+  }
+  if (!findings.length) return;
 
   // Demote from the bottom of the ranking until the page fits.
   const ranked = rankFindings(findings);
@@ -941,18 +1019,24 @@ function applyReviewContract(data) {
   } else if (Array.isArray(data.findings)) {
     data.findings = ranked;
   }
+
+  // The budget is spent on Blocks first, in rank order, and only then on the
+  // rest: a floor on demotion, not on order. Ranking by locus stands, so a
+  // Block still renders below a user-locus Suggest; but when the page is full
+  // it is the lowest-ranked non-Block that goes to a one-line row, and a Block
+  // is demoted only once every open finding is a Block. Without this, nine
+  // optional items could bury a blocker on a page whose job is surfacing it
+  // (v6.3.0 review, R9).
+  const isBlock = function (f) { return f.severity === 'block'; };
+  const order = ranked.filter(isBlock).concat(ranked.filter(function (f) { return !isBlock(f); }));
   let spent = 0, open = 0, demoted = 0;
-  ranked.forEach(function (f) {
+  order.forEach(function (f) {
     const fits = (spent + f._words) <= REVIEW_CAPS.pageWords && open < REVIEW_CAPS.openFindings;
     if (fits) { spent += f._words; open += 1; delete f.demoted; }
     else { f.demoted = true; demoted += 1; }
     delete f._words;
   });
 
-  if (retired) {
-    reviewNotes.push('refused ' + retired + ' field row(s) using the retired four-field labels ' +
-                     '(Why it matters / Example / Suggested fix); they were dropped, not rendered');
-  }
   over.forEach(function (o) { reviewNotes.push('over cap: ' + o); });
   reviewNotes.push('open prose ' + spent + '/' + REVIEW_CAPS.pageWords + ' words, ' +
                    open + ' open, ' + demoted + ' demoted to one-line rows');
@@ -978,69 +1062,180 @@ function applyReviewContract(data) {
 // The other half is memory. Because the file at the stable path is the previous
 // run's page, this run can read it and say what changed. A finding the reader
 // already saw and left alone should not present itself as news.
+// The severity phrase leads every sentence one, so it is stripped before the
+// claim words are taken: otherwise the first two of eight words were always
+// "should fix" (v6.3.0 review, R12). The line number is out of the key too,
+// because a line moves whenever the file above it changes, and a moved line
+// read as one finding resolved and a new one opened (R10). Path plus claim is
+// the identity; the payload's own `key`, when it carries one, wins.
+const SEVERITY_LEAD = /^\s*(?:blocks?|should fix|optional)\b[.:]?\s*/i;
 function stableFindingKey(f) {
   if (f.key) return String(f.key);
-  const loc = f.file ? (f.file.relPath || '') + ':' + (f.file.line == null ? '' : f.file.line) : '';
-  const claim = String(f.what || '').toLowerCase().replace(/[^a-z0-9 ]+/g, '').split(/\s+/).slice(0, 8).join('-');
+  const loc = f.file ? (f.file.relPath || '') : '';
+  const claim = String(f.what || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(SEVERITY_LEAD, '')
+    .toLowerCase().replace(/[^a-z0-9 ]+/g, '')
+    .split(/\s+/).filter(Boolean).slice(0, 8).join('-');
   return loc + ':' + claim;
 }
 
-// Pull the payload back out of a page this script wrote earlier. Returns null
-// for anything unexpected - a hand-edited file, a page from an older version,
-// no page at all. A first run in a repo and a run whose predecessor cannot be
-// read are different things, and only the first is worth saying out loud.
+// Pull the payload back out of a page this script wrote earlier. Three states,
+// because two of them used to collapse into one: no page at all is a first
+// run, and says so; a page that exists but cannot be read (a hand-edited file,
+// a page from an older version) is NOT a first run, and calling it one told
+// the reader nothing here was new when in fact nothing could be compared
+// (v6.3.0 review, R8).
 function priorPayload(file) {
+  if (!fs.existsSync(file)) return { state: 'none' };
   let html;
-  try { html = fs.readFileSync(file, 'utf-8'); } catch (e) { return null; }
+  try { html = fs.readFileSync(file, 'utf-8'); } catch (e) { return { state: 'unreadable' }; }
   const m = html.match(/<script[^>]*id="render-data"[^>]*>([\s\S]*?)<\/script>/);
-  if (!m) return null;
-  try { return JSON.parse(m[1]); } catch (e) { return null; }
+  if (!m) return { state: 'unreadable' };
+  try { return { state: 'ok', data: JSON.parse(m[1]) }; } catch (e) { return { state: 'unreadable' }; }
 }
 
-function markWhatChanged(data, outFile) {
-  const prior = priorPayload(outFile);
+// Which lenses a finding belongs to: its `specialist` ("code", "code, ux",
+// "[code, ux]"), falling back to the group it sits in. Lowercased tokens.
+function specialistsOf(f, groupLabel) {
+  const raw = (typeof f.specialist === 'string' && f.specialist) || groupLabel || '';
+  return raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
+}
+function openFindingsWithLabels(data) {
+  const out = [];
+  (Array.isArray(data.groups) ? data.groups : []).forEach(function (g) {
+    if (g && typeof g.label === 'string' && /^audited out$/i.test(g.label.trim())) return;
+    const label = g && typeof g.label === 'string' ? g.label : '';
+    (Array.isArray(g && g.findings) ? g.findings : []).forEach(function (f) { if (f) out.push({ f: f, label: label }); });
+  });
+  if (Array.isArray(data.findings)) data.findings.forEach(function (f) { if (f) out.push({ f: f, label: '' }); });
+  return out;
+}
+
+// Merge by lens (issue #162, R18). The standing page is the repository's open
+// findings, and a direct single-lens run (/review-code) sees only its own
+// lens. Replacing the page with that would report every other lens's open
+// finding as resolved, and a focused run cannot pass the full set because it
+// never saw it. So a payload names the lenses that ran in `lenses`, and every
+// open finding on the previous page whose lenses are all outside that list is
+// carried forward, marked, ranked and budgeted with the rest, and counted as
+// still open. A payload with no `lenses` is a full run and replaces the whole
+// page, which is what every run did before this key existed.
+function carryForward(data, prior) {
+  if (prior.state !== 'ok') return;
+  if (!Array.isArray(data.lenses) || !data.lenses.length) return;
+  const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
+  const present = {};
+  openFindings(data).forEach(function (f) { present[stableFindingKey(f)] = true; });
+
+  const carried = [];
+  openFindingsWithLabels(prior.data).forEach(function (item) {
+    const specs = specialistsOf(item.f, item.label);
+    // A finding no lens can be read from is carried rather than resolved: the
+    // page never reports as done what it cannot attribute to a lens that ran.
+    const ran = specs.some(function (sp) { return lenses.indexOf(sp) !== -1; });
+    if (ran) return;
+    const key = stableFindingKey(item.f);
+    if (present[key]) return;
+    const copy = JSON.parse(JSON.stringify(item.f));
+    delete copy.isNew; delete copy.demoted; delete copy._key;
+    copy.carried = true;
+    present[key] = true;
+    carried.push(copy);
+  });
+  if (!carried.length) return;
+  if (Array.isArray(data.groups)) data.groups.push({ label: '', findings: carried });
+  else if (Array.isArray(data.findings)) data.findings = data.findings.concat(carried);
+  else data.groups = [{ label: '', findings: carried }];
+  reviewNotes.push('carried ' + carried.length + ' open finding(s) forward from lenses this run did not check (' +
+                   lenses.join(', ') + ' ran)');
+}
+
+function markWhatChanged(data, prior) {
   const findings = openFindings(data);
   findings.forEach(function (f) { f._key = stableFindingKey(f); });
 
-  if (!prior) {
+  if (prior.state === 'none') {
     data.sinceLast = findings.length
       ? 'First review recorded for this repository.'
       : 'First review recorded for this repository. Nothing open.';
     return;
   }
+  if (prior.state === 'unreadable') {
+    data.sinceLast = findings.length
+      ? 'The previous page could not be read, so nothing here is marked new.'
+      : 'Nothing open. The previous page could not be read.';
+    return;
+  }
   const before = {};
-  openFindings(prior).forEach(function (f) { before[stableFindingKey(f)] = true; });
+  openFindings(prior.data).forEach(function (f) { before[stableFindingKey(f)] = true; });
 
-  let fresh = 0;
-  findings.forEach(function (f) { if (!before[f._key]) { f.isNew = true; fresh += 1; } });
-  const carried = findings.length - fresh;
+  let fresh = 0, carried = 0;
+  findings.forEach(function (f) {
+    if (!before[f._key]) { f.isNew = true; fresh += 1; }
+    else if (f.carried) { carried += 1; }
+  });
+  const still = findings.length - fresh;
   const gone = Object.keys(before).filter(function (k) {
     return !findings.some(function (f) { return f._key === k; });
   }).length;
 
+  const stillClause = still + ' still open from last time' +
+    (carried ? ' (' + carried + ' carried from ' + (carried === 1 ? 'a lens' : 'lenses') + ' this run did not check)' : '');
   const parts = [];
   if (fresh) parts.push(fresh + (fresh === 1 ? ' new finding' : ' new findings'));
-  if (carried) parts.push(carried + ' still open from last time');
-  if (gone) parts.push(gone + (gone === 1 ? ' resolved since' : ' resolved since'));
-  data.sinceLast = parts.length
-    ? 'Since you last opened this page: ' + parts.join(', ') + '.'
-    : 'Nothing has changed since you last opened this page.';
+  if (still) parts.push(stillClause);
+  if (gone) parts.push(gone + ' resolved since');
+  // A page whose findings are exactly the ones the reader already saw says so
+  // first: a finding they left alone must not present itself as news, and a
+  // moved line is the same finding (R10), so it lands here rather than as one
+  // resolved and one new.
+  if (!fresh && !gone && still) {
+    data.sinceLast = 'Nothing has changed since you last opened this page: ' + stillClause + '.';
+  } else {
+    data.sinceLast = parts.length
+      ? 'Since you last opened this page: ' + parts.join(', ') + '.'
+      : 'Nothing has changed since you last opened this page.';
+  }
   if (!findings.length) data.sinceLast = 'Nothing open. ' + (gone ? gone + ' resolved since you last looked.' : '');
 }
 
 // The review contract runs FIRST: it reads each receipt's output off disk, and
 // the strip below would rewrite those paths out from under it.
 if (opts.shell === 'review') {
-  applyReviewContract(parsed);
+  // Three flags are the renderer's to set and never the payload's. A payload
+  // that arrives carrying them is stripped before anything reads them, or
+  // `carried: true` beside an inline stdout would walk straight past the
+  // receipt guard.
+  openFindings(parsed).concat(auditedFindings(parsed)).forEach(function (f) {
+    delete f.carried; delete f.isNew; delete f.demoted;
+  });
   // In stable mode the output path is deterministic, so the page this run is
   // about to replace can be read before it is overwritten. That is the whole
   // memory mechanism: the previous page IS the record of what the reader last
   // saw. A timestamped run has no predecessor to compare against and simply
   // skips this, which is why the standing page and the memory are one change
   // rather than two.
+  let prior = { state: 'none' };
   if (opts.stable) {
-    markWhatChanged(parsed, path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+    prior = priorPayload(path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+    carryForward(parsed, prior);
+  }
+  applyReviewContract(parsed);
+  if (opts.stable) {
+    markWhatChanged(parsed, prior);
     openFindings(parsed).forEach(function (f) { delete f._key; });
+  }
+}
+// The debate page carries the same finding shape in its Recommended Actions,
+// and the retired labels were refused only on the review shell (v6.3.0
+// review, R23). Same rule, same note.
+if (opts.shell === 'debate' && parsed.synthesis && Array.isArray(parsed.synthesis.actions)) {
+  let retired = 0;
+  parsed.synthesis.actions.forEach(function (a) { if (a && typeof a === 'object') retired += refuseRetiredLabels(a); });
+  if (retired) {
+    reviewNotes.push('refused ' + retired + ' field row(s) using the retired four-field labels ' +
+                     '(Why it matters / Example / Suggested fix); they were dropped, not rendered');
   }
 }
 embedImages(parsed);
