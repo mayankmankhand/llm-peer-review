@@ -37,7 +37,7 @@ Markdown remains canonical even when HTML is also generated. Claude reads the ma
 
 For all other commands, Claude decides per-output whether HTML adds value. Default is markdown; generate HTML when:
 
-- `/review` family: 3+ findings, OR visual evidence (browser screenshots), OR severity mix spans 2+ levels (e.g., both Blocks and Warns present)
+- `/review` family: whenever the run has any surviving finding, or the standing page `artifacts/html/review.html` already exists (so a clean run can take it to empty). Findings count, visual evidence, and severity mix no longer gate it (review of the #162 cycle, R2)
 - `/explore` vision-mode summary: 2+ options being compared
 - `/ask-gpt` / `/ask-gemini`: 3+ Recommended Actions in the final summary
 - `/audit-html`: 5+ candidates listed in the report
