@@ -110,14 +110,14 @@ Each finding object (the field names match the HTML shell's finding schema, so t
 - `context`: sentence two, 22 words or fewer. **Omit the key entirely** unless it answers exactly one of: who is hit, when it fires, why now. An omitted `context` is the normal case, not a degraded one.
 - `fix`: the fix line, 20 words or fewer, stating a cost and naming both options. Not an approach, not code.
 - `fields`: an ordered array of `{ "label": "...", "value": "..." }` rows for **attachments only** - the non-prose evidence a finding carries. Browser findings use `Expected`, `Actual`, `Screenshot`, `Evidence`, in that order. Most findings emit no `fields` at all. Never put prose here to get around the caps on `what`, `context`, and `fix`: the renderer counts those three and demotes the finding if they overflow, and prose smuggled into an attachment is the one failure mode this contract cannot catch automatically.
-- `key`: a dedup key = `relPath:line:` followed by the first few normalized (lowercased) words of `what`. Two specialists flagging the same issue at the same spot emit the same key.
+- `key`: a dedup key = `relPath:` followed by the first few normalized (lowercased) words of `what` AFTER its severity phrase (`Blocks.` / `Should fix.` / `Optional.`): every `what` now opens with one, and left in, the key's first words were always the same two. No line number: a line moves whenever the file above it changes, and `render-html.js` uses this same key to recognise a finding across runs. Two specialists flagging the same issue in the same file emit the same key.
 - `receipt`: `{ "check": "...", "expect": "..." }` - the finding's runnable proof (M2 tier 1). `check` is one safe, read-only command (a grep, a file read, a test run) executable from the project root; `expect` is one line stating what the check's output must show for the finding to stand. Every finding has one - even a judgment finding's receipt is the file read showing the cited pattern exists as described. A finding without a `receipt` fails tier 1 by definition.
 
 Do NOT include an `id` field - the orchestrator assigns R1, R2, ... after dedup (IDs must be sequential and gap-free across the whole run).
 
 Example line:
 ```
-{"severity":"warn","specialist":"code","file":{"relPath":"auth/login.ts","absPath":"/abs/auth/login.ts","line":42},"what":"Should fix. Failed logins leak a live session token into the console log.","context":"Anyone who can read the support log dashboard can reuse those tokens while they are still valid.","fix":"One line: log that the attempt failed, never the payload. Ten minutes, or leave the tokens in logs.","key":"auth/login.ts:42:session-token-logged","receipt":{"check":"grep -n 'logger' auth/login.ts","expect":"the failed-login path logs the token variable at line 42"}}
+{"severity":"warn","specialist":"code","file":{"relPath":"auth/login.ts","absPath":"/abs/auth/login.ts","line":42},"what":"Should fix. Failed logins leak a live session token into the console log.","context":"Anyone who can read the support log dashboard can reuse those tokens while they are still valid.","fix":"One line: log that the attempt failed, never the payload. Ten minutes, or leave the tokens in logs.","key":"auth/login.ts:failed-logins-leak-a-live-session-token","receipt":{"check":"grep -n 'logger' auth/login.ts","expect":"the failed-login path logs the token variable at line 42"}}
 ```
 
 **If a subagent fails** (error, timeout, empty response, or output that will not parse as JSONL), re-dispatch that one specialist once with the same prompt - and when it was running on a pinned model, dispatch the retry one tier up per guardrail 2 in `.claude/skills/shared/model-routing.md`. Malformed output counts as a failure precisely because it is silent: a specialist that returns prose instead of JSONL has produced nothing the run can use. Still failing after the one retry: note it in the final report: "Note: [Specialist name] review did not complete. Run `/review [type]` to retry."
@@ -137,6 +137,13 @@ Two things are specific to this path:
 
 - **The bytes are JSONL.** A finding's `receipt.check` is its tier 1 command and `receipt.expect` is the line the output must satisfy. A merged finding carries every source receipt and stands if at least one check passes (Phase 3). What tiers 2 and 3 receive is the original JSONL lines plus each receipt's actual output.
 - **The inline path is not exempt.** When Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh subagents. M2's never-judge-your-own-findings rule applies here exactly as it does to dispatched specialists.
+- **Save each check's output as it runs** (M2 tier 1 names the folder; this is the form). Once per run, `mkdir -p reports/receipts/<run-stamp>`, where `<run-stamp>` is the same `YYYY-MM-DD-HHMMSS` the markdown report will carry. Then run each check so its output is saved and read back in one go, `reports/receipts/<run-stamp>/<specialist>-<n>.txt` being that check's file:
+
+  ```bash
+  <check> > reports/receipts/<run-stamp>/<specialist>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<specialist>-<n>.txt; cat reports/receipts/<run-stamp>/<specialist>-<n>.txt
+  ```
+
+  Tier 1 compares what `cat` printed against `expect` as before. The finding's `receipt` for the HTML becomes `{cmd, stdoutFile, exit}` with `stdoutFile` that path: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. `mkdir` and `cat` are on the toolkit's allow-list; the redirect may prompt once on a fresh install. The v6.3.0 renderer had this slot and nothing wrote to it: on its first real run, every receipt that reached the page had been typed.
 
 Killed findings exit to the Audited out log (never fixed); survivors proceed to Phase 5 with receipts attached.
 
@@ -144,7 +151,7 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 
 1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
 2. **Write that markdown to disk** per the "Where the report is written" section of the shared template inlined below. Use `orchestrator` as the `<who>` segment. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
-3. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written. The HTML is a reader's view and may carry less than the markdown; the markdown never carries less than the HTML.
+3. **Derive the HTML** (when the gate fires) from the SAME findings structure, at the END of the run - see HTML Companion below. On an auto run that is after the loop below has settled, so the page shows what was fixed and what is still open; on a "report only" run it is right after this report, since nothing gets fixed. The page used to be rendered here, before any fix, and was stale within minutes of being published. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written. The HTML is a reader's view and may carry less than the markdown; the markdown never carries less than the HTML.
 
 </procedure>
 
@@ -177,7 +184,7 @@ The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line -
 
 **Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. The merged finding uses the browser field order from the template, unchanged.
 
-The tag is the only thing this section adds to a finding. Every field row - the 4 authored fields, the browser evidence fields, and the audit-time **Receipt** row - is defined by the inlined template and rendered from there:
+The tag is the only thing this section adds to a finding. Every row - the three prose keys (`what`, `context`, `fix`), the browser evidence fields, and the audit-time **Receipt** row - is defined by the inlined template and rendered from there:
 
 - **R1** [code] 🚫 `file:line` - [What]
   - [field rows per the template, **Receipt** last]
@@ -221,9 +228,10 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 !`cat .claude/skills/shared/html-render-review.md`
 
 For orchestrator output specifically:
-- Pass `--name review --stable` to the helper: the HTML is one standing page per repository, not one per run
+- Pass `--name review --stable` to the helper: the HTML is one standing page per repository, not one per run. Set `lenses` to the specialists this run dispatched, so the renderer replaces only their findings and carries the other lenses' open findings forward (the fragment above says how)
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
-- Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
+- Use the `groups[]` array (findings grouped by specialist); the renderer ranks them itself, so the order you send does not matter. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `context`, `fix`, `fields` shape - grouped by specialist with the assigned `id`, each `receipt` carrying the `stdoutFile` the Phase 4 save step wrote. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
+- On an auto run the render happens after the loop (After the Report, step 6): the findings the loop fixed go to `alreadyFixed`, one line each with the check that confirmed the fix, and only the unfixed ones stay in `groups[]`
 - The Receipt field rows and the Audited out group render per the audit rows rule in the shared HTML fragment above; the orchestrator's only addition is the `[specialist]` tag carried inside each finding's `what`/`id` as everywhere else.
 
 ## After the Report (auto loop)
@@ -232,14 +240,15 @@ What happens after the report is governed by the shared auto-loop fragment (the 
 
 !`cat .claude/skills/shared/hitl-loop.md`
 
-Once the report (and the HTML, when the gate fired) is out, continue without waiting for a human "fix it":
+Once the report is out, continue without waiting for a human "fix it" (the HTML comes at step 6, after the loop, so it shows what the loop left open):
 
 1. **Non-issues are already gone** - the Phase 4 audit (M2) dropped them to the Audited out log with their verdict lines; do not re-litigate them here.
 2. **Auto-fix the survivors** - subject to the intent-reversal guard (M7) and the always-ask actions (M9).
 3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6.
 4. **Route each finding to its exit** - page only per M1; everything else lands in the digest or the log.
 5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what the audit and the loop dropped, and any page that needs the user.
-6. **Chain into `/document`** (M14) - once the loop has settled, announce the handoff in one line ("Review complete - chaining into `/document` per M14. Say \"no chaining\" to stop here.") and invoke `/document` through the Skill tool. M14 is authoritative for the conditions. **Do not chain** while a hard stop is still open: an M5 revert to the last green checkpoint, an unresolved blocker, an M11 tripwire hit, or a page still waiting on the human's answer. An M9 approval already granted does **not** block, so a cycle that edited prompt files still chains once the approvals are in. A cycle summary written over a reverted state is exactly the bookkeeping drift M8 exists to prevent. The debate stages are never chained into. To get that window, drive the two stages yourself: say "no chaining" when you approve the plan (`/execute` then runs and stops), type `/review no chaining` (the review runs and stops), run the debate, then type `/document`.
+6. **Write the digest to disk and render the standing page** - append a `## Digest` section to the markdown report Phase 5 wrote: one line per finding with its verdict and receipt (`R3: FIXED - <check>`, `R5: NOT FIXED - <what was tried>`, `R7: PAGED - <what needs the human>`), plus any finding the loop discovered on the way. Chat scrollback is not a file, and the fixes were the one part of the run that had none. Then render the HTML per the HTML Companion section when its gate fires: fixed findings in `alreadyFixed`, unfixed ones open, `lenses` set to the specialists that ran, `disposition` recounted; publish and record it per the fragment. This is the run's one render.
+7. **Chain into `/document`** (M14) - once the loop has settled, announce the handoff in one line ("Review complete - chaining into `/document` per M14. Say \"no chaining\" to stop here.") and invoke `/document` through the Skill tool. M14 is authoritative for the conditions. **Do not chain** while a hard stop is still open: an M5 revert to the last green checkpoint, an unresolved blocker, an M11 tripwire hit, or a page still waiting on the human's answer. An M9 approval already granted does **not** block, so a cycle that edited prompt files still chains once the approvals are in. A cycle summary written over a reverted state is exactly the bookkeeping drift M8 exists to prevent. The debate stages are never chained into. To get that window, drive the two stages yourself: say "no chaining" when you approve the plan (`/execute` then runs and stops), type `/review no chaining` (the review runs and stops), run the debate, then type `/document`.
 
 Two separate per-run opt-outs: saying "report only" on the invocation keeps the entire run report-first (M10), and saying "no chaining" runs the review and stops without invoking `/document` (M14).
 
