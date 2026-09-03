@@ -33,6 +33,10 @@
   would leave a run with no artifact at all. Do not put prose in "fields" to get
   around the caps: attachments are not counted, and that is the one evasion this
   contract cannot catch by counting.
+  Four keys are set by render-html.js and never by the payload: the page-level
+  "sinceLast" and the per-finding flags "demoted", "isNew" and "carried".
+  "demoted" comes from the page budget on every review render; the other three
+  come from the page a --stable render is about to replace.
   Inline trusted HTML (Claude-generated review text) is allowed in: looksGood
   items, a finding's "what", and every field "value". Those render via
   innerHTML. Emoji in the JSON are literal (rendered directly).
@@ -46,10 +50,34 @@
     // Omit/empty the array to hide the chip row (e.g. single-specialist run).
     "chips": [ {"name":"code","on":true}, {"name":"ux","on":false} ],
 
+    // The first screen (issue #161): two or three sentences in fixed slots -
+    // is it safe to ship, the one other thing that matters, what happens next.
+    // The first renders in display type (the only element on the page that
+    // does), the rest one step down. Inline HTML allowed in each.
+    "bottomLine": [ "Safe to ship.", "One thing needs you.", "Then /document runs." ],
+
+    // One sentence of counts only - handled without the reader, deferred,
+    // could not be checked. It replaces the severity tally row.
+    "disposition": "2 fixed, 1 needs you, 1 could not be checked.",
+
+    // SET BY render-html.js, NEVER BY THE PAYLOAD. What changed since the
+    // reader last opened this standing page (new, still open, resolved), or
+    // that this is the first review recorded for the repository.
+    "sinceLast": "Since you last opened this page: 1 new finding, 2 still open from last time.",
+
+    // The lenses (specialists) that ran this time, e.g. a lone /review-code
+    // run. ABSENT MEANS EVERY LENS RAN. When present, render-html.js reads the
+    // page it is about to replace and carries forward its open findings whose
+    // lens is not in this list, flagged "carried" (see the finding object
+    // below), rather than reporting them resolved.
+    "lenses": [ "code" ],
+
     // Sticky top-issues bar. Each key is an array of entry strings.
     // A row always renders for all three severities (shows the count, e.g.
     // "0 Blocks"); when the array is non-empty it appends ": " + comma-joined
     // entries. Omit topIssues entirely to hide the whole bar.
+    // Superseded by bottomLine: the bar renders only when the payload carries
+    // no bottomLine, so an older payload keeps exactly its old appearance.
     "topIssues": {
       "block":   ["R1 [code] (file.sh:91 - desc)"],
       "warn":    ["R2 [code]"],
@@ -84,6 +112,22 @@
                                                    // by the payload. A demoted
                                                    // finding renders as its
                                                    // headline alone.
+            "isNew":   false,                      // set by render-html.js, never
+                                                   // by the payload. Raised this
+                                                   // run and absent from the
+                                                   // previous page; renders a
+                                                   // "new" mark in the header row.
+            "carried": false,                      // set by render-html.js, never
+                                                   // by the payload. Still open
+                                                   // from the previous page, and
+                                                   // its lens did not run this
+                                                   // time (see "lenses"), so it
+                                                   // was carried forward with its
+                                                   // old receipt, unchecked. It
+                                                   // renders a quieter "carried"
+                                                   // mark and is never counted
+                                                   // as resolved. Unmarked = seen
+                                                   // before and re-checked now.
             "receipt": {                           // the check's OWN output
               "cmd":    "node .claude/scripts/pre-push-check.js",
               "stdout": ["line", "line"],          // filled by render-html.js from
@@ -105,6 +149,12 @@
         ]
       }
     ],
+
+    // Base-rate lists, rendered after the findings. Each item is a string
+    // (inline HTML allowed). Both are quiet by design: they exist to make the
+    // short list of open findings believable. Omit or empty to skip either.
+    "alreadyFixed":  [ "R4: the stale link, past tense, with the check that confirmed it." ],
+    "couldNotCheck": [ "The browser lens: no dev server was running." ],
 
     // Footer count strip. Each span = optional emoji + bold label + value.
     "summary": [
@@ -172,13 +222,6 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
    (textContent cannot produce them) - this is a guard for the day something
    renders a code span into a receipt. */
 .receipt pre code{background:none;padding:0;font-size:inherit;}
-/* A demoted finding: present, countable, and quiet. It carries its headline and
-   nothing else, because the page budget was spent on findings ranked above it.
-   Rendered flat rather than as a card so the eye reads the open findings as the
-   page's content and these as its tail. */
-.finding--demoted{padding:.45rem .9rem;margin-bottom:.35rem;border-left-width:3px;background:none;}
-.finding--demoted .what{font-size:.92rem;font-weight:400;color:var(--text-muted);margin:.2rem 0 0;}
-.finding--demoted .badge{font-size:.66rem;}
 /* ---- the first screen (issue #161) ---- */
 /* The bottom line is the only element on the page that takes --text-display.
    A second one would mean neither is the loudest thing present. */
@@ -187,6 +230,10 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .bl-rest{font-size:1.15rem;line-height:1.45;margin:0 0 .6rem;color:var(--text);max-width:var(--measure);}
 .since-last{color:var(--text-muted);font-size:.95rem;margin:.5rem 0 0;max-width:var(--measure);}
 .new-flag{font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:.05rem .4rem;}
+/* "carried" is the quieter sibling of "new": muted text and border in place of
+   the accent, because a carried finding asks for nothing today. It is still
+   open and was not re-checked; the mark only refuses to let it read as resolved. */
+.carried-flag{font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border:1px solid var(--text-muted);border-radius:999px;padding:.05rem .4rem;}
 .disposition{color:var(--text-muted);font-size:1rem;line-height:1.5;margin:.9rem 0 0;max-width:var(--measure);border-top:1px solid var(--border);padding-top:.9rem;}
 /* Base-rate lists. Quiet by construction: they exist to make the short list of
    open findings believable, not to compete with it. */
@@ -204,7 +251,7 @@ details.audited-out[open] > summary{border-bottom:1px solid var(--border);}
    object"; stamped on every finding they say it four times and rank nothing.
    Space does the grouping instead, at an 8:1 between-to-within ratio, which is
    what makes the findings countable without a single rule. */
-.finding{border:0;border-radius:0;background:none;padding:0;margin:0 0 2.6rem;max-width:var(--measure);}
+.finding{border:0;border-radius:0;background:none;padding:0;margin:0 0 2.6rem;max-width:var(--measure);overflow-wrap:anywhere;}
 /* Severity is carried by TYPE, not by a rail and not by the word alone. The
    critic's second gap was that a blocked push and a missing README line were
    given identical weight, and a severity word buried in body copy could not
@@ -216,6 +263,16 @@ details.audited-out[open] > summary{border-bottom:1px solid var(--border);}
 .finding--warn .what{font-size:1.25rem;font-weight:var(--weight-strong);line-height:1.3;}
 .finding--suggest .what{font-size:1rem;font-weight:var(--weight-normal);color:var(--text-muted);}
 .finding--suggest .context,.finding--suggest .field{color:var(--text-muted);}
+/* A demoted finding: present, countable, and quiet. It carries its headline and
+   nothing else, because the page budget was spent on findings ranked above it.
+   Rendered flat rather than as a card so the eye reads the open findings as the
+   page's content and these as its tail.
+   These sit AFTER the .finding and severity rules on purpose: the selectors tie
+   on specificity, so the later rule wins, and when they sat above a demoted
+   Block was still painted at the h2 step (review of v6.3.0, R32). */
+.finding--demoted{padding:.45rem .9rem;margin-bottom:.35rem;border-left-width:3px;background:none;}
+.finding--demoted .what{font-size:.92rem;font-weight:400;color:var(--text-muted);margin:.2rem 0 0;}
+.finding--demoted .badge{font-size:.66rem;}
 .context{max-width:var(--measure);}
 /* The header row is metadata, so it sits above the headline at micro size and
    gets out of the way. It was competing with four other things at the same size. */
@@ -232,6 +289,11 @@ h2{font-size:var(--text-h2);}
    must never push the page sideways. Neither had a rule before (issue #161). */
 .field img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;margin:.4rem 0;}
 .field pre{margin:.4rem 0;padding:.5rem .7rem;background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;overflow-x:auto;white-space:pre;font-size:.8rem;}
+/* Token safety: one unbroken URL, hash or path in a field value (or, via the
+   .finding rule above, in a finding's prose) must wrap rather than push the page
+   sideways (review of v6.3.0, R34). A <pre> keeps its own scroll box: white-space
+   pre never wraps, so this cannot reach inside it. */
+.field{overflow-wrap:anywhere;}
 </style>
 </head>
 <body>
@@ -460,6 +522,17 @@ h2{font-size:var(--text-h2);}
           var isNew = el("span", "new-flag");
           text(isNew, "new");
           cardHead.appendChild(isNew);
+        }
+
+        // "carried" marks a finding brought forward from the previous page
+        // because its lens did not run this time (payload "lenses"). It is
+        // still open and was not re-checked, which is why the mark is quieter
+        // than "new": it asks for nothing today, it only refuses to be counted
+        // as resolved. render-html.js sets the flag, never the payload.
+        if (f.carried) {
+          var carried = el("span", "carried-flag");
+          text(carried, "carried");
+          cardHead.appendChild(carried);
         }
 
         var tag = f.specialist != null ? f.specialist : group.label;
