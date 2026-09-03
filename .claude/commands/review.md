@@ -187,7 +187,7 @@ The tag is the only thing this section adds to a finding. Every field row - the 
 
 ### The first screen (orchestrator, HTML only)
 
-The HTML companion opens on a **bottom line**, not on a counter strip. Write two or three sentences, 25 words or fewer each, in fixed slots: is it safe to ship (including "I could not tell, because..." when that is the honest answer), the one other thing that matters, and what happens next. Then one **disposition** sentence saying what was handled without the reader, what was deferred, and what could not be checked.
+The HTML companion opens on a **bottom line**, not on a counter strip. Write two or three sentences, 25 words or fewer each, in fixed slots: is it safe to ship (including "I could not tell, because..." when that is the honest answer), the one other thing that matters, and what happens next. Then one **disposition** sentence carrying counts only: how many were fixed, deferred, and left unchecked. It must not restate a bottom-line sentence. The bottom line says what happens next in words; the disposition says how many, in figures.
 
 Also fill **What I already fixed** and **What I could not check**. These are the base-rate disclosure: a short list of open findings reads as a review that did not look hard unless it sits beside the count of what was handled and the named limits of the pass. Never omit the limits when limits exist.
 

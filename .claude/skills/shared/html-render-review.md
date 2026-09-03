@@ -31,7 +31,7 @@ Steps:
 1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/review-shell.html`. Read that header comment for the authoritative field list (it is the single source of truth). Compact reference:
    - `title`, `subtitle` (HTML allowed)
    - `bottomLine`: `[string, string?, string?]` - **the whole first screen.** Two or three sentences, each 25 words or fewer, in fixed slots: (1) is it safe to ship, including "I could not tell, because..."; (2) the one other thing that matters; (3) what happens next. The first renders in display type. Omit the key and the page falls back to the old counter strip.
-   - `disposition`: one sentence stating what was handled without the reader, what was deferred, and what could not be checked. Replaces the severity tally as the thing under the headline.
+   - `disposition`: one sentence of **counts only** - how many were fixed, deferred, and left unchecked. It must not restate any sentence in `bottomLine`; a design critic scored an early draft down for saying the same thing three times before the first finding. `bottomLine` slot 3 says what happens next in words; this says how many, in figures.
    - `alreadyFixed`: `[string]` - one line each, past tense, with the check that confirmed it. This is the base-rate disclosure: a short list of open findings is only believable beside the count of what was handled.
    - `couldNotCheck`: `[string]` - named limits of this pass, one line each, in plain words. Never omitted when a limit exists; a page that states none is claiming there were none.
    - `chips`: `[{name, on}]` - `on:true` = specialist ran, `on:false` = "(skipped)". Omit for a single-specialist run.

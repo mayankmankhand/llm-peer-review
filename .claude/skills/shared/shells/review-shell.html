@@ -129,6 +129,10 @@
 /*__TOKENS__*/
 
 /* ---- review-specific layout (everything NOT already in tokens.css) ---- */
+/* The page IS the measure. At 940px with a 64ch column the right two-fifths
+   were dead space that no element used, which reads as an unfinished grid
+   rather than a deliberate narrow column. */
+body{max-width:46rem;}
 header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
 .chips{margin-top:.8rem;display:flex;gap:.4rem;flex-wrap:wrap;}
@@ -194,12 +198,34 @@ details.audited-out > summary{cursor:pointer;padding:.65rem 1rem;color:var(--tex
 details.audited-out > summary:hover{background:var(--bg-muted);}
 details.audited-out[open] > summary{border-bottom:1px solid var(--border);}
 .audited-body{padding:.6rem 1rem 1rem;}
-/* Findings carry no severity rail. Severity is the first word of the sentence,
-   which survives copy-paste, greyscale, and peripheral vision; 5px of color did
-   none of those. Space does the grouping instead of a border. */
-.finding{border-left-width:0;}
-.what{max-width:var(--measure);}
+/* Findings are not cards. A border, a fill and a radius each say "separate
+   object"; stamped on every finding they say it four times and rank nothing.
+   Space does the grouping instead, at an 8:1 between-to-within ratio, which is
+   what makes the findings countable without a single rule. */
+.finding{border:0;border-radius:0;background:none;padding:0;margin:0 0 2.6rem;max-width:var(--measure);}
+/* Severity is carried by TYPE, not by a rail and not by the word alone. The
+   critic's second gap was that a blocked push and a missing README line were
+   given identical weight, and a severity word buried in body copy could not
+   triage them. So the headline size steps with severity: a Block reads at the
+   h2 step, a Warn one below it, a Suggest at body weight and muted. Three
+   levels the eye resolves before it reads anything. */
+.finding .what{max-width:var(--measure);margin:.1rem 0 0;}
+.finding--block .what{font-size:var(--text-h2);font-weight:var(--weight-strong);line-height:1.25;}
+.finding--warn .what{font-size:1.25rem;font-weight:var(--weight-strong);line-height:1.3;}
+.finding--suggest .what{font-size:1rem;font-weight:var(--weight-normal);color:var(--text-muted);}
+.finding--suggest .context,.finding--suggest .field{color:var(--text-muted);}
 .context{max-width:var(--measure);}
+/* The header row is metadata, so it sits above the headline at micro size and
+   gets out of the way. It was competing with four other things at the same size. */
+.finding > header{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;font-size:var(--text-micro);}
+.finding-id{font-size:var(--text-micro);color:var(--text-muted);}
+.specialist-tag{font-size:var(--text-micro);}
+.file-link{font-size:var(--text-micro);}
+/* Section headings pull well clear of the labels beneath them. Four levels were
+   landing within a few points of each other and reading as one. */
+h2{font-size:var(--text-h2);}
+.group-label{font-size:var(--text-micro);margin:2.4rem 0 1.2rem;}
+.aside-list h2{font-size:var(--text-micro);}
 /* Attachment safety: an <img> or a wide <pre> arriving through a field value
    must never push the page sideways. Neither had a rule before (issue #161). */
 .field img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;margin:.4rem 0;}

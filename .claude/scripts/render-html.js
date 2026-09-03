@@ -869,7 +869,17 @@ function loadReceipt(f) {
       delete f.receipt;
       return;
     }
-    const lines = raw.replace(/\s+$/, '').split('\n');
+    let lines = raw.replace(/\s+$/, '').split('\n');
+    // The runner tees raw stdout, but a hand-written or wrapped capture may
+    // already carry the command line and the exit line. Rendering ours on top
+    // of theirs echoes both twice, which is exactly what an unedited terminal
+    // dump looks like. Drop the duplicates rather than the originals.
+    if (lines.length && r.cmd && lines[0].replace(/^\$\s*/, '').trim() === String(r.cmd).trim()) {
+      lines = lines.slice(1);
+    }
+    if (lines.length && /(^|\s)exit\s+\d+\s*$/i.test(lines[lines.length - 1])) {
+      delete r.exit;
+    }
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
       .map(function (l) { return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l; });
     if (lines.length > REVIEW_CAPS.receiptLines) {
