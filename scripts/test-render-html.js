@@ -1156,8 +1156,158 @@ shellStructureTests();
 imageTests();
 indexTests();
 stampTests();
+// ==========================================================================
+// The finding contract, the standing page, and live plan status (issue #161).
+// These assert the three things the prompt CANNOT enforce: that caps are
+// counted rather than requested, that machine output survives rendering, and
+// that the page remembers what the reader already saw.
+// ==========================================================================
+function findingContractTests() {
+  console.log('\nfinding contract, standing page, plan status (issue #161)');
+  const dir = tmpdir('contract');
+
+  // Run the renderer and capture BOTH streams. The stderr accounting is the
+  // point of several of these cases, and the shared render() helper returns
+  // stdout only.
+  function run(name, data, extraArgs, shell) {
+    const dataPath = path.join(dir, name + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', shell || 'review', '--name', name,
+      '--out-dir', dir, '--stable', '--data', dataPath].concat(extraArgs || []),
+      { encoding: 'utf-8', cwd: REPO });
+    const out = (r.stdout || '').trim();
+    return { status: r.status, stderr: r.stderr || '', path: out,
+             html: out && fs.existsSync(out) ? fs.readFileSync(out, 'utf-8') : '' };
+  }
+  // dataIsland() returns the raw JSON text; every assertion below wants the object.
+  const island = function (html) { return JSON.parse(dataIsland(html)); };
+  const finds = function (d) {
+    const g = (d.groups || []).filter(function (x) { return !/^audited out$/i.test(x.label || ''); });
+    return g.reduce(function (a, x) { return a.concat(x.findings || []); }, []);
+  };
+
+  // --- machine output survives rendering ---------------------------------
+  // The exact characters that broke the old path: an angle bracket that looks
+  // like a tag, and an ampersand. They must arrive verbatim, because the shell
+  // renders the receipt through textContent rather than innerHTML.
+  const rcpt = path.join(dir, 'receipt.txt');
+  fs.writeFileSync(rcpt, 'TypeError at <anonymous>\nif (a<b) f() && g()\n', 'utf-8');
+  const hostile = run('hostile', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.',
+      receipt: { cmd: 'node x.js', stdoutFile: rcpt, exit: 1 } }] }] });
+  const hr = finds(island(hostile.html))[0].receipt;
+  check('a receipt containing "<" and "&" survives to the page verbatim',
+    hr && hr.stdout.join('\n').indexOf('<anonymous>') !== -1 &&
+    hr.stdout.join('\n').indexOf('if (a<b) f() && g()') !== -1,
+    hr ? JSON.stringify(hr.stdout) : 'no receipt');
+  check('the receipt local path never reaches the page',
+    hr && hr.stdoutFile === undefined && hostile.html.indexOf(rcpt) === -1);
+
+  // --- fabricated receipts are refused -----------------------------------
+  // Every other byte of a payload is model-typed. Output supplied inline has no
+  // file behind it, so presenting it as the machine's own words would be a lie
+  // the monospace block makes convincing.
+  const fake = run('fake', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.',
+      receipt: { cmd: 'echo hi', stdout: ['I INVENTED THIS'], exit: 0 } }] }] });
+  check('stdout supplied inline with no file is dropped, not rendered',
+    fake.html.indexOf('I INVENTED THIS') === -1 && /supplied stdout inline/.test(fake.stderr));
+
+  // --- a missing receipt file degrades, never fails ----------------------
+  const gone = run('gone', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.',
+      receipt: { cmd: 'x', stdoutFile: path.join(dir, 'nope.txt') } }] }] });
+  check('a missing receipt file degrades to no receipt and still renders',
+    gone.status === 0 && gone.html.length > 0 &&
+    finds(island(gone.html))[0].receipt === undefined &&
+    /receipt output unreadable/.test(gone.stderr));
+
+  // --- the retired four-field labels are refused -------------------------
+  // Dropped rather than fatal: aborting would leave a 21-finding run with no
+  // artifact at all, which is a worse outcome than a page missing two rows.
+  const retired = run('retired', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.', fields: [
+      { label: 'Why it matters', value: 'RETIRED-A' },
+      { label: 'Suggested fix', value: 'RETIRED-B' },
+      { label: 'Expected', value: 'KEPT' }] }] }] });
+  check('retired four-field labels are refused with a named error, render survives',
+    retired.status === 0 &&
+    retired.html.indexOf('RETIRED-A') === -1 && retired.html.indexOf('RETIRED-B') === -1 &&
+    retired.html.indexOf('KEPT') !== -1 &&
+    /retired four-field labels/.test(retired.stderr));
+
+  // --- over budget demotes, and never truncates --------------------------
+  const many = [];
+  for (let i = 1; i <= 14; i++) {
+    many.push({ id: 'R' + i, severity: i <= 2 ? 'block' : 'suggest',
+      what: 'Should fix. Finding number ' + i + ' breaks a thing that matters.',
+      context: new Array(12).join('padding word '), fix: new Array(10).join('cost word ') });
+  }
+  const over = run('over', { title: 'T', groups: [{ label: 'code', findings: many }] });
+  const od = finds(island(over.html));
+  const demoted = od.filter(function (f) { return f.demoted; });
+  check('an over-budget payload demotes rather than truncating',
+    demoted.length > 0 && od.every(function (f) { return /breaks a thing that matters\.$/.test(f.what); }),
+    demoted.length + ' demoted');
+  check('demotion respects the open-findings ceiling',
+    od.filter(function (f) { return !f.demoted; }).length <= 9);
+  check('the word accounting is reported on stderr, not onto the page',
+    /open prose \d+\/700 words/.test(over.stderr) && over.html.indexOf('cap 18') === -1);
+  check('per-field cap violations are counted on stderr',
+    /over cap: /.test(run('cap', { title: 'T', groups: [{ label: 'code', findings: [
+      { id: 'R1', severity: 'warn', what: new Array(40).join('word ') }] }] }).stderr));
+
+  // --- locus outranks the severity label ---------------------------------
+  // severity-anchors.md calls a self-assigned severity unreliable in both
+  // directions, so it must not be the primary sort.
+  const ranked = run('rank', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'RB', severity: 'block', what: 'Blocks. A block with no locus.' },
+    { id: 'RU', severity: 'suggest', locus: 'user', what: 'Optional. Only you can answer this.' }] }] });
+  const rf = finds(island(ranked.html));
+  const iU = rf.findIndex(function (f) { return f.id === 'RU'; });
+  const iB = rf.findIndex(function (f) { return f.id === 'RB'; });
+  check('a user-locus finding outranks a Block that carries no locus', iU < iB, 'RU@' + iU + ' RB@' + iB);
+
+  // --- the standing page remembers ---------------------------------------
+  const base = { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'warn', file: { relPath: 'a.js', line: 1 }, what: 'Should fix. Alpha breaks.' },
+    { id: 'R2', severity: 'warn', file: { relPath: 'b.js', line: 2 }, what: 'Should fix. Beta breaks.' }] }] };
+  const first = run('review', base);
+  check('the first run in a repository says so',
+    /First review recorded/.test(island(first.html).sinceLast || ''));
+
+  const second = run('review', { title: 'T', groups: [{ label: 'code', findings: [
+    base.groups[0].findings[0],
+    { id: 'R3', severity: 'warn', file: { relPath: 'c.js', line: 3 }, what: 'Should fix. Gamma breaks.' }] }] });
+  const sd = island(second.html);
+  check('the standing page replaces rather than accumulating',
+    first.path === second.path && fs.readdirSync(dir).filter(function (n) {
+      return /^review.*\.html$/.test(n); }).length === 1);
+  check('the second run reports new, carried and resolved',
+    /1 new finding/.test(sd.sinceLast) && /1 still open/.test(sd.sinceLast) && /1 resolved/.test(sd.sinceLast),
+    sd.sinceLast);
+  check('only the new finding is flagged new',
+    finds(sd).filter(function (f) { return f.isNew; }).map(function (f) { return f.id; }).join() === 'R3');
+  check('the internal key never leaks into the page',
+    finds(sd).every(function (f) { return f._key === undefined; }));
+
+  const empty = run('review', { title: 'T', groups: [] });
+  check('a page with nothing open says so',
+    /Nothing open/.test(island(empty.html).sinceLast || ''), island(empty.html).sinceLast);
+
+  // --- live plan status ---------------------------------------------------
+  const plan = run('PLAN-t', { title: 'P', steps: [
+    { name: 'One', status: 'done' }, { name: 'Two', status: 'doing' }, { name: 'Three' }] }, [], 'plan');
+  const ps = island(plan.html).steps;
+  check('plan steps carry live status, and an absent status stays To Do',
+    ps[0].status === 'done' && ps[1].status === 'doing' && ps[2].status === undefined);
+  check('the plan shell no longer hardcodes a single status badge',
+    /status-doing/.test(plan.html) && /status-done/.test(plan.html));
+}
+
 hardeningTests();
 themeContrastTests();
+findingContractTests();
 
 console.log('');
 if (failures.length === 0) {
