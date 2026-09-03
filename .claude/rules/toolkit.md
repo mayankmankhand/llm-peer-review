@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 6.2.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 6.3.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## How We Work Together
 
