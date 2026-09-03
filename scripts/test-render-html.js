@@ -40,6 +40,75 @@ function tmpdir(label) {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'render-' + label + '-'));
 }
 
+// Run a rendered page's own <script> against a stub DOM and return the markup
+// it built, so a test can read what a viewer would see rather than what the
+// data island echoes (issue #162, R37). The stub covers exactly the calls the
+// shells make - createElement, createTextNode, appendChild, textContent,
+// innerHTML, className, id, title, style, setAttribute, getElementById for the
+// data island - and nothing else, on purpose: a call it does not know throws,
+// which is the signal to extend it rather than to let a render pass unread.
+function renderDom(html) {
+  const vm = require('vm');
+  const island = html.match(/<script type="application\/json" id="render-data">([\s\S]*?)<\/script>/);
+  const scripts = [];
+  html.replace(/<script>([\s\S]*?)<\/script>/g, function (m, body) { scripts.push(body); return ''; });
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function TextNode(s) { this.text = String(s); }
+  TextNode.prototype.serialize = function () { return esc(this.text); };
+  Object.defineProperty(TextNode.prototype, 'textContent', { get: function () { return this.text; } });
+  function Node(tag) {
+    this.tagName = tag; this.childNodes = []; this.attrs = {}; this.style = {};
+    this.className = ''; this._text = ''; this._html = null;
+  }
+  Object.defineProperty(Node.prototype, 'textContent', {
+    get: function () {
+      if (this._html != null) return this._html.replace(/<[^>]*>/g, '');
+      return this._text + this.childNodes.map(function (c) { return c.textContent; }).join('');
+    },
+    set: function (v) { this._text = String(v == null ? '' : v); this._html = null; this.childNodes = []; }
+  });
+  Object.defineProperty(Node.prototype, 'innerHTML', {
+    get: function () { return this._html != null ? this._html : this.inner(); },
+    set: function (v) { this._html = String(v == null ? '' : v); this._text = ''; this.childNodes = []; }
+  });
+  ['id', 'title'].forEach(function (name) {
+    Object.defineProperty(Node.prototype, name, {
+      get: function () { return this.attrs[name] || ''; },
+      set: function (v) { this.attrs[name] = String(v); }
+    });
+  });
+  Node.prototype.appendChild = function (c) { this.childNodes.push(c); return c; };
+  Node.prototype.setAttribute = function (k, v) { this.attrs[k] = String(v); };
+  Node.prototype.getAttribute = function (k) { return this.attrs[k] == null ? null : this.attrs[k]; };
+  Node.prototype.inner = function () {
+    if (this._html != null) return this._html;
+    return esc(this._text) + this.childNodes.map(function (c) { return c.serialize(); }).join('');
+  };
+  Node.prototype.serialize = function () {
+    const self = this;
+    let attrs = '';
+    if (this.className) attrs += ' class="' + esc(this.className) + '"';
+    Object.keys(this.attrs).forEach(function (k) { attrs += ' ' + k + '="' + esc(self.attrs[k]) + '"'; });
+    const style = Object.keys(this.style).map(function (k) { return k + ':' + self.style[k]; }).join(';');
+    if (style) attrs += ' style="' + esc(style) + '"';
+    return '<' + this.tagName + attrs + '>' + this.inner() + '</' + this.tagName + '>';
+  };
+  const dataEl = new Node('script');
+  dataEl.textContent = island ? island[1] : '';
+  const body = new Node('body');
+  const document = {
+    title: '', body: body,
+    createElement: function (t) { return new Node(t); },
+    createTextNode: function (s) { return new TextNode(s); },
+    getElementById: function (id) { return id === 'render-data' ? dataEl : null; }
+  };
+  vm.runInNewContext(scripts.join('\n'), {
+    document: document, JSON: JSON, Object: Object, Array: Array, Number: Number,
+    String: String, Math: Math, isFinite: isFinite, console: console
+  });
+  return body.serialize();
+}
+
 // Render a payload and return the page text. cwd defaults to the repo root.
 // `env` is merged over the real environment, the way the hardening cases do
 // it: the home-directory image case (holistic review, R1) points HOME at a
@@ -1172,9 +1241,12 @@ function findingContractTests() {
   function run(name, data, extraArgs, shell) {
     const dataPath = path.join(dir, name + '.json');
     fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    // cwd is the temp dir, not the repo: the helper resolves reports/receipts/
+    // against the working copy it runs in, and these tests must never write
+    // receipts into the real one (issue #162).
     const r = spawnSync('node', [SCRIPT, '--shell', shell || 'review', '--name', name,
       '--out-dir', dir, '--stable', '--data', dataPath].concat(extraArgs || []),
-      { encoding: 'utf-8', cwd: REPO });
+      { encoding: 'utf-8', cwd: dir });
     const out = (r.stdout || '').trim();
     return { status: r.status, stderr: r.stderr || '', path: out,
              html: out && fs.existsSync(out) ? fs.readFileSync(out, 'utf-8') : '' };
@@ -1190,7 +1262,9 @@ function findingContractTests() {
   // The exact characters that broke the old path: an angle bracket that looks
   // like a tag, and an ampersand. They must arrive verbatim, because the shell
   // renders the receipt through textContent rather than innerHTML.
-  const rcpt = path.join(dir, 'receipt.txt');
+  const rdir = path.join(dir, 'reports', 'receipts', 't');
+  fs.mkdirSync(rdir, { recursive: true });
+  const rcpt = path.join(rdir, 'receipt.txt');
   fs.writeFileSync(rcpt, 'TypeError at <anonymous>\nif (a<b) f() && g()\n', 'utf-8');
   const hostile = run('hostile', { title: 'T', groups: [{ label: 'code', findings: [
     { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.',
@@ -1216,7 +1290,7 @@ function findingContractTests() {
   // --- a missing receipt file degrades, never fails ----------------------
   const gone = run('gone', { title: 'T', groups: [{ label: 'code', findings: [
     { id: 'R1', severity: 'warn', what: 'Should fix. A thing breaks.',
-      receipt: { cmd: 'x', stdoutFile: path.join(dir, 'nope.txt') } }] }] });
+      receipt: { cmd: 'x', stdoutFile: path.join(rdir, 'nope.txt') } }] }] });
   check('a missing receipt file degrades to no receipt and still renders',
     gone.status === 0 && gone.html.length > 0 &&
     finds(island(gone.html))[0].receipt === undefined &&
@@ -1298,16 +1372,190 @@ function findingContractTests() {
   // --- live plan status ---------------------------------------------------
   const plan = run('PLAN-t', { title: 'P', steps: [
     { name: 'One', status: 'done' }, { name: 'Two', status: 'doing' }, { name: 'Three' }] }, [], 'plan');
-  const ps = island(plan.html).steps;
-  check('plan steps carry live status, and an absent status stays To Do',
-    ps[0].status === 'done' && ps[1].status === 'doing' && ps[2].status === undefined);
-  check('the plan shell no longer hardcodes a single status badge',
-    /status-doing/.test(plan.html) && /status-done/.test(plan.html));
+  // Rendered, not echoed. The data island carries whatever the payload said,
+  // so reading status back out of it passed with the feature deleted, and the
+  // class names live in the stylesheet whether or not the script ever applies
+  // them (v6.3.0 review, R37). The shell's own script runs against a stub DOM
+  // instead, and the assertion reads the badge it built for each row.
+  const badges = renderDom(plan.html).match(/class="status-badge status-(?:todo|doing|done)">[^<]*/g) || [];
+  check('the rendered plan badges each step with its own status, To Do when absent',
+    badges.length === 3 && /status-done">[^<]*Done$/.test(badges[0]) &&
+    /status-doing">[^<]*In Progress$/.test(badges[1]) && /status-todo">[^<]*To Do$/.test(badges[2]),
+    badges.join(' | ') || '(no badges rendered)');
+  const prog = renderDom(run('PLAN-p', { title: 'P', progress: { percent: 40, label: '2 of 5' },
+    steps: [{ name: 'One' }] }, [], 'plan').html);
+  check('the rendered progress bar and label carry the payload percent',
+    /progress-fill[^>]*width:40%/.test(prog) && /Overall progress: 40% \(2 of 5\)/.test(prog));
+}
+
+// ==========================================================================
+// Issue #162: the receipts folder, the merge by lens, and the edge cases the
+// v6.3.0 review found (R1, R6, R7, R8, R9, R10, R23). Every assertion here
+// was run against the v6.3.0 renderer first and failed there.
+// ==========================================================================
+function issue162Tests() {
+  console.log('\nreceipts folder, merge by lens, renderer edge cases (issue #162)');
+  const dir = tmpdir('162');                       // the working copy: no git, so both roots fall back to it
+  const out = path.join(dir, 'out');
+  const rdir = path.join(dir, 'reports', 'receipts', 'run-1');
+  fs.mkdirSync(rdir, { recursive: true });
+
+  function run(name, data, extraArgs, shell) {
+    const dataPath = path.join(dir, name + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', shell || 'review', '--name', name,
+      '--out-dir', out, '--stable', '--data', dataPath].concat(extraArgs || []),
+      { encoding: 'utf-8', cwd: dir });
+    const p = (r.stdout || '').trim();
+    return { status: r.status, stderr: r.stderr || '', path: p,
+             html: p && fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '' };
+  }
+  const island = function (html) { return JSON.parse(dataIsland(html)); };
+  const finds = function (d) {
+    return (d.groups || []).filter(function (g) { return !/^audited out$/i.test(g.label || ''); })
+      .reduce(function (a, g) { return a.concat(g.findings || []); }, []);
+  };
+  function finding(id, extra) {
+    return Object.assign({ id: id, severity: 'warn', specialist: 'code',
+      what: 'Should fix. ' + id + ' breaks a thing that matters.' }, extra || {});
+  }
+  function page(findings, extra) {
+    return Object.assign({ title: 'T', groups: [{ label: 'code', findings: findings }] }, extra || {});
+  }
+
+  // --- R1: the receipts folder is the only place a receipt may come from -----
+  const okFile = path.join(rdir, 'ok.txt');
+  fs.writeFileSync(okFile, 'MACHINE-SAID-THIS\nexit 0\n', 'utf-8');
+  const inside = run('inside', page([finding('R1', { receipt: { cmd: 'echo', stdoutFile: okFile } })]));
+  const ir = finds(island(inside.html))[0].receipt;
+  check('a receipt file inside reports/receipts/ is read',
+    ir && ir.stdout && ir.stdout.join('\n') === 'MACHINE-SAID-THIS', ir ? JSON.stringify(ir) : 'no receipt');
+  const rel = run('relative', page([finding('R1', { receipt: { cmd: 'echo',
+    stdoutFile: path.join('reports', 'receipts', 'run-1', 'ok.txt') } })]));
+  check('a receipt path relative to the working copy resolves into the folder',
+    (finds(island(rel.html))[0].receipt || {}).stdout !== undefined, rel.stderr.trim());
+
+  const outsideFile = path.join(dir, 'typed-by-hand.txt');
+  fs.writeFileSync(outsideFile, 'HAND-TYPED\n', 'utf-8');
+  const outside = run('outside', page([finding('R1', { receipt: { cmd: 'echo', stdoutFile: outsideFile } })]));
+  check('a receipt file outside reports/receipts/ is refused by name',
+    outside.status === 0 && outside.html.indexOf('HAND-TYPED') === -1 &&
+    finds(island(outside.html))[0].receipt === undefined && /outside reports\/receipts/.test(outside.stderr),
+    outside.stderr.trim());
+
+  let linked = null;
+  try { fs.symlinkSync(outsideFile, path.join(rdir, 'link.txt')); linked = path.join(rdir, 'link.txt'); } catch (e) { linked = null; }
+  if (linked) {
+    const viaLink = run('link', page([finding('R1', { receipt: { cmd: 'echo', stdoutFile: linked } })]));
+    check('a symlink inside the folder that lands outside it is refused',
+      viaLink.html.indexOf('HAND-TYPED') === -1 && /outside reports\/receipts/.test(viaLink.stderr), viaLink.stderr.trim());
+  }
+  const bigFile = path.join(rdir, 'big.txt');
+  fs.writeFileSync(bigFile, new Array(64 * 1024 + 2).join('x'), 'utf-8');
+  const big = run('big', page([finding('R1', { receipt: { cmd: 'echo', stdoutFile: bigFile } })]));
+  check('a receipt file over 64 KB is refused, and the render survives',
+    big.status === 0 && finds(island(big.html))[0].receipt === undefined && /larger than 64 KB/.test(big.stderr),
+    big.stderr.trim());
+
+  // --- R6: the exit code survives a long output -----------------------------
+  const longFile = path.join(rdir, 'long.txt');
+  fs.writeFileSync(longFile, 'l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nexit 3\n', 'utf-8');
+  const long = run('long', page([finding('R1', { receipt: { cmd: 'x', stdoutFile: longFile, exit: 1 } })]));
+  const lr = finds(island(long.html))[0].receipt;
+  check('an exit line past the six-line cut still sets the exit code, and the file wins over the payload',
+    lr && lr.exit === 3 && lr.stdout.length === 7 && /3 more lines/.test(lr.stdout[6]) &&
+    !lr.stdout.some(function (l) { return /^exit /.test(l); }),
+    lr ? JSON.stringify(lr) : 'no receipt');
+
+  // --- R7: the audited-out log obeys the receipt rules too ------------------
+  const audited = run('audited', { title: 'T', groups: [
+    { label: 'code', findings: [finding('R1')] },
+    { label: 'Audited out', findings: [finding('R2', {
+      receipt: { cmd: 'x', stdout: ['I INVENTED THIS TOO'] },
+      fields: [{ label: 'Why it matters', value: 'RETIRED-AUDITED' }, { label: 'Audit verdict', value: 'REFUTED' }] })] }] });
+  check('an audited-out finding cannot carry inline stdout or a retired label',
+    audited.html.indexOf('I INVENTED THIS TOO') === -1 && audited.html.indexOf('RETIRED-AUDITED') === -1 &&
+    audited.html.indexOf('REFUTED') !== -1, audited.stderr.trim());
+
+  // --- R8: an unreadable previous page is not a first run ---------------------
+  fs.mkdirSync(out, { recursive: true });
+  fs.writeFileSync(path.join(out, 'damaged.html'), '<html>not something this script wrote</html>', 'utf-8');
+  const damaged = run('damaged', page([finding('R1')]));
+  const dd = island(damaged.html);
+  check('a previous page that cannot be read says so instead of claiming a first run',
+    damaged.status === 0 && /could not be read/.test(dd.sinceLast || '') && !/First review/.test(dd.sinceLast || '') &&
+    finds(dd).every(function (f) { return !f.isNew; }), dd.sinceLast);
+
+  // --- R9: a Block is never demoted while a lower finding renders in full ----
+  const floorFindings = [];
+  for (let i = 1; i <= 9; i++) floorFindings.push(finding('S' + i, { severity: 'suggest', locus: 'user' }));
+  floorFindings.push(finding('B1', { severity: 'block' }));
+  const floor = run('floor', page(floorFindings));
+  const ff = finds(island(floor.html));
+  const b1 = ff.filter(function (f) { return f.id === 'B1'; })[0];
+  check('with the ceiling reached, the lowest-ranked non-Block is demoted and the Block stays open',
+    b1 && !b1.demoted && ff.filter(function (f) { return f.demoted; }).length === 1 &&
+    ff.filter(function (f) { return f.demoted; })[0].severity === 'suggest',
+    ff.map(function (f) { return f.id + (f.demoted ? '(demoted)' : ''); }).join(' '));
+  check('the floor changes who is demoted, not the ranking',
+    ff.map(function (f) { return f.id; }).pop() === 'B1');
+
+  // --- R10: a moved line keeps a finding's identity ---------------------------
+  run('moved', page([finding('R1', { file: { relPath: 'a.js', line: 10 } })]));
+  const moved = island(run('moved', page([finding('R1', { file: { relPath: 'a.js', line: 20 } })])).html);
+  check('a finding whose line moved is neither new nor resolved',
+    /Nothing has changed/.test(moved.sinceLast || ''), moved.sinceLast);
+
+  // --- merge by lens ------------------------------------------------------------
+  const codeF = finding('R1', { specialist: 'code', file: { relPath: 'a.js' } });
+  const uxF = finding('R2', { specialist: 'ux', file: { relPath: 'b.css' },
+    receipt: { cmd: 'echo', stdoutFile: okFile } });
+  const full = island(run('merge', page([codeF, uxF])).html);
+  check('a full run opens both lenses', finds(full).length === 2);
+
+  const codeOnly = run('merge', page([codeF], { lenses: ['code'] }));
+  const cd = island(codeOnly.html);
+  const carried = finds(cd).filter(function (f) { return f.carried; });
+  check('a single-lens run carries the other lens\'s open finding forward instead of resolving it',
+    finds(cd).length === 2 && carried.length === 1 && carried[0].id === 'R2' && !carried[0].isNew &&
+    /2 still open/.test(cd.sinceLast || '') && /1 carried/.test(cd.sinceLast || '') && !/resolved/.test(cd.sinceLast || ''),
+    cd.sinceLast);
+  check('a carried finding keeps the receipt its own run read off disk',
+    carried.length === 1 && carried[0].receipt && carried[0].receipt.stdout.join('') === 'MACHINE-SAID-THIS');
+  check('the rendered page marks the carried finding',
+    /carried-flag">carried</.test(renderDom(codeOnly.html)));
+
+  const fullAgain = island(run('merge', page([codeF])).html);
+  check('a run with no lenses key is a full run, so the untouched finding resolves',
+    finds(fullAgain).length === 1 && /1 resolved/.test(fullAgain.sinceLast || ''), fullAgain.sinceLast);
+
+  const shared = page([finding('R1', { specialist: 'code', file: { relPath: 'a.js' } }),
+    finding('R2', { specialist: 'code, ux', file: { relPath: 'b.css' } })]);
+  run('shared', shared);
+  const sd = island(run('shared', page([shared.groups[0].findings[0]], { lenses: ['ux'] })).html);
+  check('a merged finding whose lenses include one that ran is not carried',
+    finds(sd).length === 1 && /1 resolved/.test(sd.sinceLast || ''), sd.sinceLast);
+
+  const smuggled = run('smuggle', page([finding('R1', { carried: true, isNew: true,
+    receipt: { cmd: 'x', stdout: ['SMUGGLED'] } })]));
+  check('the renderer-set flags cannot be supplied by the payload to skip the receipt guard',
+    smuggled.html.indexOf('SMUGGLED') === -1 && finds(island(smuggled.html)).every(function (f) { return !f.carried; }));
+
+  // --- R23: the debate shell refuses the retired labels too --------------------
+  const debate = run('debate', { topic: 'T', synthesis: { actions: [{ id: 'R1', severity: 'warn',
+    what: 'Should fix. A thing breaks.', fields: [{ label: 'Suggested fix', value: 'RETIRED-DEBATE' },
+    { label: 'Expected', value: 'KEPT-DEBATE' }] }] } }, [], 'debate');
+  check('the debate page drops rows carrying the retired labels and names the refusal',
+    debate.status === 0 && debate.html.indexOf('RETIRED-DEBATE') === -1 && debate.html.indexOf('KEPT-DEBATE') !== -1 &&
+    /retired four-field labels/.test(debate.stderr), debate.stderr.trim());
+
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 hardeningTests();
 themeContrastTests();
 findingContractTests();
+issue162Tests();
 
 console.log('');
 if (failures.length === 0) {
