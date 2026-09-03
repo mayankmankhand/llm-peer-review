@@ -196,3 +196,11 @@
 - **Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.**
 - **A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.**
 - **When inserting a numbered step, grep for every "step N" reference before and after the insertion.**
+
+### Standing page and receipts (issue #162)
+
+- **Render a standing page when its content is final, not when it first becomes available.**
+- **A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.**
+- **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
+- **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
+- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.**
