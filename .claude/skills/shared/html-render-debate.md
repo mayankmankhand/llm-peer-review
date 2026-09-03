@@ -27,7 +27,7 @@ Steps:
 1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/debate-shell.html` (the authoritative source). Compact reference:
    - `topic`, `model` (e.g. `"GPT-5.5"` or `"Gemini"`) - used in the title and the right-column header.
    - `rounds`: `[{n, claude, model}]` - one per debate round; `claude` and `model` are the two positions (trusted inline HTML allowed).
-   - `synthesis`: `{agreed:[], disagreed:[], actions:[...]}`. Each action: `{id, severity, file:{relPath, absPath, line}, what, fields:[{label, value}]}`, mirroring the review finding shape. `severity` is `"block" | "warn" | "suggest"`. `what` and field `value`s may contain trusted inline HTML.
+   - `synthesis`: `{agreed:[], disagreed:[], actions:[...]}`. Each action: `{id, severity, file:{relPath, absPath, line}, what, context, fix, fields:[{label, value}]}`, mirroring the review finding shape: `what` is sentence one, `context` the optional sentence two (omit the key when there is none), `fix` the fix line, and `fields` attachments only, never prose. Rows carrying the retired labels (Why it matters / Example / Suggested fix) are refused by the helper and dropped with a stderr note. `severity` is `"block" | "warn" | "suggest"`. `what`, `context`, `fix`, and field `value`s may contain trusted inline HTML.
 
 2. **Write the JSON to a temp file**, e.g. `/tmp/debate-data.json`.
 
@@ -42,4 +42,4 @@ Steps:
 
 4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause that the page holds the debate's recommendations.
 
-The debate cards reuse the same severity scale, file-link scheme, and field format as the review shell for visual consistency across the toolkit.
+The debate cards reuse the same severity scale, file-link scheme, prose keys, and attachment rows as the review shell for visual consistency across the toolkit.
