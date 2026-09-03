@@ -68,7 +68,7 @@ Also flag, as a smell that needs context (not a hard claim): **missing authoriza
 
 A real finding traces untrusted input from where it **enters** (the source) to where it **does damage** (the sink), with no safe transformation in between (parameterization, encoding, allowlist validation, canonicalization). A pattern match is not a finding.
 
-**Every security finding's `Example` field IS its exploit scenario:** a concrete, one-line "an attacker could ..." that walks input from source to sink. If you cannot write that sentence - because the input is a hardcoded constant, an internal value, or already sanitized upstream - the finding is not real. Drop it. This is the single biggest false-positive killer, and it pairs with the receipt rule in the output template (point at the line; prove the path).
+**Every security finding needs an exploit sentence:** a concrete, one-line "an attacker could ..." that walks input from source to sink. If you cannot write that sentence - because the input is a hardcoded constant, an internal value, or already sanitized upstream - the finding is not real. Drop it. This is the single biggest false-positive killer, and it pairs with the receipt rule in the output template (point at the line; prove the path).
 
 Recognize when something is already safe: a parameterized query, framework auto-escaping (Django, Rails, React outside `dangerouslySetInnerHTML`), or a documented internal sanitizer means do not re-flag it.
 
@@ -115,7 +115,7 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat .claude/skills/shared/output-template.md`
 
-For security findings, use the standard 4 fields, with the `Example` field carrying the source-to-sink exploit scenario described above (the attacker's-eye "an attacker could ...").
+Security findings use that shape unchanged: the exploit sentence above is sentence two (it answers when it fires and who is hit), or the receipt when the path can be demonstrated rather than described.
 
 ## HTML Companion (when gate fires)
 

@@ -15,7 +15,7 @@ Severity does **not** decide whether a human is interrupted. Paging is governed 
 
 Before assigning severity, decide whether the finding is worth reporting at all.
 
-**Rule:** if a finding is purely cosmetic with no functional, security, accessibility, or maintainability impact, drop it. Do not bulk it up to fit the 4-field structure (What / Why it matters / Example / Suggested fix).
+**Rule:** if a finding is purely cosmetic with no functional, security, accessibility, or maintainability impact, drop it. The test is the inverted skip rule in `output-template.md`: a finding must survive being compressed to one sentence with an honest harm verb in it. A cosmetic item has no such verb, so it fails the test and is dropped. Never reach for an overstated verb to keep it alive.
 
 Skip-worthy items:
 - Pure typos in non-user-facing comments or internal variable names
@@ -110,16 +110,14 @@ Three lines decide most disagreements, and each is taught by one worked example 
 
 ### Block vs Warn
 
-- **R10** 🚫 `api/export.ts:64` - CSV export buffers every row in memory before writing, and this change removed the row cap that used to bound it
-  - **Why it matters:** An export large enough to exhaust the process heap takes the whole server down, not just the one request that triggered it
-  - **Example:** The first account with 200k records clicks Export, the Node process runs out of memory, and every other user on that instance gets a dropped connection until it restarts
-  - **Suggested fix:** Stream rows to the response as they are read, or restore a cap with a clear message when a request exceeds it
+- **R10** 🚫 `api/export.ts:64` - Blocks. A large export exhausts memory and stops the server for everyone.
+  - It fires on the first account with enough records, and it takes down users who did nothing.
+  - **Fix:** One function: stream rows instead of buffering. An afternoon, or restore the cap that was removed.
   - *Boundary note (for the reviewer):* This is a **Block**, not a Warn, on three counts: the failure is reachable through a normal user action on data that already exists, it harms users other than the one who triggered it, and there is no workaround available to them. Drop any one of those and it becomes a **Warn** - if the crash were confined to the requesting user's own session, or if it needed a record count no account in the system currently has, it is a real risk that has not yet become a certainty. These three counts are also exactly what a tier-3 `DOWNGRADE` vote must name (M2): a downgrade that cannot say which one fails counts as `STANDS`.
 
 ### Warn vs Suggest
 
-- **R11** ⚠️ `settings/ProfileForm.tsx:112` - Save failures are swallowed: the catch block logs to the console and the form clears as though the save succeeded
-  - **Why it matters:** The user is actively told the wrong thing, so they walk away believing a change was saved when it was not
-  - **Example:** Someone updates the email address their alerts go to, watches the form clear, and stops receiving alerts for a week before working out why
-  - **Suggested fix:** Surface the failure in the form - keep the entered values, say what failed, and let them retry
+- **R11** ⚠️ `settings/ProfileForm.tsx:112` - Should fix. A failed save silences the error and clears the form anyway.
+  - The user walks away believing a change saved, and finds out weeks later.
+  - **Fix:** One branch: keep the values and say what failed. Ten minutes, or leave people misinformed.
   - *Boundary note (for the reviewer):* This is a **Warn**, not a Suggest, because the user is misinformed and loses input they already typed. That is user frustration with a concrete cost, not polish. It would be a **Suggest** if the failure were already visible - say the form showed a generic "Something went wrong" and kept the values, and the finding were only that the message could name the offending field. A working message that could be better is a Suggest; a message that never appears at all is a Warn.

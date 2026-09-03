@@ -69,7 +69,7 @@ Across the sensitive paths, apply the same vulnerability-class hunt `/review-sec
 
 ### 7. Lead with the headline
 
-Because an audit can surface many findings, structure the report so the reader gets the verdict and the worst risks first (see Output Format): the **Overall Verdict** line, then a ranked **Top issues** list, then the full findings. Every finding still carries a concrete source-to-sink exploit scenario in its `Example` field (the receipt rule applies - prove reachability, do not pattern-match).
+Because an audit can surface many findings, structure the report so the reader gets the verdict and the worst risks first (see Output Format): the **Overall Verdict** line, then a ranked **Top issues** list, then the full findings. Every finding still carries a concrete source-to-sink exploit scenario (the receipt rule applies - prove reachability, do not pattern-match).
 
 </procedure>
 
@@ -95,7 +95,7 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat .claude/skills/shared/output-template.md`
 
-For audit findings, use the standard 4 fields with the `Example` field carrying the source-to-sink exploit scenario. The Overall Verdict and the readability backstop (lead with the top findings when there are many) matter most here, because an audit naturally produces a longer list than a single-change review.
+Audit findings use that shape unchanged: the exploit scenario is sentence two (it answers when it fires and who is hit), or the receipt when the path can be demonstrated rather than described. The Overall Verdict and the readability backstop (lead with the top findings when there are many) matter most here, because an audit naturally produces a longer list than a single-change review.
 
 ## HTML Companion (when gate fires)
 

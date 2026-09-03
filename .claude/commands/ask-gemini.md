@@ -145,7 +145,7 @@ node .claude/scripts/ask-gemini.js summary --context-file /tmp/ask-gemini-contex
 
 ## Step 6: Present Results to User
 
-Present the summary to the user in this format. Each Recommended Action uses the same 4-field structure as `/review` findings (What / Why it matters / Example / Suggested fix), with 🚫/⚠️/💡 emojis and sequential R-IDs - the reasoning is mined from the debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
+Present the summary to the user in this format. Each Recommended Action uses the same two-sentence contract as `/review` findings (sentence one, an optional sentence two, then a fix line), defined in `.claude/skills/shared/output-template.md`, with 🚫/⚠️/💡 emojis and sequential R-IDs - the reasoning is mined from the debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
 
 Severity on each Recommended Action follows the shared rubric below, the same one every review skill reads. It carries the same weight here that it does there: these actions enter the auto loop's M2 audit, which routes a Block to three independent skeptics and a Warn or Suggest to one. The rubric's Skip rule and its solo-tool-versus-production calibration matter especially in a debate, where an external reviewer's instinct is to grade every hardening gap as critical.
 
@@ -170,15 +170,12 @@ Severity on each Recommended Action follows the shared rubric below, the same on
 
 ### 📋 Recommended Actions
 
-- **R1** 🚫 `file:line` - [What: the issue in plain English, one line]
-  - **Why it matters:** [The harm or risk this creates]
-  - **Example:** [Real-world impact - what could happen to a user, the system, or a future maintainer]
-  - **Suggested fix:** [The approach, not the exact code]
+- **R1** 🚫 `file:line` - Blocks. [Sentence one: the severity word, the defect, and a harm verb]
+  - [Sentence two, only if it answers who is hit, when it fires, or why now. Omit the line entirely otherwise.]
+  - **Fix:** [A cost and a choice, not an approach]
 
-- **R2** ⚠️ `file:line` - [What]
-  - **Why it matters:** [...]
-  - **Example:** [...]
-  - **Suggested fix:** [...]
+- **R2** ⚠️ `file:line` - Should fix. [Sentence one]
+  - **Fix:** [Cost and choice]
 
 ### 💬 Key Insights
 [Notable observations from the debate - terse bullets]
