@@ -185,6 +185,8 @@ header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
 .bottom-line{margin:2rem 0 0;max-width:var(--measure);}
 .bottom-line .display{margin:0 0 .6rem;}
 .bl-rest{font-size:1.15rem;line-height:1.45;margin:0 0 .6rem;color:var(--text);max-width:var(--measure);}
+.since-last{color:var(--text-muted);font-size:.95rem;margin:.5rem 0 0;max-width:var(--measure);}
+.new-flag{font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:.05rem .4rem;}
 .disposition{color:var(--text-muted);font-size:1rem;line-height:1.5;margin:.9rem 0 0;max-width:var(--measure);border-top:1px solid var(--border);padding-top:.9rem;}
 /* Base-rate lists. Quiet by construction: they exist to make the short list of
    open findings believable, not to compete with it. */
@@ -328,6 +330,16 @@ h2{font-size:var(--text-h2);}
     body.appendChild(disp);
   }
 
+  // ---- since you last looked (issue #161) -------------------------------
+  // The standing page's memory. A finding the reader already saw and left alone
+  // should not present itself as news, and a page that has genuinely gone quiet
+  // should say so rather than looking identical to one nobody has read.
+  if (data.sinceLast) {
+    var since = el("p", "since-last");
+    text(since, data.sinceLast);
+    body.appendChild(since);
+  }
+
   // ---- top-issues (sticky) ----------------------------------------------
   // Superseded by the bottom line. It still renders for a payload that carries
   // no bottomLine, so an older payload degrades to exactly its old appearance
@@ -440,6 +452,14 @@ h2{font-size:var(--text-h2);}
           var idSpan = el("span", "finding-id");
           text(idSpan, f.id);
           cardHead.appendChild(idSpan);
+        }
+
+        // "new" marks a finding this run raised that the previous page did not
+        // carry. Everything unmarked is something the reader has already seen.
+        if (f.isNew) {
+          var isNew = el("span", "new-flag");
+          text(isNew, "new");
+          cardHead.appendChild(isNew);
         }
 
         var tag = f.specialist != null ? f.specialist : group.label;

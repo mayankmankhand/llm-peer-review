@@ -143,7 +143,7 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 ### Phase 5: Report
 
 1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
-2. **Write that markdown to disk** per the "Where the report is written" section of the shared template inlined below. Use `--name review-orchestrator`. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
+2. **Write that markdown to disk** per the "Where the report is written" section of the shared template inlined below. Use `orchestrator` as the `<who>` segment. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
 3. **Derive the HTML** (when the gate fires) from the SAME findings structure - see HTML Companion below. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written. The HTML is a reader's view and may carry less than the markdown; the markdown never carries less than the HTML.
 
 </procedure>
@@ -221,7 +221,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 !`cat .claude/skills/shared/html-render-review.md`
 
 For orchestrator output specifically:
-- Pass `--name review-orchestrator` to the helper
+- Pass `--name review --stable` to the helper: the HTML is one standing page per repository, not one per run
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
 - Use the `groups[]` array (findings grouped by specialist), preserving the order from Phase 3 synthesis. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `fields` shape - grouped by specialist with the assigned `id`. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
 - The Receipt field rows and the Audited out group render per the audit rows rule in the shared HTML fragment above; the orchestrator's only addition is the `[specialist]` tag carried inside each finding's `what`/`id` as everywhere else.

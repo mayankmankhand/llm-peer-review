@@ -48,13 +48,13 @@ Steps:
 
 2. **Write the JSON to a temp file**, e.g. `/tmp/review-data.json`.
 
-3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+3. **Run the helper from the project root.** The review page is `--stable`: one standing page per repository at `artifacts/html/review.html`, replaced in place rather than added to. The name is the bare `review` because the identity is the repo. Before overwriting, the helper reads the page it is replacing and fills `sinceLast` with what changed, so pass the full current set of surviving findings every run - it is the comparison that produces the memory, and a partial payload would report everything you omitted as resolved.
    Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```
-   node .claude/scripts/render-html.js --shell review --name review-<type> --data /tmp/review-data.json
+   node .claude/scripts/render-html.js --shell review --name review --out-dir artifacts/html --stable --data /tmp/review-data.json
    ```
-   - `<type>` = the skill name (`code`, `ux`, `browser`, `plan`, `full`, `deps`, `copy`, `commands`) when a specialist is called directly, or `orchestrator` when called via `/review`. So `--name review-orchestrator`, `--name review-code`, etc.
+   - The name is always the bare `review`, for every caller. A direct `/review-code` run and an orchestrated `/review` write the same standing page, because the page is the repository's open findings and not a record of which command produced them. Which lens ran belongs in `chips` and in the markdown filename, not in the page's identity.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
 4. **Show it to the user** per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause what the page holds: the surviving findings with their receipts and the audited-out log.
