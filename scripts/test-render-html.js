@@ -1552,10 +1552,98 @@ function issue162Tests() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ==========================================================================
+// The review of the #162 cycle: what a first real run of merge by lens
+// surfaced (R1, R8, R9, R12, R13, R20). Each assertion failed before its fix.
+// ==========================================================================
+function cycle162ReviewTests() {
+  console.log('\nreview of the #162 cycle: carried findings, glued exit lines, secret scan');
+  const dir = tmpdir('162r');
+  const out = path.join(dir, 'out');
+  const rdir = path.join(dir, 'reports', 'receipts', 'run-2');
+  fs.mkdirSync(rdir, { recursive: true });
+  function run(name, data, extraArgs, shell) {
+    const dataPath = path.join(dir, name + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', shell || 'review', '--name', name,
+      '--out-dir', out, '--stable', '--data', dataPath].concat(extraArgs || []),
+      { encoding: 'utf-8', cwd: dir });
+    const p = (r.stdout || '').trim();
+    return { status: r.status, stderr: r.stderr || '', path: p,
+             html: p && fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : '' };
+  }
+  const island = function (html) { return JSON.parse(dataIsland(html)); };
+  const finds = function (d) {
+    return (d.groups || []).filter(function (g) { return !/^audited out$/i.test(g.label || ''); })
+      .reduce(function (a, g) { return a.concat(g.findings || []); }, []);
+  };
+  function finding(id, extra) {
+    return Object.assign({ id: id, severity: 'warn', what: 'Should fix. ' + id + ' breaks a thing that matters.' }, extra || {});
+  }
+
+  // --- R1: a finding tagged only by its group still belongs to that lens ---
+  run('grouponly', { title: 'T', groups: [{ label: 'code', findings: [finding('R1', { file: { relPath: 'a.js' } })] }] });
+  const g2 = island(run('grouponly', { title: 'T', lenses: ['code'], groups: [{ label: 'code', findings: [] }] }).html);
+  check('a finding tagged only by its group label resolves when that lens runs again',
+    finds(g2).length === 0 && /1 resolved/.test(g2.sinceLast || ''), g2.sinceLast);
+
+  // --- R8 and R9: a carried Block reaches the headline, and carried findings get fresh IDs ---
+  const uxBlock = finding('R1', { severity: 'block', specialist: 'ux', file: { relPath: 'b.css' }, what: 'Blocks. Beta breaks everything.' });
+  const codeWarn = finding('R2', { specialist: 'code', file: { relPath: 'a.js' } });
+  run('carriedblock', { title: 'T', groups: [{ label: 'x', findings: [uxBlock, codeWarn] }] });
+  const cb = island(run('carriedblock', { title: 'T', lenses: ['code'],
+    bottomLine: ['Safe to ship.', 'Nothing else matters.', 'The loop fixes the rest.'],
+    disposition: '1 raised, 0 fixed.',
+    groups: [{ label: 'code', findings: [finding('R1', { specialist: 'code', file: { relPath: 'a.js' } })] }] }).html);
+  const cbFinds = finds(cb);
+  const carriedOne = cbFinds.filter(function (f) { return f.carried; })[0];
+  check('a carried Block is named in the bottom line above it',
+    Array.isArray(cb.bottomLine) && /carried/i.test(cb.bottomLine[0]) && /block/i.test(cb.bottomLine[0]) && cb.bottomLine.length <= 3,
+    JSON.stringify(cb.bottomLine));
+  check('the disposition counts what was carried',
+    /carried/.test(cb.disposition || ''), cb.disposition);
+  check('a carried finding is renumbered after this run\'s last ID, so no two findings share one',
+    carriedOne && carriedOne.id === 'R2' &&
+    new Set(cbFinds.map(function (f) { return f.id; })).size === cbFinds.length,
+    cbFinds.map(function (f) { return f.id + (f.carried ? '(carried)' : ''); }).join(' '));
+
+  // --- R13: an exit line glued to output that ended without a newline ---
+  const glued = path.join(rdir, 'glued.txt');
+  fs.writeFileSync(glued, 'xexit 3\n', 'utf-8');
+  const gl = finds(island(run('glued', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'x', stdoutFile: glued, exit: 1 } })] }] }).html))[0].receipt;
+  check('an exit line glued to the last output line still sets the exit code and keeps the output',
+    gl && gl.exit === 3 && gl.stdout.length === 1 && gl.stdout[0] === 'x', JSON.stringify(gl));
+
+  // --- R20: an unreadable previous page says which lenses were not carried ---
+  fs.mkdirSync(out, { recursive: true });
+  fs.writeFileSync(path.join(out, 'unreadlens.html'), '<html>not a render</html>', 'utf-8');
+  const ul = island(run('unreadlens', { title: 'T', lenses: ['code'], groups: [{ label: 'code', findings: [finding('R1')] }] }).html);
+  check('a single-lens run over an unreadable page says the other lenses could not be carried',
+    /could not be read/.test(ul.sinceLast || '') && /not carried|could not be carried/.test(ul.sinceLast || '') && /code/.test(ul.sinceLast || ''),
+    ul.sinceLast);
+
+  // --- R12: a key printed by a check never reaches the page ---
+  const leaky = path.join(rdir, 'leaky.txt');
+  const fakeKey = ['sk', 'proj', 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij0123456789'].join('-');
+  // The variable name is assembled too: the tripwire's assignment pattern
+  // matches a literal NAME=value shape, and it has no allow-list by design.
+  const envName = ['OPENAI', 'API', 'KEY'].join('_');
+  fs.writeFileSync(leaky, envName + '=' + fakeKey + '\nexit 0\n', 'utf-8');
+  const lk = run('leaky', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'grep KEY .env', stdoutFile: leaky } })] }] });
+  check('a secret-shaped token in a receipt is redacted before it reaches the page',
+    lk.html.indexOf(fakeKey) === -1 && /redacted/.test(finds(island(lk.html))[0].receipt.stdout.join('\n')) && /redacted/.test(lk.stderr),
+    lk.stderr.trim());
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 hardeningTests();
 themeContrastTests();
 findingContractTests();
 issue162Tests();
+cycle162ReviewTests();
 
 console.log('');
 if (failures.length === 0) {

@@ -34,7 +34,7 @@
 //   node .claude/scripts/render-html.js --shell <review|debate|document|explore|audit|plan|docview> \
 //                                       --name <basename> [--data <file>] \
 //                                       [--out-dir <dir>] [--stable] [--no-abs]
-//   echo '<json>' | node .claude/scripts/render-html.js --shell review --name review-orchestrator
+//   echo '<json>' | node .claude/scripts/render-html.js --shell review --name review --stable
 //
 //   Artifact index (issue #154; stamp and sync from the holistic pass) - three
 //   extra modes that do not render anything:
@@ -77,7 +77,7 @@
 //   line so the <title> stays inside the first 8KB the hosted publisher scans.
 //
 //   --shell    which template under .claude/skills/shared/shells/ to use
-//   --name     filename prefix, e.g. review-orchestrator, review-code, debate-gpt,
+//   --name     filename prefix, e.g. review (the standing page, with --stable), debate-gpt,
 //              document, explore-<slug>, audit-html, PLAN-issue-<n>. The timestamp
 //              is appended unless --stable is set.
 //   --data     path to a JSON file. If omitted or "-", JSON is read from stdin.
@@ -167,7 +167,7 @@ for (let i = 0; i < argv.length; i++) {
 //
 //   Append one record (after a successful publish):
 //     node .claude/scripts/render-html.js --index-add --type review \
-//          --name review-orchestrator --local <path> --url <url>
+//          --name review --local <path> --url <url>
 //
 //   Look up the most recent URL recorded for a name (used by the identity-keyed
 //   types, plan and docview, to update their existing page instead of making a
@@ -454,11 +454,11 @@ if (opts.indexUrl) {
 
 if (opts.indexSync) {
   // One stamp per FILE, newest row for that file wins. For the identity-keyed
-  // types (plan, docview) every row names the same mirror, so this is "newest
-  // URL per name" - the rule --index-url applies - and a stamp can never
-  // disagree with a lookup. For the timestamped types every run has its own
-  // mirror AND its own page under a shared name ("document",
-  // "review-orchestrator"), so keying by name would stamp each older mirror
+  // types (plan, docview, and since #161 the standing review page) every row
+  // names the same mirror, so this is "newest URL per name" - the rule
+  // --index-url applies - and a stamp can never disagree with a lookup. For
+  // the timestamped types every run has its own mirror AND its own page under
+  // a shared name ("document", "debate-gpt"), so keying by name would stamp each older mirror
   // with the newest run's URL. Keying by file is right for both, and it is
   // what --index-add already does one row at a time. Null-prototype map, so a
   // path can never read a value off Object.prototype. The key is the
@@ -850,6 +850,24 @@ function rankFindings(findings) {
 const RECEIPTS_DIR = path.join('reports', 'receipts');
 const RECEIPT_MAX_BYTES = 64 * 1024;
 
+// A check is whatever a finder authored, and a finder hunting hardcoded
+// secrets will naturally grep for one; its receipt would then carry the key
+// onto a page that may be published. The pre-push tripwire never sees a
+// publish, so the same shapes it scans for are masked here before a line is
+// kept (review of the #162 cycle, R12). Mirrors PATTERNS in pre-push-check.js;
+// update both together. Global flags, so a second secret on one line is not
+// left readable beside the first.
+const RECEIPT_SECRET_PATTERNS = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  /\bAIza[0-9A-Za-z\-_]{35}\b/g,
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/gi,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/gi
+];
+
 // Returns null when the file may be read, else one short reason. The folder is
 // judged through realpath on both sides (underRoot), so a symlink inside it
 // that lands outside is refused for where it lands. Either root counts, the
@@ -928,13 +946,27 @@ function loadReceipt(f) {
     // off the list BEFORE the six-line cut: testing the last line after the
     // cut lost the status on exactly the long outputs where it mattered most
     // (v6.3.0 review, R6).
-    const exitLine = lines.length ? /^\s*exit\s+(\d+)\s*$/i.exec(lines[lines.length - 1]) : null;
+    // "xexit 0" is what the save form writes when the check's own output ended
+    // without a newline: the status landed on the last output line. The status
+    // is still the machine's, so it is taken from wherever it sits, and the
+    // output before it is kept (review of the #162 cycle, R13).
+    const last = lines.length ? lines[lines.length - 1] : '';
+    const exitLine = /^([\s\S]*?)\s*exit\s+(\d+)\s*$/i.exec(last);
     if (exitLine) {
-      lines.pop();
-      r.exit = Number(exitLine[1]);
+      r.exit = Number(exitLine[2]);
+      if (exitLine[1].trim()) lines[lines.length - 1] = exitLine[1]; else lines.pop();
     }
+    let redacted = 0;
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
-      .map(function (l) { return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l; });
+      .map(function (l) {
+        RECEIPT_SECRET_PATTERNS.forEach(function (re) {
+          l = l.replace(re, function (m) { redacted += 1; return m.slice(0, 4) + '[redacted]'; });
+        });
+        return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l;
+      });
+    if (redacted) {
+      reviewNotes.push('receipt for ' + (f.id || '?') + ': ' + redacted + ' secret-shaped token(s) redacted before rendering');
+    }
     if (lines.length > REVIEW_CAPS.receiptLines) {
       kept.push('... ' + (lines.length - REVIEW_CAPS.receiptLines) + ' more lines');
     }
@@ -1144,9 +1176,37 @@ function carryForward(data, prior) {
     carried.push(copy);
   });
   if (!carried.length) return;
+
+  // IDs reset per run, so a carried R1 would sit beside this run's R1 and
+  // "fix R1" would point at two things. Carried findings continue the sequence
+  // after this run's last number (review of the #162 cycle, R9). The key, not
+  // the id, is a finding's identity across runs, so renumbering loses nothing.
+  let maxId = 0;
+  openFindings(data).concat(auditedFindings(data)).forEach(function (f) {
+    const m = /^R(\d+)$/.exec(String(f.id || ''));
+    if (m && Number(m[1]) > maxId) maxId = Number(m[1]);
+  });
+  carried.forEach(function (f, i) { f.id = 'R' + (maxId + 1 + i); });
+
   if (Array.isArray(data.groups)) data.groups.push({ label: '', findings: carried });
   else if (Array.isArray(data.findings)) data.findings = data.findings.concat(carried);
   else data.groups = [{ label: '', findings: carried }];
+
+  // The first screen was written before the carry happened, by an author who
+  // never saw the previous page. A carried Block under a headline that says
+  // "safe to ship" is a page contradicting itself, so the renderer says so
+  // first, and the disposition counts the carried findings (R8).
+  const carriedBlocks = carried.filter(function (f) { return f.severity === 'block'; }).length;
+  if (carriedBlocks && Array.isArray(data.bottomLine)) {
+    data.bottomLine.unshift(carriedBlocks === 1
+      ? 'A blocker carried from a lens this run did not check is still open below.'
+      : carriedBlocks + ' blockers carried from lenses this run did not check are still open below.');
+    data.bottomLine = data.bottomLine.slice(0, 3);
+  }
+  if (typeof data.disposition === 'string' && data.disposition.trim()) {
+    data.disposition = data.disposition.replace(/\s+$/, '') + ' ' + carried.length +
+      (carried.length === 1 ? ' carried' : ' carried') + ' from earlier runs, not re-checked.';
+  }
   reviewNotes.push('carried ' + carried.length + ' open finding(s) forward from lenses this run did not check (' +
                    lenses.join(', ') + ' ran)');
 }
@@ -1165,6 +1225,13 @@ function markWhatChanged(data, prior) {
     data.sinceLast = findings.length
       ? 'The previous page could not be read, so nothing here is marked new.'
       : 'Nothing open. The previous page could not be read.';
+    // A single-lens run has nothing to carry from a page it cannot read, and
+    // the other lenses' open findings vanish with it. Say so rather than let
+    // the drop pass as a clean slate (review of the #162 cycle, R20).
+    if (Array.isArray(data.lenses) && data.lenses.length) {
+      data.sinceLast += ' Open findings from lenses other than ' + data.lenses.join(', ') +
+        ' could not be carried, because only that page held them.';
+    }
     return;
   }
   const before = {};
@@ -1209,6 +1276,17 @@ if (opts.shell === 'review') {
   // receipt guard.
   openFindings(parsed).concat(auditedFindings(parsed)).forEach(function (f) {
     delete f.carried; delete f.isNew; delete f.demoted;
+  });
+  // The shell lets `specialist` default to the group label, but the contract
+  // pass collapses the groups into one unlabeled list before the page is
+  // written, and the next run then found no lens on such a finding and carried
+  // it forever (review of the #162 cycle, R1). Stamp the label on first.
+  (Array.isArray(parsed.groups) ? parsed.groups : []).forEach(function (g) {
+    if (!g || typeof g.label !== 'string' || !g.label.trim()) return;
+    if (/^audited out$/i.test(g.label.trim())) return;
+    (Array.isArray(g.findings) ? g.findings : []).forEach(function (f) {
+      if (f && typeof f === 'object' && !f.specialist) f.specialist = g.label.trim();
+    });
   });
   // In stable mode the output path is deterministic, so the page this run is
   // about to replace can be read before it is overwritten. That is the whole

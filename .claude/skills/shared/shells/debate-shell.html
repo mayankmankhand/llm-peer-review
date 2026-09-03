@@ -111,6 +111,10 @@ ul.points li{margin-bottom:.35rem;font-size:.95rem;}
    precedes it. tokens.css already styles .field and .what for both shells. */
 .context{margin:.45rem 0 0;font-size:.95rem;color:var(--text);max-width:var(--measure);}
 .field.fix{margin-top:.7rem;}
+/* Token safety, as on the review page: one unbroken link or hash in an action's
+   prose, fix line, or attachment must never push the page sideways (review of
+   the #162 cycle, R11). */
+.action,.action .field,.action .context{overflow-wrap:anywhere;}
 </style>
 </head>
 <body>
