@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v6.3.0)
+# AI Agent Setup Instructions (v6.3.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -142,7 +142,9 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v6.3.0:** What a review finding says, and where the review page lives (#161). Additive on top of v6.2.0; nothing about how the loop runs changes. After re-running setup:
+**What's new in v6.3.1:** A patch on v6.3.0 (#162). The audit writes the receipt files the review page reads, the standing review page renders after the fix loop and can go empty, and a focused `/review-*` run merges into it. Nothing about setup changes; re-running it picks up the renderer, the two shells, and the prompt files.
+
+**What was new in v6.3.0:** What a review finding says, and where the review page lives (#161). Additive on top of v6.2.0; nothing about how the loop runs changes. After re-running setup:
 - **The four-field finding structure is gone.** A finding is now one sentence of 18 words or fewer opening with the severity spelled out (`Blocks.` / `Should fix.` / `Optional.`) and carrying both the defect and its consequence; an optional second sentence only when it answers who is hit, when it fires, or why now; and a fix line stating a cost, not an approach. The contract lives in `.claude/skills/shared/output-template.md`. Tell the user their reviews will be dramatically shorter: re-rendering their three largest past reports cut them 60%, 67% and 80%.
 - **The skip rule is inverted.** It used to say a finding not worth four fields should not be reported, which taught the model to inflate small true things. It now says a finding must survive being compressed to one sentence with an honest harm verb in it.
 - **Findings now show the machine's own output.** Every finding already carried a runnable check that the audit executed and discarded; its output is now attached to the finding verbatim. The renderer reads those bytes off disk itself, so what appears in the monospace block is not something a model retyped.
