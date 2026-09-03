@@ -129,7 +129,7 @@ No new view will be built.
 
 ## HTML Report Judgement
 
-The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed (the same "3+ findings" gate for `/review-*`, raised to 5 here because audit candidates are softer than review findings).
+The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed (a count gate like the one the review page had before it became a standing page; raised to 5 here because audit candidates are softer than review findings).
 
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a temp file. Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 

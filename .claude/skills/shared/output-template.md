@@ -101,7 +101,17 @@ End the report with one line so the user knows what happens next: _"Fixes for su
 
 Every review that produces a report writes it to disk before rendering anything: `reports/review-<who>-<YYYY-MM-DD-HHMMSS>.md`, where `<who>` is `orchestrator` for `/review` or the lens name for a direct specialist run. Create `reports/` if absent; it is gitignored. Print the path to **stderr**, never stdout, so a caller capturing a render path is unaffected.
 
-**The second thing a run writes is the receipts folder.** Tier 1 saves each check's output to `reports/receipts/<run-stamp>/` as it runs (M2 in `hitl-loop.md`; the orchestrator's Phase 4 shows the form), and the page's receipt slot is filled only from there. The markdown's **Receipt** row and the page's receipt block come from the same file.
+**The second thing a run writes is the receipts folder.** Tier 1 saves each check's output to `reports/receipts/<run-stamp>/` as it runs (M2 in `hitl-loop.md` names the folder; this is the form, for the orchestrator and every directly typed skill alike), and the page's receipt slot is filled only from there. The markdown's **Receipt** row and the page's receipt block come from the same file.
+
+- `<run-stamp>` is the same `YYYY-MM-DD-HHMMSS` the markdown report carries. Once per run: `mkdir -p reports/receipts/<run-stamp>`.
+- Each check's file is `reports/receipts/<run-stamp>/<lens>-<n>.txt`, where `<lens>` is the specialist that authored the finding (`orchestrator` uses the specialist's name; a direct run uses its own lens name; the orchestrator's inline path uses `inline`) and `<n>` is that finding's number within that lens's results, counting from 1.
+- Run each check so its output is saved and read back in one go:
+
+  ```bash
+  <check> > reports/receipts/<run-stamp>/<lens>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<lens>-<n>.txt; cat reports/receipts/<run-stamp>/<lens>-<n>.txt
+  ```
+
+  Tier 1 compares what `cat` printed against the finding's `expect`. The finding's HTML `receipt` becomes `{cmd, stdoutFile, exit}` with `stdoutFile` that path: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. `mkdir` and `cat` are on the toolkit's allow-list; the redirect may prompt once on a fresh install.
 
 **The markdown and the HTML are named on different principles, deliberately.** The markdown is timestamped per run because it is the archive: every run's full report, kept. The HTML page is `--stable --name review` because it is the standing page: one per repository, replaced in place, carrying only what is still open. One accumulates on purpose; the other refuses to.
 

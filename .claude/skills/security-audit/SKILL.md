@@ -103,7 +103,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat .claude/skills/shared/html-render-review.md`
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["security"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["security-audit"]` and each finding's `specialist` to `security-audit`, and omit the `chips` array (single-specialist context). The audit has its own lens token on purpose: sharing `security` with the change-scoped review would let the next small code change report every unfixed audit finding as resolved without re-examining it (review of the #162 cycle, R4).
 
 ### Security Architect Check
 
