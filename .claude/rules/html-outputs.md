@@ -1,6 +1,6 @@
 # HTML Output Rules
 
-<!-- Toolkit version: 6.3.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 6.3.2 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 ## Purpose
 
@@ -28,7 +28,7 @@ HTML is always generated for these. No judgement call.
 |---|---|
 | `/codebase-to-course` | Already HTML today |
 | `/create-plan` | Plans are always long. Dual-track (markdown canonical + HTML view) is always worth it |
-| `/document` (cycle summary) | One-page "what shipped this cycle" runs every time `/document` does |
+| `/document` (cycle summary) | The standing page telling what changed this cycle and why, refreshed every time `/document` runs |
 | `/explore` design step, load level new | The three-prototype playground always fires (`.claude/skills/shared/design-rules.md`): picking between rendered designs is a user-doing-something loop, not a judgement call |
 
 Markdown remains canonical even when HTML is also generated. Claude reads the markdown; HTML is the rendered view for the user.
@@ -63,7 +63,7 @@ The `/explore` design step dispatches the playground's rendered-prototypes varia
 |---|---|
 | `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
-| `artifacts/html/` | Cycle-bound artifacts (document summaries, debate views, explore option comparisons, audit reports) - timestamped. Also the two `--stable` views, not timestamped: the standing review page `review.html` and `/audit-html` static views. Gitignored. |
+| `artifacts/html/` | Cycle-bound artifacts (debate views, explore option comparisons, audit reports) - timestamped. Also the three `--stable` views, not timestamped: the standing review page `review.html`, the standing cycle summary `cycle.html`, and `/audit-html` static views. Gitignored. |
 | `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. It is the record; each published local file also carries its URL on line 1 as `<!-- hosted: <url> -->`, a derived copy that `--index-sync` regenerates from the newest record per file. Gitignored with the rest of `artifacts/html/`. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
@@ -78,7 +78,7 @@ node .claude/scripts/render-html.js --shell <review|debate|document|explore|audi
 
 By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-HHMMSS.html` (with a `-N` guard for same-second runs), creates `artifacts/html/`, overwrites freely, and prints the output path to stdout. This is what keeps the open fast and collision-free (issues #120, #127): the command emits only the small JSON, never the boilerplate, and there is never a read-then-overwrite cycle. The prebuilt shells live in `.claude/skills/shared/shells/`; each documents its own JSON schema in a header comment.
 
-The three identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run (issue #129): plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run; issue #161), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
+The four identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run (issue #129): plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run; issue #161), the standing cycle summary (`--shell document --name cycle --stable` -> `artifacts/html/cycle.html`, replaced on every `/document` run; issue #163 - note the shell and the name differ here, and the name is the index key), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
 
 **Exception** (still hand-rendered, NOT via the helper): `/playground` throwaways (`/tmp/`, interactive).
 
@@ -162,10 +162,14 @@ Only change a type's icon if that type's purpose changes, never as part of an or
 
 | Types | File naming | Publish behavior |
 |---|---|---|
-| document, explore, debate, audit | timestamped, one file per run | publish a new page each run |
-| review, plan, docview | `--stable`, one file per identity | update the one page for that identity |
+| explore, debate, audit | timestamped, one file per run | publish a new page each run |
+| review, document, plan, docview | `--stable`, one file per identity | update the one page for that identity |
 
 **Review moved to the identity-keyed row in issue #161.** A new page every run is a backlog, and no per-page redesign touches a backlog: cut every page to 600 words and after forty cycles there are forty unread pages, because reading one changes nothing about the next. One standing page per repo replaces itself, carries only what is open, and can go empty. `render-html.js` reads the page it is about to overwrite and states what changed since the reader last opened it, so a finding they already saw does not present itself as news. The identity is the repo, so the name is the bare `review`. A direct single-lens run names its lens in the payload's `lenses` key, and the helper then replaces only that lens's findings and carries the other lenses' open findings forward, marked, rather than reporting them resolved. The page is rendered once per run, after the auto-fix loop has settled, so what it shows as open is what the loop left open.
+
+**Document moved to the identity-keyed row in issue #163.** A cycle summary had the same backlog problem review did, and the evidence was on disk: twenty-seven `document-*.html` files, one per run, going back months. One standing page per repository replaces itself, opens on what changed and why, and carries a running one-line-per-cycle log beneath it, so a reader who was away for three cycles still sees all three. `render-html.js` reads the page it is about to overwrite: the cycle that page showed becomes the newest log entry, and `sinceLast` names it, so the reader is told what the page used to say rather than silently losing it.
+
+**Its `--name` is `cycle`, not `document`, and that is a migration decision rather than a naming preference.** `--name` feeds both the filename and the index key. The timestamped pages already own the key `document`, so a standing page under that name would make `--index-url --name document` return an old cycle page's URL on the first upgraded run - the lookup happens *before* the publish, so the stale row would win on that run and every run after, and a cycle page the user had shared would silently start showing a different cycle. A fresh key returns empty on every repository, published or not, so the behavior is identical everywhere. Review avoided this by accident in #161: its timestamped pages were named `review-orchestrator`, so `review` was already free. `scripts/test-render-html.js` pins the guard.
 
 For a stable type, look up its recorded page first:
 

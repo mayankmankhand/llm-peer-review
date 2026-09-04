@@ -223,23 +223,37 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 ### Generate the summary
 
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
+- **The cycle's name** -> `title`. Give it a real name ("The Page That Can Go Empty"), never the words "Cycle Summary". It is the loudest element on the page and the line the running log carries forward, and a generic title is dropped from that log entirely.
+- **The narrative** - the first screen, and the reason the page exists. Three short blocks: `priorState` (what the system did *before* this cycle), `whatShipped` (what changed), `why` (why it changed). For `why`, route the `### Why` section you have just written into `CHANGELOG.md` rather than composing the same reasoning twice. Any of the three may be omitted; a missing one is skipped, not stubbed.
+- **Diagram** (optional) -> `diagram`, a self-contained inline `<svg>`, and ONLY when the cycle has a flow worth drawing. Most cycles have none, and omitting the key is the normal case. No CDN and no library: the page works offline. A value that does not parse as SVG is dropped silently, so never let the diagram carry meaning the prose does not also carry.
+- **Do NOT author `sinceLast` or `cycleLog`.** The renderer owns both and overwrites whatever you supply: `sinceLast` is what changed since the reader last opened the page, and `cycleLog` is the running history, built from the page this run replaces.
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-Write the JSON to a temp file, then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+Write the JSON to a temp file, then run the helper from the project root. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
 Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```
-node .claude/scripts/render-html.js --shell document --name document --data /tmp/document-data.json
+node .claude/scripts/render-html.js --shell document --name cycle --stable --data /tmp/document-data.json
 ```
 
-You do not name, read, or clean up any prior file - the helper handles naming and overwrites. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
+**The name is `cycle`, not `document`.** `--name` feeds both the filename and the artifact index key, and the timestamped pages this replaces already own the key `document`. Rendering under that name would make the lookup below return an old cycle page's URL and update *that page* forever instead of publishing the standing one.
+
+Because this is a `--stable` type, look up its recorded page before publishing:
+
+```
+node .claude/scripts/render-html.js --index-url --name cycle
+```
+
+Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
 
 ### Advance the marker (LAST step)
 
 After the HTML is written (or deliberately skipped), write the current `HEAD` SHA to `artifacts/html/.last-cycle`, overwriting the previous value.
 
 **This must be the final action of `/document`.** The marker is a high-water mark meaning "every commit up to here is already summarized." Writing it last guarantees that an interrupted run re-summarizes the same window (a harmless duplicate) rather than skipping work permanently. Never write the marker before the summary exists.
+
+**The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree, and this step is unchanged by the standing-page move. Never read the window from the page, and never read the log from the marker.
