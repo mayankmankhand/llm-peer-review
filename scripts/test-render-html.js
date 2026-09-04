@@ -1639,11 +1639,157 @@ function cycle162ReviewTests() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// The cycle summary as a standing page (issue #163).
+//
+// The migration guard is the important one here. --name feeds both the output
+// filename and the artifact index key, and the timestamped cycle pages already
+// own the key "document". Had the standing page reused that name, --index-url
+// would have returned an OLD cycle page's URL on the first upgraded run - the
+// lookup happens before the publish, so the stale row would have won forever,
+// on every repository that had ever published one.
+// ---------------------------------------------------------------------------
+function cycleStandingPageTests() {
+  console.log('\ncycle summary as a standing page (issue #163)');
+  const dir = tmpdir('cycle');
+
+  function run(data, extraArgs) {
+    const dataPath = path.join(dir, 'cycle-in.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', 'document', '--name', 'cycle',
+      '--out-dir', dir, '--stable', '--data', dataPath].concat(extraArgs || []),
+      { encoding: 'utf-8', cwd: dir });
+    const out = (r.stdout || '').trim();
+    return { status: r.status, stderr: r.stderr || '', path: out,
+             html: out && fs.existsSync(out) ? fs.readFileSync(out, 'utf-8') : '' };
+  }
+  const island = function (html) { return JSON.parse(dataIsland(html)); };
+  const cycle = function (title, pill, date, commits) {
+    return { title: title, pill: pill, subtitle: date + ' &middot; window <code>a..b</code>',
+             commitCount: commits, filesByCategory: { scripts: ['a.js', 'b.js'] } };
+  };
+
+  // --- the memory ---------------------------------------------------------
+  const first = run(cycle('Earn the Second Sentence', 'v6.3.0', '2026-09-03', 9));
+  const fd = island(first.html);
+  check('the first cycle summary in a repository says so',
+    /First cycle summary recorded/.test(fd.sinceLast || ''), fd.sinceLast);
+  check('the first run carries no log, because there is no earlier cycle',
+    fd.cycleLog === undefined);
+
+  const second = run(cycle('The Page That Can Go Empty', 'v6.3.1', '2026-09-04', 10));
+  const sd = island(second.html);
+  check('the standing page replaces rather than accumulating',
+    first.path === second.path && fs.readdirSync(dir).filter(function (n) {
+      return /^cycle.*\.html$/.test(n); }).length === 1);
+  check('the second run names what the page previously showed',
+    /Since you last opened this page/.test(sd.sinceLast) &&
+    /Earn the Second Sentence/.test(sd.sinceLast), sd.sinceLast);
+  check('the replaced cycle becomes the newest log entry',
+    sd.cycleLog.length === 1 && sd.cycleLog[0].line === 'Earn the Second Sentence' &&
+    sd.cycleLog[0].pill === 'v6.3.0' && sd.cycleLog[0].date === '2026-09-03',
+    JSON.stringify(sd.cycleLog));
+
+  const third = island(run(cycle('The Standing Cycle Page', 'v6.3.2', '2026-09-05', 4)).html);
+  check('the log accumulates newest first',
+    third.cycleLog.map(function (e) { return e.pill; }).join() === 'v6.3.1,v6.3.0',
+    JSON.stringify(third.cycleLog));
+
+  // --- the cap ------------------------------------------------------------
+  for (let i = 1; i <= 15; i++) run(cycle('Cycle ' + i, 'v9.0.' + i, '2026-10-01', 1));
+  const capped = island(fs.readFileSync(path.join(dir, 'cycle.html'), 'utf-8'));
+  check('the running log is capped at 12 entries',
+    capped.cycleLog.length === 12, String(capped.cycleLog.length));
+  check('the cap drops the oldest, not the newest',
+    capped.cycleLog[0].line === 'Cycle 14' && capped.cycleLog[11].line === 'Cycle 3',
+    capped.cycleLog[0].line + ' .. ' + capped.cycleLog[11].line);
+
+  // --- the three prior states stay distinct -------------------------------
+  fs.writeFileSync(path.join(dir, 'cycle.html'), 'not html at all', 'utf-8');
+  const damaged = island(run(cycle('After Damage', 'v9.9.9', '2026-10-20', 3)).html);
+  check('an unreadable prior page is not reported as a first run',
+    /could not be read/.test(damaged.sinceLast) && !/First cycle summary/.test(damaged.sinceLast),
+    damaged.sinceLast);
+
+  // A page whose title was never set to a real cycle name contributes nothing:
+  // "Cycle Summary" in a history list tells the reader nothing.
+  fs.rmSync(path.join(dir, 'cycle.html'), { force: true });
+  run(cycle('Cycle Summary', 'v0.0.1', '2026-10-21', 1));
+  const afterGeneric = island(run(cycle('Real Name', 'v0.0.2', '2026-10-22', 1)).html);
+  check('a generic "Cycle Summary" title is not logged as a cycle',
+    afterGeneric.cycleLog === undefined, JSON.stringify(afterGeneric.cycleLog));
+
+  // --- the renderer owns cycleLog and sinceLast ---------------------------
+  fs.rmSync(path.join(dir, 'cycle.html'), { force: true });
+  const supplied = island(run(Object.assign(cycle('Supplied', 'v1.0.0', '2026-10-23', 1), {
+    sinceLast: 'PAYLOAD SAYS SO',
+    cycleLog: [{ date: '1999-01-01', pill: 'vX', line: 'Invented' }]
+  })).html);
+  check('a payload cannot author sinceLast',
+    supplied.sinceLast !== 'PAYLOAD SAYS SO', supplied.sinceLast);
+  check('a payload cannot inject a cycle log',
+    supplied.cycleLog === undefined, JSON.stringify(supplied.cycleLog));
+
+  // --- the malformed diagram never takes the page with it -----------------
+  // The shell drops it at render time in the browser; what is asserted here is
+  // that the renderer passes it through untouched and the page still writes.
+  fs.rmSync(path.join(dir, 'cycle.html'), { force: true });
+  const bad = run(Object.assign(cycle('Bad Diagram', 'v1.0.1', '2026-10-24', 1),
+    { diagram: '<svg viewBox="0 0 10 10"><rect' }));
+  check('a malformed diagram still renders a page',
+    bad.status === 0 && bad.html.length > 0 && /Bad Diagram/.test(bad.html));
+
+  // --- the migration guard ------------------------------------------------
+  // A repository upgrading from 6.3.1 carries index rows named "document",
+  // pointing at its old timestamped cycle pages. The standing page must NOT
+  // resolve to one of them, or it would update an old cycle's page forever
+  // instead of publishing its own - and a cycle page the user had shared would
+  // silently start showing a different cycle. This is why the standing page is
+  // named `cycle` and not `document`.
+  const repo = path.join(dir, 'upgraded');
+  fs.mkdirSync(repo, { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: repo });
+  execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+  fs.writeFileSync(path.join(repo, 'README.md'), 'x\n');
+  execFileSync('git', ['add', '.'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+
+  ['document-2026-06-11-071022.html', 'document-2026-09-03-083544.html'].forEach(function (mirror, i) {
+    execFileSync('node', [SCRIPT, '--index-add', '--type', 'document', '--name', 'document',
+      '--local', path.join('artifacts/html', mirror),
+      '--url', 'https://example.com/old-cycle-' + i],
+      { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  });
+
+  const legacy = execFileSync('node', [SCRIPT, '--index-url', '--name', 'document'],
+    { cwd: repo, encoding: 'utf-8' }).trim();
+  check('the legacy "document" key still resolves to its newest old page',
+    legacy === 'https://example.com/old-cycle-1', legacy);
+
+  const migrated = execFileSync('node', [SCRIPT, '--index-url', '--name', 'cycle'],
+    { cwd: repo, encoding: 'utf-8' }).trim();
+  check('the standing page name resolves to nothing, so no old page is taken over',
+    migrated === '', migrated);
+
+  // --- a timestamped run has no predecessor, so it gets no memory ---------
+  const dataPath = path.join(dir, 'ts.json');
+  fs.writeFileSync(dataPath, JSON.stringify(cycle('Timestamped', 'v1.0.2', '2026-10-25', 1)), 'utf-8');
+  const ts = spawnSync('node', [SCRIPT, '--shell', 'document', '--name', 'cycle-ts',
+    '--out-dir', dir, '--data', dataPath], { encoding: 'utf-8', cwd: dir });
+  const tsIsland = island(fs.readFileSync((ts.stdout || '').trim(), 'utf-8'));
+  check('a run without --stable gets no sinceLast and no log',
+    tsIsland.sinceLast === undefined && tsIsland.cycleLog === undefined);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 hardeningTests();
 themeContrastTests();
 findingContractTests();
 issue162Tests();
 cycle162ReviewTests();
+cycleStandingPageTests();
 
 console.log('');
 if (failures.length === 0) {
