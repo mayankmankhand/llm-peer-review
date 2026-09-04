@@ -38,8 +38,30 @@
     "commitCount": 1,                            // used only if subtitle is absent
     "issues":      ["#119", "#126"],             // used only if subtitle is absent
 
-    // "What shipped" callout (the gold's .meta-card). HTML allowed. Omit to hide.
+    // ---- the narrative (the page's first screen, issue #163) ----
+    // Three parts, rendered in this order under "Before" / "What changed" /
+    // "Why". Each is optional and a missing one is skipped, not stubbed. HTML
+    // allowed in all three. They lead the page; the file inventory follows.
+    "priorState":  "Every /document run wrote a new timestamped page ...",
     "whatShipped": "Two reliability fixes. <strong>#119</strong> ...",
+    "why":         "A new page every run is a backlog ...",   // route CHANGELOG's "### Why"
+
+    // Running log of earlier cycles, carried forward by render-html.js from the
+    // page this render replaces (stable mode only) and capped there. /document
+    // does not author it. date and pill are plain text; line allows HTML.
+    "cycleLog": [
+      { "date": "2026-09-03", "pill": "v6.3.1", "line": "The page that can go empty" }
+    ],
+
+    // Optional inline SVG for the cycle's flow. Rendered ONLY when it is a
+    // string beginning with <svg that parses as SVG; anything else is silently
+    // dropped, because this is the one model-authored markup field on the page.
+    // Most cycles omit it. No CDN, no library - the shell is offline-only.
+    "diagram": "<svg viewBox=\"0 0 600 120\" ...>...</svg>",
+
+    // Set by render-html.js in stable mode ("Since you last opened this page:
+    // ..."). NEVER authored by /document; a supplied value is overwritten.
+    "sinceLast": "Since you last opened this page: 19 commits across 2 cycles.",
 
     // Files changed by category. Keys are category labels; each value is an
     // array of files. A file is either a plain string (path) or an object
@@ -92,14 +114,68 @@
 
 /* ---- document-specific layout (everything NOT already in tokens.css) ---- */
 header.page{padding:2rem 0 .5rem;}
+/* The cycle's name is the loudest thing on the page, and the only element taking
+   --text-display: a second one would mean neither is loudest (html-look.md).
+   It is the h1 itself rather than a separate banner, so the page keeps one
+   heading and a screen reader hears the cycle name first (issue #163). */
+h1.display{margin:0 0 .3rem;}
 h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);vertical-align:middle;margin-left:.5rem;} /* tinted, not --bg-muted (holistic review, R30) */
-.sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
+.sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;max-width:var(--measure);}
 
-/* h2 section headers get the gold's underline rule. */
-h2{font-size:1.25rem;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px solid var(--border);}
+/* "Since you last opened this page" - renderer-set, never authored by /document.
+   Sits directly under the header because orientation comes before content. */
+.since-last{color:var(--text-muted);font-size:.95rem;margin:.7rem 0 0;max-width:var(--measure);}
 
-/* Callout card (what shipped, PR/commit) - matches the gold .meta-card. */
-.meta-card{background:var(--bg-muted);border:1px solid var(--border);border-radius:8px;padding:.9rem 1.1rem;font-size:.9rem;margin-bottom:.5rem;}
+/* The narrative: the three questions a reader opens this page to answer, in the
+   order they are asked. This is the page's first screen, above the mechanical
+   inventory that used to own the layout (issue #163). */
+.narrative{margin:1.7rem 0 0;}
+.narr{margin:0 0 1.2rem;max-width:var(--measure);}
+/* h2, not h3: these are real sections of the page, at the same level as "Earlier
+   cycles" below, and an h3 straight after the h1 skips a level (axe heading-order).
+   Visual weight and semantic level are allowed to differ - these labels stay quiet
+   on purpose so the prose leads the first screen. */
+.narr h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin:0 0 .3rem;font-weight:600;}
+.narr p{margin:0;}
+
+/* Optional inline SVG, rendered only when the cycle has a flow worth drawing.
+   Scrolls inside its own box rather than widening the page. */
+.diagram{margin:1.5rem 0 0;overflow-x:auto;}
+.diagram svg{max-width:100%;height:auto;display:block;}
+
+/* Earlier cycles - the running log carried forward from the page this replaces.
+   One line each: this is history, so it stays compact and never competes with
+   the current cycle above it. */
+.log{list-style:none;margin:.3rem 0 0;padding:0;}
+.log li{display:flex;gap:.7rem;align-items:baseline;padding:.45rem 0;border-top:1px solid var(--border);font-size:.9rem;max-width:var(--measure);}
+.log li:first-child{border-top:0;}
+.log-when,.log-pill{color:var(--text-muted);font-family:ui-monospace,Consolas,monospace;font-size:.78rem;flex:none;}
+.log-when{min-width:5.5rem;}
+
+/* The underline rule is gone (design critic, round 1). It spanned the full 940px
+   over a 64ch text column, which left the right third empty and made a composed
+   page read as an unstyled document. Capping it to --measure does not work either:
+   ch is relative to the element's OWN font-size, so the same token resolves wider
+   on a 1.25rem heading than on 1rem prose. Space separates the sections instead,
+   which is one less thing on the screen (design-rules.md, Technique 6). */
+h2{font-size:1.25rem;margin:2.6rem 0 .7rem;}
+/* The first section after the narrative gets extra air, so the page separates
+   "this cycle's story" from the mechanical record rather than running them
+   together at one rhythm (design critic, round 1). */
+.narrative + h2{margin-top:3.4rem;}
+/* The diagram already carries its own space above and below, so it does not also
+   take the extra section gap - stacking both left a ~120px void that read as a
+   break in the page (design critic, round 2). */
+.diagram + h2{margin-top:2.2rem;}
+/* Lines inside a callout card stack as blocks; see the prNote comment below. */
+.card-line{margin:0 0 .4rem;}
+.card-line:last-child{margin-bottom:0;}
+
+/* Callout card - now only the PR/commit block. "What shipped" left this card in
+   issue #163 and became plain narrative prose: the card was a container holding
+   nothing the layout needed, and it made the page's most important paragraph
+   look like an aside (design-rules.md, Technique 6). */
+.meta-card{background:var(--bg-muted);border:1px solid var(--border);border-radius:8px;padding:.9rem 1.1rem;font-size:.9rem;margin-bottom:.5rem;max-width:var(--measure);}
 
 /* Files-by-category. */
 .cat{margin-bottom:1rem;}
@@ -117,10 +193,13 @@ h2{font-size:1.25rem;margin:2rem 0 .7rem;padding-bottom:.3rem;border-bottom:1px 
 
 /* Documentation deltas list. */
 .deltas{margin:.3rem 0;padding-left:1.2rem;}
-.deltas li{margin-bottom:.3rem;}
+.deltas li{margin-bottom:.3rem;max-width:var(--measure);}
 
 /* Mini commit chart - small inline bars. */
-.chart{display:flex;align-items:flex-end;gap:.5rem;height:70px;padding:.5rem 0;margin-top:.6rem;}
+/* min-height, not height: a 55px bar plus a two-line label is taller than 70px,
+   and a fixed height with align-items:flex-end pushed the overflow UPWARD, so the
+   bars were painted over the note above the chart (design critic, round 1). */
+.chart{display:flex;align-items:flex-end;gap:.5rem;min-height:70px;padding:.5rem 0;margin-top:.6rem;}
 .bar-wrap{display:flex;flex-direction:column;align-items:center;gap:.3rem;}
 .bar{width:30px;min-height:2px;background:var(--accent);border-radius:3px 3px 0 0;}
 .bar--zero{background:var(--border);}
@@ -161,7 +240,7 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
 
   // ---- header.page (title + pill, subtitle) -----------------------------
   var header = el("header", "page");
-  var h1 = el("h1");
+  var h1 = el("h1", "display"); // the cycle's name, and the page's one display element
   text(h1, data.title || "Cycle Summary");
   if (isStr(data.pill)) {
     var pill = el("span", "pill");
@@ -178,29 +257,65 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     html(sub, subMarkup); // may carry inline HTML (e.g. <code>, &middot;)
     header.appendChild(sub);
   }
+  // "Since you last opened this page" - set by render-html.js in stable mode,
+  // never authored by /document. Orientation comes before content.
+  if (isStr(data.sinceLast)) {
+    var sl = el("p", "since-last");
+    text(sl, data.sinceLast);
+    header.appendChild(sl);
+  }
   body.appendChild(header);
 
-  // ---- what shipped (callout) -------------------------------------------
-  if (isStr(data.whatShipped)) {
-    var ws = el("div", "meta-card");
-    html(ws, data.whatShipped);
-    body.appendChild(ws);
-  }
+  // ---- the narrative (first screen) -------------------------------------
+  // Before / What changed / Why, in the order a reader asks them. This is what
+  // the page is for; everything below it is the mechanical record (issue #163).
+  var narrative = el("div", "narrative");
+  [
+    { key: "priorState",  label: "Before" },
+    { key: "whatShipped", label: "What changed" },
+    { key: "why",         label: "Why" }
+  ].forEach(function (part) {
+    if (!isStr(data[part.key])) return;      // a missing part is skipped, not stubbed
+    var block = el("div", "narr");
+    var lbl = el("h2");                       // h2 keeps the heading order valid
+    text(lbl, part.label);
+    block.appendChild(lbl);
+    var p = el("p");
+    html(p, data[part.key]);                 // trusted inline HTML
+    block.appendChild(p);
+    narrative.appendChild(block);
+  });
+  if (narrative.childNodes.length) body.appendChild(narrative);
 
-  // ---- files changed by category ----------------------------------------
-  var fbc = data.filesByCategory;
-  if (fbc && typeof fbc === "object") {
-    var order = orderedCategoryKeys(fbc);
-    var sections = [];
-    order.forEach(function (key) {
-      var list = fbc[key];
-      if (!nonEmpty(list)) return;
-      sections.push(renderCategory(key, list));
+  // ---- diagram (optional) -----------------------------------------------
+  var diagram = renderDiagram(data.diagram);
+  if (diagram) body.appendChild(diagram);
+
+  // ---- earlier cycles (the running log) ---------------------------------
+  if (nonEmpty(data.cycleLog)) {
+    body.appendChild(sectionHeading("Earlier cycles"));
+    var log = el("ul", "log");
+    data.cycleLog.forEach(function (entry) {
+      if (!entry) return;
+      var li = el("li");
+      if (isStr(entry.date)) {
+        var when = el("span", "log-when");
+        text(when, entry.date);
+        li.appendChild(when);
+      }
+      if (isStr(entry.pill)) {
+        var lp = el("span", "log-pill");
+        text(lp, entry.pill);
+        li.appendChild(lp);
+      }
+      if (isStr(entry.line)) {
+        var lt = document.createElement("span");
+        html(lt, entry.line);                // trusted inline HTML
+        li.appendChild(lt);
+      }
+      if (li.childNodes.length) log.appendChild(li);
     });
-    if (sections.length) {
-      body.appendChild(sectionHeading("Files changed by category"));
-      sections.forEach(function (s) { body.appendChild(s); });
-    }
+    if (log.childNodes.length) body.appendChild(log);
   }
 
   // ---- documentation deltas ---------------------------------------------
@@ -235,15 +350,17 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     var card = el("div", "meta-card");
 
     if (hasPrNote) {
-      var note = document.createElement("span");
+      // A block, not a bare <span>: an inline note followed by the block-level
+      // chart shared a line box, and the bars were drawn over the note's text
+      // (design critic, round 1). A block box cannot be overlapped that way.
+      var note = el("p", "card-line");
       html(note, data.prNote); // inline HTML allowed (may itself include a link)
       card.appendChild(note);
     }
 
     if (hasPrLink) {
       // Standalone PR link (when not already embedded in prNote markup).
-      if (hasPrNote) card.appendChild(document.createTextNode(" "));
-      var prWrap = document.createElement("span");
+      var prWrap = el("p", "card-line");
       prWrap.appendChild(document.createTextNode("PR: "));
       var a = el("a");
       a.setAttribute("href", data.prLink);
@@ -255,6 +372,25 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     if (hasChart) card.appendChild(renderChart(data.commitChart));
 
     body.appendChild(card);
+  }
+
+  // ---- files changed by category ----------------------------------------
+  // Last on purpose. This is the mechanical record: useful to check, but it used
+  // to own the page's layout while the narrative sat in a small card above it,
+  // which is the hierarchy issue #163 was filed about.
+  var fbc = data.filesByCategory;
+  if (fbc && typeof fbc === "object") {
+    var order = orderedCategoryKeys(fbc);
+    var sections = [];
+    order.forEach(function (key) {
+      var list = fbc[key];
+      if (!nonEmpty(list)) return;
+      sections.push(renderCategory(key, list));
+    });
+    if (sections.length) {
+      body.appendChild(sectionHeading("Files changed by category"));
+      sections.forEach(function (s) { body.appendChild(s); });
+    }
   }
 
   // ---- footer -----------------------------------------------------------
@@ -269,6 +405,36 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
   // ====================================================================
   // builders
   // ====================================================================
+
+  // Optional inline SVG for the cycle's flow. Unlike every other field, this one
+  // is model-authored markup per run, so a malformed value must degrade to "no
+  // diagram" and never take the rest of the page with it (issue #163).
+  //
+  // Three gates, cheapest first:
+  //   1. a non-empty string that starts with <svg after trimming
+  //   2. it parses as XML with no parser error
+  //   3. the parsed root really is an <svg> element
+  // Anything else returns null and the section is simply skipped.
+  function renderDiagram(raw) {
+    if (!isStr(raw)) return null;
+    var src = raw.replace(/^\s+/, "");
+    if (src.slice(0, 4).toLowerCase() !== "<svg") return null;
+
+    var doc;
+    try {
+      doc = new DOMParser().parseFromString(src, "image/svg+xml");
+    } catch (e) {
+      return null;                                   // parser threw outright
+    }
+    if (!doc || doc.getElementsByTagName("parsererror").length) return null;
+
+    var root = doc.documentElement;
+    if (!root || String(root.nodeName).toLowerCase() !== "svg") return null;
+
+    var wrap = el("figure", "diagram");
+    wrap.appendChild(document.importNode(root, true)); // adopt the parsed node, not the raw string
+    return wrap;
+  }
 
   function buildSubtitle(d) {
     var parts = [];
