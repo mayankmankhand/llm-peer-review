@@ -141,7 +141,15 @@ h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6r
 /* Optional inline SVG, rendered only when the cycle has a flow worth drawing.
    Scrolls inside its own box rather than widening the page. */
 .diagram{margin:1.5rem 0 0;overflow-x:auto;}
-.diagram svg{max-width:100%;height:auto;display:block;}
+/* fill follows the theme (review of this cycle, R12). SVG's initial fill is black
+   with no inheritance from the page's text color, so a diagram authored without
+   explicit colors - the likely shape, since the authoring instruction says nothing
+   about color - painted black on the dark ground and disappeared. fill is an
+   inherited SVG property, so setting it on the root reaches every shape and every
+   <text> that did not set its own, and leaves explicitly coloured ones alone.
+   stroke is deliberately NOT set: its initial value is none, so inheriting a colour
+   would draw outlines the author never asked for. */
+.diagram svg{max-width:100%;height:auto;display:block;color:var(--text);fill:currentColor;}
 
 /* Earlier cycles - the running log carried forward from the page this replaces.
    One line each: this is history, so it stays compact and never competes with
