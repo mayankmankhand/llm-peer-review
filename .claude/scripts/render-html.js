@@ -77,9 +77,10 @@
 //   line so the <title> stays inside the first 8KB the hosted publisher scans.
 //
 //   --shell    which template under .claude/skills/shared/shells/ to use
-//   --name     filename prefix, e.g. review (the standing page, with --stable), debate-gpt,
-//              document, explore-<slug>, audit-html, PLAN-issue-<n>. The timestamp
-//              is appended unless --stable is set.
+//   --name     filename prefix, e.g. review and cycle (the standing pages, with
+//              --stable; note --shell document renders under the name `cycle`),
+//              debate-gpt, explore-<slug>, audit-html, PLAN-issue-<n>. The
+//              timestamp is appended unless --stable is set.
 //   --data     path to a JSON file. If omitted or "-", JSON is read from stdin.
 //   --out-dir  output directory. Default: artifacts/html. Resolved against the
 //              current working directory (relative or absolute both work) and
@@ -458,7 +459,7 @@ if (opts.indexSync) {
   // names the same mirror, so this is "newest URL per name" - the rule
   // --index-url applies - and a stamp can never disagree with a lookup. For
   // the timestamped types every run has its own mirror AND its own page under
-  // a shared name ("document", "debate-gpt"), so keying by name would stamp each older mirror
+  // a shared name ("debate-gpt", "explore-<slug>"), so keying by name would stamp each older mirror
   // with the newest run's URL. Keying by file is right for both, and it is
   // what --index-add already does one row at a time. Null-prototype map, so a
   // path can never read a value off Object.prototype. The key is the
@@ -1127,6 +1128,89 @@ function priorPayload(file) {
   try { return { state: 'ok', data: JSON.parse(m[1]) }; } catch (e) { return { state: 'unreadable' }; }
 }
 
+// ---- the cycle summary's standing-page memory (issue #163) ----------------
+// The review page's memory speaks in findings ("new / still open / resolved").
+// A cycle summary has no standing backlog: its items are events that happened
+// once. So it reuses priorPayload() above verbatim and nothing else - not
+// carryForward (lens-merging is a review concept; a /document run always sees
+// the whole cycle), not stableFindingKey, not openFindings.
+
+const CYCLE_LOG_MAX = 12; // the page is a summary, not an archive
+
+// The date this cycle is filed under. /document may set `date` outright; if it
+// does not, the subtitle it already writes begins with one.
+function cycleDate(d) {
+  if (!d || typeof d !== 'object') return '';
+  if (typeof d.date === 'string' && d.date.trim()) return d.date.trim();
+  const m = typeof d.subtitle === 'string' ? d.subtitle.match(/\d{4}-\d{2}-\d{2}/) : null;
+  return m ? m[0] : '';
+}
+
+// How many commits and files this cycle touched, for the sinceLast line.
+function cycleCounts(d) {
+  let commits = Number(d && d.commitCount);
+  if (!(commits > 0) && Array.isArray(d && d.commitChart)) {
+    commits = d.commitChart.reduce(function (n, r) { return n + (Number(r && r.count) || 0); }, 0);
+  }
+  let files = 0;
+  const fbc = d && d.filesByCategory;
+  if (fbc && typeof fbc === 'object') {
+    Object.keys(fbc).forEach(function (k) { if (Array.isArray(fbc[k])) files += fbc[k].length; });
+  }
+  return { commits: commits > 0 ? commits : 0, files: files };
+}
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+// Build this run's log from the page it replaces: the cycle that page showed
+// becomes the newest log entry, ahead of the entries it was already carrying.
+// The renderer owns this key outright - a supplied cycleLog is replaced, the
+// same way sinceLast is - so /document never has to remember past cycles.
+function carryCycleLog(data, prior) {
+  const carried = (prior.state === 'ok' && Array.isArray(prior.data.cycleLog))
+    ? prior.data.cycleLog.filter(function (e) { return e && typeof e === 'object'; })
+    : [];
+
+  const log = [];
+  if (prior.state === 'ok') {
+    const p = prior.data;
+    const line = typeof p.title === 'string' ? p.title.trim() : '';
+    // A page whose title was never set to a real cycle name contributes no
+    // entry: "Cycle Summary" in a history list tells the reader nothing.
+    if (line && !/^cycle summary$/i.test(line)) {
+      log.push({ date: cycleDate(p), pill: typeof p.pill === 'string' ? p.pill : '', line: line });
+    }
+  }
+  data.cycleLog = log.concat(carried).slice(0, CYCLE_LOG_MAX);
+  if (!data.cycleLog.length) delete data.cycleLog; // an empty section renders nothing
+}
+
+// One sentence about what changed since the reader last opened this page. The
+// three prior states stay distinct here for the same reason they do on the
+// review page: "no page yet" and "a page I could not read" are different facts.
+function markCycleChanged(data, prior) {
+  const c = cycleCounts(data);
+  const scope = c.commits || c.files
+    ? plural(c.commits, 'commit') + ' across ' + plural(c.files, 'file')
+    : '';
+
+  if (prior.state === 'none') {
+    data.sinceLast = 'First cycle summary recorded for this repository'
+      + (scope ? ': ' + scope + '.' : '.');
+    return;
+  }
+  if (prior.state === 'unreadable') {
+    data.sinceLast = 'The previous page could not be read, so nothing here is compared against it'
+      + (scope ? '. This cycle: ' + scope + '.' : '.');
+    return;
+  }
+  const wasTitle = typeof prior.data.title === 'string' ? prior.data.title.trim() : '';
+  const showed = wasTitle && !/^cycle summary$/i.test(wasTitle) ? ' It previously showed ' + wasTitle + '.' : '';
+  data.sinceLast = (scope
+    ? 'Since you last opened this page: ' + scope + '.'
+    : 'Since you last opened this page.') + showed;
+}
+
 // Which lenses a finding belongs to: its `specialist` ("code", "code, ux",
 // "[code, ux]"), falling back to the group it sits in. Lowercased tokens.
 function specialistsOf(f, groupLabel) {
@@ -1304,6 +1388,15 @@ if (opts.shell === 'review') {
     markWhatChanged(parsed, prior);
     openFindings(parsed).forEach(function (f) { delete f._key; });
   }
+}
+// The cycle summary is the second identity-keyed page (issue #163). Same memory
+// mechanism as review, different vocabulary: events, not open findings. The path
+// is derived from outDir + safeName exactly as above, so it follows the --name
+// the caller passed (`cycle`) rather than hardcoding a filename.
+if (opts.shell === 'document' && opts.stable) {
+  const priorCycle = priorPayload(path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+  carryCycleLog(parsed, priorCycle);
+  markCycleChanged(parsed, priorCycle);
 }
 // The debate page carries the same finding shape in its Recommended Actions,
 // and the retired labels were refused only on the review shell (v6.3.0
