@@ -109,7 +109,14 @@
   --weight-strong:700;
   --measure:64ch;           /* running prose stays readable; the page stays 940px */
 }
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:17px;font-weight:var(--weight-normal);}
+/* Token safety, shell-wide (issue #163). One unbroken URL, hash, or file path must
+   wrap rather than push the whole page sideways. It lives here, on body, rather than
+   as a per-shell rule because overflow-wrap is INHERITED: one declaration covers all
+   seven shells and any shell added later, so the gap cannot reopen. Review and debate
+   shipped their own local copies in #161 and #162; those now merely restate this and
+   are left alone. A <pre> is unaffected either way - white-space:pre never wraps, so
+   it keeps its own horizontal scroll box. */
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:17px;font-weight:var(--weight-normal);overflow-wrap:anywhere;}
 .display{font-size:var(--text-display);font-weight:var(--weight-strong);line-height:1.1;letter-spacing:-.02em;margin:0 0 .5rem;text-wrap:balance;max-width:var(--measure);}
 h1{font-size:var(--text-h1);font-weight:600;line-height:1.3;margin:0 0 .25rem;}
 h2{font-size:var(--text-h2);font-weight:600;line-height:1.3;margin:2rem 0 .8rem;}

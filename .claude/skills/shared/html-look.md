@@ -16,6 +16,7 @@ This is the minimal v1: typography, colors, severity badges, and the copy-button
 - `--measure` 64ch bounds running prose. The page itself stays 940px
 - Line height: 1.6 for body, 1.3 for headings, 1.1 for display
 - Only one element per page takes `--text-display`. A second one means neither is the loudest thing
+- `body` carries `overflow-wrap: anywhere`, so one unbroken URL, hash, or file path wraps instead of pushing the page sideways. It sits on `body` because `overflow-wrap` is inherited: one declaration covers every shell, including any added later (issue #163). A `<pre>` is unaffected, because `white-space: pre` never wraps and keeps its own scroll box
 
 Two entries here were wrong before issue #161 and are corrected above: h3 was documented as 1.25rem where the code has always set 1.1rem, and a `small 0.875rem` was documented that `tokens.css` never defined. Both files change together; that is the whole point of the mirror.
 
