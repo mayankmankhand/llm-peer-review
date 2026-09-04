@@ -204,3 +204,11 @@
 - **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
 - **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
 - **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.**
+
+### The standing cycle page (issue #163)
+
+- **A name that is also a key is a migration decision, not a preference.**
+- **The design critic finds rendering bugs the test suite cannot see.**
+- **An inherited CSS property belongs on the shared root, not copied into each file.**
+- **Ask what a change means for repos that already installed the last version, before writing the plan.**
+- **Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.**

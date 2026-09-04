@@ -44,10 +44,14 @@ and never overwrites a design system you already have. Edit it freely.
 <!-- One line per direction: name, seed, best critic score, kept or dropped. Written
      by /document at the end of a cycle. -->
 
+- **Narrative-first cycle page** (issue #163, v6.3.2) - load level improve, surface `.claude/skills/shared/shells/document-shell.html`. No seed: seeds are generated for the three directions of new work, and an improve run varies one existing surface. Brief: the reader opens this page to understand what changed and why, so the story takes the first screen and the mechanical file inventory moves below it. Rounds: 4/10, then 4/10. Round 2 kept (the score did not rise, so the loop stopped under M15 and the later state was kept, since both rounds scored equally and round 2 held the fixes). **Kept.** Divergence: stay inside, and none was taken - no new colour, type size, or spacing value was introduced. Gaps left open at the stop, all judged out of scope for this issue: the 64ch prose column against the 940px page is a shared-token question, not a per-shell one; the page carries two labelling idioms (quiet uppercase micro-labels above prose, sentence-case section headings below); and the accent colour appears in unrelated roles across the page. Two of round 2's six gaps were fixture artifacts rather than design faults - a deliberately trivial demo diagram, and a two-bar chart - which is worth knowing when reading a critic score: the critic judges the screenshot it is given, so a weak fixture costs real points.
+
 ## Prompts to retry on newer models
 
 <!-- Briefs that did not work this time. Try them again when a newer model ships;
      that is how you learn what the latest models can do. -->
+
+- **"Narrative-first cycle page"** (issue #163). Failed by the digest definition: the loop stopped at 4/10, under the 9/10 bar. Worth rerunning on a newer model with a *realistic* fixture rather than the demo one - the critic penalised a placeholder diagram and a two-bar chart that a real cycle would not produce, so part of the score was measuring the fixture. The brief itself still looks right: the redesign did move the narrative to the first screen and demote the inventory, which was the goal. What no round reached was studio-level composition on a single-column document page.
 
 ## Baseline images
 
