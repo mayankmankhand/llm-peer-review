@@ -24,19 +24,19 @@ The generic `secret-assignment` fallback was not the safety net it looked like. 
 
 ### Added
 
-- **Six patterns.** `gitlab-pat` for `glpat-`, `gitlab-token` for GitLab's deploy, runner, service-account, pipeline-trigger and cluster-agent tokens, `npm-token` for npm access tokens, `pypi-token` for PyPI publish tokens, `jwt` for JSON Web Tokens, and `netrc-record` for a netrc credential record pasted somewhere that is not a `.netrc`. Nine patterns become fifteen.
+- **Six patterns.** `gitlab-pat` for `glpat-`, `gitlab-token` for GitLab's deploy, runner, service-account, pipeline-trigger and cluster-agent tokens, `npm-token` for npm access tokens, `pypi-token` for PyPI publish tokens, `jwt` for JSON Web Tokens, and `netrc-record` for a netrc credential record pasted somewhere that is not a `.netrc`. Nine patterns become fifteen. `pypi-token` and the credential-shape requirement on `netrc-record` were both added by this cycle's own review, not by the original change.
 - **`.netrc` and `_netrc` are never-push files.** A committed netrc is entirely credentials, so there is no line to match and the name is the check.
 - **`scripts/test-pre-push-check.js`, 31 checks.** The tripwire was the only runtime script with no test file, and it is the security-critical one. Each new pattern gets a hit and a near-miss, both real false-positive sentences are pinned, and the `.netrc` filename check, its base exemption, whole-line masking and the 0/1/2 exit contract are covered.
 
 ### Notes on what was deliberately left out
 
 - **No `anthropic-key` pattern.** `sk-ant-` already matches the existing `openai-key` pattern, and since one report line is emitted per matching pattern, adding it would report every Anthropic key twice for no new detection.
-- **`.npmrc` and `.pypirc` are not never-push files.** Both are routinely committed with no credential in them, so flagging them by name would block ordinary pushes and train the "push anyway" reflex the tripwire exists to prevent. Their token lines are caught by `npm-token` instead.
-- **`netrc-record` anchors on the record shape**, not on the keyword. A pattern matching the bare word fires on ordinary English: excluding prose one phrase at a time was tried and does not converge. The cost is that a bare `password <value>` line with no `machine` or `login` before it is not matched, which is acceptable because a real netrc is caught by name.
+- **`.npmrc` and `.pypirc` are not never-push files.** Both are routinely committed with no credential in them, so flagging them by name would block ordinary pushes and train the "push anyway" reflex the tripwire exists to prevent. Their token lines are caught by `npm-token` and `pypi-token` instead, one pattern per registry, because the two formats share nothing. An earlier draft of this section claimed `npm-token` covered both; it does not, and the review caught it.
+- **`netrc-record` needs two things at once**: the record shape, and a value that looks like a credential (eight characters or more, with at least one digit). The shape alone was not enough. The first version shipped in this cycle matched "The login and password fields are required.", because any filler word satisfies the middle slot and any six-letter word satisfies the value; the review caught it and five such sentences are now pinned as tests. The cost is that a bare `password <value>` line, and a real credential of eight-plus letters carrying no digit, are both missed. A file actually named `.netrc` is caught by name whatever it contains.
 
 ### Upgrading
 
-Nothing to migrate. Re-running setup replaces `.claude/scripts/pre-push-check.js`; if you have edited your copy, the installer's manifest gate warns and backs up as usual. One caveat worth knowing: `netrc-record` fires on prose that spells a netrc record out, so a document that shows one rather than describing it will block a push.
+Nothing to migrate. Re-running setup replaces `.claude/scripts/pre-push-check.js`; if you have edited your copy, the installer's manifest gate warns and backs up as usual. One caveat worth knowing: `netrc-record` can still fire on prose that spells a record out with a credential-shaped value in it, so a document showing a realistic example rather than describing one will block a push. Ordinary sign-in documentation no longer trips it.
 
 ---
 

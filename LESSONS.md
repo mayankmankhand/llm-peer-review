@@ -212,3 +212,10 @@
 - **An inherited CSS property belongs on the shared root, not copied into each file.**
 - **Ask what a change means for repos that already installed the last version, before writing the plan.**
 - **Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.**
+
+### Tripwire credential patterns (issue #164)
+
+- **A detection pattern must be tested against ordinary prose, not only against what it hunts.**
+- **A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.**
+- **The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.**
+- **Release counts go stale a second time when the fix loop itself changes them; re-sweep after the loop, never before.**

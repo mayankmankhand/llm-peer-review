@@ -181,7 +181,8 @@ function nearMissTests() {
 }
 
 // --- 3. ordinary English does not fire --------------------------------------
-// The reason netrc-record anchors on the record shape instead of the keyword.
+// The reason netrc-record needs BOTH a record shape and a credential-shaped
+// value: the shape alone still matched ordinary sign-in prose.
 function falsePositiveTests() {
   console.log('\n3. prose containing the word does not fire');
   const sb = makeRepo('prose');
