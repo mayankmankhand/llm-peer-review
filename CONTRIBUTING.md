@@ -33,6 +33,7 @@ The script updates VERSION, package.json, package-lock.json (if present), and th
 - If this release bumps a default model, follow the model-bump reminder printed by `bump-version.sh`: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL` to the new value, then update `.env.local.example` and `API-KEYS.md`
 - If the installers changed since the last release, run `bash scripts/setup/test-installer-guarantees.sh` (and the `.ps1` mirror on Windows) before tagging
 - If `.claude/scripts/gen-media.js` changed, run `node scripts/test-gen-media.js` (no network or key needed)
+- If `.claude/scripts/pre-push-check.js` changed, run `node scripts/test-pre-push-check.js` (builds throwaway git repos under the temp directory; no network needed)
 - Commit, push, tag
 - Cut a GitHub release with `gh release create vX.Y.Z` so the latest release on GitHub reflects current main
 
