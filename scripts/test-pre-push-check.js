@@ -61,6 +61,9 @@ const GITLAB_PAT_SHORT = 'gl' + 'pat-' + BODY19;
 const GITLAB_RUNNER = 'gl' + 'rt-' + BODY20;
 const NPM_TOKEN = 'npm' + '_' + 'a'.repeat(36);
 const NPM_TOKEN_SHORT = 'npm' + '_' + 'a'.repeat(35);
+const GITLAB_RUNNER_SHORT = 'gl' + 'rt-' + BODY19;
+const PYPI_TOKEN = 'py' + 'pi-' + 'AgEIcHlwaS5vcmcCJDY3' + BODY20;
+const PYPI_TOKEN_SHORT = 'py' + 'pi-' + 'AgEIcHlwaS5v';
 const JWT_HEAD = 'ey' + 'J' + 'hbGciOiJIUzI1NiJ9';
 const JWT_BODY = 'ey' + 'J' + 'zdWIiOiIxMjM0NTY3OCJ9';
 const JWT_SIG = 'SflKxwRJSMeKKF2QT4fwpMeJf36POk6y';
@@ -76,6 +79,17 @@ const NETRC_RECORD = 'machine gitlab.com login testuser ' + NETRC_KEYWORD + ' ' 
 // bracket before the verb slipped past the lookahead.
 const PROSE_1 = '(password) is Enterprise-only or a $150/mo Pro add-on, NOT part of base Pro';
 const PROSE_2 = 'password protection is an Enterprise add-on';
+// Ordinary sign-in documentation. Every line here matched the netrc pattern before
+// the credential-shape requirement was added: any filler word satisfies the middle
+// slot and any six-letter word satisfies the value. Keep these - they are the
+// regression net for a pattern that blocked pushes on English.
+const PROSE_AUTH = [
+  'The login and password fields are required.',
+  'login and password combination is invalid',
+  'Store the login and password securely in the vault.',
+  'machine learning login and password fields',
+  'Reset your login and password requirements.',
+];
 
 // --- sandbox helpers --------------------------------------------------------
 function makeRepo(label) {
@@ -118,6 +132,9 @@ function patternTests() {
     // not know, which is why the fallback never caught it.
     ['npm-token', 'ci/npmrc.sample', '//registry.npmjs.org/:_authToken' + '=' + NPM_TOKEN + '\n'],
     ['jwt', 'ci/session.txt', 'Authorization: Bearer ' + JWT + '\n'],
+    // .pypirc is deliberately absent from the never-push list, so this pattern is
+    // the only cover a PyPI publish token has.
+    ['pypi-token', 'ci/pypirc.sample', '[pypi]\n' + 'username' + '=' + '__token__\n' + 'password' + '=' + PYPI_TOKEN + '\n'],
     // A netrc RECORD pasted somewhere that is not named .netrc - the case the
     // filename check cannot see.
     ['netrc-record', 'ci/bootstrap.sh', '#!/bin/sh\ncat > ~/.netrc <<EOF\n' + NETRC_RECORD + '\nEOF\n'],
@@ -149,6 +166,8 @@ function nearMissTests() {
     commitFile(sb, 'notes.md', [
       'A GitLab token prefix with a short body: ' + GITLAB_PAT_SHORT,
       'An npm prefix one character short: ' + NPM_TOKEN_SHORT,
+      'A GitLab runner-token prefix with a short body: ' + GITLAB_RUNNER_SHORT,
+      'A PyPI prefix with a body too short to be a token: ' + PYPI_TOKEN_SHORT,
       'A lone JWT header with no payload or signature: ' + JWT_HEAD,
       '',
     ].join('\n'), 'add near-miss notes');
@@ -168,10 +187,13 @@ function falsePositiveTests() {
   const sb = makeRepo('prose');
   try {
     commitFile(sb, 'README.md', 'seed\n', 'init');
-    commitFile(sb, 'docs/pricing.md', ['# Pricing', '', PROSE_1, '', PROSE_2, ''].join('\n'), 'add pricing docs');
+    commitFile(sb, 'docs/pricing.md', ['# Pricing', '', PROSE_1, '', PROSE_2, '', ...PROSE_AUTH, ''].join('\n'), 'add pricing docs');
     const r = run(sb.repo);
     check('the reporter\'s real false positive does not block', r.status === 0, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
     check('prose run prints nothing to stdout', r.stdout === '', r.stdout.slice(0, 300));
+    check('ordinary sign-in documentation does not block',
+      r.status === 0 && r.stdout.indexOf('netrc-record') === -1,
+      'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
   } catch (e) {
     check('prose test set up a repo', false, e.message);
   }

@@ -88,7 +88,9 @@ const NEVER_PUSH_BASENAMES = [
   // with no credential in them at all (registry URLs, save-exact, index-url), so
   // flagging them by name would block ordinary pushes and train the "push anyway"
   // reflex this tripwire exists to prevent. Their token lines are caught by the
-  // npm-token pattern instead.
+  // npm-token and pypi-token patterns instead - one pattern per registry, because
+  // the two token formats share nothing. An earlier draft of this comment claimed
+  // npm-token covered both, which was false and left .pypirc with no cover at all.
   ".netrc", "_netrc"
 ];
 
@@ -138,6 +140,12 @@ const PATTERNS = [
   // (//registry.npmjs.org/:_authToken=npm_...), which secret-assignment below
   // cannot catch: the value is unquoted AND the key is not one of its names.
   { name: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}\b/ },
+  // PyPI API tokens: the literal prefix pypi- then a long base64url body. Added
+  // because .pypirc is deliberately absent from the never-push list above, so this
+  // pattern is the only thing standing between a publish token and a push. The
+  // legacy npm token (a bare hex UUID with no prefix) is knowingly NOT matched: a
+  // pattern for it would fire on every UUID in the tree.
+  { name: "pypi-token", re: /\bpypi-[A-Za-z0-9_-]{16,}\b/ },
   // A JSON Web Token: three dot-separated base64url segments. Anchored on BOTH
   // the header and the payload starting with eyJ (what base64 makes of a JSON
   // object opening with a brace and a quote), because one eyJ alone is ordinary
@@ -150,14 +158,24 @@ const PATTERNS = [
   // attempt flagged the sentence "(password) is Enterprise-only ...", and
   // excluding English one phrase at a time is unwinnable.
   //
-  // The concession is that a bare "password hunter2" line no longer matches. That
-  // is acceptable because a real .netrc is caught by NAME above; this pattern is
-  // for a record pasted somewhere else (a setup script, an .env, a shell profile).
+  // The concession is that a bare "password hunter2" line no longer matches, and
+  // neither does a record split one keyword per line. A file actually NAMED .netrc
+  // is caught by name above whatever its layout; what stays uncovered is a
+  // multi-line record written into a file with another name, such as a setup
+  // script heredoc. This pattern catches the single-line form of that case only.
   //
-  // CAVEAT: it also fires on prose that spells a record out ("login user password
-  // abc123 to authenticate"), so documentation must DESCRIBE a netrc record
-  // rather than show one, or it trips this scanner.
-  { name: "netrc-record", re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+\S{6,}/i },
+  // The value must ALSO look like a credential: eight characters or more and at
+  // least one digit. Without that, the keyword pair alone matched ordinary English
+  // - "The login and password fields are required." and "machine learning login and
+  // password fields" both fired, because any filler word satisfies the middle slot
+  // and any six-letter word satisfies the value. A false positive is not mere noise
+  // here: this scanner has no allow-list, so a spurious block teaches the "push
+  // anyway" reflex it exists to prevent.
+  //
+  // The residue: a real credential of eight-plus letters with no digit is missed,
+  // and so is prose that quotes a record WITH a digit in it. Documentation should
+  // still DESCRIBE a netrc record rather than show one.
+  { name: "netrc-record", re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/i },
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
   {
     name: "secret-assignment",
