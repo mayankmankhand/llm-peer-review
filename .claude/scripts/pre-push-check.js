@@ -79,7 +79,17 @@ const NEVER_PUSH_BASENAMES = [
   // /document writes before --add, it carries both private fields UNtruncated, and
   // its path is chosen at runtime rather than fixed in code. The script deletes it
   // after a successful append; this catches the run where that did not happen.
-  "correction-rows.json"
+  "correction-rows.json",
+  // A committed .netrc is never legitimate: the whole file is credentials, so
+  // there is no line pattern to match and the name alone is the check (#164).
+  // _netrc is the Windows spelling of the same file.
+  //
+  // .npmrc and .pypirc are deliberately NOT here. Both are routinely committed
+  // with no credential in them at all (registry URLs, save-exact, index-url), so
+  // flagging them by name would block ordinary pushes and train the "push anyway"
+  // reflex this tripwire exists to prevent. Their token lines are caught by the
+  // npm-token pattern instead.
+  ".netrc", "_netrc"
 ];
 
 // The shared settings file: legitimate to push, but a change rides along
@@ -116,6 +126,38 @@ const PATTERNS = [
   // fal.ai keys (the design workflow's FAL_KEY): a UUID, a colon, 32 hex characters.
   { name: "fal-key", re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/ },
   { name: "slack-token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  // GitLab tokens (issue #164). glpat- is the personal access token the toolkit
+  // itself authenticates with through glab, so on a GitLab-hosted install it is
+  // the single most likely credential to appear in the tree. The five prefixes on
+  // the second line are GitLab's deploy, runner, service-account, pipeline-trigger
+  // and cluster-agent tokens, which share the same body shape.
+  { name: "gitlab-pat", re: /\bglpat-[A-Za-z0-9_-]{20,}\b/ },
+  { name: "gitlab-token", re: /\b(?:gldt|glrt|glsoat|glptt|glcbt)-[A-Za-z0-9_-]{20,}\b/ },
+  // npm automation and granular access tokens: npm_ plus exactly 36 characters.
+  // The shape that actually occurs is an .npmrc line
+  // (//registry.npmjs.org/:_authToken=npm_...), which secret-assignment below
+  // cannot catch: the value is unquoted AND the key is not one of its names.
+  { name: "npm-token", re: /\bnpm_[A-Za-z0-9]{36}\b/ },
+  // A JSON Web Token: three dot-separated base64url segments. Anchored on BOTH
+  // the header and the payload starting with eyJ (what base64 makes of a JSON
+  // object opening with a brace and a quote), because one eyJ alone is ordinary
+  // base64 and would fire on any encoded blob.
+  { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/ },
+  // A .netrc credential record. Anchored on the RECORD SHAPE, never on the bare
+  // word "password": netrc keywords are whitespace-separated pairs, so a real
+  // credential line carries "machine <host>" or "login <user>" first. A pattern
+  // matching the bare word fires on ordinary English - the reporter's first
+  // attempt flagged the sentence "(password) is Enterprise-only ...", and
+  // excluding English one phrase at a time is unwinnable.
+  //
+  // The concession is that a bare "password hunter2" line no longer matches. That
+  // is acceptable because a real .netrc is caught by NAME above; this pattern is
+  // for a record pasted somewhere else (a setup script, an .env, a shell profile).
+  //
+  // CAVEAT: it also fires on prose that spells a record out ("login user password
+  // abc123 to authenticate"), so documentation must DESCRIBE a netrc record
+  // rather than show one, or it trips this scanner.
+  { name: "netrc-record", re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+\S{6,}/i },
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
   {
     name: "secret-assignment",
@@ -123,7 +165,9 @@ const PATTERNS = [
   },
 ];
 
-// Global twins of the patterns above, used only for masking: replace() with a
+// Global twins of the patterns above, DERIVED from PATTERNS with .map(), so a new
+// pattern is masked automatically and there is no second list to keep in sync.
+// Used only for masking: replace() with a
 // non-global regex rewrites one occurrence, which would leave a second secret
 // on the same line readable in the report.
 const MASK_PATTERNS = PATTERNS.map((p) => new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"));
