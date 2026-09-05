@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v6.3.2)
+# AI Agent Setup Instructions (v6.3.3)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -142,7 +142,9 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v6.3.2:** A patch on v6.3.1 (#163). The cycle summary `/document` renders is now one standing page per repository at `artifacts/html/cycle.html`, replaced each run and carrying a running log of earlier cycles; it leads with what changed and why rather than a file inventory, and may carry a diagram when the cycle has a flow worth drawing. The wrap guard five shells were missing now lives once in the shared tokens. Nothing about setup changes; re-running it picks up the renderer, the shells, the tokens, and the prompt files. Existing `document-*.html` files are inert and safe to delete.
+**What's new in v6.3.3:** A patch on v6.3.2 (#164). The M11 pre-push tripwire learns five credential formats it could not see: GitLab's `glpat-` personal access token and its five sibling token prefixes, npm access tokens, JSON Web Tokens, and a `.netrc` credential record; `.netrc` and `_netrc` join the never-push files. The tripwire also gains `scripts/test-pre-push-check.js`, 28 checks, having been the only runtime script with no test file. Nothing about setup changes; re-running it replaces the script.
+
+**What was new in v6.3.2:** A patch on v6.3.1 (#163). The cycle summary `/document` renders is now one standing page per repository at `artifacts/html/cycle.html`, replaced each run and carrying a running log of earlier cycles; it leads with what changed and why rather than a file inventory, and may carry a diagram when the cycle has a flow worth drawing. The wrap guard five shells were missing now lives once in the shared tokens. Nothing about setup changes; re-running it picks up the renderer, the shells, the tokens, and the prompt files. Existing `document-*.html` files are inert and safe to delete.
 
 **What was new in v6.3.1:** A patch on v6.3.0 (#162). The audit writes the receipt files the review page reads, the standing review page renders after the fix loop and can go empty, and a focused `/review-*` run merges into it. Nothing about setup changes; re-running it picks up the renderer, the two shells, and the prompt files.
 
