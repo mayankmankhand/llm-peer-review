@@ -86,6 +86,43 @@
 #      fresh install creates it, a re-run skips it and keeps a local edit.
 #      gen-media.js is a managed dep-free script and enters the manifest
 #      like its siblings (issue #160)
+#  23. -Tools codex records the answer in .claude\.toolkit-tools.json; a
+#      re-run without the flag reuses it and never prompts (stdin is
+#      redirected); a -DryRun with a different answer changes nothing in
+#      the target or under the redirected user profile (issue #144)
+#  24. A chosen tool's layout exists after install (.agents\skills\review\
+#      SKILL.md, .codex\config.toml, AGENTS.md); without a console the
+#      Codex trust step is printed, never written
+#  25. A fresh install with no flag and no console creates no .agents\,
+#      .codex\, .cursor\ and no AGENTS.md, and records Claude Code only
+#  26. The manifest lists .claude\toolkit-permissions.json, the three new
+#      scripts, an emitter and a host-notes file, and no path under
+#      .agents\, .codex\, .cursor\, nor AGENTS.md or the build's own record
+#  27. A fresh install seeds .claude\settings.local.json from the permission
+#      list (it carries Bash(node .claude/scripts/build-layouts.js *) plus
+#      this target's absolute browse.js entries) even when the toolkit
+#      source has no settings.local.json at all: the suite installs from a
+#      source copy with that file left out
+#  28. With cursor chosen and a bare `.cursor/` line pre-planted in the
+#      target's .gitignore, the line is retired and `git check-ignore
+#      .cursor/hooks.json` returns nothing afterwards, while a file Cursor
+#      writes on its own stays ignored. The allowlist lands in the redirected
+#      profile's .cursor\permissions.json: other keys and entries preserved,
+#      the pre-existing file backed up (mirrored under the backup root with
+#      its drive colon dropped), the _generated marker never copied, and a
+#      re-run finds nothing to add
+#  29. In a git-initialised target the pre-push hook is installed with the
+#      marker line and LF-only (no executable bit exists on Windows; git
+#      runs the file through sh regardless); a re-run finds it identical; a
+#      pre-existing hook WITHOUT the marker is left byte-for-byte untouched
+#      with a message; a non-repo target gets one skip note
+#  30. -Tools codex,cursor then -Tools codex removes the generated .cursor\
+#      files (and only those), the report names the clean, and the record
+#      drops them
+#
+# Every setup run below gets $env:USERPROFILE (and HOME) redirected to a
+# scratch directory, so the per-machine merges (issue #144) can never touch
+# the real ~\.cursor, ~\.gemini, or ~\.codex.
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -112,6 +149,18 @@ New-Item -ItemType Directory -Force -Path $Log | Out-Null
 # machine cannot fail the commit; see Invoke-TestGit.
 $GitEmptyConfig = Join-Path $Work "gitconfig-empty"
 [System.IO.File]::WriteAllText($GitEmptyConfig, "")
+
+# Every setup run honors $env:USERPROFILE for its per-machine merges (issue
+# #144), so the whole suite runs against a scratch home: the real ~\.cursor,
+# ~\.gemini and ~\.codex are never read or written. HOME is redirected too,
+# for any tool that reads it instead. Both are restored in the finally
+# block. $Work above came from TEMP, which is left alone.
+$ScratchHome = Join-Path $Work "home"
+New-Item -ItemType Directory -Force -Path $ScratchHome | Out-Null
+$SavedUserProfile = $env:USERPROFILE
+$SavedHome = $env:HOME
+$env:USERPROFILE = $ScratchHome
+$env:HOME = $ScratchHome
 
 $script:Pass = 0
 $script:Fail = 0
@@ -151,13 +200,77 @@ function Get-NewBackupDir {
 }
 
 function Invoke-Setup {
-  param([string[]]$SetupArgs, [string]$LogFile)
-  $setupPath = Join-Path $ScriptDir "setup.ps1"
+  param([string[]]$SetupArgs, [string]$LogFile, [string]$SetupPath)
+  # Scenario 27 installs from a source copy of its own; every other run
+  # uses the toolkit's setup.ps1 beside this script.
+  if (-not $SetupPath) { $SetupPath = Join-Path $ScriptDir "setup.ps1" }
   # Piping empty input redirects the child's stdin, so the overwrite gate
   # (issue #138) always detects a non-interactive host and takes the abort
   # path instead of blocking on Read-Host. The suite exercises the abort
-  # path and the -Force path, never a live prompt.
-  "" | & powershell -NoProfile -ExecutionPolicy Bypass -File $setupPath @SetupArgs *> $LogFile
+  # path and the -Force path, never a live prompt. The same redirect keeps
+  # the issue #144 tools question and Codex trust offer silent.
+  "" | & powershell -NoProfile -ExecutionPolicy Bypass -File $SetupPath @SetupArgs *> $LogFile
+}
+
+# Invoke-TestNode <args...>: node with the stderr rule of Invoke-TestGit
+# below, for the test's own build-layouts.js calls. Returns the exit code
+# and the stdout lines.
+function Invoke-TestNode {
+  param([string[]]$NodeArgs)
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $raw = @(& node @NodeArgs 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
+  $lines = @()
+  foreach ($item in $raw) {
+    if ($item -isnot [System.Management.Automation.ErrorRecord]) { $lines += [string]$item }
+  }
+  return [pscustomobject]@{ Code = $code; Output = $lines }
+}
+
+# Get-BackupRelPath: where Backup-File in setup.ps1 mirrors a file that
+# lives OUTSIDE the target (issue #144): the drive colon (or a UNC path's
+# leading slashes) is dropped and the rest keeps its shape under the
+# backup root, so C:\Users\me\x lands at <backup>\C\Users\me\x.
+function Get-BackupRelPath {
+  param([string]$Path)
+  return (($Path -replace '^([A-Za-z]):\\', '$1\').TrimStart('\'))
+}
+
+# Get-ToolsRecord: the tools answer file as setup.ps1 compares it - CR
+# stripped, trailing newline dropped - or "" when it does not exist.
+function Get-ToolsRecord {
+  param([string]$File)
+  if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { return "" }
+  return ([System.IO.File]::ReadAllText($File)).Replace("`r", "").TrimEnd("`n")
+}
+
+# Get-TreeState: one line per entry (path, size, mtime), sorted, so a
+# before/after comparison shows whether a run touched a tree at all.
+function Get-TreeState {
+  param([string]$Dir)
+  return ((@(Get-ChildItem -Path $Dir -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object { "$($_.FullName)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" } | Sort-Object)) -join "`n")
+}
+
+# Copy-TestTree: recursive copy that never descends into node_modules
+# (3000+ files under .claude\scripts\ that setup never copies), for the
+# scenario 27 source copy. Copy-Item -Recurse has no exclusion that stops
+# the descent itself.
+function Copy-TestTree {
+  param([string]$From, [string]$To)
+  New-Item -ItemType Directory -Force -Path $To | Out-Null
+  foreach ($item in Get-ChildItem -LiteralPath $From -Force) {
+    if ($item.PSIsContainer) {
+      if ($item.Name -eq "node_modules") { continue }
+      Copy-TestTree -From $item.FullName -To (Join-Path $To $item.Name)
+    } else {
+      Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $To $item.Name) -Force
+    }
+  }
 }
 
 # Edit-PermEntry: add (default) or -Remove one permissions.allow entry
@@ -230,10 +343,23 @@ function Invoke-TestGit {
 # remove it even if a scenario throws.
 $uncScratch = $null
 
+# The settings.local.json that scenarios 18 and 21 plant or commit is the
+# Claude Code translation of the permission list, the same content a fresh
+# install writes: since issue #144 the toolkit tracks no settings.local.json
+# of its own, so there is no file to copy.
+$SeedSettingsFile = Join-Path $Work "seed-settings.json"
+$seedRun = Invoke-TestNode -NodeArgs @((Join-Path $ToolkitRoot ".claude\scripts\build-layouts.js"), "--root", $ToolkitRoot, "--claude-settings", "--print")
+if ($seedRun.Code -eq 0) {
+  [System.IO.File]::WriteAllText($SeedSettingsFile, (($seedRun.Output -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+} else {
+  Failed "test setup: build-layouts.js --claude-settings --print exited $($seedRun.Code)"
+}
+
 try {
   Write-Host ""
   Write-Host "Toolkit: $ToolkitRoot"
   Write-Host "Scratch: $Scratch"
+  Write-Host "Home:    $ScratchHome (USERPROFILE and HOME redirected for every run)"
   Write-Host ""
 
   # --- [1] -DryRun on an empty target makes no changes ---------
@@ -491,9 +617,13 @@ try {
   }
 
   # 8a. Inline cat directives are executed at skill-load time, so a missing
-  #     target is a real break rather than a dead link in prose.
+  #     target is a real break rather than a dead link in prose. Only prompt
+  #     files (*.md) are scanned: Claude Code expands the token nowhere else,
+  #     and build-layouts.js carries it inside a regex (issue #144), which
+  #     would otherwise read as a path. Mirrors the bash suite's --include.
   $InlineRefs = @{}
   foreach ($f in $InstalledFiles) {
+    if ($f.Extension -ne ".md") { continue }
     $text = Get-Content -LiteralPath $f.FullName -Raw -ErrorAction SilentlyContinue
     if ($null -eq $text) { continue }
     foreach ($m in [regex]::Matches($text, '!`cat ([^`]+)`')) {
@@ -1082,7 +1212,7 @@ try {
     Write-Host "  skip: the toolkit is not on a UNC share, so there is no UNC target to install into here"
   } else {
     $uncSettings = Join-Path $uncScratch ".claude\settings.local.json"
-    Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".claude\settings.local.json") -Destination $uncSettings -Force
+    Copy-Item -LiteralPath $SeedSettingsFile -Destination $uncSettings -Force
     Edit-PermEntry -File $uncSettings -Entry $posixEntry
     Invoke-Setup -SetupArgs @("-Target", $uncScratch) -LogFile (Join-Path $Log "unc-target.log")
     $uncExit = $LASTEXITCODE
@@ -1180,7 +1310,7 @@ try {
   if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
     Write-Host "  skip: git is not on PATH, so there is no index to seed here"
   } else {
-    $seedSettings = Join-Path $ToolkitRoot ".claude\settings.local.json"
+    $seedSettings = $SeedSettingsFile
     $tracked = Join-Path $Work "tracked"
     New-Item -ItemType Directory -Force -Path (Join-Path $tracked ".claude") | Out-Null
     $trackedSettings = Join-Path $tracked ".claude\settings.local.json"
@@ -1325,7 +1455,392 @@ try {
   Assert-Contains "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" (Join-Path $Log "profile-rerun.log") "re-run skips the existing profile"
   Assert-Contains "LOCAL EDIT MARKER" $profilePath "local profile edit survived the re-run"
 
+  # --- [23] the tools answer persists; a dry run never rewrites it ---
+  # -Tools codex records the answer in .claude\.toolkit-tools.json (one
+  # line, LF). A re-run without the flag reuses it and never prompts: stdin
+  # is redirected, so a prompt would read an empty answer and silently
+  # record Claude Code only instead. A -DryRun with a DIFFERENT answer must
+  # change nothing in the target or under the scratch profile - the record,
+  # the clean, the build, and the per-machine merges all sit after the
+  # dry-run exit. Mirrors scenario 23 of the bash suite.
+  Write-Host "[23] tools answer persists across runs; a dry run never rewrites it"
+  $toolsScratch = Join-Path $Work "tools"
+  $toolsFile = Join-Path $toolsScratch ".claude\.toolkit-tools.json"
+  New-Item -ItemType Directory -Force -Path $toolsScratch | Out-Null
+  Invoke-Setup -SetupArgs @("-Target", $toolsScratch, "-Tools", "codex") -LogFile (Join-Path $Log "tools-first.log")
+  $toolsExit = $LASTEXITCODE
+  if ($toolsExit -eq 0) {
+    Ok "-Tools codex run exited 0"
+  } else {
+    Failed "-Tools codex run exited $toolsExit (log: $(Join-Path $Log 'tools-first.log'))"
+  }
+  if ((Get-ToolsRecord -File $toolsFile) -ceq '{ "tools": ["codex"] }') {
+    Ok 'answer recorded as { "tools": ["codex"] }'
+  } else {
+    Failed "answer not recorded as expected: $(Get-ToolsRecord -File $toolsFile)"
+  }
+  Assert-Contains "Tools: codex (from -Tools)" (Join-Path $Log "tools-first.log") "pre-flight names the tools from the flag"
+  Assert-Contains "Recorded the tool layouts in .claude\.toolkit-tools.json: codex" (Join-Path $Log "tools-first.log") "run reports the record"
+  Invoke-Setup -SetupArgs @("-Target", $toolsScratch) -LogFile (Join-Path $Log "tools-rerun.log")
+  $toolsRerunExit = $LASTEXITCODE
+  if ($toolsRerunExit -eq 0) {
+    Ok "re-run without -Tools exited 0"
+  } else {
+    Failed "re-run without -Tools exited $toolsRerunExit"
+  }
+  Assert-Contains "Tools: codex (recorded in .claude\.toolkit-tools.json)" (Join-Path $Log "tools-rerun.log") "re-run reuses the recorded answer"
+  if ((Get-ToolsRecord -File $toolsFile) -ceq '{ "tools": ["codex"] }') {
+    Ok "recorded answer unchanged by the re-run"
+  } else {
+    Failed "re-run changed the recorded answer: $(Get-ToolsRecord -File $toolsFile)"
+  }
+  $toolsLogs = (Get-Content -LiteralPath (Join-Path $Log "tools-first.log") -Raw) + (Get-Content -LiteralPath (Join-Path $Log "tools-rerun.log") -Raw)
+  if ($toolsLogs.Contains("Which AI tools")) {
+    Failed "a non-interactive run printed the tools prompt"
+  } else {
+    Ok "no run printed the tools prompt (stdin is redirected)"
+  }
+  $toolsBefore = Get-TreeState -Dir $toolsScratch
+  $homeBefore = Get-TreeState -Dir $ScratchHome
+  Invoke-Setup -SetupArgs @("-Target", $toolsScratch, "-DryRun", "-Tools", "cursor") -LogFile (Join-Path $Log "tools-dryrun.log")
+  if ((Get-TreeState -Dir $toolsScratch) -ceq $toolsBefore) {
+    Ok "dry run with a different -Tools changed nothing in the target"
+  } else {
+    Failed "dry run with -Tools modified the target"
+  }
+  if ((Get-TreeState -Dir $ScratchHome) -ceq $homeBefore) {
+    Ok "dry run with a different -Tools changed nothing under the user profile"
+  } else {
+    Failed "dry run with -Tools modified the user profile"
+  }
+  Assert-Contains "Tools: cursor (from -Tools)" (Join-Path $Log "tools-dryrun.log") "dry run reports the flag's answer"
+  Assert-Contains "Remove the generated files of: codex" (Join-Path $Log "tools-dryrun.log") "dry run announces the clean it would run"
+  Assert-Contains "Dry run complete" (Join-Path $Log "tools-dryrun.log") "dry run completes"
+
+  # --- [24] a chosen tool's layout exists after install ------------
+  # The Codex layout is what -Tools codex asked for; the shared skills and
+  # AGENTS.md come with any tool. Without a console the Codex trust section
+  # is printed for the user to add, never written into the profile's
+  # .codex\config.toml.
+  Write-Host "[24] a chosen tool's layout exists after install"
+  foreach ($rel in @(".agents\skills\review\SKILL.md", ".codex\config.toml", "AGENTS.md", ".claude\.toolkit-generated.json")) {
+    if (Test-Path -LiteralPath (Join-Path $toolsScratch $rel) -PathType Leaf) {
+      Ok "generated: $rel"
+    } else {
+      Failed "missing after -Tools codex: $rel"
+    }
+  }
+  Assert-Contains "build-layouts.js:" (Join-Path $Log "tools-first.log") "install printed the build summary line"
+  Assert-Contains 'trust_level = "trusted"' (Join-Path $Log "tools-first.log") "Codex trust step printed for a non-interactive run"
+  Assert-Contains "run /hooks once" (Join-Path $Log "tools-first.log") "the one-time /hooks step is printed"
+  if (-not (Test-Path -LiteralPath (Join-Path $ScratchHome ".codex\config.toml"))) {
+    Ok "no console, so the profile's .codex\config.toml was not written"
+  } else {
+    Failed "the profile's .codex\config.toml was written without a console"
+  }
+
+  # --- [25] no flag, no console: nothing is generated ---------------
+  # The downstream default. An existing project must never gain folders
+  # unasked, and a fresh install that cannot ask records Claude Code only.
+  Write-Host "[25] a fresh install with no flag and no console generates nothing"
+  $plainScratch = Join-Path $Work "plain"
+  New-Item -ItemType Directory -Force -Path $plainScratch | Out-Null
+  Invoke-Setup -SetupArgs @("-Target", $plainScratch) -LogFile (Join-Path $Log "plain.log")
+  foreach ($rel in @(".agents", ".codex", ".cursor", "AGENTS.md", ".claude\.toolkit-generated.json")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $plainScratch $rel))) {
+      Ok "not created: $rel"
+    } else {
+      Failed "created without being asked for: $rel"
+    }
+  }
+  $plainRecord = Join-Path $plainScratch ".claude\.toolkit-tools.json"
+  if ((Get-ToolsRecord -File $plainRecord) -ceq '{ "tools": [] }') {
+    Ok "answer recorded as Claude Code only"
+  } else {
+    Failed "answer not recorded as Claude Code only: $(Get-ToolsRecord -File $plainRecord)"
+  }
+  Assert-Contains "Tools: none (Claude Code only) (default: Claude Code only)" (Join-Path $Log "plain.log") "pre-flight reports the default"
+  if ((Get-Content -LiteralPath (Join-Path $Log "plain.log") -Raw).Contains("Which AI tools")) {
+    Failed "non-interactive fresh install printed the tools prompt"
+  } else {
+    Ok "non-interactive fresh install did not prompt"
+  }
+
+  # --- [26] manifest: new sources in, generated paths out ------------
+  # The sources setup copies are manifest-managed like their siblings; what
+  # build-layouts.js writes, and the tools answer, never are - the build
+  # hashes its own output and the answer belongs to the repo.
+  Write-Host "[26] manifest lists the new sources and no generated path"
+  $toolsManifest = Join-Path $toolsScratch ".claude\.toolkit-manifest.json"
+  $toolsManifestText = if (Test-Path -LiteralPath $toolsManifest -PathType Leaf) { Get-Content -LiteralPath $toolsManifest -Raw } else { "" }
+  $emitter = (Get-ChildItem -Path (Join-Path $ToolkitRoot ".claude\scripts\layouts") -Filter *.js -File | Select-Object -First 1).Name
+  $hostNote = (Get-ChildItem -Path (Join-Path $ToolkitRoot ".claude\skills\shared\host-notes") -Filter *.md -File | Select-Object -First 1).Name
+  foreach ($rel in @(".claude/toolkit-permissions.json", ".claude/scripts/build-layouts.js", ".claude/scripts/write-guard.js", ".claude/scripts/chain-hook.js", ".claude/scripts/layouts/$emitter", ".claude/skills/shared/host-notes/$hostNote")) {
+    if ($toolsManifestText -match ('"' + [regex]::Escape($rel) + '": "[0-9a-f]{64}"')) {
+      Ok "manifest carries $rel"
+    } else {
+      Failed "manifest lacks $rel"
+    }
+  }
+  $generatedPattern = '"(\.agents|\.codex|\.cursor)/|"AGENTS\.md"|toolkit-tools\.json|toolkit-generated\.json'
+  if ($toolsManifestText -match $generatedPattern) {
+    Failed "manifest tracks a generated path or the tools answer: $(@($toolsManifestText -split "`n" | Where-Object { $_ -match $generatedPattern } | Select-Object -First 2) -join ' ')"
+  } else {
+    Ok "manifest tracks no generated path and not the tools answer"
+  }
+
+  # --- [27] settings.local.json seeded from the permission list ------
+  # The toolkit repo no longer tracks a settings.local.json of its own, so a
+  # fresh install must not depend on one being there. The suite builds a
+  # source copy that lacks the file outright (only what setup copies, minus
+  # node_modules) on the local drive and installs from it: the seed comes
+  # from .claude\toolkit-permissions.json via build-layouts.js, and the
+  # merge then adds this target's absolute browse.js entries on top.
+  Write-Host "[27] settings.local.json is seeded from the permission list, not from a toolkit copy"
+  $sourceCopy = Join-Path $Work "source"
+  New-Item -ItemType Directory -Force -Path (Join-Path $sourceCopy ".claude") | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $sourceCopy "scripts") | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $sourceCopy "artifacts") | Out-Null
+  foreach ($d in @("agents", "commands", "rules", "scripts", "skills")) {
+    Copy-TestTree -From (Join-Path $ToolkitRoot (Join-Path ".claude" $d)) -To (Join-Path $sourceCopy (Join-Path ".claude" $d))
+  }
+  Copy-Item -LiteralPath (Join-Path $ToolkitRoot ".claude\toolkit-permissions.json") -Destination (Join-Path $sourceCopy ".claude\toolkit-permissions.json") -Force
+  Copy-TestTree -From (Join-Path $ToolkitRoot "scripts\setup") -To (Join-Path $sourceCopy "scripts\setup")
+  Copy-Item -LiteralPath (Join-Path $ToolkitRoot "artifacts\README.md") -Destination (Join-Path $sourceCopy "artifacts\README.md") -Force
+  foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".gitignore", ".gitattributes")) {
+    Copy-Item -LiteralPath (Join-Path $ToolkitRoot $f) -Destination (Join-Path $sourceCopy $f) -Force
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $sourceCopy ".claude\settings.local.json"))) {
+    Ok "test setup: source copy has no settings.local.json"
+  } else {
+    Failed "test setup: source copy still has a settings.local.json"
+  }
+  $seedScratch = Join-Path $Work "seed"
+  New-Item -ItemType Directory -Force -Path $seedScratch | Out-Null
+  Invoke-Setup -SetupPath (Join-Path $sourceCopy "scripts\setup\setup.ps1") -SetupArgs @("-Target", $seedScratch) -LogFile (Join-Path $Log "seed.log")
+  $seedExit = $LASTEXITCODE
+  if ($seedExit -eq 0) {
+    Ok "install from the seedless source exited 0"
+  } else {
+    Failed "install from the seedless source exited $seedExit (log: $(Join-Path $Log 'seed.log'))"
+  }
+  Assert-Contains "Seeding .claude\settings.local.json from .claude\toolkit-permissions.json" (Join-Path $Log "seed.log") "run says the seed came from the permission list"
+  $seeded = Join-Path $seedScratch ".claude\settings.local.json"
+  if (Test-Path -LiteralPath $seeded -PathType Leaf) {
+    Ok "settings.local.json seeded"
+  } else {
+    Failed "settings.local.json missing after the seedless install"
+  }
+  Assert-Contains 'Bash(node .claude/scripts/build-layouts.js *)' $seeded "seeded file carries the build-layouts.js permission"
+  $seedBrowseEntry = "Bash(echo * | node " + $seedScratch.Replace("\", "/") + "/.claude/scripts/browse.js *)"
+  if ((Get-Content -LiteralPath $seeded -Raw).IndexOf($seedBrowseEntry, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+    Ok "merge added this target's absolute browse.js entry after the seed"
+  } else {
+    Failed "this target's absolute browse.js entry is missing after the seed: $seedBrowseEntry"
+  }
+  Assert-Contains '"defaultMode": "acceptEdits"' $seeded "seeded file carries defaultMode"
+  if (@(Get-ChildItem -Path $seedScratch -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue).Count -eq 0) {
+    Ok "seed plus merge on a fresh install made no backup dir"
+  } else {
+    Failed "seed plus merge on a fresh install created a backup dir"
+  }
+
+  # --- [28] bare .cursor/ line retired; Cursor allowlist merged under the profile ---
+  # A target from before v7 ignores the whole .cursor\ directory, and git
+  # never descends into an excluded directory, so the toolkit's by-name
+  # negations would be dead. The pre-planted .cursor\permissions.json under
+  # the scratch profile has a key and an entry of its own that must survive
+  # the merge, and it must be backed up (it lives outside the target, so its
+  # absolute path is mirrored under the backup root with the drive colon
+  # dropped).
+  Write-Host "[28] a bare .cursor/ line is retired; the Cursor allowlist is merged under the profile"
+  $cursorScratch = Join-Path $Work "cursor"
+  if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "  skip: git is not on PATH, so check-ignore cannot be asked here"
+  } else {
+    New-Item -ItemType Directory -Force -Path $cursorScratch | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $ScratchHome ".cursor") | Out-Null
+    if ((Invoke-TestGit -Repo $cursorScratch -GitArgs @("init", "-q")).Code -ne 0) {
+      Failed "test setup: could not init the cursor scratch repo"
+    }
+    [System.IO.File]::WriteAllText((Join-Path $cursorScratch ".gitignore"), "node_modules/`n.cursor/`n", $utf8NoBom)
+    $cursorPerms = Join-Path $ScratchHome ".cursor\permissions.json"
+    [System.IO.File]::WriteAllText($cursorPerms, "{`n  `"foo`": 1,`n  `"terminalAllowlist`": [`"my own command`"]`n}`n", $utf8NoBom)
+    Invoke-Setup -SetupArgs @("-Target", $cursorScratch, "-Tools", "cursor") -LogFile (Join-Path $Log "cursor.log")
+    $cursorExit = $LASTEXITCODE
+    if ($cursorExit -eq 0) {
+      Ok "-Tools cursor run exited 0"
+    } else {
+      Failed "-Tools cursor run exited $cursorExit (log: $(Join-Path $Log 'cursor.log'))"
+    }
+    Assert-Contains "Removed the bare .cursor/ line from .gitignore" (Join-Path $Log "cursor.log") "run reports the retired line"
+    $cursorGiLines = @(Get-Content -LiteralPath (Join-Path $cursorScratch ".gitignore"))
+    if ($cursorGiLines -ccontains ".cursor/") {
+      Failed "bare .cursor/ line still in .gitignore"
+    } else {
+      Ok "bare .cursor/ line removed from .gitignore"
+    }
+    if ($cursorGiLines -ccontains "node_modules/") {
+      Ok "the user's own ignore line survived"
+    } else {
+      Failed "the user's own ignore line (node_modules/) is gone"
+    }
+    if (Test-Path -LiteralPath (Join-Path $cursorScratch ".cursor\hooks.json") -PathType Leaf) {
+      Ok "generated .cursor\hooks.json exists"
+    } else {
+      Failed "generated .cursor\hooks.json missing"
+    }
+    $cursorIgnored = Invoke-TestGit -Repo $cursorScratch -GitArgs @("check-ignore", ".cursor/hooks.json")
+    if (@($cursorIgnored.Output).Count -eq 0) {
+      Ok "git check-ignore .cursor/hooks.json returns nothing"
+    } else {
+      Failed "generated .cursor/hooks.json is still ignored: $($cursorIgnored.Output -join ' ')"
+    }
+    $cursorOwnIgnored = Invoke-TestGit -Repo $cursorScratch -GitArgs @("check-ignore", ".cursor/mcp.json")
+    if (@($cursorOwnIgnored.Output).Count -gt 0) {
+      Ok "a file Cursor writes on its own (.cursor/mcp.json) stays ignored"
+    } else {
+      Failed ".cursor/mcp.json is no longer ignored"
+    }
+    Assert-Contains '"node .claude/scripts/build-layouts.js"' $cursorPerms "toolkit allowlist entry merged into the profile's .cursor\permissions.json"
+    Assert-Contains '"my own command"' $cursorPerms "the user's own allowlist entry survived the merge"
+    Assert-Contains '"foo": 1' $cursorPerms "the user's other key survived the merge"
+    if ((Get-Content -LiteralPath $cursorPerms -Raw).Contains("_generated")) {
+      Failed "the _generated marker was copied into the per-machine file"
+    } else {
+      Ok "the _generated marker was not copied"
+    }
+    Assert-Contains "machine-global" (Join-Path $Log "cursor.log") "the merge says the file is machine-global"
+    $cursorBackupDir = @(Get-ChildItem -Path $cursorScratch -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1)
+    $cursorBackupFile = if ($cursorBackupDir.Count -gt 0) { Join-Path $cursorBackupDir[0].FullName (Get-BackupRelPath -Path $cursorPerms) } else { $null }
+    if ($cursorBackupFile -and (Test-Path -LiteralPath $cursorBackupFile -PathType Leaf) -and ((Get-Content -LiteralPath $cursorBackupFile -Raw).Contains('"my own command"'))) {
+      Ok "pre-existing permissions.json backed up under the backup root"
+    } else {
+      Failed "pre-existing permissions.json not found in the backup dir (expected $cursorBackupFile)"
+    }
+    Invoke-Setup -SetupArgs @("-Target", $cursorScratch) -LogFile (Join-Path $Log "cursor-rerun.log")
+    $cursorRerunExit = $LASTEXITCODE
+    if ($cursorRerunExit -eq 0) {
+      Ok "cursor re-run exited 0"
+    } else {
+      Failed "cursor re-run exited $cursorRerunExit"
+    }
+    Assert-Contains "already holds every toolkit allowlist entry" (Join-Path $Log "cursor-rerun.log") "re-run finds nothing to add to the allowlist"
+  }
+
+  # --- [29] pre-push hook installed; a foreign hook is left alone ----
+  # The hook is the toolkit's only when it carries the marker line. A hook
+  # somebody else wrote is never replaced, and a target that is not a git
+  # repository gets one skip note (the scenario 2 install ran on one).
+  # Windows has no executable bit; git runs the file through sh regardless,
+  # so the check is presence plus LF-only content.
+  Write-Host "[29] git pre-push hook installed with the marker; a foreign hook is left alone"
+  if ($null -eq (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "  skip: git is not on PATH, so there is no hooks directory to install into"
+  } else {
+    $hook = Join-Path $cursorScratch ".git\hooks\pre-push"
+    if (Test-Path -LiteralPath $hook -PathType Leaf) {
+      Ok "pre-push hook installed"
+    } else {
+      Failed "pre-push hook missing: $hook"
+    }
+    Assert-Contains "# llm-peer-review toolkit pre-push hook (issue #144)" $hook "hook carries the marker line"
+    Assert-Contains "exec node .claude/scripts/pre-push-check.js" $hook "hook runs the tripwire from the repository root"
+    $hookBytes = [System.IO.File]::ReadAllBytes($hook)
+    $hookText = [System.Text.Encoding]::ASCII.GetString($hookBytes)
+    if (@($hookText -split "`n")[0] -ceq "#!/bin/sh") {
+      Ok "hook starts with #!/bin/sh"
+    } else {
+      Failed "hook does not start with #!/bin/sh"
+    }
+    if ($hookBytes -contains 13) {
+      Failed "hook carries CR bytes (must be LF-only)"
+    } else {
+      Ok "hook is LF-only"
+    }
+    if ($hookBytes.Length -ge 3 -and $hookBytes[0] -eq 0xEF -and $hookBytes[1] -eq 0xBB -and $hookBytes[2] -eq 0xBF) {
+      Failed "hook starts with a UTF-8 BOM (sh would choke on it)"
+    } else {
+      Ok "hook has no BOM"
+    }
+    Assert-Contains "Installed the git pre-push hook" (Join-Path $Log "cursor.log") "first run reports the install"
+    Assert-Contains "Git pre-push hook already installed" (Join-Path $Log "cursor-rerun.log") "re-run finds the hook identical"
+    $foreign = Join-Path $Work "foreign"
+    New-Item -ItemType Directory -Force -Path $foreign | Out-Null
+    if ((Invoke-TestGit -Repo $foreign -GitArgs @("init", "-q")).Code -ne 0) {
+      Failed "test setup: could not init the foreign-hook scratch repo"
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $foreign ".git\hooks") | Out-Null
+    $foreignHook = Join-Path $foreign ".git\hooks\pre-push"
+    [System.IO.File]::WriteAllText($foreignHook, "#!/bin/sh`necho mine`n", $utf8NoBom)
+    $foreignOrig = Join-Path $Work "foreign-hook.orig"
+    Copy-Item -LiteralPath $foreignHook -Destination $foreignOrig -Force
+    Invoke-Setup -SetupArgs @("-Target", $foreign) -LogFile (Join-Path $Log "foreign.log")
+    $foreignExit = $LASTEXITCODE
+    if ($foreignExit -eq 0) {
+      Ok "run with a foreign pre-push hook exited 0"
+    } else {
+      Failed "run with a foreign pre-push hook exited $foreignExit"
+    }
+    if (Test-FilesEqual $foreignHook $foreignOrig) {
+      Ok "foreign pre-push hook left byte-for-byte untouched"
+    } else {
+      Failed "foreign pre-push hook was modified"
+    }
+    Assert-Contains "is not the toolkit's - left alone" (Join-Path $Log "foreign.log") "pre-flight announces the foreign hook"
+    Assert-Contains "Left the existing pre-push hook alone" (Join-Path $Log "foreign.log") "run reports the foreign hook"
+    Assert-Contains "Git pre-push hook: skipped, the target is not a git repository" (Join-Path $Log "install.log") "non-repo target gets the skip note (scenario 2 log)"
+  }
+
+  # --- [30] shrinking the answer cleans the dropped tool -------------
+  # The stored answer is which layouts live in the repo. Dropping cursor
+  # must remove exactly the Cursor files (and the empty directory), keep
+  # the Codex and shared files, and drop the entries from the build's record.
+  Write-Host "[30] -Tools codex,cursor then -Tools codex removes the generated Cursor files"
+  $shrinkScratch = Join-Path $Work "shrink"
+  New-Item -ItemType Directory -Force -Path $shrinkScratch | Out-Null
+  Invoke-Setup -SetupArgs @("-Target", $shrinkScratch, "-Tools", "codex,cursor") -LogFile (Join-Path $Log "shrink-first.log")
+  if ((Test-Path -LiteralPath (Join-Path $shrinkScratch ".cursor\hooks.json") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $shrinkScratch ".cursor\skills\tk-review\SKILL.md") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $shrinkScratch ".codex\config.toml") -PathType Leaf)) {
+    Ok "codex and cursor layouts both built"
+  } else {
+    Failed "codex and cursor layouts not both built (log: $(Join-Path $Log 'shrink-first.log'))"
+  }
+  Invoke-Setup -SetupArgs @("-Target", $shrinkScratch, "-Tools", "codex") -LogFile (Join-Path $Log "shrink-second.log")
+  $shrinkExit = $LASTEXITCODE
+  if ($shrinkExit -eq 0) {
+    Ok "-Tools codex run exited 0"
+  } else {
+    Failed "-Tools codex run exited $shrinkExit (log: $(Join-Path $Log 'shrink-second.log'))"
+  }
+  Assert-Contains "Remove the generated files of: cursor" (Join-Path $Log "shrink-second.log") "pre-flight announces the clean"
+  Assert-Contains "Removed the generated cursor layout" (Join-Path $Log "shrink-second.log") "report names the clean"
+  if (-not (Test-Path -LiteralPath (Join-Path $shrinkScratch ".cursor"))) {
+    Ok "generated .cursor\ removed entirely"
+  } else {
+    Failed "generated .cursor\ still present: $(@(Get-ChildItem -Path (Join-Path $shrinkScratch '.cursor') -Recurse -Force | Select-Object -First 3 | ForEach-Object { $_.FullName }) -join ' ')"
+  }
+  if ((Test-Path -LiteralPath (Join-Path $shrinkScratch ".codex\config.toml") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $shrinkScratch ".agents\skills\review\SKILL.md") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $shrinkScratch "AGENTS.md") -PathType Leaf)) {
+    Ok "codex and shared layouts kept"
+  } else {
+    Failed "codex or shared layout lost by the clean"
+  }
+  $shrinkRecord = Join-Path $shrinkScratch ".claude\.toolkit-tools.json"
+  if ((Get-ToolsRecord -File $shrinkRecord) -ceq '{ "tools": ["codex"] }') {
+    Ok "answer re-recorded as codex only"
+  } else {
+    Failed "answer not re-recorded: $(Get-ToolsRecord -File $shrinkRecord)"
+  }
+  $shrinkGenerated = Join-Path $shrinkScratch ".claude\.toolkit-generated.json"
+  $shrinkGeneratedText = if (Test-Path -LiteralPath $shrinkGenerated -PathType Leaf) { Get-Content -LiteralPath $shrinkGenerated -Raw } else { "" }
+  if ($shrinkGeneratedText -match '"\.cursor/') {
+    Failed "the build's record still lists .cursor/ files"
+  } else {
+    Ok "the build's record no longer lists .cursor/ files"
+  }
+
 } finally {
+  $env:USERPROFILE = $SavedUserProfile
+  $env:HOME = $SavedHome
   if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {
     Remove-Item -LiteralPath $uncScratch -Recurse -Force -ErrorAction SilentlyContinue
   }

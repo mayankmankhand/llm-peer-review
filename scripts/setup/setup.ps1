@@ -1,7 +1,7 @@
 # setup.ps1 - Copy the LLM Peer Review toolkit into any project (Windows PowerShell).
 #
 # Usage:
-#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project" [-DryRun] [-Force]
+#   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1 -Target "C:\path\to\your-project" [-DryRun] [-Force] [-Tools <list>]
 #
 # If -Target is omitted, uses the current working directory (but will error if run from inside the toolkit repo).
 #
@@ -15,6 +15,14 @@
 # you have edited, and aborts when it cannot prompt (non-interactive
 # host). Every replaced file is backed up first either way.
 #
+# -Tools <list> names the AI tools this project generates layouts for
+# beyond Claude Code (issue #144): a comma-separated list drawn from codex,
+# cursor, antigravity, or `none` for Claude Code only. It works on any run,
+# fresh or upgrade, and re-records the answer in .claude\.toolkit-tools.json;
+# a tool dropped from the list has its generated files cleaned. Without the
+# flag, a fresh install on an interactive host asks once; every other run
+# reuses the recorded answer (default: Claude Code only) and never asks.
+#
 # Examples:
 #   # From toolkit repo, specify target:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app"
@@ -22,14 +30,24 @@
 #   # See what an upgrade would do without changing anything:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app" -DryRun
 #
+#   # Generate the Codex and Cursor layouts beside the Claude Code one:
+#   powershell -ExecutionPolicy Bypass -File .\scripts\setup\setup.ps1 -Target "C:\Projects\my-app" -Tools codex,cursor
+#
 #   # From your project directory:
 #   cd C:\Projects\my-app
 #   powershell -ExecutionPolicy Bypass -File C:\path\to\llm-peer-review\scripts\setup\setup.ps1
 
+# PARITY: mirrors setup.sh (--tools argument) - change both together
+# -Tools is [string[]] so both spellings bind the same way: a bare
+# `-Tools codex,cursor` reaches a string parameter as "codex cursor" (the
+# comma makes an array PowerShell joins with a space), while a quoted
+# "codex,cursor" arrives whole. The value is rejoined, re-split, and
+# validated in the "Tool layouts" block below, after the target is known.
 param(
   [string]$Target = ".",
   [switch]$DryRun,
-  [switch]$Force
+  [switch]$Force,
+  [string[]]$Tools
 )
 
 # Check PowerShell version (requires 5.1+)
@@ -147,7 +165,33 @@ foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "ses
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes", ".claude\skills\shared\design-profile-template.md")) {
+# Check the layout build, write-guard, and chain-hook scripts (dependency-free;
+# issue #144), plus the per-tool emitters and host notes build-layouts.js reads.
+# PARITY: mirrors setup.sh (issue #144 source checks) - change both together
+# The two directories must each hold at least one file: an empty one would copy
+# nothing, and the build would then emit only the shared files for every tool.
+foreach ($f in @("build-layouts.js", "write-guard.js", "chain-hook.js")) {
+  $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
+  if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
+    Write-Host "  Error: source file not found: $p"
+    $PreflightOk = $false
+  }
+}
+$LayoutsSrcDir = Join-Path $ToolkitRoot ".claude\scripts\layouts"
+if (@(Get-ChildItem -Path $LayoutsSrcDir -Filter *.js -File -ErrorAction SilentlyContinue).Count -eq 0) {
+  Write-Host "  Error: no emitter files found in $LayoutsSrcDir\"
+  $PreflightOk = $false
+}
+$HostNotesSrcDir = Join-Path $ToolkitRoot ".claude\skills\shared\host-notes"
+if (@(Get-ChildItem -Path $HostNotesSrcDir -Filter *.md -File -ErrorAction SilentlyContinue).Count -eq 0) {
+  Write-Host "  Error: no host-notes files found in $HostNotesSrcDir\"
+  $PreflightOk = $false
+}
+
+# Check files that will be copied to the target project. Since issue #144 the
+# toolkit repo no longer tracks .claude\settings.local.json: the permission seed
+# is .claude\toolkit-permissions.json, translated per machine by build-layouts.js.
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\toolkit-permissions.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes", ".claude\skills\shared\design-profile-template.md")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -208,6 +252,215 @@ if (Test-Path -LiteralPath $GlobalCmdDir -PathType Container) {
 $IsUpgrade = $false
 if (Test-Path -LiteralPath (Join-Path $Target ".claude\rules\toolkit.md") -PathType Leaf) {
   $IsUpgrade = $true
+}
+
+# --- Shared helpers used on both sides of the -DryRun exit -----
+# Defined up here, before the pre-flight, because the issue #144 blocks
+# below (the tools answer and the pre-push hook plan) read files during the
+# read-only pre-flight; until then only the copy phase needed them.
+
+# Read-ToolkitText / Write-ToolkitText: byte-exact text round trip for
+# the line-edited files (.gitignore) and the small files setup writes
+# itself (the tools record, the pre-push hook). Latin-1 (code page 28591)
+# maps every byte to one char and back, so editing a few lines never
+# re-encodes the rest or adds a BOM - the same trick Get-ToolkitFileHash
+# uses. Get-ToolkitNewline reports the newline the file already uses so
+# appended or rewritten lines match it instead of mixing CRLF into an
+# LF file.
+function Read-ToolkitText {
+  param([string]$Path)
+  $enc = [System.Text.Encoding]::GetEncoding(28591)
+  return $enc.GetString([System.IO.File]::ReadAllBytes($Path))
+}
+function Write-ToolkitText {
+  param([string]$Path, [string]$Text)
+  $enc = [System.Text.Encoding]::GetEncoding(28591)
+  [System.IO.File]::WriteAllBytes($Path, $enc.GetBytes($Text))
+}
+function Get-ToolkitNewline {
+  param([string]$Text)
+  if ($Text.Contains("`r`n")) { return "`r`n" }
+  return "`n"
+}
+
+# Test-ToolkitCanPrompt: whether a human can answer a Read-Host here - the
+# PowerShell side of bash's `[ -t 0 ]`. Redirected stdin or a
+# non-interactive host must take the no-prompt path (abort, or the default
+# answer), never block forever. Shared by the overwrite gate, the tools
+# question, and the Codex trust offer.
+function Test-ToolkitCanPrompt {
+  try {
+    if ([Console]::IsInputRedirected) { return $false }
+  } catch {
+    return $false
+  }
+  if (-not [Environment]::UserInteractive) { return $false }
+  return $true
+}
+
+# Invoke-ToolkitGit: run git against a directory and capture stdout and
+# the exit code without tripping $ErrorActionPreference = "Stop". Same
+# stderr rule as Invoke-ToolkitNode below: Windows PowerShell 5.1 turns
+# every stderr line of a native command into an ErrorRecord, and under
+# Stop the first one ("fatal: not a git repository") would terminate the
+# script, so the preference is relaxed for the call only. Stderr records
+# are dropped; callers read the exit code and the stdout lines.
+function Invoke-ToolkitGit {
+  param([string]$Repo, [string[]]$GitArgs)
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $raw = @(& git -C $Repo @GitArgs 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
+  $lines = @()
+  foreach ($item in $raw) {
+    if ($item -isnot [System.Management.Automation.ErrorRecord]) { $lines += [string]$item }
+  }
+  return @{ ExitCode = $code; Lines = $lines }
+}
+$GitAvailable = $null -ne (Get-Command git -ErrorAction SilentlyContinue)
+
+# The per-machine files (issue #144) live under the user profile. Read from
+# $env:USERPROFILE (falling back to $HOME) rather than $HOME alone, so a
+# test can redirect every per-machine read and write with one environment
+# variable, the way the bash suite redirects $HOME. Resolved once here so
+# the pre-flight report and the merges after the copies name the same files.
+$UserHome = $env:USERPROFILE
+if (-not $UserHome) { $UserHome = $HOME }
+$CursorDst = Join-Path $UserHome ".cursor\permissions.json"
+$AgDst = Join-Path $UserHome ".gemini\antigravity-cli\settings.json"
+$CodexCfg = Join-Path $UserHome ".codex\config.toml"
+
+# --- Tool layouts: the recorded answer (issue #144) ------------
+# PARITY: mirrors setup.sh (tools answer) - change both together
+# Which AI tools this project generates layouts for, beyond Claude Code.
+# The answer lives in .claude\.toolkit-tools.json in the target (committed
+# there, so it is the repo's choice and reaches every collaborator). It is
+# resolved here, before the pre-flight report, so the report can say what
+# will be built; nothing is written until the copy phase. Precedence:
+#   1. -Tools <list>              any run, fresh or upgrade; re-records it
+#   2. the recorded file          reused as-is, never asked again
+#   3. fresh install + console    asked once (default: Claude Code only).
+#                                 A -DryRun never asks: it reports the
+#                                 default and says the real run will ask
+#   4. otherwise                  Claude Code only
+# Everything here is READ-ONLY. The file is parsed with a regex rather
+# than ConvertFrom-Json, the way setup.sh uses sed: setup writes it in a
+# fixed one-line shape, and this repo's own committed copy keeps the key
+# and its list on one line too.
+$ToolsKnown = @("codex", "cursor", "antigravity")
+$ToolsFileRel = ".claude\.toolkit-tools.json"
+$ToolsFile = Join-Path $Target $ToolsFileRel
+$script:ToolsChosen = @()
+# Test-ToolsHas <name>: true when <name> is in this run's answer.
+function Test-ToolsHas {
+  param([string]$Name)
+  return ($script:ToolsChosen -ccontains $Name)
+}
+# Add-ToolsEntry <name>: append <name> to the answer unless it is already there.
+function Add-ToolsEntry {
+  param([string]$Name)
+  if (-not ($script:ToolsChosen -ccontains $Name)) { $script:ToolsChosen += $Name }
+}
+# Get-ToolsList: the answer as prose, for the report lines.
+function Get-ToolsList {
+  if ($script:ToolsChosen.Count -eq 0) { return "none (Claude Code only)" }
+  return ($script:ToolsChosen -join ", ")
+}
+# Get-ToolsJsonList: the answer as the JSON array body the record is written with.
+function Get-ToolsJsonList {
+  return (@($script:ToolsChosen | ForEach-Object { '"' + $_ + '"' }) -join ", ")
+}
+$ToolsPrev = @()
+$ToolsFilePreexisted = $false
+if (Test-Path -LiteralPath $ToolsFile -PathType Leaf) {
+  $ToolsFilePreexisted = $true
+  $toolsRaw = (Read-ToolkitText -Path $ToolsFile) -replace "[`r`n]", ""
+  $toolsMatch = [regex]::Match($toolsRaw, '"tools"\s*:\s*\[([^\]]*)\]')
+  if ($toolsMatch.Success) {
+    foreach ($toolsName in @($toolsMatch.Groups[1].Value -split ",")) {
+      $toolsName = $toolsName -replace '[\s"]', ''
+      if (-not $toolsName) { continue }
+      if ($ToolsKnown -ccontains $toolsName) {
+        $ToolsPrev += $toolsName
+      } else {
+        Write-Host "  Warning: ignoring unknown tool `"$toolsName`" in $ToolsFileRel"
+      }
+    }
+  }
+}
+$ToolsSource = ""
+if ($PSBoundParameters.ContainsKey("Tools")) {
+  $toolsArg = @(((@($Tools) -join ",") -split "[,\s]+") | Where-Object { $_ -ne "" })
+  if ($toolsArg.Count -eq 0) {
+    Write-Host ""
+    Write-Host "  Error: -Tools needs a value: codex, cursor, antigravity (comma-separated), or none"
+    Write-Host ""
+    exit 1
+  }
+  if (-not ($toolsArg.Count -eq 1 -and $toolsArg[0] -ceq "none")) {
+    foreach ($toolsName in $toolsArg) {
+      if ($ToolsKnown -ccontains $toolsName) {
+        Add-ToolsEntry -Name $toolsName
+      } else {
+        Write-Host ""
+        Write-Host "  Error: unknown tool in -Tools: $toolsName"
+        Write-Host "  Known tools: codex, cursor, antigravity (comma-separated), or none for Claude Code only"
+        Write-Host ""
+        exit 1
+      }
+    }
+  }
+  $ToolsSource = "from -Tools"
+} elseif ($ToolsFilePreexisted) {
+  foreach ($toolsName in $ToolsPrev) { Add-ToolsEntry -Name $toolsName }
+  $ToolsSource = "recorded in $ToolsFileRel"
+} elseif (-not $IsUpgrade -and -not $DryRun -and (Test-ToolkitCanPrompt)) {
+  Write-Host "  Which AI tools should this project generate layouts for, besides Claude Code?"
+  Write-Host "  Every chosen layout lives side by side, so switching tools later needs nothing;"
+  Write-Host "  add or remove one any time with: setup.ps1 -Target <target> -Tools <list>"
+  Write-Host ""
+  Write-Host "    1) Codex CLI        .agents\, .codex\, AGENTS.md"
+  Write-Host "    2) Cursor           .agents\, .cursor\, AGENTS.md"
+  Write-Host "    3) Antigravity CLI  .agents\, AGENTS.md"
+  Write-Host ""
+  $toolsReply = ""
+  try {
+    $toolsReply = Read-Host "  Numbers separated by commas (e.g. 1,2), or Enter for Claude Code only"
+  } catch {
+    $toolsReply = ""
+  }
+  Write-Host ""
+  foreach ($toolsName in @(([string]$toolsReply) -split ",")) {
+    $toolsName = $toolsName -replace '\s', ''
+    if (-not $toolsName) { continue }
+    if ($toolsName -eq "1" -or $toolsName -ceq "codex") {
+      Add-ToolsEntry -Name "codex"
+    } elseif ($toolsName -eq "2" -or $toolsName -ceq "cursor") {
+      Add-ToolsEntry -Name "cursor"
+    } elseif ($toolsName -eq "3" -or $toolsName -ceq "antigravity") {
+      Add-ToolsEntry -Name "antigravity"
+    } else {
+      Write-Host "  Error: unrecognized answer: $toolsName (expected numbers 1-3, or Enter for none)."
+      Write-Host "  Nothing was changed. Re-run, or pass the list directly: setup.ps1 -Target `"$Target`" -Tools codex,cursor"
+      Write-Host ""
+      exit 1
+    }
+  }
+  $ToolsSource = "asked above"
+} elseif (-not $IsUpgrade -and $DryRun -and (Test-ToolkitCanPrompt)) {
+  $ToolsSource = "default for this dry run; the real run asks once, or pass -Tools"
+} else {
+  $ToolsSource = "default: Claude Code only"
+}
+# Tools the recorded answer had that this run drops: their generated files
+# are removed with build-layouts.js --clean after the copy phase.
+$ToolsDropped = @()
+foreach ($toolsName in $ToolsPrev) {
+  if (-not (Test-ToolsHas -Name $toolsName)) { $ToolsDropped += $toolsName }
 }
 
 # --- Migration inventory (issue #133) --------------------------
@@ -515,9 +768,23 @@ if (Test-Path -LiteralPath $pfAgentsDir -PathType Container) {
     Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\agents" $src.Name)
   }
 }
-foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
+foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "build-layouts.js", "write-guard.js", "chain-hook.js")) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
 }
+# Issue #144: the per-tool emitters, the host notes, and the permission list.
+# Two new directories (the shared\*.md loop above is top-level only). The
+# files build-layouts.js WRITES (.agents\, .codex\, .cursor\, AGENTS.md,
+# .claude\.toolkit-generated.json) and the tools answer
+# (.claude\.toolkit-tools.json) are deliberately not here: they never enter
+# ManagedRels or the manifest. The build hashes its own output, and the
+# answer is the repo's, not the toolkit's. Mirrors setup.sh.
+foreach ($src in Get-ChildItem -Path $LayoutsSrcDir -Filter *.js -File -ErrorAction SilentlyContinue) {
+  Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\scripts\layouts" $src.Name)
+}
+foreach ($src in Get-ChildItem -Path $HostNotesSrcDir -Filter *.md -File -ErrorAction SilentlyContinue) {
+  Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\skills\shared\host-notes" $src.Name)
+}
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\toolkit-permissions.json") -Rel ".claude\toolkit-permissions.json"
 $pfLockSrc = Join-Path $ToolkitRoot ".claude\scripts\package-lock.json"
 if (Test-Path -LiteralPath $pfLockSrc -PathType Leaf) {
   Add-PreflightDiff -Source $pfLockSrc -Rel ".claude\scripts\package-lock.json"
@@ -569,6 +836,96 @@ foreach ($pfDirName in @("agents", "commands", "rules", "scripts", "skills")) {
 # Stale backup directories from earlier runs (issue #133 evidence: these
 # linger in project roots for years without anyone noticing).
 $PfStaleBackups = @(Get-ChildItem -Path $Target -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue).Count
+
+# Issue #144: a bare `.cursor/` ignore line. The toolkit's .gitignore matches
+# the directory as .cursor/* and re-includes the generated Cursor files by
+# name; git never descends into an excluded directory, so the old bare line
+# (every install before v7) would keep every negation dead. Detected here
+# (read-only) for the report; removed after the .gitignore merge below.
+$PfCursorBare = $false
+$pfGitignore = Join-Path $Target ".gitignore"
+if (Test-Path -LiteralPath $pfGitignore -PathType Leaf) {
+  if (@((Read-ToolkitText -Path $pfGitignore) -split "`r?`n") -ccontains ".cursor/") { $PfCursorBare = $true }
+}
+
+# --- Git pre-push hook plan (issue #144) -----------------------
+# PARITY: mirrors setup.sh (pre-push hook plan) - change both together
+# Read-only: decides what the hook block after the copies will do, so the
+# report can say it and -DryRun can stop here. The hook runs the M11
+# tripwire (secret scan, never-push files, settings diff, and the generated-
+# layout check) on every push. Git runs hooks from the repository root, so
+# the script path inside the hook is relative. The hooks directory comes
+# from `git rev-parse --git-path hooks`, which resolves a worktree to the
+# main checkout's hooks; a relative answer is relative to the target. A
+# target that sits inside a repository rooted elsewhere is skipped: the
+# relative path would not resolve from that root and every push would fail.
+# A pre-push hook without the marker line is somebody else's and is never
+# replaced; one with the marker is refreshed only when its content differs.
+$HookMarker = "# llm-peer-review toolkit pre-push hook (issue #144)"
+# Get-HookContent: the hook text, LF-joined with a trailing LF - the exact
+# bytes setup.sh's printf writes. Git runs the hook through sh on Windows
+# too, and sh needs LF.
+function Get-HookContent {
+  return ((@(
+    '#!/bin/sh',
+    $HookMarker,
+    '# Runs the M11 tripwire (secret scan, never-push files, settings diff, and the',
+    '# generated-layout check) before every push. Git runs hooks from the repository',
+    '# root, so the relative path below resolves there. Installed by the toolkit',
+    '# setup; safe to delete, and re-created by the next setup run.',
+    'exec node .claude/scripts/pre-push-check.js'
+  ) -join "`n") + "`n")
+}
+# ConvertTo-ToolkitComparablePath: git prints forward slashes (C:/x, or
+# //server/share/x for a UNC target) while the target is a native path.
+# Both are flipped to backslashes and stripped of a trailing separator, and
+# the caller compares case-insensitively, as the Windows filesystem does.
+function ConvertTo-ToolkitComparablePath {
+  param([string]$Path)
+  return (([string]$Path).Replace('/', '\')).TrimEnd('\')
+}
+$HookState = "not-git"
+$HookDir = ""
+$HookFile = ""
+if ($GitAvailable -and (Invoke-ToolkitGit -Repo $Target -GitArgs @("rev-parse", "--git-dir")).ExitCode -eq 0) {
+  $hookTop = Invoke-ToolkitGit -Repo $Target -GitArgs @("rev-parse", "--show-toplevel")
+  $hookTopLevel = ""
+  if ($hookTop.ExitCode -eq 0 -and @($hookTop.Lines).Count -gt 0) { $hookTopLevel = ([string]@($hookTop.Lines)[0]).Trim() }
+  $hookCfg = Invoke-ToolkitGit -Repo $Target -GitArgs @("config", "--get", "core.hooksPath")
+  $hookHooksPath = ""
+  if ($hookCfg.ExitCode -eq 0 -and @($hookCfg.Lines).Count -gt 0) { $hookHooksPath = ([string]@($hookCfg.Lines)[0]).Trim() }
+  if ((ConvertTo-ToolkitComparablePath -Path $hookTopLevel) -ine (ConvertTo-ToolkitComparablePath -Path $Target)) {
+    $HookState = "other-root"
+  } elseif ($hookHooksPath -ne "") {
+    $HookState = "hooks-path"
+  } else {
+    # --git-path needs git 2.5 (2015); an older git fails here and the
+    # empty answer becomes the old-git state.
+    $hookPathRun = Invoke-ToolkitGit -Repo $Target -GitArgs @("rev-parse", "--git-path", "hooks")
+    if ($hookPathRun.ExitCode -eq 0 -and @($hookPathRun.Lines).Count -gt 0) { $HookDir = ([string]@($hookPathRun.Lines)[0]).Trim() }
+    if ($HookDir -ne "") {
+      $HookDir = $HookDir.Replace('/', '\')
+      if (-not [System.IO.Path]::IsPathRooted($HookDir)) { $HookDir = Join-Path $Target $HookDir }
+      $HookFile = Join-Path $HookDir "pre-push"
+    }
+    if ($HookDir -eq "") {
+      $HookState = "old-git"
+    } elseif (-not (Test-Path -LiteralPath $HookFile)) {
+      $HookState = "install"
+    } elseif (-not (Test-Path -LiteralPath $HookFile -PathType Leaf)) {
+      $HookState = "foreign"
+    } else {
+      $hookExisting = Read-ToolkitText -Path $HookFile
+      if (-not $hookExisting.Contains($HookMarker)) {
+        $HookState = "foreign"
+      } elseif ($hookExisting.Replace("`r", "") -ceq (Get-HookContent)) {
+        $HookState = "identical"
+      } else {
+        $HookState = "replace"
+      }
+    }
+  }
+}
 
 # PARITY: mirrors the `command -v node` guard on the settings.local.json
 # permission merge in setup.sh. Detected once here so the pre-flight
@@ -622,14 +979,68 @@ if ($PfStaleBackups -gt 0) {
   Write-Host "    Note: $PfStaleBackups older .toolkit-backup-* folder(s) from previous runs are"
   Write-Host "    still in the project root. Delete them when no longer needed."
 }
-# The settings.local.json permission merge skips silently inside its own
-# block when node is absent. Say so here, once, so a permission that never
-# arrived is not a mystery later. (setup.sh also names its package.json
-# cleanup here; on this side that step is native PowerShell.)
+# PARITY: mirrors setup.sh (tool layouts pre-flight section) - change both together
+# Issue #144: the tools answer, what the copy phase will build or clean for
+# it, the per-machine steps that follow, the pre-push hook plan, and the
+# .gitignore repair. Each line mirrors a block after the -DryRun exit.
+Write-Host ""
+Write-Host "    Tool layouts (issue #144):"
+Write-Host "      Tools: $(Get-ToolsList) ($ToolsSource)"
+if ($ToolsDropped.Count -gt 0) {
+  Write-Host "      - Remove the generated files of: $($ToolsDropped -join ' ') (build-layouts.js --clean)"
+}
+if ($script:ToolsChosen.Count -gt 0) {
+  Write-Host "      - Build the layouts from .claude\ (node .claude\scripts\build-layouts.js)"
+  if (Test-ToolsHas -Name "cursor") {
+    Write-Host "      - Cursor: merge the terminal allowlist into $CursorDst"
+    Write-Host "        (machine-global: every Cursor project on this machine runs in Allowlist mode)"
+  }
+  if (Test-ToolsHas -Name "antigravity") {
+    Write-Host "      - Antigravity: merge the permissions into $AgDst (machine-global)"
+  }
+  if (Test-ToolsHas -Name "codex") {
+    Write-Host "      - Codex: offer to trust this project in $CodexCfg, plus a one-time /hooks step"
+  }
+}
+if ($PfCursorBare) {
+  Write-Host "      - .gitignore: remove the bare .cursor/ line (it keeps the generated Cursor files ignored)"
+}
+if ($HookState -eq "install") {
+  Write-Host "      Git pre-push hook: install $HookFile (runs the M11 tripwire)"
+} elseif ($HookState -eq "replace") {
+  Write-Host "      Git pre-push hook: refresh $HookFile (toolkit hook, content differs; backed up first)"
+} elseif ($HookState -eq "identical") {
+  Write-Host "      Git pre-push hook: already installed at $HookFile"
+} elseif ($HookState -eq "foreign") {
+  Write-Host "      Git pre-push hook: $HookFile exists and is not the toolkit's - left alone"
+} elseif ($HookState -eq "hooks-path") {
+  Write-Host "      Git pre-push hook: skipped, core.hooksPath is set for this repository"
+} elseif ($HookState -eq "other-root") {
+  Write-Host "      Git pre-push hook: skipped, the target is inside a repository rooted elsewhere"
+} elseif ($HookState -eq "old-git") {
+  Write-Host "      Git pre-push hook: skipped, this git cannot report its hooks directory (needs git 2.5+)"
+} else {
+  Write-Host "      Git pre-push hook: skipped, the target is not a git repository"
+}
+# PARITY: mirrors setup.sh (node-absent pre-flight note) - change both together
+# The node-dependent steps (the settings.local.json seed and permission
+# merge, and the issue #144 layout build and clean) skip inside their own
+# blocks when node is absent. Say so here, once, so a permission or a
+# layout that never arrived is not a mystery later. (setup.sh also names
+# its package.json cleanup here; on this side that step is native
+# PowerShell.)
 if (-not $NodeAvailable) {
   Write-Host ""
   Write-Host "    Note: node was not found, so the .claude\settings.local.json permission"
   Write-Host "    merge will be skipped this run."
+  if ($script:ToolsChosen.Count -gt 0 -or $ToolsDropped.Count -gt 0) {
+    Write-Host "    The tool layouts will not be built or cleaned either. Once node is installed,"
+    Write-Host "    run from the project root: node .claude\scripts\build-layouts.js"
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $Target ".claude\settings.local.json") -PathType Leaf)) {
+    Write-Host "    .claude\settings.local.json will not be seeded. Once node is installed, run"
+    Write-Host "    from the project root: node .claude\scripts\build-layouts.js --claude-settings"
+  }
 }
 Write-Host ""
 
@@ -655,14 +1066,9 @@ if ($script:PfModified.Count -gt 0 -and -not $Force) {
   Write-Host ""
   $proceed = $false
   # Only prompt when a human can actually answer. Redirected stdin or a
-  # non-interactive host must take the abort path, not block forever.
-  $canPrompt = $true
-  try {
-    if ([Console]::IsInputRedirected) { $canPrompt = $false }
-  } catch {
-    $canPrompt = $false
-  }
-  if ($canPrompt -and -not [Environment]::UserInteractive) { $canPrompt = $false }
+  # non-interactive host must take the abort path, not block forever
+  # (Test-ToolkitCanPrompt, shared with the issue #144 prompts).
+  $canPrompt = Test-ToolkitCanPrompt
   if ($canPrompt) {
     try {
       $answer = Read-Host "  Continue? [y/N]"
@@ -717,6 +1123,15 @@ function Backup-File {
   }
   if ($rel.StartsWith($prefix)) {
     $rel = $rel.Substring($prefix.Length)
+  } else {
+    # A file outside the target keeps its absolute path here (issue #144:
+    # the per-machine files under the user profile, or a worktree's hooks
+    # under the main checkout). Dropping the root marker - the colon of a
+    # drive letter, the leading slashes of a UNC path - mirrors it under
+    # the backup root like any other file (C:\Users\me\.cursor\permissions.json
+    # lands at <backup>\C\Users\me\.cursor\permissions.json), the way
+    # setup.sh drops the leading slash instead of producing a double one.
+    $rel = ($rel -replace '^([A-Za-z]):\\', '$1\').TrimStart('\')
   }
   $dest = Join-Path $script:BackupDir $rel
   $destParent = Split-Path -Parent $dest
@@ -761,33 +1176,15 @@ function Invoke-SafeCopy {
   Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
-# Read-ToolkitText / Write-ToolkitText: byte-exact text round trip for
-# the line-edited files (.gitignore). Latin-1 (code page 28591) maps
-# every byte to one char and back, so editing a few lines never
-# re-encodes the rest or adds a BOM - the same trick Get-ToolkitFileHash
-# uses. Get-ToolkitNewline reports the newline the file already uses so
-# appended or rewritten lines match it instead of mixing CRLF into an
-# LF file.
-function Read-ToolkitText {
-  param([string]$Path)
-  $enc = [System.Text.Encoding]::GetEncoding(28591)
-  return $enc.GetString([System.IO.File]::ReadAllBytes($Path))
-}
-function Write-ToolkitText {
-  param([string]$Path, [string]$Text)
-  $enc = [System.Text.Encoding]::GetEncoding(28591)
-  [System.IO.File]::WriteAllBytes($Path, $enc.GetBytes($Text))
-}
-function Get-ToolkitNewline {
-  param([string]$Text)
-  if ($Text.Contains("`r`n")) { return "`r`n" }
-  return "`n"
-}
+# Read-ToolkitText, Write-ToolkitText, and Get-ToolkitNewline (the
+# byte-exact text round trip the line-edited files use) live in the
+# "Shared helpers" section above the pre-flight: since issue #144 the
+# read-only pre-flight needs them too.
 
-# .gitignore is edited by two blocks below (the toolkit-line merge and
-# the legacy INDEX.md cleanup). Backing it up on the first edit only
-# keeps the backup a true pre-run original; a second Backup-File would
-# overwrite it with the half-edited version.
+# .gitignore is edited by three blocks below (the toolkit-line merge, the
+# bare .cursor/ line removal, and the legacy INDEX.md cleanup). Backing it
+# up on the first edit only keeps the backup a true pre-run original; a
+# second Backup-File would overwrite it with the half-edited version.
 $script:GitignoreBackedUp = $false
 
 # Invoke-ToolkitNode: run a `node -e` script and capture stdout, stderr,
@@ -817,6 +1214,41 @@ function Invoke-ToolkitNode {
     }
   }
   return @{ ExitCode = $code; Lines = $lines; Errors = $errors }
+}
+
+# Invoke-ToolkitNodeFile: the same capture for `node <script> <args>` - the
+# build-layouts.js runs (issue #144). Paths travel as separate arguments
+# here, never interpolated into a -e source string.
+function Invoke-ToolkitNodeFile {
+  param([string]$File, [string[]]$NodeArgs)
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $raw = @(& node $File @NodeArgs 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $prevEap
+  }
+  $lines = @()
+  $errors = @()
+  foreach ($item in $raw) {
+    if ($item -is [System.Management.Automation.ErrorRecord]) {
+      $errors += [string]$item.Exception.Message
+    } else {
+      $lines += [string]$item
+    }
+  }
+  return @{ ExitCode = $code; Lines = $lines; Errors = $errors }
+}
+
+# Get-ToolkitFirstLine: the first non-blank line of a node run's output,
+# stdout first, for the one-line warnings (bash: grep -v blank | head -1).
+function Get-ToolkitFirstLine {
+  param($Run)
+  foreach ($l in @(@($Run.Lines) + @($Run.Errors))) {
+    if (([string]$l).Trim() -ne "") { return ([string]$l).Trim() }
+  }
+  return "node exited $($Run.ExitCode)"
 }
 
 $Skipped = @()
@@ -1079,6 +1511,25 @@ if (Test-Path -LiteralPath $shellsDir -PathType Container) {
   }
 }
 
+# PARITY: shared\host-notes\ must be copied by BOTH setup.sh and setup.ps1 (issue #144).
+# Same shape as the shells\ block above: the shared\*.md loop is top-level only
+# and the per-skill loop below skips shared\, so the per-tool host notes (the
+# "Host notes" section build-layouts.js appends to every generated skill) need
+# their own copy step. Mirrors the host-notes block in setup.sh.
+if (Test-Path -LiteralPath $HostNotesSrcDir -PathType Container) {
+  $hostNotesDest = Join-Path $Target ".claude\skills\shared\host-notes"
+  New-Item -ItemType Directory -Force -Path $hostNotesDest | Out-Null
+  foreach ($src in Get-ChildItem -Path $HostNotesSrcDir -Filter *.md -File) {
+    $dest = Join-Path $hostNotesDest $src.Name
+    try {
+      Invoke-SafeCopy -Source $src.FullName -Destination $dest
+    } catch {
+      Write-Host "  Error: Failed to copy shared\host-notes\$($src.Name): $_"
+      exit 1
+    }
+  }
+}
+
 # Copy each skill directory (contains SKILL.md and optional supporting files)
 $skillsRoot = Join-Path $ToolkitRoot ".claude\skills"
 if (Test-Path -LiteralPath $skillsRoot -PathType Container) {
@@ -1146,6 +1597,49 @@ foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "
   }
 }
 
+# --- Layout build, write-guard, chain-hook scripts and emitters (issue #144) --
+# PARITY: mirrors setup.sh (issue #144 scripts, emitters, permission list) - change both together
+# Dependency-free. build-layouts.js derives every other tool's layout from
+# .claude\ (it runs further down, once every source file is in place);
+# write-guard.js and chain-hook.js are the M2 and M14 guards outside Claude
+# Code. The emitters under .claude\scripts\layouts\ are what build-layouts.js
+# requires per tool, so they travel with it.
+Write-Host "  Copying .claude\scripts\build-layouts.js, write-guard.js, chain-hook.js ..."
+foreach ($name in @("build-layouts.js", "write-guard.js", "chain-hook.js")) {
+  try {
+    $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
+    $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)
+    Invoke-SafeCopy -Source $src -Destination $dest
+  } catch {
+    Write-Host "  Error: Failed to copy $name : $_"
+    exit 1
+  }
+}
+Write-Host "  Copying .claude\scripts\layouts\ ..."
+$layoutsDest = Join-Path $Target ".claude\scripts\layouts"
+New-Item -ItemType Directory -Force -Path $layoutsDest | Out-Null
+foreach ($src in Get-ChildItem -Path $LayoutsSrcDir -Filter *.js -File -ErrorAction SilentlyContinue) {
+  $dest = Join-Path $layoutsDest $src.Name
+  try {
+    Invoke-SafeCopy -Source $src.FullName -Destination $dest
+  } catch {
+    Write-Host "  Error: Failed to copy layouts\$($src.Name): $_"
+    exit 1
+  }
+}
+
+# --- Permission list (issue #144) ------------------------------
+# The one committed, tool-agnostic list every translator reads. It replaced
+# the tracked settings.local.json as the seed: the Claude Code translation is
+# produced from it (fresh install) or merged from it (upgrade) further down.
+Write-Host "  Copying .claude\toolkit-permissions.json ..."
+try {
+  Invoke-SafeCopy -Source (Join-Path $ToolkitRoot ".claude\toolkit-permissions.json") -Destination (Join-Path $Target ".claude\toolkit-permissions.json")
+} catch {
+  Write-Host "  Error: Failed to copy .claude\toolkit-permissions.json : $_"
+  exit 1
+}
+
 # --- .env.local.example (template - Invoke-SafeCopy backs up local edits) ---
 Write-Host "  Copying .env.local.example ..."
 try {
@@ -1168,6 +1662,16 @@ $gitignoreSrc = Join-Path $ToolkitRoot ".gitignore"
 $gitignoreDest = Join-Path $Target ".gitignore"
 # Whether the target brought its own .gitignore (mirrors GITIGNORE_PREEXISTED).
 $gitignorePreexisted = Test-Path -LiteralPath $gitignoreDest -PathType Leaf
+# $settingsIgnorePreexisted: whether the target's .gitignore already ignored
+# .claude/settings.local.json before this run. The toolkit's own .gitignore
+# carries that line since issue #144, so the merge (or the fresh copy) below
+# normally brings it in; the report after the merge needs to know whether it
+# was this run that added it. Mirrors SETTINGS_IGNORE_PREEXISTED.
+$settingsIgnoreLine = ".claude/settings.local.json"
+$settingsIgnorePreexisted = $false
+if ($gitignorePreexisted -and (@((Read-ToolkitText -Path $gitignoreDest) -split "`r?`n") -ccontains $settingsIgnoreLine)) {
+  $settingsIgnorePreexisted = $true
+}
 if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
   Write-Host "  Merging .gitignore (preserving your entries) ..."
   $giText = Read-ToolkitText -Path $gitignoreDest
@@ -1200,14 +1704,44 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
   }
 }
 
-# --- Ignore the seeded settings.local.json downstream ---------
+# --- Retire a bare .cursor/ ignore line (issue #144) -----------
+# PARITY: mirrors setup.sh (bare .cursor/ line removal) - change both together
+# The toolkit's .gitignore matches the directory as .cursor/* and re-includes
+# the generated Cursor files by name. The merge above only adds lines, so a
+# target that carried the old bare `.cursor/` keeps it, and git never
+# descends into an excluded directory: every negation would be dead and the
+# generated files would stay ignored. Removed the way the INDEX.md cleanup
+# below edits the file (exact-line filter, backed up first unless the merge
+# already saved the pre-run copy). Detected in the pre-flight ($PfCursorBare)
+# and re-checked here so the report and the edit cannot drift.
+if ($PfCursorBare) {
+  $giText = Read-ToolkitText -Path $gitignoreDest
+  $giLines = @($giText -split "`r?`n")
+  if ($giLines -ccontains ".cursor/") {
+    if (-not $script:GitignoreBackedUp) {
+      Backup-File -Original $gitignoreDest
+      $script:GitignoreBackedUp = $true
+    }
+    $giNewline = Get-ToolkitNewline -Text $giText
+    $giKept = @($giLines | Where-Object { $_ -cne ".cursor/" })
+    Write-ToolkitText -Path $gitignoreDest -Text ($giKept -join $giNewline)
+    Write-Host "  Removed the bare .cursor/ line from .gitignore (the generated Cursor files are re-included by name)"
+  }
+}
+
+# --- Ignore settings.local.json downstream --------------------
 # PARITY: mirrors the settings.local.json ignore line in setup.sh - change both together
-# The toolkit repo tracks .claude\settings.local.json as the SEED for the
-# permission merge, so its own .gitignore cannot list the file and the merge
-# above never adds the line. Downstream the file carries machine-specific
-# absolute paths and the M11 tripwire refuses to push it. Appended once, to a
-# fresh copy and a merged file alike; an identical re-run writes nothing.
-$settingsIgnoreLine = ".claude/settings.local.json"
+# Since issue #144 the toolkit repo no longer tracks .claude\settings.local.json:
+# the permission seed is .claude\toolkit-permissions.json, translated per
+# machine by build-layouts.js --claude-settings (below), and the toolkit's own
+# .gitignore lists the file, so the merge above (or the fresh copy) normally
+# brings the line in. This block is the fallback for a target .gitignore that
+# still lacks it, and the one place the line is REPORTED either way. Downstream
+# the file carries machine-specific absolute paths and the M11 tripwire refuses
+# to push it, so a target that does not ignore it trips the tripwire on its
+# first "git add -A" (holistic pass, fresh-install walk). An identical re-run
+# finds the line, writes nothing, and says nothing.
+$settingsIgnoreAdded = $false
 $giNow = Read-ToolkitText -Path $gitignoreDest
 if (-not (@($giNow -split "`r?`n") -ccontains $settingsIgnoreLine)) {
   if (-not $script:GitignoreBackedUp -and $gitignorePreexisted) {
@@ -1218,39 +1752,38 @@ if (-not (@($giNow -split "`r?`n") -ccontains $settingsIgnoreLine)) {
   if ($giNow.Length -gt 0 -and -not $giNow.EndsWith("`n")) { $giNow += $giNl }
   $giNow += "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" + $giNl + $settingsIgnoreLine + $giNl
   Write-ToolkitText -Path $gitignoreDest -Text $giNow
-  # PARITY: mirrors the tracked settings.local.json warning in setup.sh - change both together
-  # An ignore line never untracks a file git already holds in its index, and
-  # pre-push-check.js deliberately exempts a never-push path that already
-  # exists at the remote base, so a downstream copy committed before this
-  # install kept going out on every push while the line below claimed
-  # "never pushed" (holistic review, R3). When git is on PATH, ask the
-  # index and warn instead: ls-files --error-unmatch exits 0 only for a
-  # tracked path, and fails the same way on a plain folder as on an
-  # untracked file, so a non-repo target keeps the plain message. Same
-  # stderr rule as Invoke-ToolkitNode: git's "fatal: not a git repository"
-  # would terminate the script under Stop, so the preference is relaxed
-  # for the call only. The untrack itself is the user's call - git rm
-  # --cached keeps the file on disk, but it is still a change to their
-  # repo - so setup never runs it.
-  $settingsTracked = $false
-  if ($null -ne (Get-Command git -ErrorAction SilentlyContinue)) {
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-      & git -C $Target ls-files --error-unmatch -- $settingsIgnoreLine 2>&1 | Out-Null
-      $settingsTracked = ($LASTEXITCODE -eq 0)
-    } finally {
-      $ErrorActionPreference = $prevEap
-    }
-  }
-  if ($settingsTracked) {
-    Write-Host "  Added $settingsIgnoreLine to .gitignore"
-    Write-Host "  WARNING: $settingsIgnoreLine is already tracked by git, and an ignore line does not untrack it."
-    Write-Host "           It will keep being pushed until you run: git rm --cached $settingsIgnoreLine"
-    Write-Host "           (the file stays on disk; git just stops tracking it)"
-  } else {
-    Write-Host "  Added $settingsIgnoreLine to .gitignore (machine-specific, never pushed)"
-  }
+  $settingsIgnoreAdded = $true
+} elseif (-not $settingsIgnorePreexisted) {
+  # The merge or the fresh copy brought the line in during this run.
+  $settingsIgnoreAdded = $true
+}
+# PARITY: mirrors the tracked settings.local.json warning in setup.sh - change both together
+# An ignore line never untracks a file git already holds in its index, and
+# pre-push-check.js deliberately exempts a never-push path that already
+# exists at the remote base, so a downstream copy committed before this
+# install kept going out on every push while the line below claimed
+# "never pushed" (holistic review, R3). When git is on PATH, ask the
+# index and warn instead: ls-files --error-unmatch exits 0 only for a
+# tracked path, and fails the same way on a plain folder as on an
+# untracked file, so a non-repo target keeps the plain message
+# (Invoke-ToolkitGit keeps git's "fatal: not a git repository" from
+# terminating the script under Stop). The untrack itself is the user's
+# call - git rm --cached keeps the file on disk, but it is still a change
+# to their repo - so setup never runs it. The warning repeats on every run
+# while the file stays tracked: it is a live problem each time.
+$settingsTracked = $false
+if ($GitAvailable) {
+  $settingsTracked = ((Invoke-ToolkitGit -Repo $Target -GitArgs @("ls-files", "--error-unmatch", "--", $settingsIgnoreLine)).ExitCode -eq 0)
+}
+if ($settingsIgnoreAdded -and -not $settingsTracked) {
+  Write-Host "  Added $settingsIgnoreLine to .gitignore (machine-specific, never pushed)"
+} elseif ($settingsIgnoreAdded) {
+  Write-Host "  Added $settingsIgnoreLine to .gitignore"
+}
+if ($settingsTracked) {
+  Write-Host "  WARNING: $settingsIgnoreLine is already tracked by git, and an ignore line does not untrack it."
+  Write-Host "           It will keep being pushed until you run: git rm --cached $settingsIgnoreLine"
+  Write-Host "           (the file stays on disk; git just stops tracking it)"
 }
 
 # --- .gitattributes (upstream-owned - Invoke-SafeCopy handles any customizations) ---
@@ -1328,7 +1861,7 @@ $LessonsPreexisted = Test-Path -LiteralPath (Join-Path $Target "LESSONS.md") -Pa
 # would give every fresh install a backup dir. Mirrors SETTINGS_PREEXISTED.
 $SettingsPreexisted = Test-Path -LiteralPath (Join-Path $Target ".claude\settings.local.json") -PathType Leaf
 
-foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
+foreach ($f in @("CLAUDE.md", "LESSONS.md")) {
   $src = Join-Path $ToolkitRoot $f
   $dest = Join-Path $Target $f
   if (Test-Path -LiteralPath $dest -PathType Leaf) {
@@ -1343,6 +1876,31 @@ foreach ($f in @("CLAUDE.md", "LESSONS.md", ".claude\settings.local.json")) {
       exit 1
     }
   }
+}
+
+# --- Seed .claude\settings.local.json from the permission list (issue #144) -
+# PARITY: mirrors setup.sh (settings.local.json seed) - change both together
+# The tracked seed copy is gone: the toolkit repo ignores its own
+# settings.local.json now, and the seed is .claude\toolkit-permissions.json.
+# On a fresh install, build-layouts.js --claude-settings translates the list
+# into Claude Code's grammar and writes the file (the merge below then adds
+# this target's absolute-path browse.js entries). An existing file is the
+# user's and is left to the merge. Without node nothing can be translated,
+# so the command is named for later.
+$buildLayoutsPath = Join-Path $Target ".claude\scripts\build-layouts.js"
+if ($SettingsPreexisted) {
+  Write-Host "  Skipping .claude\settings.local.json - already exists (yours to customize; new permissions are merged below)"
+  $Skipped += ".claude\settings.local.json"
+} elseif ($NodeAvailable) {
+  Write-Host "  Seeding .claude\settings.local.json from .claude\toolkit-permissions.json ..."
+  $seedRun = Invoke-ToolkitNodeFile -File $buildLayoutsPath -NodeArgs @("--root", $Target, "--claude-settings")
+  if ($seedRun.ExitCode -ne 0) {
+    Write-Host "  Warning: could not seed .claude\settings.local.json ($(Get-ToolkitFirstLine -Run $seedRun))."
+    Write-Host "    Run later from the project root: node .claude\scripts\build-layouts.js --claude-settings"
+  }
+} else {
+  Write-Host "  Note: node was not found, so .claude\settings.local.json was not seeded. Once node is"
+  Write-Host "        installed, run from the project root: node .claude\scripts\build-layouts.js --claude-settings"
 }
 
 # ─── LESSONS-detail.md (paired with the LESSONS.md index) ────
@@ -1420,17 +1978,38 @@ if (Test-Path -LiteralPath $designProfileDest -PathType Leaf) {
 # setup.sh writes are left alone, and on a UNC target (\\wsl.localhost\...,
 # whose flipped form //wsl.localhost/... never matches a real command
 # line) no absolute entry is added or removed at all.
+#
+# Issue #144: the merge SOURCE is the Claude Code translation of
+# .claude\toolkit-permissions.json, printed by build-layouts.js and written
+# to a sibling file inside the target's .claude\ (the same writable place
+# the .tmp uses), never the toolkit's own settings.local.json, which is no
+# longer tracked. The inline node reads it from SRC_FILE. The print mode
+# never reads the target's file, so an unparseable target still reaches
+# the merge and gets the warning below, not a translation error.
 $settingsDest = Join-Path $Target ".claude\settings.local.json"
+$permsSrcFile = ""
 if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
+  $permsSrcFile = $settingsDest + ".tmp.src"
+  if (Test-Path -LiteralPath $permsSrcFile) { Remove-Item -LiteralPath $permsSrcFile -Force }
+  $permsSrcRun = Invoke-ToolkitNodeFile -File $buildLayoutsPath -NodeArgs @("--root", $Target, "--claude-settings", "--print")
+  if ($permsSrcRun.ExitCode -ne 0) {
+    $permsSrcFile = ""
+    Write-Host "  Warning: could not translate .claude\toolkit-permissions.json (build-layouts.js --claude-settings --print exited $($permsSrcRun.ExitCode)),"
+    Write-Host "    so the permission merge was skipped. Your .claude\settings.local.json was left unchanged."
+  } else {
+    $permsSrcUtf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($permsSrcFile, ((@($permsSrcRun.Lines) -join "`n") + "`n"), $permsSrcUtf8)
+  }
+}
+if ($permsSrcFile -ne "") {
   $settingsTmp = $settingsDest + ".tmp"
   if (Test-Path -LiteralPath $settingsTmp) { Remove-Item -LiteralPath $settingsTmp -Force }
   $permsMergeJs = @'
     const fs = require('fs');
     const path = require('path');
-    const toolkitSrc = process.env.TOOLKIT_SRC;
     const targetDir = process.env.TARGET_DIR;
     const tgtPath = path.join(targetDir, '.claude', 'settings.local.json');
-    const src = JSON.parse(fs.readFileSync(path.join(toolkitSrc, '.claude', 'settings.local.json'), 'utf-8'));
+    const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
     const tgt = JSON.parse(fs.readFileSync(tgtPath, 'utf-8'));
     if (!tgt.permissions) tgt.permissions = {};
     if (!tgt.permissions.allow) tgt.permissions.allow = [];
@@ -1496,10 +2075,13 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
       allNew.forEach(p => console.log(p));
     }
 '@
-  $env:TOOLKIT_SRC = $ToolkitRoot
+  $env:SRC_FILE = $permsSrcFile
   $env:TARGET_DIR = $Target
   $permsRun = Invoke-ToolkitNode -Script $permsMergeJs
-  Remove-Item -Path Env:TOOLKIT_SRC, Env:TARGET_DIR -ErrorAction SilentlyContinue
+  Remove-Item -Path Env:SRC_FILE, Env:TARGET_DIR -ErrorAction SilentlyContinue
+  # The translation file has served its purpose whatever the merge did, so
+  # nothing that fails below can leave it behind in .claude\.
+  Remove-Item -LiteralPath $permsSrcFile -Force -ErrorAction SilentlyContinue
   if ($permsRun.ExitCode -ne 0) {
     if (Test-Path -LiteralPath $settingsTmp) { Remove-Item -LiteralPath $settingsTmp -Force }
     # node's first stderr line is a stack location ("[eval]:5"), not the
@@ -1568,6 +2150,272 @@ if (Test-Path -LiteralPath $gitignoreDest -PathType Leaf) {
     Write-ToolkitText -Path $gitignoreDest -Text ($giKept -join $giNewline)
     Write-Host "    Cleaned stale INDEX.md entries from .gitignore"
   }
+}
+
+# --- Tool layouts: record the answer, clean, build (issue #144) -
+# PARITY: mirrors setup.sh (tools record, clean, build) - change both together
+# The answer resolved in the pre-flight is written here, after every source
+# file is in place (build-layouts.js and its emitters were copied above, and
+# the seeded CLAUDE.md feeds the AGENTS.md digest). Written byte-exact with
+# an LF ending like the manifest, in the one-line shape the pre-flight
+# parses; identical content is left alone so a re-run makes no backup. The
+# file is committed downstream, so it is the repo's choice and reaches every
+# collaborator. It never enters the manifest, and neither do the generated
+# files: the build hashes its own output in .claude\.toolkit-generated.json.
+$toolsJson = '{ "tools": [' + (Get-ToolsJsonList) + '] }'
+$toolsCurrent = $null
+if (Test-Path -LiteralPath $ToolsFile -PathType Leaf) {
+  $toolsCurrent = (Read-ToolkitText -Path $ToolsFile).Replace("`r", "").TrimEnd("`n")
+}
+if ($null -ne $toolsCurrent -and $toolsCurrent -ceq $toolsJson) {
+  # unchanged - nothing to write, nothing to back up
+} else {
+  if ($null -ne $toolsCurrent) { Backup-File -Original $ToolsFile }
+  Write-ToolkitText -Path $ToolsFile -Text ($toolsJson + "`n")
+  Write-Host ("  Recorded the tool layouts in " + $ToolsFileRel + ": " + (Get-ToolsList))
+}
+
+# A tool dropped from the recorded answer has its generated files removed.
+# --clean reads the build's own record (which tools it last built), refuses
+# a hand-edited generated file rather than deleting it, and takes only the
+# toolkit's entries back out of a key-merged hooks.json.
+if ($ToolsDropped.Count -gt 0) {
+  if ($NodeAvailable) {
+    foreach ($toolsName in $ToolsDropped) {
+      $cleanRun = Invoke-ToolkitNodeFile -File $buildLayoutsPath -NodeArgs @("--root", $Target, "--clean", $toolsName)
+      if ($cleanRun.ExitCode -eq 0) {
+        $cleanSummary = Get-ToolkitFirstLine -Run $cleanRun
+        $cleanPrefix = "build-layouts.js --clean " + $toolsName + ": "
+        if ($cleanSummary.StartsWith($cleanPrefix)) { $cleanSummary = $cleanSummary.Substring($cleanPrefix.Length) }
+        Write-Host "  Removed the generated $toolsName layout ($cleanSummary)"
+      } else {
+        Write-Host "  Warning: could not remove the generated $toolsName layout ($(Get-ToolkitFirstLine -Run $cleanRun))."
+        Write-Host "    Run later from the project root: node .claude\scripts\build-layouts.js --clean $toolsName"
+      }
+    }
+  } else {
+    Write-Host "  Note: node was not found, so the generated layout(s) for $($ToolsDropped -join ' ') were not removed."
+    Write-Host "        Once node is installed, run from the project root: node .claude\scripts\build-layouts.js --clean <tool>"
+  }
+}
+
+# Build every recorded layout. build-layouts.js reads the answer just written,
+# refuses to overwrite a hand-edited generated file (it names it; the user
+# restores it or rebuilds with --force), and prints one summary line.
+$LayoutsBuilt = $false
+if ($script:ToolsChosen.Count -gt 0) {
+  if ($NodeAvailable) {
+    Write-Host "  Building the tool layouts for $(Get-ToolsList) ..."
+    $buildRun = Invoke-ToolkitNodeFile -File $buildLayoutsPath -NodeArgs @("--root", $Target)
+    foreach ($buildLine in @(@($buildRun.Lines) + @($buildRun.Errors))) {
+      if (([string]$buildLine) -ne "") { Write-Host "    $buildLine" }
+    }
+    if ($buildRun.ExitCode -eq 0) {
+      $LayoutsBuilt = $true
+    } else {
+      Write-Host "  Warning: build-layouts.js exited $($buildRun.ExitCode), so the layouts were not fully built."
+      Write-Host "    Fix what it named above, then run from the project root: node .claude\scripts\build-layouts.js"
+    }
+  } else {
+    Write-Host "  Note: node was not found, so the layouts for $(Get-ToolsList) were not built."
+    Write-Host "        Once node is installed, run from the project root: node .claude\scripts\build-layouts.js"
+  }
+}
+
+# --- Per-machine permission merges (issue #144) ----------------
+# PARITY: mirrors setup.sh (per-machine merges) - change both together
+# Cursor's editor and Antigravity read permissions from one file per machine,
+# not per repo, so the translations the build wrote into the repo are merged
+# into those files here: union on the allow list, every other key preserved,
+# the toolkit's _generated marker never copied, a pre-existing file backed up
+# before it changes, nothing written when it already holds every entry. node
+# writes the merged result to a .tmp inside the target's .claude\ (known to
+# be writable) and PowerShell copies it into place, the same shape as the
+# settings.local.json merge above. Codex reads .codex\ per repo, but only
+# once the project is trusted, so that one is an offer, never a silent
+# write. $env:USERPROFILE is honored throughout ($UserHome, resolved above
+# the pre-flight), so a test can redirect it. Paths reach node through the
+# environment, never interpolated into the -e string, and the scripts use
+# single quotes only (Windows PowerShell 5.1 drops embedded double quotes
+# from native-command arguments).
+if (Test-ToolsHas -Name "cursor") {
+  $cursorSrc = Join-Path $Target ".cursor\permissions.toolkit.json"
+  if (-not (Test-Path -LiteralPath $cursorSrc -PathType Leaf)) {
+    Write-Host "  Cursor: .cursor\permissions.toolkit.json is not built yet, so nothing was merged into $CursorDst"
+  } elseif (-not $NodeAvailable) {
+    Write-Host "  Cursor: node was not found, so the allowlist merge into $CursorDst was skipped"
+  } else {
+    $cursorTmp = Join-Path $Target ".claude\.cursor-permissions.tmp"
+    if (Test-Path -LiteralPath $cursorTmp) { Remove-Item -LiteralPath $cursorTmp -Force }
+    $cursorMergeJs = @'
+      const fs = require('fs');
+      const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
+      const dst = fs.existsSync(process.env.DST_FILE) ? JSON.parse(fs.readFileSync(process.env.DST_FILE, 'utf-8')) : {};
+      if (!Array.isArray(dst.terminalAllowlist)) dst.terminalAllowlist = [];
+      const missing = (src.terminalAllowlist || []).filter(p => !dst.terminalAllowlist.includes(p));
+      if (missing.length) {
+        dst.terminalAllowlist = dst.terminalAllowlist.concat(missing);
+        fs.writeFileSync(process.env.OUT_FILE, JSON.stringify(dst, null, 2) + '\n');
+      }
+      console.log(missing.length);
+'@
+    $env:SRC_FILE = $cursorSrc
+    $env:DST_FILE = $CursorDst
+    $env:OUT_FILE = $cursorTmp
+    $cursorRun = Invoke-ToolkitNode -Script $cursorMergeJs
+    Remove-Item -Path Env:SRC_FILE, Env:DST_FILE, Env:OUT_FILE -ErrorAction SilentlyContinue
+    if ($cursorRun.ExitCode -ne 0) {
+      if (Test-Path -LiteralPath $cursorTmp) { Remove-Item -LiteralPath $cursorTmp -Force }
+      Write-Host "  Warning: could not merge the Cursor allowlist into $CursorDst (is it valid JSON?)."
+      Write-Host "    Copy the terminalAllowlist entries from .cursor\permissions.toolkit.json into it by hand."
+    } elseif (Test-Path -LiteralPath $cursorTmp -PathType Leaf) {
+      if (Test-Path -LiteralPath $CursorDst -PathType Leaf) { Backup-File -Original $CursorDst }
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CursorDst) | Out-Null
+      Copy-Item -LiteralPath $cursorTmp -Destination $CursorDst -Force
+      Remove-Item -LiteralPath $cursorTmp -Force
+      $cursorAdded = @(@($cursorRun.Lines) | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
+      Write-Host "  Cursor: added $($cursorAdded -join '') terminal allowlist entries to $CursorDst"
+      Write-Host "    That file is machine-global: every Cursor project on this machine now runs in Allowlist mode."
+    } else {
+      Write-Host "  Cursor: $CursorDst already holds every toolkit allowlist entry (machine-global)"
+    }
+  }
+}
+
+if (Test-ToolsHas -Name "antigravity") {
+  $agSrc = Join-Path $Target ".agents\settings.toolkit.json"
+  if (-not (Test-Path -LiteralPath $agSrc -PathType Leaf)) {
+    Write-Host "  Antigravity: .agents\settings.toolkit.json is not built yet, so nothing was merged into $AgDst"
+  } elseif (-not $NodeAvailable) {
+    Write-Host "  Antigravity: node was not found, so the permission merge into $AgDst was skipped"
+  } else {
+    $agTmp = Join-Path $Target ".claude\.antigravity-settings.tmp"
+    if (Test-Path -LiteralPath $agTmp) { Remove-Item -LiteralPath $agTmp -Force }
+    # The workspace placeholder becomes this target's absolute path (no
+    # trailing slash), exactly as the file's _note says: the committed file
+    # must never carry a machine path, so the substitution happens here.
+    $agMergeJs = @'
+      const fs = require('fs');
+      const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
+      const dst = fs.existsSync(process.env.DST_FILE) ? JSON.parse(fs.readFileSync(process.env.DST_FILE, 'utf-8')) : {};
+      if (!dst.permissions || typeof dst.permissions !== 'object') dst.permissions = {};
+      if (!Array.isArray(dst.permissions.allow)) dst.permissions.allow = [];
+      const ws = process.env.WORKSPACE;
+      const wanted = ((src.permissions && src.permissions.allow) || []).map(p => p.split('__WORKSPACE__').join(ws));
+      const missing = wanted.filter(p => !dst.permissions.allow.includes(p));
+      if (missing.length) {
+        dst.permissions.allow = dst.permissions.allow.concat(missing);
+        fs.writeFileSync(process.env.OUT_FILE, JSON.stringify(dst, null, 2) + '\n');
+      }
+      console.log(missing.length);
+'@
+    $env:SRC_FILE = $agSrc
+    $env:DST_FILE = $AgDst
+    $env:OUT_FILE = $agTmp
+    $env:WORKSPACE = $Target
+    $agRun = Invoke-ToolkitNode -Script $agMergeJs
+    Remove-Item -Path Env:SRC_FILE, Env:DST_FILE, Env:OUT_FILE, Env:WORKSPACE -ErrorAction SilentlyContinue
+    if ($agRun.ExitCode -ne 0) {
+      if (Test-Path -LiteralPath $agTmp) { Remove-Item -LiteralPath $agTmp -Force }
+      Write-Host "  Warning: could not merge the Antigravity permissions into $AgDst (is it valid JSON?)."
+      Write-Host "    Copy the permissions.allow entries from .agents\settings.toolkit.json into it by hand,"
+      Write-Host "    replacing __WORKSPACE__ with $Target"
+    } elseif (Test-Path -LiteralPath $agTmp -PathType Leaf) {
+      if (Test-Path -LiteralPath $AgDst -PathType Leaf) { Backup-File -Original $AgDst }
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $AgDst) | Out-Null
+      Copy-Item -LiteralPath $agTmp -Destination $AgDst -Force
+      Remove-Item -LiteralPath $agTmp -Force
+      $agAdded = @(@($agRun.Lines) | Where-Object { $_ -match '^\d+$' } | Select-Object -Last 1)
+      Write-Host "  Antigravity: added $($agAdded -join '') permission entries to $AgDst (machine-global; the write_file rule names this project)"
+    } else {
+      Write-Host "  Antigravity: $AgDst already holds every toolkit permission entry (machine-global)"
+    }
+  }
+}
+
+if (Test-ToolsHas -Name "codex") {
+  # A TOML basic string escapes every backslash, and every Windows path has
+  # them, so the table header is written as [projects."C:\\Users\\me\\proj"]
+  # - the form a TOML serializer emits for that path. setup.sh, whose paths
+  # never carry a backslash, skips the write on one; here only a double
+  # quote (impossible in a Windows path, but checked) is left to the user.
+  $codexSection = '[projects."' + $Target.Replace('\', '\\') + '"]'
+  $codexHasSection = $false
+  if (Test-Path -LiteralPath $CodexCfg -PathType Leaf) {
+    if ((Read-ToolkitText -Path $CodexCfg).Contains($codexSection)) { $codexHasSection = $true }
+  }
+  if ($codexHasSection) {
+    Write-Host "  Codex: $CodexCfg already has a section for this project"
+  } else {
+    $codexWrite = $false
+    if ($Target.Contains('"')) {
+      Write-Host "  Codex: the target path contains a quote, so the trust section is not written automatically."
+    } elseif (Test-ToolkitCanPrompt) {
+      Write-Host "  Codex applies .codex\config.toml and .codex\rules\ only in a project it trusts."
+      try {
+        $codexReply = Read-Host "  Mark this project trusted in $CodexCfg? [y/N]"
+        if ($codexReply -match '^(?i)(y|yes)$') { $codexWrite = $true }
+      } catch {
+        $codexWrite = $false
+      }
+    }
+    if ($codexWrite) {
+      $codexText = ""
+      $codexNl = "`n"
+      if (Test-Path -LiteralPath $CodexCfg -PathType Leaf) {
+        Backup-File -Original $CodexCfg
+        # End the existing content with a newline, then a blank separator
+        # line before the new table; a file created here needs neither.
+        $codexText = Read-ToolkitText -Path $CodexCfg
+        $codexNl = Get-ToolkitNewline -Text $codexText
+        if ($codexText.Length -gt 0 -and -not $codexText.EndsWith("`n")) { $codexText += $codexNl }
+        $codexText += $codexNl
+      }
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CodexCfg) | Out-Null
+      $codexText += $codexSection + $codexNl + 'trust_level = "trusted"' + $codexNl
+      Write-ToolkitText -Path $CodexCfg -Text $codexText
+      Write-Host "  Codex: marked this project trusted in $CodexCfg"
+    } else {
+      Write-Host ("  Codex: to trust this project, add these two lines to " + $CodexCfg + ":")
+      Write-Host "    $codexSection"
+      Write-Host '    trust_level = "trusted"'
+    }
+  }
+  Write-Host "  Codex: one-time step - open Codex in this project and run /hooks once to trust the toolkit's Stop hook (.codex\hooks.json)."
+}
+
+# --- Git pre-push hook (issue #144) ----------------------------
+# PARITY: mirrors setup.sh (pre-push hook install) - change both together
+# Acts on the plan the pre-flight computed ($HookState). Written byte-exact
+# with LF endings and no BOM (Write-ToolkitText): git runs the hook through
+# sh, which chokes on CRLF and on a BOM. There is no executable bit to set
+# on Windows; git runs the file regardless. A differing toolkit hook is
+# backed up before it is replaced, and a hook without the marker is never
+# touched.
+if ($HookState -eq "install" -or $HookState -eq "replace") {
+  if ($HookState -eq "replace") { Backup-File -Original $HookFile }
+  New-Item -ItemType Directory -Force -Path $HookDir | Out-Null
+  Write-ToolkitText -Path $HookFile -Text (Get-HookContent)
+  if ($HookState -eq "replace") {
+    Write-Host "  Refreshed the git pre-push hook: $HookFile (runs the M11 tripwire before every push)"
+  } else {
+    Write-Host "  Installed the git pre-push hook: $HookFile (runs the M11 tripwire before every push)"
+  }
+} elseif ($HookState -eq "identical") {
+  Write-Host "  Git pre-push hook already installed: $HookFile"
+} elseif ($HookState -eq "foreign") {
+  Write-Host "  Left the existing pre-push hook alone: $HookFile is not the toolkit's (no marker line)."
+  Write-Host "    To run the tripwire from it, add: node .claude/scripts/pre-push-check.js"
+} elseif ($HookState -eq "hooks-path") {
+  Write-Host "  Skipping the git pre-push hook: core.hooksPath is set, so this repository's hooks live elsewhere."
+  Write-Host "    Add 'node .claude/scripts/pre-push-check.js' to the pre-push hook there."
+} elseif ($HookState -eq "other-root") {
+  Write-Host "  Skipping the git pre-push hook: the target is inside a git repository rooted elsewhere."
+} elseif ($HookState -eq "old-git") {
+  Write-Host "  Skipping the git pre-push hook: this git cannot report its hooks directory (git rev-parse --git-path needs 2.5+)."
+  Write-Host "    Add 'node .claude/scripts/pre-push-check.js' to .git\hooks\pre-push by hand."
+} else {
+  Write-Host "  Skipping the git pre-push hook: the target is not a git repository (run git init, then setup again)."
 }
 
 # --- Toolkit manifest (issue #138) -----------------------------
@@ -1767,4 +2615,7 @@ Write-Host "      human-read markdown."
 Write-Host ""
 Write-Host "    Tip: To update commands and scripts, run setup again from"
 Write-Host "    the toolkit repo: powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`" -Target `"$Target`""
+Write-Host ""
+Write-Host "    Tool layouts: $(Get-ToolsList). To add or remove one later, run setup"
+Write-Host "    again with -Tools, e.g. -Tools codex,cursor (or -Tools none)."
 Write-Host ""
