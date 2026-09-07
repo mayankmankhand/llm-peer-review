@@ -74,6 +74,41 @@
 #      fresh install creates it, a re-run skips it and keeps a local edit.
 #      gen-media.js is a managed dep-free script and enters the manifest
 #      like its siblings (issue #160)
+#  23. --tools codex records the answer in .claude/.toolkit-tools.json; a
+#      re-run without the flag reuses it and never prompts (stdin is
+#      /dev/null); a --dry-run with a different answer changes nothing in
+#      the target or under $HOME (issue #144)
+#  24. A chosen tool's layout exists after install (.agents/skills/review/
+#      SKILL.md, .codex/config.toml, AGENTS.md); without a terminal the
+#      Codex trust step is printed, never written
+#  25. A fresh install with no flag and no terminal creates no .agents/,
+#      .codex/, .cursor/ and no AGENTS.md, and records Claude Code only
+#  26. The manifest lists .claude/toolkit-permissions.json, the three new
+#      scripts, an emitter and a host-notes file, and no path under
+#      .agents/, .codex/, .cursor/, nor AGENTS.md or the build's own record
+#  27. A fresh install seeds .claude/settings.local.json from the permission
+#      list (it carries Bash(node .claude/scripts/build-layouts.js *) plus
+#      this target's absolute browse.js entries) even when the toolkit
+#      source has no settings.local.json at all: the suite installs from a
+#      source copy with that file deleted
+#  28. With cursor chosen and a bare `.cursor/` line pre-planted in the
+#      target's .gitignore, the line is retired and `git check-ignore
+#      .cursor/hooks.json` returns nothing afterwards, while a file Cursor
+#      writes on its own stays ignored. The allowlist lands in the redirected
+#      $HOME/.cursor/permissions.json: other keys and entries preserved, the
+#      pre-existing file backed up, the _generated marker never copied, and
+#      a re-run finds nothing to add
+#  29. In a git-initialised target the pre-push hook is installed with the
+#      marker line, executable, LF-only; a re-run finds it identical; a
+#      pre-existing hook WITHOUT the marker is left byte-for-byte untouched
+#      with a message; a non-repo target gets one skip note
+#  30. --tools codex,cursor then --tools codex removes the generated .cursor/
+#      files (and only those), the report names the clean, and the record
+#      drops them
+#
+# Every setup run below gets HOME redirected to a scratch directory, so the
+# per-machine merges (issue #144) can never touch the real ~/.cursor, ~/.gemini,
+# or ~/.codex.
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -94,6 +129,13 @@ SNAP="$WORK/snapshot"
 LOG="$WORK/logs"
 mkdir -p "$SCRATCH" "$LOG"
 trap 'rm -rf "$WORK"' EXIT
+
+# Every setup run honors $HOME for its per-machine merges (issue #144), so the
+# whole suite runs against a scratch home: the real ~/.cursor, ~/.gemini and
+# ~/.codex are never read or written. mktemp above already used TMPDIR.
+HOME="$WORK/home"
+export HOME
+mkdir -p "$HOME"
 
 PASS=0
 FAIL=0
@@ -121,6 +163,22 @@ remove_perm() {
     j.permissions.allow = j.permissions.allow.filter(p => p !== process.env.PERM_TO_REMOVE);
     fs.writeFileSync(file, JSON.stringify(j, null, 2) + "\n");
   ' "$1"
+}
+
+# tgit <repo> <git args...>: git against a scratch repo with the global and
+# system config masked and a fixed identity supplied, so a signing key or
+# hooks path on this machine cannot fail a scratch commit. Setup itself runs
+# with the real config, as it would downstream. Used by scenarios 21, 28,
+# 29 and 30, which skip when git is not on PATH.
+GIT_EMPTY_CONFIG="$WORK/gitconfig-empty"
+: > "$GIT_EMPTY_CONFIG"
+tgit() {
+  local repo="$1"
+  shift
+  GIT_CONFIG_GLOBAL="$GIT_EMPTY_CONFIG" GIT_CONFIG_NOSYSTEM=1 \
+  GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com \
+  GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com \
+  git -C "$repo" "$@"
 }
 
 # list_backup_dirs: one absolute path per line, sorted, so a before/after
@@ -371,7 +429,10 @@ assert_grep "older .toolkit-backup-" "$LOG/rerun.log" "re-run notes the stale ba
 echo "[8] referenced-path resolution (installed tree)"
 
 # 8a. Inline `!`cat <path>`` directives are executed at skill-load time, so a
-#     missing target is a real break rather than a dead link in prose.
+#     missing target is a real break rather than a dead link in prose. Only
+#     prompt files (*.md) are scanned: Claude Code expands the token nowhere
+#     else, and build-layouts.js carries it inside a regex (issue #144),
+#     which would otherwise read as a path.
 INLINE_MISSING=0
 INLINE_TOTAL=0
 while IFS= read -r ref; do
@@ -385,7 +446,7 @@ while IFS= read -r ref; do
     INLINE_MISSING=$((INLINE_MISSING + 1))
   fi
 done <<EOF
-$(grep -rhoE '!`cat [^`]+`' "$SCRATCH/.claude" 2>/dev/null | sed 's/^!`cat //; s/`$//' | sort -u)
+$(grep -rhoE --include='*.md' '!`cat [^`]+`' "$SCRATCH/.claude" 2>/dev/null | sed 's/^!`cat //; s/`$//' | sort -u)
 EOF
 if [ "$INLINE_TOTAL" -eq 0 ]; then
   fail "found no inline-read directives to check - the extraction pattern is probably broken"
@@ -901,9 +962,9 @@ fi
 # one that committed the seed before setup (must get the warning, stay
 # tracked, and keep every committed entry - the merge adds, never replaces)
 # and a control repo whose copy is untracked (must get the normal message).
-# The user's own git config is masked for the seeding, so a signing key or
-# hooks path on this machine cannot fail the commit; setup itself runs with
-# the real config, as it would downstream.
+# The seed committed here is the Claude Code translation of the permission
+# list, the same content a fresh install writes: since issue #144 the toolkit
+# tracks no settings.local.json of its own, so there is no file to copy.
 echo "[21] tracked settings.local.json gets a warning, untracked gets the normal message"
 TRACKED_MSG="already tracked by git"
 UNTRACK_CMD="git rm --cached .claude/settings.local.json"
@@ -911,21 +972,10 @@ NORMAL_MSG="(machine-specific, never pushed)"
 if ! command -v git > /dev/null 2>&1; then
   echo "  skip: git is not on PATH, so there is no index to seed here"
 else
-  GIT_EMPTY_CONFIG="$WORK/gitconfig-empty"
-  : > "$GIT_EMPTY_CONFIG"
-  # tgit <repo> <git args...>: git against a scratch repo with the global
-  # and system config masked and a fixed identity supplied.
-  tgit() {
-    local repo="$1"
-    shift
-    GIT_CONFIG_GLOBAL="$GIT_EMPTY_CONFIG" GIT_CONFIG_NOSYSTEM=1 \
-    GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com \
-    GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com \
-    git -C "$repo" "$@"
-  }
+  node "$TOOLKIT_ROOT/.claude/scripts/build-layouts.js" --root "$TOOLKIT_ROOT" --claude-settings --print > "$WORK/seed-settings.json"
   TRACKED="$WORK/tracked"
   mkdir -p "$TRACKED/.claude"
-  cp "$TOOLKIT_ROOT/.claude/settings.local.json" "$TRACKED/.claude/settings.local.json"
+  cp "$WORK/seed-settings.json" "$TRACKED/.claude/settings.local.json"
   # The committed content, kept aside so "every committed entry survived"
   # can be checked without a second git call.
   cp "$TRACKED/.claude/settings.local.json" "$WORK/committed-settings.json"
@@ -983,7 +1033,7 @@ else
   # Control: the same seed, untracked, in a repo of its own.
   UNTRACKED="$WORK/untracked"
   mkdir -p "$UNTRACKED/.claude"
-  cp "$TOOLKIT_ROOT/.claude/settings.local.json" "$UNTRACKED/.claude/settings.local.json"
+  cp "$WORK/seed-settings.json" "$UNTRACKED/.claude/settings.local.json"
   if tgit "$UNTRACKED" init -q > "$LOG/untracked-seed.log" 2>&1; then
     ok "test setup: scratch repo with an untracked settings.local.json"
   else
@@ -1059,6 +1109,367 @@ else
 fi
 assert_grep "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" "$LOG/profile-rerun.log" "re-run skips the existing profile"
 assert_grep "LOCAL EDIT MARKER" "$PROFILE_SCRATCH/DESIGN-PROFILE.md" "local profile edit survived the re-run"
+
+# ─── [23] the tools answer persists; a dry run never rewrites it ───
+# --tools codex records the answer in .claude/.toolkit-tools.json (printf,
+# one line). A re-run without the flag reuses it and never prompts: stdin
+# is /dev/null, so a prompt would read an empty answer and silently record
+# Claude Code only instead. A --dry-run with a DIFFERENT answer must change
+# nothing in the target or under $HOME - the record, the clean, the build,
+# and the per-machine merges all sit after the dry-run exit.
+echo "[23] tools answer persists across runs; a dry run never rewrites it"
+TOOLS_SCRATCH="$WORK/tools"
+TOOLS_FILE="$TOOLS_SCRATCH/.claude/.toolkit-tools.json"
+mkdir -p "$TOOLS_SCRATCH"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$TOOLS_SCRATCH" --tools codex < /dev/null > "$LOG/tools-first.log" 2>&1
+TOOLS_RC=$?
+set -e
+if [ "$TOOLS_RC" -eq 0 ]; then
+  ok "--tools codex run exited 0"
+else
+  fail "--tools codex run exited $TOOLS_RC (log: $LOG/tools-first.log)"
+fi
+if [ "$(cat "$TOOLS_FILE" 2>/dev/null)" = '{ "tools": ["codex"] }' ]; then
+  ok "answer recorded as { \"tools\": [\"codex\"] }"
+else
+  fail "answer not recorded as expected: $(cat "$TOOLS_FILE" 2>/dev/null)"
+fi
+assert_grep "Tools: codex (from --tools)" "$LOG/tools-first.log" "pre-flight names the tools from the flag"
+assert_grep "Recorded the tool layouts in .claude/.toolkit-tools.json: codex" "$LOG/tools-first.log" "run reports the record"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$TOOLS_SCRATCH" < /dev/null > "$LOG/tools-rerun.log" 2>&1
+TOOLS_RERUN_RC=$?
+set -e
+if [ "$TOOLS_RERUN_RC" -eq 0 ]; then
+  ok "re-run without --tools exited 0"
+else
+  fail "re-run without --tools exited $TOOLS_RERUN_RC"
+fi
+assert_grep "Tools: codex (recorded in .claude/.toolkit-tools.json)" "$LOG/tools-rerun.log" "re-run reuses the recorded answer"
+if [ "$(cat "$TOOLS_FILE" 2>/dev/null)" = '{ "tools": ["codex"] }' ]; then
+  ok "recorded answer unchanged by the re-run"
+else
+  fail "re-run changed the recorded answer: $(cat "$TOOLS_FILE" 2>/dev/null)"
+fi
+if grep -qF "Which AI tools" "$LOG/tools-first.log" "$LOG/tools-rerun.log"; then
+  fail "a non-interactive run printed the tools prompt"
+else
+  ok "no run printed the tools prompt (stdin is not a terminal)"
+fi
+cp -R "$TOOLS_SCRATCH" "$WORK/tools-snap"
+cp -R "$HOME" "$WORK/home-snap"
+bash "$SCRIPT_DIR/setup.sh" "$TOOLS_SCRATCH" --dry-run --tools cursor < /dev/null > "$LOG/tools-dryrun.log" 2>&1
+if diff -r "$TOOLS_SCRATCH" "$WORK/tools-snap" > /dev/null 2>&1; then
+  ok "dry run with a different --tools changed nothing in the target"
+else
+  fail "dry run with --tools modified the target: $(diff -rq "$TOOLS_SCRATCH" "$WORK/tools-snap" 2>&1 | head -3 | tr '\n' ' ')"
+fi
+if diff -r "$HOME" "$WORK/home-snap" > /dev/null 2>&1; then
+  ok "dry run with a different --tools changed nothing under HOME"
+else
+  fail "dry run with --tools modified HOME: $(diff -rq "$HOME" "$WORK/home-snap" 2>&1 | head -3 | tr '\n' ' ')"
+fi
+assert_grep "Tools: cursor (from --tools)" "$LOG/tools-dryrun.log" "dry run reports the flag's answer"
+assert_grep "Remove the generated files of: codex" "$LOG/tools-dryrun.log" "dry run announces the clean it would run"
+assert_grep "Dry run complete" "$LOG/tools-dryrun.log" "dry run completes"
+rm -rf "$WORK/tools-snap" "$WORK/home-snap"
+
+# ─── [24] a chosen tool's layout exists after install ────────
+# The Codex layout is what --tools codex asked for; the shared skills and
+# AGENTS.md come with any tool. Without a terminal the Codex trust section
+# is printed for the user to add, never written into ~/.codex/config.toml.
+echo "[24] a chosen tool's layout exists after install"
+for rel in .agents/skills/review/SKILL.md .codex/config.toml AGENTS.md .claude/.toolkit-generated.json; do
+  if [ -f "$TOOLS_SCRATCH/$rel" ]; then
+    ok "generated: $rel"
+  else
+    fail "missing after --tools codex: $rel"
+  fi
+done
+assert_grep "build-layouts.js:" "$LOG/tools-first.log" "install printed the build summary line"
+assert_grep 'trust_level = "trusted"' "$LOG/tools-first.log" "Codex trust step printed for a non-interactive run"
+assert_grep "run /hooks once" "$LOG/tools-first.log" "the one-time /hooks step is printed"
+if [ ! -e "$HOME/.codex/config.toml" ]; then
+  ok "no terminal, so ~/.codex/config.toml was not written"
+else
+  fail "~/.codex/config.toml was written without a terminal"
+fi
+
+# ─── [25] no flag, no terminal: nothing is generated ─────────
+# The downstream default. An existing project must never gain folders
+# unasked, and a fresh install that cannot ask records Claude Code only.
+echo "[25] a fresh install with no flag and no terminal generates nothing"
+PLAIN_SCRATCH="$WORK/plain"
+mkdir -p "$PLAIN_SCRATCH"
+bash "$SCRIPT_DIR/setup.sh" "$PLAIN_SCRATCH" < /dev/null > "$LOG/plain.log" 2>&1
+for rel in .agents .codex .cursor AGENTS.md .claude/.toolkit-generated.json; do
+  if [ ! -e "$PLAIN_SCRATCH/$rel" ]; then
+    ok "not created: $rel"
+  else
+    fail "created without being asked for: $rel"
+  fi
+done
+if [ "$(cat "$PLAIN_SCRATCH/.claude/.toolkit-tools.json" 2>/dev/null)" = '{ "tools": [] }' ]; then
+  ok "answer recorded as Claude Code only"
+else
+  fail "answer not recorded as Claude Code only: $(cat "$PLAIN_SCRATCH/.claude/.toolkit-tools.json" 2>/dev/null)"
+fi
+assert_grep "Tools: none (Claude Code only) (default: Claude Code only)" "$LOG/plain.log" "pre-flight reports the default"
+if grep -qF "Which AI tools" "$LOG/plain.log"; then
+  fail "non-interactive fresh install printed the tools prompt"
+else
+  ok "non-interactive fresh install did not prompt"
+fi
+
+# ─── [26] manifest: new sources in, generated paths out ──────
+# The sources setup copies are manifest-managed like their siblings; what
+# build-layouts.js writes, and the tools answer, never are - the build
+# hashes its own output and the answer belongs to the repo.
+echo "[26] manifest lists the new sources and no generated path"
+TOOLS_MANIFEST="$TOOLS_SCRATCH/.claude/.toolkit-manifest.json"
+EMITTER="$(basename "$(ls "$TOOLKIT_ROOT/.claude/scripts/layouts/"*.js | head -1)")"
+HOST_NOTE="$(basename "$(ls "$TOOLKIT_ROOT/.claude/skills/shared/host-notes/"*.md | head -1)")"
+for rel in .claude/toolkit-permissions.json .claude/scripts/build-layouts.js .claude/scripts/write-guard.js .claude/scripts/chain-hook.js ".claude/scripts/layouts/$EMITTER" ".claude/skills/shared/host-notes/$HOST_NOTE"; do
+  if grep -qE "\"$rel\": \"[0-9a-f]{64}\"" "$TOOLS_MANIFEST" 2>/dev/null; then
+    ok "manifest carries $rel"
+  else
+    fail "manifest lacks $rel"
+  fi
+done
+if grep -qE '"(\.agents|\.codex|\.cursor)/|"AGENTS\.md"|toolkit-tools\.json|toolkit-generated\.json' "$TOOLS_MANIFEST" 2>/dev/null; then
+  fail "manifest tracks a generated path or the tools answer: $(grep -E '"(\.agents|\.codex|\.cursor)/|"AGENTS\.md"|toolkit-tools\.json|toolkit-generated\.json' "$TOOLS_MANIFEST" | head -2 | tr '\n' ' ')"
+else
+  ok "manifest tracks no generated path and not the tools answer"
+fi
+
+# ─── [27] settings.local.json seeded from the permission list ───
+# The toolkit repo no longer tracks a settings.local.json of its own, so a
+# fresh install must not depend on one being there. The suite builds a
+# source copy that lacks the file outright (only what setup copies, minus
+# node_modules and any nested worktree) and installs from it: the seed
+# comes from .claude/toolkit-permissions.json via build-layouts.js, and
+# the merge then adds this target's absolute browse.js entries on top.
+echo "[27] settings.local.json is seeded from the permission list, not from a toolkit copy"
+SOURCE_COPY="$WORK/source"
+mkdir -p "$SOURCE_COPY/.claude" "$SOURCE_COPY/scripts" "$SOURCE_COPY/artifacts"
+for d in agents commands rules scripts skills; do
+  cp -R "$TOOLKIT_ROOT/.claude/$d" "$SOURCE_COPY/.claude/$d"
+done
+rm -rf "$SOURCE_COPY/.claude/scripts/node_modules"
+cp "$TOOLKIT_ROOT/.claude/toolkit-permissions.json" "$SOURCE_COPY/.claude/toolkit-permissions.json"
+cp -R "$TOOLKIT_ROOT/scripts/setup" "$SOURCE_COPY/scripts/setup"
+cp "$TOOLKIT_ROOT/artifacts/README.md" "$SOURCE_COPY/artifacts/README.md"
+for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .gitignore .gitattributes; do
+  cp "$TOOLKIT_ROOT/$f" "$SOURCE_COPY/$f"
+done
+if [ ! -e "$SOURCE_COPY/.claude/settings.local.json" ]; then
+  ok "test setup: source copy has no settings.local.json"
+else
+  fail "test setup: source copy still has a settings.local.json"
+fi
+SEED_SCRATCH="$WORK/seed"
+mkdir -p "$SEED_SCRATCH"
+set +e
+bash "$SOURCE_COPY/scripts/setup/setup.sh" "$SEED_SCRATCH" < /dev/null > "$LOG/seed.log" 2>&1
+SEED_RC=$?
+set -e
+if [ "$SEED_RC" -eq 0 ]; then
+  ok "install from the seedless source exited 0"
+else
+  fail "install from the seedless source exited $SEED_RC (log: $LOG/seed.log)"
+fi
+assert_grep "Seeding .claude/settings.local.json from .claude/toolkit-permissions.json" "$LOG/seed.log" "run says the seed came from the permission list"
+SEEDED="$SEED_SCRATCH/.claude/settings.local.json"
+if [ -f "$SEEDED" ]; then
+  ok "settings.local.json seeded"
+else
+  fail "settings.local.json missing after the seedless install"
+fi
+assert_grep 'Bash(node .claude/scripts/build-layouts.js *)' "$SEEDED" "seeded file carries the build-layouts.js permission"
+assert_grep "Bash(echo * | node $SEED_SCRATCH/.claude/scripts/browse.js *)" "$SEEDED" "merge added this target's absolute browse.js entry after the seed"
+assert_grep '"defaultMode": "acceptEdits"' "$SEEDED" "seeded file carries defaultMode"
+if [ -z "$(find "$SEED_SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d)" ]; then
+  ok "seed plus merge on a fresh install made no backup dir"
+else
+  fail "seed plus merge on a fresh install created a backup dir"
+fi
+
+# ─── [28] bare .cursor/ line retired; Cursor allowlist merged under HOME ───
+# A target from before v7 ignores the whole .cursor/ directory, and git
+# never descends into an excluded directory, so the toolkit's by-name
+# negations would be dead. The pre-planted ~/.cursor/permissions.json has
+# a key and an entry of its own that must survive the merge, and it must
+# be backed up (it lives outside the target, so its absolute path is
+# mirrored under the backup root without the leading slash).
+echo "[28] a bare .cursor/ line is retired; the Cursor allowlist is merged under HOME"
+if ! command -v git > /dev/null 2>&1; then
+  echo "  skip: git is not on PATH, so check-ignore cannot be asked here"
+else
+  CURSOR_SCRATCH="$WORK/cursor"
+  mkdir -p "$CURSOR_SCRATCH" "$HOME/.cursor"
+  tgit "$CURSOR_SCRATCH" init -q
+  printf 'node_modules/\n.cursor/\n' > "$CURSOR_SCRATCH/.gitignore"
+  printf '{\n  "foo": 1,\n  "terminalAllowlist": ["my own command"]\n}\n' > "$HOME/.cursor/permissions.json"
+  set +e
+  bash "$SCRIPT_DIR/setup.sh" "$CURSOR_SCRATCH" --tools cursor < /dev/null > "$LOG/cursor.log" 2>&1
+  CURSOR_RC=$?
+  set -e
+  if [ "$CURSOR_RC" -eq 0 ]; then
+    ok "--tools cursor run exited 0"
+  else
+    fail "--tools cursor run exited $CURSOR_RC (log: $LOG/cursor.log)"
+  fi
+  assert_grep "Removed the bare .cursor/ line from .gitignore" "$LOG/cursor.log" "run reports the retired line"
+  if grep -qxF ".cursor/" "$CURSOR_SCRATCH/.gitignore"; then
+    fail "bare .cursor/ line still in .gitignore"
+  else
+    ok "bare .cursor/ line removed from .gitignore"
+  fi
+  assert_grep "node_modules/" "$CURSOR_SCRATCH/.gitignore" "the user's own ignore line survived"
+  if [ -f "$CURSOR_SCRATCH/.cursor/hooks.json" ]; then
+    ok "generated .cursor/hooks.json exists"
+  else
+    fail "generated .cursor/hooks.json missing"
+  fi
+  CURSOR_IGNORED="$(tgit "$CURSOR_SCRATCH" check-ignore .cursor/hooks.json 2>/dev/null || true)"
+  if [ -z "$CURSOR_IGNORED" ]; then
+    ok "git check-ignore .cursor/hooks.json returns nothing"
+  else
+    fail "generated .cursor/hooks.json is still ignored: $CURSOR_IGNORED"
+  fi
+  CURSOR_OWN_IGNORED="$(tgit "$CURSOR_SCRATCH" check-ignore .cursor/mcp.json 2>/dev/null || true)"
+  if [ -n "$CURSOR_OWN_IGNORED" ]; then
+    ok "a file Cursor writes on its own (.cursor/mcp.json) stays ignored"
+  else
+    fail ".cursor/mcp.json is no longer ignored"
+  fi
+  CURSOR_PERMS="$HOME/.cursor/permissions.json"
+  assert_grep '"node .claude/scripts/build-layouts.js"' "$CURSOR_PERMS" "toolkit allowlist entry merged into HOME/.cursor/permissions.json"
+  assert_grep '"my own command"' "$CURSOR_PERMS" "the user's own allowlist entry survived the merge"
+  assert_grep '"foo": 1' "$CURSOR_PERMS" "the user's other key survived the merge"
+  if grep -qF '_generated' "$CURSOR_PERMS"; then
+    fail "the _generated marker was copied into the per-machine file"
+  else
+    ok "the _generated marker was not copied"
+  fi
+  assert_grep "machine-global" "$LOG/cursor.log" "the merge says the file is machine-global"
+  CURSOR_BACKUP="$(find "$CURSOR_SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | sort | tail -1)"
+  if [ -n "$CURSOR_BACKUP" ] && grep -qF '"my own command"' "$CURSOR_BACKUP/${HOME#/}/.cursor/permissions.json" 2>/dev/null; then
+    ok "pre-existing permissions.json backed up under the backup root"
+  else
+    fail "pre-existing permissions.json not found in the backup dir"
+  fi
+  set +e
+  bash "$SCRIPT_DIR/setup.sh" "$CURSOR_SCRATCH" < /dev/null > "$LOG/cursor-rerun.log" 2>&1
+  CURSOR_RERUN_RC=$?
+  set -e
+  if [ "$CURSOR_RERUN_RC" -eq 0 ]; then
+    ok "cursor re-run exited 0"
+  else
+    fail "cursor re-run exited $CURSOR_RERUN_RC"
+  fi
+  assert_grep "already holds every toolkit allowlist entry" "$LOG/cursor-rerun.log" "re-run finds nothing to add to the allowlist"
+fi
+
+# ─── [29] pre-push hook installed; a foreign hook is left alone ───
+# The hook is the toolkit's only when it carries the marker line. A hook
+# somebody else wrote is never replaced, and a target that is not a git
+# repository gets one skip note (the scenario 2 install ran on one).
+echo "[29] git pre-push hook installed with the marker; a foreign hook is left alone"
+if ! command -v git > /dev/null 2>&1; then
+  echo "  skip: git is not on PATH, so there is no hooks directory to install into"
+else
+  HOOK="$CURSOR_SCRATCH/.git/hooks/pre-push"
+  if [ -x "$HOOK" ]; then
+    ok "pre-push hook installed and executable"
+  else
+    fail "pre-push hook missing or not executable: $HOOK"
+  fi
+  assert_grep "# llm-peer-review toolkit pre-push hook (issue #144)" "$HOOK" "hook carries the marker line"
+  assert_grep "exec node .claude/scripts/pre-push-check.js" "$HOOK" "hook runs the tripwire from the repository root"
+  if [ "$(head -n 1 "$HOOK" 2>/dev/null)" = "#!/bin/sh" ]; then
+    ok "hook starts with #!/bin/sh"
+  else
+    fail "hook does not start with #!/bin/sh"
+  fi
+  if grep -q $'\r' "$HOOK" 2>/dev/null; then
+    fail "hook carries CR bytes (must be LF-only)"
+  else
+    ok "hook is LF-only"
+  fi
+  assert_grep "Installed the git pre-push hook" "$LOG/cursor.log" "first run reports the install"
+  assert_grep "Git pre-push hook already installed" "$LOG/cursor-rerun.log" "re-run finds the hook identical"
+  FOREIGN="$WORK/foreign"
+  mkdir -p "$FOREIGN"
+  tgit "$FOREIGN" init -q
+  mkdir -p "$FOREIGN/.git/hooks"
+  printf '#!/bin/sh\necho mine\n' > "$FOREIGN/.git/hooks/pre-push"
+  chmod +x "$FOREIGN/.git/hooks/pre-push"
+  cp "$FOREIGN/.git/hooks/pre-push" "$WORK/foreign-hook.orig"
+  set +e
+  bash "$SCRIPT_DIR/setup.sh" "$FOREIGN" < /dev/null > "$LOG/foreign.log" 2>&1
+  FOREIGN_RC=$?
+  set -e
+  if [ "$FOREIGN_RC" -eq 0 ]; then
+    ok "run with a foreign pre-push hook exited 0"
+  else
+    fail "run with a foreign pre-push hook exited $FOREIGN_RC"
+  fi
+  if cmp -s "$FOREIGN/.git/hooks/pre-push" "$WORK/foreign-hook.orig"; then
+    ok "foreign pre-push hook left byte-for-byte untouched"
+  else
+    fail "foreign pre-push hook was modified"
+  fi
+  assert_grep "is not the toolkit's - left alone" "$LOG/foreign.log" "pre-flight announces the foreign hook"
+  assert_grep "Left the existing pre-push hook alone" "$LOG/foreign.log" "run reports the foreign hook"
+  assert_grep "Git pre-push hook: skipped, the target is not a git repository" "$LOG/install.log" "non-repo target gets the skip note (scenario 2 log)"
+fi
+
+# ─── [30] shrinking the answer cleans the dropped tool ───────
+# The stored answer is which layouts live in the repo. Dropping cursor
+# must remove exactly the Cursor files (and the empty directory), keep
+# the Codex and shared files, and drop the entries from the build's record.
+echo "[30] --tools codex,cursor then --tools codex removes the generated Cursor files"
+SHRINK_SCRATCH="$WORK/shrink"
+mkdir -p "$SHRINK_SCRATCH"
+bash "$SCRIPT_DIR/setup.sh" "$SHRINK_SCRATCH" --tools codex,cursor < /dev/null > "$LOG/shrink-first.log" 2>&1
+if [ -f "$SHRINK_SCRATCH/.cursor/hooks.json" ] && [ -f "$SHRINK_SCRATCH/.cursor/skills/tk-review/SKILL.md" ] && [ -f "$SHRINK_SCRATCH/.codex/config.toml" ]; then
+  ok "codex and cursor layouts both built"
+else
+  fail "codex and cursor layouts not both built (log: $LOG/shrink-first.log)"
+fi
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$SHRINK_SCRATCH" --tools codex < /dev/null > "$LOG/shrink-second.log" 2>&1
+SHRINK_RC=$?
+set -e
+if [ "$SHRINK_RC" -eq 0 ]; then
+  ok "--tools codex run exited 0"
+else
+  fail "--tools codex run exited $SHRINK_RC (log: $LOG/shrink-second.log)"
+fi
+assert_grep "Remove the generated files of: cursor" "$LOG/shrink-second.log" "pre-flight announces the clean"
+assert_grep "Removed the generated cursor layout" "$LOG/shrink-second.log" "report names the clean"
+if [ ! -e "$SHRINK_SCRATCH/.cursor" ]; then
+  ok "generated .cursor/ removed entirely"
+else
+  fail "generated .cursor/ still present: $(ls -R "$SHRINK_SCRATCH/.cursor" | head -3 | tr '\n' ' ')"
+fi
+if [ -f "$SHRINK_SCRATCH/.codex/config.toml" ] && [ -f "$SHRINK_SCRATCH/.agents/skills/review/SKILL.md" ] && [ -f "$SHRINK_SCRATCH/AGENTS.md" ]; then
+  ok "codex and shared layouts kept"
+else
+  fail "codex or shared layout lost by the clean"
+fi
+if [ "$(cat "$SHRINK_SCRATCH/.claude/.toolkit-tools.json" 2>/dev/null)" = '{ "tools": ["codex"] }' ]; then
+  ok "answer re-recorded as codex only"
+else
+  fail "answer not re-recorded: $(cat "$SHRINK_SCRATCH/.claude/.toolkit-tools.json" 2>/dev/null)"
+fi
+if grep -q '"\.cursor/' "$SHRINK_SCRATCH/.claude/.toolkit-generated.json" 2>/dev/null; then
+  fail "the build's record still lists .cursor/ files"
+else
+  ok "the build's record no longer lists .cursor/ files"
+fi
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

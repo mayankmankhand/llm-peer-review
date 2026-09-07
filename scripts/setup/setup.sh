@@ -4,7 +4,7 @@
 # Compatible with Bash 3.2+ (macOS default), Linux, and WSL.
 #
 # Usage:
-#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory] [--dry-run] [--force]
+#   bash /path/to/llm-peer-review/scripts/setup/setup.sh [target-directory] [--dry-run] [--force] [--tools <list>]
 #
 # If no target directory is given, uses the current working directory
 # (but will error if run from inside the toolkit repo).
@@ -18,6 +18,14 @@
 # files (issue #138). Without it, setup prompts before replacing files
 # you have edited, and aborts when it cannot prompt (no terminal). Every
 # replaced file is backed up first either way.
+#
+# --tools <list> names the AI tools this project generates layouts for
+# beyond Claude Code (issue #144): a comma-separated list drawn from codex,
+# cursor, antigravity, or `none` for Claude Code only. It works on any run,
+# fresh or upgrade, and re-records the answer in .claude/.toolkit-tools.json;
+# a tool dropped from the list has its generated files cleaned. Without the
+# flag, a fresh install with a terminal asks once; every other run reuses
+# the recorded answer (default: Claude Code only) and never asks.
 #
 # Examples:
 #   # From toolkit repo, specify target:
@@ -39,37 +47,57 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLKIT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── Arguments ───────────────────────────────────────────────
-# Positional target directory plus the optional --dry-run and --force
-# flags, in any order. Unknown options error out instead of being
-# mistaken for a target directory.
+# Positional target directory plus the optional --dry-run, --force, and
+# --tools <list> flags, in any order. Unknown options error out instead of
+# being mistaken for a target directory. The --tools value is parsed and
+# validated in the "Tool layouts" block below, after the target is known.
+# PARITY: mirrored in setup.ps1 (--tools argument) - change both together
 TARGET=""
 DRY_RUN=0
 FORCE=0
-for arg in "$@"; do
-  case "$arg" in
+TOOLS_ARG=""
+TOOLS_ARG_SET=0
+while [ $# -gt 0 ]; do
+  case "$1" in
     --dry-run)
       DRY_RUN=1
       ;;
     --force)
       FORCE=1
       ;;
+    --tools)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo ""
+        echo "  Error: --tools needs a value: codex, cursor, antigravity (comma-separated), or none"
+        echo ""
+        exit 1
+      fi
+      TOOLS_ARG="$2"
+      TOOLS_ARG_SET=1
+      shift
+      ;;
+    --tools=*)
+      TOOLS_ARG="${1#--tools=}"
+      TOOLS_ARG_SET=1
+      ;;
     -*)
       echo ""
-      echo "  Error: unknown option: $arg"
-      echo "  Usage: bash setup.sh [target-directory] [--dry-run] [--force]"
+      echo "  Error: unknown option: $1"
+      echo "  Usage: bash setup.sh [target-directory] [--dry-run] [--force] [--tools <list>]"
       echo ""
       exit 1
       ;;
     *)
       if [ -n "$TARGET" ]; then
         echo ""
-        echo "  Error: more than one target directory given: $TARGET, $arg"
+        echo "  Error: more than one target directory given: $TARGET, $1"
         echo ""
         exit 1
       fi
-      TARGET="$arg"
+      TARGET="$1"
       ;;
   esac
+  shift
 done
 TARGET="${TARGET:-.}"
 
@@ -203,8 +231,30 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" ]; then
   PREFLIGHT_OK=false
 fi
 
-# Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
+# Check the layout build, write-guard, and chain-hook scripts (dependency-free;
+# issue #144), plus the per-tool emitters and host notes build-layouts.js reads.
+# PARITY: mirrored in setup.ps1 (issue #144 source checks) - change both together
+# The two directories must each hold at least one file: an empty one would copy
+# nothing, and the build would then emit only the shared files for every tool.
+for f in build-layouts.js write-guard.js chain-hook.js; do
+  if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/$f" ]; then
+    echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/$f"
+    PREFLIGHT_OK=false
+  fi
+done
+if ! compgen -G "$TOOLKIT_ROOT/.claude/scripts/layouts/"*.js > /dev/null 2>&1; then
+  echo "  Error: no emitter files found in $TOOLKIT_ROOT/.claude/scripts/layouts/"
+  PREFLIGHT_OK=false
+fi
+if ! compgen -G "$TOOLKIT_ROOT/.claude/skills/shared/host-notes/"*.md > /dev/null 2>&1; then
+  echo "  Error: no host-notes files found in $TOOLKIT_ROOT/.claude/skills/shared/host-notes/"
+  PREFLIGHT_OK=false
+fi
+
+# Check files that will be copied to the target project. Since issue #144 the
+# toolkit repo no longer tracks .claude/settings.local.json: the permission seed
+# is .claude/toolkit-permissions.json, translated per machine by build-layouts.js.
+for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/toolkit-permissions.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -266,6 +316,140 @@ IS_UPGRADE=0
 if [ -f "$TARGET/.claude/rules/toolkit.md" ]; then
   IS_UPGRADE=1
 fi
+
+# ─── Tool layouts: the recorded answer (issue #144) ──────────
+# PARITY: mirrored in setup.ps1 (tools answer) - change both together
+# Which AI tools this project generates layouts for, beyond Claude Code.
+# The answer lives in .claude/.toolkit-tools.json in the target (committed
+# there, so it is the repo's choice and reaches every collaborator). It is
+# resolved here, before the pre-flight report, so the report can say what
+# will be built; nothing is written until the copy phase. Precedence:
+#   1. --tools <list>            any run, fresh or upgrade; re-records it
+#   2. the recorded file          reused as-is, never asked again
+#   3. fresh install + terminal   asked once (default: Claude Code only).
+#                                 A --dry-run never asks: it reports the
+#                                 default and says the real run will ask
+#   4. otherwise                  Claude Code only
+# Everything here is READ-ONLY. The file is parsed with sed rather than
+# node: setup writes it in a fixed one-line shape, and this repo's own
+# committed copy keeps the key and its list on one line too.
+TOOLS_KNOWN="codex cursor antigravity"
+TOOLS_FILE_REL=".claude/.toolkit-tools.json"
+TOOLS_FILE="$TARGET/$TOOLS_FILE_REL"
+TOOLS=()
+# tools_has <name>: true when <name> is in this run's answer.
+tools_has() {
+  local t
+  for t in "${TOOLS[@]}"; do
+    if [ "$t" = "$1" ]; then return 0; fi
+  done
+  return 1
+}
+# tools_add <name>: append <name> to the answer unless it is already there.
+tools_add() {
+  if ! tools_has "$1"; then TOOLS+=("$1"); fi
+}
+# tools_list: the answer as prose, for the report lines.
+tools_list() {
+  local out="" t
+  if [ ${#TOOLS[@]} -eq 0 ]; then
+    printf '%s' "none (Claude Code only)"
+    return 0
+  fi
+  for t in "${TOOLS[@]}"; do out="${out:+$out, }$t"; done
+  printf '%s' "$out"
+}
+# tools_json_list: the answer as the JSON array body the record is written with.
+tools_json_list() {
+  local out="" t
+  for t in "${TOOLS[@]}"; do out="${out:+$out, }\"$t\""; done
+  printf '%s' "$out"
+}
+TOOLS_PREV=()
+TOOLS_FILE_PREEXISTED=0
+if [ -f "$TOOLS_FILE" ]; then
+  TOOLS_FILE_PREEXISTED=1
+  while IFS= read -r tools_name; do
+    [ -n "$tools_name" ] || continue
+    case " $TOOLS_KNOWN " in
+      *" $tools_name "*) TOOLS_PREV+=("$tools_name") ;;
+      *) echo "  Warning: ignoring unknown tool \"$tools_name\" in $TOOLS_FILE_REL" ;;
+    esac
+  done <<EOF_TOOLS
+$(tr -d '\r\n' < "$TOOLS_FILE" | sed -n 's/.*"tools"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/\1/p' | tr ',' '\n' | sed 's/[[:space:]"]//g')
+EOF_TOOLS
+fi
+TOOLS_SOURCE=""
+if [ "$TOOLS_ARG_SET" -eq 1 ]; then
+  if [ -z "$TOOLS_ARG" ]; then
+    echo ""
+    echo "  Error: --tools needs a value: codex, cursor, antigravity (comma-separated), or none"
+    echo ""
+    exit 1
+  fi
+  if [ "$TOOLS_ARG" != "none" ]; then
+    while IFS= read -r tools_name; do
+      tools_name="$(printf '%s' "$tools_name" | tr -d '[:space:]')"
+      [ -n "$tools_name" ] || continue
+      case " $TOOLS_KNOWN " in
+        *" $tools_name "*) tools_add "$tools_name" ;;
+        *)
+          echo ""
+          echo "  Error: unknown tool in --tools: $tools_name"
+          echo "  Known tools: codex, cursor, antigravity (comma-separated), or none for Claude Code only"
+          echo ""
+          exit 1
+          ;;
+      esac
+    done <<EOF_TOOLS
+$(printf '%s\n' "$TOOLS_ARG" | tr ',' '\n')
+EOF_TOOLS
+  fi
+  TOOLS_SOURCE="from --tools"
+elif [ "$TOOLS_FILE_PREEXISTED" -eq 1 ]; then
+  for tools_name in "${TOOLS_PREV[@]}"; do tools_add "$tools_name"; done
+  TOOLS_SOURCE="recorded in $TOOLS_FILE_REL"
+elif [ "$IS_UPGRADE" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && [ -t 0 ]; then
+  echo "  Which AI tools should this project generate layouts for, besides Claude Code?"
+  echo "  Every chosen layout lives side by side, so switching tools later needs nothing;"
+  echo "  add or remove one any time with: setup.sh <target> --tools <list>"
+  echo ""
+  echo "    1) Codex CLI        .agents/, .codex/, AGENTS.md"
+  echo "    2) Cursor           .agents/, .cursor/, AGENTS.md"
+  echo "    3) Antigravity CLI  .agents/, AGENTS.md"
+  echo ""
+  printf '%s' "  Numbers separated by commas (e.g. 1,2), or Enter for Claude Code only: "
+  read -r TOOLS_REPLY || TOOLS_REPLY=""
+  echo ""
+  while IFS= read -r tools_name; do
+    tools_name="$(printf '%s' "$tools_name" | tr -d '[:space:]')"
+    [ -n "$tools_name" ] || continue
+    case "$tools_name" in
+      1|codex)       tools_add codex ;;
+      2|cursor)      tools_add cursor ;;
+      3|antigravity) tools_add antigravity ;;
+      *)
+        echo "  Error: unrecognized answer: $tools_name (expected numbers 1-3, or Enter for none)."
+        echo "  Nothing was changed. Re-run, or pass the list directly: setup.sh $TARGET --tools codex,cursor"
+        echo ""
+        exit 1
+        ;;
+    esac
+  done <<EOF_TOOLS
+$(printf '%s\n' "$TOOLS_REPLY" | tr ',' '\n')
+EOF_TOOLS
+  TOOLS_SOURCE="asked above"
+elif [ "$IS_UPGRADE" -eq 0 ] && [ "$DRY_RUN" -eq 1 ] && [ -t 0 ]; then
+  TOOLS_SOURCE="default for this dry run; the real run asks once, or pass --tools"
+else
+  TOOLS_SOURCE="default: Claude Code only"
+fi
+# Tools the recorded answer had that this run drops: their generated files
+# are removed with build-layouts.js --clean after the copy phase.
+TOOLS_DROPPED=()
+for tools_name in "${TOOLS_PREV[@]}"; do
+  if ! tools_has "$tools_name"; then TOOLS_DROPPED+=("$tools_name"); fi
+done
 
 # ─── Migration inventory (issue #133) ────────────────────────
 # The legacy-path lists consumed by the migration blocks further down,
@@ -582,9 +766,27 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js; do
+for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js build-layouts.js write-guard.js chain-hook.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
+# Issue #144: the per-tool emitters, the host notes, and the permission list.
+# Two new directories (the shared/*.md glob above is top-level only), same
+# failglob handling as the shells/ block. The files build-layouts.js WRITES
+# (.agents/, .codex/, .cursor/, AGENTS.md, .claude/.toolkit-generated.json)
+# and the tools answer (.claude/.toolkit-tools.json) are deliberately not
+# here: they never enter MANAGED_RELS or the manifest. The build hashes its
+# own output, and the answer is the repo's, not the toolkit's.
+shopt -u failglob; shopt -s nullglob
+for pf_src in "$TOOLKIT_ROOT/.claude/scripts/layouts/"*.js; do
+  [ -f "$pf_src" ] || continue
+  preflight_record_diff "$pf_src" ".claude/scripts/layouts/$(basename "$pf_src")"
+done
+for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/host-notes/"*.md; do
+  [ -f "$pf_src" ] || continue
+  preflight_record_diff "$pf_src" ".claude/skills/shared/host-notes/$(basename "$pf_src")"
+done
+shopt -u nullglob; shopt -s failglob
+preflight_record_diff "$TOOLKIT_ROOT/.claude/toolkit-permissions.json" ".claude/toolkit-permissions.json"
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ".claude/scripts/package-lock.json"
 fi
@@ -625,6 +827,74 @@ done
 # Stale backup directories from earlier runs (issue #133 evidence: these
 # linger in project roots for years without anyone noticing).
 PF_STALE_BACKUPS=$(find "$TARGET" -maxdepth 1 -name '.toolkit-backup-*' -type d 2>/dev/null | wc -l | tr -d ' ')
+
+# Issue #144: a bare `.cursor/` ignore line. The toolkit's .gitignore matches
+# the directory as .cursor/* and re-includes the generated Cursor files by
+# name; git never descends into an excluded directory, so the old bare line
+# (every install before v7) would keep every negation dead. Detected here
+# (read-only) for the report; removed after the .gitignore merge below.
+PF_CURSOR_BARE=0
+if [ -f "$TARGET/.gitignore" ] && grep -qxF ".cursor/" "$TARGET/.gitignore"; then
+  PF_CURSOR_BARE=1
+fi
+
+# ─── Git pre-push hook plan (issue #144) ─────────────────────
+# PARITY: mirrored in setup.ps1 (pre-push hook plan) - change both together
+# Read-only: decides what the hook block after the copies will do, so the
+# report can say it and --dry-run can stop here. The hook runs the M11
+# tripwire (secret scan, never-push files, settings diff, and the generated-
+# layout check) on every push. Git runs hooks from the repository root, so
+# the script path inside the hook is relative. The hooks directory comes
+# from `git rev-parse --git-path hooks`, which resolves a worktree to the
+# main checkout's hooks; a relative answer is relative to the target. A
+# target that sits inside a repository rooted elsewhere is skipped: the
+# relative path would not resolve from that root and every push would fail.
+# A pre-push hook without the marker line is somebody else's and is never
+# replaced; one with the marker is refreshed only when its content differs.
+HOOK_MARKER="# llm-peer-review toolkit pre-push hook (issue #144)"
+hook_content() {
+  printf '%s\n' \
+    '#!/bin/sh' \
+    "$HOOK_MARKER" \
+    '# Runs the M11 tripwire (secret scan, never-push files, settings diff, and the' \
+    '# generated-layout check) before every push. Git runs hooks from the repository' \
+    '# root, so the relative path below resolves there. Installed by the toolkit' \
+    '# setup; safe to delete, and re-created by the next setup run.' \
+    'exec node .claude/scripts/pre-push-check.js'
+}
+HOOK_STATE="not-git"
+HOOK_DIR=""
+HOOK_FILE=""
+if command -v git > /dev/null 2>&1 && git -C "$TARGET" rev-parse --git-dir > /dev/null 2>&1; then
+  HOOK_TOPLEVEL="$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null)" || HOOK_TOPLEVEL=""
+  HOOK_HOOKSPATH="$(git -C "$TARGET" config --get core.hooksPath 2>/dev/null)" || HOOK_HOOKSPATH=""
+  if [ "$HOOK_TOPLEVEL" != "$(cd "$TARGET" && pwd -P)" ]; then
+    HOOK_STATE="other-root"
+  elif [ -n "$HOOK_HOOKSPATH" ]; then
+    HOOK_STATE="hooks-path"
+  else
+    # --git-path needs git 2.5 (2015); an older git fails here, and a failed
+    # assignment under set -e would abort the whole run, so it is caught.
+    HOOK_DIR="$(git -C "$TARGET" rev-parse --git-path hooks 2>/dev/null)" || HOOK_DIR=""
+    case "$HOOK_DIR" in
+      "") ;;
+      /*) ;;
+      *) HOOK_DIR="$TARGET/$HOOK_DIR" ;;
+    esac
+    HOOK_FILE="$HOOK_DIR/pre-push"
+    if [ -z "$HOOK_DIR" ]; then
+      HOOK_STATE="old-git"
+    elif [ ! -e "$HOOK_FILE" ]; then
+      HOOK_STATE="install"
+    elif ! grep -qF -- "$HOOK_MARKER" "$HOOK_FILE"; then
+      HOOK_STATE="foreign"
+    elif [ "$(hook_content)" = "$(tr -d '\r' < "$HOOK_FILE")" ]; then
+      HOOK_STATE="identical"
+    else
+      HOOK_STATE="replace"
+    fi
+  fi
+fi
 
 echo "  ────────────────────────────────────────"
 echo "   Pre-flight report (no changes made yet)"
@@ -672,15 +942,59 @@ if [ "$PF_STALE_BACKUPS" -gt 0 ]; then
   echo "    Note: $PF_STALE_BACKUPS older .toolkit-backup-* folder(s) from previous runs are"
   echo "    still in the project root. Delete them when no longer needed."
 fi
+# PARITY: mirrored in setup.ps1 (tool layouts pre-flight section) - change both together
+# Issue #144: the tools answer, what the copy phase will build or clean for
+# it, the per-machine steps that follow, the pre-push hook plan, and the
+# .gitignore repair. Each line mirrors a block after the --dry-run exit.
+echo ""
+echo "    Tool layouts (issue #144):"
+echo "      Tools: $(tools_list) ($TOOLS_SOURCE)"
+if [ ${#TOOLS_DROPPED[@]} -gt 0 ]; then
+  echo "      - Remove the generated files of: ${TOOLS_DROPPED[*]} (build-layouts.js --clean)"
+fi
+if [ ${#TOOLS[@]} -gt 0 ]; then
+  echo "      - Build the layouts from .claude/ (node .claude/scripts/build-layouts.js)"
+  if tools_has cursor; then
+    echo "      - Cursor: merge the terminal allowlist into ~/.cursor/permissions.json"
+    echo "        (machine-global: every Cursor project on this machine runs in Allowlist mode)"
+  fi
+  if tools_has antigravity; then
+    echo "      - Antigravity: merge the permissions into ~/.gemini/antigravity-cli/settings.json (machine-global)"
+  fi
+  if tools_has codex; then
+    echo "      - Codex: offer to trust this project in ~/.codex/config.toml, plus a one-time /hooks step"
+  fi
+fi
+if [ "$PF_CURSOR_BARE" -eq 1 ]; then
+  echo "      - .gitignore: remove the bare .cursor/ line (it keeps the generated Cursor files ignored)"
+fi
+case "$HOOK_STATE" in
+  install)    echo "      Git pre-push hook: install $HOOK_FILE (runs the M11 tripwire)" ;;
+  replace)    echo "      Git pre-push hook: refresh $HOOK_FILE (toolkit hook, content differs; backed up first)" ;;
+  identical)  echo "      Git pre-push hook: already installed at $HOOK_FILE" ;;
+  foreign)    echo "      Git pre-push hook: $HOOK_FILE exists and is not the toolkit's - left alone" ;;
+  hooks-path) echo "      Git pre-push hook: skipped, core.hooksPath is set for this repository" ;;
+  other-root) echo "      Git pre-push hook: skipped, the target is inside a repository rooted elsewhere" ;;
+  old-git)    echo "      Git pre-push hook: skipped, this git cannot report its hooks directory (needs git 2.5+)" ;;
+  *)          echo "      Git pre-push hook: skipped, the target is not a git repository" ;;
+esac
 # PARITY: mirrored in setup.ps1 (node-absent pre-flight note) - change both together
-# The two node-dependent steps (the settings.local.json permission merge
-# and the issue #91 package.json cleanup) skip silently inside their own
-# blocks when node is absent. Say so here, once, so a permission that never
-# arrived is not a mystery later.
+# The node-dependent steps (the settings.local.json seed and permission
+# merge, the issue #91 package.json cleanup, and the issue #144 layout build
+# and clean) skip inside their own blocks when node is absent. Say so here,
+# once, so a permission or a layout that never arrived is not a mystery later.
 if ! command -v node > /dev/null 2>&1; then
   echo ""
   echo "    Note: node was not found, so the .claude/settings.local.json permission"
   echo "    merge and the package.json cleanup will be skipped this run."
+  if [ ${#TOOLS[@]} -gt 0 ] || [ ${#TOOLS_DROPPED[@]} -gt 0 ]; then
+    echo "    The tool layouts will not be built or cleaned either. Once node is installed,"
+    echo "    run from the project root: node .claude/scripts/build-layouts.js"
+  fi
+  if [ ! -f "$TARGET/.claude/settings.local.json" ]; then
+    echo "    .claude/settings.local.json will not be seeded. Once node is installed, run"
+    echo "    from the project root: node .claude/scripts/build-layouts.js --claude-settings"
+  fi
 fi
 echo ""
 
@@ -755,6 +1069,11 @@ backup_file() {
   # Inner quotes make the prefix a literal, not a glob pattern - matters
   # if $TARGET contains `*`, `?`, or `[` characters.
   local rel="${original#"$TARGET"/}"
+  # A file outside the target keeps its absolute path here (issue #144: the
+  # per-machine files under $HOME, or a worktree's hooks under the main
+  # checkout); dropping the leading slash mirrors it under the backup root
+  # like any other file instead of producing a double slash.
+  rel="${rel#/}"
   local dest="$BACKUP_DIR/$rel"
   # mkdir -p handles nested paths and is portable across GNU and BSD systems
   mkdir -p "$(dirname "$dest")"
@@ -993,6 +1312,22 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/shells" ]; then
   shopt -u nullglob; shopt -s failglob
 fi
 
+# PARITY: shared/host-notes/ must be copied by BOTH setup.sh and setup.ps1 (issue #144).
+# Same shape as the shells/ block above: the shared/*.md glob is top-level only
+# and the per-skill loop below skips shared/, so the per-tool host notes (the
+# "Host notes" section build-layouts.js appends to every generated skill) need
+# their own copy step.
+if [ -d "$TOOLKIT_ROOT/.claude/skills/shared/host-notes" ]; then
+  mkdir -p "$TARGET/.claude/skills/shared/host-notes"
+  shopt -u failglob; shopt -s nullglob
+  for src in "$TOOLKIT_ROOT/.claude/skills/shared/host-notes/"*.md; do
+    [ -f "$src" ] || continue
+    fname="$(basename "$src")"
+    safe_copy "$src" "$TARGET/.claude/skills/shared/host-notes/$fname"
+  done
+  shopt -u nullglob; shopt -s failglob
+fi
+
 # Copy each skill directory (contains SKILL.md and optional supporting files)
 shopt -u failglob; shopt -s nullglob
 for skill_dir in "$TOOLKIT_ROOT/.claude/skills/"*/; do
@@ -1041,6 +1376,16 @@ GITIGNORE_PREEXISTED=0
 if [ -f "$TARGET/.gitignore" ]; then
   GITIGNORE_PREEXISTED=1
 fi
+# SETTINGS_IGNORE_PREEXISTED: whether the target's .gitignore already ignored
+# .claude/settings.local.json before this run. The toolkit's own .gitignore
+# carries that line since issue #144, so the merge (or the fresh copy) below
+# normally brings it in; the report after the merge needs to know whether it
+# was this run that added it.
+SETTINGS_IGNORE_LINE=".claude/settings.local.json"
+SETTINGS_IGNORE_PREEXISTED=0
+if [ -f "$TARGET/.gitignore" ] && grep -qxF "$SETTINGS_IGNORE_LINE" "$TARGET/.gitignore"; then
+  SETTINGS_IGNORE_PREEXISTED=1
+fi
 if [ -f "$TARGET/.gitignore" ]; then
   echo "  Merging .gitignore (preserving your entries) ..."
   while IFS= read -r line; do
@@ -1065,17 +1410,39 @@ else
   cp "$TOOLKIT_ROOT/.gitignore" "$TARGET/.gitignore"
 fi
 
-# ─── Ignore the seeded settings.local.json downstream ───────
+# ─── Retire a bare .cursor/ ignore line (issue #144) ─────────
+# PARITY: mirrored in setup.ps1 (bare .cursor/ line removal) - change both together
+# The toolkit's .gitignore matches the directory as .cursor/* and re-includes
+# the generated Cursor files by name. The merge above only adds lines, so a
+# target that carried the old bare `.cursor/` keeps it, and git never
+# descends into an excluded directory: every negation would be dead and the
+# generated files would stay ignored. Removed the way the INDEX.md cleanup
+# below edits the file (sed -i.bak, backed up first unless the merge already
+# saved the pre-run copy). Detected in the pre-flight (PF_CURSOR_BARE) and
+# re-checked here so the report and the edit cannot drift.
+if [ "$PF_CURSOR_BARE" -eq 1 ] && grep -qxF ".cursor/" "$TARGET/.gitignore"; then
+  if [ "$GITIGNORE_BACKED_UP" -eq 0 ]; then
+    backup_file "$TARGET/.gitignore"
+    GITIGNORE_BACKED_UP=1
+  fi
+  sed -i.bak '/^\.cursor\/$/d' "$TARGET/.gitignore"
+  rm -f "$TARGET/.gitignore.bak"
+  echo "  Removed the bare .cursor/ line from .gitignore (the generated Cursor files are re-included by name)"
+fi
+
+# ─── Ignore settings.local.json downstream ───────────────────
 # PARITY: mirrored in setup.ps1 (settings.local.json ignore line) - change both together
-# The toolkit repo tracks .claude/settings.local.json as the SEED for the
-# permission merge, so its own .gitignore cannot list the file and the merge
-# above never adds the line. Downstream the file carries this machine's
-# absolute paths and the M11 tripwire refuses to push it, so a target that
-# does not ignore it trips the tripwire on its first "git add -A" (holistic
-# pass, fresh-install walk). Appended once as an install-time extra, to a
-# fresh copy and a merged file alike; an identical re-run finds it and
-# writes nothing.
-SETTINGS_IGNORE_LINE=".claude/settings.local.json"
+# Since issue #144 the toolkit repo no longer tracks .claude/settings.local.json:
+# the permission seed is .claude/toolkit-permissions.json, translated per
+# machine by build-layouts.js --claude-settings (below), and the toolkit's own
+# .gitignore lists the file, so the merge above (or the fresh copy) normally
+# brings the line in. This block is the fallback for a target .gitignore that
+# still lacks it, and the one place the line is REPORTED either way. Downstream
+# the file carries this machine's absolute paths and the M11 tripwire refuses
+# to push it, so a target that does not ignore it trips the tripwire on its
+# first "git add -A" (holistic pass, fresh-install walk). An identical re-run
+# finds the line, writes nothing, and says nothing.
+SETTINGS_IGNORE_ADDED=0
 if ! grep -qxF "$SETTINGS_IGNORE_LINE" "$TARGET/.gitignore"; then
   if [ "$GITIGNORE_BACKED_UP" -eq 0 ] && [ "$GITIGNORE_PREEXISTED" -eq 1 ]; then
     backup_file "$TARGET/.gitignore"
@@ -1083,31 +1450,38 @@ if ! grep -qxF "$SETTINGS_IGNORE_LINE" "$TARGET/.gitignore"; then
   fi
   [ -n "$(tail -c 1 "$TARGET/.gitignore")" ] && echo "" >> "$TARGET/.gitignore"
   printf '%s\n' "# Local Claude Code permissions (machine-specific; setup merges new entries into it)" "$SETTINGS_IGNORE_LINE" >> "$TARGET/.gitignore"
-  # PARITY: mirrored in setup.ps1 (tracked settings.local.json warning) - change both together
-  # An ignore line never untracks a file git already holds in its index, and
-  # pre-push-check.js deliberately exempts a never-push path that already
-  # exists at the remote base, so a downstream copy committed before this
-  # install kept going out on every push while the line below claimed
-  # "never pushed" (holistic review, R3). When git is on PATH, ask the
-  # index and warn instead: ls-files --error-unmatch exits 0 only for a
-  # tracked path, and fails the same way on a plain folder as on an
-  # untracked file, so a non-repo target keeps the plain message (stderr
-  # silenced so it does not print "fatal:"). The untrack itself is the
-  # user's call - git rm --cached keeps the file on disk, but it is still a
-  # change to their repo - so setup never runs it.
-  SETTINGS_TRACKED=0
-  if command -v git > /dev/null 2>&1 \
-     && git -C "$TARGET" ls-files --error-unmatch -- "$SETTINGS_IGNORE_LINE" > /dev/null 2>&1; then
-    SETTINGS_TRACKED=1
-  fi
-  if [ "$SETTINGS_TRACKED" -eq 1 ]; then
-    echo "  Added $SETTINGS_IGNORE_LINE to .gitignore"
-    echo "  WARNING: $SETTINGS_IGNORE_LINE is already tracked by git, and an ignore line does not untrack it."
-    echo "           It will keep being pushed until you run: git rm --cached $SETTINGS_IGNORE_LINE"
-    echo "           (the file stays on disk; git just stops tracking it)"
-  else
-    echo "  Added $SETTINGS_IGNORE_LINE to .gitignore (machine-specific, never pushed)"
-  fi
+  SETTINGS_IGNORE_ADDED=1
+elif [ "$SETTINGS_IGNORE_PREEXISTED" -eq 0 ]; then
+  # The merge or the fresh copy brought the line in during this run.
+  SETTINGS_IGNORE_ADDED=1
+fi
+# PARITY: mirrored in setup.ps1 (tracked settings.local.json warning) - change both together
+# An ignore line never untracks a file git already holds in its index, and
+# pre-push-check.js deliberately exempts a never-push path that already
+# exists at the remote base, so a downstream copy committed before this
+# install kept going out on every push while the line below claimed
+# "never pushed" (holistic review, R3). When git is on PATH, ask the
+# index and warn instead: ls-files --error-unmatch exits 0 only for a
+# tracked path, and fails the same way on a plain folder as on an
+# untracked file, so a non-repo target keeps the plain message (stderr
+# silenced so it does not print "fatal:"). The untrack itself is the
+# user's call - git rm --cached keeps the file on disk, but it is still a
+# change to their repo - so setup never runs it. The warning repeats on
+# every run while the file stays tracked: it is a live problem each time.
+SETTINGS_TRACKED=0
+if command -v git > /dev/null 2>&1 \
+   && git -C "$TARGET" ls-files --error-unmatch -- "$SETTINGS_IGNORE_LINE" > /dev/null 2>&1; then
+  SETTINGS_TRACKED=1
+fi
+if [ "$SETTINGS_IGNORE_ADDED" -eq 1 ] && [ "$SETTINGS_TRACKED" -eq 0 ]; then
+  echo "  Added $SETTINGS_IGNORE_LINE to .gitignore (machine-specific, never pushed)"
+elif [ "$SETTINGS_IGNORE_ADDED" -eq 1 ]; then
+  echo "  Added $SETTINGS_IGNORE_LINE to .gitignore"
+fi
+if [ "$SETTINGS_TRACKED" -eq 1 ]; then
+  echo "  WARNING: $SETTINGS_IGNORE_LINE is already tracked by git, and an ignore line does not untrack it."
+  echo "           It will keep being pushed until you run: git rm --cached $SETTINGS_IGNORE_LINE"
+  echo "           (the file stays on disk; git just stops tracking it)"
 fi
 
 echo "  Copying .gitattributes ..."
@@ -1185,6 +1559,35 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/
 echo "  Copying .claude/scripts/gen-media.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" "$TARGET/.claude/scripts/gen-media.js"
 
+# ─── Layout build, write-guard, chain-hook scripts and emitters (issue #144) ──
+# PARITY: mirrored in setup.ps1 (issue #144 scripts, emitters, permission list) - change both together
+# Dependency-free. build-layouts.js derives every other tool's layout from
+# .claude/ (it runs further down, once every source file is in place);
+# write-guard.js and chain-hook.js are the M2 and M14 guards outside Claude
+# Code. The emitters under .claude/scripts/layouts/ are what build-layouts.js
+# requires per tool, so they travel with it. Same empty-directory handling as
+# the shells/ block.
+echo "  Copying .claude/scripts/build-layouts.js, write-guard.js, chain-hook.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/build-layouts.js" "$TARGET/.claude/scripts/build-layouts.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/write-guard.js"   "$TARGET/.claude/scripts/write-guard.js"
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/chain-hook.js"    "$TARGET/.claude/scripts/chain-hook.js"
+echo "  Copying .claude/scripts/layouts/ ..."
+mkdir -p "$TARGET/.claude/scripts/layouts"
+shopt -u failglob; shopt -s nullglob
+for src in "$TOOLKIT_ROOT/.claude/scripts/layouts/"*.js; do
+  [ -f "$src" ] || continue
+  fname="$(basename "$src")"
+  safe_copy "$src" "$TARGET/.claude/scripts/layouts/$fname"
+done
+shopt -u nullglob; shopt -s failglob
+
+# ─── Permission list (issue #144) ────────────────────────────
+# The one committed, tool-agnostic list every translator reads. It replaced
+# the tracked settings.local.json as the seed: the Claude Code translation is
+# produced from it (fresh install) or merged from it (upgrade) further down.
+echo "  Copying .claude/toolkit-permissions.json ..."
+safe_copy "$TOOLKIT_ROOT/.claude/toolkit-permissions.json" "$TARGET/.claude/toolkit-permissions.json"
+
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
 # LESSONS-detail.md is only seeded on a genuinely fresh install (see the block below).
@@ -1199,7 +1602,7 @@ if [ -f "$TARGET/LESSONS.md" ]; then LESSONS_PREEXISTED=true; fi
 SETTINGS_PREEXISTED=false
 if [ -f "$TARGET/.claude/settings.local.json" ]; then SETTINGS_PREEXISTED=true; fi
 
-for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
+for f in CLAUDE.md LESSONS.md; do
   if [ -f "$TARGET/$f" ]; then
     echo "  Skipping $f - already exists (yours to customize)"
     SKIPPED+=("$f")
@@ -1208,6 +1611,31 @@ for f in CLAUDE.md LESSONS.md .claude/settings.local.json; do
     cp "$TOOLKIT_ROOT/$f" "$TARGET/$f"
   fi
 done
+
+# ─── Seed .claude/settings.local.json from the permission list (issue #144) ─
+# PARITY: mirrored in setup.ps1 (settings.local.json seed) - change both together
+# The tracked seed copy is gone: the toolkit repo ignores its own
+# settings.local.json now, and the seed is .claude/toolkit-permissions.json.
+# On a fresh install, build-layouts.js --claude-settings translates the list
+# into Claude Code's grammar and writes the file (the merge below then adds
+# this target's absolute-path browse.js entries). An existing file is the
+# user's and is left to the merge. Without node nothing can be translated,
+# so the command is named for later.
+if [ "$SETTINGS_PREEXISTED" = true ]; then
+  echo "  Skipping .claude/settings.local.json - already exists (yours to customize; new permissions are merged below)"
+  SKIPPED+=(".claude/settings.local.json")
+elif command -v node > /dev/null 2>&1; then
+  echo "  Seeding .claude/settings.local.json from .claude/toolkit-permissions.json ..."
+  SEED_RC=0
+  SEED_OUT="$(node "$TARGET/.claude/scripts/build-layouts.js" --root "$TARGET" --claude-settings 2>&1)" || SEED_RC=$?
+  if [ "$SEED_RC" -ne 0 ]; then
+    echo "  Warning: could not seed .claude/settings.local.json ($(printf '%s\n' "$SEED_OUT" | grep -v '^[[:space:]]*$' | head -1))."
+    echo "    Run later from the project root: node .claude/scripts/build-layouts.js --claude-settings"
+  fi
+else
+  echo "  Note: node was not found, so .claude/settings.local.json was not seeded. Once node is"
+  echo "        installed, run from the project root: node .claude/scripts/build-layouts.js --claude-settings"
+fi
 
 # ─── LESSONS-detail.md (paired with the LESSONS.md index) ────
 # LESSONS.md is the short index Claude reads each session; LESSONS-detail.md holds the full
@@ -1261,7 +1689,28 @@ fi
 # merge writes nothing, so an identical re-run makes no backup. node's stderr goes to its own file, never into the change list -
 # with 2>&1 a parse error used to print as a "+ SyntaxError" permission line.
 # A non-zero exit leaves the file untouched and prints a warning instead.
+#
+# Issue #144: the merge SOURCE is the Claude Code translation of
+# .claude/toolkit-permissions.json, printed by build-layouts.js into a
+# sibling file inside the target's .claude/ (the same writable place the
+# .tmp and .err files use), never the toolkit's own settings.local.json,
+# which is no longer tracked. The inline node reads it from SRC_FILE. The
+# print mode never reads the target's file, so an unparseable target still
+# reaches the merge and gets the warning below, not a translation error.
+PERMS_SRC_FILE=""
 if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2>&1; then
+  PERMS_SRC_FILE="$TARGET/.claude/settings.local.json.tmp.src"
+  rm -f "$PERMS_SRC_FILE"
+  PERMS_SRC_RC=0
+  node "$TARGET/.claude/scripts/build-layouts.js" --root "$TARGET" --claude-settings --print > "$PERMS_SRC_FILE" 2>/dev/null || PERMS_SRC_RC=$?
+  if [ "$PERMS_SRC_RC" -ne 0 ]; then
+    rm -f "$PERMS_SRC_FILE"
+    PERMS_SRC_FILE=""
+    echo "  Warning: could not translate .claude/toolkit-permissions.json (build-layouts.js --claude-settings --print exited $PERMS_SRC_RC),"
+    echo "    so the permission merge was skipped. Your .claude/settings.local.json was left unchanged."
+  fi
+fi
+if [ -n "$PERMS_SRC_FILE" ]; then
   SETTINGS_TMP="$TARGET/.claude/settings.local.json.tmp"
   rm -f "$SETTINGS_TMP"
   # node's stderr is captured beside the .tmp, inside the target's .claude/
@@ -1272,11 +1721,10 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
   PERMS_ERR_FILE="$SETTINGS_TMP.err"
   rm -f "$PERMS_ERR_FILE"
   PERMS_RC=0
-  PERMS_ADDED=$(TOOLKIT_SRC="$TOOLKIT_ROOT" TARGET_DIR="$TARGET" node -e "
+  PERMS_ADDED=$(SRC_FILE="$PERMS_SRC_FILE" TARGET_DIR="$TARGET" node -e "
     const fs = require('fs');
-    const toolkitSrc = process.env.TOOLKIT_SRC;
     const targetDir = process.env.TARGET_DIR;
-    const src = JSON.parse(fs.readFileSync(toolkitSrc + '/.claude/settings.local.json', 'utf-8'));
+    const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
     const tgt = JSON.parse(fs.readFileSync(targetDir + '/.claude/settings.local.json', 'utf-8'));
     if (!tgt.permissions) tgt.permissions = {};
     if (!tgt.permissions.allow) tgt.permissions.allow = [];
@@ -1344,6 +1792,7 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
   # node call and nothing that fails below can leave it behind in .claude/.
   PERMS_ERR="$(cat "$PERMS_ERR_FILE" 2>/dev/null)"
   rm -f "$PERMS_ERR_FILE"
+  rm -f "$PERMS_SRC_FILE"
   if [ "$PERMS_RC" -ne 0 ]; then
     rm -f "$SETTINGS_TMP"
     # node's first stderr line is a stack location ("[eval]:5" or
@@ -1413,6 +1862,253 @@ if [ -f "$TARGET/.gitignore" ] && grep -qxF "INDEX.md" "$TARGET/.gitignore"; the
   rm -f "$TARGET/.gitignore.bak"
   echo "    Cleaned stale INDEX.md entries from .gitignore"
 fi
+
+# ─── Tool layouts: record the answer, clean, build (issue #144) ─
+# PARITY: mirrored in setup.ps1 (tools record, clean, build) - change both together
+# The answer resolved in the pre-flight is written here, after every source
+# file is in place (build-layouts.js and its emitters were copied above, and
+# the seeded CLAUDE.md feeds the AGENTS.md digest). Written with printf like
+# the manifest, in the one-line shape the pre-flight parses; identical
+# content is left alone so a re-run makes no backup. The file is committed
+# downstream, so it is the repo's choice and reaches every collaborator. It
+# never enters the manifest, and neither do the generated files: the build
+# hashes its own output in .claude/.toolkit-generated.json instead.
+TOOLS_JSON="{ \"tools\": [$(tools_json_list)] }"
+if [ -f "$TOOLS_FILE" ] && [ "$(tr -d '\r' < "$TOOLS_FILE")" = "$TOOLS_JSON" ]; then
+  : # unchanged - nothing to write, nothing to back up
+else
+  if [ -f "$TOOLS_FILE" ]; then backup_file "$TOOLS_FILE"; fi
+  printf '%s\n' "$TOOLS_JSON" > "$TOOLS_FILE"
+  echo "  Recorded the tool layouts in $TOOLS_FILE_REL: $(tools_list)"
+fi
+
+# A tool dropped from the recorded answer has its generated files removed.
+# --clean reads the build's own record (which tools it last built), refuses
+# a hand-edited generated file rather than deleting it, and takes only the
+# toolkit's entries back out of a key-merged hooks.json.
+if [ ${#TOOLS_DROPPED[@]} -gt 0 ]; then
+  if command -v node > /dev/null 2>&1; then
+    for tools_name in "${TOOLS_DROPPED[@]}"; do
+      CLEAN_RC=0
+      CLEAN_OUT="$(node "$TARGET/.claude/scripts/build-layouts.js" --root "$TARGET" --clean "$tools_name" 2>&1)" || CLEAN_RC=$?
+      if [ "$CLEAN_RC" -eq 0 ]; then
+        echo "  Removed the generated $tools_name layout (${CLEAN_OUT#build-layouts.js --clean $tools_name: })"
+      else
+        echo "  Warning: could not remove the generated $tools_name layout ($(printf '%s\n' "$CLEAN_OUT" | grep -v '^[[:space:]]*$' | head -1))."
+        echo "    Run later from the project root: node .claude/scripts/build-layouts.js --clean $tools_name"
+      fi
+    done
+  else
+    echo "  Note: node was not found, so the generated layout(s) for ${TOOLS_DROPPED[*]} were not removed."
+    echo "        Once node is installed, run from the project root: node .claude/scripts/build-layouts.js --clean <tool>"
+  fi
+fi
+
+# Build every recorded layout. build-layouts.js reads the answer just written,
+# refuses to overwrite a hand-edited generated file (it names it; the user
+# restores it or rebuilds with --force), and prints one summary line.
+LAYOUTS_BUILT=0
+if [ ${#TOOLS[@]} -gt 0 ]; then
+  if command -v node > /dev/null 2>&1; then
+    echo "  Building the tool layouts for $(tools_list) ..."
+    BUILD_RC=0
+    BUILD_OUT="$(node "$TARGET/.claude/scripts/build-layouts.js" --root "$TARGET" 2>&1)" || BUILD_RC=$?
+    if [ -n "$BUILD_OUT" ]; then
+      printf '%s\n' "$BUILD_OUT" | sed 's/^/    /'
+    fi
+    if [ "$BUILD_RC" -eq 0 ]; then
+      LAYOUTS_BUILT=1
+    else
+      echo "  Warning: build-layouts.js exited $BUILD_RC, so the layouts were not fully built."
+      echo "    Fix what it named above, then run from the project root: node .claude/scripts/build-layouts.js"
+    fi
+  else
+    echo "  Note: node was not found, so the layouts for $(tools_list) were not built."
+    echo "        Once node is installed, run from the project root: node .claude/scripts/build-layouts.js"
+  fi
+fi
+
+# ─── Per-machine permission merges (issue #144) ──────────────
+# PARITY: mirrored in setup.ps1 (per-machine merges) - change both together
+# Cursor's editor and Antigravity read permissions from one file per machine,
+# not per repo, so the translations the build wrote into the repo are merged
+# into those files here: union on the allow list, every other key preserved,
+# the toolkit's _generated marker never copied, a pre-existing file backed up
+# before it changes, nothing written when it already holds every entry. node
+# writes the merged result to a .tmp inside the target's .claude/ (known to
+# be writable) and bash copies it into place, the same shape as the
+# settings.local.json merge above. Codex reads .codex/ per repo, but only
+# once the project is trusted, so that one is an offer, never a silent
+# write. $HOME is honored throughout, so a test can redirect it. Paths reach
+# node through the environment, never interpolated into the -e string.
+if tools_has cursor; then
+  CURSOR_SRC="$TARGET/.cursor/permissions.toolkit.json"
+  CURSOR_DST="$HOME/.cursor/permissions.json"
+  if [ ! -f "$CURSOR_SRC" ]; then
+    echo "  Cursor: .cursor/permissions.toolkit.json is not built yet, so nothing was merged into $CURSOR_DST"
+  elif ! command -v node > /dev/null 2>&1; then
+    echo "  Cursor: node was not found, so the allowlist merge into $CURSOR_DST was skipped"
+  else
+    CURSOR_TMP="$TARGET/.claude/.cursor-permissions.tmp"
+    rm -f "$CURSOR_TMP"
+    CURSOR_RC=0
+    CURSOR_ADDED="$(SRC_FILE="$CURSOR_SRC" DST_FILE="$CURSOR_DST" OUT_FILE="$CURSOR_TMP" node -e "
+      const fs = require('fs');
+      const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
+      const dst = fs.existsSync(process.env.DST_FILE) ? JSON.parse(fs.readFileSync(process.env.DST_FILE, 'utf-8')) : {};
+      if (!Array.isArray(dst.terminalAllowlist)) dst.terminalAllowlist = [];
+      const missing = (src.terminalAllowlist || []).filter(p => !dst.terminalAllowlist.includes(p));
+      if (missing.length) {
+        dst.terminalAllowlist = dst.terminalAllowlist.concat(missing);
+        fs.writeFileSync(process.env.OUT_FILE, JSON.stringify(dst, null, 2) + '\n');
+      }
+      console.log(missing.length);
+    " 2>/dev/null)" || CURSOR_RC=$?
+    if [ "$CURSOR_RC" -ne 0 ]; then
+      rm -f "$CURSOR_TMP"
+      echo "  Warning: could not merge the Cursor allowlist into $CURSOR_DST (is it valid JSON?)."
+      echo "    Copy the terminalAllowlist entries from .cursor/permissions.toolkit.json into it by hand."
+    elif [ -f "$CURSOR_TMP" ]; then
+      if [ -f "$CURSOR_DST" ]; then backup_file "$CURSOR_DST"; fi
+      mkdir -p "$(dirname "$CURSOR_DST")"
+      cp "$CURSOR_TMP" "$CURSOR_DST"
+      rm -f "$CURSOR_TMP"
+      echo "  Cursor: added $CURSOR_ADDED terminal allowlist entries to $CURSOR_DST"
+      echo "    That file is machine-global: every Cursor project on this machine now runs in Allowlist mode."
+    else
+      echo "  Cursor: $CURSOR_DST already holds every toolkit allowlist entry (machine-global)"
+    fi
+  fi
+fi
+
+if tools_has antigravity; then
+  AG_SRC="$TARGET/.agents/settings.toolkit.json"
+  AG_DST="$HOME/.gemini/antigravity-cli/settings.json"
+  if [ ! -f "$AG_SRC" ]; then
+    echo "  Antigravity: .agents/settings.toolkit.json is not built yet, so nothing was merged into $AG_DST"
+  elif ! command -v node > /dev/null 2>&1; then
+    echo "  Antigravity: node was not found, so the permission merge into $AG_DST was skipped"
+  else
+    AG_TMP="$TARGET/.claude/.antigravity-settings.tmp"
+    rm -f "$AG_TMP"
+    AG_RC=0
+    # The workspace placeholder becomes this target's absolute path (no
+    # trailing slash), exactly as the file's _note says: the committed file
+    # must never carry a machine path, so the substitution happens here.
+    AG_ADDED="$(SRC_FILE="$AG_SRC" DST_FILE="$AG_DST" OUT_FILE="$AG_TMP" WORKSPACE="$TARGET" node -e "
+      const fs = require('fs');
+      const src = JSON.parse(fs.readFileSync(process.env.SRC_FILE, 'utf-8'));
+      const dst = fs.existsSync(process.env.DST_FILE) ? JSON.parse(fs.readFileSync(process.env.DST_FILE, 'utf-8')) : {};
+      if (!dst.permissions || typeof dst.permissions !== 'object') dst.permissions = {};
+      if (!Array.isArray(dst.permissions.allow)) dst.permissions.allow = [];
+      const ws = process.env.WORKSPACE;
+      const wanted = ((src.permissions && src.permissions.allow) || []).map(p => p.split('__WORKSPACE__').join(ws));
+      const missing = wanted.filter(p => !dst.permissions.allow.includes(p));
+      if (missing.length) {
+        dst.permissions.allow = dst.permissions.allow.concat(missing);
+        fs.writeFileSync(process.env.OUT_FILE, JSON.stringify(dst, null, 2) + '\n');
+      }
+      console.log(missing.length);
+    " 2>/dev/null)" || AG_RC=$?
+    if [ "$AG_RC" -ne 0 ]; then
+      rm -f "$AG_TMP"
+      echo "  Warning: could not merge the Antigravity permissions into $AG_DST (is it valid JSON?)."
+      echo "    Copy the permissions.allow entries from .agents/settings.toolkit.json into it by hand,"
+      echo "    replacing __WORKSPACE__ with $TARGET"
+    elif [ -f "$AG_TMP" ]; then
+      if [ -f "$AG_DST" ]; then backup_file "$AG_DST"; fi
+      mkdir -p "$(dirname "$AG_DST")"
+      cp "$AG_TMP" "$AG_DST"
+      rm -f "$AG_TMP"
+      echo "  Antigravity: added $AG_ADDED permission entries to $AG_DST (machine-global; the write_file rule names this project)"
+    else
+      echo "  Antigravity: $AG_DST already holds every toolkit permission entry (machine-global)"
+    fi
+  fi
+fi
+
+if tools_has codex; then
+  CODEX_CFG="$HOME/.codex/config.toml"
+  CODEX_SECTION="[projects.\"$TARGET\"]"
+  if [ -f "$CODEX_CFG" ] && grep -qF -- "$CODEX_SECTION" "$CODEX_CFG"; then
+    echo "  Codex: $CODEX_CFG already has a section for this project"
+  else
+    CODEX_WRITE=0
+    case "$TARGET" in
+      *'"'*|*'\'*)
+        # A quote or backslash would need TOML escaping; leave it to the user.
+        echo "  Codex: the target path contains a quote or backslash, so the trust section is not written automatically."
+        ;;
+      *)
+        if [ -t 0 ]; then
+          echo "  Codex applies .codex/config.toml and .codex/rules/ only in a project it trusts."
+          printf '%s' "  Mark this project trusted in $CODEX_CFG? [y/N] "
+          read -r CODEX_REPLY || CODEX_REPLY=""
+          case "$CODEX_REPLY" in
+            y|Y|yes|Yes|YES) CODEX_WRITE=1 ;;
+          esac
+        fi
+        ;;
+    esac
+    if [ "$CODEX_WRITE" -eq 1 ]; then
+      if [ -f "$CODEX_CFG" ]; then
+        backup_file "$CODEX_CFG"
+        # End the existing content with a newline, then a blank separator
+        # line before the new table; a file created here needs neither.
+        if [ -n "$(tail -c 1 "$CODEX_CFG")" ]; then echo "" >> "$CODEX_CFG"; fi
+        echo "" >> "$CODEX_CFG"
+      fi
+      mkdir -p "$(dirname "$CODEX_CFG")"
+      printf '%s\ntrust_level = "trusted"\n' "$CODEX_SECTION" >> "$CODEX_CFG"
+      echo "  Codex: marked this project trusted in $CODEX_CFG"
+    else
+      echo "  Codex: to trust this project, add these two lines to $CODEX_CFG:"
+      echo "    $CODEX_SECTION"
+      echo "    trust_level = \"trusted\""
+    fi
+  fi
+  echo "  Codex: one-time step - open Codex in this project and run /hooks once to trust the toolkit's Stop hook (.codex/hooks.json)."
+fi
+
+# ─── Git pre-push hook (issue #144) ──────────────────────────
+# PARITY: mirrored in setup.ps1 (pre-push hook install) - change both together
+# Acts on the plan the pre-flight computed (HOOK_STATE). Written with LF
+# endings by printf, marked executable; a differing toolkit hook is backed
+# up before it is replaced, and a hook without the marker is never touched.
+case "$HOOK_STATE" in
+  install|replace)
+    if [ "$HOOK_STATE" = "replace" ]; then backup_file "$HOOK_FILE"; fi
+    mkdir -p "$HOOK_DIR"
+    hook_content > "$HOOK_FILE"
+    chmod +x "$HOOK_FILE"
+    if [ "$HOOK_STATE" = "replace" ]; then
+      echo "  Refreshed the git pre-push hook: $HOOK_FILE (runs the M11 tripwire before every push)"
+    else
+      echo "  Installed the git pre-push hook: $HOOK_FILE (runs the M11 tripwire before every push)"
+    fi
+    ;;
+  identical)
+    echo "  Git pre-push hook already installed: $HOOK_FILE"
+    ;;
+  foreign)
+    echo "  Left the existing pre-push hook alone: $HOOK_FILE is not the toolkit's (no marker line)."
+    echo "    To run the tripwire from it, add: node .claude/scripts/pre-push-check.js"
+    ;;
+  hooks-path)
+    echo "  Skipping the git pre-push hook: core.hooksPath is set, so this repository's hooks live elsewhere."
+    echo "    Add 'node .claude/scripts/pre-push-check.js' to the pre-push hook there."
+    ;;
+  other-root)
+    echo "  Skipping the git pre-push hook: the target is inside a git repository rooted elsewhere."
+    ;;
+  old-git)
+    echo "  Skipping the git pre-push hook: this git cannot report its hooks directory (git rev-parse --git-path needs 2.5+)."
+    echo "    Add 'node .claude/scripts/pre-push-check.js' to .git/hooks/pre-push by hand."
+    ;;
+  *)
+    echo "  Skipping the git pre-push hook: the target is not a git repository (run git init, then setup again)."
+    ;;
+esac
 
 # ─── Toolkit manifest (issue #138) ───────────────────────────
 # Wholesale-regenerated on every real run (never on --dry-run, which
@@ -1632,4 +2328,7 @@ echo "      human-read markdown."
 echo ""
 echo "    Tip: To update commands, skills, and scripts, run setup again from"
 echo "    the toolkit repo: bash /path/to/llm-peer-review/scripts/setup/setup.sh $TARGET"
+echo ""
+echo "    Tool layouts: $(tools_list). To add or remove one later, run setup"
+echo "    again with --tools, e.g. --tools codex,cursor (or --tools none)."
 echo ""
