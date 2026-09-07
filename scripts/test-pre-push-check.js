@@ -316,6 +316,38 @@ function exitCodeTests() {
   cleanup(sb);
 }
 
+// --- 7. the layout check (issue #144) --------------------------------------
+// When .claude/.toolkit-tools.json names tools, the tripwire runs
+// build-layouts.js --check and a failing check blocks the push. The stub build
+// scripts below test the WIRING (exit code and report line); the build logic
+// itself is covered by scripts/test-build-layouts.js.
+function layoutTests() {
+  console.log("\n7. the layout check blocks a stale generated layout");
+  const STALE = "process.stderr.write(\"build-layouts.js --check: 1 problem(s):\\n  stale (source changed, rebuild): .agents/skills/review/SKILL.md\\n\"); process.exit(1);\n";
+  const FRESH = "process.exit(0);\n";
+  const sb = makeRepo("layout");
+  try {
+    commitFile(sb, "README.md", "seed\n", "init");
+    commitFile(sb, ".claude/.toolkit-tools.json", "{ \"tools\": [\"codex\"] }\n", "record tools");
+    commitFile(sb, ".claude/scripts/build-layouts.js", STALE, "stub build: stale");
+    const hit = run(sb.repo);
+    check("a stale layout blocks the push", hit.status === 1, "exit " + hit.status + " :: " + hit.stdout.slice(0, 300));
+    check("the report names the layout section", hit.stdout.indexOf("Generated layouts are out of date") !== -1, hit.stdout.slice(0, 300));
+    check("the report carries the build script's own line", hit.stdout.indexOf(".agents/skills/review/SKILL.md") !== -1, hit.stdout.slice(0, 300));
+    commitFile(sb, ".claude/scripts/build-layouts.js", FRESH, "stub build: current");
+    const ok = run(sb.repo);
+    check("a current layout does not block (near-miss)", ok.status === 0, "exit " + ok.status + " :: " + ok.stdout.slice(0, 300));
+    check("a current layout prints nothing to stdout", ok.stdout === "", ok.stdout.slice(0, 300));
+    commitFile(sb, ".claude/.toolkit-tools.json", "{ \"tools\": [] }\n", "no tools recorded");
+    commitFile(sb, ".claude/scripts/build-layouts.js", STALE, "stub build: stale again");
+    const skipped = run(sb.repo);
+    check("no recorded tools skips the layout check entirely", skipped.status === 0, "exit " + skipped.status + " :: " + skipped.stdout.slice(0, 300));
+  } catch (e) {
+    check("layout test set up a repo", false, e.message);
+  }
+  cleanup(sb);
+}
+
 // --- run --------------------------------------------------------------------
 patternTests();
 nearMissTests();
@@ -323,6 +355,7 @@ falsePositiveTests();
 netrcFilenameTests();
 maskingTest();
 exitCodeTests();
+layoutTests();
 
 console.log('');
 if (failures.length === 0) {

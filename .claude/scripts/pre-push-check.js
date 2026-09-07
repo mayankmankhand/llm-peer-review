@@ -14,15 +14,26 @@
 //   2. Never-push    - .claude/settings.local.json, .env, .env.local NEWLY
 //                      introduced by the outgoing commits (they must never
 //                      leave the machine). A path that already exists at the
-//                      range base is published history rather than news - this
-//                      repo tracks settings.local.json as the seed template -
-//                      and re-alarming on it every time would train the
-//                      override reflex the tripwire exists to prevent. With no
-//                      remote base nothing can be proven published, so every
-//                      match blocks.
+//                      range base is published history rather than news, and
+//                      re-alarming on it every time would train the override
+//                      reflex the tripwire exists to prevent. (Until issue
+//                      #144 this repo tracked settings.local.json as the seed
+//                      template; the seed is now .claude/toolkit-permissions.json
+//                      and settings.local.json is gitignored everywhere, so any
+//                      appearance of it is news.) With no remote base nothing
+//                      can be proven published, so every match blocks.
 //   3. Settings diff - .claude/settings.json changed in this push: the hunks
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
+//   4. Layout check  - when .claude/.toolkit-tools.json names tools, the
+//                      generated layouts under .agents/, .codex/, .cursor/ and
+//                      the AGENTS.md digest must be up to date with .claude/:
+//                      node .claude/scripts/build-layouts.js --check runs and
+//                      any stale, missing, or hand-edited file blocks the push
+//                      (issue #144). A collaborator on another tool reads only
+//                      the generated copy, so a stale one is a silently wrong
+//                      prompt. Skipped when the tools file or the build script
+//                      is absent (a Claude Code-only install).
 //
 // Fail closed, never open. A file this script cannot parse is REPORTED as
 // unscannable, not skipped: a scanner that stays silent about what it could
@@ -98,6 +109,12 @@ const NEVER_PUSH_BASENAMES = [
 // silently far too easily - so any change in the outgoing range is a hit
 // and the human approves it by saying "push anyway".
 const SETTINGS_PATH = ".claude/settings.json";
+
+// The layout check (issue #144): both files must exist and the tools list must
+// be non-empty, or the check is skipped rather than failed - an older install
+// or a Claude Code-only project has nothing to keep in sync.
+const LAYOUT_BUILD = ".claude/scripts/build-layouts.js";
+const TOOLS_FILE = ".claude/.toolkit-tools.json";
 
 // Binary files whose NAME says they hold key material. The line scanner cannot
 // read a binary at all: git emits a single "Binary files ... differ" line for
@@ -205,6 +222,20 @@ function git(args) {
   } catch {
     return null;
   }
+}
+
+// Run the layout check. Returns null when it does not apply, "" when the
+// layouts are current, or the build script's report when they are not.
+function layoutCheck() {
+  const fs = require("fs");
+  if (!fs.existsSync(LAYOUT_BUILD) || !fs.existsSync(TOOLS_FILE)) return null;
+  let tools = [];
+  try { tools = JSON.parse(fs.readFileSync(TOOLS_FILE, "utf8")).tools || []; } catch { return "could not read " + TOOLS_FILE; }
+  if (!Array.isArray(tools) || tools.length === 0) return null;
+  const r = require("child_process").spawnSync(process.execPath, [LAYOUT_BUILD, "--check"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+  if (r.status === 0) return "";
+  const text = ((r.stderr || "") + (r.stdout || "")).trim();
+  return text || ("build-layouts.js --check exited " + r.status);
 }
 
 function fail(msg) {
@@ -433,8 +464,9 @@ function scanCommit(sha, hits) {
 const { commits, base } = outgoingCommits();
 if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
 
-const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set() };
+const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), layout: null };
 for (const sha of commits) scanCommit(sha, hits);
+hits.layout = layoutCheck();
 
 // Keep only never-push paths this push would actually publish for the first
 // time; one base lookup per distinct path, after the walk rather than inside it.
@@ -452,7 +484,8 @@ const clean =
   hits.secrets.length === 0 &&
   hits.neverPush.length === 0 &&
   hits.unscannable.length === 0 &&
-  hits.settingsCommits.size === 0;
+  hits.settingsCommits.size === 0 &&
+  !hits.layout;
 if (clean) process.exit(0); // silent when clean, by contract
 
 const out = [];
@@ -480,6 +513,11 @@ if (hits.settingsCommits.size > 0) {
     : ["diff", "--no-color", base + "..HEAD", "--", SETTINGS_PATH];
   const diff = git(diffArgs);
   out.push(diff === null || diff.trim() === "" ? "  (touched in: " + [...hits.settingsCommits].join(", ") + ")" : diff.trimEnd());
+  out.push("");
+}
+if (hits.layout) {
+  out.push("Generated layouts are out of date (run node " + LAYOUT_BUILD + " and commit the result):");
+  for (const line of hits.layout.split("\n")) out.push("  " + line);
   out.push("");
 }
 out.push("Commits scanned: " + commits.length + (base === null ? " (no remote base - full history)" : ""));

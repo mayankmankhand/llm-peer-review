@@ -29,8 +29,34 @@ plans/PLAN-*.html
 # are both user-facing working dirs. Existing tracked reports are unaffected.
 reports/
 
-# IDE (local Cursor settings - shared commands are in .claude/commands/)
-.cursor/
+# IDE (local Cursor settings). Since issue #144 the toolkit GENERATES a few files
+# under .cursor/ that must be committed, so the directory is matched as .cursor/*
+# (a bare .cursor/ would make every negation below dead: git never descends into
+# an excluded directory) and only the generated paths are re-included by name.
+# Everything else Cursor writes there (plans, mcp.json with its env block, user
+# rules and agents) stays ignored.
+.cursor/*
+!.cursor/skills/
+.cursor/skills/*
+!.cursor/skills/tk-review/
+!.cursor/skills/tk-review-security/
+!.cursor/agents/
+.cursor/agents/*
+!.cursor/agents/correction-extractor.md
+!.cursor/agents/design-critic.md
+!.cursor/agents/index-mapper.md
+!.cursor/agents/review-finder.md
+!.cursor/agents/review-finder-shell.md
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/toolkit.mdc
+!.cursor/hooks.json
+!.cursor/permissions.toolkit.json
+
+# Claude Code permissions are per machine (issue #144): the committed seed is
+# .claude/toolkit-permissions.json, translated into this file by
+# node .claude/scripts/build-layouts.js --claude-settings. Never commit this file.
+.claude/settings.local.json
 
 # Claude Code worktrees (Remote Control spawn mode)
 .claude/worktrees/
