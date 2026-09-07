@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "tools": [
+    "antigravity",
+    "codex",
+    "cursor"
+  ],
+  "files": {
+    ".agents/agents/correction-extractor.md": {
+      "tool": "antigravity",
+      "hash": "sha256:67217fed24348483fcf710c96605a82e7337b70f0408dab75556de5d29c1ebb3"
+    },
+    ".agents/agents/design-critic.md": {
+      "tool": "antigravity",
+      "hash": "sha256:82cd8098998acf476ecc4a5561935dd02e51c048aac92fde8c81248ad4a12b3b"
+    },
+    ".agents/agents/index-mapper.md": {
+      "tool": "antigravity",
+      "hash": "sha256:7dfd400dd81874f731baddf765156e2f4407f8cfb09030a2af66cd6775d7687a"
+    },
+    ".agents/agents/review-finder.md": {
+      "tool": "antigravity",
+      "hash": "sha256:b79745760b777ce0ee169c0f6df810e0be82b452c483bfd7c4c200a9629b53bb"
+    },
+    ".agents/hooks.json": {
+      "tool": "antigravity",
+      "hash": "sha256:72d547acecbfe452f873ba569ad7e7fb4b82df1965cfd22726fa3521ba61b4d1",
+      "merge": "json",
+      "ours": "{\n  \"toolkit-chain\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"node .claude/scripts/chain-hook.js --tool antigravity\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+    },
+    ".agents/rules/toolkit.md": {
+      "tool": "antigravity",
+      "hash": "sha256:3b1501ca8915fe189828dcdd0a65cf09273d2acf885b5b3f8b95fe60a5511f78"
+    },
+    ".agents/settings.toolkit.json": {
+      "tool": "antigravity",
+      "hash": "sha256:7982c20ff0a840c8f65da727e8dae9857aa0d1922128e0c4d214348a5694e9b1"
+    },
+    ".agents/skills/ask-gemini/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:6d6a88263a2e8a01ce6be5b029ce467cb06c4095dadb1508f773a1893342e53a"
+    },
+    ".agents/skills/ask-gemini/agents/openai.yaml": {
+      "tool": "codex",
+      "hash": "sha256:a122502677f55c01e69bf236b537c18f98ab3037437d0b25daa7d3eeade933a7"
+    },
+    ".agents/skills/ask-gpt/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:c943fff03b050a8372c2464808df4c10b89514cfc3ca33a004e13d9933f949ba"
+    },
+    ".agents/skills/ask-gpt/agents/openai.yaml": {
+      "tool": "codex",
+      "hash": "sha256:49afa0fe3fa2c145b5dfe8a937433fec22ca3b673a6f76fc5bb5d8d0667a0ea3"
+    },
+    ".agents/skills/audit-html/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:286e5faa880a3a2febb3399c8573e803fd15facf28cad4de2394e72f6c256b84"
+    },
+    ".agents/skills/codebase-to-course/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:606c85e8f58a07b422313fcae522ef357cfcdbf5e4960cae916a77d422c52054"
+    },
+    ".agents/skills/create-issue/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:ae3f30b4b42e178aef691aeaa23018bae774d54ffab7d7fca1f89d8707a8462e"
+    },
+    ".agents/skills/create-plan/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:cc9d3a63c7ad86c83bab8db2e175d879cb8f0fc50d41fa76414cd83219eebc31"
+    },
+    ".agents/skills/document/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:f470b25111d4c0e37c425daa8c35c078c25ecacb77fca814bb03ecca3170b680"
+    },
+    ".agents/skills/error-analysis/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:7f583e81617a8b7c9348c780e19c05376134621b37038962b5cee5633c62ef17"
+    },
+    ".agents/skills/execute/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:bade6c952c7b186373fd83127360e15674dbabc4f1fe66e9352441bdb3360367"
+    },
+    ".agents/skills/explore/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:6e9621d1d8e501c00d41bb26ccd3eecd5d56cb50dc08c034b0e29aa3077eb993"
+    },
+    ".agents/skills/index/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:ba90c0b839c381215d3c32c397784100f3565a4f79b24c139ffc8dff0e535fec"
+    },
+    ".agents/skills/learning-opportunity/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:264c2a69cfee4a286e88d72844490905662fe28f469ef0aa622b88610e401a94"
+    },
+    ".agents/skills/package-review/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:7246d7ae32bcaa3ee47669916d1096567ab90196441642a57e917ef5e74b7ac9"
+    },
+    ".agents/skills/pair-debug/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:fd4de83baa150092251575c84aa725867d2e29409344c43fe3283f5eb40b0899"
+    },
+    ".agents/skills/peer-review/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:362e0f32192bf50a78edb8f2b07e9264efec26ac40da85fa63374c51119ee40a"
+    },
+    ".agents/skills/peer-review/agents/openai.yaml": {
+      "tool": "codex",
+      "hash": "sha256:b287ee8185ca75f0710483959b14b5f9a02a9b012a959df84d0b894367efee19"
+    },
+    ".agents/skills/playground/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:55bd44f4b2293ee8ffc6fe38ebdd6f68867736e5f0989e8e7e691fa0e1c76991"
+    },
+    ".agents/skills/review-browser/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:58138a2f816a4ab7664f062f16b9fb4083d95148bd9d124b34968ca822c78fc5"
+    },
+    ".agents/skills/review-code/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:1eaa65d1f7fef87867a7f2f99f984944e7d6276c9b24acde689867fb93a4fd03"
+    },
+    ".agents/skills/review-commands/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:bf2412bf71257efe0fb6ed069983f52fa87352b63330650ae1374126680a7be8"
+    },
+    ".agents/skills/review-copy/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:9edb6d134dbf3cb66b8d51ed7342ef1643ac552ffc6366b5d86223e39bb5f3ec"
+    },
+    ".agents/skills/review-deps/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:98813e0fe7396929e15b637646c5b844204e883b7d881c98679880e7e888e79a"
+    },
+    ".agents/skills/review-full/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:686942c42a9bd6cac2d71878644469a8c14d7e86efbd48b4117c447fd4683cfd"
+    },
+    ".agents/skills/review-plan/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:fa1cfb0ab77b79c71c2dbaa96859b345dfb6c3bc1da1d037ac0f3c8fa0a84ac1"
+    },
+    ".agents/skills/review-security/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:f431f742f057f1a57cab0912246be0ad5db73185b7aaee0f54609933f06fdd47"
+    },
+    ".agents/skills/review-ux/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:4fa8558f0e954a553d659e4852b654cd3f984b13fccfdf8652761fdfd3a5206e"
+    },
+    ".agents/skills/review/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:2aa808337b5bbb3232bd828ffb74fe97cd4a17f327331301730f3021c30195b0"
+    },
+    ".agents/skills/security-audit/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:9837e2a28da2eac9a3c04ab5999f31eeed4428e77cb75bc14fb1315d9d1d6037"
+    },
+    ".agents/skills/worktree/SKILL.md": {
+      "tool": "shared",
+      "hash": "sha256:e2370960e4e16238a7f833664d388de35ed9cfcc80e4f9456798a63cce623a0e"
+    },
+    ".codex/agents/correction-extractor.toml": {
+      "tool": "codex",
+      "hash": "sha256:f652d3e948a4127be6fc411ad0dd08b2720e4f6c2887d4dd4b761be4ee41939c"
+    },
+    ".codex/agents/design-critic.toml": {
+      "tool": "codex",
+      "hash": "sha256:713ea7797f34159984fc0430ade2e66dbb2bbb73050f02934a7975d636897a2e"
+    },
+    ".codex/agents/index-mapper.toml": {
+      "tool": "codex",
+      "hash": "sha256:6be4991b4b718a7a4d87a3db215c97ef81aa57ea002328dffe821ac3a55b589e"
+    },
+    ".codex/agents/review-finder.toml": {
+      "tool": "codex",
+      "hash": "sha256:90a9854065369ee6e6216ffadcd082c9a6d74ef6960b733666b6b65827adc004"
+    },
+    ".codex/config.toml": {
+      "tool": "codex",
+      "hash": "sha256:086923d45c924a79335c5e8269a6a91430c1ef4403c41d6f477811c22c28c76f"
+    },
+    ".codex/hooks.json": {
+      "tool": "codex",
+      "hash": "sha256:81f2cf8d09492a595f50d12cc08832f567daa8c8a772c5a2bde2fde5a8ebd7ee",
+      "merge": "json",
+      "ours": "{\n  \"description\": \"GENERATED by node .claude/scripts/build-layouts.js from .claude/scripts/chain-hook.js. Do not edit: change the source under .claude/ and rebuild.\",\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"node .claude/scripts/chain-hook.js --tool codex\",\n            \"timeout\": 30,\n            \"statusMessage\": \"toolkit: checking for a queued next stage (M14)\"\n          }\n        ]\n      }\n    ]\n  }\n}\n"
+    },
+    ".codex/rules/toolkit.rules": {
+      "tool": "codex",
+      "hash": "sha256:7924d424b84056f823036210a148eacfea3bb4f889d259ce797fd1390b1213e7"
+    },
+    ".cursor/agents/correction-extractor.md": {
+      "tool": "cursor",
+      "hash": "sha256:571d2d0c69ae7c488527072ed4be11de10b032389ae1c56d1dc03766da8e1b9e"
+    },
+    ".cursor/agents/design-critic.md": {
+      "tool": "cursor",
+      "hash": "sha256:c0f3d3f42b26247310c890ff8721e67ea50ea5fc22ea99101f8bcd91994ae8ab"
+    },
+    ".cursor/agents/index-mapper.md": {
+      "tool": "cursor",
+      "hash": "sha256:14ffe9de129c421238fe138fa9623daea31398a842b3a18de2d9d92fc8bb4b64"
+    },
+    ".cursor/agents/review-finder-shell.md": {
+      "tool": "cursor",
+      "hash": "sha256:6d6114b29640db80b03cecc1d5ff1bedb55f94332e7c9795246bb3522c47abba"
+    },
+    ".cursor/agents/review-finder.md": {
+      "tool": "cursor",
+      "hash": "sha256:c12a1f14f3334c819a28991c833c66cf367a4283512ae0d766673448a7fc2f5a"
+    },
+    ".cursor/hooks.json": {
+      "tool": "cursor",
+      "hash": "sha256:3fd53849ac784ed32383dbd57bf810f18769e012b83a0258dad19a6db4a5a9f2",
+      "merge": "json",
+      "ours": "{\n  \"version\": 1,\n  \"hooks\": {\n    \"stop\": [\n      {\n        \"command\": \"node .claude/scripts/chain-hook.js --tool cursor\"\n      }\n    ],\n    \"beforeShellExecution\": [\n      {\n        \"command\": \"node .claude/scripts/chain-hook.js --tool cursor --guard-shell\"\n      }\n    ]\n  }\n}\n"
+    },
+    ".cursor/permissions.toolkit.json": {
+      "tool": "cursor",
+      "hash": "sha256:3b7363410a41534b5b7af59bd958e4bde6adef0c5e073f3a3a7c3dea34e13a1b"
+    },
+    ".cursor/rules/toolkit.mdc": {
+      "tool": "cursor",
+      "hash": "sha256:6f6be943aea86f0189839acb0a76109cdbda4d90835c243ae5754ca35c743b60"
+    },
+    ".cursor/skills/tk-review-security/SKILL.md": {
+      "tool": "cursor",
+      "hash": "sha256:de5d0c2c9fb13046ad563bd2d58461637de8ff1397723722fcffb1a99980b5b0"
+    },
+    ".cursor/skills/tk-review/SKILL.md": {
+      "tool": "cursor",
+      "hash": "sha256:7aff4934189dd4db90bbbb215dc7a669b6a71dbff0ecd00b7c26e23881760344"
+    },
+    "AGENTS.md": {
+      "tool": "shared",
+      "hash": "sha256:d46fad03bb40482b8435b649962a42f18e816b0d912edcad81d1806c84975eeb",
+      "merge": "markers"
+    }
+  }
+}

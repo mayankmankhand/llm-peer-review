@@ -1,0 +1,15 @@
+Skills are the commands here. Every `.agents/skills/<name>/SKILL.md` is a slash command: type `/name`, or let the model pick one by its description. There is no `$ARGUMENTS` placeholder; text after the name arrives with the prompt.
+
+Subagents live in `.agents/agents/<name>.md`. Start one with `invoke_subagent` by name (`review-finder`, `index-mapper`, `design-critic`, `correction-extractor`). It runs with a clean context, sees only its own system prompt plus the task text you pass, holds only the tools listed in its file (never a write tool), and ends by sending you a message. Its `skills:` list omits `ask-gpt`, `ask-gemini`, and `peer-review`, so a subagent can never start a debate stage (M14).
+
+The M2 audit dispatches its skeptics and voters the same way. Dispatch them all, then wait until every ballot has come back as a message before tallying; a vote that has not arrived is not a vote. Run the canary on every audit dispatch: mint a random token and keep it in your own context only; the first line of each skeptic's reply must say whether it can see any such token. A skeptic that sees one is a failed audit subagent under M2: redispatch it once, then mark the finding unaudited.
+
+Finders run inside the write-guard. Before a finder starts, run `node .claude/scripts/write-guard.js begin <label>`; after it reports, run `node .claude/scripts/write-guard.js end <label>`. An `INVALID` result means the finder changed the working tree and the guard reverted it: redispatch that finder once, then drop it.
+
+For `/review-browser`, use the built-in browser subagent (the `/browser` command) instead of `node .claude/scripts/browse.js`. It takes screenshots, drives interactions, and reports diagnostics with no Playwright install.
+
+Permissions are per machine, not per repo. The loop runs unattended only after setup has merged `.agents/settings.toolkit.json` into `~/.gemini/antigravity-cli/settings.json`, including the `write_file` rule for this workspace. Until then every file write pauses for a diff review and every command outside the allow list pauses for approval; that is the merge not having run, not a toolkit failure. `toolPermission` stays at its default, request-review.
+
+This session cannot publish to a hosted page. Render every artifact without `--no-abs` and open it with `bash .claude/scripts/open-artifact.sh <file>`. That is the complete viewport here, not a degraded one; `--no-abs` exists only for pages that leave the machine.
+
+Nothing here forces the next stage. When a stage finishes, name the next one in plain words ("Now running /review") and start it yourself; that prose handoff is the working M14 path. The Stop hook in `.agents/hooks.json` runs `node .claude/scripts/chain-hook.js --tool antigravity`, which reads the chain-state file the finishing stage wrote and asks Antigravity to continue if you stopped early. It is the backstop, capped by Antigravity's own continuation limit, never the first line. "no chaining" and "report only" work exactly as they do in Claude Code.

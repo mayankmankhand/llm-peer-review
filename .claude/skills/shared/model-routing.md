@@ -15,12 +15,14 @@ Shared reference for every command that spawns a subagent. Decided in issue #152
 
 The pin lives in agent frontmatter under `.claude/agents/`, never in prose. A prompt's user-facing message is not enforcement (the #131 lesson); frontmatter is applied by the harness on every dispatch.
 
-| Agent | Model | Effort | Used by |
-|---|---|---|---|
-| `review-finder` | inherit | high | `/review` Phase 2 dispatch; the direct-run fan-outs inside the review skills |
-| `index-mapper` | sonnet | low | `/index` Step 3 chunk analysis |
-| `correction-extractor` | inherit | low | `/document` capture stage (issue #157) |
-| `design-critic` | inherit | high | `/execute` design steps (M15, issue #160) |
+| Agent | Model | Outside Claude Code | Effort | Used by |
+|---|---|---|---|---|
+| `review-finder` | inherit | inherit | high | `/review` Phase 2 dispatch; the direct-run fan-outs inside the review skills |
+| `index-mapper` | sonnet | inherit | low | `/index` Step 3 chunk analysis |
+| `correction-extractor` | inherit | inherit | low | `/document` capture stage (issue #157) |
+| `design-critic` | inherit | inherit | high | `/execute` design steps (M15, issue #160) |
+
+**Outside Claude Code (issue #144).** The subagent files that `node .claude/scripts/build-layouts.js` generates for Cursor, Codex, and Antigravity never carry a model: `sonnet` is a Claude alias with no meaning to another tool, and guardrail 3 requires an A/B receipt before any pin ships, so every generated file inherits. The first candidate is a `flash` pin for `index-mapper` on Antigravity, where Flash and Pro draw from one quota; it stays deferred until its receipt is run.
 
 Why these tiers: `index-mapper` runs the tier issue #131 chose for chunk analysis and has run live since, moved here from prose into frontmatter so the cost message is enforced rather than aspirational; low effort matches mechanical read-and-extract behind a strict output contract. `review-finder` inherits because a Sonnet pin was tested on this exact job and failed its receipt - see "Tested and revoked" below. `correction-extractor` inherits for the same reason `review-finder` does: no A/B receipt has been run for it yet, and guardrail 3 decides. It is a strong pin candidate (mechanical read-and-extract behind a strict output contract, the same shape as `index-mapper`) and it has an unusually strong downstream judge, since the human accepts or rewrites every open code before a row is written. None of that substitutes for the receipt. Low effort matches the job shape. `design-critic` inherits by rule rather than by missing receipt: a scoring critic whose verdict is final is a judge, and a judge never runs below the tier of the work it judges. High effort matches a judgment call made from one image.
 

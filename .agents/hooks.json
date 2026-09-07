@@ -1,0 +1,14 @@
+{
+  "toolkit-chain": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/scripts/chain-hook.js --tool antigravity"
+          }
+        ]
+      }
+    ]
+  }
+}

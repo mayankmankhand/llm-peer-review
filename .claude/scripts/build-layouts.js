@@ -53,6 +53,9 @@
 //                      Code's grammar and merge it into .claude/settings.local.json
 //                      (existing entries are kept). Setup calls this; it is the
 //                      replacement for the tracked seed copy that used to ship.
+//                      With --print, write nothing and print the translation
+//                      alone as JSON on stdout (the installers feed it to their
+//                      own merge, which also retires stale absolute-path entries).
 //   --root <dir>       project root; default is the current directory
 //
 // Output is deterministic: identical inputs give byte-identical files, so a
@@ -69,7 +72,7 @@ function warn(msg) { console.error('build-layouts.js: warning: ' + msg); }
 
 // --- parse args ---
 const argv = process.argv.slice(2);
-const opts = { tools: null, check: false, clean: null, force: false, claudeSettings: false, root: process.cwd(), verbose: false };
+const opts = { tools: null, check: false, clean: null, force: false, claudeSettings: false, print: false, root: process.cwd(), verbose: false };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
   if (a === '--tools') opts.tools = String(argv[++i] || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -77,6 +80,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--clean') opts.clean = String(argv[++i] || '').trim();
   else if (a === '--force') opts.force = true;
   else if (a === '--claude-settings') opts.claudeSettings = true;
+  else if (a === '--print') opts.print = true;
   else if (a === '--root') opts.root = path.resolve(String(argv[++i] || '.'));
   else if (a === '--verbose') opts.verbose = true;
   else die('unknown argument: ' + a);
@@ -350,6 +354,31 @@ function mergeJson(theirs, ours) {
   return ours;
 }
 
+// Remove our entries from a merged JSON document, leaving whatever the user had.
+// Arrays lose the items deep-equal to ours; objects lose keys whose value is
+// ours or empties out after recursion; a scalar equal to ours goes.
+function unmergeJson(theirs, ours) {
+  if (Array.isArray(theirs) && Array.isArray(ours)) {
+    return theirs.filter(t => !ours.some(o => JSON.stringify(t) === JSON.stringify(o)));
+  }
+  if (theirs && ours && typeof theirs === 'object' && typeof ours === 'object' && !Array.isArray(theirs) && !Array.isArray(ours)) {
+    const out = {};
+    for (const k of Object.keys(theirs)) {
+      if (!(k in ours)) { out[k] = theirs[k]; continue; }
+      const rest = unmergeJson(theirs[k], ours[k]);
+      const empty = rest === undefined || (Array.isArray(rest) && rest.length === 0) || (rest && typeof rest === 'object' && !Array.isArray(rest) && Object.keys(rest).length === 0);
+      if (!empty) out[k] = rest;
+    }
+    return out;
+  }
+  return JSON.stringify(theirs) === JSON.stringify(ours) ? undefined : theirs;
+}
+// Merge our JSON into the text on disk; null when the disk text is not JSON.
+function mergedJsonOrNull(diskText, ours) {
+  let theirs; try { theirs = JSON.parse(diskText); } catch (e) { return null; }
+  return JSON.stringify(mergeJson(theirs, JSON.parse(ours)), null, 2) + '\n';
+}
+
 function backup(rel) {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const dir = abs('.toolkit-backup-' + stamp + '-build');
@@ -407,9 +436,12 @@ function runCheck(tools) {
   const problems = [];
   for (const f of files) {
     const disk = diskContentFor(f);
-    const expected = f.merge === 'markers' ? f.content : f.content;
     if (disk === null || disk === '') { problems.push('missing: ' + f.path); continue; }
-    if (sha256(disk) === sha256(expected)) continue;
+    // A key-merged file (hooks.json) may carry the user's own entries beside
+    // ours, so "current" means: merging ours into what is on disk changes
+    // nothing. Every other file must match byte for byte.
+    const expected = f.merge === 'json' ? mergedJsonOrNull(disk, f.content) : f.content;
+    if (expected !== null && sha256(disk) === sha256(expected)) continue;
     const recorded = record.files[f.path] && record.files[f.path].hash;
     problems.push((recorded && sha256(disk) === recorded ? 'stale (source changed, rebuild): ' : 'hand-edited (restore it or rebuild with --force): ') + f.path);
   }
@@ -437,13 +469,17 @@ function runBuild(tools) {
       if (rec && diskHash !== rec.hash) {
         if (!opts.force) die('refusing to overwrite a hand-edited generated file: ' + f.path + ' (restore it, or rebuild with --force to back it up and replace it)');
         console.error('  backed up hand-edited ' + f.path + ' to ' + backup(f.path));
+      } else if (f.merge === 'json' && diskHash !== sha256(content)) {
+        // Merge by key into the copy on disk, whether it is the user's own file
+        // (unrecorded) or our earlier merge (recorded and untouched). The merge is
+        // idempotent, so a rebuild over an untouched file changes nothing.
+        const merged = mergedJsonOrNull(disk, f.content);
+        if (merged === null) die(f.path + ' exists and is not valid JSON; move it aside');
+        if (!rec) console.error('  merged existing ' + f.path + ' by key');
+        content = merged;
       } else if (!rec && diskHash !== sha256(content)) {
         if (f.merge === 'markers') {
           // an existing AGENTS.md is merged, never replaced
-        } else if (f.merge === 'json') {
-          let theirs; try { theirs = JSON.parse(read(f.path)); } catch (e) { die(f.path + ' exists, is not ours, and is not valid JSON; move it aside'); }
-          content = JSON.stringify(mergeJson(theirs, JSON.parse(f.content)), null, 2) + '\n';
-          console.error('  merged existing ' + f.path + ' by key');
         } else {
           if (!opts.force) die('refusing to overwrite a file the toolkit did not generate: ' + f.path + ' (move it aside, or rebuild with --force to back it up and replace it)');
           console.error('  backed up ' + f.path + ' to ' + backup(f.path));
@@ -454,9 +490,10 @@ function runBuild(tools) {
     if (f.merge === 'markers') toWrite = mergeMarkers(exists(f.path) ? read(f.path) : '', content);
     fs.mkdirSync(path.dirname(abs(f.path)), { recursive: true });
     if (!exists(f.path) || read(f.path) !== toWrite) { fs.writeFileSync(abs(f.path), toWrite); written.push(f.path); } else skipped.push(f.path);
-    const recordedContent = f.merge === 'markers' ? markerBlock(toWrite) : (f.merge === 'json' ? content : content);
+    const recordedContent = f.merge === 'markers' ? markerBlock(toWrite) : toWrite;
     record.files[f.path] = { tool: f.tool, hash: sha256(recordedContent) };
     if (f.merge) record.files[f.path].merge = f.merge;
+    if (f.merge === 'json') record.files[f.path].ours = f.content;
   }
   // drop record entries for files this build no longer produces (a removed command, say)
   const produced = new Set(files.map(f => f.path));
@@ -490,6 +527,14 @@ function runClean(tool) {
       if (r.merge === 'markers') {
         const rest = read(k).replace(markerBlock(read(k)), '').replace(/\n{3,}/g, '\n\n');
         if (rest.trim()) fs.writeFileSync(abs(k), rest.replace(/\s+$/, '') + '\n'); else fs.unlinkSync(abs(k));
+      } else if (r.merge === 'json' && r.ours) {
+        // Take only our entries back out; a user's own hooks stay behind.
+        const theirs = JSON.parse(disk);
+        let rest = unmergeJson(theirs, JSON.parse(r.ours));
+        const meaningful = Object.keys(rest).filter(key => key !== 'version');
+        // A schema field the user's file needs (Cursor's version) stays even when ours matched it.
+        if (meaningful.length && 'version' in theirs && !('version' in rest)) rest = Object.assign({ version: theirs.version }, rest);
+        if (meaningful.length) fs.writeFileSync(abs(k), JSON.stringify(rest, null, 2) + '\n'); else fs.unlinkSync(abs(k));
       } else fs.unlinkSync(abs(k));
       removed++;
       let dir = path.dirname(abs(k));
@@ -516,8 +561,16 @@ function claudeAllowList(model) {
   }
   return out.concat(model.permissions.claudeCode.allow || []);
 }
+function claudeTranslation(model) {
+  const cc = model.permissions.claudeCode || {};
+  const out = { permissions: { allow: claudeAllowList(model) } };
+  if (cc.additionalDirectories) out.permissions.additionalDirectories = cc.additionalDirectories.slice();
+  if (cc.defaultMode) out.defaultMode = cc.defaultMode;
+  return out;
+}
 function runClaudeSettings() {
   const model = loadModel([]);
+  if (opts.print) { process.stdout.write(JSON.stringify(claudeTranslation(model), null, 2) + '\n'); return; }
   const rel = '.claude/settings.local.json';
   const current = readJson(rel, {});
   current.permissions = current.permissions || {};

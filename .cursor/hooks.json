@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "node .claude/scripts/chain-hook.js --tool cursor"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .claude/scripts/chain-hook.js --tool cursor --guard-shell"
+      }
+    ]
+  }
+}
