@@ -11,8 +11,10 @@
 //                      pattern list. Per-commit on purpose: a secret added in
 //                      one commit and removed in a later one is invisible in
 //                      the endpoint diff but still lands in public history.
-//   2. Never-push    - .claude/settings.local.json, .env, .env.local NEWLY
-//                      introduced by the outgoing commits (they must never
+//   2. Never-push    - every name in the NEVER_PUSH_PATHS and
+//                      NEVER_PUSH_BASENAMES lists below (the local settings
+//                      file, env files, the correction ledger's files, netrc)
+//                      NEWLY introduced by the outgoing commits (they must never
 //                      leave the machine). A path that already exists at the
 //                      range base is published history rather than news - this
 //                      repo tracks settings.local.json as the seed template -
