@@ -174,10 +174,29 @@ const PATTERNS = [
   // here: this scanner has no allow-list, so a spurious block teaches the "push
   // anyway" reflex it exists to prevent.
   //
-  // The residue: a real credential of eight-plus letters with no digit is missed,
-  // and so is prose that quotes a record WITH a digit in it. Documentation should
-  // still DESCRIBE a netrc record rather than show one.
-  { name: "netrc-record", re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/i },
+  // The residue after the shape and value requirements was documentation that SHOWS
+  // a record rather than describing one: a realistic example carries a digit, so it
+  // matched, and the only way past a block is --no-verify - the reflex this scanner
+  // exists to prevent. Asking every downstream project to adopt a writing convention
+  // is not a fix. So the pattern takes file context too (issue #166): it does not
+  // apply to markdown, which is where documentation lives.
+  //
+  // What that costs, stated plainly: a real netrc record pasted into a markdown file
+  // is missed by THIS pattern. What still covers that file: a file actually named
+  // .netrc or _netrc is blocked by name whatever its extension or contents, and every
+  // other pattern (url-with-credentials, secret-assignment, and each token format)
+  // still scans markdown unchanged. Only this one heuristic steps aside, and only
+  // where prose is expected.
+  //
+  // The narrower rule - fire inside a fenced code block, skip in prose - is not
+  // available: the scanner reads `git diff --unified=0`, which yields added lines
+  // with no surrounding context, so there is no way to know whether a line sits
+  // inside a fence. A guess would fail open or fail loud, and both are worse.
+  {
+    name: "netrc-record",
+    re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/i,
+    skipFile: (f) => /\.(?:md|markdown|mdx)$/i.test(f),
+  },
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
   {
     name: "secret-assignment",
@@ -361,6 +380,11 @@ function scanCommit(sha, hits) {
         const added = line.slice(1);
         if (file !== null && file !== SELF_PATH) {
           for (const p of PATTERNS) {
+            // A pattern may exempt itself by FILE, not by content: see netrc-record
+            // (issue #166). Content-based allow-listing is still refused - that is
+            // what teaches the "push anyway" reflex - but a heuristic whose false
+            // positives all land in one file type may decline that file type.
+            if (p.skipFile && p.skipFile(file)) continue;
             if (p.re.test(added)) {
               hits.secrets.push("[" + p.name + "] " + file + " @ " + short + " line " + newLine + ": " + mask(added));
             }

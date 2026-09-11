@@ -201,6 +201,90 @@ function falsePositiveTests() {
   cleanup(sb);
 }
 
+// --- 3b. a netrc EXAMPLE in documentation does not block --------------------
+// Issue #166. The shape-plus-credential requirement cleared ordinary sign-in
+// prose but not documentation that SHOWS a record instead of describing one: a
+// realistic example carries a digit, so it matched, and the only way past the
+// block was --no-verify - the reflex the tripwire exists to prevent. The pattern
+// now declines markdown, where documentation lives.
+//
+// Both halves are pinned here, because the exemption is only safe if it is
+// narrow: the same record in a script still blocks (that case also lives in
+// section 1, on ci/bootstrap.sh), and a file NAMED .netrc still blocks whatever
+// its contents (section 4). What this asserts is the seam between them.
+function docExampleTests() {
+  console.log('\n3b. a netrc example in markdown does not block, elsewhere it still does');
+
+  const sb = makeRepo('netrc-doc');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'docs/auth-setup.md', [
+      '# Authenticating with the registry',
+      '',
+      'Create a `~/.netrc` with a record like this one:',
+      '',
+      '```',
+      NETRC_RECORD,
+      '```',
+      '',
+      'The same record on one line: ' + NETRC_RECORD,
+      '',
+    ].join('\n'), 'document the netrc setup');
+    const r = run(sb.repo);
+    check('a netrc example in a .md does not block the push', r.status === 0,
+      'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    check('the .md documentation run prints nothing to stdout', r.stdout === '', r.stdout.slice(0, 300));
+  } catch (e) {
+    check('markdown documentation test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // The exemption is keyed to the EXTENSION, so .markdown must behave the same
+  // way - otherwise the fix depends on which of two spellings a project uses.
+  const mb = makeRepo('netrc-doc-alt');
+  try {
+    commitFile(mb, 'README.md', 'seed\n', 'init');
+    commitFile(mb, 'docs/setup.markdown', 'An example record:\n\n' + NETRC_RECORD + '\n', 'document it again');
+    const r = run(mb.repo);
+    check('.markdown is exempt on the same terms as .md', r.status === 0,
+      'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+  } catch (e) {
+    check('.markdown documentation test set up a repo', false, e.message);
+  }
+  cleanup(mb);
+
+  // The narrowness half. A record in a config or a script is not documentation,
+  // and nothing about issue #166 relaxes it.
+  const cb = makeRepo('netrc-nondoc');
+  try {
+    commitFile(cb, 'README.md', 'seed\n', 'init');
+    commitFile(cb, 'deploy/netrc.txt', NETRC_RECORD + '\n', 'stage a netrc body');
+    const r = run(cb.repo);
+    check('the same record outside markdown still blocks',
+      r.status === 1 && r.stdout.indexOf('[netrc-record]') !== -1,
+      'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+  } catch (e) {
+    check('non-markdown record test set up a repo', false, e.message);
+  }
+  cleanup(cb);
+
+  // The exemption covers ONE pattern, not the file type. A markdown file
+  // carrying a real token is still blocked - otherwise #166 would have turned
+  // every .md into a blind spot.
+  const tb = makeRepo('netrc-doc-token');
+  try {
+    commitFile(tb, 'README.md', 'seed\n', 'init');
+    commitFile(tb, 'docs/ci.md', 'Set the CI variable to ' + GITLAB_PAT + ' before the first run.\n', 'document a token');
+    const r = run(tb.repo);
+    check('markdown is still scanned by every other pattern',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1,
+      'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+  } catch (e) {
+    check('markdown token test set up a repo', false, e.message);
+  }
+  cleanup(tb);
+}
+
 // --- 4. .netrc is caught by NAME, and the base exemption applies ------------
 // A .netrc is entirely credentials, so there is no line to match: the name is
 // the check. The exemption is the same one every never-push path gets - a file
@@ -320,6 +404,7 @@ function exitCodeTests() {
 patternTests();
 nearMissTests();
 falsePositiveTests();
+docExampleTests();
 netrcFilenameTests();
 maskingTest();
 exitCodeTests();
