@@ -219,3 +219,8 @@
 - **A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.**
 - **The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.**
 - **Release counts go stale a second time when the fix loop itself changes them; re-sweep after the loop, never before.**
+
+### Permission seeding and the netrc exemption (issues #165, #166)
+
+- **Copying a script and permitting it are two edits, and only the missing copy is loud.**
+- **A caveat in release notes is a deferred defect, not a resolution.**
