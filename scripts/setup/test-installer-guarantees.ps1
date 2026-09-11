@@ -1325,6 +1325,37 @@ try {
   Assert-Contains "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" (Join-Path $Log "profile-rerun.log") "re-run skips the existing profile"
   Assert-Contains "LOCAL EDIT MARKER" $profilePath "local profile edit survived the re-run"
 
+  # --- [23] every installed runtime script has a permission row ---
+  # PARITY: mirrored in test-installer-guarantees.sh ([23]) - change both together
+  # Issue #165: gen-media.js was copied by both installers for a whole release
+  # while no row for it existed in the seed, so the design step's seed call
+  # prompted on every run. Copying a script and permitting it are two edits, and
+  # only the first one is loud when it is missing. This walks the scripts the
+  # installer actually landed and asserts the installed settings.local.json names
+  # each one, so the next script added cannot repeat the omission silently.
+  #
+  # The row FORM is deliberately not pinned: session-init.js is granted in the
+  # exact form (no trailing " *") because it takes no arguments, while the rest
+  # carry a wildcard. What must exist is a Bash() entry naming the script.
+  Write-Host "[23] every installed .claude\scripts\*.js has a permission row"
+  $permFile = Join-Path $profileScratch ".claude\settings.local.json"
+  if (Test-Path -LiteralPath $permFile -PathType Leaf) {
+    Ok "fresh install wrote .claude\settings.local.json"
+    $permText = Get-Content -LiteralPath $permFile -Raw
+    $scriptsDir = Join-Path $profileScratch ".claude\scripts"
+    foreach ($js in (Get-ChildItem -LiteralPath $scriptsDir -Filter "*.js" -File -ErrorAction SilentlyContinue)) {
+      # package.json's lockfile sibling is data, not an entry point.
+      if ($js.Name -like "*-lock.js") { continue }
+      if ($permText.Contains("Bash(node .claude/scripts/" + $js.Name)) {
+        Ok "permission row present for $($js.Name)"
+      } else {
+        Failed "no permission row for .claude/scripts/$($js.Name) in the installed settings.local.json"
+      }
+    }
+  } else {
+    Failed "fresh install left no .claude\settings.local.json to check"
+  }
+
 } finally {
   if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {
     Remove-Item -LiteralPath $uncScratch -Recurse -Force -ErrorAction SilentlyContinue

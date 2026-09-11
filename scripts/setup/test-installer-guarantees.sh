@@ -1060,6 +1060,39 @@ fi
 assert_grep "Skipping DESIGN-PROFILE.md - already exists (yours to customize)" "$LOG/profile-rerun.log" "re-run skips the existing profile"
 assert_grep "LOCAL EDIT MARKER" "$PROFILE_SCRATCH/DESIGN-PROFILE.md" "local profile edit survived the re-run"
 
+# ─── [23] every installed runtime script has a permission row ───
+# PARITY: mirrored in test-installer-guarantees.ps1 ([23]) - change both together
+# Issue #165: gen-media.js was copied by both installers for a whole release
+# while no row for it existed in the seed, so the design step's seed call
+# prompted on every run. Copying a script and permitting it are two edits, and
+# only the first one is loud when it is missing. This walks the scripts the
+# installer actually landed and asserts the installed settings.local.json names
+# each one, so the next script added cannot repeat the omission silently.
+#
+# The row FORM is deliberately not pinned: session-init.js is granted in the
+# exact form (no trailing " *") because it takes no arguments, while the rest
+# carry a wildcard. What must exist is a Bash() entry naming the script.
+echo "[23] every installed .claude/scripts/*.js has a permission row"
+PERM_FILE="$PROFILE_SCRATCH/.claude/settings.local.json"
+if [ -f "$PERM_FILE" ]; then
+  ok "fresh install wrote .claude/settings.local.json"
+  for script_path in "$PROFILE_SCRATCH"/.claude/scripts/*.js; do
+    [ -f "$script_path" ] || continue
+    script_name=$(basename "$script_path")
+    # package.json's lockfile sibling is data, not an entry point.
+    case "$script_name" in
+      *-lock.js) continue ;;
+    esac
+    if grep -qF "Bash(node .claude/scripts/$script_name" "$PERM_FILE"; then
+      ok "permission row present for $script_name"
+    else
+      fail "no permission row for .claude/scripts/$script_name in the installed settings.local.json"
+    fi
+  done
+else
+  fail "fresh install left no .claude/settings.local.json to check"
+fi
+
 # ─── Summary ─────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

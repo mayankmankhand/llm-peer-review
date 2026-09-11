@@ -260,7 +260,7 @@ Released 2026-09-02 on top of v6.1.1. Nothing here changes how the loop runs; it
 - **A design critic in `/execute`.** A fresh-context `design-critic` agent sees only a screenshot and scores each round out of 10 until the design clears the bar or the round budget runs out (loop rule M15: up to 5 rounds for new work, 2 for an improvement, best-scoring round kept). Polish runs inside every fix pass.
 - **Media generation, optional.** `gen-media.js` prints the seed strings and can generate images (your OpenAI or Gemini key), video, and matted video (an optional `FAL_KEY`). With no key it hands you the prompt to run elsewhere and the workflow continues. See [API-KEYS.md](API-KEYS.md#media-generation-optional).
 - **`DESIGN-PROFILE.md`, yours.** Setup seeds it once and never overwrites it; it remembers the design-system answer, what may vary, your taste notes, directions tried with their seeds, and prompts worth retrying on a newer model.
-- **One permission to check.** If the first design run prompts on `node .claude/scripts/gen-media.js`, add `Bash(node .claude/scripts/gen-media.js *)` to `.claude/settings.local.json`.
+- **One permission to check.** The design step calls `node .claude/scripts/gen-media.js`, which needs `Bash(node .claude/scripts/gen-media.js *)` in `.claude/settings.local.json`. v6.2.0 copied the script but never seeded the row, so the first design run prompted until you added it by hand; setup now merges the row like every other toolkit permission (#165). If a design run still prompts, your install predates the fix - re-run setup.
 
 ### What v6.3.0 adds
 

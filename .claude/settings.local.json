@@ -54,6 +54,7 @@
       "Bash(node .claude/scripts/pre-push-check.js)",
       "Bash(node .claude/scripts/pre-push-check.js *)",
       "Bash(node .claude/scripts/correction-ledger.js *)",
+      "Bash(node .claude/scripts/gen-media.js *)",
       "Read",
       "Edit",
       "Write",
