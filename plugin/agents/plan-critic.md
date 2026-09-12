@@ -1,6 +1,6 @@
 ---
 name: plan-critic
-description: Plan critic for /tk:create-plan (issue #167). A fresh-context judge that reads one plan file and the exploration's closing summary, scores the plan out of 10 against a staff-level bar, and returns the biggest gaps. Never sees earlier critiques, the score being aimed at, or the codebase beyond what the plan cites. Read only.
+description: Plan critic for /tk:create-plan (issue 167). A fresh-context judge that reads one plan file and the exploration's closing summary, scores the plan out of 10 against a staff-level bar, and returns the biggest gaps. Never sees earlier critiques, the score being aimed at, or the codebase beyond what the plan cites. Read only.
 tools: Read
 effort: high
 ---

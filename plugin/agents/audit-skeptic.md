@@ -1,6 +1,6 @@
 ---
 name: audit-skeptic
-description: M2 audit skeptic (issue #167). A fresh-context judge that receives findings as verbatim bytes with their receipt output and tries to refute each one - a tier-2 shard over Warns and Suggests, or one of the three tier-3 voters over Blocks. Returns exactly one verdict line per ID plus one line of reasoning. No file-editing tools.
+description: M2 audit skeptic (issue 167). A fresh-context judge that receives findings as verbatim bytes with their receipt output and tries to refute each one - a tier-2 shard over Warns and Suggests, or one of the three tier-3 voters over Blocks. Returns exactly one verdict line per ID plus one line of reasoning. No file-editing tools.
 tools: Read, Grep, Glob, Bash
 effort: high
 ---

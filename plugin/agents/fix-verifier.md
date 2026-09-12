@@ -1,6 +1,6 @@
 ---
 name: fix-verifier
-description: M3 judgment verifier (issue #167). A fresh-context judge that receives a shard of judgment findings with their original text, file:line, and the diff of the fixes, and returns one line per ID - "RN: FIXED" or "RN: NOT FIXED" - plus a one-line receipt. Never the agent that made the fix. No file-editing tools.
+description: M3 judgment verifier (issue 167). A fresh-context judge that receives a shard of judgment findings with their original text, file:line, and the diff of the fixes, and returns one line per ID - "RN: FIXED" or "RN: NOT FIXED" - plus a one-line receipt. Never the agent that made the fix. No file-editing tools.
 tools: Read, Grep, Glob, Bash
 effort: high
 ---

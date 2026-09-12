@@ -1,6 +1,6 @@
 ---
 name: review-code-finder
-description: Code review finder for /review dispatches and the /review-code direct-run fan-out (issue #167). Preloads the code criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
+description: Code review finder for /review dispatches and the /review-code direct-run fan-out (issue 167). Preloads the code criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob
 effort: high
 skills:
