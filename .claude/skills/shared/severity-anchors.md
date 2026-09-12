@@ -15,7 +15,7 @@ Severity does **not** decide whether a human is interrupted. Paging is governed 
 
 Before assigning severity, decide whether the finding is worth reporting at all.
 
-**Rule:** if a finding is purely cosmetic with no functional, security, accessibility, or maintainability impact, drop it. The test is the inverted skip rule in `output-template.md`: a finding must survive being compressed to one sentence with an honest harm verb in it. A cosmetic item has no such verb, so it fails the test and is dropped. Never reach for an overstated verb to keep it alive.
+**Rule:** if a finding is purely cosmetic with no functional, security, accessibility, or maintainability impact, drop it. The test is the inverted skip rule in `finding-contract.md`: a finding must survive being compressed to one sentence with an honest harm verb in it. A cosmetic item has no such verb, so it fails the test and is dropped. Never reach for an overstated verb to keep it alive.
 
 Skip-worthy items:
 - Pure typos in non-user-facing comments or internal variable names
@@ -106,7 +106,7 @@ Judge this from what is actually in front of you - a deploy config, an auth laye
 
 ## Boundary Examples
 
-Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `output-template.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the template's own illustrative blocks use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
+Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `finding-contract.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the template's own illustrative blocks use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
 
 ### Block vs Warn
 

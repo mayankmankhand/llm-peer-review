@@ -145,7 +145,7 @@ node .claude/scripts/ask-gpt.js summary --context-file /tmp/ask-gpt-context-<ses
 
 ## Step 6: Present Results to User
 
-Present the summary to the user in this format. Each Recommended Action uses the same shape as a `/review` finding - sentence one, an optional sentence two, then a **Fix:** line, per the Findings section of `.claude/skills/shared/output-template.md` - with 🚫/⚠️/💡 emojis and sequential R-IDs. The reasoning is mined from the debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
+Present the summary to the user in this format. Each Recommended Action uses the same shape as a `/review` finding - sentence one, an optional sentence two, then a **Fix:** line, per `.claude/skills/shared/finding-contract.md` - with 🚫/⚠️/💡 emojis and sequential R-IDs. The reasoning is mined from the debate transcript. Agreed Points, Disagreed Points, and Key Insights stay as terse bullets.
 
 Severity on each Recommended Action follows the shared rubric below, the same one every review skill reads. It carries the same weight here that it does there: these actions enter the auto loop's M2 audit, which routes a Block to three independent skeptics and a Warn or Suggest to one. The rubric's Skip rule and its solo-tool-versus-production calibration matter especially in a debate, where an external reviewer's instinct is to grade every hardening gap as critical.
 

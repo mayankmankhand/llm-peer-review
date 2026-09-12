@@ -44,7 +44,7 @@ Severity on every finding below follows the shared rubric, the same one the revi
 
 ### Confirmed Findings (real problems)
 
-Write each confirmed finding in the two-sentence contract from `.claude/skills/shared/output-template.md`: one sentence carrying the defect and its harm, an optional second, then a **Fix:** line naming the cost.
+Write each confirmed finding in the two-sentence contract from `.claude/skills/shared/finding-contract.md`: one sentence carrying the defect and its harm, an optional second, then a **Fix:** line naming the cost.
 
 ### Dismissed Findings
 

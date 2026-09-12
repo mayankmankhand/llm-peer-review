@@ -29,32 +29,7 @@ Be thorough but concise.
 
 </rules>
 
-## How to Review
-
-<procedure>
-
-Read the UI-related files (components, templates, styles, markup). Then pick one of two modes:
-
-**Small change** (1-2 files, minor UI tweak): Review in a single pass. No sub-agents needed.
-
-**Bigger change** (3+ files or new user-facing feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-finder`, the finder agent per the roster in `.claude/skills/shared/model-routing.md`; fallback per that rule: `general-purpose` carrying what its roster row declares), then combine their results:
-
-| Sub-agent | What it checks |
-|-----------|----------------|
-| **Usability** | Nielsen's heuristics - feedback, user control, error prevention, consistent language |
-| **Accessibility** | WCAG AA - keyboard navigation, contrast, focus indicators, semantic HTML, screen-reader support |
-| **User Flows** | Happy path completeness, error states, destructive action confirmations, empty states |
-| **Research** | How leading products handle similar UX patterns, against established design systems like Material, Apple HIG, GOV.UK |
-
-**Run the Research searches yourself, before dispatching, and paste the results into that sub-agent's prompt.** This skill grants `WebSearch`; the `review-finder` agent the sub-agents run as does not (`Read, Grep, Glob, Bash`), so a Research sub-agent asked to search cannot do the one thing it was dispatched for - it would return heuristics dressed as research, with nothing to signal the difference. Do at most 2 searches, and dispatch the sub-agent with the findings already in hand so its job is applying them, not fetching them.
-
-Do not "fix" this by granting `WebSearch` to `review-finder`. That agent is shared by every specialist in every `/review` dispatch, so widening its tool list to serve one row of one skill widens the tool surface of the whole review system. Narrowing or widening an agent's tools is a behavior change, not an annotation.
-
-The Research sub-agent should keep findings lightweight and evidence-linked. Clearly separate research-backed findings from heuristic findings. If the searches came back weak, say so and move on - research should not block the review.
-
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
-
-</procedure>
+!`cat .claude/skills/shared/criteria-ux.md`
 
 ## Reading Budget
 
@@ -76,7 +51,9 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/output-template.md`
+!`cat .claude/skills/shared/report-format.md`
+
+!`cat .claude/skills/shared/finding-contract.md`
 
 ## HTML Companion (when gate fires)
 

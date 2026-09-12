@@ -1037,7 +1037,7 @@ if (Test-Path -LiteralPath $agentsDir -PathType Container) {
 # --- Skill files (upstream-owned - always copy; mirrors setup.sh) ---
 # Added in issue #113. Previously setup.ps1 did not copy .claude\skills\
 # at all, so Windows users never received review skills or shared reference
-# files (output-template.md, severity-anchors.md, html-look.md, etc.).
+# files (finding-contract.md, report-format.md, severity-anchors.md, html-look.md, etc.).
 # This block mirrors the setup.sh skills loop: copy shared\ first, then
 # iterate each skill directory.
 Write-Host "  Copying .claude\skills\ ..."

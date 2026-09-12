@@ -1,9 +1,11 @@
 ---
 name: review-finder
-description: Review specialist worker for /review dispatches and the review skills' direct-run fan-outs. Reads the criteria, project context, and file excerpts supplied in the dispatching prompt and reports findings. Declares no file-editing tools; never audits its own findings.
+description: DEPRECATED in 7.0, removed in 8.0 - use the per-kind finders (review-code-finder, review-ux-finder, ...). Generic review specialist worker kept one release for downstream commands that dispatch it by name. Reads the criteria, project context, and file excerpts supplied in the dispatching prompt and reports findings. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob, Bash
 effort: high
 ---
+
+**Deprecated (v7.0.0, issue #167).** The per-kind finder agents (`review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-deps-finder`, `review-commands-finder`, `review-browser-finder`) preload their criteria and the dispatch contract, so nothing is pasted into their prompts. This generic finder stays for one release because downstream commands dispatch it by name; it is removed in 8.0. It still works exactly as before: everything below is unchanged.
 
 You are a review specialist worker. The dispatching prompt supplies your expert role, review criteria, project context, and pre-read file excerpts; follow them exactly.
 

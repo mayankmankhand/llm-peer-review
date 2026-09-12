@@ -190,7 +190,7 @@ const cacheScripts = path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-re
 fs.mkdirSync(cacheScripts, { recursive: true });
 fs.copyFileSync(path.join(REPO, '.claude', 'scripts', 'ask-gpt.js'), path.join(cacheScripts, 'ask-gpt.js'));
 fs.mkdirSync(path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'skills', 'shared'), { recursive: true });
-fs.copyFileSync(path.join(REPO, '.claude', 'skills', 'shared', 'output-template.md'), path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'skills', 'shared', 'output-template.md'));
+for (const f of ['finding-contract.md', 'report-format.md']) fs.copyFileSync(path.join(REPO, '.claude', 'skills', 'shared', f), path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'skills', 'shared', f));
 const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-proj-'));
 fs.writeFileSync(path.join(proj, 'in.md'), 'x\n');
 const nodePath = path.join(REPO, '.claude', 'scripts', 'node_modules');

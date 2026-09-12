@@ -148,7 +148,7 @@ const ERR = {
 /**
  * Load the canonical finding template from the shared /review template.
  *
- * Slices the "Base Format" section out of .claude/skills/shared/output-template.md
+ * Slices the base of .claude/skills/shared/report-format.md and finding-contract.md
  * by splitting on "## Illustrative Examples", so the debate summary prompt gets
  * the format spec without the per-domain example flood. Single source of truth:
  * editing the shared template propagates to /review skills AND to this script.
@@ -157,25 +157,36 @@ const ERR = {
  * ship a malformed summary; loud failure forces the install or rename to be fixed.
  */
 function loadOutputTemplate() {
-  const templatePath = path.join(__dirname, '..', 'skills', 'shared', 'output-template.md');
-  if (!fs.existsSync(templatePath)) {
-    throw new Error(
-      `Shared output template not found at ${templatePath}. ` +
-      `The /ask-gpt summary inlines this file for the canonical finding format. ` +
-      `Restore it from git with \`git checkout HEAD -- .claude/skills/shared/output-template.md\` or re-run the toolkit installer from your llm-peer-review clone.`
-    );
-  }
-  const content = fs.readFileSync(templatePath, 'utf-8');
-  const marker = '## Illustrative Examples';
-  const splitIndex = content.indexOf(marker);
-  if (splitIndex === -1) {
-    throw new Error(
-      `Slice marker "${marker}" not found in ${templatePath}. ` +
-      `loadOutputTemplate() uses this heading to isolate the Base Format section. ` +
-      `If the heading was renamed in the shared template, update the marker constant in BOTH .claude/scripts/ask-gpt.js AND .claude/scripts/ask-gemini.js to match (mirror parity required).`
-    );
-  }
-  return content.slice(0, splitIndex).trim();
+  // v7.0.0 (issue #167): the template is two fragments. finding-contract.md is
+  // what a finding contains (also preloaded into every finder agent);
+  // report-format.md is the report a runner writes. The debate summary needs
+  // the base of both: the contract without its illustrative examples, and the
+  // format without its role table and audit-aware rows.
+  const shared = path.join(__dirname, '..', 'skills', 'shared');
+  const parts = [
+    ['report-format.md', '## Staff Check Variants'],
+    ['finding-contract.md', '## Illustrative Examples'],
+  ];
+  return parts.map(([name, marker]) => {
+    const templatePath = path.join(shared, name);
+    if (!fs.existsSync(templatePath)) {
+      throw new Error(
+        `Shared output fragment not found at ${templatePath}. ` +
+        `The summary inlines finding-contract.md and report-format.md for the canonical finding format. ` +
+        `Restore them from git with \`git checkout HEAD -- .claude/skills/shared/${name}\` or reinstall the toolkit.`
+      );
+    }
+    const content = fs.readFileSync(templatePath, 'utf-8');
+    const splitIndex = content.indexOf(marker);
+    if (splitIndex === -1) {
+      throw new Error(
+        `Slice marker "${marker}" not found in ${templatePath}. ` +
+        `loadOutputTemplate() uses this heading to isolate the base of the fragment. ` +
+        `If the heading was renamed in the shared fragment, update the marker in BOTH .claude/scripts/ask-gpt.js AND .claude/scripts/ask-gemini.js (mirror parity required).`
+      );
+    }
+    return content.slice(0, splitIndex).trim();
+  }).join('\n\n');
 }
 
 // Cache for the lazily-built summary prompt. Populated on first access to

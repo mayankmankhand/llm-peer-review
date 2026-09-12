@@ -165,7 +165,9 @@ The orchestrator report uses the two-sentence finding contract inlined below fro
 The orchestrator fills this structure from the surviving JSON findings (Phases 3-4): each finding's `what` becomes the dash summary line, `context` becomes the unlabeled sub-bullet under it when present, `fix` becomes the **Fix:** row, and any `fields[]` attachments become labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
 
 <shared_template>
-!`cat .claude/skills/shared/output-template.md`
+!`cat .claude/skills/shared/report-format.md`
+
+!`cat .claude/skills/shared/finding-contract.md`
 </shared_template>
 
 ### Orchestrator Supplement

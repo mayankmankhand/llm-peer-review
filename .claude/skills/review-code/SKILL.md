@@ -26,26 +26,7 @@ Be thorough but concise.
 
 </rules>
 
-## How to Review
-
-<procedure>
-
-Read the changed files. Then pick one of two modes:
-
-**Small change** (1-2 files): Review in a single pass. No sub-agents needed.
-
-**Bigger change** (3+ files or significant logic): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-finder`, the finder agent per the roster in `.claude/skills/shared/model-routing.md`; fallback per that rule: `general-purpose` carrying what its roster row declares), then combine their results:
-
-| Sub-agent | What it checks |
-|-----------|----------------|
-| **Security** | Auth checks, input validation, secrets exposure, injection risks |
-| **Code Quality** | Naming, duplication, complexity, pattern consistency |
-| **Logic** | Edge cases, off-by-ones, missing error handling, wrong assumptions |
-| **Performance & Maintainability** | O(n) issues, memory usage, tech debt, maintainability concerns |
-
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
-
-</procedure>
+!`cat .claude/skills/shared/criteria-code.md`
 
 ## Reading Budget
 
@@ -67,7 +48,9 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/output-template.md`
+!`cat .claude/skills/shared/report-format.md`
+
+!`cat .claude/skills/shared/finding-contract.md`
 
 ## HTML Companion (when gate fires)
 

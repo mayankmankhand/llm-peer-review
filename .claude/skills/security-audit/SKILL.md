@@ -93,7 +93,9 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/output-template.md`
+!`cat .claude/skills/shared/report-format.md`
+
+!`cat .claude/skills/shared/finding-contract.md`
 
 Audit findings use that shape unchanged: the exploit scenario is sentence two, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described. The Overall Verdict and the readability backstop (lead with the top findings when there are many) matter most here, because an audit naturally produces a longer list than a single-change review.
 

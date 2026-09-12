@@ -37,14 +37,14 @@ Then pick one of two modes:
 
 **Small change** (1-2 files, minor update): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-finder`, the finder agent per the roster in `.claude/skills/shared/model-routing.md`; fallback per that rule: `general-purpose` carrying what its roster row declares), then combine their results:
+**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool, one per-kind finder each (the roster in `.claude/skills/shared/model-routing.md`; each preloads its own criteria and the dispatch contract in `.claude/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what the row declares plus that kind's criteria fragment pasted in), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
-| **Code & Architecture** | Security red flags, architectural soundness, obvious logic issues, performance risks |
-| **Design & Completeness** | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
-| **UX & Accessibility** | Usability quick-check, WCAG AA basics, error states, key user flows |
-| **Operations** | Secrets in code, logging/monitoring, deployment readiness, rollback plan |
+| **Code & Architecture** (`subagent_type=review-code-finder`) | Security red flags, architectural soundness, obvious logic issues, performance risks |
+| **Design & Completeness** (`subagent_type=review-plan-finder`) | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
+| **UX & Accessibility** (`subagent_type=review-ux-finder`) | Usability quick-check, WCAG AA basics, error states, key user flows |
+| **Operations** (`subagent_type=review-security-finder`) | Secrets in code, logging/monitoring, deployment readiness, rollback plan |
 
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 
@@ -72,7 +72,9 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/output-template.md`
+!`cat .claude/skills/shared/report-format.md`
+
+!`cat .claude/skills/shared/finding-contract.md`
 
 ## HTML Companion (when gate fires)
 
