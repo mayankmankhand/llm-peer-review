@@ -147,11 +147,37 @@ fs.appendFileSync(path.join(repo, 'LESSONS.md'), 'uncommitted\n');
 r = run(repo, pluginRoot);
 check('a dirty tree pages without --force', r.status === 3 && /uncommitted changes/.test(r.out), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
-repo = makeCopyInstall(false);
-write(repo, '.claude/settings.json', '{"enabledPlugins":{"tk@llm-peer-review":true}}\n'); // untracked, exactly as `claude plugin install -s project` leaves it
+// The plugin install writes .claude/settings.json moments before /tk:setup runs,
+// so that file alone must not count as a dirty tree. The manifest fixture is used
+// with its planted local edit undone: a manifest-less install pages on provenance
+// no matter what, which is what made the first version of these checks unpassable.
+const cleanManifestInstall = () => {
+  const r0 = makeCopyInstall(true);
+  write(r0, '.claude/scripts/render-html.js', 'toolkit content of .claude/scripts/render-html.js\n');
+  commitAll(r0, 'no local edit');
+  return r0;
+};
+repo = cleanManifestInstall();
+const s0 = JSON.parse(read(repo, '.claude/settings.json'));
+s0.enabledPlugins = { 'tk@llm-peer-review': true }; // what `claude plugin install -s project` adds
+write(repo, '.claude/settings.json', JSON.stringify(s0, null, 2) + '\n');
 r = run(repo, pluginRoot);
-check('an untracked .claude/settings.json alone is not a dirty tree (the plugin install writes it)', r.status === 0 && !/uncommitted changes/.test(r.out), r.out);
-check('that settings.json is key-merged, not replaced', JSON.parse(read(repo, '.claude/settings.json')).enabledPlugins['tk@llm-peer-review'] === true && !!JSON.parse(read(repo, '.claude/settings.json')).extraKnownMarketplaces);
+check('a tracked settings.json the plugin install modified is not a dirty tree on its own', r.status === 0 && !/uncommitted changes/.test(r.out), r.out);
+const merged = JSON.parse(read(repo, '.claude/settings.json'));
+check('that settings.json is key-merged: the install key and the user key both survive', merged.enabledPlugins['tk@llm-peer-review'] === true && merged.env && merged.env.X === '1' && !!merged.extraKnownMarketplaces['llm-peer-review'], JSON.stringify(merged));
+fs.rmSync(repo, { recursive: true, force: true });
+repo = cleanManifestInstall();
+fs.rmSync(path.join(repo, '.claude', 'settings.json'));
+commitAll(repo, 'no shared settings yet');
+write(repo, '.claude/settings.json', JSON.stringify({ enabledPlugins: { 'tk@llm-peer-review': true } }, null, 2) + '\n'); // untracked, as in both live migrations
+r = run(repo, pluginRoot);
+check('an untracked settings.json written by the plugin install is not a dirty tree either', r.status === 0 && !/uncommitted changes/.test(r.out), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+repo = cleanManifestInstall();
+write(repo, '.claude/settings.json', JSON.stringify({ enabledPlugins: { 'tk@llm-peer-review': true } }, null, 2) + '\n');
+fs.appendFileSync(path.join(repo, 'LESSONS.md'), 'uncommitted\n');
+r = run(repo, pluginRoot);
+check('the exemption covers settings.json only: another uncommitted file still pages', r.status === 3 && /uncommitted changes/.test(r.out), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
 console.log('\n3. copy-install without a manifest');

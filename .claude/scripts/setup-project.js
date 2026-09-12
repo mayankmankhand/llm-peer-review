@@ -87,8 +87,24 @@ function sha256NoCR(abs) {
 // untracked or modified settings.json is the expected state, not in-progress
 // work the undo line would miss (found on the first dogfood migration, #167).
 function dirtyTree(project) {
-  const out = git(['status', '--porcelain'], project) || '';
-  return out.split('\n').some(l => l.trim() !== '' && l.slice(3).trim() !== '.claude/settings.json');
+  // Read the status NUL-separated and untrimmed. The shared git() helper trims
+  // its output, which strips the leading space of a first line like
+  // " M .claude/settings.json" and shifts every column, so the exemption below
+  // never matched a TRACKED settings file (found by the suite after the v7.0.0
+  // tag; both live migrations had an untracked one). -z also leaves paths with
+  // spaces unquoted. Entry shape: "XY path"; a rename or copy (X is R or C)
+  // is followed by one more NUL-terminated token, the original path.
+  let out;
+  try { out = execFileSync('git', ['status', '--porcelain', '-z'], { cwd: project, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+  catch (e) { return false; }
+  const tokens = out.split('\0');
+  for (let i = 0; i < tokens.length; i++) {
+    const entry = tokens[i];
+    if (entry.length < 4) continue;
+    if (entry[0] === 'R' || entry[0] === 'C') i++; // skip the original path of a rename or copy
+    if (entry.slice(3) !== '.claude/settings.json') return true;
+  }
+  return false;
 }
 function readJson(abs, fallback) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; }

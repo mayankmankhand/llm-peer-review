@@ -230,3 +230,4 @@
 - **An agent file written mid-session is not dispatchable until the session reloads it.**
 - **Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.**
 - **Review a plan this size with three fresh lenses before executing it.**
+- **A suite is green when its exit code is 0, not when its tail looks quiet.**
