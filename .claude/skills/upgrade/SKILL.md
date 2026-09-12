@@ -77,19 +77,19 @@ Write the report per the format below, with `upgrade` as the `<who>` segment of 
 
 Page once with the batch (rule 2): every file to be edited, its finding ids, and the fix shape each convention names. On approval, apply each fix in the project's file, subject to the intent-reversal guard (M7). Re-verify per M3: a regex or agent-tools finding is mechanical, so rerun the audit and the finding is FIXED when its file no longer appears for that id (the receipt is the same grep, now empty); a `manual` finding goes to `subagent_type=fix-verifier` shards with the original finding, the file:line, and the diff. M5 bounds the rounds at two; M6 sweeps the other project files for the same claim, which the rerun does for free. Checkpoint-commit each green unit (M4).
 
-### 7. One sample cycle
+### 7. Stamp
 
-Announce it ("Upgrade fixes are in; running one `/review` over them so the loop is proven on <to> before this cycle closes.") and invoke `/review` through the Skill tool over the files this run changed. It runs the typed finders, the audit, and the auto-fix loop on the new version, and chains into `/document` itself (M14), which records the cycle with this run's issue. Do not invoke `/document` separately.
-
-### 8. Stamp
-
-Before the sample cycle hands off, record that this project is audited up to the installed version:
+On a clean fix loop, record that this project is audited up to the installed version, before the sample cycle hands off:
 
 ```bash
 node .claude/scripts/upgrade-audit.js --stamp
 ```
 
-It sets `version` and `auditedVersion` in `.claude/.toolkit-state.json`; the next `/upgrade` starts its range there. Stamp only on a clean finish: a run that paged and stopped, or that has a finding left NOT FIXED after two rounds, leaves the state file alone so the next run sees the same range.
+It sets `version` and `auditedVersion` in `.claude/.toolkit-state.json`; the next `/upgrade` starts its range there. Clean means: no finding NOT FIXED after two rounds, and no page still waiting on the user. A finding the user chose to leave open on purpose (an upstream-only script edit under C-6, carried in the digest with its diff) does not block the stamp: it is a decision, not a failure, and it would otherwise block every migration that carried a local edit. A run that paged and stopped leaves the state file alone, so the next run sees the same range.
+
+### 8. One sample cycle
+
+Announce it ("Upgrade fixes are in; running one `/review` over them so the loop is proven on <to> before this cycle closes.") and invoke `/review` through the Skill tool over the files this run changed. It runs the typed finders, the audit, and the auto-fix loop on the new version, and chains into `/document` itself (M14), which records the cycle with this run's issue. Do not invoke `/document` separately. A change under fifty lines with no code file takes the orchestrator's inline path, so the sample cycle proves the audit and the loop rather than a finder dispatch; that is fine, the dispatch shape is proven by the next code change.
 
 </procedure>
 
