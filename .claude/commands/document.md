@@ -125,7 +125,9 @@ primary way the feature introduces itself. Say it once, then never again in this
 
 ### Read the candidates cold
 
-Dispatch the `correction-extractor` agent (`.claude/agents/correction-extractor.md`) with
+Dispatch the `correction-extractor` agent (`subagent_type=correction-extractor`; an unknown
+type right after a plugin install means `/reload-plugins` once, then the fallback in
+`.claude/skills/shared/model-routing.md`) with
 the candidate list. It has no memory of this session, which is the point: a participant
 has a stake in reading a correction as a clarification, the same reason the M2 audit never
 lets anything judge its own output.
@@ -205,7 +207,7 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 
 ## 9. Cycle Summary (HTML, default-on)
 
-Generate a one-page HTML summary of what shipped this cycle. Runs on every `/document`, per `.claude/rules/html-outputs.md` (default-on).
+Generate a one-page HTML summary of what shipped this cycle. Runs on every `/document`, per `.claude/skills/shared/html-outputs.md` (default-on).
 
 ### Determine the cycle window
 
@@ -234,7 +236,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 
 Write the JSON to a temp file, then run the helper from the project root. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
-Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```
 node .claude/scripts/render-html.js --shell document --name cycle --stable --data /tmp/document-data.json
@@ -248,7 +250,7 @@ Because this is a `--stable` type, look up its recorded page before publishing:
 node .claude/scripts/render-html.js --index-url --name cycle
 ```
 
-Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
+Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
 
 ### Advance the marker (LAST step)
 
@@ -257,3 +259,9 @@ After the HTML is written (or deliberately skipped), write the current `HEAD` SH
 **This must be the final action of `/document`.** The marker is a high-water mark meaning "every commit up to here is already summarized." Writing it last guarantees that an interrupted run re-summarizes the same window (a harmless duplicate) rather than skipping work permanently. Never write the marker before the summary exists.
 
 **The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree, and this step is unchanged by the standing-page move. Never read the window from the page, and never read the log from the marker.
+
+## HTML Output Rules
+
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
+
+!`cat .claude/skills/shared/html-outputs.md`

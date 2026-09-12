@@ -85,7 +85,8 @@ fi
 # (simple indexed array).
 RULES_FILES=(
   .claude/rules/toolkit.md
-  .claude/rules/html-outputs.md
+  .claude/skills/shared/toolkit-reference.md
+  .claude/skills/shared/html-outputs.md
 )
 for rules_file in "${RULES_FILES[@]}"; do
   RULES_FILE="$rules_file" NEW_VERSION="$NEW" node -e '

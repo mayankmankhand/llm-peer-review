@@ -168,6 +168,21 @@ Again, it's still not time to build yet. Just write the clear plan document. No 
 
 </rules>
 
+## Plan Critic (before the stop)
+
+A plan is judged before it is presented, by a context that did not write it (issue #167). The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
+
+<procedure>
+
+1. Dispatch `subagent_type=plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number, never earlier critiques, never the score you are aiming for.
+2. Parse the return: `Score: N/10` on the first line, then up to six gap lines. A return without a parseable score is redispatched once (routing guardrail 2); still malformed, the round counts with no score and the loop stops with a note in the closing message.
+3. A score of 9 or higher ends the loop. Below that, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
+4. Round 2's result stands, whatever the score.
+
+</procedure>
+
+The closing message states the rounds and scores in one line ("Plan critic: 6/10, then 9/10 after two gaps were fixed."), so the user sees what the judge said before they approve. Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
+
 ## Render HTML View (default-on)
 
 After writing the markdown plan, also render an HTML view of the same plan to `plans/` using the matching name (`PLAN-issue-N.html` or `PLAN-<short-name>.html`).
@@ -176,7 +191,7 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 - HTML is generated at plan creation and **re-rendered by `/execute`** as steps complete (issue #161). Markdown remains canonical for `/execute` and `/review-plan`; the page mirrors it.
 - `--stable` means the page keeps one URL for the life of the plan, so a re-render updates the published page rather than creating a second one.
-- This is default-on per `.claude/rules/html-outputs.md`. No judgement call needed.
+- This is default-on per `.claude/skills/shared/html-outputs.md`. No judgement call needed.
 - Do NOT hand-write the HTML. Emit a compact JSON payload and run the shared helper, which injects it plus the shared `tokens.css` into the prebuilt plan shell.
 
 </rules>
@@ -194,7 +209,7 @@ Write the payload to a temp file (e.g. `/tmp/plan-data.json`).
 
 From the project root:
 
-Check the publish gate first (see **"Render for the viewport"** in `.claude/rules/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```bash
 node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
@@ -203,7 +218,7 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
 
 `<basename>` is the plan identifier *without* the `PLAN-` prefix (e.g. `issue-129` for the markdown plan `PLAN-issue-129.md`, or `auth-flow` for `PLAN-auth-flow.md`) - the template already supplies `PLAN-`, so do not repeat it or the filename doubles to `PLAN-PLAN-`. `--stable` writes exactly `plans/PLAN-<basename>.html` - no timestamp - and a re-plan for the same issue replaces the old view. Malformed JSON dies before any file is written, so there is never a broken page. The helper prints the output path to stdout.
 
-Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/rules/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
+Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
 
 ---
 
@@ -214,3 +229,9 @@ Present the plan and stop. Plan approval is the cycle's one human gate, so **`/e
 This is the loop's one deliberate non-chaining handoff. It is written down precisely because chaining is the norm everywhere else: an unstated exception drifts into a chain.
 
 Close by telling the user the plan is ready, and that saying "go" runs `/execute`.
+
+## HTML Output Rules
+
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
+
+!`cat .claude/skills/shared/html-outputs.md`

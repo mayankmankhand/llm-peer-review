@@ -34,7 +34,7 @@ The calling command (e.g. `/explore` vision mode) provides the option set, the c
 ### Output
 Always end the flow by writing the HTML to `/tmp/playground-{timestamp}.html` (use `date +%s` for the timestamp), then emit a clickable `file:///tmp/playground-{timestamp}.html` link in chat. Do not try to open the file via `xdg-open` or similar - the clickable link is the agreed-upon mechanism.
 
-Per `.claude/rules/html-outputs.md`, announce the HTML generation upfront:
+Per the HTML output rules inlined at the end of this skill, announce the HTML generation upfront:
 > "Generating an HTML playground because [reason]. Say 'skip HTML' if you want markdown only."
 
 ## Interaction Patterns
@@ -48,7 +48,7 @@ Two to four option cards laid out horizontally. Each card has a title, short des
 
 **More than 4 options?** Either ask the user to narrow the set first, or switch to Pattern 2 (toggle/variant switcher) and announce the switch so the user knows why their request changed shape. Six cards side-by-side violate principle #2 (fits on one screen) - the comparison becomes unreadable rather than helpful.
 
-**Rendered-prototypes variant** (dispatched by `/explore`'s design step, see `.claude/skills/shared/design-rules.md`): each of the three cards holds a working, self-contained prototype of one direction - real markup and inline CSS, scaled with a CSS transform so all three fit on one screen, with click-to-expand to full size as the fixed primitive. The dispatcher builds the three prototypes (explore.md's "Build the prototypes" step) and supplies them with their names; the seed strings behind them stay hidden. This variant is default-on (`.claude/rules/html-outputs.md`), so when the dispatch context says so, announce it without the skip offer. The payload carries the pick and the user's notes (sketch below). Still Pattern 1, so the static-default rule holds.
+**Rendered-prototypes variant** (dispatched by `/explore`'s design step, see `.claude/skills/shared/design-rules.md`): each of the three cards holds a working, self-contained prototype of one direction - real markup and inline CSS, scaled with a CSS transform so all three fit on one screen, with click-to-expand to full size as the fixed primitive. The dispatcher builds the three prototypes (explore.md's "Build the prototypes" step) and supplies them with their names; the seed strings behind them stay hidden. This variant is default-on (`.claude/skills/shared/html-outputs.md`), so when the dispatch context says so, announce it without the skip offer. The payload carries the pick and the user's notes (sketch below). Still Pattern 1, so the static-default rule holds.
 
 ### 2. Toggle / variant switcher
 A single content area with toggle buttons or tabs above it. Clicking a toggle swaps the displayed content.
@@ -182,3 +182,9 @@ rm /tmp/playground-*.html
 ```
 
 `/tmp/` is reboot-wiped on Linux, macOS, and WSL by default, so files self-clean on next restart.
+
+## HTML Output Rules
+
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
+
+!`cat .claude/skills/shared/html-outputs.md`

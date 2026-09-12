@@ -90,7 +90,7 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 > 2. Detail: <next gap, one line>
 > (up to 6 gaps, each prefixed Structure: or Detail:)
 
-**The judge.** The critic is the `design-critic` agent (`.claude/agents/design-critic.md`), Read only, no model pin: a scoring critic whose verdict is final is a judge, and judges inherit the session model (`model-routing.md`). Fallback per that file: `general-purpose` with no model parameter when the agent type is unavailable.
+**The judge.** The critic is the `design-critic` agent (`subagent_type=design-critic`), Read only, no model pin: a scoring critic whose verdict is final is a judge, and judges inherit the session model (`model-routing.md`). Fallback per that file: `/reload-plugins` once when the plugin was installed this session, then `general-purpose` with no model parameter and this fixed prompt pasted, when the agent type is unavailable.
 
 **The return.** `Score: N/10` on the first line, then a numbered gaps list. A return without a parseable score is redispatched once (routing guardrail 2); still malformed, the round counts with no score and the loop stops with a digest note.
 

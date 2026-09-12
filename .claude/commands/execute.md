@@ -55,7 +55,7 @@ After all parallel steps finish, always run a sequential checkpoint:
 
 ## Design Steps
 
-When the plan's UI/UX Design section carries a load level of new or improve, the step that builds that surface is a design step. The loop it runs is the "loop procedure" in `.claude/skills/shared/design-rules.md`, bounded by M15 in `.claude/skills/shared/hitl-loop.md`; read the fragment when the step starts and cite it rather than restating it. What is specific to `/execute`:
+When the plan's UI/UX Design section carries a load level of new or improve, the step that builds that surface is a design step. The loop it runs is the "loop procedure" in the `design-rules` skill, bounded by M15 in `.claude/skills/shared/hitl-loop.md`; load the skill through the Skill tool (`Skill(design-rules)`) when the step starts and cite it rather than restating it. What is specific to `/execute`:
 
 <conditions>
 - **Pre-flight:** a design step is downgraded to `[sequential]` the same way overlapping files are, so it runs in the main loop. A spawned agent cannot dispatch the critic, cannot page, and must not drive the browser.
@@ -64,6 +64,7 @@ When the plan's UI/UX Design section carries a load level of new or improve, the
 - **Media:** run `node .claude/scripts/gen-media.js` through the Bash tool with the tool's maximum timeout; the exit codes and what each one means are in the fragment's Techniques 4 and 5.
 - **Records:** checkpoints per M15; the score of every round and the kept round land in the plan's Outcomes.
 - **Bounds:** the 3-attempt retry bound in When to Stop covers build failures; the critic rounds are M15's and never borrow from it.
+- **Registration:** the critic is the `design-critic` agent, dispatched by name. When the toolkit plugin was installed or updated this session and the type is not found, run `/reload-plugins` once before falling back per `.claude/skills/shared/model-routing.md`.
 </conditions>
 
 ## When to Stop
@@ -102,7 +103,7 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
 
 `--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
 
-The re-render rewrites the local file only, so republish it too: look the page up with `node .claude/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/create-plan` does under "Viewing the Artifact" in `.claude/rules/html-outputs.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent (v6.3.0 review, R22). A session that cannot publish stops at the local re-render.
+The re-render rewrites the local file only, so republish it too: look the page up with `node .claude/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/create-plan` does under "Viewing the Artifact" in `.claude/skills/shared/html-outputs.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent (v6.3.0 review, R22). A session that cannot publish stops at the local re-render.
 
 This exists because the page used to be frozen at creation: a plan page sat beside a markdown file recording 62 completed checkboxes while showing every step as not started. A stable URL whose content is permanently false is worse than no page.
 </procedure>
@@ -121,3 +122,9 @@ On a clean finish - M14 is authoritative for the conditions; it reads "every ste
 In both cases, stop and page as described above. The chain resumes only after the human decides what to do.
 
 Saying "no chaining" on this run stops here (M14). That is a different opt-out from "report only" (M10), which governs whether findings get auto-fixed rather than whether the next stage fires.
+
+## HTML Output Rules
+
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
+
+!`cat .claude/skills/shared/html-outputs.md`

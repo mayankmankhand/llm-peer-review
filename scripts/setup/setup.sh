@@ -204,7 +204,7 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" ]; then
 fi
 
 # Check files that will be copied to the target project
-for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/rules/html-outputs.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
+for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/skills/shared/html-outputs.md .claude/skills/shared/toolkit-reference.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/$f"
     PREFLIGHT_OK=false
@@ -546,6 +546,9 @@ if [ -d "$TOOLKIT_ROOT/.claude/skills/shared" ]; then
   shopt -u failglob; shopt -s nullglob
   for pf_src in "$TOOLKIT_ROOT/.claude/skills/shared/"*.md; do
     [ -f "$pf_src" ] || continue
+    # The two version-stamped fragments are recorded below in stamped mode,
+    # so a pure version bump never reads as a local edit (v7.0.0, #167).
+    case "$(basename "$pf_src")" in html-outputs.md|toolkit-reference.md) continue ;; esac
     preflight_record_diff "$pf_src" ".claude/skills/shared/$(basename "$pf_src")"
   done
   shopt -u nullglob; shopt -s failglob
@@ -592,7 +595,8 @@ preflight_record_diff "$TOOLKIT_ROOT/.env.local.example" ".env.local.example"
 preflight_record_diff "$TOOLKIT_ROOT/.gitattributes" ".gitattributes"
 preflight_record_diff "$TOOLKIT_ROOT/artifacts/README.md" "artifacts/README.md"
 preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/toolkit.md" ".claude/rules/toolkit.md" stamped
-preflight_record_diff "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" ".claude/rules/html-outputs.md" stamped
+preflight_record_diff "$TOOLKIT_ROOT/.claude/skills/shared/html-outputs.md" ".claude/skills/shared/html-outputs.md" stamped
+preflight_record_diff "$TOOLKIT_ROOT/.claude/skills/shared/toolkit-reference.md" ".claude/skills/shared/toolkit-reference.md" stamped
 # VERSION is compared only on a fresh install: on upgrade it always
 # differs (that is the version gap, reported above), but a fresh target
 # carrying its own unrelated VERSION file is about to lose it. On
@@ -1125,13 +1129,18 @@ safe_copy "$TOOLKIT_ROOT/.claude/rules/toolkit.md" "$TARGET/.claude/rules/toolki
 sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/toolkit.md"
 rm -f "$TARGET/.claude/rules/toolkit.md.bak"
 
-# HTML output rules (issue #113) - same stamp pattern as toolkit.md.
-# Source ships pre-stamped via bump-version.sh; this sed is a no-op on
-# stamped files and harmless on re-runs.
-echo "  Copying .claude/rules/html-outputs.md ..."
-safe_copy "$TOOLKIT_ROOT/.claude/rules/html-outputs.md" "$TARGET/.claude/rules/html-outputs.md"
-sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/rules/html-outputs.md"
-rm -f "$TARGET/.claude/rules/html-outputs.md.bak"
+# The two version-stamped shared fragments (v7.0.0, issue #167): the HTML
+# output rules, a rules file until 7.0.0, and the long manual that left
+# toolkit.md. Both were already copied by the skills/shared loop above;
+# this is the same stamp pattern as toolkit.md. Source ships pre-stamped
+# via bump-version.sh, so the sed is a no-op on stamped files and harmless
+# on re-runs. A pre-7.0.0 target still carrying .claude/rules/html-outputs.md
+# keeps it; it is listed as managed and the plugin migration removes it.
+for stamped_frag in html-outputs.md toolkit-reference.md; do
+  echo "  Stamping .claude/skills/shared/$stamped_frag ..."
+  sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/skills/shared/$stamped_frag"
+  rm -f "$TARGET/.claude/skills/shared/$stamped_frag.bak"
+done
 
 # ─── artifacts/ scaffold (issue #113) ────────────────────────
 # The HTML-output feature writes to artifacts/html/ in the target project.

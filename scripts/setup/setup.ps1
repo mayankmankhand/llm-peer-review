@@ -147,7 +147,7 @@ foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "ses
   }
 }
 
-foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\rules\html-outputs.md", "artifacts\README.md", ".gitignore", ".gitattributes", ".claude\skills\shared\design-profile-template.md")) {
+foreach ($f in @("VERSION", "CLAUDE.md", "LESSONS.md", "LESSONS-detail.md", ".env.local.example", ".claude\settings.local.json", ".claude\rules\toolkit.md", ".claude\skills\shared\html-outputs.md", ".claude\skills\shared\toolkit-reference.md", "artifacts\README.md", ".gitignore", ".gitattributes", ".claude\skills\shared\design-profile-template.md")) {
   $p = Join-Path $ToolkitRoot $f
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -491,6 +491,9 @@ foreach ($src in Get-ChildItem -Path $CommandsDir -Filter *.md -File) {
 $pfSharedDir = Join-Path $ToolkitRoot ".claude\skills\shared"
 if (Test-Path -LiteralPath $pfSharedDir -PathType Container) {
   foreach ($src in Get-ChildItem -Path $pfSharedDir -Filter *.md -File) {
+    # The two version-stamped fragments are recorded below with
+    # -IgnoreVersionStamp, so a pure version bump never reads as a local edit.
+    if ($src.Name -in @("html-outputs.md", "toolkit-reference.md")) { continue }
     Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\skills\shared" $src.Name)
   }
 }
@@ -526,7 +529,8 @@ Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".env.local.example") -Rel ".e
 Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".gitattributes") -Rel ".gitattributes"
 Add-PreflightDiff -Source (Join-Path $ToolkitRoot "artifacts\README.md") -Rel "artifacts\README.md"
 Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\toolkit.md") -Rel ".claude\rules\toolkit.md" -IgnoreVersionStamp
-Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\rules\html-outputs.md") -Rel ".claude\rules\html-outputs.md" -IgnoreVersionStamp
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\skills\shared\html-outputs.md") -Rel ".claude\skills\shared\html-outputs.md" -IgnoreVersionStamp
+Add-PreflightDiff -Source (Join-Path $ToolkitRoot ".claude\skills\shared\toolkit-reference.md") -Rel ".claude\skills\shared\toolkit-reference.md" -IgnoreVersionStamp
 # VERSION is compared only on a fresh install: on upgrade it always
 # differs (that is the version gap, reported above), but a fresh target
 # carrying its own unrelated VERSION file is about to lose it. On
@@ -1288,22 +1292,20 @@ $content = Get-Content -LiteralPath $toolkitRuleDest -Raw
 $content = $content -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
 Set-Content -LiteralPath $toolkitRuleDest -Value $content -NoNewline
 
-# --- HTML output rules (issue #113, mirror of toolkit.md handling) ---
-# Same stamp pattern as toolkit.md. Source ships pre-stamped via
+# --- The two version-stamped shared fragments (v7.0.0, issue #167) ---
+# The HTML output rules (a rules file until 7.0.0) and the long manual that
+# left toolkit.md. Both were already copied by the skills\shared loop above;
+# same stamp pattern as toolkit.md. Source ships pre-stamped via
 # bump-version.sh; this -replace is a no-op on stamped files and harmless
-# on re-runs.
-Write-Host "  Copying .claude\rules\html-outputs.md ..."
-$htmlRuleSrc = Join-Path $ToolkitRoot ".claude\rules\html-outputs.md"
-$htmlRuleDest = Join-Path $Target ".claude\rules\html-outputs.md"
-try {
-  Invoke-SafeCopy -Source $htmlRuleSrc -Destination $htmlRuleDest
-} catch {
-  Write-Host "  Error: Failed to copy html-outputs.md: $_"
-  exit 1
+# on re-runs. A pre-7.0.0 target still carrying .claude\rules\html-outputs.md
+# keeps it; it is listed as managed and the plugin migration removes it.
+foreach ($stampedFrag in @("html-outputs.md", "toolkit-reference.md")) {
+  $fragDest = Join-Path $Target (Join-Path ".claude\skills\shared" $stampedFrag)
+  Write-Host "  Stamping .claude\skills\shared\$stampedFrag ..."
+  $fragContent = Get-Content -LiteralPath $fragDest -Raw
+  $fragContent = $fragContent -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
+  Set-Content -LiteralPath $fragDest -Value $fragContent -NoNewline
 }
-$htmlContent = Get-Content -LiteralPath $htmlRuleDest -Raw
-$htmlContent = $htmlContent -replace '<!-- This file is managed by the LLM Peer Review toolkit\.', "<!-- Toolkit version: $Version | Managed by LLM Peer Review."
-Set-Content -LiteralPath $htmlRuleDest -Value $htmlContent -NoNewline
 
 # --- artifacts/ scaffold (issue #113, mirror of setup.sh) ---
 # The HTML-output feature writes to artifacts\html\ in the target project.

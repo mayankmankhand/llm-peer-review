@@ -18,7 +18,8 @@
 //     frontmatter allowed-tools, hook commands). Every `.claude/<dir>/...`
 //     reference for the four emitted dirs becomes `${CLAUDE_PLUGIN_ROOT}/<dir>/...`.
 //     `.claude/rules/html-outputs.md` maps to its relocated shared fragment;
-//     `.claude/rules/toolkit.md` is the project SEED and stays a project path.
+//     `.claude/rules/toolkit.md` is the project SEED and stays a project path;
+//     its own text gets command names scoped, nothing else.
 //   * Names. A plugin's commands, skills, and agents resolve only under the
 //     scoped form `<plugin>:<name>` (Step 1, spike 5: bare names hit project
 //     files only, and the Skill tool says "invoke it by that full name"). So
@@ -145,8 +146,11 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
   const slashNames = [...new Set([...inv.commands.map(c => c.name), ...inv.skillNames])].sort(longestFirst);
 
   // 1. Every `.claude/...` path token. A token runs until whitespace, a quote,
-  //    a backtick, a closing paren/bracket, or a trailing sentence dot.
-  text = text.replace(/\.claude\/[A-Za-z0-9_./*<>-]*[A-Za-z0-9_*>-]/g, (tok) => {
+  //    a backtick, a closing paren/bracket, or a trailing sentence dot. A token
+  //    that is the tail of a longer path (`~/.claude/plugins/...`,
+  //    `/home/x/.claude/...`) is a home-directory path, not a project path, and
+  //    is left alone: the lookbehind refuses a `~/` or `<word>/` prefix.
+  text = text.replace(/(?<![~\w]\/)\.claude\/[A-Za-z0-9_./*<>-]*[A-Za-z0-9_*>-]/g, (tok) => {
     const mapped = mapPath(tok, src);
     if (mapped === null) { unresolved.push(fileRel + ': ' + tok); return tok; }
     return mapped;
@@ -308,7 +312,13 @@ function build(src, version) {
   };
   for (const [rel, abs] of Object.entries(seedSources)) {
     if (!fs.existsSync(abs)) { unresolved.push('seed: missing source ' + path.relative(repo, abs)); continue; }
-    put(rel, fs.readFileSync(abs));
+    const raw = fs.readFileSync(abs);
+    // The seed rules file is written into PROJECTS, where the toolkit's commands
+    // answer only to their scoped names (/tk:explore), so its command mentions
+    // are rewritten exactly like a command file's. By convention it carries no
+    // toolkit paths (it refers to fragments by name), so nothing else changes;
+    // a path that slips in is reported as unresolved like anywhere else.
+    put(rel, rel === 'seed/rules-toolkit.md' ? Buffer.from(rewriteText(raw.toString('utf8'), inv, src, unresolved, rel), 'utf8') : raw);
   }
   put('README.md', [
     '# tk (generated)',

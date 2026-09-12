@@ -104,7 +104,7 @@
 //              the reference is not hidden (holistic review, R27). Images are
 //              embedded as data: URIs BEFORE the strip runs, so a screenshot
 //              under the home directory still embeds (holistic review, R1). See
-//              "Viewing the Artifact" in .claude/rules/html-outputs.md.
+//              "Viewing the Artifact" in .claude/skills/shared/html-outputs.md.
 //   --stable   write exactly <name>.html in the out dir - no timestamp, no -N
 //              collision guard - overwriting any existing file. This exists for
 //              identity-keyed outputs that pair with a markdown file and are

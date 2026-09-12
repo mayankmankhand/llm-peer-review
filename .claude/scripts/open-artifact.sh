@@ -5,7 +5,7 @@
 #   Toolkit commands generate HTML artifacts (review reports, plans, course
 #   pages) and need to open them in a real browser - clicking a file link in an
 #   editor opens the SOURCE, not the rendered page. The opener used to be prose
-#   instructions in .claude/rules/html-outputs.md that Claude ran by hand. On
+#   instructions in .claude/skills/shared/html-outputs.md that Claude ran by hand. On
 #   WSL with no launcher on PATH that chain silently no-opped and the artifact
 #   never appeared. This script makes the fallback deterministic: it tries each
 #   opener in order with real error handling and reports failure ONLY when the

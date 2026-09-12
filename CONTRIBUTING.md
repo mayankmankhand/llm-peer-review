@@ -26,7 +26,7 @@ To bump the toolkit version:
 
     bash scripts/setup/bump-version.sh <new-version>
 
-The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in both managed rules files (`.claude/rules/toolkit.md`, `.claude/rules/html-outputs.md`). Then manually:
+The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`). Then manually:
 
 - Add a new section to CHANGELOG.md
 - Update AGENT-SETUP.md title and "What's new" block (rename the previous block to "What was new in vX.Y", and keep only the last three blocks inline - older entries point at CHANGELOG.md)

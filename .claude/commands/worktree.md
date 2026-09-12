@@ -45,10 +45,12 @@ If it fails because the branch name is taken, increment N and try again.
 
 ### Step 5: Install dependencies
 
-Install host project deps and toolkit deps separately. The toolkit's deps live in `.claude/scripts/` (post-v4.3) and need their own install - without it, `/review-browser`, `/ask-gpt`, and `/ask-gemini` will not work in the new worktree.
+Install host project deps; toolkit deps depend on how the toolkit is installed.
 
 1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
-2. **Toolkit deps** - if `.claude/scripts/package.json` exists in the worktree, run: `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Skip if there is no toolkit package.json (older v4.2 layouts kept toolkit deps at the host root).
+2. **Toolkit deps** - two cases:
+   - **Plugin install (v7.0.0 and later, the normal case):** nothing to do. The toolkit's dependencies live with the plugin under `~/.claude/plugins/`, installed once per machine when the plugin is installed and shared by every worktree and every project.
+   - **Copy-install (a `.claude/scripts/package.json` exists in the worktree):** run `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Without it, `/review-browser`, `/ask-gpt`, and `/ask-gemini` will not work in the new worktree. Skip if there is no toolkit package.json.
 
 If either install fails, warn the user but do NOT stop. The worktree is still usable for general work, but the affected toolkit features will not run until the missing deps are installed manually.
 
@@ -82,7 +84,7 @@ Worktree ready!
   Path:         /full/absolute/path/to/.claude/worktrees/worktree-N
   Branch:       worktree-N
   Host npm:     installed (or: failed - run manually / skipped - no package.json)
-  Toolkit npm:  installed (or: failed - run manually / skipped - no .claude/scripts/package.json)
+  Toolkit npm:  plugin - nothing to install (or: installed / failed - run manually / skipped - no .claude/scripts/package.json)
   .env:         copied (or: skipped - not found / already exists)
   Map:          copied (or: skipped - not found / already exists)
 

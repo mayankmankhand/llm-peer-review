@@ -72,7 +72,7 @@ function makeFixture() {
   write(src, 'settings.local.json', '{ "permissions": { "allow": ["Bash(rm -rf /)"] } }\n');
   write(src, 'settings.json', '{}\n');
   write(src, 'worktrees/worktree-1/.claude/commands/review.md', '# stale copy\n');
-  write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n');
+  write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /review and /review-code; your permissions live in `.claude/settings.local.json`.\n');
   write(src, 'skills/shared/design-profile-template.md', '# Design profile\n');
   write(root, 'CLAUDE.md', '# Project Instructions\n');
   write(root, 'LESSONS.md', '# Lessons\n');
@@ -147,7 +147,7 @@ const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths never lists node_modules or settings', !managed.paths.some(p => /node_modules|settings/.test(p)));
 check('the seed carries every project file the installer seeds', ['seed/CLAUDE.md', 'seed/LESSONS.md', 'seed/LESSONS-detail.md', 'seed/DESIGN-PROFILE.md', 'seed/env.local.example', 'seed/gitattributes', 'seed/gitignore', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'seed/settings.local.json'].every(r => exists(out, r)));
-check('the seed rules file is the source rules file, byte for byte', read(out, 'seed/rules-toolkit.md') === read(fx.src, 'rules/toolkit.md'));
+check('the seed rules file is the source with command names scoped and nothing else touched', read(out, 'seed/rules-toolkit.md') === '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /tk:review and /tk:review-code; your permissions live in `.claude/settings.local.json`.\n');
 check('the seed permission baseline is the source settings.local.json', read(out, 'seed/settings.local.json') === read(fx.src, 'settings.local.json'));
 const stray = [];
 for (const f of walkFiles(out)) {
@@ -167,16 +167,19 @@ check('--check fails when the source moved on', c2.status === 1 && /differs: com
 write(fx.src, 'commands/dangling.md', '# Dangling\n\nRead `.claude/rules/nope.md` and `.claude/skills/shared/html-outputs.md`.\n');
 fs.rmSync(path.join(fx.src, 'skills', 'shared', 'html-outputs.md'));
 write(fx.src, 'commands/dangling2.md', '# Dangling two\n\nRead `.claude/rules/html-outputs.md`.\n');
+write(fx.src, 'commands/homepath.md', '# Home\n\nKeys live in `~/.claude/plugins/.env.local`; the ledger is `~/.claude/correction-ledger.jsonl`; the stable path is `~/.claude/plugins/data/tk-x/current/skills/shared/toolkit-reference.md`.\n');
 runBuild(['--source', fx.src, '--out', out, '--quiet']);
 const c3 = runBuild(['--source', fx.src, '--out', out, '--check', '--quiet']);
 check('--check fails on an unresolvable html-outputs reference when the fragment is absent', c3.status === 1 && /unresolved reference .*html-outputs\.md/.test(c3.stderr), c3.stderr);
 check('a project rules path other than html-outputs is kept, not reported', !/nope\.md/.test(c3.stderr), c3.stderr);
+check('a home-directory path (~/.claude/...) is neither rewritten nor reported', !/homepath/.test(c3.stderr) && read(out, 'commands/homepath.md').includes('`~/.claude/plugins/.env.local`') && read(out, 'commands/homepath.md').includes('~/.claude/plugins/data/tk-x/current/skills/shared/toolkit-reference.md'), c3.stderr);
 
 // --- 5. The real source ------------------------------------------------------
 console.log('\n5. the live source builds');
 const live = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-live-'));
 const l = runBuild(['--out', live, '--quiet']);
 check('live .claude/ builds without error', l.status === 0, l.stderr);
+check('live build reports no unresolved reference', !/unresolved/.test(l.stderr), l.stderr);
 check('live build emits every command', fs.readdirSync(path.join(REPO, '.claude', 'commands')).every(f => exists(live, 'commands/' + f)));
 check('live build emits every agent', fs.readdirSync(path.join(REPO, '.claude', 'agents')).every(f => exists(live, 'agents/' + f)));
 check('live build emits all seven shells', fs.readdirSync(path.join(live, 'skills', 'shared', 'shells')).filter(f => f.endsWith('-shell.html')).length === 7);

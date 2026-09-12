@@ -8,4 +8,4 @@ The HTML files are disposable: safe to delete, regenerated on demand, and not me
 
 This README is checked in so the directory is discoverable in fresh clones.
 
-See `.claude/rules/html-outputs.md` for the full HTML output policy.
+See the toolkit's `html-outputs` fragment (shipped inside the plugin as `skills/shared/html-outputs.md`) for the full HTML output policy.
