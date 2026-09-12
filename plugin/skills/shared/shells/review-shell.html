@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review</title>
+<!--
+  review-shell.html - prebuilt HTML shell for /review and the /review-* family.
+
+  Rendered by .claude/scripts/render-html.js, which inlines two things:
+    1. tokens.css  -> the tokens slot inside the <style> block below
+    2. the JSON payload -> the render-data block (the application/json
+       data island carrying id="render-data") further down in <body>
+  (Each slot's literal placeholder token appears EXACTLY ONCE in this file, at
+  its real injection point - the helper does a first-occurrence replace, so this
+  doc must not repeat those tokens verbatim.)
+  The result is a single self-contained file (inline CSS + JSON + renderer JS),
+  no CDN, works offline on file://. Reproduces the gold look of
+  the 2026-06-08 review artifact, a timestamped file then; the page is now the
+  standing artifacts/html/review.html.
+
+  ==========================================================================
+  JSON SCHEMA (the slash commands produce this; the renderer below consumes it)
+  ==========================================================================
+  All fields optional unless noted; a section is skipped when its data is
+  missing or empty. Severity is the string "block" | "warn" | "suggest".
+
+  THE FINDING CONTRACT (issue #161). A finding is prose in three keys - "what",
+  "context", "fix" - plus non-prose attachments. render-html.js counts the words
+  in those three, ranks the findings by locus, and demotes the lowest-ranked to
+  one-line rows once the page budget is spent. It also refuses the retired
+  four-field labels (Why it matters / Example / Suggested fix) by dropping them
+  and naming the refusal on stderr; it does not abort, because a rejected render
+  would leave a run with no artifact at all. Do not put prose in "fields" to get
+  around the caps: attachments are not counted, and that is the one evasion this
+  contract cannot catch by counting.
+  Four keys are set by render-html.js and never by the payload: the page-level
+  "sinceLast" and the per-finding flags "demoted", "isNew" and "carried".
+  "demoted" comes from the page budget on every review render; the other three
+  come from the page a --stable render is about to replace.
+  Inline trusted HTML (Claude-generated review text) is allowed in: looksGood
+  items, a finding's "what", and every field "value". Those render via
+  innerHTML. Emoji in the JSON are literal (rendered directly).
+
+  {
+    "title":    "Orchestrator Review",          // h1 (required-ish; defaults to "Review")
+    "subtitle": "#119 ... &middot; 2026-06-08", // p.sub under the title (HTML allowed)
+
+    // Specialist chips. on:true -> "<name>"      (class "chip on")
+    //                   on:false -> "<name> (skipped)" (class "chip")
+    // Omit/empty the array to hide the chip row (e.g. single-specialist run).
+    "chips": [ {"name":"code","on":true}, {"name":"ux","on":false} ],
+
+    // The first screen (issue #161): two or three sentences in fixed slots -
+    // is it safe to ship, the one other thing that matters, what happens next.
+    // The first renders in display type (the only element on the page that
+    // does), the rest one step down. Inline HTML allowed in each.
+    "bottomLine": [ "Safe to ship.", "One thing needs you.", "Then /document runs." ],
+
+    // One sentence of counts only - handled without the reader, deferred,
+    // could not be checked. It replaces the severity tally row.
+    "disposition": "2 fixed, 1 needs you, 1 could not be checked.",
+
+    // SET BY render-html.js, NEVER BY THE PAYLOAD. What changed since the
+    // reader last opened this standing page (new, still open, resolved), or
+    // that this is the first review recorded for the repository.
+    "sinceLast": "Since you last opened this page: 1 new finding, 2 still open from last time.",
+
+    // The lenses (specialists) that ran this time, e.g. a lone /review-code
+    // run. ABSENT MEANS EVERY LENS RAN. When present, render-html.js reads the
+    // page it is about to replace and carries forward its open findings whose
+    // lens is not in this list, flagged "carried" (see the finding object
+    // below), rather than reporting them resolved.
+    "lenses": [ "code" ],
+
+    // Sticky top-issues bar. Each key is an array of entry strings.
+    // A row always renders for all three severities (shows the count, e.g.
+    // "0 Blocks"); when the array is non-empty it appends ": " + comma-joined
+    // entries. Omit topIssues entirely to hide the whole bar.
+    // Superseded by bottomLine: the bar renders only when the payload carries
+    // no bottomLine, so an older payload keeps exactly its old appearance.
+    "topIssues": {
+      "block":   ["R1 [code] (file.sh:91 - desc)"],
+      "warn":    ["R2 [code]"],
+      "suggest": ["R3 [code]", "R4 [commands]"]
+    },
+
+    // Looks-good callout box. Items may contain inline HTML.
+    "looksGood": [ "<strong>The core approach is right.</strong> ..." ],
+
+    // Findings, grouped by specialist. Each group renders a .group-label then
+    // its finding cards. (Flat top-level "findings" array also accepted as a
+    // fallback for single-specialist runs - see renderer.)
+    "groups": [
+      {
+        "label": "code",
+        "findings": [
+          {
+            "id":         "R1",
+            "severity":   "warn",                 // block | warn | suggest
+            "specialist": "code",                 // shown as [code]; defaults to group label
+            "file": { "relPath": ".claude/scripts/open-artifact.sh",
+                      "absPath": "/home/.../open-artifact.sh",
+                      "line": 91 },               // line optional; file optional
+            "what": "Sentence one: severity spelled out, defect, harm verb (HTML allowed).",
+            "context": "Sentence two. OMIT THE KEY unless it answers who is hit,
+                        when it fires, or why now. Omitted is the normal case.",
+            "fix":     "The fix line: a cost and a choice, not an approach.",
+            "locus":   "user",                     // optional. "user" = only the
+                                                   // human can answer this. Drives
+                                                   // ranking; severity breaks ties.
+            "demoted": false,                      // set by render-html.js, never
+                                                   // by the payload. A demoted
+                                                   // finding renders as its
+                                                   // headline alone.
+            "isNew":   false,                      // set by render-html.js, never
+                                                   // by the payload. Raised this
+                                                   // run and absent from the
+                                                   // previous page; renders a
+                                                   // "new" mark in the header row.
+            "carried": false,                      // set by render-html.js, never
+                                                   // by the payload. Still open
+                                                   // from the previous page, and
+                                                   // its lens did not run this
+                                                   // time (see "lenses"), so it
+                                                   // was carried forward with its
+                                                   // old receipt, unchecked. It
+                                                   // renders a quieter "carried"
+                                                   // mark and is never counted
+                                                   // as resolved. Unmarked = seen
+                                                   // before and re-checked now.
+            "receipt": {                           // the check's OWN output
+              "cmd":    "node .claude/scripts/pre-push-check.js",
+              "stdout": ["line", "line"],          // filled by render-html.js from
+                                                   // receipt.stdoutFile, which the
+                                                   // tier-1 runner writes. Rendered
+                                                   // via textContent, so it may
+                                                   // contain any characters at all.
+              "exit":   1
+            },
+            "fields": [                            // ATTACHMENTS ONLY, in order.
+                                                   // Most findings emit none.
+              // Browser findings use, in this order:
+              // { "label": "Expected",   "value": "..." },
+              // { "label": "Actual",     "value": "..." },
+              // { "label": "Screenshot", "value": "<img src='...' alt='...'>" },
+              // { "label": "Evidence",   "value": "<pre>console errors</pre>" }
+            ]
+          }
+        ]
+      }
+    ],
+
+    // Base-rate lists, rendered after the findings. Each item is a string
+    // (inline HTML allowed). Both are quiet by design: they exist to make the
+    // short list of open findings believable. Omit or empty to skip either.
+    "alreadyFixed":  [ "R4: the stale link, past tense, with the check that confirmed it." ],
+    "couldNotCheck": [ "The browser lens: no dev server was running." ],
+
+    // Footer count strip. Each span = optional emoji + bold label + value.
+    "summary": [
+      { "emoji": "",  "label": "Specialists run", "value": "3 of 3 (4 auto-skipped)" },
+      { "emoji": "",  "label": "Files reviewed",  "value": "6" },
+      { "emoji": "🚫", "label": "Blocks",          "value": "0" },
+      { "emoji": "⚠️", "label": "Warns",           "value": "2" },
+      { "emoji": "💡", "label": "Suggests",        "value": "5" },
+      { "emoji": "",  "label": "Deduplicated",    "value": "7 (8 raw)" }
+    ]
+  }
+
+  File-reference rendering: <a class="file-link"
+    href="vscode://file/<absPath>[:<line>]"><relPath>[:<line>]</a>.
+  Visible text = relPath (+ :line if present). The href uses absPath; when absPath
+  is absent (a --no-abs render, i.e. a page bound for a hosted viewer) the
+  reference renders as PLAIN TEXT rather than a link, because an editor link
+  built from a relative path is dead for every viewer.
+  ==========================================================================
+-->
+<style>
+/*__TOKENS__*/
+
+/* ---- review-specific layout (everything NOT already in tokens.css) ---- */
+/* The page IS the measure. At 940px with a 64ch column the right two-fifths
+   were dead space that no element used, which reads as an unfinished grid
+   rather than a deliberate narrow column. */
+body{max-width:46rem;}
+header.page{padding:2rem 0 1rem;border-bottom:1px solid var(--border);}
+.sub{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0;}
+.chips{margin-top:.8rem;display:flex;gap:.4rem;flex-wrap:wrap;}
+.chip{font-family:ui-monospace,Consolas,monospace;font-size:.75rem;background:var(--bg-muted);border:1px solid var(--border);color:var(--text-muted);padding:.2rem .55rem;border-radius:999px;}
+/* An "on" chip sits on its own tint with an accent ring. The dark-mode sweep
+   had flattened it to --bg-muted, leaving it .chip plus a text color
+   (holistic review, R30). --accent on --accent-soft clears AA in both palettes. */
+.chip.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+.top-issues{position:sticky;top:0;background:var(--bg);padding:.8rem 0;border-bottom:1px solid var(--border);z-index:10;max-height:40vh;overflow-y:auto;}
+.top-row{font-size:.9rem;padding:.15rem 0;}
+.top-row--block{color:var(--block);font-weight:600;}
+.top-row--warn{color:var(--warn-strong);font-weight:600;}
+.top-row--suggest{color:var(--suggest);}
+.looks-good{background:var(--bg-muted);border:1px solid var(--border);border-left:4px solid var(--positive);border-radius:8px;padding:1rem 1.2rem;margin-top:1rem;}
+.looks-good h2{margin:0 0 .5rem;font-size:1rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);}
+.looks-good ul{margin:0;padding-left:1.1rem;}
+.looks-good li{margin-bottom:.35rem;}
+.group-label{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:1.6rem 0 .6rem;}
+.noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
+
+/* ---- the two-sentence contract (issue #161) ---- */
+/* Sentence two. Unlabeled, one step down from the headline, and given real
+   space above it so the eye reads it as a continuation rather than a field. */
+.context{margin:.45rem 0 0;font-size:.95rem;color:var(--text);}
+/* The fix line closes every finding, so it gets separation from what precedes it. */
+.field.fix{margin-top:.7rem;}
+/* The receipt is the ONE tinted, monospaced surface on a finding. That single
+   visual exception is load-bearing: it is how the reader tells the machine's
+   words from the reviewer's. Everything here is defensive against real command
+   output - long lines scroll inside the block rather than pushing the page
+   sideways, and the content arrives via textContent so nothing in it is parsed. */
+.receipt{margin:.7rem 0 0;background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+.receipt-label{font-family:ui-monospace,Consolas,monospace;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:.4rem .8rem 0;}
+.receipt pre{margin:0;padding:.4rem .8rem .6rem;overflow-x:auto;font-family:ui-monospace,Consolas,monospace;font-size:.8rem;line-height:1.5;white-space:pre;color:var(--text);}
+/* tokens.css styles inline `code` with a background and padding; inside a <pre>
+   that would paint a stray pill around nested spans. There are none here today
+   (textContent cannot produce them) - this is a guard for the day something
+   renders a code span into a receipt. */
+.receipt pre code{background:none;padding:0;font-size:inherit;}
+/* ---- the first screen (issue #161) ---- */
+/* The bottom line is the only element on the page that takes --text-display.
+   A second one would mean neither is the loudest thing present. */
+.bottom-line{margin:2rem 0 0;max-width:var(--measure);}
+.bottom-line .display{margin:0 0 .6rem;}
+.bl-rest{font-size:1.15rem;line-height:1.45;margin:0 0 .6rem;color:var(--text);max-width:var(--measure);}
+.since-last{color:var(--text-muted);font-size:.95rem;margin:.5rem 0 0;max-width:var(--measure);}
+.new-flag{font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:.05rem .4rem;}
+/* "carried" is the quieter sibling of "new": muted text and border in place of
+   the accent, because a carried finding asks for nothing today. It is still
+   open and was not re-checked; the mark only refuses to let it read as resolved. */
+.carried-flag{font-size:var(--text-micro);text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border:1px solid var(--text-muted);border-radius:999px;padding:.05rem .4rem;}
+.disposition{color:var(--text-muted);font-size:1rem;line-height:1.5;margin:.9rem 0 0;max-width:var(--measure);border-top:1px solid var(--border);padding-top:.9rem;}
+/* Base-rate lists. Quiet by construction: they exist to make the short list of
+   open findings believable, not to compete with it. */
+.aside-list{margin-top:2rem;}
+.aside-list h2{font-size:1rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin:0 0 .5rem;}
+.aside-list ul{margin:0;padding-left:1.1rem;}
+.aside-list li{margin-bottom:.3rem;font-size:.95rem;color:var(--text-muted);}
+/* The audited-out log: the one disclosure on the page. Closed by default. */
+details.audited-out{margin:2rem 0 0;border:1px solid var(--border);border-radius:8px;background:var(--bg);}
+details.audited-out > summary{cursor:pointer;padding:.65rem 1rem;color:var(--text-muted);font-size:.95rem;}
+details.audited-out > summary:hover{background:var(--bg-muted);}
+details.audited-out[open] > summary{border-bottom:1px solid var(--border);}
+.audited-body{padding:.6rem 1rem 1rem;}
+/* Findings are not cards. A border, a fill and a radius each say "separate
+   object"; stamped on every finding they say it four times and rank nothing.
+   Space does the grouping instead, at an 8:1 between-to-within ratio, which is
+   what makes the findings countable without a single rule. */
+.finding{border:0;border-radius:0;background:none;padding:0;margin:0 0 2.6rem;max-width:var(--measure);overflow-wrap:anywhere;}
+/* Severity is carried by TYPE, not by a rail and not by the word alone. The
+   critic's second gap was that a blocked push and a missing README line were
+   given identical weight, and a severity word buried in body copy could not
+   triage them. So the headline size steps with severity: a Block reads at the
+   h2 step, a Warn one below it, a Suggest at body weight and muted. Three
+   levels the eye resolves before it reads anything. */
+.finding .what{max-width:var(--measure);margin:.1rem 0 0;}
+.finding--block .what{font-size:var(--text-h2);font-weight:var(--weight-strong);line-height:1.25;}
+.finding--warn .what{font-size:1.25rem;font-weight:var(--weight-strong);line-height:1.3;}
+.finding--suggest .what{font-size:1rem;font-weight:var(--weight-normal);color:var(--text-muted);}
+.finding--suggest .context,.finding--suggest .field{color:var(--text-muted);}
+/* A demoted finding: present, countable, and quiet. It carries its headline and
+   nothing else, because the page budget was spent on findings ranked above it.
+   Rendered flat rather than as a card so the eye reads the open findings as the
+   page's content and these as its tail.
+   These sit AFTER the .finding and severity rules on purpose: the selectors tie
+   on specificity, so the later rule wins, and when they sat above a demoted
+   Block was still painted at the h2 step (review of v6.3.0, R32). */
+.finding--demoted{padding:.45rem .9rem;margin-bottom:.35rem;border-left-width:3px;background:none;}
+.finding--demoted .what{font-size:.92rem;font-weight:400;color:var(--text-muted);margin:.2rem 0 0;}
+.finding--demoted .badge{font-size:.66rem;}
+.context{max-width:var(--measure);}
+/* The header row is metadata, so it sits above the headline at micro size and
+   gets out of the way. It was competing with four other things at the same size. */
+.finding > header{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;font-size:var(--text-micro);}
+.finding-id{font-size:var(--text-micro);color:var(--text-muted);}
+.specialist-tag{font-size:var(--text-micro);}
+.file-link{font-size:var(--text-micro);}
+/* Section headings pull well clear of the labels beneath them. Four levels were
+   landing within a few points of each other and reading as one. */
+h2{font-size:var(--text-h2);}
+.group-label{font-size:var(--text-micro);margin:2.4rem 0 1.2rem;}
+.aside-list h2{font-size:var(--text-micro);}
+/* Attachment safety: an <img> or a wide <pre> arriving through a field value
+   must never push the page sideways. Neither had a rule before (issue #161). */
+.field img{max-width:100%;height:auto;border:1px solid var(--border);border-radius:6px;display:block;margin:.4rem 0;}
+.field pre{margin:.4rem 0;padding:.5rem .7rem;background:var(--bg-muted);border:1px solid var(--border);border-radius:6px;overflow-x:auto;white-space:pre;font-size:.8rem;}
+/* Token safety: one unbroken URL, hash or path in a field value (or, via the
+   .finding rule above, in a finding's prose) must wrap rather than push the page
+   sideways (review of v6.3.0, R34). A <pre> keeps its own scroll box: white-space
+   pre never wraps, so this cannot reach inside it. */
+.field{overflow-wrap:anywhere;}
+</style>
+</head>
+<body>
+
+<noscript>
+  <p class="noscript-note">This report needs JavaScript to render. Its data is in this file's source, or open the canonical markdown version.</p>
+</noscript>
+
+<script type="application/json" id="render-data">__RENDER_DATA__</script>
+
+<script>
+(function () {
+  "use strict";
+
+  var data = JSON.parse(document.getElementById("render-data").textContent);
+
+  var SEV = {
+    block:   { label: "Block",   emoji: "🚫" }, /* 🚫 */
+    warn:    { label: "Warn",    emoji: "⚠️" },  /* ⚠️ */
+    suggest: { label: "Suggest", emoji: "💡" }   /* 💡 */
+  };
+
+  // ---- tiny DOM helpers -------------------------------------------------
+  function el(tag, cls) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    return n;
+  }
+  // Trusted inline HTML (Claude-generated review text, not untrusted input).
+  function html(node, markup) { node.innerHTML = (markup == null ? "" : String(markup)); return node; }
+  function text(node, str)    { node.textContent = (str == null ? "" : String(str));   return node; }
+  function isArr(x)           { return Object.prototype.toString.call(x) === "[object Array]"; }
+  function nonEmpty(x)        { return isArr(x) && x.length > 0; }
+
+  // All rendered output lives inside a <main> landmark (a11y: one main region
+  // per page). We build into "body" (the main element) and attach it once at the
+  // end. Keeping the variable name "body" leaves the rest of the renderer
+  // untouched; only the container element changed from document.body to <main>.
+  var body = el("main");
+
+  // ---- header.page (title, subtitle, chips) -----------------------------
+  var header = el("header", "page");
+  var h1 = el("h1");
+  text(h1, data.title || "Review");
+  header.appendChild(h1);
+
+  if (data.subtitle) {
+    var sub = el("p", "sub");
+    html(sub, data.subtitle); // subtitle may carry inline HTML (e.g. &middot;)
+    header.appendChild(sub);
+  }
+
+  if (nonEmpty(data.chips)) {
+    var chips = el("div", "chips");
+    data.chips.forEach(function (c) {
+      if (!c || !c.name) return;
+      var chip;
+      if (c.on) {
+        chip = el("span", "chip on");
+        text(chip, c.name);
+      } else {
+        chip = el("span", "chip");
+        text(chip, c.name + " (skipped)");
+      }
+      chips.appendChild(chip);
+    });
+    if (chips.childNodes.length) header.appendChild(chips);
+  }
+  body.appendChild(header);
+
+  // ---- the bottom line (issue #161) -------------------------------------
+  // Two or three sentences in the largest type on the page, in fixed slots: is
+  // it safe to ship, the one other thing that matters, what happens next. This
+  // is the whole first screen. It exists because the page previously opened on
+  // a truncated count strip and then finding one out of up to forty-one, and
+  // more than half of a reader's attention is spent above the fold regardless
+  // of what occupies it.
+  if (nonEmpty(data.bottomLine)) {
+    var bl = el("section", "bottom-line");
+    data.bottomLine.slice(0, 3).forEach(function (line, i) {
+      var p = el("p", i === 0 ? "display" : "bl-rest");
+      html(p, line);
+      bl.appendChild(p);
+    });
+    body.appendChild(bl);
+  }
+
+  // ---- disposition ------------------------------------------------------
+  // One sentence: what was handled without the reader, what was deferred, what
+  // could not be checked. It replaces the severity tally row, because "two
+  // things need you today" is a sentence a person can act on and a badge
+  // reading "8" is a number they have to interpret first.
+  if (data.disposition) {
+    var disp = el("p", "disposition");
+    html(disp, data.disposition);
+    body.appendChild(disp);
+  }
+
+  // ---- since you last looked (issue #161) -------------------------------
+  // The standing page's memory. A finding the reader already saw and left alone
+  // should not present itself as news, and a page that has genuinely gone quiet
+  // should say so rather than looking identical to one nobody has read.
+  if (data.sinceLast) {
+    var since = el("p", "since-last");
+    text(since, data.sinceLast);
+    body.appendChild(since);
+  }
+
+  // ---- top-issues (sticky) ----------------------------------------------
+  // Superseded by the bottom line. It still renders for a payload that carries
+  // no bottomLine, so an older payload degrades to exactly its old appearance
+  // rather than to a page with no summary at all.
+  if (data.topIssues && !nonEmpty(data.bottomLine)) {
+    var ti = data.topIssues;
+    var rows = [
+      { key: "block",   word: "Blocks"   },
+      { key: "warn",    word: "Warns"    },
+      { key: "suggest", word: "Suggests" }
+    ];
+    var sec = el("section", "top-issues");
+    rows.forEach(function (r) {
+      var entries = isArr(ti[r.key]) ? ti[r.key] : [];
+      var row = el("div", "top-row top-row--" + r.key);
+      var line = SEV[r.key].emoji + " " + entries.length + " " + r.word;
+      if (entries.length > 0) line += ": " + entries.join(", ");
+      text(row, line);
+      sec.appendChild(row);
+    });
+    body.appendChild(sec);
+  }
+
+  // ---- looks-good -------------------------------------------------------
+  if (nonEmpty(data.looksGood)) {
+    var lg = el("section", "looks-good");
+    var lgh = el("h2");
+    text(lgh, "Looks Good");
+    lg.appendChild(lgh);
+    var ul = el("ul");
+    data.looksGood.forEach(function (item) {
+      var li = el("li");
+      html(li, item); // inline HTML allowed
+      ul.appendChild(li);
+    });
+    lg.appendChild(ul);
+    body.appendChild(lg);
+  }
+
+  // ---- findings ---------------------------------------------------------
+  // Accept either grouped (data.groups) or a flat data.findings fallback.
+  var groups = [];
+  if (nonEmpty(data.groups)) {
+    groups = data.groups;
+  } else if (nonEmpty(data.findings)) {
+    groups = [{ label: null, findings: data.findings }];
+  }
+
+  var hasFindings = groups.some(function (g) { return g && nonEmpty(g.findings); });
+
+  if (hasFindings) {
+    var fh = el("h2");
+    text(fh, "Findings");
+    body.appendChild(fh);
+
+    groups.forEach(function (group) {
+      if (!group || !nonEmpty(group.findings)) return;
+
+      // The Audited out log is the ONE thing on this page behind a disclosure,
+      // and it is the right one: these are findings the audit killed, so every
+      // card in it asks the reader to load a claim and immediately unload it.
+      // It stays on the page (M8 wants the audit inspectable) and stops being
+      // the first thing between the reader and the findings that survived.
+      // Nothing decision-relevant is ever collapsed - a demoted finding renders
+      // as a visible one-line row, never in here.
+      var isAudit = typeof group.label === "string" && /^audited out$/i.test(group.label.trim());
+      var host = body;
+      if (isAudit) {
+        var det = el("details", "audited-out");
+        var sum = el("summary");
+        text(sum, "Audited out: " + group.findings.length +
+                  (group.findings.length === 1 ? " finding did not survive" : " findings did not survive"));
+        det.appendChild(sum);
+        host = el("div", "audited-body");
+        det.appendChild(host);
+        body.appendChild(det);
+      } else if (group.label) {
+        // h2 (not div) so the group label is a heading for SR navigation. The
+        // .group-label class outranks the bare h2 rule, so the look is unchanged.
+        var gl = el("h2", "group-label");
+        text(gl, group.label);
+        body.appendChild(gl);
+      }
+
+      group.findings.forEach(function (f) {
+        if (!f) return;
+        var sev = SEV[f.severity] ? f.severity : "suggest";
+        var meta = SEV[sev];
+
+        var card = el("article", "finding finding--" + sev);
+
+        // card header: badge, id, specialist tag, file link
+        var cardHead = el("header");
+
+        // The severity word now leads the sentence itself (issue #161), so a
+        // badge repeating it is noise. The badge still renders for a finding
+        // whose text does not carry it - an older payload, or a specialist that
+        // missed the rule - because losing severity entirely is far worse than
+        // showing it twice. The 5px rail is gone either way: it sat below the
+        // size at which a skimming reader resolves anything.
+        var saysSeverity = typeof f.what === "string" &&
+          /^\s*(?:<[^>]+>\s*)?(blocks|should fix|optional)\b/i.test(f.what);
+        if (!saysSeverity) {
+          var badge = el("span", "badge badge--" + sev);
+          text(badge, meta.emoji + " " + meta.label);
+          cardHead.appendChild(badge);
+        }
+
+        if (f.id) {
+          var idSpan = el("span", "finding-id");
+          text(idSpan, f.id);
+          cardHead.appendChild(idSpan);
+        }
+
+        // "new" marks a finding this run raised that the previous page did not
+        // carry. Everything unmarked is something the reader has already seen.
+        if (f.isNew) {
+          var isNew = el("span", "new-flag");
+          text(isNew, "new");
+          cardHead.appendChild(isNew);
+        }
+
+        // "carried" marks a finding brought forward from the previous page
+        // because its lens did not run this time (payload "lenses"). It is
+        // still open and was not re-checked, which is why the mark is quieter
+        // than "new": it asks for nothing today, it only refuses to be counted
+        // as resolved. render-html.js sets the flag, never the payload.
+        if (f.carried) {
+          var carried = el("span", "carried-flag");
+          text(carried, "carried");
+          cardHead.appendChild(carried);
+        }
+
+        var tag = f.specialist != null ? f.specialist : group.label;
+        if (tag) {
+          var tagSpan = el("span", "specialist-tag");
+          text(tagSpan, "[" + tag + "]");
+          cardHead.appendChild(tagSpan);
+        }
+
+        if (f.file && (f.file.relPath || f.file.absPath)) {
+          cardHead.appendChild(fileLink(f.file));
+        }
+
+        card.appendChild(cardHead);
+
+        // what (one-line summary) - rendered as an h3 so screen-reader heading
+        // navigation can jump between findings. The .what class (specificity
+        // beats the bare h3 element rule) preserves the look.
+        if (f.what) {
+          var what = el("h3", "what");
+          html(what, f.what); // inline HTML allowed
+          card.appendChild(what);
+        }
+
+        // A demoted finding stops here: severity, id, location and its first
+        // sentence, and nothing else. render-html.js sets the flag when the page
+        // budget is spent (issue #161). Demotion is not omission - the finding is
+        // still on the page, and the markdown on disk still carries it in full.
+        if (f.demoted) {
+          card.className += " finding--demoted";
+          host.appendChild(card);
+          return;
+        }
+
+        // context (sentence two) - unlabeled on purpose. It earns its place by
+        // answering who is hit, when it fires, or why now; a label would only
+        // repeat what the sentence already says.
+        if (f.context) {
+          var ctx = el("p", "context");
+          html(ctx, f.context);
+          card.appendChild(ctx);
+        }
+
+        // receipt - the check's own output. TEXTCONTENT, never innerHTML: this
+        // is machine output, and machine output is made of the characters
+        // innerHTML eats. A probe render through the old field path deleted
+        // "<anonymous>" from the page outright and let "if (a<b)" swallow
+        // everything to the next ">". textContent makes both safe by
+        // construction, which is why the receipt has its own slot rather than
+        // riding fields[] (issue #161).
+        if (f.receipt && (f.receipt.cmd || nonEmpty(f.receipt.stdout))) {
+          var box = el("div", "receipt");
+          var label = el("div", "receipt-label");
+          text(label, "What I ran");
+          box.appendChild(label);
+          var pre = el("pre");
+          var lines = [];
+          if (f.receipt.cmd) lines.push("$ " + f.receipt.cmd);
+          if (nonEmpty(f.receipt.stdout)) lines = lines.concat(f.receipt.stdout);
+          if (f.receipt.exit != null) lines.push("exit " + f.receipt.exit);
+          text(pre, lines.join("\n"));
+          box.appendChild(pre);
+          card.appendChild(box);
+        }
+
+        // attachment rows, in order (Expected / Actual / Screenshot / Evidence)
+        if (nonEmpty(f.fields)) {
+          f.fields.forEach(function (fld) {
+            if (!fld || (fld.label == null && fld.value == null)) return;
+            var row = el("div", "field");
+            var strong = el("strong");
+            text(strong, (fld.label != null ? fld.label : "") + ":");
+            row.appendChild(strong);
+            row.appendChild(document.createTextNode(" "));
+            var span = document.createElement("span");
+            html(span, fld.value); // value may carry inline HTML (incl <img>, <pre>)
+            row.appendChild(span);
+            card.appendChild(row);
+          });
+        }
+
+        // fix line - a cost and a choice, always last
+        if (f.fix) {
+          var fixRow = el("div", "field fix");
+          var fixLabel = el("strong");
+          text(fixLabel, "Fix:");
+          fixRow.appendChild(fixLabel);
+          fixRow.appendChild(document.createTextNode(" "));
+          var fixSpan = document.createElement("span");
+          html(fixSpan, f.fix);
+          fixRow.appendChild(fixSpan);
+          card.appendChild(fixRow);
+        }
+
+        host.appendChild(card);
+      });
+    });
+  }
+
+  // ---- what I already fixed / what I could not check (issue #161) --------
+  // The base-rate disclosure. A short list of open findings is only believable
+  // next to the count of what was handled and the named limits of the pass;
+  // without them a short page reads as a page that did not look hard.
+  [
+    { key: "alreadyFixed", head: "What I already fixed" },
+    { key: "couldNotCheck", head: "What I could not check" }
+  ].forEach(function (sec) {
+    if (!nonEmpty(data[sec.key])) return;
+    var wrap = el("section", "aside-list");
+    var h = el("h2");
+    text(h, sec.head);
+    wrap.appendChild(h);
+    var ul = el("ul");
+    data[sec.key].forEach(function (item) {
+      var li = el("li");
+      html(li, item);
+      ul.appendChild(li);
+    });
+    wrap.appendChild(ul);
+    body.appendChild(wrap);
+  });
+
+  // ---- footer.summary ---------------------------------------------------
+  if (nonEmpty(data.summary)) {
+    var footer = el("footer", "summary");
+    data.summary.forEach(function (s) {
+      if (!s) return;
+      var span = document.createElement("span");
+      if (s.emoji) span.appendChild(document.createTextNode(s.emoji + " "));
+      if (s.label != null) {
+        var strong = el("strong");
+        text(strong, s.label + ":");
+        span.appendChild(strong);
+      }
+      if (s.value != null) {
+        span.appendChild(document.createTextNode((s.label != null ? " " : "") + s.value));
+      }
+      footer.appendChild(span);
+    });
+    body.appendChild(footer);
+  }
+
+  // Attach the assembled <main> landmark to the document once.
+  document.body.appendChild(body);
+
+  // ---- file reference -> clickable vscode:// link -----------------------
+  function fileLink(file) {
+    var rel = file.relPath || file.absPath || "";
+    var hasLine = file.line != null && file.line !== "";
+    var visible = rel + (hasLine ? ":" + file.line : "");
+    // No absPath means the payload was rendered with --no-abs, i.e. this page is
+    // destined for a hosted viewer (issue #155 item 2). A vscode://file/ link
+    // built from the RELATIVE path would not leak anything, but it is dead for
+    // every viewer, so render the reference as plain text instead of a link.
+    if (!file.absPath) {
+      var span = el("span", "file-link");
+      text(span, visible);
+      return span;
+    }
+    var a = el("a", "file-link");
+    a.setAttribute("href", "vscode://file/" + file.absPath + (hasLine ? ":" + file.line : ""));
+    text(a, visible);
+    return a;
+  }
+})();
+</script>
+
+</body>
+</html>

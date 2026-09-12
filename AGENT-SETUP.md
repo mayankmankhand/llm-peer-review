@@ -1,10 +1,10 @@
-# AI Agent Setup Instructions (v6.3.3)
+# AI Agent Setup Instructions (v7.0.0)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
 <rules>
 
-**Do NOT modify this repository.** Do not commit changes, open PRs, or edit files in this repo. This repo is the source toolkit. Your job is to copy the right files into the user's project.
+**Do NOT modify this repository.** Do not commit changes, open PRs, or edit files in this repo. This repo is the source toolkit and the plugin marketplace. Your job is to install the plugin and seed the user's project (Claude Code), or to copy the right files into it (other editors).
 
 </rules>
 
@@ -48,7 +48,30 @@ If the user is on Windows, choose one:
 - **WSL/bash path** (Linux style): convert `C:\Users\YourName\Projects\my-app` to `"/mnt/c/Users/YourName/Projects/my-app"`
 - **PowerShell/native path** (Windows style): keep `C:\Users\YourName\Projects\my-app`
 
-### Step 1: Copy the toolkit into the user's project
+### Step 1: Install the plugin (Claude Code)
+
+Since v7.0.0 the toolkit is a Claude Code plugin. Nothing is copied into the project except a short rules file and a few seed files. From any terminal on the user's machine:
+
+```bash
+claude plugin marketplace add mayankmankhand/llm-peer-review
+claude plugin install tk@llm-peer-review -s user
+```
+
+Inside Claude Code the same two steps are `/plugin marketplace add mayankmankhand/llm-peer-review` and `/plugin install tk@llm-peer-review`. A restart, or `/reload-plugins`, registers the commands; they carry the plugin's prefix (`/tk:explore`, `/tk:review`). The plugin installs its own runtime packages from its lockfile, so `npm install` is not needed for the debate or browser commands, only the Chromium binary (Step 2).
+
+### Step 1b: Seed the project
+
+If you are Claude Code, invoke the `tk:setup` skill from the project root: it runs the seed script, relays its report, and pages (exit code 3) when a decision is needed. From any other shell, run the same script directly:
+
+```bash
+node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/setup-project.js
+```
+
+(That `current` link is created when a Claude Code session starts; before the first session, use the versioned cache path `~/.claude/plugins/cache/llm-peer-review/tk/<version>/scripts/setup-project.js`.) Exit code 0 is done; 3 means it stopped before touching anything and printed what needs a human decision (a dirty git tree, locally modified toolkit files, or a copy-install of unknown provenance); rerun with `--force` only after the user decides.
+
+On a fresh project it writes, when absent: `.claude/rules/toolkit.md` (the short, version-stamped rules seed), `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md`, `DESIGN-PROFILE.md`, `.env.local.example`, `.gitattributes`, `artifacts/README.md`, `plans/`, and `artifacts/`; it line-merges `.gitignore`, key-merges the marketplace pointer into `.claude/settings.json` and the permission baseline into `.claude/settings.local.json`, and writes `.claude/.toolkit-state.json`. On a project that carried the copy-installed toolkit it migrates: see "Updating an Existing Project".
+
+### Step 1c: Copy-install for other editors (Cursor, Codex, any editor without Claude Code plugins)
 
 Use one of these commands. Replace `TARGET_PROJECT_PATH` with the absolute path to the user's project.
 
@@ -68,8 +91,7 @@ This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/skills/` (all skill definitions - review specialists, learning-opportunity, project-context - plus the shared reference files and the prebuilt HTML shells in `shared/shells/`)
 - `.claude/agents/` (all worker definitions - the review finder, index mapper, correction extractor, and design critic, carrying their model, effort, and tool settings - always updated)
-- `.claude/rules/toolkit.md` (toolkit workflow rules - always updated)
-- `.claude/rules/html-outputs.md` (HTML output rules - always updated)
+- `.claude/rules/toolkit.md` (the short toolkit rules seed, version-stamped - always updated; the long manual is `.claude/skills/shared/toolkit-reference.md` and the HTML output rules are `.claude/skills/shared/html-outputs.md`, both copied with the shared files and stamped)
 - `.claude/settings.local.json` (permission config - preserved if it already exists; new toolkit permissions are merged in on re-run)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
@@ -94,13 +116,17 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 ### Updating an Existing Project
 
-If the toolkit is already set up in the user's project, **run the same Step 1 command again**. It's safe to rerun.
+**On the plugin:** `claude plugin marketplace update llm-peer-review && claude plugin update tk@llm-peer-review`, restart or `/reload-plugins`, then invoke the `tk:upgrade` skill in each project that has files of its own under `.claude/` or a `CLAUDE.md` that mentions toolkit pieces. It audits those files against the conventions that changed since the project's last audited version (`docs/CONVENTIONS.md`), through the normal M2 audit and auto-fix loop, and pages once before editing any prompt file. The update itself never touches the project.
+
+**Migrating a copy-install to the plugin:** install the plugin (Step 1), then run `tk:setup` in the project (Step 1b). It classifies every managed file against the installer's manifest, pages on locally modified ones, backs up and removes the toolkit's files, keeps every custom file, seeds, merges settings, records the migration, and hands off to `tk:upgrade`. The undo is `git checkout -- .claude VERSION .gitattributes` plus the backup folder it names.
+
+**On a copy-install (other editors):** **run the same Step 1c command again**. It's safe to rerun.
 
 **What gets updated** (always overwritten - manifest-tracked, and backed up first when the copy on disk differs):
 - `.claude/commands/` - all slash command definitions
 - `.claude/agents/` - all worker definitions (review finder, index mapper, correction extractor, design critic)
 - `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references, and the prebuilt HTML shells in `shared/shells/`)
-- `.claude/rules/toolkit.md` and `.claude/rules/html-outputs.md` - the managed rules files (version-stamped)
+- `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, and `.claude/skills/shared/html-outputs.md` - the three version-stamped files
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
@@ -142,7 +168,9 @@ If the toolkit is already set up in the user's project, **run the same Step 1 co
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v6.3.3:** A patch on v6.3.2 (#164). The M11 pre-push tripwire learns six credential formats it could not see: GitLab's `glpat-` personal access token and its five sibling token prefixes, npm access tokens, PyPI publish tokens, JSON Web Tokens, and a `.netrc` credential record; `.netrc` and `_netrc` join the never-push files. The tripwire also gains `scripts/test-pre-push-check.js`, 31 checks, having been the only runtime script with no test file. Nothing about setup changes; re-running it replaces the script.
+**What's new in v7.0.0:** The toolkit is a Claude Code plugin (#167). Install once per machine, seed each project with `tk:setup`, update with `claude plugin update` and then `tk:upgrade`, which audits the project's own commands, skills, agents, rules, and `CLAUDE.md` against the conventions that changed (`docs/CONVENTIONS.md`, C-1 to C-8) and fixes what drifted through the loop. Every review dispatch goes to a typed `review-<kind>-finder` agent that preloads its criteria, so nothing is pasted per dispatch; the M2 skeptics and M3 verifiers are typed `audit-skeptic` and `fix-verifier` agents with no edit tools; `/create-plan` scores each plan with a fresh-context `plan-critic`. The always-on rules file is a short seed; the manual and the HTML output rules moved into the plugin as shared fragments. The copy-install scripts keep working for other editors.
+
+**What was new in v6.3.3:** A patch on v6.3.2 (#164). The M11 pre-push tripwire learns six credential formats it could not see: GitLab's `glpat-` personal access token and its five sibling token prefixes, npm access tokens, PyPI publish tokens, JSON Web Tokens, and a `.netrc` credential record; `.netrc` and `_netrc` join the never-push files. The tripwire also gains `scripts/test-pre-push-check.js`, 31 checks, having been the only runtime script with no test file. Nothing about setup changes; re-running it replaces the script.
 
 **What was new in v6.3.2:** A patch on v6.3.1 (#163). The cycle summary `/document` renders is now one standing page per repository at `artifacts/html/cycle.html`, replaced each run and carrying a running log of earlier cycles; it leads with what changed and why rather than a file inventory, and may carry a diagram when the cycle has a flow worth drawing. The wrap guard five shells were missing now lives once in the shared tokens. Nothing about setup changes; re-running it picks up the renderer, the shells, the tokens, and the prompt files. Existing `document-*.html` files are inert and safe to delete.
 
@@ -154,7 +182,9 @@ If the user wants a completely fresh `CLAUDE.md` template, they can delete their
 
 ### Step 2: Install dependencies (optional)
 
-All toolkit runtime packages live inside `.claude/scripts/` so they don't pollute the user's root `package.json`. One install covers both feature groups:
+**On the plugin** the runtime packages are installed with the plugin; the only thing left is the Chromium binary for `/tk:review-browser`: `npx --prefix ~/.claude/plugins/data/tk-llm-peer-review/current playwright-core install chromium` (plus `sudo npx playwright-core install-deps chromium` on Linux and WSL). Skip the rest of this step.
+
+**On a copy-install** all toolkit runtime packages live inside `.claude/scripts/` so they don't pollute the user's root `package.json`. One install covers both feature groups:
 
 ```bash
 npm install --prefix "TARGET_PROJECT_PATH/.claude/scripts"
@@ -179,7 +209,9 @@ The user's project does NOT need a root `package.json` for the toolkit to work. 
 
 ### Step 3: Set up API keys (optional, requires user input)
 
-Only needed if the user installed dependencies in Step 2:
+**On the plugin** the scripts read keys from the environment or from `~/.claude/plugins/.env.local` (one file per machine); a project-level `.env.local` is not found from the plugin cache. Tell the user to create that file from the template below, or to export the keys; `API-KEYS.md` has both. Do NOT fill in keys yourself.
+
+**On a copy-install,** only needed if the user installed dependencies in Step 2:
 
 ```bash
 cp "TARGET_PROJECT_PATH/.env.local.example" "TARGET_PROJECT_PATH/.env.local"
@@ -200,7 +232,7 @@ If `CLAUDE.md` was newly created (not skipped), tell the user they should edit i
 - **"Who I Am"** - describe themselves or their team
 - **"My Preferences"** - add project-specific rules or coding conventions
 
-Toolkit workflow rules are in `.claude/rules/toolkit.md` (auto-loaded, managed by the toolkit - no need to edit).
+The short toolkit rules are in `.claude/rules/toolkit.md` (auto-loaded, seeded by the toolkit - no need to edit); the full manual is the plugin's `toolkit-reference` fragment.
 
 </procedure>
 
@@ -232,8 +264,10 @@ On any install or update, `/audit-html` can scan the user's own markdown for fil
 
 - **"setup.sh: command not found"** - Make sure to run the full `bash -c '...'` command from Step 1, not just `setup.sh` on its own
 - **"target directory does not exist"** - Create the project folder first: `mkdir -p /path/to/project`
-- **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in the project root with `.md` files inside
-- **`/ask-gpt` or `/ask-gemini` fails** - Check that `npm install` was run and `.env.local` has valid API keys
+- **"Unknown command" for `/tk:...` right after a plugin install or update, or an agent type such as `tk:review-code-finder` not found** - Run `/reload-plugins` or restart Claude Code
+- **`tk:setup` exits 3** - It needs a decision (dirty tree, locally modified toolkit files, unknown provenance) and touched nothing; show the user its list and rerun with `--force` only when they say yes
+- **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in the project root with `.md` files inside (copy-install only)
+- **`/ask-gpt` or `/ask-gemini` fails** - On the plugin, the keys must be exported or in `~/.claude/plugins/.env.local` (a project-level `.env.local` is out of the scripts' reach); on a copy-install, check that `npm install` was run and `.env.local` has valid API keys
 - **"Permission denied"** - Ensure you have write access to the target project directory
 - **Commands exist but don't appear in the editor** - Make sure the editor workspace root is the project folder that contains `.claude/`, not a parent directory
 - **Script errors with `/bin/bash^M` or "bad interpreter"** - Line-ending issue. Delete the folder and clone fresh, or run `git add --renormalize . && git checkout -- .`

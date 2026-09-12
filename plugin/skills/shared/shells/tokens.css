@@ -1,0 +1,156 @@
+/* tokens.css - shared visual system for the toolkit's HTML shells.
+ *
+ * Mirrors .claude/skills/shared/html-look.md (typography, color tokens, severity
+ * hex). html-look.md stays the documented source of truth; this file is its
+ * machine-usable embodiment. UPDATE BOTH TOGETHER when the look changes.
+ *
+ * render-html.js inlines this file into each shell's /*__TOKENS__* / slot at
+ * render time, so the look lives in ONE place across every shell. Shell-specific
+ * layout (sticky bars, chips, two-column rounds, charts) lives in each shell's
+ * own <style>; this file holds only the tokens and the cross-shell card system. */
+
+/* Light palette. Defined on BARE :root so it is the unconditional default -
+ * never inside a media query - and the dark blocks below redefine only tokens.
+ * No color is given its sole definition in a conditional block. */
+:root{
+  color-scheme:light dark; /* the parts the browser draws itself (scrollbars, form controls) follow the palette instead of staying light in dark mode; the dark blocks and the explicit-light block below pin it (holistic review, R28) */
+  --bg:#ffffff; --bg-muted:#f4f4f5; --border:#e4e4e7;
+  --text:#18181b; --text-muted:#52525b; --accent:#2563eb;
+  --block:#dc2626; --warn:#d97706; --suggest:#2563eb;
+  --warn-strong:#b45309; /* AA text/badge variant of --warn (~5:1 contrast); --warn stays for decorative borders only */
+  --block-strong:#b91c1c; /* AA variant of --block for red TEXT on --bg-muted (5.9:1); --block itself is 4.4:1 there and fails */
+  --badge-text:#fff;     /* text ON a severity badge; a token because dark mode inverts it */
+  --positive:#15803d;    /* keep / added / pro. NOT a severity - severities are block/warn/suggest */
+  /* Tint surfaces for a state drawn ON a card or chip: an "on" chip, a signal
+   * or veto tag, a NEW/MOD/DEL file tag. The dark-mode sweep had flattened
+   * these to --bg-muted, which left .chip.on identical to .chip except for
+   * its text (holistic review, R30). Each is the 100-level tone of its hue,
+   * stepping to the 50-level only where the state's TEXT token would fall
+   * under AA: --accent on blue-100 measures 4.24:1, so blue steps down.
+   * Measured text-on-tint: accent 4.75, positive 4.57, warn-strong 4.68,
+   * block-strong 5.30. Every pairing is asserted in scripts/test-render-html.js. */
+  --accent-soft:#eff6ff; --positive-soft:#dcfce7; --warn-soft:#fef9c3; --block-soft:#fee2e2;
+}
+
+/* Dark palette (issue #155 item 4).
+ *
+ * Why this exists: these pages used to be local-only, where they inherited
+ * nothing from the viewer. Published to a hosted page they render inside the
+ * VIEWER's theme, so a light-only stylesheet gives a dark-mode reader a white
+ * slab. Both selectors below carry the SAME declarations - the media query
+ * handles a viewer whose theme is "system", the attribute handles an explicit
+ * choice - and the media query is guarded with :not([data-theme="light"]) so an
+ * explicit light choice still wins on a machine set to dark.
+ *
+ * The severity colors are re-derived, not reused. In light mode a badge is
+ * WHITE text on the severity color, which is the whole reason --warn-strong
+ * (#b45309) exists: base amber #d97706 is only ~3.2:1 against white and fails
+ * AA. On a dark ground that trade inverts - the readable badge is a LIGHT fill
+ * with near-black text - so dark mode lightens every severity fill to the
+ * 400-level tone and flips --badge-text to the page's dark ink. Each pairing
+ * clears AA comfortably (6.4:1 red, 7.0:1 blue, 10.6:1 amber), and amber
+ * no longer needs a separate strong variant, so --warn-strong tracks --warn. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
+    --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
+    --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
+    --warn-strong:#fbbf24;
+    --badge-text:#18181b;
+    --positive:#4ade80;
+    --block-strong:#f87171; /* on a dark muted surface --block already clears AA, so it needs no darker variant */
+    /* Tints are the 900-level tone of each hue, stepping to 950 where the
+     * state text falls under AA: --accent on blue-900 is 4.07:1 and
+     * --block-strong on red-900 is 3.62:1. Measured text-on-tint: accent 5.78,
+     * positive 5.23, warn-strong 5.43, block-strong 5.84 (holistic review, R30). */
+    --accent-soft:#172554; --positive-soft:#14532d; --warn-soft:#78350f; --block-soft:#450a0a;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#18181b; --bg-muted:#27272a; --border:#3f3f46;
+  --text:#f4f4f5; --text-muted:#a1a1aa; --accent:#60a5fa;
+  --block:#f87171; --warn:#fbbf24; --suggest:#60a5fa;
+  --warn-strong:#fbbf24;
+  --badge-text:#18181b;
+  --positive:#4ade80;
+  --block-strong:#f87171;
+  --accent-soft:#172554; --positive-soft:#14532d; --warn-soft:#78350f; --block-soft:#450a0a;
+}
+/* An explicit light choice on a machine set to dark. The tokens already win
+ * there (the media block is guarded against it), but color-scheme on bare
+ * :root says "light dark", which lets the browser follow the OS for the parts
+ * it draws itself - so a light page would get dark scrollbars and controls.
+ * Pin those to light as well (holistic review, R28). */
+:root[data-theme="light"]{color-scheme:light;}
+*{box-sizing:border-box;}
+/* Type scale (issue #161). The previous scale spanned 2.76x end to end with 17
+ * of its 25 sizes BELOW body size and only 1.34x of headroom above it, which is
+ * a plateau rather than a hierarchy: there was no size available to make one
+ * thing on the page louder than another. Three changes, and only these three,
+ * under the approved type-scale divergence:
+ *   1. body 16px -> 17px. 16px sits at the practical floor for sustained screen
+ *      reading, and these pages are read, not scanned.
+ *   2. a --display step above h1, so a verdict can be the loudest thing present.
+ *   3. weights open from 500/600 to 400/700. A 100-unit step in the middle of
+ *      the axis is an expert-eye distinction that disappears after hinting.
+ * Colors and spacing are untouched: the severity palette is already correct and
+ * already contrast-tested, and the gap was never color. */
+:root{
+  --text-display:2.75rem;   /* the bottom line, and nothing else */
+  --text-h1:1.875rem;
+  --text-h2:1.5rem;
+  --text-h3:1.1rem;
+  --text-body:1rem;
+  --text-small:.875rem;
+  --text-micro:.75rem;      /* labels, tags, chips */
+  --weight-normal:400;
+  --weight-strong:700;
+  --measure:64ch;           /* running prose stays readable; the page stays 940px */
+}
+/* Token safety, shell-wide (issue #163). One unbroken URL, hash, or file path must
+   wrap rather than push the whole page sideways. It lives here, on body, rather than
+   as a per-shell rule because overflow-wrap is INHERITED: one declaration covers all
+   seven shells and any shell added later, so the gap cannot reopen. Review and debate
+   shipped their own local copies in #161 and #162; those now merely restate this and
+   are left alone. A <pre> is unaffected either way - white-space:pre never wraps, so
+   it keeps its own horizontal scroll box. */
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;max-width:940px;margin:0 auto;padding:0 1.5rem 4rem;font-size:17px;font-weight:var(--weight-normal);overflow-wrap:anywhere;}
+.display{font-size:var(--text-display);font-weight:var(--weight-strong);line-height:1.1;letter-spacing:-.02em;margin:0 0 .5rem;text-wrap:balance;max-width:var(--measure);}
+h1{font-size:var(--text-h1);font-weight:600;line-height:1.3;margin:0 0 .25rem;}
+h2{font-size:var(--text-h2);font-weight:600;line-height:1.3;margin:2rem 0 .8rem;}
+h3{font-size:var(--text-h3);font-weight:500;margin:0 0 .4rem;}
+code,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:.85rem;background:var(--bg-muted);padding:.1rem .35rem;border-radius:4px;}
+a{color:var(--accent);text-decoration:none;}
+a:hover{text-decoration:underline;}
+
+/* Severity cards - shared by review findings and debate recommended-actions. */
+.finding,.action{border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;margin-bottom:.9rem;border-left-width:5px;border-left-style:solid;}
+.finding--block,.action--block{border-left-color:var(--block);}
+.finding--warn,.action--warn{border-left-color:var(--warn);}
+.finding--suggest,.action--suggest{border-left-color:var(--suggest);}
+.finding header,.action header{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem;}
+
+/* Severity badges. */
+.badge{font-size:.72rem;font-weight:600;padding:.18rem .5rem;border-radius:999px;color:var(--badge-text);white-space:nowrap;}
+.badge--block{background:var(--block);}
+.badge--warn{background:var(--warn-strong);}
+.badge--suggest{background:var(--suggest);}
+
+/* Card metadata + fields. */
+.finding-id,.action-id{font-family:ui-monospace,Consolas,monospace;font-weight:600;}
+.specialist-tag{font-family:ui-monospace,Consolas,monospace;font-size:.75rem;color:var(--text-muted);}
+.file-link{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;margin-left:auto;}
+.what{font-size:1rem;font-weight:500;margin:.1rem 0 .55rem;}
+.field{font-size:.92rem;margin-bottom:.35rem;}
+.field strong{color:var(--text);}
+
+/* Placeholder left by render-html.js when a payload image could not be inlined -
+   unreadable, or over the embed budget. Visible on purpose: the bug this
+   replaces was a silently broken image. */
+.img-omitted{color:var(--text-muted);font-size:.85rem;}
+
+/* Summary footer - shared by review and any report that ends with a count strip. */
+footer.summary{margin-top:2rem;border-top:1px solid var(--border);padding-top:1rem;display:flex;gap:1.2rem;flex-wrap:wrap;font-size:.9rem;color:var(--text-muted);}
+footer.summary span strong{color:var(--text);}

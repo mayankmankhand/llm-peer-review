@@ -1,8 +1,8 @@
 # Toolkit Reference
 
-<!-- Toolkit version: 6.3.3 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 7.0.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
-The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, permissions. Since v7.0.0 (issue #167) it ships inside the plugin and is loaded by the commands that need it (`/setup`, `/upgrade`) rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`.
+The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here.
 
 ## How We Work Together
 

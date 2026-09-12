@@ -1736,6 +1736,10 @@ if ($IsUpgrade -and $OldVersion -ne $Version -and $LegacyCleaned -eq 0 -and $Pla
   Write-Host ""
 }
 
+Write-Host "    Claude Code users: since v7.0.0 the toolkit is also a plugin. Prefer it over this copy:"
+Write-Host "      /plugin marketplace add mayankmankhand/llm-peer-review, /plugin install tk@llm-peer-review,"
+Write-Host "      then /tk:setup in this project (it migrates this copy and keeps your custom files)."
+Write-Host ""
 Write-Host "    What to do next:"
 Write-Host ""
 Write-Host "      cd $Target"

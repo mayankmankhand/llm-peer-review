@@ -1,8 +1,8 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 6.3.3 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 7.0.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
-This project runs the LLM Peer Review toolkit as a Claude Code plugin named `tk`, so its commands are typed with that prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit's `toolkit-reference` fragment: it ships inside the plugin, `/tk:setup` and `/tk:upgrade` load it, and its stable path on this machine is `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`. In the toolkit's own repository the same commands run unprefixed.
+This project runs the LLM Peer Review toolkit as a Claude Code plugin named `tk`, so its commands are typed with that prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit's `toolkit-reference` fragment: it ships inside the plugin, and its stable path on this machine is `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`; open it there when a question is not answered here. In the toolkit's own repository the same commands run unprefixed.
 
 ## How We Work Together
 

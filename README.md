@@ -176,7 +176,9 @@ The short version: **auto-fixing is a privilege earned by verification.** Add th
 
 ### Keeping your own files through an upgrade
 
-Re-running setup is how you get toolkit updates, and it is also where custom work quietly disappears. These are worth checking once, before your next upgrade.
+**On the plugin (v7.0.0 and later), an update cannot touch your files:** `/plugin update` changes the plugin cache and nothing in your project. What can go stale is the other direction, your files referring to toolkit pieces that moved, and that is what `/tk:upgrade` audits: it reads the [conventions](docs/CONVENTIONS.md) that changed, finds each file of yours behind one, and fixes it through the loop after one page. Three habits keep that audit short: refer to toolkit pieces by name (`Skill(tk:<name>)`, `subagent_type=tk:<name>`) rather than by a `.claude/...` path; give your own agents a `skills:` line instead of pasting criteria; and never edit a toolkit script, because the plugin replaces it whole (file an issue instead).
+
+**On a copy-install,** re-running setup is how you get toolkit updates, and it is also where custom work quietly disappears. These are worth checking once, before your next upgrade.
 
 **Do not customize by editing a toolkit file.** Editing `.claude/commands/review.md` to add your own step works until the next upgrade copies the toolkit's version back over it. Put your customization in a file the toolkit does not ship.
 
@@ -202,7 +204,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 **Give finder workers no ability to edit.** A worker that can both find problems and change files will apply its findings before anything has judged them, which removes the check that makes the loop safe.
 
-**Send everything in the prompt.** A subagent starts blank. It does not inherit your conversation, and it does not discover skills on its own, so the criteria and the file excerpts have to be in the message you send it.
+**Preload the expertise; paste only the run.** A subagent starts blank: it does not inherit your conversation and does not discover skills on its own. Since v7.0.0 the answer is a `skills:` line in the agent's frontmatter, which loads a skill into the worker byte for byte on every dispatch (the toolkit's finders preload `tk:review-<kind>-criteria` and `tk:dispatch-contract` this way). The prompt then carries only what differs per run: project context, file excerpts, notes. A manual pasted into the prompt sits in the parent transcript once per dispatch and is the first thing compaction truncates.
 
 **Have a branch for the worker that fails.** Decide in advance what happens when one errors, times out, or returns something you cannot parse.
 
@@ -222,15 +224,15 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 ## Requirements
 
-This toolkit runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-a-bash-workflow) first. Native Windows PowerShell also works for setup and all non-debate commands; only `/ask-gpt` and `/ask-gemini` require bash/WSL.
+The plugin needs **Claude Code** with plugin support (2.x); it runs wherever Claude Code does. The copy-install for other editors runs on **macOS, Linux, or WSL** (Windows Subsystem for Linux). Windows users: [install WSL](SETUP.md#step-4-optional-install-wsl-if-you-prefer-a-bash-workflow) first. Native Windows PowerShell also works for setup and all non-debate commands; only `/ask-gpt` and `/ask-gemini` require bash/WSL.
 
 ---
 
 ## What's New
 
-**Latest release: v6.3.3** (September 2026), a patch that teaches the pre-push tripwire six credential formats it could not see, GitLab's personal access token above all, since the toolkit authenticates with `glab` on a GitLab install; it also gives that scanner the test file it never had (#164). v6.3.2 (September 2026) was a patch that gave the cycle summary the treatment the review page got: `/document` now writes one standing page per repository at `artifacts/html/cycle.html`, replaced each run, leading with what changed and why instead of a file inventory and carrying a running log of earlier cycles so time away does not lose them (#163). v6.3.1 (September 2026) was a patch on **v6.3.0** that made two of its promises true in a real run: the evidence on the review page is written by the audit rather than typed, and the standing page is rendered after the fix loop so it shows what is still open and can go empty (#162). v6.3.0 (September 2026), additive on top of **v6.2.0**, rewrote what a review finding says. The four-field template is gone - a finding is one sentence carrying the defect and the harm, a second only when it can say who is hit or when it fires, a fix line that states a cost, and the check's real output attached instead of paraphrased. The length caps are counted by the renderer rather than requested by a prompt, and the review page becomes one standing page per repository that carries only what is open and can go empty (#161); [What v6.3.0 adds](#what-v630-adds) has the bullets. v6.2.0 added the design workflow described under `/explore` above (#160). v6.1.1 was a one-fix patch on **v6.1.0**, which is additive on top of **v6.0.0** (August 2026). **v6.0.0 is the one that changed behavior** and is still the release to read first: if you are upgrading from v5.x or earlier, start with its bullets directly below.
+**Latest release: v7.0.0** (September 2026). The toolkit is now a Claude Code **plugin**: install it once per machine, seed each project with `/tk:setup`, and update with `/plugin update` followed by `/tk:upgrade`, which audits the files you wrote yourself against the conventions that changed and fixes what drifted through the same audit-and-fix loop reviews use. Under the hood every review dispatch goes to a typed finder agent that already carries its criteria, so nothing is pasted per dispatch and a review that compacts mid-run loses nothing. [What v7.0.0 adds](#what-v700-adds) has the details; the copy-install scripts still work for other editors.
 
-Setup installs from `main`, not from a tag, so you get everything on this page, not just the tagged release. The bullets directly below describe v6.0.0; [What v6.1.0 adds](#what-v610-adds), [What v6.2.0 adds](#what-v620-adds), and [What v6.3.0 adds](#what-v630-adds) list what the newer releases build on top of it. See the CHANGELOG for the full split.
+Setup installs from `main`, not from a tag, so you get everything on this page, not just the tagged release. The bullets directly below describe v6.0.0; [What v6.1.0 adds](#what-v610-adds), [What v6.2.0 adds](#what-v620-adds), [What v6.3.0 adds](#what-v630-adds), and [What v7.0.0 adds](#what-v700-adds) list what the newer releases build on top of it. See the CHANGELOG for the full split.
 
 - **The loop no longer stops at a report.** A review used to hand you a list and wait for "fix it". It now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and starts the next stage on its own. Two per-run phrases take control back, and they do different things: say **"report only"** and the run changes nothing, say **"no chaining"** and it finishes its stage without starting the next. Nothing was renamed or removed; what changed is what a command does once it starts.
 - **Findings have to prove themselves before you see them.** Every finding now ships with a receipt (a read-only command, plus what its output must show), and the run executes it. What survives goes to a fresh skeptic told to refute it, and a Block-severity finding faces three. Expect shorter reports: the first live run killed four of seven findings. What was thrown out is listed rather than hidden.
@@ -275,21 +277,54 @@ Released 2026-09-03 on top of v6.2.0. Nothing here changes the auto-by-default b
 
 **v6.3.1** (2026-09-03) is the patch that made the second and fourth bullets above true in a real run: the audit now writes the receipt file the page reads, the page is rendered once per run after the fix loop, a focused `/review-*` run merges into it instead of overwriting it, and the twenty-seven defects the v6.3.0 review found are fixed. [CHANGELOG.md](CHANGELOG.md) has the list.
 
+### What v7.0.0 adds
+
+Released 2026-09-12 on top of v6.3.3 (#167). The loop is unchanged; what changed is how the toolkit reaches your project and how a review carries its expertise.
+
+- **It is a plugin.** `/plugin marketplace add mayankmankhand/llm-peer-review`, `/plugin install tk@llm-peer-review`, then `/tk:setup` in each project. The commands, skills, agents, and scripts live in the plugin cache and never in your project; a project keeps a short, version-stamped rules file and its own files. Commands carry the `tk:` prefix (`/tk:explore`, `/tk:review`).
+- **Upgrades are audited, not copied over.** `/plugin update tk@llm-peer-review` moves the plugin; `/tk:upgrade` then reads the [conventions](docs/CONVENTIONS.md) that changed since the version your project was last audited against, turns every file of yours that is behind one into a finding with a receipt, and runs it through the normal M2 audit and auto-fix loop, with one page before it edits your prompt files. A copy-install migrates the same way: `/tk:setup` backs up and removes the toolkit's files, keeps yours, and hands off to `/tk:upgrade`.
+- **Every review dispatch goes to a typed finder.** Eight `review-<kind>-finder` agents preload their criteria and the dispatch contract through their own `skills:` line, so the orchestrator pastes only project context and file excerpts. The M2 skeptics and M3 verifiers are typed too (`audit-skeptic`, `fix-verifier`), with no edit tools, and `/create-plan` scores each plan with a fresh-context `plan-critic` before the approval stop.
+- **The always-on rules got short.** The long manual moved into the plugin (`toolkit-reference`), and the HTML output rules load with the commands that render HTML instead of every turn.
+
 Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
 
 ---
 
 ## Add to a New Project
 
-This isn't an app you install; it's a set of instructions that live in your project folder. Once they're there, type `/` in your editor and the commands show up.
+Since v7.0.0 the toolkit is a Claude Code plugin. Nothing is copied into your project except a short rules file and a few seed files; the commands, skills, agents, and scripts live in the plugin and update in one command. Other editors keep the copy-install below.
 
-### Recommended: Tell your AI agent to set it up
+### Install the plugin (Claude Code)
 
-The fastest path is to let Claude Code, Cursor, or any AI agent with shell access install it for you. Open your project folder in Claude Code or Cursor, then paste the message below into the AI chat panel (the side panel where you chat with the assistant):
+Inside Claude Code, from any folder:
+
+```
+/plugin marketplace add mayankmankhand/llm-peer-review
+/plugin install tk@llm-peer-review
+```
+
+Or from a terminal: `claude plugin marketplace add mayankmankhand/llm-peer-review && claude plugin install tk@llm-peer-review -s user`. Restart Claude Code or run `/reload-plugins`, and the commands appear under the plugin's prefix: `/tk:explore`, `/tk:review`, `/tk:document`, and the rest. The plugin installs its own runtime packages (for `/tk:ask-gpt`, `/tk:ask-gemini`, `/tk:review-browser`) from its lockfile; nothing lands in your project's `package.json`.
+
+### Seed your project
+
+Open your project in Claude Code and run `/tk:setup`. On a fresh project it writes the short rules file `.claude/rules/toolkit.md`, `LESSONS.md`, `DESIGN-PROFILE.md`, `CLAUDE.md` (empty on purpose), the `plans/` and `artifacts/` folders, the gitignore lines, and a pointer to the marketplace in `.claude/settings.json` so a collaborator's Claude Code offers the install. Every file is write-when-absent: your existing files are never overwritten. On a project that carried the copy-installed toolkit, it migrates instead; see [Update an Existing Project](#update-an-existing-project).
+
+### Optional: API keys and Chromium
+
+- `/tk:ask-gpt`, `/tk:ask-gemini`, and the design workflow's media helper read their keys from the environment or from `~/.claude/plugins/.env.local` (one file per machine, not per project). [API-KEYS.md](API-KEYS.md) walks through it.
+- `/tk:review-browser` needs Chromium once per machine: `npx --prefix ~/.claude/plugins/data/tk-llm-peer-review/current playwright-core install chromium` (on Linux and WSL also `sudo npx playwright-core install-deps chromium`). That `current` path is a link the plugin keeps pointing at its installed version.
+
+### Recommended for a hands-off install: tell your AI agent
+
+Paste this into Claude Code's chat and it will run the steps above for you:
 
 > "Set up the workflow from this repo in my project. Follow the instructions in https://github.com/mayankmankhand/llm-peer-review/blob/main/AGENT-SETUP.md"
 
-[`AGENT-SETUP.md`](AGENT-SETUP.md) has step-by-step instructions written for AI agents. They will clone the toolkit, copy the right files into your project, install dependencies (if you want them), and prompt you for API keys.
+[`AGENT-SETUP.md`](AGENT-SETUP.md) has the step-by-step instructions written for AI agents, for both the plugin and the copy-install.
+
+### Copy-install for other editors (Cursor, Codex, and any editor without Claude Code plugins)
+
+The setup scripts copy the same files into your project the way every release before 7.0.0 did. They stay supported until the per-editor layouts land (#144); Claude Code users should prefer the plugin, because a copy-install cannot be audited by `/tk:upgrade` and its scripts are replaced whole on every re-run.
 
 ### Manual Setup (run the script yourself)
 
@@ -407,6 +442,23 @@ npx --prefix .claude/scripts playwright-core install chromium
 
 ## Update an Existing Project
 
+### On the plugin (v7.0.0 and later)
+
+```
+/plugin marketplace update llm-peer-review
+/plugin update tk@llm-peer-review
+```
+
+Restart Claude Code or run `/reload-plugins`. That moves the plugin; your project has not changed. Then, in each project that has files of its own under `.claude/` (commands, skills, agents, rules) or a `CLAUDE.md` that mentions toolkit pieces, run `/tk:upgrade`. It opens the cycle's issue, reads the [conventions](docs/CONVENTIONS.md) that changed since the version the project was last audited against, and turns every file of yours that is behind one into a finding with a receipt: a command that still dispatches the old generic finder, a prompt that pastes review criteria, an agent with edit tools in a reviewer role, a path into `.claude/skills/shared/` that no longer exists in the project. The findings go through the same M2 audit and auto-fix loop a review uses, with one page listing every prompt file before the first edit, then one sample `/tk:review` proves the loop on the new version and `/tk:document` records the cycle. A project with nothing behind is told so in one line.
+
+Your own files are never overwritten by an update, because the update touches only the plugin cache. The two files the toolkit does write into a project, the short rules seed and the state file `.claude/.toolkit-state.json`, are the ones `/tk:upgrade` stamps.
+
+### Moving a copy-install (v6.x or earlier) to the plugin
+
+Install the plugin, then run `/tk:setup` in the project. It detects the copy-install, classifies every managed file against the installer's manifest, and pages on any file you edited locally (each one is backed up and becomes an `/tk:upgrade` finding with the diff as its receipt). On a clean or approved run it backs up and removes the toolkit's files, keeps every custom file, seeds the short rules file, merges the marketplace pointer and permissions, records the migration, and hands off to `/tk:upgrade`, which audits your custom files against every convention since the version you came from. The report ends with the one-line undo: `git checkout -- .claude VERSION .gitattributes` plus the backup folder. The first push after the migration pages on the settings change, which is the tripwire doing its job.
+
+### Copy-install updates (other editors)
+
 Re-run the same setup command (or ask your AI agent to follow [`AGENT-SETUP.md`](AGENT-SETUP.md) again); it is safe to rerun, and the list below says exactly what it touches.
 
 **What an upgrade touches:**
@@ -454,15 +506,15 @@ npx --prefix .claude/scripts playwright-core --version # Chromium binary
 
 ### Checking Your Version
 
-Open `.claude/rules/toolkit.md` in your project. The first comment near the top shows your installed version:
+On the plugin, `/plugin` lists the installed version of `tk@llm-peer-review`. The version a project was last seeded or audited at is the stamp near the top of its `.claude/rules/toolkit.md`, and `.claude/.toolkit-state.json` records the install path and the versions it came from and was audited against:
 
 ```
-<!-- Toolkit version: X.Y | Managed by LLM Peer Review. ...
+<!-- Toolkit version: X.Y.Z | Managed by LLM Peer Review. ...
 ```
 
-To update, re-run setup. The version stamp updates automatically. See [CHANGELOG.md](CHANGELOG.md) for what changed between versions.
+On a copy-install the same stamp shows the installed version; re-running setup updates it. See [CHANGELOG.md](CHANGELOG.md) for what changed between versions, and its Upgrading sections for the conventions each release adds.
 
-**Coming from before the CLAUDE.md split?** If your `CLAUDE.md` has toolkit rules mixed in (workflow, permissions, slash commands table), those now live in `.claude/rules/toolkit.md`. After re-running setup, edit your `CLAUDE.md` to keep only project-specific info, and retire any "report first" wording while you are in there (see the checklist above). See [CHANGELOG.md](CHANGELOG.md) for details.
+**Coming from before the CLAUDE.md split?** If your `CLAUDE.md` has toolkit rules mixed in (workflow, permissions, slash commands table), those now live in the plugin's `toolkit-reference` fragment, and the short seed in `.claude/rules/toolkit.md` points at it. Edit your `CLAUDE.md` to keep only project-specific information; `/tk:upgrade` flags the toolkit paths it still carries.
 
 ---
 
@@ -511,10 +563,10 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | File | Who owns it | What it does |
 |---|---|---|
 | `CLAUDE.md` | **You** | Your project-specific instructions (tech stack, preferences, team info). Never overwritten by setup. |
-| `.claude/rules/toolkit.md` | **Toolkit** | Workflow rules, slash command docs, permissions. Always updated when you re-run setup. |
-| `.claude/commands/*.md` | **Toolkit** (editable) | One file per slash command. You can customize these. |
-| `.claude/skills/<name>/SKILL.md` | **Toolkit** (editable) | One folder per skill (review specialists, learning-opportunity). Auto-create slash commands and are agent-discoverable. `project-context` is agent-only (not user-invocable). |
-| `.claude/skills/shared/*.md` | **Toolkit** (editable) | Shared reference files used by multiple review skills (`severity-anchors.md`, `finding-contract.md`, `report-format.md`, `finding-id-system.md`, `browse-api.md`). Editing one of these affects every skill that injects it. |
+| `.claude/rules/toolkit.md` | **Toolkit** (seeded) | The short always-on rules, version-stamped. The full manual (workflow, command table, permissions, git and worktree conventions) is the plugin's `toolkit-reference` fragment. `/tk:setup` writes the seed once; `/tk:upgrade` flags a stale stamp. |
+| `.claude/commands/*.md` | **Plugin** | One file per slash command, in the plugin cache on a plugin install (never in your project). Your own commands go beside them in your project's `.claude/commands/` and dispatch the toolkit's agents by scoped name. On a copy-install these are copied files you can edit until the next re-run. |
+| `.claude/skills/<name>/SKILL.md` | **Plugin** | One folder per skill (review specialists, learning-opportunity, setup, upgrade). The `review-<kind>-criteria`, `dispatch-contract`, `design-rules`, and `project-context` skills are agent-only: they exist to be preloaded by name. |
+| `.claude/skills/shared/*.md` | **Plugin** | Shared reference files used by multiple review skills (`severity-anchors.md`, `finding-contract.md`, `report-format.md`, `finding-id-system.md`, `browse-api.md`). Editing one of these affects every skill that injects it. |
 | `LESSONS.md` | **You** | Lesson index (one line per lesson). Read at the start of `/explore`, `/create-plan`, `/execute`, and `/pair-debug` so past lessons inform new work. Never overwritten. |
 | `LESSONS-detail.md` | **You** | Full write-ups behind the index, opened on demand when a lesson is relevant. Never overwritten. |
 | `DESIGN-PROFILE.md` | **You** | Your repo's design answers: whether a design system exists and where, what exploration may vary, taste notes, directions tried, prompts to retry. Read by `/explore` and `/execute`, written by `/explore` and `/document`. Seeded once from `.claude/skills/shared/design-profile-template.md`, never overwritten. |
@@ -529,7 +581,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `reports/` | **Yours** | Research and review reports you or the toolkit write during a cycle. Gitignored (local working docs). Setup does not create it; make it when you first need it. |
 | `artifacts/html/` | **Generated** | Rendered HTML artifacts (reviews, cycle summaries, debates, audits) plus `index.jsonl`, the append-only record of every published page. Gitignored; the index is the one file in it that cannot be regenerated. |
 
-Setup also copies a few supporting files (`.gitignore`, `.gitattributes`, `settings.local.json`, `.env.local.example`). See [Advanced: Do It Manually](#advanced-do-it-manually) for the full list.
+On the plugin, `/tk:setup` also writes `.claude/.toolkit-state.json` (the install path and the versions the project came from and was audited against), merges a marketplace pointer into `.claude/settings.json`, and seeds `.gitignore`, `.gitattributes`, and `.env.local.example`. The `.claude/scripts/*.js` rows above describe the plugin's scripts; a plugin install has no `.claude/scripts/` folder in the project at all. A copy-install gets those files copied; see [Advanced: Do It Manually](#advanced-do-it-manually) for the full list.
 
 **Why is CLAUDE.md empty?** On purpose. It's a blank slate for your project-specific info. The toolkit rules live in `.claude/rules/toolkit.md` instead, so toolkit updates can reach you without overwriting your project notes.
 
@@ -563,14 +615,17 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 ## Customization
 
 - **CLAUDE.md** - Your project-specific instructions. Describe your project, tech stack, and preferences here. See [How It Works](#how-it-works-file-architecture) for details.
-- **`.claude/rules/toolkit.md`** - Toolkit workflow rules (auto-updated on setup). Don't edit this; your changes will be overwritten.
-- **Commands and skills** - Each file in `.claude/commands/` is independent. Skill folders in `.claude/skills/<name>/SKILL.md` work the same way. Want `/review-code` to check different things? Edit `.claude/skills/review-code/SKILL.md`. The 9 review skills are: `review-code`, `review-security`, `review-commands`, `review-plan`, `review-ux`, `review-browser`, `review-full`, `review-deps`, `review-copy`. There is also a standalone `security-audit` skill for a deep on-demand whole-repo security pass.
+- **`.claude/rules/toolkit.md`** - The short toolkit rules seed. Don't edit this; `/tk:setup` rewrites it and `/tk:upgrade` flags a stale one. Your own rules go in their own files beside it, which the toolkit never touches.
+- **Commands and skills** - On the plugin, the toolkit's files are read-only in the plugin cache. Customize by adding your own command, skill, or agent in your project's `.claude/` folder: dispatch the toolkit's finders by scoped name (`subagent_type=tk:review-code-finder`), preload a criteria skill on your own agent with a `skills:` line, and refer to toolkit pieces by name rather than by path, which is what `/tk:upgrade` checks (see [docs/CONVENTIONS.md](docs/CONVENTIONS.md)). On a copy-install each file in `.claude/commands/` and `.claude/skills/<name>/SKILL.md` is a copy you can edit until the next re-run of setup replaces it.
 - **LESSONS.md** - Lesson index that Claude reads each session so past lessons feed back into new work; full write-ups live in **LESSONS-detail.md**. Both are yours to customize.
 
 ---
 
 ## Troubleshooting
 
+- **"Unknown command: /tk:explore" right after installing or updating the plugin** - Run `/reload-plugins` or restart Claude Code. The same fix applies when a dispatch says an agent type such as `tk:review-code-finder` is not found: a plugin's agents register when the session loads them.
+- **`/tk:ask-gpt` says the key was not found, but `.env.local` is in the project** - On the plugin the scripts run from the plugin cache and look upward from there, so a project-level `.env.local` is out of reach. Export the keys, or put the file at `~/.claude/plugins/.env.local`. See [API-KEYS.md](API-KEYS.md).
+- **`/tk:setup` stopped with exit code 3** - It found something that needs your decision (a dirty git tree, locally modified toolkit files, or a copy-install of unknown provenance) and touched nothing. Read its list; rerun with `--force` only after you have decided.
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
 - **`/ask-gpt` or `/ask-gemini` fails** - Check that `npm install --prefix .claude/scripts` was run and `.env.local` has valid API keys.
 - **`/ask-gpt` or `/ask-gemini` prints a "deprecated model" warning** - v4.5.0 auto-overrides outdated `GPT_MODEL` or `GEMINI_MODEL` env values with the current default. Edit `.env.local` to remove or update the stale value if you want to silence the warning. See [API-KEYS.md](API-KEYS.md#changing-the-model).

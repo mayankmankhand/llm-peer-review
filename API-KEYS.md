@@ -93,10 +93,18 @@ Then restart PowerShell (or any open terminals) for the change to take effect.
 
 ### Option B: `.env.local` File (Easier, Less Safe)
 
-This stores your keys in a file inside your project folder. The file is listed in `.gitignore` so git skips it, but the keys are still sitting in plain text on your disk.
+This stores your keys in a file on your disk. Where the file goes depends on how the toolkit is installed:
+
+- **Plugin (v7.0.0 and later):** the scripts run from the plugin's own folder under `~/.claude/plugins/` and look upward from there, so a file in your project is out of their reach. Put it at `~/.claude/plugins/.env.local`, one file per machine, shared by every project. Moving keys there from a project's old `.env.local` is a good moment to rotate them.
+- **Copy-install:** in your project folder, where it always was. It is listed in `.gitignore` so git skips it.
+
+Either way the keys sit in plain text on your disk.
 
 ```bash
-# From your project directory:
+# Plugin: one file per machine
+cp .env.local.example ~/.claude/plugins/.env.local
+
+# Copy-install: from your project directory
 cp .env.local.example .env.local
 ```
 

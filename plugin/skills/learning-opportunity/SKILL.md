@@ -1,0 +1,59 @@
+---
+name: learning-opportunity
+description: Pause development to learn a concept at 3 levels of depth. Triggers when unfamiliar patterns, new frameworks, or complex concepts appear during development.
+allowed-tools:
+  - Read
+  - Grep
+  - Glob
+  - WebSearch
+---
+
+# Learning Opportunity
+
+**Use this when:** You hit an unfamiliar pattern, framework, or concept and want to pause development to understand it at three levels of depth.
+**Don't use this when:** You are debugging a specific bug (use `/tk:pair-debug`) or reviewing code quality (use `/tk:review-code`).
+
+Pause development mode. I want to understand something better.
+
+## Teaching Approach
+
+<guidelines>
+
+**Target audience**: Technical PM with mid-level engineering knowledge. Understands architecture, can read code, ships production apps. Not a senior engineer, but not a beginner either.
+
+**Philosophy**: 80/20 rule - focus on concepts that compound. Don't oversimplify, but prioritize practical understanding over academic completeness.
+
+</guidelines>
+
+## Three-Level Explanation
+
+Present the concept at **three increasing complexity levels**. Let me absorb each level before moving on.
+
+### Level 1: Core Concept
+- What this is and why it exists
+- The problem it solves
+- When you'd reach for this pattern
+- How it fits into the broader architecture
+
+### Level 2: How It Works
+- The mechanics underneath
+- Key tradeoffs and why we chose this approach
+- Edge cases and failure modes to watch for
+- How to debug when things go wrong
+
+### Level 3: Deep Dive
+- Implementation details that affect production behavior
+- Performance implications and scaling considerations
+- Related patterns and when to use alternatives
+- The "senior engineer" perspective on this
+
+## Tone
+
+<rules>
+
+- Peer-to-peer, not teacher-to-student
+- Technical but not jargon-heavy
+- Concrete examples from the current codebase
+- Acknowledge complexity honestly - "this is genuinely tricky because..."
+
+</rules>

@@ -108,6 +108,15 @@ for rules_file in "${RULES_FILES[@]}"; do
   echo "  Updated $rules_file"
 done
 
+# 5. Rebuild the generated plugin layout so plugin.json and every emitted file
+# carry the new version. The committed plugin/ is what the marketplace serves,
+# and `build-plugin.js --check` (run by the pre-push tripwire) fails on a
+# stale copy, so the rebuild belongs to the bump, not to a separate step.
+if [ -f scripts/build-plugin.js ]; then
+  node scripts/build-plugin.js --quiet
+  echo "  Rebuilt plugin/ at v$NEW"
+fi
+
 echo ""
 echo "Automated updates done. Still to do manually:"
 echo ""
@@ -121,6 +130,8 @@ echo "        1. In .claude/scripts/ask-*.js, append the CURRENT value of DEFAUL
 echo "        2. Then update DEFAULT_*_MODEL to the new value"
 echo "        3. Update .env.local.example and API-KEYS.md to match"
 echo "        (Ordering matters: step 1 before step 2, otherwise the old default is gone from the file and easy to mistype.)"
+echo "  [ ] If this release adds or changes a convention, append its C-<n> entry to .claude/skills/shared/conventions.md and name it in the CHANGELOG Upgrading section"
+echo "  [ ] Commit plugin/ together with the bump (it was just rebuilt)"
 echo "  [ ] Run 'git diff' to verify all changes"
 echo "  [ ] Commit: git commit -m 'Bump to v$NEW (<reason>)'"
 echo ""
