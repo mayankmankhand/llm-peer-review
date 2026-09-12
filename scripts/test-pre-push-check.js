@@ -406,8 +406,40 @@ nearMissTests();
 falsePositiveTests();
 docExampleTests();
 netrcFilenameTests();
+
+function pluginCopyTests() {
+  console.log('\n8. the generated plugin copy of the tripwire and the build check (issue #167)');
+  // 8a. A committed plugin/scripts/pre-push-check.js is exempt like the source copy.
+  var sb = makeRepo('plugin-copy');
+  commitFile(sb, 'README.md', 'base\n', 'base');
+  commitFile(sb, 'plugin/scripts/pre-push-check.js', fs.readFileSync(TRIPWIRE, 'utf-8'), 'add the generated copy');
+  var r = run(sb.repo);
+  check('the plugin copy of the tripwire does not scan itself', r.status === 0, 'status ' + r.status + ' ' + r.stdout.slice(0, 200));
+  // (Measured 2026-09-12: the script's own text does not trip its current patterns,
+  // so the exemption is defensive; the case that mattered is 8a, the committed copy.)
+  cleanup(sb);
+  // 8c. Downstream: no marketplace file, no build script -> no build check, exit 0.
+  sb = makeRepo('downstream');
+  commitFile(sb, 'src/app.js', 'console.log(1);\n', 'plain change');
+  r = run(sb.repo);
+  check('a repo without the generator skips the build check', r.status === 0 && !/plugin\//.test(r.stdout), 'status ' + r.status + ' ' + r.stdout.slice(0, 200));
+  cleanup(sb);
+  // 8d. Toolkit repo shape with a stale plugin/: the build check blocks the push and names the fix.
+  sb = makeRepo('stale-plugin');
+  commitFile(sb, '.claude-plugin/marketplace.json', '{ "name": "x", "plugins": [] }\n', 'marketplace');
+  commitFile(sb, 'scripts/build-plugin.js', '#!/usr/bin/env node\nconsole.error("build-plugin --check: differs: commands/review.md");\nprocess.exit(1);\n', 'fake generator');
+  r = run(sb.repo);
+  check('a stale generated plugin blocks the push', r.status === 1 && /Generated plugin\/ is stale/.test(r.stdout) && /differs: commands\/review\.md/.test(r.stdout), 'status ' + r.status + ' ' + r.stdout.slice(0, 300));
+  fs.writeFileSync(path.join(sb.repo, 'scripts', 'build-plugin.js'), '#!/usr/bin/env node\nprocess.exit(0);\n');
+  sb.g(['add', 'scripts/build-plugin.js']); sb.g(['commit', '-qm', 'generator green']);
+  r = run(sb.repo);
+  check('a fresh generated plugin passes the build check', r.status === 0, 'status ' + r.status + ' ' + r.stdout.slice(0, 200));
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
+pluginCopyTests();
 
 console.log('');
 if (failures.length === 0) {

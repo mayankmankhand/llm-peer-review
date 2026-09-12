@@ -56,11 +56,15 @@
 //     variables into inline shell strings).
 
 const { execFileSync } = require("child_process");
+const fs = require("fs");
 
-// Repo-relative path of this script. Its pattern list would match itself, so
-// the scanner skips this one file (the alternative - an allowlist - was
-// explicitly scoped out; this is the single hard-coded exception).
-const SELF_PATH = ".claude/scripts/pre-push-check.js";
+// Repo-relative paths of this script. Its pattern list would match itself, so
+// the scanner skips these files (the alternative - an allowlist - was
+// explicitly scoped out; this is the single hard-coded exception). Two paths
+// since v7.0.0: the source copy, and the copy the plugin generator commits
+// under plugin/ (issue #167) - an exact-path exemption would have scanned that
+// second copy against its own patterns and blocked every push.
+const SELF_PATHS = [".claude/scripts/pre-push-check.js", "plugin/scripts/pre-push-check.js"];
 
 // Files that must never appear in a push, checked against every outgoing
 // commit's file list. settings.local.json is matched by full repo path;
@@ -378,7 +382,7 @@ function scanCommit(sha, hits) {
       if (line.startsWith("+")) {
         pending--;
         const added = line.slice(1);
-        if (file !== null && file !== SELF_PATH) {
+        if (file !== null && !SELF_PATHS.includes(file)) {
           for (const p of PATTERNS) {
             // A pattern may exempt itself by FILE, not by content: see netrc-record
             // (issue #166). Content-based allow-listing is still refused - that is
@@ -459,8 +463,19 @@ function scanCommit(sha, hits) {
 const { commits, base } = outgoingCommits();
 if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
 
-const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set() };
+const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), buildStale: null };
 for (const sha of commits) scanCommit(sha, hits);
+
+// Generated-plugin freshness (issue #167). Only the toolkit repository carries
+// both the marketplace file and the maintainer generator; every downstream copy
+// of this script sees neither and skips the check, so a downstream push never
+// fails on a script it does not have.
+const BUILD_CHECK_MARKER = ".claude-plugin/marketplace.json";
+const BUILD_SCRIPT = "scripts/build-plugin.js";
+if (fs.existsSync(BUILD_CHECK_MARKER) && fs.existsSync(BUILD_SCRIPT)) {
+  const r = require("child_process").spawnSync(process.execPath, [BUILD_SCRIPT, "--check", "--quiet"], { encoding: "utf8" });
+  if (r.status !== 0) hits.buildStale = (r.stderr || r.stdout || "").trim() || "build-plugin --check failed with status " + r.status;
+}
 
 // Keep only never-push paths this push would actually publish for the first
 // time; one base lookup per distinct path, after the walk rather than inside it.
@@ -478,7 +493,8 @@ const clean =
   hits.secrets.length === 0 &&
   hits.neverPush.length === 0 &&
   hits.unscannable.length === 0 &&
-  hits.settingsCommits.size === 0;
+  hits.settingsCommits.size === 0 &&
+  hits.buildStale === null;
 if (clean) process.exit(0); // silent when clean, by contract
 
 const out = [];
@@ -506,6 +522,11 @@ if (hits.settingsCommits.size > 0) {
     : ["diff", "--no-color", base + "..HEAD", "--", SETTINGS_PATH];
   const diff = git(diffArgs);
   out.push(diff === null || diff.trim() === "" ? "  (touched in: " + [...hits.settingsCommits].join(", ") + ")" : diff.trimEnd());
+  out.push("");
+}
+if (hits.buildStale !== null) {
+  out.push("Generated plugin/ is stale against .claude/ (run: node scripts/build-plugin.js, then commit):");
+  for (const line of hits.buildStale.split("\n")) out.push("  " + line);
   out.push("");
 }
 out.push("Commits scanned: " + commits.length + (base === null ? " (no remote base - full history)" : ""));

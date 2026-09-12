@@ -1,0 +1,11 @@
+{
+  "name": "llm-peer-review",
+  "owner": { "name": "Mayank Mankhand" },
+  "plugins": [
+    {
+      "name": "tk",
+      "source": "./plugin",
+      "description": "The LLM Peer Review toolkit: /tk:explore, /tk:create-plan, /tk:execute, /tk:review, /tk:document and the review skills, as a Claude Code plugin generated from this repository's .claude/ source."
+    }
+  ]
+}
