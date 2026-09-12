@@ -289,6 +289,27 @@ function build(src, version) {
     '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md',
   ].sort();
   put('managed-paths.json', JSON.stringify({ version, paths: managed }, null, 2) + '\n');
+  // The project seed: what /tk:setup writes into a project (write-when-absent
+  // files, plus the gitignore lines and the permission baseline it merges).
+  // Sourced from the repository root and .claude/, exactly the files setup.sh
+  // seeds today, so the two install paths cannot drift on what a project gets.
+  const repo = path.dirname(src);
+  const seedSources = {
+    'seed/CLAUDE.md': path.join(repo, 'CLAUDE.md'),
+    'seed/LESSONS.md': path.join(repo, 'LESSONS.md'),
+    'seed/LESSONS-detail.md': path.join(repo, 'LESSONS-detail.md'),
+    'seed/DESIGN-PROFILE.md': path.join(src, 'skills', 'shared', 'design-profile-template.md'),
+    'seed/env.local.example': path.join(repo, '.env.local.example'),
+    'seed/gitattributes': path.join(repo, '.gitattributes'),
+    'seed/gitignore': path.join(repo, '.gitignore'),
+    'seed/artifacts-README.md': path.join(repo, 'artifacts', 'README.md'),
+    'seed/rules-toolkit.md': path.join(src, 'rules', 'toolkit.md'),
+    'seed/settings.local.json': path.join(src, 'settings.local.json'),
+  };
+  for (const [rel, abs] of Object.entries(seedSources)) {
+    if (!fs.existsSync(abs)) { unresolved.push('seed: missing source ' + path.relative(repo, abs)); continue; }
+    put(rel, fs.readFileSync(abs));
+  }
   put('README.md', [
     '# tk (generated)',
     '',
@@ -310,9 +331,22 @@ function writeTree(outDir, files) {
   }
 }
 
+// The output tree is walked WITHOUT the source allowlist filter: the seed
+// legitimately carries a settings.local.json copy, and a stale file of any
+// name in plugin/ must be reported, not skipped.
+function walkAll(dir, rel, out) {
+  if (!fs.existsSync(dir)) return out;
+  for (const name of fs.readdirSync(dir).sort()) {
+    const abs = path.join(dir, name);
+    const r = rel ? rel + '/' + name : name;
+    if (fs.statSync(abs).isDirectory()) walkAll(abs, r, out); else out.push({ rel: r, abs });
+  }
+  return out;
+}
+
 function diffTree(outDir, files) {
   const diffs = [];
-  const onDisk = new Map(walk(outDir, '', []).map(f => [f.rel, f.abs]));
+  const onDisk = new Map(walkAll(outDir, '', []).map(f => [f.rel, f.abs]));
   for (const [rel, content] of files) {
     const abs = onDisk.get(rel);
     if (!abs) { diffs.push('missing: ' + rel); continue; }

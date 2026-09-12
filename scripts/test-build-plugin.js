@@ -73,6 +73,14 @@ function makeFixture() {
   write(src, 'settings.json', '{}\n');
   write(src, 'worktrees/worktree-1/.claude/commands/review.md', '# stale copy\n');
   write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n');
+  write(src, 'skills/shared/design-profile-template.md', '# Design profile\n');
+  write(root, 'CLAUDE.md', '# Project Instructions\n');
+  write(root, 'LESSONS.md', '# Lessons\n');
+  write(root, 'LESSONS-detail.md', '# Lessons detail\n');
+  write(root, '.env.local.example', 'OPENAI_API_KEY=\n');
+  write(root, '.gitattributes', '*.sh text eol=lf\n');
+  write(root, '.gitignore', 'node_modules/\nplans/PLAN-*.md\n');
+  write(root, 'artifacts/README.md', '# artifacts\n');
   return { root, src };
 }
 
@@ -138,6 +146,9 @@ check('SessionStart hook links the data folder to the plugin root', JSON.stringi
 const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths never lists node_modules or settings', !managed.paths.some(p => /node_modules|settings/.test(p)));
+check('the seed carries every project file the installer seeds', ['seed/CLAUDE.md', 'seed/LESSONS.md', 'seed/LESSONS-detail.md', 'seed/DESIGN-PROFILE.md', 'seed/env.local.example', 'seed/gitattributes', 'seed/gitignore', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'seed/settings.local.json'].every(r => exists(out, r)));
+check('the seed rules file is the source rules file, byte for byte', read(out, 'seed/rules-toolkit.md') === read(fx.src, 'rules/toolkit.md'));
+check('the seed permission baseline is the source settings.local.json', read(out, 'seed/settings.local.json') === read(fx.src, 'settings.local.json'));
 const stray = [];
 for (const f of walkFiles(out)) {
   if (!/\.md$/.test(f)) continue;
