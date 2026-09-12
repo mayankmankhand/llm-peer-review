@@ -57,7 +57,7 @@ The countable test: search the repo for the surface the feature names (a route, 
 
 A model cannot act randomly, so variety has to come from outside it. For each of the three directions a new surface gets:
 
-1. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js --kind seed` and take the `seed` field. The script is installer-copied and setup seeds its permission row into `.claude/settings.local.json` (documented in `toolkit.md`), so the call should not prompt. If it does, the install predates that seeding and re-running setup merges the row; the user can also add it by hand, since Claude cannot edit that file. Do not reach for a shell one-liner.
+1. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js --kind seed` and take the `seed` field. On the plugin, the commands that run a design step carry their own permission for the script, so the call should not prompt; if it does, the session has not loaded the current plugin, so run `/reload-plugins`. On a copy-install, setup seeds the row into `.claude/settings.local.json`, and an install that predates that seeding gets it by re-running setup. Either way the user can also add the row by hand, since Claude cannot edit that file. Do not reach for a shell one-liner.
 2. Define the creative direction from the string: color scheme, layout, typography, motion. Look past the surface for sub-patterns, repeated characters, special numbers, anything that inspires a choice. Three seeds give three genuinely different directions.
 3. Bring the direction to life with judgment, so it looks great and not merely different.
 

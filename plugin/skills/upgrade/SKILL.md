@@ -57,7 +57,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js
 
 Findings come out as JSONL on stdout, one per line, in the same shape a review finder returns (`id`, `severity`, `convention`, `file`, `what`, `fix`, `since`, optional `fields`, and a `receipt` with a `check` and an `expect`). The stderr summary states the range: "N candidate finding(s); K of M convention(s) in range <from> -> <to> [C-1, ...]". The range starts at the version this project was last audited against, which right after a migration is the copy-install's version, so the first upgrade after `/tk:setup` audits everything since.
 
-An empty range with zero candidates and no `manual` convention in range means the project is current: say so in one line, stamp (step 8), and stop. No issue, no sample cycle.
+An empty range with zero candidates and no `manual` convention in range means the project is current: say so in one line, stamp (step 7), and stop. No issue, no sample cycle.
 
 ### 2. Open the cycle's issue
 
@@ -77,7 +77,7 @@ You are the runner. Assign ids (`R1`, `R2`, ...) across the script's findings an
 
 ### 5. Report
 
-Write the report per the format below, with `upgrade` as the `<who>` segment of the path and every surviving finding carrying its convention id in the summary line (`**R1** [C-1] ⚠️`). Killed findings go to the Audited out section with their verdict lines. This report is markdown only: the standing review page belongs to the sample cycle in step 7, not to this audit.
+Write the report per the format below, with `upgrade` as the `<who>` segment of the path and every surviving finding carrying its convention id in the summary line (`**R1** [C-1] ⚠️`). Killed findings go to the Audited out section with their verdict lines. This report is markdown only: the standing review page belongs to the sample cycle in step 8, not to this audit.
 
 !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md`
 
@@ -85,7 +85,7 @@ Write the report per the format below, with `upgrade` as the `<who>` segment of 
 
 ### 6. Fix and re-verify
 
-Page once with the batch (rule 2): every file to be edited, its finding ids, and the fix shape each convention names. On approval, apply each fix in the project's file, subject to the intent-reversal guard (M7). Re-verify per M3: a regex or agent-tools finding is mechanical, so rerun the audit and the finding is FIXED when its file no longer appears for that id (the receipt is the same grep, now empty); a `manual` finding goes to `subagent_type=tk:fix-verifier` shards with the original finding, the file:line, and the diff. M5 bounds the rounds at two; M6 sweeps the other project files for the same claim, which the rerun does for free. Checkpoint-commit each green unit (M4).
+Page once with the batch (rule 2): every file to be edited, its finding ids, and the fix shape each convention names. On approval, apply each fix in the project's file, subject to the intent-reversal guard (M7). Re-verify per M3: a regex or agent-tools finding is mechanical, so rerun the audit and the finding is FIXED when its file no longer appears for that id (the receipt is the same grep, now empty); a `manual` finding goes to `subagent_type=tk:fix-verifier` shards with the original finding, the file:line, and the diff. M5 bounds the rounds at two; M6 sweeps the other project files for the same claim, which the rerun does for free. Do not commit yet: `/tk:review` finds what to review from uncommitted changes, so a checkpoint commit here leaves the sample cycle in step 8 nothing to look at. The commit comes at the end of step 8.
 
 ### 7. Stamp
 
@@ -99,7 +99,7 @@ It sets `version` and `auditedVersion` in `.claude/.toolkit-state.json`; the nex
 
 ### 8. One sample cycle
 
-Announce it ("Upgrade fixes are in; running one `/tk:review` over them so the loop is proven on <to> before this cycle closes.") and invoke `/tk:review` through the Skill tool over the files this run changed. It runs the typed finders, the audit, and the auto-fix loop on the new version, and chains into `/tk:document` itself (M14), which records the cycle with this run's issue. Do not invoke `/tk:document` separately. A change under fifty lines with no code file takes the orchestrator's inline path, so the sample cycle proves the audit and the loop rather than a finder dispatch; that is fine, the dispatch shape is proven by the next code change.
+Announce it ("Upgrade fixes are in; running one `/tk:review` over them so the loop is proven on <to> before this cycle closes.") and invoke `/tk:review` through the Skill tool over the files this run changed. It runs the typed finders, the audit, and the auto-fix loop on the new version, and chains into `/tk:document` itself (M14), which records the cycle with this run's issue. Do not invoke `/tk:document` separately. When the sample cycle has run, checkpoint-commit whatever of this run's fixes and the stamped state file is still uncommitted (M4). A change under fifty lines with no code file takes the orchestrator's inline path, so the sample cycle proves the audit and the loop rather than a finder dispatch; that is fine, the dispatch shape is proven by the next code change.
 
 </procedure>
 
@@ -113,6 +113,6 @@ When `/tk:setup` migrated a copy-install, `.claude/.toolkit-migration.json` list
 
 ## HTML Output Rules
 
-The sample cycle in step 7 renders the standing review page; this audit's own report is markdown only. The rules are inlined so the publish and record steps that cycle runs are in context:
+The sample cycle in step 8 renders the standing review page; this audit's own report is markdown only. The rules are inlined so the publish and record steps that cycle runs are in context:
 
 !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`

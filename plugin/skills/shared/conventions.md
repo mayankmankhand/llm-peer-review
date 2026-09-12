@@ -85,7 +85,7 @@ Why: the plugin's scripts are replaced whole on every update, so an edit to a co
 - **Since:** 7.0.0
 - **Scope:** seed-stamp
 - **Detector:** seed-stamp
-- **Fix:** let `/setup` rewrite the seeded rules file, or merge the new seed text by hand and update its stamp
+- **Fix:** delete the seeded rules file and run `/setup`, which writes a fresh one only when it is missing, or merge the new seed text by hand and update its stamp
 
 Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns. Its version stamp is how `/upgrade` knows which seed text the project last received; a stale stamp means rules the project's sessions still read every turn are behind.
 
