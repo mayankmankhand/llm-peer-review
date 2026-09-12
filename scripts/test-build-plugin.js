@@ -72,7 +72,8 @@ function makeFixture() {
   write(src, 'settings.local.json', '{ "permissions": { "allow": ["Bash(rm -rf /)"] } }\n');
   write(src, 'settings.json', '{}\n');
   write(src, 'worktrees/worktree-1/.claude/commands/review.md', '# stale copy\n');
-  write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /review and /review-code; your permissions live in `.claude/settings.local.json`.\n');
+  write(src, 'skills/shared/conventions.md', '# Conventions\n\n### C-1: By name\n- **Since:** 7.0.0\n- **Looks behind:** `\\.claude/skills/shared/`\n- **Fix:** name it\n');
+write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /review and /review-code; your permissions live in `.claude/settings.local.json`.\n');
   write(src, 'skills/shared/design-profile-template.md', '# Design profile\n');
   write(root, 'CLAUDE.md', '# Project Instructions\n');
   write(root, 'LESSONS.md', '# Lessons\n');
@@ -147,11 +148,13 @@ const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths never lists node_modules or settings', !managed.paths.some(p => /node_modules|settings/.test(p)));
 check('the seed carries every project file the installer seeds', ['seed/CLAUDE.md', 'seed/LESSONS.md', 'seed/LESSONS-detail.md', 'seed/DESIGN-PROFILE.md', 'seed/env.local.example', 'seed/gitattributes', 'seed/gitignore', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'seed/settings.local.json'].every(r => exists(out, r)));
+check('the conventions file is copied raw, its .claude/ regexes untouched', read(out, 'skills/shared/conventions.md') === read(fx.src, 'skills/shared/conventions.md') && read(out, 'skills/shared/conventions.md').includes('`\\.claude/skills/shared/`'));
 check('the seed rules file is the source with command names scoped and nothing else touched', read(out, 'seed/rules-toolkit.md') === '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /tk:review and /tk:review-code; your permissions live in `.claude/settings.local.json`.\n');
 check('the seed permission baseline is the source settings.local.json', read(out, 'seed/settings.local.json') === read(fx.src, 'settings.local.json'));
 const stray = [];
 for (const f of walkFiles(out)) {
   if (!/\.md$/.test(f)) continue;
+  if (path.relative(out, f) === path.join('skills', 'shared', 'conventions.md')) continue; // data: its regexes name downstream paths on purpose
   const t = fs.readFileSync(f, 'utf8');
   for (const m of t.matchAll(/\.claude\/(commands|agents|skills|scripts)\//g)) stray.push(path.relative(out, f) + ': ' + m[0]);
 }

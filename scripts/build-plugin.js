@@ -66,8 +66,8 @@ const HOST_ROWS = {
 // project, and settings never ship in a plugin.
 const KEEP_PROJECT_PATHS = [
   '.claude/rules', '.claude/settings.json', '.claude/settings.local.json',
-  '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/worktrees',
-  '.claude/.no-correction-log',
+  '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
+  '.claude/worktrees', '.claude/.no-correction-log',
 ];
 
 function parseArgs(argv) {
@@ -252,7 +252,13 @@ function build(src, version) {
     put('agents/' + a.rel, rewriteText(fs.readFileSync(a.abs, 'utf8'), inv, src, unresolved, 'agents/' + a.rel));
   }
   for (const f of inv.skillFiles) {
-    if (f.rel.endsWith('.md')) {
+    if (f.rel === 'shared/conventions.md') {
+      // Data, not prose: upgrade-audit.js parses its `Looks behind` regexes,
+      // several of which match `.claude/...` paths in DOWNSTREAM files. Rewriting
+      // those to the plugin root would break every one of them, so the file is
+      // copied byte for byte.
+      put('skills/' + f.rel, fs.readFileSync(f.abs));
+    } else if (f.rel.endsWith('.md')) {
       let text = rewriteText(fs.readFileSync(f.abs, 'utf8'), inv, src, unresolved, 'skills/' + f.rel);
       if (/^[^/]+\/SKILL\.md$/.test(f.rel) && !f.rel.startsWith('shared/')) {
         const name = f.rel.split('/')[0];

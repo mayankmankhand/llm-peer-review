@@ -3,7 +3,7 @@
 // upgrade-audit.js - the deterministic half of /tk:upgrade (issue #167, Step 6).
 //
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--project <dir>]
-//        [--plugin-root <dir>] [--conventions <file>] [--from <version>]
+//        [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp]
 //
 // Reads the conventions document (the plugin's skills/shared/conventions.md by
 // default), selects every convention whose `Since` version lies in the range
@@ -14,25 +14,35 @@
 // on stdout. Each finding carries a runnable receipt, so the /tk:upgrade skill
 // can hand them straight to the M2 audit. A one-line summary goes to stderr.
 //
-// The installed version comes from .claude/.toolkit-state.json (written by
-// setup-project.js on both install paths and advanced by /tk:upgrade on a clean
-// finish); --from overrides it; with neither, every convention applies.
+// The range starts at the last version whose conventions this project has been
+// audited against, read from .claude/.toolkit-state.json: `auditedVersion` when
+// a previous /tk:upgrade stamped it, else `previousVersion` (a copy-install
+// migration records the version it came from there, so the first upgrade after
+// a migration audits everything since that copy-install rather than nothing),
+// else `version`. --from overrides all three; with no state file at all every
+// convention applies. `--stamp` is the end of a clean /tk:upgrade run: it sets
+// `version` and `auditedVersion` to the plugin version and exits.
 //
 // Convention format (one section each, parsed here and written by hand there):
 //
 //   ### C-12: Criteria reach a worker by preload, not by paste
 //   - **Since:** 7.0.0
 //   - **Scope:** prompt-files            (prompt-files | claude-md | settings-local | seed-stamp | local-edits)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | local-edits)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | local-edits | agent-tools | manual)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
 //   - **Fix:** dispatch the typed finder for the kind; move any pasted criteria into a skill it preloads
 //
 // `Looks behind` may repeat; each backticked value is a JavaScript regular
-// expression applied per line. The three non-regex detectors need no pattern:
+// expression applied per line. The non-regex detectors need no pattern:
 // seed-stamp compares the seeded rules file's version stamp with the plugin
 // version, dead-permissions lists settings.local.json entries that point at
-// removed scripts, local-edits reads .claude/.toolkit-migration.json.
+// removed scripts, local-edits reads .claude/.toolkit-migration.json, and
+// agent-tools reads every project-owned agent whose name or description says
+// it is a finder, reviewer, critic, skeptic, verifier, judge, or auditor and
+// flags one with no `tools:` line or with Edit, Write, or NotebookEdit in it.
+// `manual` is not run here at all: the /tk:upgrade skill judges those by hand
+// (a judgment no grep expresses) and emits findings in the same shape.
 //
 // Exit codes: 0 (findings are data, zero is a valid count), 1 on error.
 // Dependency-free, like every script under .claude/scripts/.
@@ -52,13 +62,14 @@ const DEAD_PERMISSION = [
 ];
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '' };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
     else if (a === '--plugin-root') o.pluginRoot = argv[++i];
     else if (a === '--conventions') o.conventions = argv[++i];
     else if (a === '--from') o.from = argv[++i];
+    else if (a === '--stamp') o.stamp = true;
     else { console.error('upgrade-audit: unknown argument ' + a); process.exit(1); }
   }
   return o;
@@ -107,10 +118,19 @@ function main() {
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
   const project = git(['rev-parse', '--show-toplevel'], cwd) || cwd;
   const P = (rel) => path.join(project, rel);
-  if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
   const toVersion = readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {}).version || '0.0.0';
   const state = readJson(P(STATE_REL), null);
-  const fromVersion = opts.from || (state && state.version) || null;
+  if (opts.stamp) {
+    // The end of a clean /tk:upgrade: this project is now audited up to the
+    // plugin version, so the next run's range starts here.
+    const next = Object.assign({}, state || {}, { version: toVersion, auditedVersion: toVersion, auditedAt: new Date().toISOString() });
+    fs.mkdirSync(path.dirname(P(STATE_REL)), { recursive: true });
+    fs.writeFileSync(P(STATE_REL), JSON.stringify(next, null, 2) + '\n');
+    console.error('upgrade-audit: stamped ' + STATE_REL + ' as audited up to ' + toVersion);
+    return;
+  }
+  if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
+  const fromVersion = opts.from || (state && (state.auditedVersion || state.previousVersion || state.version)) || null;
 
   const all = parseConventions(fs.readFileSync(conventionsPath, 'utf8'));
   const inRange = all.filter(c => (fromVersion === null || cmp(c.since, fromVersion) > 0) && cmp(c.since, toVersion) <= 0);
@@ -157,6 +177,25 @@ function main() {
         fix: c.fix || 'remove them; the plugin commands carry their own allowed-tools', since: c.since,
         fields: [{ label: 'Entries', value: dead.join(' ; ') }],
         receipt: { check: 'grep -n -E "\\.claude/scripts/|browse\\.js|Skill\\(review-commands" .claude/settings.local.json', expect: dead.length + ' matching line(s)' } });
+    } else if (c.detector === 'agent-tools') {
+      const ROLE = /finder|review|critic|skeptic|verif|judge|audit/i;
+      for (const rel of promptFiles.filter(r => r.startsWith('.claude/agents/'))) {
+        const text = fs.readFileSync(P(rel), 'utf8');
+        const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+        const head = fm ? fm[1].split(/\r?\n/) : [];
+        const field = (k) => { const m = head.find(l => new RegExp('^' + k + ':').test(l)); return m ? m.replace(new RegExp('^' + k + ':'), '').trim() : ''; };
+        const role = (field('name') || path.basename(rel, '.md')) + ' ' + field('description');
+        if (!ROLE.test(role)) continue;
+        const toolsIdx = head.findIndex(l => /^tools:/.test(l));
+        let tools = '';
+        if (toolsIdx >= 0) { tools = head[toolsIdx].replace(/^tools:/, '').trim(); for (let i = toolsIdx + 1; i < head.length && /^\s+-\s/.test(head[i]); i++) tools += ' ' + head[i].replace(/^\s+-\s*/, ''); }
+        const edits = tools.split(/[\s,]+/).filter(t => /^(Edit|Write|NotebookEdit)$/.test(t));
+        if (toolsIdx >= 0 && !edits.length) continue;
+        emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: rel, line: toolsIdx >= 0 ? toolsIdx + 2 : 1 },
+          what: 'Should fix. ' + rel + (toolsIdx >= 0 ? ' grants ' + edits.join(', ') + ' to a finder or judge role, so it can change files before any audit judges its output.' : ' declares no tools list, so its finder or judge role gets every tool, Edit included.'),
+          fix: c.fix || 'declare tools: Read, Grep, Glob (Bash only for read-only checks); a finder or judge never edits', since: c.since,
+          receipt: { check: 'grep -n -E "^tools:|^  - (Edit|Write|NotebookEdit)$" ' + JSON.stringify(rel), expect: toolsIdx >= 0 ? 'an edit tool appears in the tools list' : 'no tools: line at all' } });
+      }
     } else if (c.detector === 'local-edits') {
       const mig = readJson(P(MIGRATION_REL), null);
       for (const m of (mig && mig.modified) || []) {
