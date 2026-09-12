@@ -147,6 +147,12 @@ fs.appendFileSync(path.join(repo, 'LESSONS.md'), 'uncommitted\n');
 r = run(repo, pluginRoot);
 check('a dirty tree pages without --force', r.status === 3 && /uncommitted changes/.test(r.out), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
+repo = makeCopyInstall(false);
+write(repo, '.claude/settings.json', '{"enabledPlugins":{"tk@llm-peer-review":true}}\n'); // untracked, exactly as `claude plugin install -s project` leaves it
+r = run(repo, pluginRoot);
+check('an untracked .claude/settings.json alone is not a dirty tree (the plugin install writes it)', r.status === 0 && !/uncommitted changes/.test(r.out), r.out);
+check('that settings.json is key-merged, not replaced', JSON.parse(read(repo, '.claude/settings.json')).enabledPlugins['tk@llm-peer-review'] === true && !!JSON.parse(read(repo, '.claude/settings.json')).extraKnownMarketplaces);
+fs.rmSync(repo, { recursive: true, force: true });
 
 console.log('\n3. copy-install without a manifest');
 repo = makeCopyInstall(false);

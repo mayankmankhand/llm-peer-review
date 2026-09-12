@@ -22,7 +22,8 @@
 //                    before touching anything, and --force proceeds.
 //
 // A migration refuses to start on a dirty git tree (or outside a repo) unless
-// --force, because `git checkout` plus the backup folder is the undo. It removes
+// --force (an untracked or modified .claude/settings.json alone is not dirty:
+// the plugin install writes it), because `git checkout` plus the backup folder is the undo. It removes
 // first and seeds second (the manifest lists four root files the seed also
 // writes; the other order deleted them), key-merges .claude/settings.json (the
 // marketplace pointer is what tells a collaborator to install the plugin; a
@@ -79,6 +80,15 @@ function sha256NoCR(abs) {
   const buf = fs.readFileSync(abs);
   const stripped = Buffer.from(buf.toString('latin1').replace(/\r/g, ''), 'latin1');
   return crypto.createHash('sha256').update(stripped).digest('hex');
+}
+// A tree is dirty when git status reports anything EXCEPT .claude/settings.json:
+// `claude plugin install -s project` writes that file (the enabledPlugins entry)
+// moments before /tk:setup runs, and this script key-merges it anyway, so an
+// untracked or modified settings.json is the expected state, not in-progress
+// work the undo line would miss (found on the first dogfood migration, #167).
+function dirtyTree(project) {
+  const out = git(['status', '--porcelain'], project) || '';
+  return out.split('\n').some(l => l.trim() !== '' && l.slice(3).trim() !== '.claude/settings.json');
 }
 function readJson(abs, fallback) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; }
@@ -149,7 +159,7 @@ function main() {
   const migrating = mode === 'migrate-manifest' || mode === 'migrate-unknown';
   if (migrating) {
     const isRepo = top !== null;
-    const dirty = isRepo ? (git(['status', '--porcelain'], project) || '') !== '' : false;
+    const dirty = isRepo ? dirtyTree(project) : false;
     if (!isRepo) { say('  Not a git repository: there is no `git checkout` undo for a migration.'); if (!opts.force) paged = true; }
     if (dirty) { say('  The git tree has uncommitted changes. Commit or stash first, so the undo line below is exact.'); if (!opts.force) paged = true; }
     const managed = mode === 'migrate-manifest' ? Object.keys(manifest.files) : managedShipped;
@@ -244,7 +254,7 @@ function main() {
     say('PAGED - nothing was written. Decide, then re-run:');
     if (modified.length) say('  - keep going and let the backup hold your edits: add --force');
     if (mode === 'migrate-unknown') say('  - no manifest to verify against: add --force to sweep the listed paths, or run the v6 installer once first to get a manifest');
-    if (migrating && (top === null || (git(['status', '--porcelain'], project) || '') !== '')) say('  - commit or stash your changes first (or add --force)');
+    if (migrating && (top === null || dirtyTree(project))) say('  - commit or stash your changes first (or add --force)');
     process.stdout.write(out.join('\n') + '\n');
     process.exit(3);
   }
