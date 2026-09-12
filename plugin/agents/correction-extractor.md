@@ -1,6 +1,6 @@
 ---
 name: correction-extractor
-description: Correction-ledger worker for /tk:document's capture stage (issue #157). Reads pre-filtered transcript candidates cold and reports which were genuine human interventions, with a plain-language open code for each. Read-only; never writes to the ledger itself.
+description: Correction-ledger worker for /tk:document's capture stage (issue 157). Reads pre-filtered transcript candidates cold and reports which were genuine human interventions, with a plain-language open code for each. Read-only; never writes to the ledger itself.
 tools: Read
 effort: low
 ---
