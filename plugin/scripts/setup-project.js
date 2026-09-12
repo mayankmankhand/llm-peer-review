@@ -51,13 +51,24 @@ const STATE_REL = '.claude/.toolkit-state.json';
 const MANIFEST_REL = '.claude/.toolkit-manifest.json';
 const MIGRATION_REL = '.claude/.toolkit-migration.json';
 const MANAGED_DIRS = ['.claude/commands', '.claude/agents', '.claude/skills', '.claude/scripts', '.claude/rules'];
-// Permission entries that pointed at the copy-installed scripts. The plugin's
-// commands carry their own allowed-tools now, so these are dead after a move.
-const DEAD_PERMISSION = [
-  /\.claude\/scripts\//,
+// A permission row is dead when it can no longer allow anything real. Two kinds:
+// the toolkit's own legacy row shapes (an absolute-path browse.js pipe that an
+// old installer injected, the pre-skill review-commands row), and any row that
+// names a script under .claude/scripts/ which will not exist in the project once
+// this run finishes. The plugin's commands carry their own allowed-tools, so a
+// row for a removed toolkit script is dead; a row for a script the project still
+// has, its own custom tool included, is live and kept. The first version treated
+// every .claude/scripts/ row as dead and deleted a kept custom script's row on
+// every run (review of the v7.0.0 release, R2).
+const LEGACY_DEAD_PERMISSION = [
   /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
+function deadPermission(row, willExist) {
+  if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
+  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+)/.exec(row);
+  return m !== null && !willExist('.claude/scripts/' + m[1]);
+}
 
 function parseArgs(argv) {
   const o = { dryRun: false, force: false, project: '', pluginRoot: '' };
@@ -241,13 +252,14 @@ function main() {
 
   // settings.local.json: baseline merge minus the script entries, dead entries out
   const seedLocal = readJson(path.join(seedDir, 'settings.local.json'), { permissions: { allow: [] } });
-  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => !DEAD_PERMISSION.some(re => re.test(p)));
+  const willExist = (rel) => fs.existsSync(P(rel)) && !willRemove.has(rel);
+  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => !deadPermission(p, willExist));
   const local = readJson(P('.claude/settings.local.json'), null);
   const localBefore = local ? JSON.stringify(local) : null;
   const localNext = local || { permissions: { allow: [] } };
   localNext.permissions = localNext.permissions || {};
   localNext.permissions.allow = localNext.permissions.allow || [];
-  const deadPerms = localNext.permissions.allow.filter(p => DEAD_PERMISSION.some(re => re.test(p)));
+  const deadPerms = localNext.permissions.allow.filter(p => deadPermission(p, willExist));
   localNext.permissions.allow = localNext.permissions.allow.filter(p => !deadPerms.includes(p));
   const addedPerms = seedAllow.filter(p => !localNext.permissions.allow.includes(p));
   localNext.permissions.allow.push(...addedPerms);

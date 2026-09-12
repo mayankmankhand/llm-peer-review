@@ -470,11 +470,71 @@ for (const sha of commits) scanCommit(sha, hits);
 // both the marketplace file and the maintainer generator; every downstream copy
 // of this script sees neither and skips the check, so a downstream push never
 // fails on a script it does not have.
+//
+// The check runs against the commit being pushed, not the working folder. The
+// outgoing range always ends at HEAD, and build-plugin.js resolves its source
+// and plugin/ from its own location, so running HEAD's copy of the generator
+// inside HEAD's exported tree checks exactly what lands. Run in place, it read
+// the working folder: an uncommitted edit blocked a clean push, and a stale
+// plugin/ that was committed passed once the working copy had been rebuilt
+// (review of the v7.0.0 release, R3).
 const BUILD_CHECK_MARKER = ".claude-plugin/marketplace.json";
 const BUILD_SCRIPT = "scripts/build-plugin.js";
+
+// Write every file of HEAD's tree under dir, with no shell and no tar: one
+// `git ls-tree` for the list, one `git cat-file --batch` for the contents.
+// Returns false when git cannot supply the tree.
+function exportHeadTree(dir) {
+  const { spawnSync } = require("child_process");
+  const path = require("path");
+  const ls = spawnSync("git", ["ls-tree", "-r", "-z", "HEAD"], { maxBuffer: 64 * 1024 * 1024 });
+  if (ls.status !== 0) return false;
+  const blobs = ls.stdout.toString("utf8").split("\0").filter(Boolean).map((entry) => {
+    const tab = entry.indexOf("\t");
+    const meta = entry.slice(0, tab).split(" ");
+    return { type: meta[1], sha: meta[2], name: entry.slice(tab + 1) };
+  }).filter((e) => e.type === "blob");
+  const cat = spawnSync("git", ["cat-file", "--batch"], { input: blobs.map((e) => e.sha).join("\n") + "\n", maxBuffer: 1024 * 1024 * 1024 });
+  if (cat.status !== 0) return false;
+  const buf = cat.stdout;
+  let offset = 0;
+  for (const e of blobs) {
+    const newline = buf.indexOf(10, offset);
+    if (newline === -1) return false;
+    const size = parseInt(buf.slice(offset, newline).toString("utf8").split(" ")[2], 10);
+    if (!Number.isFinite(size)) return false;
+    const start = newline + 1;
+    const abs = path.join(dir, e.name);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, buf.slice(start, start + size));
+    offset = start + size + 1;
+  }
+  return true;
+}
+
+function buildCheckAtHead() {
+  const os = require("os");
+  const path = require("path");
+  const { spawnSync } = require("child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pre-push-build-"));
+  let exported = false;
+  let result = null;
+  try {
+    exported = exportHeadTree(dir);
+    const script = path.join(dir, BUILD_SCRIPT);
+    if (exported && fs.existsSync(script)) {
+      const r = spawnSync(process.execPath, [script, "--check", "--quiet"], { cwd: dir, encoding: "utf8" });
+      if (r.status !== 0) result = (r.stderr || r.stdout || "").trim() || "build-plugin --check failed with status " + r.status;
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  if (!exported) fail("could not export the pushed commit's tree for the generated-plugin check.");
+  return result;
+}
+
 if (fs.existsSync(BUILD_CHECK_MARKER) && fs.existsSync(BUILD_SCRIPT)) {
-  const r = require("child_process").spawnSync(process.execPath, [BUILD_SCRIPT, "--check", "--quiet"], { encoding: "utf8" });
-  if (r.status !== 0) hits.buildStale = (r.stderr || r.stdout || "").trim() || "build-plugin --check failed with status " + r.status;
+  hits.buildStale = buildCheckAtHead();
 }
 
 // Keep only never-push paths this push would actually publish for the first
@@ -525,7 +585,7 @@ if (hits.settingsCommits.size > 0) {
   out.push("");
 }
 if (hits.buildStale !== null) {
-  out.push("Generated plugin/ is stale against .claude/ (run: node scripts/build-plugin.js, then commit):");
+  out.push("Generated plugin/ is stale against .claude/ in the commit being pushed (run: node scripts/build-plugin.js, then commit):");
   for (const line of hits.buildStale.split("\n")) out.push("  " + line);
   out.push("");
 }

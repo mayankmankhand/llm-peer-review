@@ -1,0 +1,25 @@
+# Paths under .claude/commands, agents, skills, scripts and rules that an
+# earlier toolkit release shipped from main and the current source no longer
+# has. build-plugin.js adds them to plugin/managed-paths.json, the list
+# /tk:setup uses to sweep a copy-install that predates the installer's
+# manifest (v5.5.0), so a file the toolkit once installed is not mistaken for
+# the project's own (review of the v7.0.0 release, R15).
+#
+# Regenerate after the source drops a file it used to ship. From the
+# repository root, list every path main ever carried in those folders:
+#   git log main -m --first-parent --name-only --format= -- .claude/commands \
+#     .claude/agents .claude/skills .claude/scripts .claude/rules | grep -v '^$' | sort -u
+# and keep the lines whose file no longer exists under .claude/.
+.claude/commands/dev-lead-1.md
+.claude/commands/dev-lead-gemini.md
+.claude/commands/dev-lead-gpt.md
+.claude/commands/learning-opportunity.md
+.claude/commands/review-browser.md
+.claude/commands/review-code.md
+.claude/commands/review-commands.md
+.claude/commands/review-full.md
+.claude/commands/review-plan.md
+.claude/commands/review-ux.md
+.claude/commands/ui-spec.md
+.claude/rules/html-outputs.md
+.claude/skills/shared/output-template.md

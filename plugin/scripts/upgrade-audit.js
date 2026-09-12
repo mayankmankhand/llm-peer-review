@@ -55,11 +55,20 @@ const PROJECT_PROMPT_DIRS = ['.claude/commands', '.claude/agents', '.claude/skil
 const SEED_RULES = '.claude/rules/toolkit.md';
 const STATE_REL = '.claude/.toolkit-state.json';
 const MIGRATION_REL = '.claude/.toolkit-migration.json';
-const DEAD_PERMISSION = [
-  /\.claude\/scripts\//,
+// Same rule as setup-project.js: a legacy toolkit row shape, or a row naming a
+// script under .claude/scripts/ that the project does not have. A custom
+// script's row is live (review of the v7.0.0 release, R2).
+const LEGACY_DEAD_PERMISSION = [
   /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
+function deadPermission(row, exists) {
+  if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
+  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+)/.exec(row);
+  return m !== null && !exists('.claude/scripts/' + m[1]);
+}
+// Single-quote a string for a POSIX shell, so a receipt can name rows verbatim.
+function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
 
 function parseArgs(argv) {
   const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false };
@@ -165,18 +174,18 @@ function main() {
         const stamped = m ? m[1] : null;
         if (stamped === null || cmp(stamped, toVersion) < 0) emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: 3 },
           what: 'Should fix. The seeded rules file is stamped ' + (stamped || 'with no version') + ' while the plugin is ' + toVersion + '.',
-          fix: c.fix || 'let /tk:setup rewrite the seed, or update the stamp after merging the seed text', since: c.since,
+          fix: c.fix || 'delete the rules file and run /tk:setup for a fresh seed, or merge the new seed text by hand and update the stamp', since: c.since,
           receipt: { check: 'grep -n "Toolkit version" ' + SEED_RULES, expect: 'the stamp reads a version below ' + toVersion } });
       }
     } else if (c.detector === 'dead-permissions') {
       const local = readJson(P('.claude/settings.local.json'), null);
       const allow = (local && local.permissions && local.permissions.allow) || [];
-      const dead = allow.filter(p => DEAD_PERMISSION.some(re => re.test(p)));
+      const dead = allow.filter(p => deadPermission(p, (rel) => fs.existsSync(P(rel))));
       if (dead.length) emit({ id: c.id, severity: 'suggest', convention: c.title, file: { relPath: '.claude/settings.local.json' },
         what: 'Optional. ' + dead.length + ' permission entr' + (dead.length === 1 ? 'y points' : 'ies point') + ' at scripts the plugin no longer places in the project.',
         fix: c.fix || 'remove them; the plugin commands carry their own allowed-tools', since: c.since,
         fields: [{ label: 'Entries', value: dead.join(' ; ') }],
-        receipt: { check: 'grep -n -E "\\.claude/scripts/|browse\\.js|Skill\\(review-commands" .claude/settings.local.json', expect: dead.length + ' matching line(s)' } });
+        receipt: { check: 'grep -n -F ' + dead.map(p => '-e ' + shq(JSON.stringify(p))).join(' ') + ' .claude/settings.local.json', expect: dead.length + ' matching line(s), one per dead entry' } });
     } else if (c.detector === 'agent-tools') {
       const ROLE = /finder|review|critic|skeptic|verif|judge|audit/i;
       for (const rel of promptFiles.filter(r => r.startsWith('.claude/agents/'))) {

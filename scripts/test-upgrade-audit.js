@@ -106,7 +106,8 @@ write(proj, '.claude/agents/myteam-scout.md', '---\nname: myteam-scout\ndescript
 write(proj, '.claude/rules/bank-safety.md', '# Bank safety\n\nNever edit a number. Ours.\n');
 write(proj, '.claude/rules/toolkit.md', '# Toolkit Rules\n\n<!-- Toolkit version: 6.3.3 | Managed by LLM Peer Review. -->\n');
 write(proj, 'CLAUDE.md', '# Project\n\nSee `.claude/skills/shared/hitl-loop.md` for the loop.\n');
-write(proj, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)', 'Bash(node .claude/scripts/render-html.js *)', 'Bash(cat * | node /abs/p/.claude/scripts/browse.js *)'] } }));
+write(proj, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)', 'Bash(node .claude/scripts/render-html.js *)', 'Bash(cat * | node /abs/p/.claude/scripts/browse.js *)', 'Bash(node .claude/scripts/our-report.js *)'] } }, null, 2)); // pretty-printed, as setup and Claude Code write it
+write(proj, '.claude/scripts/our-report.js', 'console.log("ours");\n');
 write(proj, '.claude/.toolkit-state.json', JSON.stringify({ version: '6.3.3', path: 'copy-migrated' }));
 write(proj, '.claude/.toolkit-migration.json', JSON.stringify({ from: '6.3.3', to: '7.0.0', modified: [{ rel: '.claude/scripts/render-html.js', backup: '.toolkit-backup-x-plugin/.claude/scripts/render-html.js', pluginCopy: 'scripts/render-html.js' }] }));
 write(proj, '.toolkit-backup-x-plugin/.claude/scripts/render-html.js', 'plugin copy\n// my fix\n');
@@ -133,6 +134,8 @@ check('C-5 carries the local edit with a diff receipt', by('C-5').length === 1 &
 check('C-8 flags a reviewer agent that grants Edit, at its tools line', by('C-8').some(f => f.file.relPath === '.claude/agents/myteam-reviewer.md' && f.file.line === 4 && /Edit/.test(f.what)));
 check('C-8 flags a judge agent with no tools line', by('C-8').some(f => f.file.relPath === '.claude/agents/myteam-judge.md' && f.file.line === 1 && /no tools list/.test(f.what)));
 check('C-8 leaves a read-only scout and a non-role agent alone', !by('C-8').some(f => /scout|researcher/.test(f.file.relPath)));
+check('C-6 leaves a row for a script the project still has', !by('C-6')[0].fields[0].value.includes('our-report.js'));
+{ const rc = spawnSync('bash', ['-c', by('C-6')[0].receipt.check], { cwd: proj, encoding: 'utf8' }); check('C-6 receipt runs and matches exactly the dead rows', rc.status === 0 && rc.stdout.trim().split('\n').length === 2, rc.stdout + rc.stderr); }
 check('C-6 lists the dead permission entries', by('C-6').length === 1 && by('C-6')[0].fields[0].value.includes('render-html.js') && by('C-6')[0].fields[0].value.includes('browse.js') && !by('C-6')[0].fields[0].value.includes('git add'));
 check('the clean custom rule yields nothing', !r.findings.some(f => f.file.relPath === '.claude/rules/bank-safety.md'));
 check('every finding has a receipt with a check and an expectation', r.findings.every(f => f.receipt && f.receipt.check && f.receipt.expect));

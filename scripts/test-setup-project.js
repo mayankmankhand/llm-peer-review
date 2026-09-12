@@ -84,7 +84,7 @@ function makeCopyInstall(withManifest) {
   write(repo, '.gitignore', 'mine/\n');
   write(repo, '.claude/settings.json', JSON.stringify({ env: { X: '1' } }, null, 2) + '\n');
   write(repo, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: [
-    'Bash(node .claude/scripts/ask-gpt.js *)', 'Bash(echo * | node /abs/proj/.claude/scripts/browse.js *)', 'Bash(git add *)', 'Bash(custom-thing *)', 'Skill(review-commands)'] }, defaultMode: 'acceptEdits' }, null, 2) + '\n');
+    'Bash(node .claude/scripts/ask-gpt.js *)', 'Bash(echo * | node /abs/proj/.claude/scripts/browse.js *)', 'Bash(git add *)', 'Bash(custom-thing *)', 'Bash(node .claude/scripts/my-tool.js *)', 'Skill(review-commands)'] }, defaultMode: 'acceptEdits' }, null, 2) + '\n');
   if (withManifest) {
     const files = {};
     for (const rel of MANAGED) files[rel] = sha(repo, rel);
@@ -119,7 +119,8 @@ check('CLAUDE.md and DESIGN-PROFILE.md are seeded when absent', read(repo, 'CLAU
 const sj = JSON.parse(read(repo, '.claude/settings.json'));
 check('settings.json keeps its keys and gains the marketplace and plugin', sj.env.X === '1' && sj.extraKnownMarketplaces['llm-peer-review'].source.repo === 'mayankmankhand/llm-peer-review' && sj.enabledPlugins['tk@llm-peer-review'] === true);
 const sl = JSON.parse(read(repo, '.claude/settings.local.json'));
-check('dead script permissions are removed', !sl.permissions.allow.some(p => /\.claude\/scripts\/|browse\.js|Skill\(review-commands/.test(p)));
+check('dead script permissions are removed', !sl.permissions.allow.some(p => /ask-gpt\.js|browse\.js|Skill\(review-commands/.test(p)));
+check('a kept custom script keeps its permission row', sl.permissions.allow.includes('Bash(node .claude/scripts/my-tool.js *)') && exists(repo, '.claude/scripts/my-tool.js'));
 check('custom and baseline permissions are kept, new baseline entries added', sl.permissions.allow.includes('Bash(custom-thing *)') && sl.permissions.allow.includes('Bash(git add *)') && sl.permissions.allow.includes('Bash(gh auth status *)') && sl.permissions.additionalDirectories.includes('/tmp'));
 const gi = read(repo, '.gitignore');
 check('.gitignore is line-merged', gi.startsWith('mine/') && gi.includes('node_modules/') && gi.includes('artifacts/html/') && gi.includes('.claude/settings.local.json'));

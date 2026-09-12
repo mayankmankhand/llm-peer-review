@@ -435,6 +435,23 @@ function pluginCopyTests() {
   r = run(sb.repo);
   check('a fresh generated plugin passes the build check', r.status === 0, 'status ' + r.status + ' ' + r.stdout.slice(0, 200));
   cleanup(sb);
+  // 8e/8f. The build check reads the commit being pushed, not the working folder
+  // (review of the v7.0.0 release, R3). This generator passes only when a file
+  // next to it exists, so it answers for whichever tree it was run from.
+  var readsTree = '#!/usr/bin/env node\nconst ok = require("fs").existsSync(require("path").join(__dirname, "..", "plugin", "ok"));\nif (!ok) console.error("build-plugin --check: differs: plugin/ok");\nprocess.exit(ok ? 0 : 1);\n';
+  sb = makeRepo('tree-not-folder');
+  commitFile(sb, '.claude-plugin/marketplace.json', '{ "name": "x", "plugins": [] }\n', 'marketplace');
+  commitFile(sb, 'scripts/build-plugin.js', readsTree, 'generator that reads its tree');
+  fs.mkdirSync(path.join(sb.repo, 'plugin'), { recursive: true });
+  fs.writeFileSync(path.join(sb.repo, 'plugin', 'ok'), 'rebuilt, never committed\n');
+  r = run(sb.repo);
+  check('a stale plugin in the pushed commit blocks even when the working copy was rebuilt', r.status === 1 && /in the commit being pushed/.test(r.stdout) && /differs: plugin\/ok/.test(r.stdout), 'status ' + r.status + ' ' + r.stdout.slice(0, 300));
+  sb.g(['add', 'plugin/ok']); sb.g(['commit', '-qm', 'commit the rebuilt plugin']);
+  fs.rmSync(path.join(sb.repo, 'plugin', 'ok'));
+  r = run(sb.repo);
+  check('an uncommitted change in the working copy does not block a push whose commit is fresh', r.status === 0, 'status ' + r.status + ' ' + r.stdout.slice(0, 300));
+  check('the check leaves no temporary tree behind', !fs.readdirSync(os.tmpdir()).some(function (n) { return n.indexOf('pre-push-build-') === 0 && fs.statSync(path.join(os.tmpdir(), n)).mtimeMs > Date.now() - 60000; }));
+  cleanup(sb);
 }
 
 maskingTest();

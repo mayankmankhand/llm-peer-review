@@ -289,15 +289,25 @@ function build(src, version) {
       }] }],
     },
   }, null, 2) + '\n');
-  // Paths a copy-install manages (for migrating a manifest-less install).
-  const managed = [
+  // Paths a copy-install manages (for migrating a manifest-less install): today's
+  // inventory, plus every path an earlier release shipped from main that the
+  // source has since dropped (scripts/historical-managed-paths.txt, a committed
+  // list so --check stays deterministic without tags or history). Without it a
+  // pre-v5.5.0 install's old toolkit files were reported as the user's own
+  // (review of the v7.0.0 release, R15).
+  const historyFile = path.join(path.dirname(src), 'scripts', 'historical-managed-paths.txt');
+  const historical = fs.existsSync(historyFile)
+    ? fs.readFileSync(historyFile, 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    : [];
+  const managed = [...new Set([
     ...inv.commands.map(c => '.claude/commands/' + c.rel),
     ...inv.agents.map(a => '.claude/agents/' + a.rel),
     ...inv.skillFiles.map(f => '.claude/skills/' + f.rel),
     ...inv.scripts.map(s => '.claude/scripts/' + s.rel),
     '.claude/rules/toolkit.md', '.claude/rules/html-outputs.md',
     '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md',
-  ].sort();
+    ...historical,
+  ])].sort();
   put('managed-paths.json', JSON.stringify({ version, paths: managed }, null, 2) + '\n');
   // The project seed: what /tk:setup writes into a project (write-when-absent
   // files, plus the gitignore lines and the permission baseline it merges).

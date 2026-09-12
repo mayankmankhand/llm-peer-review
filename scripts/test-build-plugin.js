@@ -82,6 +82,7 @@ write(src, 'rules/toolkit.md', '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse th
   write(root, '.gitattributes', '*.sh text eol=lf\n');
   write(root, '.gitignore', 'node_modules/\nplans/PLAN-*.md\n');
   write(root, 'artifacts/README.md', '# artifacts\n');
+  write(root, 'scripts/historical-managed-paths.txt', '# a comment line is ignored\n\n.claude/commands/review-code.md\n.claude/skills/shared/output-template.md\n');
   return { root, src };
 }
 
@@ -146,6 +147,8 @@ const hooks = JSON.parse(read(out, 'hooks/hooks.json'));
 check('SessionStart hook links the data folder to the plugin root', JSON.stringify(hooks).includes('${CLAUDE_PLUGIN_DATA}/current') && JSON.stringify(hooks).includes('|| true'));
 const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
+check('managed-paths adds every historical path and skips comments and blanks', managed.paths.includes('.claude/commands/review-code.md') && managed.paths.includes('.claude/skills/shared/output-template.md') && !managed.paths.some(p => p === '' || p.startsWith('#')));
+check('managed-paths lists each path once', new Set(managed.paths).size === managed.paths.length);
 check('managed-paths never lists node_modules or settings', !managed.paths.some(p => /node_modules|settings/.test(p)));
 check('the seed carries every project file the installer seeds', ['seed/CLAUDE.md', 'seed/LESSONS.md', 'seed/LESSONS-detail.md', 'seed/DESIGN-PROFILE.md', 'seed/env.local.example', 'seed/gitattributes', 'seed/gitignore', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'seed/settings.local.json'].every(r => exists(out, r)));
 check('the conventions file is copied raw, its .claude/ regexes untouched', read(out, 'skills/shared/conventions.md') === read(fx.src, 'skills/shared/conventions.md') && read(out, 'skills/shared/conventions.md').includes('`\\.claude/skills/shared/`'));
