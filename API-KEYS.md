@@ -101,14 +101,14 @@ This stores your keys in a file on your disk. Where the file goes depends on how
 Either way the keys sit in plain text on your disk.
 
 ```bash
-# Plugin: one file per machine
+# Plugin: one file per machine (run from your project folder, where setup put the template)
 cp .env.local.example ~/.claude/plugins/.env.local
 
 # Copy-install: from your project directory
 cp .env.local.example .env.local
 ```
 
-Then open `.env.local` and paste your keys:
+Then open the file you just created (`~/.claude/plugins/.env.local` on the plugin, `.env.local` in your project on a copy-install) and paste your keys:
 
 ```
 OPENAI_API_KEY=sk-proj-your-key-here

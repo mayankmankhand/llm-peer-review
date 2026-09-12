@@ -61,7 +61,7 @@ Inside Claude Code the same two steps are `/plugin marketplace add mayankmankhan
 
 ### Step 1b: Seed the project
 
-If you are Claude Code, invoke the `tk:setup` skill from the project root: it runs the seed script, relays its report, and pages (exit code 3) when a decision is needed. From any other shell, run the same script directly:
+If you are Claude Code, invoke the `tk:setup` skill from the project root: it runs the seed script, relays its report, and stops to ask the user (exit code 3) when a decision is needed. From any other shell, run the same script directly:
 
 ```bash
 node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/setup-project.js
@@ -116,9 +116,9 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 ### Updating an Existing Project
 
-**On the plugin:** `claude plugin marketplace update llm-peer-review && claude plugin update tk@llm-peer-review`, restart or `/reload-plugins`, then invoke the `tk:upgrade` skill in each project that has files of its own under `.claude/` or a `CLAUDE.md` that mentions toolkit pieces. It audits those files against the conventions that changed since the project's last audited version (`docs/CONVENTIONS.md`), through the normal M2 audit and auto-fix loop, and pages once before editing any prompt file. The update itself never touches the project.
+**On the plugin:** `claude plugin marketplace update llm-peer-review && claude plugin update tk@llm-peer-review`, restart or `/reload-plugins`, then invoke the `tk:upgrade` skill in each project that has files of its own under `.claude/` or a `CLAUDE.md` that mentions toolkit pieces. It audits those files against the conventions that changed since the project's last audited version (`docs/CONVENTIONS.md`), through the normal M2 audit and auto-fix loop, and stops once to ask before editing any prompt file. The update itself never touches the project.
 
-**Migrating a copy-install to the plugin:** install the plugin (Step 1), then run `tk:setup` in the project (Step 1b). It classifies every managed file against the installer's manifest, pages on locally modified ones, backs up and removes the toolkit's files, keeps every custom file, seeds, merges settings, records the migration, and hands off to `tk:upgrade`. The undo is `git checkout -- .claude VERSION .gitattributes` plus the backup folder it names.
+**Migrating a copy-install to the plugin:** install the plugin (Step 1), then run `tk:setup` in the project (Step 1b). It classifies every managed file against the installer's manifest, stops to ask about locally modified ones, backs up and removes the toolkit's files, keeps every custom file, seeds, merges settings, records the migration, and hands off to `tk:upgrade`. The undo is `git checkout -- .claude VERSION .gitattributes` plus the backup folder it names. Setup never reads or moves the project's `.env.local`, and the plugin's scripts cannot see it, so tell the user to copy their API keys to `~/.claude/plugins/.env.local` or export them (Step 3).
 
 **On a copy-install (other editors):** **run the same Step 1c command again**. It's safe to rerun.
 
@@ -162,7 +162,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 5. Permission entries in a project-level `.claude/settings.json` are the user's to clean; setup never touches that file.
 
 **Migrating from the old CLAUDE.md (pre-split):** If the user's `CLAUDE.md` contains toolkit rules (workflow, slash commands table, permissions table, git workflow, subagent strategy), those rules now live in `.claude/rules/toolkit.md` and are auto-loaded. The user should:
-1. Re-run setup (Step 1 above) to get the new `toolkit.md`
+1. Get the new `toolkit.md`: on the plugin, run `tk:setup` (Step 1b), which writes it when it is missing; on a copy-install, re-run the Step 1c command
 2. Edit their `CLAUDE.md` to keep only project-specific info (About This Project, Who I Am, My Preferences)
 3. Remove the toolkit sections from their `CLAUDE.md` - they're now managed automatically
 
