@@ -454,9 +454,74 @@ function pluginCopyTests() {
   cleanup(sb);
 }
 
+// --- 9. mangled mailto: and tel: links are not credentials (issue #168) ----
+// A mail client that linkifies an address already written as a mailto: link
+// produces https://mailto:user@example.com, which the old pattern read as
+// username "mailto", password "user". Every pass fixture below keeps the
+// X:Y@host shape the old pattern matched, so each one fails without the fix.
+// The scheme is split from the rest, which breaks the :// the pattern needs.
+const MANGLED_MAILTO = 'https://' + 'mailto:user@example.com';
+const MANGLED_TEL = 'http://' + 'tel:+15551234567@example.com';
+const MANGLED_MAILTO_UPPER = 'HTTPS://' + 'MAILTO:Someone@Example.com';
+// Real credentials whose usernames only START with the skipped words.
+const CRED_URL = 'https://' + 'mailtoadmin' + ':' + 'hunter22' + '@git.example.com';
+const CRED_URL_TEL = 'https://' + 'telco' + ':' + 'hunter22' + '@git.example.com';
+
+function mailtoTests() {
+  console.log('\n9. mangled mailto: and tel: links do not fire (issue #168)');
+  let sb = makeRepo('mailto');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'docs/contact.md', [
+      'Email us: ' + MANGLED_MAILTO,
+      'Call us: ' + MANGLED_TEL,
+      'Upper-case client output: ' + MANGLED_MAILTO_UPPER,
+      '',
+    ].join('\n'), 'add mangled contact links');
+    const r = run(sb.repo);
+    check('mangled mailto: and tel: links do not block the push', r.status === 0, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    check('mangled-link run prints nothing to stdout', r.stdout === '', r.stdout.slice(0, 300));
+  } catch (e) {
+    check('mangled-link test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+
+  for (const [label, url] of [['mailtoadmin', CRED_URL], ['telco', CRED_URL_TEL]]) {
+    sb = makeRepo(label);
+    try {
+      commitFile(sb, 'README.md', 'seed\n', 'init');
+      commitFile(sb, 'ci/remote.txt', 'origin ' + url + '\n', 'add a credential URL');
+      const r = run(sb.repo);
+      check('a credential URL with username ' + label + ' still blocks', r.status === 1 && r.stdout.indexOf('[url-with-credentials]') !== -1, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    } catch (e) {
+      check(label + ' test set up a repo', false, e.message);
+    }
+    cleanup(sb);
+  }
+
+  // One line carrying both. The push must still block on the real credential and
+  // mask it, and the mangled link must come through UNMASKED: mask() rewrites a
+  // match to its first 4 characters plus ****, so without the fix the mangled link
+  // is masked too and the second assertion fails. That is the check that proves
+  // the lookahead, since exit 1 and the masked credential hold either way.
+  sb = makeRepo('mailto-mixed');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'ci/mixed.txt', 'contact ' + MANGLED_MAILTO + ' remote ' + CRED_URL + '\n', 'add a link and a credential');
+    const r = run(sb.repo);
+    check('a line with a mangled link and a real credential still blocks', r.status === 1, 'exit ' + r.status);
+    check('the real credential is masked in the report', r.stdout.indexOf(CRED_URL) === -1, 'the full credential was printed');
+    check('the mangled link is not treated as a credential', r.stdout.indexOf('mailto:user@example.com') !== -1, r.stdout.slice(0, 300));
+  } catch (e) {
+    check('mixed-line test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
+mailtoTests();
 
 console.log('');
 if (failures.length === 0) {

@@ -201,7 +201,22 @@ const PATTERNS = [
     re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/i,
     skipFile: (f) => /\.(?:md|markdown|mdx)$/i.test(f),
   },
-  { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
+  // A URL carrying user:password before the host. The lookahead after :// skips a
+  // mail client's mangled link (issue #168): some clients linkify an address that
+  // is already a mailto: link and write https://mailto:user@example.com, which
+  // otherwise reads as username "mailto", password "user". tel: gets the same
+  // treatment. The word must be followed by its colon, so a real username that
+  // only STARTS with one (mailtoadmin, telco) is still caught.
+  //
+  // The concession: a real credential whose username is exactly "mailto" or "tel"
+  // is missed. It has the same shape as a mangled link, so no pattern can tell the
+  // two apart, and a downstream project cannot patch this around a false positive
+  // because the plugin does not keep local edits.
+  //
+  // render-html.js keeps the broader form in its receipt masker on purpose: there
+  // it only hides text on a published page, where masking a mailto link costs
+  // nothing.
+  { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/(?!(?:mailto|tel):)[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
   {
     name: "secret-assignment",
     re: /(password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*["'][^"']{8,}["']/i,
