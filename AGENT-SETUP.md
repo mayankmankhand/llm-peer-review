@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v7.0.0)
+# AI Agent Setup Instructions (v7.0.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
@@ -168,15 +168,15 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
 
-**What's new in v7.0.0:** The toolkit is a Claude Code plugin (#167). Install once per machine, seed each project with `tk:setup`, update with `claude plugin update` and then `tk:upgrade`, which audits the project's own commands, skills, agents, rules, and `CLAUDE.md` against the conventions that changed (`docs/CONVENTIONS.md`, C-1 to C-8) and fixes what drifted through the loop. Every review dispatch goes to a typed `review-<kind>-finder` agent that preloads its criteria, so nothing is pasted per dispatch; the M2 skeptics and M3 verifiers are typed `audit-skeptic` and `fix-verifier` agents with no edit tools; `/create-plan` scores each plan with a fresh-context `plan-critic`. The always-on rules file is a short seed; the manual and the HTML output rules moved into the plugin as shared fragments. The copy-install scripts keep working for other editors.
+**What's new in v7.0.1:** A patch on v7.0.0 (#168). The pre-push tripwire no longer blocks a push over a mail client's mangled `https://mailto:` or `tel:` link, while a real credential, including a username that only starts with those words, still blocks. The fixes made on `main` after the v7.0.0 tag reach existing plugin installs with this version. Nothing about setup changes: update the plugin, or re-run the copy-install setup to replace the script.
+
+**What was new in v7.0.0:** The toolkit is a Claude Code plugin (#167). Install once per machine, seed each project with `tk:setup`, update with `claude plugin update` and then `tk:upgrade`, which audits the project's own commands, skills, agents, rules, and `CLAUDE.md` against the conventions that changed (`docs/CONVENTIONS.md`, C-1 to C-8) and fixes what drifted through the loop. Every review dispatch goes to a typed `review-<kind>-finder` agent that preloads its criteria, so nothing is pasted per dispatch; the M2 skeptics and M3 verifiers are typed `audit-skeptic` and `fix-verifier` agents with no edit tools; `/create-plan` scores each plan with a fresh-context `plan-critic`. The always-on rules file is a short seed; the manual and the HTML output rules moved into the plugin as shared fragments. The copy-install scripts keep working for other editors.
 
 **What was new in v6.3.3:** A patch on v6.3.2 (#164). The M11 pre-push tripwire learns six credential formats it could not see: GitLab's `glpat-` personal access token and its five sibling token prefixes, npm access tokens, PyPI publish tokens, JSON Web Tokens, and a `.netrc` credential record; `.netrc` and `_netrc` join the never-push files. The tripwire also gains `scripts/test-pre-push-check.js`, 31 checks, having been the only runtime script with no test file. Nothing about setup changes; re-running it replaces the script.
 
 **What was new in v6.3.2:** A patch on v6.3.1 (#163). The cycle summary `/document` renders is now one standing page per repository at `artifacts/html/cycle.html`, replaced each run and carrying a running log of earlier cycles; it leads with what changed and why rather than a file inventory, and may carry a diagram when the cycle has a flow worth drawing. The wrap guard five shells were missing now lives once in the shared tokens. Nothing about setup changes; re-running it picks up the renderer, the shells, the tokens, and the prompt files. Existing `document-*.html` files are inert and safe to delete.
 
-**What was new in v6.3.1:** A patch on v6.3.0 (#162). The audit writes the receipt files the review page reads, the standing review page renders after the fix loop and can go empty, and a focused `/review-*` run merges into it. Nothing about setup changes; re-running it picks up the renderer, the two shells, and the prompt files.
-
-**Older releases:** v6.3.0 (what a review finding says, and the standing review page), v6.2.0 (the design workflow), v6.1.1 (a plan-shell fix), v6.1.0 (the correction ledger, the hosted page as the primary viewport, installer parity) and v6.0.0 (the auto loop itself) are described in [CHANGELOG.md](CHANGELOG.md). If the user is upgrading from v5.x or earlier, read the v6.0.0 section there first: it is the release that changed behavior.
+**Older releases:** v6.3.1 (the receipt files and the standing review page after the fix loop), v6.3.0 (what a review finding says, and the standing review page), v6.2.0 (the design workflow), v6.1.1 (a plan-shell fix), v6.1.0 (the correction ledger, the hosted page as the primary viewport, installer parity) and v6.0.0 (the auto loop itself) are described in [CHANGELOG.md](CHANGELOG.md). If the user is upgrading from v5.x or earlier, read the v6.0.0 section there first: it is the release that changed behavior.
 
 ---
 
