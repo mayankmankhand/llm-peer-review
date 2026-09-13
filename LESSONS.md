@@ -231,3 +231,8 @@
 - **Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.**
 - **Review a plan this size with three fresh lenses before executing it.**
 - **A suite is green when its exit code is 0, not when its tail looks quiet.**
+
+## Issue 168 (v7.0.1, mangled mail links)
+
+- **A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.**
+- **A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.**
