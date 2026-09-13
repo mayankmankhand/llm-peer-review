@@ -857,7 +857,9 @@ const RECEIPT_MAX_BYTES = 64 * 1024;
 // publish, so the same shapes it scans for are masked here before a line is
 // kept (review of the #162 cycle, R12). Mirrors PATTERNS in pre-push-check.js;
 // update both together. Global flags, so a second secret on one line is not
-// left readable beside the first.
+// left readable beside the first. One deliberate difference: the URL pattern
+// below has no mailto:/tel: skip (issue #168). The tripwire skips those to stop
+// blocking pushes on mangled mail links; here over-masking one costs nothing.
 const RECEIPT_SECRET_PATTERNS = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
