@@ -3,7 +3,11 @@
 // test-setup-project.js - assertions for .claude/scripts/setup-project.js
 // (issue #167, Step 5; the version, .gitignore and .gitattributes cases of issue
 // #174; the migration record, undo line and seed .gitignore cases of 7.1.0;
-// colon-star permission rows and the folder-only undo line).
+// colon-star permission rows and the folder-only undo line; the copy-installs
+// from before VERSION was copied into projects, their root scripts/ helpers and
+// permission rows, and undo lines carried out literally, clause by clause, until
+// the tree matches its pre-run snapshot; whose VERSION a migration may remove
+// or read, checked afterwards through the SessionStart hook and pre-push check).
 // Builds a fixture plugin root and fixture projects in
 // temp dirs; never touches a real project. Dependency-free; exits non-zero on
 // any failure.
@@ -17,6 +21,14 @@ const os = require('os');
 const path = require('path');
 
 const SCRIPT = path.resolve(__dirname, '..', '.claude', 'scripts', 'setup-project.js');
+// The fixture repos read no global or system git config: a machine-wide ignore
+// file (one listing .claude/settings.local.json, say) would otherwise change
+// what a fixture tracks, and with it every undo list. Identity is set per repo.
+const gitCfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-gitcfg-'));
+fs.writeFileSync(path.join(gitCfgDir, 'ignore'), '');
+fs.writeFileSync(path.join(gitCfgDir, 'config'), '[core]\n\texcludesFile = ' + path.join(gitCfgDir, 'ignore').split(path.sep).join('/') + '\n');
+process.env.GIT_CONFIG_GLOBAL = path.join(gitCfgDir, 'config');
+process.env.GIT_CONFIG_NOSYSTEM = '1';
 let passed = 0;
 const failures = [];
 function check(name, cond, detail) {
@@ -73,28 +85,96 @@ function shellWords(s) {
   if (cur !== null) words.push(cur);
   return words;
 }
-// The undo line when it is the report's last line, parsed into its clauses; null otherwise.
+// The report's `  Undo: ` line, parsed into its clauses in order; null when the
+// report has none. `steps` keeps the order the line gives; the named lists are
+// for assertions. `thenOk` is false when "then" is missing from a later action
+// or starts the first one.
 function undoOf(out) {
-  const lines = out.replace(/\s+$/, '').split('\n');
-  const m = /^ {2}Undo: (.*)$/.exec(lines[lines.length - 1]);
-  if (!m) return null;
-  const u = { noGit: false, del: [], dirs: [], checkout: [], byHand: [], unknown: [] };
-  for (const clause of m[1].split(' ; ')) {
+  const line = out.split('\n').find(l => l.startsWith('  Undo: '));
+  if (!line) return null;
+  const u = { line, noGit: false, steps: [], del: [], dirs: [], checkout: [], restore: [], backupFrom: null, removeBackup: null, byHand: [], notRestored: [], unknown: [], thenOk: true };
+  let actions = 0;
+  for (const raw of line.slice('  Undo: '.length).split(' ; ')) {
     let c;
-    if (clause === 'not a git repository, so there is no git undo') u.noGit = true;
-    else if ((c = /^delete (.+)$/.exec(clause))) u.del = shellWords(c[1]);
-    else if ((c = /^(?:then )?remove the new folders if empty: (.+)$/.exec(clause))) u.dirs = shellWords(c[1]);
-    else if ((c = /^git checkout -- (.+)$/.exec(clause))) u.checkout = shellWords(c[1]);
-    else if ((c = /^restore by hand \(git holds no copy of them as they were\): (.+)$/.exec(clause))) u.byHand = shellWords(c[1]);
-    else u.unknown.push(clause);
+    if (raw === 'not a git repository, so there is no git undo') { u.noGit = true; continue; }
+    if ((c = /^not restored \(reinstall the packages only if you still need them\): (.+)$/.exec(raw))) { u.notRestored = shellWords(c[1]); continue; }
+    const then = raw.startsWith('then ');
+    if (then !== (actions > 0)) u.thenOk = false;
+    actions++;
+    const clause = then ? raw.slice(5) : raw;
+    if ((c = /^git checkout -- (.+)$/.exec(clause))) { u.checkout = shellWords(c[1]); u.steps.push({ kind: 'checkout', paths: u.checkout }); }
+    else if ((c = /^remove the new folders if empty: (.+)$/.exec(clause))) { u.dirs = shellWords(c[1]); u.steps.push({ kind: 'dirs', paths: u.dirs }); }
+    else if ((c = /^copy back from the backup folder (.+?): (.+)$/.exec(clause))) { u.backupFrom = shellWords(c[1])[0]; u.restore = shellWords(c[2]); u.steps.push({ kind: 'restore', from: u.backupFrom, paths: u.restore }); }
+    else if ((c = /^restore by hand \(git holds no copy of them as they were\): (.+)$/.exec(clause))) { u.byHand = shellWords(c[1]); u.steps.push({ kind: 'byHand', paths: u.byHand }); }
+    else if ((c = /^remove the backup folder: (.+)$/.exec(clause))) { u.removeBackup = shellWords(c[1])[0]; u.steps.push({ kind: 'removeBackup', paths: [u.removeBackup] }); }
+    else if ((c = /^delete (.+)$/.exec(clause))) { u.del = shellWords(c[1]); u.steps.push({ kind: 'delete', paths: u.del }); }
+    else u.unknown.push(raw);
   }
   return u;
 }
-// Carry out an undo line the way a user would (the by-hand clause excepted).
-function applyUndo(root, u) {
-  for (const rel of u.del) fs.rmSync(path.join(root, rel));
-  for (const rel of u.dirs) fs.rmdirSync(path.join(root, rel));
-  if (u.checkout.length) git(root, ['checkout', '--', ...u.checkout]);
+// Carry out an undo line literally, clause by clause in its order, the way a
+// user would: `git checkout --` with exactly the listed words, delete each listed
+// file, remove each listed folder when it is empty, copy each listed file back
+// from the named backup folder (creating its folder), put back by hand the bytes
+// the pre-run snapshot `before` holds for each by-hand file, remove the backup
+// folder. Throws when a clause cannot be done as written.
+function applyUndo(root, u, before) {
+  if (u.unknown.length) throw new Error('unknown undo clause: ' + u.unknown.join(' | '));
+  for (const s of u.steps) {
+    if (s.kind === 'checkout') execFileSync('git', ['checkout', '--', ...s.paths], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    else if (s.kind === 'delete') for (const rel of s.paths) fs.rmSync(path.join(root, rel));
+    else if (s.kind === 'dirs') for (const rel of s.paths) { const a = path.join(root, rel); if (fs.existsSync(a) && fs.readdirSync(a).length === 0) fs.rmdirSync(a); }
+    else if (s.kind === 'restore') for (const rel of s.paths) { const dest = path.join(root, rel); fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.copyFileSync(path.join(root, s.from, rel), dest); }
+    else if (s.kind === 'byHand') for (const rel of s.paths) {
+      if (!before || !before.bytes.has(rel)) throw new Error('a by-hand file the snapshot never held: ' + rel);
+      fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+      fs.writeFileSync(path.join(root, rel), before.bytes.get(rel));
+    }
+    else if (s.kind === 'removeBackup') fs.rmSync(path.join(root, s.paths[0]), { recursive: true });
+  }
+}
+// Everything an exact undo must give back: git's view (ignored and every
+// untracked file listed one by one), each file's raw bytes, and every folder.
+function fullSnapshot(root) {
+  const bytes = new Map();
+  (function walk(d, rel) {
+    for (const n of fs.readdirSync(d).sort()) {
+      if (n === '.git') continue;
+      const a = path.join(d, n); const r = rel ? rel + '/' + n : n;
+      if (fs.statSync(a).isDirectory()) walk(a, r); else bytes.set(r, fs.readFileSync(a));
+    }
+  })(root, '');
+  const isRepo = fs.existsSync(path.join(root, '.git'));
+  return {
+    status: isRepo ? execFileSync('git', ['status', '--porcelain', '--ignored', '--untracked-files=all'], { cwd: root, encoding: 'utf8' }) : '(no repo)',
+    tree: [...bytes].map(([r, b]) => r + ':' + crypto.createHash('sha256').update(b).digest('hex')).join('\n'),
+    dirs: dirSnapshot(root).join('\n'),
+    bytes,
+  };
+}
+// Which parts of a snapshot differ, for a failure's detail.
+function snapshotDiff(a, b) {
+  const diff = [];
+  if (a.status !== b.status) diff.push('status before:\n' + a.status + 'status after:\n' + b.status);
+  if (a.tree !== b.tree) { const x = a.tree.split('\n'); const y = b.tree.split('\n'); diff.push('files: -' + x.filter(l => !y.includes(l)).join(', -') + ' +' + y.filter(l => !x.includes(l)).join(', +')); }
+  if (a.dirs !== b.dirs) { const x = a.dirs.split('\n'); const y = b.dirs.split('\n'); diff.push('dirs: -' + x.filter(l => !y.includes(l)).join(', -') + ' +' + y.filter(l => !x.includes(l)).join(', +')); }
+  return diff.join('\n');
+}
+// Run setup, carry out its undo line literally in a copy of the tree (the
+// original stays for other checks), and compare with `before`. `label` names
+// the checks.
+function undoRestores(label, repo, before, out) {
+  const u = undoOf(out);
+  check(label + ': the report has an undo line with only known clauses and "then" placed right', u !== null && u.unknown.length === 0 && u.thenOk, out);
+  if (!u) return null;
+  const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-undo-'));
+  fs.cpSync(repo, copy, { recursive: true });
+  let err = null;
+  try { applyUndo(copy, u, before); } catch (e) { err = e.message; }
+  const after = err === null ? fullSnapshot(copy) : null;
+  check(label + ': following the undo line literally restores git status, every file and every folder exactly', err === null && snapshotDiff(before, after) === '', err || (after && snapshotDiff(before, after)) + '\n' + u.line);
+  fs.rmSync(copy, { recursive: true, force: true });
+  return u;
 }
 const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
 function treeSnapshot(root) {
@@ -124,10 +204,15 @@ write(pluginRoot, 'seed/gitignore', '# Dependencies\nnode_modules/\n.claude/sett
 write(pluginRoot, 'seed/artifacts-README.md', '# artifacts (seed)\n');
 write(pluginRoot, 'seed/rules-toolkit.md', '# Toolkit Rules\n\n<!-- Toolkit version: 0.0.0 | Managed by LLM Peer Review. -->\n\nShort seed.\n');
 write(pluginRoot, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)', 'Bash(gh auth status *)', 'Bash(node .claude/scripts/render-html.js *)'], additionalDirectories: ['/tmp'] }, defaultMode: 'acceptEdits' }));
+// One managed path holds a space, so every undo list is shell-quoted for real.
+const SPACED = '.claude/skills/shared/notes one.md';
 const MANAGED = ['.claude/commands/review.md', '.claude/commands/explore.md', '.claude/agents/review-finder.md', '.claude/skills/review-code/SKILL.md',
   '.claude/skills/shared/hitl-loop.md', '.claude/skills/shared/shells/review-shell.html', '.claude/scripts/render-html.js', '.claude/scripts/package.json',
-  '.claude/rules/toolkit.md', '.claude/rules/html-outputs.md', '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md'];
-write(pluginRoot, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED }));
+  '.claude/rules/toolkit.md', '.claude/rules/html-outputs.md', '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md', SPACED];
+// The helper scripts early installers copied to the project's root scripts/
+// folder, listed like the real historical-managed-paths.txt lists them.
+const ROOT_TOOLKIT_SCRIPTS = ['scripts/ask-gpt.js', 'scripts/ask-gemini.js', 'scripts/browse.js'];
+write(pluginRoot, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED.concat(ROOT_TOOLKIT_SCRIPTS) }));
 
 const LFS_LINE = '*.psd filter=lfs diff=lfs merge=lfs -text';
 const ARTIFACTS_NOTES = '# Our artifacts notes\n\nKept by hand.\n';
@@ -168,6 +253,8 @@ function makeCopyInstall(withManifest) {
 
 console.log('\n1. copy-install with a manifest');
 let repo = makeCopyInstall(true);
+let undo = null;
+let snapBefore = null;
 const before = treeSnapshot(repo);
 let r = run(repo, pluginRoot, ['--dry-run']);
 check('dry run reports the migration and writes nothing', r.status === 3 && /migration from copy-install v6\.3\.3 \(manifest present\)/.test(r.out) && treeSnapshot(repo) === before, r.out);
@@ -276,6 +363,364 @@ check('--force sweeps the shipped managed paths', r.status === 0 && !exists(repo
 check('state records the unknown-provenance migration with the old VERSION', JSON.parse(read(repo, '.claude/.toolkit-state.json')).previousVersion === '6.3.3');
 fs.rmSync(repo, { recursive: true, force: true });
 
+// A copy-install from before VERSION was copied into projects: no VERSION, no
+// manifest, the installer's stamp in the rules file, and the helper scripts it
+// copied to the root scripts/ folder beside one of the project's own.
+console.log('\n3b. copy-install from before VERSION was copied into projects');
+const stampedRules = (v) => '# Toolkit Rules\n\n<!-- Toolkit version: ' + v + ' | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->\n\nOld long manual.\n';
+const EARLY_ROWS = ['Bash(node scripts/ask-gpt.js *)', 'Bash(node scripts/ask-gemini.js:*)', 'Bash(node scripts/browse.js *)', 'Bash(echo * | node scripts/browse.js *)'];
+const OWN_ROWS = ['Bash(node scripts/build.js *)', 'Bash(node scripts/build.js:*)', 'Bash(git add *)'];
+function makeEarlyInstall(rules) {
+  const repo0 = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-early-'));
+  initRepo(repo0);
+  for (const rel of ['.claude/commands/review.md', '.claude/commands/explore.md', '.env.local.example']) write(repo0, rel, 'toolkit content of ' + rel + '\n');
+  write(repo0, '.claude/rules/toolkit.md', rules === undefined ? stampedRules('4.1.0') : rules);
+  for (const rel of ROOT_TOOLKIT_SCRIPTS) write(repo0, rel, '// toolkit helper ' + rel + '\n');
+  write(repo0, 'scripts/build.js', 'console.log("ours");\n');
+  write(repo0, '.claude/commands/myteam-deploy.md', '# Deploy\n\nOurs.\n');
+  write(repo0, '.gitignore', 'mine/\n');
+  write(repo0, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: EARLY_ROWS.concat(OWN_ROWS) } }, null, 2) + '\n');
+  commitAll(repo0, 'early copy-install');
+  return repo0;
+}
+repo = makeEarlyInstall();
+let early = fullSnapshot(repo);
+r = run(repo, pluginRoot);
+check('an early install with no VERSION is a migration from an unknown provenance, not a fresh project', r.status === 3 && /migration from copy-install v4\.1\.0 \(NO manifest: provenance unknown\)/.test(r.out) && !/fresh install/.test(r.out), r.out);
+check('its page reads right with no VERSION file and names the sweep decision', /No VERSION file: recognized by the toolkit stamp/.test(r.out) && /version is read from that stamp/.test(r.out) && /PAGED - nothing was written/.test(r.out) && /add --force to sweep/.test(r.out), r.out);
+check('the report lists the root toolkit scripts it would remove, and only those', /helper scripts an early installer copied to the root scripts\/ folder[^\n]*scripts\/ask-gpt\.js, scripts\/ask-gemini\.js, scripts\/browse\.js\n/.test(r.out) && !/scripts\/build\.js/.test(r.out), r.out);
+check('the paged run wrote nothing', snapshotDiff(early, fullSnapshot(repo)) === '');
+r = run(repo, pluginRoot, ['--force']);
+check('--force sweeps it', r.status === 0 && /Done\./.test(r.out), r.out);
+check('the root toolkit scripts are removed and the project\'s own scripts/build.js is kept byte for byte', ROOT_TOOLKIT_SCRIPTS.every(rel => !exists(repo, rel)) && read(repo, 'scripts/build.js') === 'console.log("ours");\n');
+check('the old commands are removed, the custom one kept, the rules file reseeded at the plugin version', !exists(repo, '.claude/commands/review.md') && !exists(repo, '.claude/commands/explore.md') && exists(repo, '.claude/commands/myteam-deploy.md') && read(repo, '.claude/rules/toolkit.md').includes('Toolkit version: 7.0.0 |') && read(repo, '.claude/rules/toolkit.md').includes('Short seed.'));
+let earlyBackup = fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-'));
+check('the backup holds the removed root scripts and the old rules file', earlyBackup.length === 1 && ROOT_TOOLKIT_SCRIPTS.every(rel => exists(repo, earlyBackup[0] + '/' + rel)) && read(repo, earlyBackup[0] + '/.claude/rules/toolkit.md').includes('Old long manual.'));
+let earlyAllow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+check('rows for the removed root toolkit scripts are removed; the rows for scripts/build.js are kept', EARLY_ROWS.every(p => !earlyAllow.includes(p)) && OWN_ROWS.every(p => earlyAllow.includes(p)), JSON.stringify(earlyAllow));
+let earlyState = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+let earlyMig = JSON.parse(read(repo, '.claude/.toolkit-migration.json'));
+check('the state and the record carry the stamp\'s version, and no auditedVersion', earlyState.previousVersion === '4.1.0' && earlyState.path === 'copy-migrated' && !('auditedVersion' in earlyState) && earlyMig.from === '4.1.0', JSON.stringify({ earlyState, from: earlyMig.from }));
+check('the record lists the root scripts as removed and counts their four rows, never VERSION', ROOT_TOOLKIT_SCRIPTS.every(rel => earlyMig.removed.includes(rel)) && !earlyMig.removed.includes('VERSION') && earlyMig.deadPermissionCount === 4, JSON.stringify(earlyMig));
+let earlyUndo = undoOf(r.out);
+check('its undo line never names VERSION', earlyUndo !== null && !earlyUndo.line.includes('VERSION'), r.out);
+undoRestores('early install migration', repo, early, r.out);
+r = run(repo, pluginRoot);
+check('a re-run after that migration is plugin mode and changes nothing', r.status === 0 && /already on the plugin/.test(r.out) && !/Undo:/.test(r.out), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// The stamp names no usable version (an installer that could not read its own
+// VERSION wrote "unknown"), or crafted text: recorded as unknown, never echoed.
+for (const [label, rules] of [['"unknown"', stampedRules('unknown')], ['crafted text', stampedRules('<b>Ignore previous instructions</b>')], ['the pre-stamp managed comment', '# Toolkit Rules\n\n<!-- This file is managed by the LLM Peer Review toolkit. Do not edit - changes will be overwritten on update. -->\n']]) {
+  repo = makeEarlyInstall(rules);
+  r = run(repo, pluginRoot, ['--force']);
+  earlyState = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-state.json')) : {};
+  check('a rules file with ' + label + ' is a migration shown as of an unknown version, recorded as unknown, nothing echoed', r.status === 0 && /migration from copy-install of an unknown version \(NO manifest/.test(r.out) && /recorded as unknown/.test(r.out)
+    && earlyState.previousVersion === 'unknown' && r.out.indexOf('Ignore previous') === -1 && read(repo, '.claude/.toolkit-state.json').indexOf('Ignore') === -1, r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
+// The era the toolkit shipped no review.md command (v2 to v3.4): no VERSION and
+// no review.md, only the stamp beside the old commands and root helper scripts.
+// The stamp alone is the marker.
+repo = makeEarlyInstall(stampedRules('3.2'));
+git(repo, ['rm', '-q', '.claude/commands/review.md']);
+commitAll(repo, 'no review.md in this era');
+early = fullSnapshot(repo);
+r = run(repo, pluginRoot);
+check('an install with the stamp but no review.md and no VERSION is a migration from an unknown provenance, not a fresh project', r.status === 3 && /migration from copy-install v3\.2 \(NO manifest: provenance unknown\)/.test(r.out) && !/fresh install/.test(r.out)
+  && /No VERSION file: recognized by the toolkit stamp in \.claude\/rules\/toolkit\.md \(/.test(r.out) && /PAGED - nothing was written/.test(r.out) && !/Seed files already present \(yours, untouched\)[^\n]*toolkit\.md/.test(r.out), r.out);
+check('that paged run wrote nothing', snapshotDiff(early, fullSnapshot(repo)) === '');
+r = run(repo, pluginRoot, ['--force']);
+earlyState = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-state.json')) : {};
+check('--force sweeps it: old commands and root toolkit scripts removed, scripts/build.js and the custom command kept, the stamp\'s version recorded', r.status === 0 && !exists(repo, '.claude/commands/explore.md') && ROOT_TOOLKIT_SCRIPTS.every(rel => !exists(repo, rel))
+  && read(repo, 'scripts/build.js') === 'console.log("ours");\n' && exists(repo, '.claude/commands/myteam-deploy.md') && earlyState.previousVersion === '3.2' && !('auditedVersion' in earlyState), r.out);
+undoRestores('no-review.md era migration', repo, early, r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// A VERSION at the project root is the toolkit's only when the install shape
+// says the installer wrote it: a manifest lists it, review.md sits beside it, or
+// it holds exactly the stamp's version. An app's own VERSION beside an install
+// recognized by the stamp alone is the project's: kept, never the old version.
+console.log('\n3b-version. whose VERSION it is');
+// The plugin's SessionStart hook and pre-push check, run from a fixture plugin
+// root at the same version as the setup fixture, read the state the run wrote.
+const hookRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-hooks-'));
+write(hookRoot, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version: '7.0.0' }));
+for (const name of ['session-start.js', 'pre-push-check.js']) write(hookRoot, 'scripts/' + name, fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'scripts', name)));
+function sessionNotice(project) {
+  const env = Object.assign({}, process.env, { CLAUDE_PROJECT_DIR: project });
+  delete env.CLAUDE_PLUGIN_DATA; delete env.CLAUDE_PLUGIN_ROOT;
+  const r0 = spawnSync(process.execPath, [path.join(hookRoot, 'scripts', 'session-start.js')], { env, input: JSON.stringify({ source: 'startup' }), encoding: 'utf8', timeout: 10000 });
+  return { status: r0.status, out: r0.stdout || '' };
+}
+function prePush(project) {
+  const r0 = spawnSync(process.execPath, [path.join(hookRoot, 'scripts', 'pre-push-check.js')], { cwd: project, encoding: 'utf8', timeout: 30000 });
+  return { status: r0.status, out: r0.stdout || '', err: r0.stderr || '' };
+}
+const NEWER_RECORDED = /older than this project's recorded version|records toolkit/;
+function makeStampOnlyInstall(versionText) {
+  const repo0 = makeEarlyInstall(stampedRules('3.2'));
+  git(repo0, ['rm', '-q', '.claude/commands/review.md']);
+  write(repo0, 'VERSION', versionText);
+  commitAll(repo0, 'stamp-only install beside a VERSION');
+  return repo0;
+}
+const OWN_VERSION = '12.0.0\n';
+repo = makeStampOnlyInstall(OWN_VERSION);
+early = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--dry-run']);
+check('a stamp-only install beside a project-owned VERSION is a migration from the stamp\'s version, never from VERSION', r.status === 3 && /migration from copy-install v3\.2 \(NO manifest: provenance unknown\)/.test(r.out) && r.out.indexOf('12.0.0') === -1, r.out);
+check('its page says VERSION is the project\'s and kept, the version comes from the stamp, and lists no VERSION among the removals', /No VERSION file of the toolkit's: recognized by the toolkit stamp[^\n]*version is read from that stamp/.test(r.out)
+  && /VERSION at the project root is yours, kept untouched and not read as the toolkit version/.test(r.out) && !/Among them, VERSION/.test(r.out), r.out);
+check('that dry run wrote nothing', snapshotDiff(early, fullSnapshot(repo)) === '');
+r = run(repo, pluginRoot, ['--force']);
+check('--force completes that migration', r.status === 0 && /Done\./.test(r.out), r.out);
+check('the project-owned VERSION is kept byte for byte', exists(repo, 'VERSION') && fs.readFileSync(path.join(repo, 'VERSION')).equals(early.bytes.get('VERSION')));
+earlyState = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-state.json')) : {};
+earlyMig = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-migration.json')) : { removed: [] };
+check('the state and the record carry the stamp\'s version, never the project\'s', earlyState.previousVersion === '3.2' && earlyMig.from === '3.2' && read(repo, '.claude/.toolkit-state.json').indexOf('12.0.0') === -1, JSON.stringify({ earlyState, from: earlyMig.from }));
+earlyBackup = fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-'));
+check('VERSION is not in the record\'s removals and not backed up as a toolkit file', !earlyMig.removed.includes('VERSION') && earlyBackup.length === 1 && !exists(repo, earlyBackup[0] + '/VERSION'), JSON.stringify(earlyMig.removed));
+earlyUndo = undoRestores('stamp-only install beside a project-owned VERSION', repo, early, r.out);
+check('its undo line names VERSION nowhere, the checkout list included', earlyUndo !== null && !earlyUndo.checkout.includes('VERSION') && !earlyUndo.line.includes('VERSION'), r.out);
+let hook = sessionNotice(repo);
+check('afterwards the session notice reports no newer recorded version (it measures from the stamp\'s 3.2) and echoes no 12.0.0', hook.status === 0 && !/which is older/.test(hook.out) && hook.out.indexOf('12.0.0') === -1 && /toolkit 3\.2, and this session runs the tk plugin 7\.0\.0, which is newer/.test(hook.out) && !/Toolkit install notice/.test(hook.out), hook.out);
+let push = prePush(repo);
+check('afterwards pre-push-check.js reports no newer recorded version', /tk pre-push check 7\.0\.0/.test(push.err) && !NEWER_RECORDED.test(push.out) && push.out.indexOf('12.0.0') === -1, push.out + push.err);
+// Control: the same hooks on the state the old rule wrote do report it, so the
+// two checks above are live.
+write(repo, '.claude/.toolkit-state.json', JSON.stringify(Object.assign({}, earlyState, { previousVersion: '12.0.0' }), null, 2) + '\n');
+hook = sessionNotice(repo);
+push = prePush(repo);
+check('control: a recorded previousVersion of 12.0.0 makes both hooks report a newer recorded version', /which is older/.test(hook.out) && NEWER_RECORDED.test(push.out) && push.status === 1, hook.out + push.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// The same shape whose VERSION holds exactly the stamp's version: the old
+// installer's own file, swept on --force and named on the page.
+repo = makeStampOnlyInstall('3.2\n');
+early = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--dry-run']);
+check('a stamp-only install whose VERSION equals the stamp version names VERSION among the removals, with the reason', r.status === 3 && /migration from copy-install v3\.2 \(NO manifest/.test(r.out)
+  && /Among them, VERSION at the project root, as the toolkit's because it holds the same version as the toolkit stamp in \.claude\/rules\/toolkit\.md\. If VERSION is your project's own file, stop here/.test(r.out) && !/VERSION at the project root is yours/.test(r.out), r.out);
+r = run(repo, pluginRoot, ['--force']);
+earlyMig = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-migration.json')) : { removed: [] };
+earlyBackup = fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-'));
+check('--force removes that VERSION, backs it up, records it as removed, and names it again in the report', r.status === 0 && !exists(repo, 'VERSION') && earlyMig.removed.includes('VERSION') && earlyBackup.length === 1 && read(repo, earlyBackup[0] + '/VERSION') === '3.2\n'
+  && /Among them, VERSION at the project root/.test(r.out) && JSON.parse(read(repo, '.claude/.toolkit-state.json')).previousVersion === '3.2', r.out);
+earlyUndo = undoRestores('stamp-only install whose VERSION equals the stamp', repo, early, r.out);
+check('its undo line checks VERSION out (tracked, removed by the run)', earlyUndo !== null && earlyUndo.checkout.includes('VERSION'), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// VERSION beside review.md with a pre-7 stamp: the toolkit's, as before. Its
+// content is the old version, and the page names it with that reason.
+repo = makeEarlyInstall();
+write(repo, 'VERSION', '4.1.0\n');
+commitAll(repo, 'VERSION beside review.md');
+early = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--force']);
+earlyMig = r.status === 0 ? JSON.parse(read(repo, '.claude/.toolkit-migration.json')) : { removed: [] };
+check('VERSION beside review.md with a pre-7 stamp is the toolkit\'s: named with that reason, removed, recorded, previousVersion from it', r.status === 0 && /migration from copy-install v4\.1\.0 \(NO manifest/.test(r.out) && !/No VERSION file/.test(r.out)
+  && /Among them, VERSION at the project root, as the toolkit's because it sits beside \.claude\/commands\/review\.md/.test(r.out) && !exists(repo, 'VERSION') && earlyMig.removed.includes('VERSION')
+  && JSON.parse(read(repo, '.claude/.toolkit-state.json')).previousVersion === '4.1.0', r.out);
+undoRestores('VERSION beside review.md with a pre-7 stamp', repo, early, r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+// With a different VERSION there, review.md beside it still decides.
+repo = makeEarlyInstall();
+write(repo, 'VERSION', '6.3.3\n');
+commitAll(repo, 'VERSION beside review.md, not the stamp version');
+r = run(repo, pluginRoot, ['--force']);
+check('VERSION beside review.md that differs from the stamp is still the toolkit\'s and its content the old version, unchanged from before', r.status === 0 && !exists(repo, 'VERSION') && /migration from copy-install v6\.3\.3/.test(r.out)
+  && JSON.parse(read(repo, '.claude/.toolkit-state.json')).previousVersion === '6.3.3', r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// The ownership rule directly.
+{
+  const h = require(SCRIPT);
+  const noMarkers = { manifest: false, versionFile: false, stamp: null };
+  const stamp32 = { manifest: false, versionFile: false, stamp: { version: '3.2' } };
+  const stampNone = { manifest: false, versionFile: false, stamp: { version: null } };
+  check('versionFileOwner: a manifest listing VERSION, review.md beside it, or the stamp\'s exact version make it the toolkit\'s',
+    h.versionFileOwner(noMarkers, { files: { VERSION: 'x' } }, '12.0.0') === 'manifest' && h.versionFileOwner({ manifest: false, versionFile: true, stamp: null }, null, '12.0.0') === 'review'
+    && h.versionFileOwner(stamp32, null, '3.2') === 'stamp');
+  check('versionFileOwner: anything else is the project\'s (another version, a manifest without VERSION, a stamp naming none, no file)',
+    h.versionFileOwner(stamp32, null, '12.0.0') === null && h.versionFileOwner(stamp32, { files: { '.claude/commands/explore.md': 'x' } }, '12.0.0') === null
+    && h.versionFileOwner(stamp32, null, '3.2.0') === null && h.versionFileOwner(stampNone, null, 'unknown') === null && h.versionFileOwner(stamp32, null, null) === null
+    && h.versionFileOwner(stamp32, { files: Object.create({ VERSION: 'inherited' }) }, '12.0.0') === null);
+}
+fs.rmSync(hookRoot, { recursive: true, force: true });
+
+// No marker: a project's own review.md stays a fresh project, with or without
+// a rules file (its own, or a plugin seed stamped 7.0.0 or later). A 7.x stamp
+// also cancels VERSION beside review.md, which is the toolkit's own repository
+// shape: its own VERSION and review.md, a 7.x rules file, no state file.
+for (const [label, rules, versionFile] of [['no rules file', null], ['its own rules file', '# Our rules\n\nNo toolkit here.\n'], ['a plugin-era stamped rules file', stampedRules('7.0.1')],
+  ['VERSION beside a plugin-era stamped rules file (the toolkit\'s own repository shape)', stampedRules('7.0.1'), '7.1.0\n']]) {
+  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-own-review-'));
+  initRepo(repo);
+  write(repo, '.claude/commands/review.md', '# Our review command\n');
+  write(repo, 'scripts/browse.js', '// ours\n');
+  if (rules !== null) write(repo, '.claude/rules/toolkit.md', rules);
+  if (versionFile) write(repo, 'VERSION', versionFile);
+  commitAll(repo, 'own commands');
+  r = run(repo, pluginRoot);
+  check('a project with its own review.md and ' + label + ' stays a fresh project and keeps its files', r.status === 0 && /Install type: fresh install/.test(r.out) && read(repo, '.claude/commands/review.md') === '# Our review command\n' && read(repo, 'scripts/browse.js') === '// ours\n'
+    && (!versionFile || read(repo, 'VERSION') === versionFile), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+}
+
+// The real list the build turns into managed-paths.json carries exactly the
+// root helper scripts the early installers copied, and no other scripts/ path.
+{
+  const hist = fs.readFileSync(path.resolve(__dirname, 'historical-managed-paths.txt'), 'utf8').split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  const rootHist = hist.filter(l => l.startsWith('scripts/'));
+  check('historical-managed-paths.txt lists the five root helper scripts early installers copied, and no other root scripts/ path', sameSet(rootHist, ['scripts/ask-gpt.js', 'scripts/ask-gemini.js', 'scripts/browse.js', 'scripts/dev-lead-gpt.js', 'scripts/dev-lead-gemini.js']), rootHist.join(', '));
+}
+
+// The helpers directly: the marker rule, the root-row rule, the classification.
+{
+  const h = require(SCRIPT);
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-markers-'));
+  const m0 = h.copyInstallMarkers(d);
+  write(d, '.claude/rules/toolkit.md', stampedRules('3.2'));
+  const mNoReview = h.copyInstallMarkers(d);
+  write(d, '.claude/commands/review.md', '# review\n');
+  write(d, '.claude/rules/toolkit.md', stampedRules('6.3.3'));
+  const mStamp = h.copyInstallMarkers(d);
+  write(d, '.claude/rules/toolkit.md', stampedRules('7.0.0'));
+  const mSeed = h.copyInstallMarkers(d);
+  write(d, 'VERSION', '9.9.9\n');
+  const mSeedVersion = h.copyInstallMarkers(d);
+  fs.rmSync(path.join(d, '.claude', 'rules', 'toolkit.md'));
+  const mVersion = h.copyInstallMarkers(d);
+  write(d, '.claude/rules/toolkit.md', '# Our rules\n');
+  const mVersionOwnRules = h.copyInstallMarkers(d);
+  check('copyInstallMarkers: nothing in an empty folder, a pre-7 stamp with or without review.md, none for a 7.0.0 stamp, VERSION beside review.md with no rules file or its own', !m0.manifest && !m0.versionFile && m0.stamp === null
+    && mNoReview.stamp && mNoReview.stamp.version === '3.2' && !mNoReview.versionFile && mStamp.stamp && mStamp.stamp.version === '6.3.3' && mSeed.stamp === null && mVersion.versionFile && !mVersion.manifest && mVersionOwnRules.versionFile,
+    JSON.stringify({ m0, mNoReview, mStamp, mSeed, mVersion, mVersionOwnRules }));
+  check('copyInstallMarkers: a 7.x stamp cancels VERSION beside review.md (the toolkit\'s own repository shape)', !mSeedVersion.versionFile && mSeedVersion.stamp === null && !mSeedVersion.manifest, JSON.stringify(mSeedVersion));
+  fs.rmSync(d, { recursive: true, force: true });
+  const roots = new Set(ROOT_TOOLKIT_SCRIPTS);
+  const gone = () => false;
+  check('deadPermission: a row for a root toolkit script that will not exist is dead, plain or colon-star', h.deadPermission('Bash(node scripts/ask-gpt.js *)', gone, roots) && h.deadPermission('Bash(node scripts/ask-gemini.js:*)', gone, roots) && h.deadPermission('Bash(cat * | node scripts/browse.js *)', gone, roots));
+  check('deadPermission: a row for any other root script, or a root toolkit script that stays, is live', !h.deadPermission('Bash(node scripts/build.js *)', gone, roots) && !h.deadPermission('Bash(node scripts/ask-gpt.js *)', () => true, roots) && !h.deadPermission('Bash(node tools/scripts/ask-gpt.js *)', gone, roots));
+  const B = (s) => Buffer.from(s);
+  const cls = h.classifyUndo([
+    { rel: 'clean-changed', before: B('a'), after: B('b'), tracked: true, unstaged: false, backupHolds: true },
+    { rel: 'tracked-deleted-before', before: null, after: B('seed'), tracked: true, unstaged: true, backupHolds: false },
+    { rel: 'tracked-removed', before: B('a'), after: null, tracked: true, unstaged: false, backupHolds: true },
+    { rel: 'dirty-with-backup', before: B('a'), after: B('b'), tracked: true, unstaged: true, backupHolds: true },
+    { rel: 'untracked-removed', before: B('a'), after: null, tracked: false, unstaged: false, backupHolds: true },
+    { rel: 'untracked-changed-no-backup', before: B('a'), after: B('b'), tracked: false, unstaged: false, backupHolds: false },
+    { rel: 'created', before: null, after: B('x'), tracked: false, unstaged: false, backupHolds: false },
+    { rel: 'unchanged', before: B('same'), after: B('same'), tracked: false, unstaged: false, backupHolds: false },
+  ]);
+  check('classifyUndo: tracked clean or missing-before goes to checkout; untracked new is deleted; the rest copied back or by hand; unchanged nowhere',
+    JSON.stringify(cls) === JSON.stringify({ checkout: ['clean-changed', 'tracked-deleted-before', 'tracked-removed'], created: ['created'], restore: ['dirty-with-backup', 'untracked-removed'], byHand: ['untracked-changed-no-backup'] }), JSON.stringify(cls));
+}
+
+// Undo lines followed literally on migrations: every one must give the tree
+// back exactly, including git status with ignored files.
+console.log('\n3c. a migration undo line followed literally');
+// With a manifest: the tracked node_modules, a local edit, a tracked
+// settings.json the plugin install modified, and a tracked path with a space.
+repo = makeCopyInstall(true);
+{
+  const s1 = JSON.parse(read(repo, '.claude/settings.json'));
+  s1.enabledPlugins = { 'tk@llm-peer-review': true };
+  write(repo, '.claude/settings.json', JSON.stringify(s1, null, 2) + '\n');
+}
+snapBefore = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--force']);
+undo = undoRestores('manifest migration', repo, snapBefore, r.out);
+check('manifest migration: the tracked path with a space is checked out, quoted; the modified tracked settings.json is copied back from the backup', r.status === 0 && undo !== null
+  && undo.checkout.includes(SPACED) && undo.line.includes("'" + SPACED + "'") && undo.restore.includes('.claude/settings.json') && !undo.checkout.includes('.claude/settings.json') && undo.removeBackup === undo.backupFrom, r.out);
+check('manifest migration: every checkout path is one git tracked, so the checkout cannot abort', undo !== null && undo.checkout.every(p => spawnSync('git', ['ls-files', '--error-unmatch', '--', p], { cwd: repo }).status === 0), undo && undo.checkout.join(' '));
+fs.rmSync(repo, { recursive: true, force: true });
+
+// With no VERSION: an untracked managed file with a space and an ignored
+// settings.local.json, both copied back from the backup.
+repo = makeEarlyInstall();
+fs.appendFileSync(path.join(repo, '.gitignore'), '.claude/settings.local.json\n');
+git(repo, ['rm', '-q', '--cached', '.claude/settings.local.json']);
+commitAll(repo, 'settings.local.json ignored');
+write(repo, SPACED, 'toolkit content, never committed\n');
+snapBefore = fullSnapshot(repo);
+check('the no-VERSION fixture really has an ignored settings.local.json and an untracked spaced path', /^!! \.claude\/settings\.local\.json$/m.test(snapBefore.status) && snapBefore.status.includes(SPACED), snapBefore.status);
+r = run(repo, pluginRoot, ['--force']);
+undo = undoRestores('no-VERSION migration', repo, snapBefore, r.out);
+check('no-VERSION migration: the untracked and ignored files are copied back, never checked out or deleted', r.status === 0 && undo !== null
+  && undo.restore.includes(SPACED) && undo.restore.includes('.claude/settings.local.json') && !undo.checkout.includes(SPACED) && !undo.del.includes(SPACED) && !undo.line.includes('VERSION'), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// VERSION present but untracked: `git checkout -- VERSION` would abort the whole
+// checkout, so VERSION is copied back from the backup instead.
+repo = makeCopyInstall(false);
+git(repo, ['rm', '-q', '--cached', 'VERSION']);
+git(repo, ['commit', '-qm', 'VERSION untracked']);
+snapBefore = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--force']);
+undo = undoRestores('untracked VERSION migration', repo, snapBefore, r.out);
+check('untracked VERSION: not in the checkout list, copied back from the backup', r.status === 0 && undo !== null && !undo.checkout.includes('VERSION') && undo.restore.includes('VERSION') && undo.checkout.length > 0, r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// An ignored .claude/scripts/node_modules is deleted for good: the line says
+// so, and reinstalling it is the only step between the undo and the old tree.
+repo = makeCopyInstall(true);
+write(repo, '.claude/scripts/render-html.js', 'toolkit content of .claude/scripts/render-html.js\n');
+git(repo, ['rm', '-r', '-q', '--cached', '.claude/scripts/node_modules']);
+fs.appendFileSync(path.join(repo, '.gitignore'), 'node_modules/\n');
+commitAll(repo, 'packages ignored');
+snapBefore = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--force']);
+undo = undoOf(r.out);
+check('an ignored node_modules: the undo line names it as not restored, never for checkout', r.status === 0 && undo !== null && sameSet(undo.notRestored, ['.claude/scripts/node_modules/']) && !undo.checkout.some(p => p.includes('node_modules')), r.out);
+if (undo) {
+  let err = null;
+  try { applyUndo(repo, undo, snapBefore); } catch (e) { err = e.message; }
+  for (const [rel, b] of snapBefore.bytes) if (rel.startsWith('.claude/scripts/node_modules/')) write(repo, rel, b); // the reinstall
+  const after = fullSnapshot(repo);
+  check('  following the rest literally, then reinstalling the packages, restores the tree exactly', err === null && snapshotDiff(snapBefore, after) === '', err || snapshotDiff(snapBefore, after));
+}
+fs.rmSync(repo, { recursive: true, force: true });
+
+// Outside git (--force): no checkout at all; everything the run removed or
+// changed comes back from the backup folder.
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-mig-'));
+for (const rel of MANAGED) write(repo, rel, 'toolkit content of ' + rel + '\n');
+write(repo, 'VERSION', '6.3.3\n');
+write(repo, '.claude/commands/myteam-deploy.md', '# Deploy\n');
+write(repo, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)'] } }, null, 2) + '\n');
+snapBefore = fullSnapshot(repo);
+r = run(repo, pluginRoot, ['--force']);
+undo = undoRestores('migration outside git', repo, snapBefore, r.out);
+check('outside git: the line says there is no git undo, checks nothing out, and copies VERSION back from the backup', r.status === 0 && undo !== null && undo.noGit && undo.checkout.length === 0 && undo.restore.includes('VERSION') && undo.restore.includes(SPACED), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// The C-7 fix shape on the plugin: delete the seeded rules file, re-run setup on
+// a newer plugin. The reseeded file is tracked, so its undo is a checkout, which
+// gives back the committed file the fix started from (never a delete).
+console.log('\n3d. a plugin-mode re-run after deleting the tracked rules file');
+{
+  const newer = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-plugin-c7-'));
+  fs.cpSync(pluginRoot, newer, { recursive: true });
+  write(newer, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version: '7.1.0' }));
+  write(newer, 'seed/rules-toolkit.md', '# Toolkit Rules\n\n<!-- Toolkit version: 0.0.0 | Managed by LLM Peer Review. -->\n\nNewer short seed.\n');
+  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-c7-'));
+  initRepo(repo);
+  write(repo, 'README.md', '# app\n');
+  run(repo, pluginRoot);
+  commitAll(repo, 'seeded at 7.0.0');
+  snapBefore = fullSnapshot(repo);
+  fs.rmSync(path.join(repo, '.claude', 'rules', 'toolkit.md'));
+  r = run(repo, newer);
+  undo = undoRestores('C-7 re-run', repo, snapBefore, r.out);
+  check('C-7 re-run: the reseeded tracked rules file is checked out, never deleted', r.status === 0 && /already on the plugin/.test(r.out) && read(repo, '.claude/rules/toolkit.md').includes('Newer short seed.')
+    && undo !== null && undo.checkout.includes('.claude/rules/toolkit.md') && !undo.del.includes('.claude/rules/toolkit.md') && undo.checkout.includes('.claude/.toolkit-state.json'), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(newer, { recursive: true, force: true });
+}
+
 console.log('\n4. fresh project');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-fresh-'));
 initRepo(repo);
@@ -284,9 +729,11 @@ commitAll(repo, 'init');
 let filesBefore = fileList(repo);
 let dirsBefore = dirSnapshot(repo);
 let treeBefore = treeSnapshot(repo);
+snapBefore = fullSnapshot(repo);
 r = run(repo, pluginRoot);
-let undo = undoOf(r.out);
-check('a fresh setup ends with an Undo: line', undo !== null && undo.unknown.length === 0, r.out);
+undo = undoOf(r.out);
+check('a fresh setup ends with an Undo: line', undo !== null && undo.unknown.length === 0 && /\n {2}Undo: [^\n]*\n?$/.test(r.out), r.out);
+undoRestores('fresh setup', repo, snapBefore, r.out);
 check('its delete list is exactly the files the run created', undo !== null && sameSet(undo.del, fileList(repo).filter(f => !filesBefore.includes(f))), r.out);
 check('its folder list is exactly the folders the run created, deepest first', undo !== null && sameSet(undo.dirs, dirSnapshot(repo).filter(d => !dirsBefore.includes(d))) && undo.dirs.indexOf('.claude/rules/') < undo.dirs.indexOf('.claude/'), r.out);
 check('a fresh setup changed no existing file, so nothing to checkout or restore by hand', undo !== null && undo.checkout.length === 0 && undo.byHand.length === 0 && !undo.noGit, r.out);
@@ -331,8 +778,10 @@ write(repo, '.claude/settings.json', JSON.stringify({ env: { X: '1' } }, null, 2
 commitAll(repo, 'init');
 write(repo, '.claude/settings.json', JSON.stringify({ env: { X: '2' } }, null, 2) + '\n');
 write(repo, '.gitignore', 'mine/\n');
+snapBefore = fullSnapshot(repo);
 r = run(repo, pluginRoot);
 undo = undoOf(r.out);
+undoRestores('fresh setup over an untracked .gitignore and a dirty tracked settings.json', repo, snapBefore, r.out);
 check('an untracked .gitignore and a dirty tracked settings.json are restored by hand, never checked out', r.status === 0 && undo !== null && sameSet(undo.byHand, ['.gitignore', '.claude/settings.json']) && undo.checkout.length === 0 && !undo.del.includes('.gitignore'), r.out);
 filesBefore = fileList(repo);
 r = run(repo, pluginRoot);
@@ -385,7 +834,12 @@ repo = makeCopyInstall(true);
 r = run(repo, realSeedRoot, ['--force']);
 check('a migration adds the migration record line once', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1, read(repo, '.gitignore'));
 check('after a migration the record is ignored and the state file is not', spawnSync('git', ['check-ignore', '-q', MIG_LINE], { cwd: repo }).status === 0 && spawnSync('git', ['check-ignore', '-q', '.claude/.toolkit-state.json'], { cwd: repo }).status === 1);
-check('the migration keeps its own undo line', /Undo: git checkout -- \.claude VERSION \.gitattributes \.gitignore ; then delete/.test(r.out), r.out);
+{
+  const mu = undoOf(r.out);
+  check('the migration undo line checks out the tracked files it removed or changed, VERSION among them, and deletes the state and migration files', mu !== null && mu.unknown.length === 0
+    && ['VERSION', '.claude/commands/review.md', '.gitignore', '.gitattributes'].every(p => mu.checkout.includes(p))
+    && mu.del.includes('.claude/.toolkit-state.json') && mu.del.includes('.claude/.toolkit-migration.json') && !mu.checkout.includes('.claude') && !mu.del.includes('.claude/rules/toolkit.md'), r.out);
+}
 r = run(repo, realSeedRoot);
 check('a re-run after the migration does not add the line again', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1 && !/Undo:/.test(r.out), r.out);
 fs.rmSync(repo, { recursive: true, force: true });

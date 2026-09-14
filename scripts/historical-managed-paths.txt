@@ -23,3 +23,16 @@
 .claude/commands/ui-spec.md
 .claude/rules/html-outputs.md
 .claude/skills/shared/output-template.md
+#
+# Kept by hand, outside the regeneration above: the helper scripts the early
+# installers (scripts/setup/setup.sh and setup.ps1, before the scripts moved
+# under .claude/scripts/) copied into the project's ROOT scripts/ folder. Each
+# name is exact; setup-project.js treats only these root paths as the toolkit's,
+# for the sweep and for dead permission rows, so a project's own scripts/ files
+# are never touched. The first installers' scripts/setup.sh copy is left out on
+# purpose: that name is too common in projects to sweep on provenance alone.
+scripts/ask-gemini.js
+scripts/ask-gpt.js
+scripts/browse.js
+scripts/dev-lead-gemini.js
+scripts/dev-lead-gpt.js

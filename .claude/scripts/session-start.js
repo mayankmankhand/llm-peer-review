@@ -7,7 +7,10 @@
 //      files (the toolkit-reference fragment is opened through it).
 //   2. Version guard. Compare the running plugin version with the version the
 //      project recorded in .claude/.toolkit-state.json and tell the user when
-//      they differ, plus when the old copy-install still sits beside the plugin.
+//      they differ, plus when the old copy-install still sits beside the plugin:
+//      its manifest, or (with no state file yet) VERSION beside
+//      .claude/commands/review.md or the old installer's rules-file stamp, the
+//      same markers setup-project.js migrates by (see copyInstallMarkers).
 //
 //   node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"
 //
@@ -44,7 +47,6 @@ const os = require('os');
 const path = require('path');
 
 const STATE_REL = path.join('.claude', '.toolkit-state.json');
-const MANIFEST_REL = path.join('.claude', '.toolkit-manifest.json');
 const STDIN_TIMEOUT_MS = 1000;
 
 function note(msg) {
@@ -107,6 +109,64 @@ function referenceVersion(state) {
   return null;
 }
 // <<< version helpers <<<
+// >>> copy-install markers (7.1.0) >>>
+// Byte-identical in setup-project.js and session-start.js, from this marker to
+// the closing one (it uses the version helpers above);
+// scripts/test-session-start.js fails when the copies drift.
+//
+// The files an old copy-install left in one folder, each something a project of
+// its own would not have by accident:
+//   manifest     .claude/.toolkit-manifest.json, written by installers from v5.5.0;
+//   versionFile  VERSION beside .claude/commands/review.md (setup.sh copied
+//                VERSION into projects from v4.0, setup.ps1 only from v5.1);
+//   stamp        a .claude/rules/toolkit.md carrying the managed-file comment
+//                the installers wrote into it: `<!-- Toolkit version: X |
+//                Managed by LLM Peer Review` from v1.4, or before that `<!-- This
+//                file is managed by the LLM Peer Review toolkit.` This is how an
+//                install from before VERSION was copied into projects is
+//                recognized. It needs no review.md beside it: the toolkit
+//                shipped no review.md command for part of that era (removed in
+//                v2, back in v3.5), and the comment alone is the toolkit's own.
+// A stamp naming 7.0.0 or later is no marker, and it also cancels versionFile:
+// /tk:setup seeds that same file stamped with the plugin version, and the
+// toolkit's own repository carries it beside its own VERSION and review.md,
+// while every installer that wrote a 7.x stamp also wrote a manifest, which
+// stays a marker. A project with its own review.md and no marker has none.
+// Only the presence of VERSION is read here, never its content, and a marker
+// says nothing about whose VERSION it is (setup-project.js's versionFileOwner
+// decides that for a migration).
+// Returns { manifest, versionFile, stamp }, stamp null or { version } where
+// version is validated (null when the stamp names no usable version).
+const COPY_STAMP = /<!-- Toolkit version: ([^|\r\n]*)\| Managed by LLM Peer Review/;
+const COPY_STAMP_EARLY = /<!-- This file is managed by the LLM Peer Review toolkit\./;
+const COPY_STAMP_READ_BYTES = 4096;
+function copyInstallMarkers(dir) {
+  const isFile = (rel) => { try { return fs.statSync(path.join(dir, rel)).isFile(); } catch (e) { return false; } };
+  const found = { manifest: isFile(path.join('.claude', '.toolkit-manifest.json')), versionFile: false, stamp: null };
+  let pluginStamp = false;
+  const rules = path.join('.claude', 'rules', 'toolkit.md');
+  if (isFile(rules)) {
+    let head = null;
+    try {
+      const fd = fs.openSync(path.join(dir, rules), 'r');
+      try {
+        const buf = Buffer.alloc(COPY_STAMP_READ_BYTES);
+        head = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
+      } finally { fs.closeSync(fd); }
+    } catch (e) { head = null; }
+    const m = head === null ? null : COPY_STAMP.exec(head);
+    if (m) {
+      const v = validVersion(m[1]);
+      if (v !== null && compareVersions(v, '7.0.0') !== -1) pluginStamp = true;
+      else found.stamp = { version: v };
+    } else if (head !== null && COPY_STAMP_EARLY.test(head)) {
+      found.stamp = { version: null };
+    }
+  }
+  found.versionFile = !pluginStamp && isFile(path.join('.claude', 'commands', 'review.md')) && isFile('VERSION');
+  return found;
+}
+// <<< copy-install markers <<<
 
 // Make `<dataDir>/current` point at target. Factored with the platform and fs
 // injected so the Windows branch is testable anywhere. win32 uses a junction
@@ -222,6 +282,23 @@ function readStateUp(startDir) {
   });
 }
 
+// Whether the old copy-install still sits in this project: the nearest folder
+// from startDir upward with any copy-install marker (see copyInstallMarkers,
+// shared with setup-project.js) has a manifest, or has VERSION beside
+// .claude/commands/review.md or the old rules stamp while no state file was
+// found. The last two are exactly the shapes /tk:setup migrates without a
+// manifest, and a state file means setup already ran there (a plugin project's
+// seeded rules file carries a 7.x stamp, which is no marker and cancels the
+// VERSION one, so its own review.md and VERSION stay silent either way; so does
+// the toolkit's own repository). A manifest notifies with or without state.
+function copyInstallBeside(startDir, state) {
+  const found = walkUp(startDir, (dir) => {
+    const m = copyInstallMarkers(dir);
+    return m.manifest || m.versionFile || m.stamp !== null ? m : null;
+  });
+  return found !== null && (found.manifest || state === null);
+}
+
 // The plain-text notices for this project, or [] when nothing applies. Both
 // versions are validated before use, so neither can carry text of its own.
 function notices(projectDir, runningRaw) {
@@ -241,7 +318,7 @@ function notices(projectDir, runningRaw) {
       + running + ', which is newer. Run /tk:upgrade in this project so its own files are checked against the newer '
       + 'conventions.');
   }
-  if (findUp(projectDir, MANIFEST_REL) !== null) {
+  if (copyInstallBeside(projectDir, state)) {
     out.push('Toolkit install notice - tell the user this in plain words at the start of your reply: '
       + 'the old copy-install of the toolkit is still in this project beside the tk plugin, so both /review and '
       + '/tk:review exist and it is easy to run the stale one. Run /tk:setup to migrate the project onto the plugin.');
@@ -305,4 +382,4 @@ if (require.main === module) {
   try { main(); } catch (e) { note(e.message); process.exitCode = 0; }
 }
 
-module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, findUp, readStateUp, linkCurrent, notices };
+module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, copyInstallMarkers, copyInstallBeside, findUp, readStateUp, linkCurrent, notices };

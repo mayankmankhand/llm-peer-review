@@ -15,11 +15,29 @@
 //                    installer does (sha256 over the file with carriage returns
 //                    stripped), PAGE on any locally modified one, then back up,
 //                    remove, reseed, and register the plugin.
-//   copy-install     VERSION and .claude/commands/review.md are present but no
-//   (no manifest)    manifest (an install from before v5.5.0): the shipped
-//                    managed-paths.json says which paths the installer managed;
-//                    every present one is provenance unknown, so the run pages
-//                    before touching anything, and --force proceeds.
+//   copy-install     no manifest (an install from before v5.5.0), recognized by
+//   (no manifest)    .claude/commands/review.md beside VERSION (unless the
+//                    rules file carries a 7.x stamp), or, for an install from
+//                    before VERSION was copied into projects, a
+//                    .claude/rules/toolkit.md that carries the old installer's
+//                    managed-file comment (see copyInstallMarkers).
+//                    The shipped managed-paths.json says which paths the
+//                    installers managed, the helper scripts early ones copied
+//                    to the project's root scripts/ folder included; every
+//                    present one is provenance unknown, so the run pages
+//                    before touching anything, and --force proceeds. With no
+//                    VERSION of the toolkit's the old version is the stamp's,
+//                    and a stamp that names no usable version is recorded as
+//                    `unknown`, so /tk:upgrade audits every convention instead
+//                    of none.
+//
+// Which VERSION is the toolkit's (see versionFileOwner): projects commonly keep
+// a VERSION of their own at the root, so on every migration a VERSION file is
+// the old copy-install's only when the install shape says the installer wrote
+// it: the manifest lists it, .claude/commands/review.md sits beside it, or it
+// holds exactly the version the rules-file stamp names. Any other VERSION is
+// the project's: never removed or backed up, never on the undo line, never read
+// as the old toolkit version. The report names VERSION whenever it is removed.
 //
 // A migration refuses to start on a dirty git tree (or outside a repo) unless
 // --force (an untracked or modified .claude/settings.json alone is not dirty:
@@ -56,20 +74,27 @@
 // gitignored settings.local.json and hold this machine's paths, and the backup
 // folder's copy of that file already keeps them. The seed gitignores the record.
 //
-// The undo line: a migration keeps its fixed line. Every other run that created
-// or changed something ends with an `Undo:` line built from what the run
-// actually wrote: the files and folders it created (delete), the tracked files
-// it changed that were clean before (`git checkout --`), and the changed files
-// git holds no copy of as they were (restore by hand). A run that changed
-// nothing prints no undo line. Paths are project-relative and shell-quoted.
+// The undo line: every run that created, changed or deleted something prints an
+// `Undo:` line built per path from what the run actually did, the same way on a
+// migration and on a fresh or plugin-mode run, and ordered so that following it
+// left to right restores the tree as it was: first `git checkout --` the tracked
+// files the run changed or deleted (only paths git tracks, so the checkout never
+// aborts on an unmatched pathspec; a tracked file that was clean, or missing from
+// the working tree, before the run), then delete the files it created that git
+// does not track, then remove the folders it created if empty, then copy back
+// from the backup folder every other file it changed or deleted (an untracked or
+// ignored file, or a tracked one with uncommitted edits) that the backup holds,
+// then restore by hand the rest, then remove the backup folder. A run that
+// changed nothing prints no undo line. Paths are project-relative and
+// shell-quoted.
 //
 // Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
 // needed: locally modified files, provenance unknown, or a dirty tree).
 // --dry-run prints the same report and exit code and writes nothing.
 //
 // Dependency-free, like every script under .claude/scripts/. Run directly it
-// sets up the project; required, it only exports the undo-line helpers for
-// scripts/test-setup-project.js.
+// sets up the project; required, it only exports the undo-line, copy-install
+// marker, VERSION-owner and dead-permission helpers for scripts/test-setup-project.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -99,14 +124,23 @@ const KEEP_ON_MIGRATION = ['.gitattributes', 'artifacts/README.md'];
 // `Bash(node .claude/scripts/our-report.js:*)`, and reading that name as
 // `our-report.js:` deleted a kept script's row on every run the same way.
 // upgrade-audit.js carries the same regex; its test fails when the copies drift.
+//
+// Early installers copied their helper scripts to the project's ROOT scripts/
+// folder (`node scripts/ask-gpt.js *`). A row for one of those counts as dead the
+// same way, but only for the exact root paths the shipped managed-paths list
+// names (`rootScripts`): projects commonly own a scripts/ folder, and a row for
+// any other script there is the project's own and never touched.
 const LEGACY_DEAD_PERMISSION = [
   /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
-function deadPermission(row, willExist) {
+const ROOT_SCRIPT_ROW = /(?:^|[\s(])(?:\.\/)?scripts\/([^\s)'"*\/]+?):?(?=[\s)'"*]|$)/;
+function deadPermission(row, willExist, rootScripts) {
   if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
   const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/.exec(row);
-  return m !== null && !willExist('.claude/scripts/' + m[1]);
+  if (m !== null) return !willExist('.claude/scripts/' + m[1]);
+  const r = ROOT_SCRIPT_ROW.exec(row);
+  return r !== null && !!rootScripts && rootScripts.has('scripts/' + r[1]) && !willExist('scripts/' + r[1]);
 }
 
 function parseArgs(argv) {
@@ -208,6 +242,91 @@ function referenceVersion(state) {
   return null;
 }
 // <<< version helpers <<<
+// >>> copy-install markers (7.1.0) >>>
+// Byte-identical in setup-project.js and session-start.js, from this marker to
+// the closing one (it uses the version helpers above);
+// scripts/test-session-start.js fails when the copies drift.
+//
+// The files an old copy-install left in one folder, each something a project of
+// its own would not have by accident:
+//   manifest     .claude/.toolkit-manifest.json, written by installers from v5.5.0;
+//   versionFile  VERSION beside .claude/commands/review.md (setup.sh copied
+//                VERSION into projects from v4.0, setup.ps1 only from v5.1);
+//   stamp        a .claude/rules/toolkit.md carrying the managed-file comment
+//                the installers wrote into it: `<!-- Toolkit version: X |
+//                Managed by LLM Peer Review` from v1.4, or before that `<!-- This
+//                file is managed by the LLM Peer Review toolkit.` This is how an
+//                install from before VERSION was copied into projects is
+//                recognized. It needs no review.md beside it: the toolkit
+//                shipped no review.md command for part of that era (removed in
+//                v2, back in v3.5), and the comment alone is the toolkit's own.
+// A stamp naming 7.0.0 or later is no marker, and it also cancels versionFile:
+// /tk:setup seeds that same file stamped with the plugin version, and the
+// toolkit's own repository carries it beside its own VERSION and review.md,
+// while every installer that wrote a 7.x stamp also wrote a manifest, which
+// stays a marker. A project with its own review.md and no marker has none.
+// Only the presence of VERSION is read here, never its content, and a marker
+// says nothing about whose VERSION it is (setup-project.js's versionFileOwner
+// decides that for a migration).
+// Returns { manifest, versionFile, stamp }, stamp null or { version } where
+// version is validated (null when the stamp names no usable version).
+const COPY_STAMP = /<!-- Toolkit version: ([^|\r\n]*)\| Managed by LLM Peer Review/;
+const COPY_STAMP_EARLY = /<!-- This file is managed by the LLM Peer Review toolkit\./;
+const COPY_STAMP_READ_BYTES = 4096;
+function copyInstallMarkers(dir) {
+  const isFile = (rel) => { try { return fs.statSync(path.join(dir, rel)).isFile(); } catch (e) { return false; } };
+  const found = { manifest: isFile(path.join('.claude', '.toolkit-manifest.json')), versionFile: false, stamp: null };
+  let pluginStamp = false;
+  const rules = path.join('.claude', 'rules', 'toolkit.md');
+  if (isFile(rules)) {
+    let head = null;
+    try {
+      const fd = fs.openSync(path.join(dir, rules), 'r');
+      try {
+        const buf = Buffer.alloc(COPY_STAMP_READ_BYTES);
+        head = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
+      } finally { fs.closeSync(fd); }
+    } catch (e) { head = null; }
+    const m = head === null ? null : COPY_STAMP.exec(head);
+    if (m) {
+      const v = validVersion(m[1]);
+      if (v !== null && compareVersions(v, '7.0.0') !== -1) pluginStamp = true;
+      else found.stamp = { version: v };
+    } else if (head !== null && COPY_STAMP_EARLY.test(head)) {
+      found.stamp = { version: null };
+    }
+  }
+  found.versionFile = !pluginStamp && isFile(path.join('.claude', 'commands', 'review.md')) && isFile('VERSION');
+  return found;
+}
+// <<< copy-install markers <<<
+// Whose VERSION file sits at the project root, for a migration: why it is the
+// old copy-install's, or null when it is the project's own. Apps commonly keep
+// a VERSION of their own, and an early install recognized by its rules-file
+// stamp alone used to take that file for the toolkit's: its release number
+// became previousVersion, --force deleted it, and a number above the plugin's
+// then made the version guard block every push. So it is the toolkit's only
+// when the install shape says the installer wrote it:
+//   'manifest'  the copy-install manifest lists VERSION;
+//   'review'    it sits beside .claude/commands/review.md (the versionFile
+//               marker, which a 7.x stamp already cancels);
+//   'stamp'     its trimmed content is exactly the version the old rules-file
+//               stamp names (a validated one; a stamp naming none matches nothing).
+// `markers` is copyInstallMarkers' result, `manifest` the parsed manifest or
+// null, `versionText` the file's trimmed content or null when there is no file.
+function versionFileOwner(markers, manifest, versionText) {
+  if (typeof versionText !== 'string') return null;
+  const files = manifest && manifest.files && typeof manifest.files === 'object' ? manifest.files : null;
+  if (files && Object.prototype.hasOwnProperty.call(files, 'VERSION')) return 'manifest';
+  if (markers && markers.versionFile) return 'review';
+  if (markers && markers.stamp && markers.stamp.version !== null && versionText === markers.stamp.version) return 'stamp';
+  return null;
+}
+const VERSION_OWNER_REASON = {
+  manifest: 'the copy-install manifest lists it',
+  review: 'it sits beside .claude/commands/review.md',
+  stamp: 'it holds the same version as the toolkit stamp in .claude/rules/toolkit.md',
+};
 const parseableVersion = (v) => parseVersion(v) !== null;
 // A version read from the project (the state file, a manifest, VERSION) as
 // report text. This report reaches Claude through the /tk:setup skill, and a
@@ -238,22 +357,41 @@ function walkFiles(dir, rel, out) {
 function shellQuote(rel) {
   return /^[A-Za-z0-9_.\/@%+=:,-]+$/.test(rel) ? rel : "'" + rel.replace(/'/g, "'\\''") + "'";
 }
-// The undo line for a fresh or plugin-mode run, or null when the run changed
-// nothing. `u`: isRepo, created (files), createdDirs (deepest first), checkout
-// (tracked files that were clean before), byHand (changed files git cannot restore).
+// The undo line of any run, or null when the run changed nothing. `u`: isRepo,
+// checkout (tracked files to `git checkout --`), created (untracked files to
+// delete), createdDirs (deepest first), restore (files to copy back from
+// backupDir), byHand (changed files nothing here holds a copy of), backupDir
+// (the backup folder, removed last), notRestored (folders deleted for good).
+// Missing lists count as empty. Clauses run left to right in that order, and
+// "then" joins each action to the one before it, never the first (a run whose
+// only change is a new folder, plans/ recreated on a re-run, starts with the
+// folder clause).
 function undoLine(u) {
   const q = (list) => list.map(shellQuote).join(' ');
-  if (!u.created.length && !u.createdDirs.length && !u.checkout.length && !u.byHand.length) return null;
+  const L = (k) => Array.isArray(u[k]) ? u[k] : [];
+  const actions = [];
+  if (L('checkout').length) actions.push('git checkout -- ' + q(L('checkout')));
+  if (L('created').length) actions.push('delete ' + q(L('created')));
+  if (L('createdDirs').length) actions.push('remove the new folders if empty: ' + q(L('createdDirs')));
+  if (L('restore').length) actions.push('copy back from the backup folder ' + shellQuote(u.backupDir + '/') + ': ' + q(L('restore')));
+  if (L('byHand').length) actions.push('restore by hand (git holds no copy of them as they were): ' + q(L('byHand')));
+  if (u.backupDir) actions.push('remove the backup folder: ' + shellQuote(u.backupDir + '/'));
+  const notes = L('notRestored').length ? ['not restored (reinstall the packages only if you still need them): ' + q(L('notRestored'))] : [];
+  if (!actions.length && !notes.length) return null;
   const parts = [];
   if (!u.isRepo) parts.push('not a git repository, so there is no git undo');
-  if (u.created.length) parts.push('delete ' + q(u.created));
-  // "then" only follows a delete clause: a run whose only change is a new folder
-  // (plans/ recreated on a re-run) starts with the folder clause.
-  if (u.createdDirs.length) parts.push((u.created.length ? 'then ' : '') + 'remove the new folders if empty: ' + q(u.createdDirs));
-  if (u.checkout.length) parts.push('git checkout -- ' + q(u.checkout));
-  if (u.byHand.length) parts.push('restore by hand (git holds no copy of them as they were): ' + q(u.byHand));
-  return 'Undo: ' + parts.join(' ; ');
+  actions.forEach((a, i) => parts.push((i ? 'then ' : '') + a));
+  return 'Undo: ' + parts.concat(notes).join(' ; ');
 }
+// NUL-separated path output of a git command, pathspecs read literally (so a
+// name with a glob character matches only itself); [] outside a repo or on error.
+function gitPaths(args, cwd) {
+  try {
+    return execFileSync('git', ['--literal-pathspecs', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 })
+      .split('\0').filter(Boolean);
+  } catch (e) { return []; }
+}
+const readIfFile = (abs) => { try { return fs.statSync(abs).isFile() ? fs.readFileSync(abs) : null; } catch (e) { return null; } };
 function removeEmptyDirsUpTo(dir, stopAt) {
   let d = dir;
   while (d !== stopAt && d.startsWith(stopAt)) {
@@ -271,6 +409,8 @@ function main() {
   const pluginMeta = readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {});
   const version = pluginMeta.version || '0.0.0';
   const managedShipped = readJson(path.join(pluginRoot, 'managed-paths.json'), { paths: [] }).paths;
+  // The root scripts/ files early installers copied, exactly as the shipped list names them.
+  const ROOT_SCRIPTS = new Set(managedShipped.filter(rel => /^scripts\/[^/]+$/.test(rel)));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
   const top = git(['rev-parse', '--show-toplevel'], cwd);
   const project = top || cwd;
@@ -283,23 +423,43 @@ function main() {
   // --- 1. Detect -------------------------------------------------------------
   const state = readJson(P(STATE_REL), null);
   const manifest = readJson(P(MANIFEST_REL), null);
-  const looksCopyInstalled = fs.existsSync(P('VERSION')) && fs.existsSync(P('.claude/commands/review.md'));
+  const markers = copyInstallMarkers(project);
+  const versionFileBytes = readIfFile(P('VERSION'));
+  const hasVersionFile = versionFileBytes !== null;
   let mode;
   if (state) mode = 'plugin';
   else if (manifest && manifest.files) mode = 'migrate-manifest';
-  else if (looksCopyInstalled) mode = 'migrate-unknown';
+  else if (markers.versionFile || markers.stamp) mode = 'migrate-unknown';
   else mode = 'fresh';
+  // The toolkit's VERSION, or none: a project's own VERSION is never read as
+  // the old toolkit version, never removed, never backed up (versionFileOwner).
+  const versionOwner = versionFileOwner(markers, manifest, hasVersionFile ? versionFileBytes.toString('utf8').trim() : null);
+  const toolkitVersionFile = versionOwner !== null;
+  // No VERSION of the toolkit's (none at all, or the project's own): an install
+  // from before VERSION was copied into projects, whose version is the rules
+  // file's stamp, validated; a stamp that names none is recorded as `unknown`,
+  // which no reader takes for a version, so /tk:upgrade audits every convention
+  // rather than none (a null would fall through to the plugin version and empty
+  // its range). A migrate-unknown run without the toolkit's VERSION always has
+  // the stamp: the other marker, VERSION beside review.md, makes it the toolkit's.
+  const fromStamp = mode === 'migrate-unknown' && !toolkitVersionFile;
   const previousVersion = manifest && manifest.toolkitVersion ? manifest.toolkitVersion
-    : (fs.existsSync(P('VERSION')) ? fs.readFileSync(P('VERSION'), 'utf8').trim() : null);
+    : toolkitVersionFile ? versionFileBytes.toString('utf8').trim()
+    : fromStamp ? (markers.stamp.version || 'unknown') : null;
+  const shownPrevious = fromStamp && !markers.stamp.version ? 'of an unknown version' : shownVersion(previousVersion, 'v');
 
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
   say('  Install type: ' + ({
     plugin: 'already on the plugin (' + shownVersion(state && state.version, 'v') + ') - seed check only',
-    'migrate-manifest': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (manifest present)',
-    'migrate-unknown': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (NO manifest: provenance unknown)',
+    'migrate-manifest': 'migration from copy-install ' + shownPrevious + ' (manifest present)',
+    'migrate-unknown': 'migration from copy-install ' + shownPrevious + ' (NO manifest: provenance unknown)',
     fresh: 'fresh install',
   })[mode]);
+  if (fromStamp) {
+    say('  ' + (hasVersionFile ? 'No VERSION file of the toolkit\'s' : 'No VERSION file') + ': recognized by the toolkit stamp in .claude/rules/toolkit.md (an install from before VERSION was copied into projects); '
+      + (markers.stamp.version ? 'its version is read from that stamp.' : 'the stamp names no version, so it is recorded as unknown and /tk:upgrade audits every convention.'));
+  }
   if (opts.dryRun) say('  Dry run: nothing will be written.');
 
   // --- 2. Migration plan -----------------------------------------------------
@@ -319,18 +479,29 @@ function main() {
       // Kept and merged below, so nothing of the user's is lost and an edit to
       // one of them is no reason to page.
       if (KEEP_ON_MIGRATION.includes(rel)) continue;
+      // The shipped list names VERSION, but only the toolkit's own is swept.
+      if (rel === 'VERSION' && !toolkitVersionFile) continue;
       if (mode === 'migrate-manifest') {
         if (sha256NoCR(P(rel)) !== manifest.files[rel]) modified.push(rel);
       }
       removed.push(rel);
     }
-    for (const rel of [MANIFEST_REL, 'VERSION']) if (fs.existsSync(P(rel)) && !removed.includes(rel)) removed.push(rel);
+    for (const rel of [MANIFEST_REL].concat(toolkitVersionFile ? ['VERSION'] : [])) if (readIfFile(P(rel)) !== null && !removed.includes(rel)) removed.push(rel);
     const managedSet = new Set(removed);
     for (const dir of MANAGED_DIRS) for (const rel of walkFiles(P(dir), dir, [])) if (!managedSet.has(rel)) custom.push(rel);
     if (modified.length && !opts.force) paged = true;
     if (mode === 'migrate-unknown' && !opts.force) paged = true;
 
     say('  Managed toolkit files to remove: ' + removed.length + (mode === 'migrate-unknown' ? ' (from the shipped managed-paths list; none can be verified against a manifest)' : ''));
+    const rootRemoved = removed.filter(rel => ROOT_SCRIPTS.has(rel));
+    if (rootRemoved.length) say('  Among them, helper scripts an early installer copied to the root scripts/ folder (every other file there is yours, untouched): ' + rootRemoved.join(', '));
+    // Named either way, so the owner can object before a project's own VERSION goes.
+    if (removed.includes('VERSION')) {
+      say('  Among them, VERSION at the project root, as the toolkit\'s because ' + VERSION_OWNER_REASON[versionOwner]
+        + '. If VERSION is your project\'s own file, stop here and say so (a finished run keeps a copy in the backup folder).');
+    } else if (hasVersionFile) {
+      say('  VERSION at the project root is yours, kept untouched and not read as the toolkit version: no manifest lists it, no .claude/commands/review.md sits beside it, and it does not hold the toolkit stamp\'s version.');
+    }
     if (modified.length) {
       say('  Locally modified toolkit files (' + modified.length + '), the ones a plugin cannot carry:');
       for (const rel of modified) say('    - ' + rel + '  (your edit is kept in the backup folder; the plugin\'s copy takes over. File the change upstream to keep it.)');
@@ -407,13 +578,13 @@ function main() {
   // settings.local.json: baseline merge minus the script entries, dead entries out
   const seedLocal = readJson(path.join(seedDir, 'settings.local.json'), { permissions: { allow: [] } });
   const willExist = (rel) => fs.existsSync(P(rel)) && !willRemove.has(rel);
-  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => !deadPermission(p, willExist));
+  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => !deadPermission(p, willExist, ROOT_SCRIPTS));
   const local = readJson(P('.claude/settings.local.json'), null);
   const localBefore = local ? JSON.stringify(local) : null;
   const localNext = local || { permissions: { allow: [] } };
   localNext.permissions = localNext.permissions || {};
   localNext.permissions.allow = localNext.permissions.allow || [];
-  const deadPerms = localNext.permissions.allow.filter(p => deadPermission(p, willExist));
+  const deadPerms = localNext.permissions.allow.filter(p => deadPermission(p, willExist, ROOT_SCRIPTS));
   localNext.permissions.allow = localNext.permissions.allow.filter(p => !deadPerms.includes(p));
   const addedPerms = seedAllow.filter(p => !localNext.permissions.allow.includes(p));
   localNext.permissions.allow.push(...addedPerms);
@@ -456,19 +627,29 @@ function main() {
   if (opts.dryRun) { process.stdout.write(out.join('\n') + '\n'); process.exit(0); }
 
   // --- 5. Apply --------------------------------------------------------------------
-  // What the undo line of a fresh or plugin-mode run needs, taken before anything
-  // is written: the bytes of every file this run may write, whether each folder
-  // it may create already exists, and for a tracked file whether it was clean
-  // (a `git checkout --` would also discard an uncommitted edit made before the run).
+  // What the undo line needs, taken before anything is written: the bytes of
+  // every file this run may write or delete, whether each folder it may create
+  // already exists, which of those files git tracks, and which tracked ones
+  // differ from the index (a `git checkout --` restores the index copy, so it
+  // would also discard an uncommitted edit made before the run).
   const mayWrite = seedWrite.map(s => s[0]).concat(['.gitignore', '.gitattributes', '.claude/settings.json', '.claude/settings.local.json', STATE_REL]);
-  const bytesBefore = new Map(mayWrite.map(rel => [rel, fs.existsSync(P(rel)) ? fs.readFileSync(P(rel)) : null]));
+  const touched = [...new Set(removed.concat(mayWrite, migrating ? [MIGRATION_REL] : []))];
+  const bytesBefore = new Map(touched.map(rel => [rel, readIfFile(P(rel))]));
   const mayCreateDirs = new Set(['plans', 'artifacts']);
-  for (const rel of mayWrite) for (let d = path.posix.dirname(rel); d !== '.'; d = path.posix.dirname(d)) mayCreateDirs.add(d);
+  for (const rel of touched) for (let d = path.posix.dirname(rel); d !== '.'; d = path.posix.dirname(d)) mayCreateDirs.add(d);
   const dirsBefore = new Map([...mayCreateDirs].map(d => [d, fs.existsSync(P(d))]));
-  const cleanTracked = new Set();
-  if (!migrating && top !== null) {
-    const tracked = (git(['ls-files', '-z', '--', ...mayWrite], project) || '').split('\0').filter(Boolean);
-    for (const rel of tracked) if (git(['diff', '--quiet', '--', rel], project) !== null) cleanTracked.add(rel);
+  const isRepo = top !== null;
+  const trackedBefore = new Set(isRepo ? gitPaths(['ls-files', '-z', '--', ...touched], project) : []);
+  const unstagedBefore = new Set(isRepo && trackedBefore.size ? gitPaths(['diff', '--name-only', '-z', '--', ...trackedBefore], project) : []);
+  // The old copy-install's packages, deleted whole below: git restores them only
+  // when it tracks them and they are unchanged; anything else there is gone.
+  const NODE_MODULES = '.claude/scripts/node_modules';
+  let nodeModules = null;
+  if (migrating && fs.existsSync(P(NODE_MODULES))) {
+    const trackedNm = isRepo ? gitPaths(['ls-files', '-z', '--', NODE_MODULES], project) : [];
+    const untrackedNm = isRepo ? gitPaths(['ls-files', '-z', '--others', '--', NODE_MODULES], project) : ['(not a repository)'];
+    const unstagedNm = trackedNm.length ? gitPaths(['diff', '--name-only', '-z', '--', NODE_MODULES], project) : [];
+    nodeModules = { checkout: trackedNm.length > 0 && unstagedNm.length === 0, lost: untrackedNm.length > 0 || unstagedNm.length > 0 };
   }
 
   let backupDir = null;
@@ -486,7 +667,8 @@ function main() {
     for (const rel of ['.claude/settings.local.json', '.claude/settings.json', '.gitignore', '.gitattributes']) backup(rel);
     for (const rel of removed) {
       fs.rmSync(P(rel), { force: true });
-      removeEmptyDirsUpTo(path.dirname(P(rel)), P('.claude'));
+      // A root scripts/ file an early installer copied can leave scripts/ empty.
+      removeEmptyDirsUpTo(path.dirname(P(rel)), rel.startsWith('.claude/') ? P('.claude') : project);
     }
     fs.rmSync(P('.claude/scripts/node_modules'), { recursive: true, force: true });
     removeEmptyDirsUpTo(P('.claude/scripts'), P('.claude'));
@@ -547,33 +729,58 @@ function main() {
   say('');
   say('Done.');
   if (backupDir) say('  Backup: ' + path.relative(project, backupDir) + ' (every removed file, plus the settings, .gitignore and .gitattributes as they were)');
+  // One undo line for every mode, compared by bytes after the writes, so only
+  // what this run really created, changed or deleted is named; a folder counts
+  // when it did not exist before. The state and migration files a migration
+  // writes are new and untracked, so they land in the delete list: left in
+  // place they would make the next run think the project is already on the plugin.
+  const backupRel = backupDir ? path.relative(project, backupDir).split(path.sep).join('/') : null;
+  const u = classifyUndo(touched.map(rel => {
+    const before = bytesBefore.get(rel);
+    const backupCopy = backupDir ? readIfFile(path.join(backupDir, rel)) : null;
+    return { rel, before, after: readIfFile(P(rel)), tracked: trackedBefore.has(rel), unstaged: unstagedBefore.has(rel), backupHolds: before !== null && backupCopy !== null && backupCopy.equals(before) };
+  }));
+  if (nodeModules && !fs.existsSync(P(NODE_MODULES))) {
+    if (nodeModules.checkout) u.checkout.push(NODE_MODULES);
+    if (nodeModules.lost) u.notRestored = [NODE_MODULES + '/'];
+  }
+  u.isRepo = isRepo;
+  u.backupDir = backupRel;
+  u.createdDirs = [...dirsBefore].filter(([d, existed]) => !existed && fs.existsSync(P(d))).map(([d]) => d + '/')
+    .sort((a, b) => (b.split('/').length - a.split('/').length) || a.localeCompare(b));
+  const undo = undoLine(u);
   if (migrating) {
-    // The state and migration files are new and untracked, so `git checkout`
-    // leaves them behind; left in place they would make the next run think the
-    // project is already on the plugin.
-    say('  Undo: git checkout -- .claude VERSION .gitattributes .gitignore ; then delete the seeded files listed above plus ' + STATE_REL + ' and ' + MIGRATION_REL + ', or restore from the backup folder.');
+    if (undo) say('  ' + undo);
     say('  Next: run /tk:upgrade to audit your custom files against the ' + version + ' conventions' + (modified.length ? ' (it will carry your ' + modified.length + ' local edit(s) as findings)' : '') + '.');
   } else {
     say(mode === 'fresh' ? '  Next: /tk:explore. The codebase map generates on first use.' : '  Nothing to migrate; seed checked.');
-    // Compared by bytes after the writes, so only what this run really created
-    // or changed is named; a folder counts when it did not exist before.
-    const created = [];
-    const checkout = [];
-    const byHand = [];
-    for (const rel of mayWrite) {
-      const was = bytesBefore.get(rel);
-      if (!fs.existsSync(P(rel))) continue;
-      if (was === null) created.push(rel);
-      else if (!was.equals(fs.readFileSync(P(rel)))) (cleanTracked.has(rel) ? checkout : byHand).push(rel);
-    }
-    const createdDirs = [...dirsBefore].filter(([d, existed]) => !existed && fs.existsSync(P(d))).map(([d]) => d + '/')
-      .sort((a, b) => (b.split('/').length - a.split('/').length) || a.localeCompare(b));
-    const undo = undoLine({ isRepo: top !== null, created, createdDirs, checkout, byHand });
     if (undo) say('  ' + undo);
   }
   process.stdout.write(out.join('\n') + '\n');
 }
 
+// Which undo list each path the run touched belongs to. `entries`: { rel,
+// before, after (Buffers, null when no file), tracked (git tracked it before the
+// run), unstaged (its working copy differed from the index before the run, a
+// deletion included), backupHolds (the backup folder holds its bytes as they
+// were) }. An unchanged path is in no list. A tracked path goes to checkout when
+// the index copy is what it was: clean before, or missing from the working tree
+// (a file deleted to be reseeded is restored, never deleted). An untracked path
+// the run created is deleted. Every other change is copied back from the backup
+// when it holds the file, else restored by hand.
+function classifyUndo(entries) {
+  const u = { checkout: [], created: [], restore: [], byHand: [] };
+  for (const e of entries) {
+    if (e.before === null && e.after === null) continue;
+    if (e.before !== null && e.after !== null && e.before.equals(e.after)) continue;
+    if (e.tracked && (e.before === null || !e.unstaged)) u.checkout.push(e.rel);
+    else if (e.before === null) u.created.push(e.rel);
+    else if (e.backupHolds) u.restore.push(e.rel);
+    else u.byHand.push(e.rel);
+  }
+  return u;
+}
+
 if (require.main === module) main();
 
-module.exports = { shellQuote, undoLine };
+module.exports = { shellQuote, undoLine, classifyUndo, copyInstallMarkers, versionFileOwner, deadPermission };

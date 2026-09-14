@@ -6,7 +6,11 @@
 // crafted recorded version (or plugin.json version) out of Claude's context,
 // and the upward search for the state file from a subfolder: it skips an
 // unusable state file, stops at the git top level, and never reaches the home
-// directory. Builds a fake plugin root (a
+// directory; and the install notice for every copy-install shape setup migrates
+// (a manifest, VERSION beside review.md, or the old rules stamp with or without
+// review.md), silent for a plugin project's own commands and for the toolkit's
+// own repository shape, with its marker rule shared byte for byte with
+// setup-project.js. Builds a fake plugin root (a
 // .claude-plugin/plugin.json and a copy of the script under scripts/) and fake
 // projects in temp dirs; never touches a real plugin data folder or project.
 // Dependency-free; exits non-zero on any failure.
@@ -210,6 +214,90 @@ r = run(plugin, { data, project: makeProject(null, true) });
 check('(c) a leftover copy-install manifest: relayed notice pointing at /tk:setup', r.status === 0 && /^Toolkit install notice - tell the user this in plain words/.test(r.stdout) && /\/review and \/tk:review/.test(r.stdout) && /\/tk:setup/.test(r.stdout), r.stdout);
 r = run(plugin, { data, project: makeProject({ version: '7.0.1' }, true) });
 check('(b) and (c) together print both notices', /\/tk:upgrade/.test(r.stdout) && /\/tk:setup/.test(r.stdout), r.stdout);
+// The manifest-less shapes setup-project.js migrates: VERSION beside review.md,
+// and an install from before VERSION was copied into projects, recognized by the
+// old installer's stamp in the rules file, with or without review.md (the
+// toolkit shipped none from v2 to v3.4).
+const INSTALL = /^Toolkit install notice - tell the user this in plain words/;
+const stampRules = (v) => '# Toolkit Rules\n\n<!-- Toolkit version: ' + v + ' | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->\n';
+let shaped = makeProject(null);
+write(shaped, '.claude/commands/review.md', '# review\n');
+write(shaped, '.claude/rules/toolkit.md', stampRules('4.1.0'));
+r = run(plugin, { data, project: shaped });
+check('(c) no VERSION, the old stamp beside review.md: the install notice fires', r.status === 0 && INSTALL.test(r.stdout) && /\/tk:setup/.test(r.stdout), r.stdout);
+check('(c) that notice echoes nothing from the rules file', r.stdout.indexOf('4.1.0') === -1, r.stdout);
+write(shaped, '.claude/rules/toolkit.md', '# Toolkit Rules\n\n<!-- This file is managed by the LLM Peer Review toolkit. Do not edit. -->\n');
+r = run(plugin, { data, project: shaped });
+check('(c) the pre-stamp managed comment beside review.md fires it too', INSTALL.test(r.stdout), r.stdout);
+shaped = makeProject(null);
+write(shaped, '.claude/commands/review.md', '# review\n');
+write(shaped, 'VERSION', '6.3.3\n');
+r = run(plugin, { data, project: shaped });
+check('(c) VERSION beside review.md with no manifest: the install notice fires', r.status === 0 && INSTALL.test(r.stdout), r.stdout);
+shaped = makeProject(null);
+write(shaped, '.claude/commands/review.md', '# review\n');
+write(shaped, '.claude/rules/toolkit.md', stampRules('4.1.0'));
+fs.mkdirSync(path.join(shaped, 'packages', 'app'), { recursive: true });
+r = run(plugin, { data, project: path.join(shaped, 'packages', 'app') });
+check('(c) the no-VERSION shape is found from a subfolder too', INSTALL.test(r.stdout), r.stdout);
+shaped = makeProject(null);
+write(shaped, '.claude/commands/explore.md', '# explore\n');
+write(shaped, '.claude/commands/review-code.md', '# review-code\n');
+write(shaped, '.claude/rules/toolkit.md', stampRules('3.2'));
+write(shaped, 'scripts/ask-gpt.js', '// helper\n');
+r = run(plugin, { data, project: shaped });
+check('(c) no VERSION and no review.md (an install from the era the toolkit shipped none), the old stamp alone: the install notice fires', r.status === 0 && INSTALL.test(r.stdout), r.stdout);
+// The same shape beside the project's own VERSION (an app's release number): the
+// install notice still fires, and nothing reads that VERSION as a toolkit
+// version, so there is no version notice and the number is never echoed.
+write(shaped, 'VERSION', '12.0.0\n');
+r = run(plugin, { data, project: shaped });
+check('(c) the old stamp alone beside a project-owned VERSION: the install notice only, no version notice, VERSION never echoed', r.status === 0 && INSTALL.test(r.stdout) && !/Toolkit version notice/.test(r.stdout) && r.stdout.indexOf('12.0.0') === -1, r.stdout);
+// A project on the plugin: its seeded rules file carries a 7.x stamp, and its
+// own commands (a review.md of its own included) are no copy-install.
+const pluginProject = makeProject({ version: '7.1.0', auditedVersion: '7.1.0', path: 'plugin' });
+write(pluginProject, '.claude/commands/review.md', '# Our own review command\n');
+write(pluginProject, '.claude/commands/deploy.md', '# Our deploy\n');
+write(pluginProject, '.claude/rules/toolkit.md', stampRules('7.1.0'));
+r = run(plugin, { data, project: pluginProject });
+check('a plugin project with only its own commands (review.md among them) and the seeded rules file is silent', r.status === 0 && r.stdout === '', r.stdout);
+const ownNoState = makeProject(null);
+write(ownNoState, '.claude/commands/review.md', '# Our own review command\n');
+write(ownNoState, '.claude/rules/toolkit.md', '# Our rules\n');
+r = run(plugin, { data, project: ownNoState });
+check('a project with its own review.md and rules file but no toolkit marker is silent', r.status === 0 && r.stdout === '', r.stdout);
+const setUp = makeProject({ version: '7.1.0', auditedVersion: '7.1.0', path: 'plugin' });
+write(setUp, '.claude/commands/review.md', '# Our own review command\n');
+write(setUp, 'VERSION', '2.0.0\n');
+r = run(plugin, { data, project: setUp });
+check('once setup has run (a state file), VERSION beside a review.md is no install notice: setup would not migrate it', r.status === 0 && r.stdout === '', r.stdout);
+// The toolkit's own repository shape: its own VERSION and review.md beside a
+// rules file stamped 7.x, no state file and no manifest. The 7.x stamp cancels
+// the VERSION marker, so the notice stays silent; a pre-7 stamp does not.
+const toolkitRepo = makeProject(null);
+write(toolkitRepo, '.claude/commands/review.md', '# review\n');
+write(toolkitRepo, 'VERSION', '7.1.0\n');
+write(toolkitRepo, '.claude/rules/toolkit.md', stampRules('7.0.1'));
+r = run(plugin, { data, project: toolkitRepo });
+check('VERSION and review.md beside a 7.x-stamped rules file with no state (the toolkit\'s own repository) is silent', r.status === 0 && r.stdout === '', r.stdout);
+write(toolkitRepo, '.claude/rules/toolkit.md', stampRules('6.3.3'));
+r = run(plugin, { data, project: toolkitRepo });
+check('control: the same shape with a pre-7 stamp fires the install notice', INSTALL.test(r.stdout), r.stdout);
+write(toolkitRepo, '.claude/rules/toolkit.md', stampRules('<b>7.0.1</b>'));
+r = run(plugin, { data, project: toolkitRepo });
+check('control: a malformed stamp cancels nothing, so VERSION beside review.md still fires', INSTALL.test(r.stdout), r.stdout);
+// The marker rule is shared with setup-project.js: the same block, byte for byte.
+{
+  const blockOf = (file) => {
+    const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
+    const a = text.indexOf('// >>> copy-install markers');
+    const b = text.indexOf('// <<< copy-install markers <<<');
+    return a < 0 || b < 0 ? null : text.slice(a, b);
+  };
+  const mine = blockOf(SOURCE);
+  const setupBlock = blockOf(path.resolve(__dirname, '..', '.claude', 'scripts', 'setup-project.js'));
+  check('the copy-install markers block is byte-identical in session-start.js and setup-project.js', mine !== null && mine.length > 200 && mine === setupBlock);
+}
 r = run(plugin, { data, project: makeProject({ version: '7.0.0', previousVersion: '6.3.3', auditedVersion: '7.1.0' }) });
 check('matching versions are silent', r.status === 0 && r.stdout === '', r.stdout);
 r = run(plugin, { data, project: makeProject({ version: '7.1.0', auditedVersion: '7.1.0-rc.1' }) });
