@@ -1,8 +1,8 @@
 # Toolkit Conventions
 
-<!-- Parsed by scripts/upgrade-audit.js, the deterministic half of /upgrade. Keep each entry in exactly the format under "Entry format": the parser reads the heading and the bold-labelled bullets and nothing else. Ids are permanent: never renumber, never reuse. -->
+<!-- Parsed by scripts/upgrade-audit.js, the deterministic half of /tk:upgrade. Keep each entry in exactly the format under "Entry format": the parser reads the heading and the bold-labelled bullets and nothing else. Ids are permanent: never renumber, never reuse. -->
 
-A convention is a countable unit with one source (issue #167). Each entry carries an id that never changes, the release it arrived in, what it applies to, how a file behind it is found, and the shape of the fix. `/upgrade` reads this file, selects the entries whose `Since` lies in the range (last audited version, current plugin version], runs each detector over the files the project owns (its own commands, skills, agents, and rules under `.claude/`, plus `CLAUDE.md`; the plugin's files are never in the project), and turns every hit into a finding with a runnable receipt. From there the normal loop applies: the M2 audit judges the findings, survivors are auto-fixed, every fix is re-verified with the same detector, and the run ends by stamping `.claude/.toolkit-state.json` so the next upgrade starts where this one stopped. The CHANGELOG's Upgrading section names, by id, the conventions each release adds.
+A convention is a countable unit with one source (issue #167). Each entry carries an id that never changes, the release it arrived in, what it applies to, how a file behind it is found, and the shape of the fix. `/tk:upgrade` reads this file, selects the entries whose `Since` lies in the range (last audited version, current plugin version], plus every entry marked `Runs: every upgrade`, runs each detector over the files the project owns (its own commands, skills, agents, and rules under `.claude/`, plus `CLAUDE.md`; the plugin's files are never in the project), and turns every hit into a finding with a runnable receipt. From there the normal loop applies: the M2 audit judges the findings, survivors are auto-fixed, every fix is re-verified with the same detector, and the run ends by stamping `.claude/.toolkit-state.json` so the next upgrade starts where this one stopped. The CHANGELOG's Upgrading section names, by id, the conventions each release adds.
 
 A convention describes the toolkit's contract with a project's own files. It is not a style guide for the project's code, and it never fires on a file the toolkit ships.
 
@@ -11,13 +11,16 @@ A convention describes the toolkit's contract with a project's own files. It is 
 ```
 ### C-<n>: <title>
 - **Since:** <version the convention arrived in>
-- **Scope:** prompt-files | prompt-files+claude-md | claude-md | agents | settings-local | seed-stamp | local-edits
-- **Detector:** regex | seed-stamp | dead-permissions | local-edits | agent-tools | manual
+- **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
+- **Scope:** prompt-files | prompt-files+claude-md | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits
+- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | manual
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
 ```
 
-`regex` needs one or more `Looks behind` patterns; the other detectors carry their check in the script and take none. `manual` is the one detector the script does not run: the `/upgrade` skill reads the files in scope itself, judges each against the `Looks behind` prose, and emits findings in the same shape with a file-read receipt. Use it only for a judgment no grep expresses.
+`regex` needs one or more `Looks behind` patterns; the other detectors carry their check in the script and take none. `manual` is the one detector the script does not run: the `/tk:upgrade` skill reads the files in scope itself, judges each against the `Looks behind` prose, and emits findings in the same shape with a file-read receipt. Use it only for a judgment no grep expresses.
+
+`Runs: every upgrade` takes an entry out of the version range: it is checked on every upgrade, whatever version the project was last audited at. Use it only for a check whose subject can fall behind on any release, such as a stamp that every release moves; an entry without the bullet runs only when its `Since` lies in the range.
 
 A hit is a candidate, not a verdict. Every finding goes through the M2 audit before anything is fixed, and the audit is where a false positive dies: a path pattern that matched a file the project itself owns, a dispatch name that only looks like a toolkit agent. The receipt on each finding is the grep that found it, so a skeptic can refute it from the bytes.
 
@@ -77,17 +80,18 @@ Why: a finder that could edit would apply changes before the M2 audit judged the
 - **Since:** 7.0.0
 - **Scope:** local-edits
 - **Detector:** local-edits
-- **Fix:** file the change upstream as an issue, or carry it as a project-owned script the toolkit does not ship
+- **Fix:** diff your backup copy against the same file at the toolkit tag it came from (`https://github.com/mayankmankhand/llm-peer-review/blob/v<previousVersion>/<path>`), never against the current plugin copy; carry what that diff shows as a project-owned script the toolkit does not ship, or describe it in an issue upstream
 
-Why: the plugin's scripts are replaced whole on every update, so an edit to a copy is lost the next time. The migration from a copy-install records each locally modified script in `.claude/.toolkit-migration.json` with its backup path; this convention turns each record into a finding whose receipt is the diff, so the edit is either upstreamed or moved, never silently dropped.
+Why: the plugin's scripts are replaced whole on every update, so an edit to a copy is lost the next time. The migration from a copy-install records each locally modified script in `.claude/.toolkit-migration.json` with its backup path; this convention turns each record into a finding whose receipt is the evidence of the edit (the migration record, the hash the copy-install's manifest recorded for the file, and the different hash of the backup copy), so the edit is either upstreamed or moved, never silently dropped. The current plugin copy is not the base of the edit: it also carries every toolkit change made since that copy-install, so a diff against it shows those changes as if they were the user's, and filing that diff upstream would revert them.
 
 ### C-7: Seeded files carry the current stamp
 - **Since:** 7.0.0
+- **Runs:** every upgrade
 - **Scope:** seed-stamp
 - **Detector:** seed-stamp
-- **Fix:** delete the seeded rules file and run `/setup`, which writes a fresh one only when it is missing, or merge the new seed text by hand and update its stamp
+- **Fix:** delete the seeded rules file and run `/tk:setup`, which writes a fresh one only when it is missing, or merge the new seed text by hand and update its stamp
 
-Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns. Its version stamp is how `/upgrade` knows which seed text the project last received; a stale stamp means rules the project's sessions still read every turn are behind.
+Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns. Its version stamp is how `/tk:upgrade` knows which seed text the project last received; a stale stamp means rules the project's sessions still read every turn are behind. Every release moves the stamp, so this entry runs on every upgrade rather than only when its `Since` is in range: a project audited at 7.0.0 or later would otherwise never be told its rules text is stale.
 
 ### C-8: Permissions point at the plugin, not at removed scripts
 - **Since:** 7.0.0
@@ -96,6 +100,30 @@ Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns. I
 - **Fix:** remove the entries; each plugin command carries `allowed-tools` for the scripts it runs
 
 Why: a `Bash(node .claude/scripts/...)` row allows a path nothing runs any more. Dead allow rows are not dangerous, but they hide the row that matters and they age into a settings file nobody understands.
+
+### C-9: Permission rows match the shipped seed
+- **Since:** 7.1.0
+- **Scope:** settings-local
+- **Detector:** permission-rows
+- **Fix:** re-run `/tk:setup` to merge the toolkit rows the file lacks; remove the rows the shipped retired list names; ask the user about `"defaultMode": "acceptEdits"`, never change it without their answer
+
+Why: a project migrated on 7.0.0 or 7.0.1 received that release's whole seed in `.claude/settings.local.json`, including grants only the toolkit's own repository needs and bare `Skill(<name>)` rows that never match a `tk:` skill, and it does not receive a row a later seed adds. The detector reads the plugin's shipped `seed/settings.local.json` and `seed/retired-permission-rows.txt` and reports three kinds of finding: toolkit rows the file lacks, retired rows it still has, and the `acceptEdits` default mode. The last is its own finding and a question, because the 7.0.x seed set it but a user may have chosen it.
+
+### C-10: Seeded root files carry no copy-install lines
+- **Since:** 7.1.0
+- **Scope:** seed-lines
+- **Detector:** seed-lines
+- **Fix:** replace the line with the shipped seed's line, or delete it when the seed has none in its place; a line that ignores the state file is never deleted: keep it and add `!.claude/.toolkit-state.json` after it, or, when it ignores the whole `.claude` folder, ask the user how to narrow it
+
+Why: `.gitattributes`, `.gitignore`, and `artifacts/README.md` are written once and then belong to the project, so lines an older seed wrote stay after the layout they describe is gone. The detector flags `.gitattributes` lines naming `.claude/scripts/`, the `.gitignore` copy-install manifest block (`.claude/.toolkit-manifest.json` and the "preserved by setup.sh" comment), any `.gitignore` line that ignores `.claude/.toolkit-state.json` (the state file is committed so every collaborator's session sees the recorded version), and `artifacts/README.md` lines naming `.claude/scripts/render-html.js`. The state file check reads the whole `.gitignore` the way git does, so a later `!.claude/.toolkit-state.json` clears it, while a negation under an ignored folder does not. Such a line is often the project's own broad pattern (`.claude/`, `*.json`), so deleting it would un-ignore everything else it covers: the fix keeps it and re-includes only the state file.
+
+### C-11: Toolkit names carry the tk: scope
+- **Since:** 7.1.0
+- **Scope:** prompt-files+claude-md
+- **Detector:** unscoped-names
+- **Fix:** scope the name with `tk:`: `Skill(tk:<name>)`, `subagent_type=tk:<name>`, `/tk:<name>`; in `.claude/settings.local.json`, scope the row or drop it when the `tk:` row is already there
+
+Why: under the plugin every toolkit command, skill, and agent is registered as `tk:<name>`, so a bare name reaches nothing, or reaches a project piece of the same name. The detector reads the names from the plugin's own `commands/`, `skills/`, and `agents/` and flags `Skill(<name>)`, `subagent_type=<name>` or `subagent_type: <name>`, and a `/<name>` mention in the project's own files, plus bare `Skill(<name>)` rows in `.claude/settings.local.json`. A name the project owns itself is never flagged. URLs are blanked before matching, and a slash mention needs a boundary on both sides, so file paths (`docs/review.md`), relative link paths, closing tags such as `</document>`, and prose such as "a UX/review of the design" stay out. A slash right after a markdown link target `](`, a reference definition, an attribute value (`href="/review"`), a CSS `url(`, an HTTP method (`GET /index`) or a shell command that takes a path (`cd /worktree`) is a root-relative path, not a mention. A bare row the retired list already names is left to C-9, whose fix removes it.
 
 ## How a release adds a convention
 
