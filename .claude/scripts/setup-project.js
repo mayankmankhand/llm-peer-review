@@ -41,7 +41,7 @@
 //
 // A migration refuses to start on a dirty git tree (or outside a repo) unless
 // --force (an untracked or modified .claude/settings.json alone is not dirty:
-// the plugin install writes it), because `git checkout` plus the backup folder is the undo. It removes
+// the plugin install writes it), because the undo line it prints relies on git holding the tree as it was. It removes
 // first and seeds second (the manifest lists four root files the seed also
 // writes; the other order deleted them), key-merges .claude/settings.json (the
 // marketplace pointer is what tells a collaborator to install the plugin; a
