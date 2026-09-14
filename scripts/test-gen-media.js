@@ -266,6 +266,32 @@ console.log('gen-media.js');
   check(r2.status === 0 && r2.requests[0].body.prompt === 'ends with a blank line\n', 'prompt-file/eol: of two trailing newlines, one is kept');
 }
 
+// ─── --prompt-file: a leading byte order mark is dropped ─────────────────────
+{
+  // Windows PowerShell 5.1 `Out-File -Encoding utf8` starts the file with EF BB BF. Only
+  // that one leading mark goes: a second mark right after it and one in the middle of
+  // the text are prompt bytes like any other, and so is everything else.
+  const BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+  const text = 'a crystal \uFEFF on "dark" glass, café\r\nline two `ticked` $HOME';
+  const sb = sandbox('prompt-file-bom', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(sb.out('prompt.txt'), Buffer.concat([BOM, Buffer.from(text + '\r\n', 'utf8')]));
+  const r = run(sb, ['--kind', 'image', '--prompt-file', sb.out('prompt.txt'), '--out', sb.out('hero.png')]);
+  contract(r, 'prompt-file/bom');
+  const sent = r.requests[0] && r.requests[0].body && r.requests[0].body.prompt;
+  check(r.status === 0 && typeof sent === 'string' && sent.charCodeAt(0) !== 0xfeff && sent === text, 'prompt-file/bom: a file starting with a BOM arrives without it, the rest identical');
+  check(typeof sent === 'string' && Buffer.from(sent, 'utf8').equals(Buffer.from(text, 'utf8')), 'prompt-file/bom: the sent bytes equal the file bytes minus the BOM and the final line ending (a mid-text U+FEFF kept)');
+
+  const dsb = sandbox('prompt-file-bom-twice', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(dsb.out('prompt.txt'), Buffer.concat([BOM, BOM, Buffer.from('two marks\n', 'utf8')]));
+  const d = run(dsb, ['--kind', 'image', '--prompt-file', dsb.out('prompt.txt'), '--out', dsb.out('hero.png')]);
+  check(d.status === 0 && d.requests[0].body.prompt === '\uFEFFtwo marks', 'prompt-file/bom: only one leading BOM is stripped, a second one stays');
+
+  const esb = sandbox('prompt-file-bom-only', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(esb.out('prompt.txt'), Buffer.concat([BOM, Buffer.from('\n')]));
+  const e = run(esb, ['--kind', 'image', '--prompt-file', esb.out('prompt.txt'), '--out', esb.out('hero.png')]);
+  check(e.status === 1 && /--prompt-file is empty/.test(e.json && e.json.error) && e.requests.length === 0, 'prompt-file/bom: a file holding only a BOM and a newline is empty, exit 1 before any request');
+}
+
 // ─── --prompt-file with no key: the handoff carries the file's prompt ────────
 {
   const sb = sandbox('prompt-file-handoff', {});

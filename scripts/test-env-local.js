@@ -9,6 +9,12 @@
 // runtime, so no real-shaped key sits in the source. Dependency-free; prints one line
 // per check; exits non-zero on any failure.
 //
+// Sections 6 to 8 cover the hardening from the issue #177 verifier notes: only the
+// allowed names load from a file (a base URL, proxy, or NODE_OPTIONS in a cloned repo's
+// .env.local must never reach process.env), a whitespace-only environment value counts
+// as unset, and an unreadable file is skipped with one warning instead of a crash (that
+// case is skipped when running as root, which reads a mode 000 file anyway).
+//
 //   node scripts/test-env-local.js
 
 const { spawnSync } = require('child_process');
@@ -231,17 +237,50 @@ const PARITY_TEXT = [
   'CRLF_LINE=crlf-value\r',
   'QUOTED_CRLF="crlf quoted"\r',
   '\r',
+  // The same shapes again under names the loader accepts, so the loader comparison
+  // below is not trivially two empty objects. No quoted value follows an *_API_KEY name
+  // (the pre-push tripwire reads that as a secret assignment).
+  'GPT_MODEL="double-quoted-model"',
+  "GEMINI_MODEL='single-quoted-model'",
+  'export GPT_MAX_TOKENS=4000',
+  '  GEMINI_MAX_TOKENS  =   8000   ',
+  'FAL_VIDEO_MODEL=fal-ai/a=b',
+  'FAL_MATTE_MODEL="half\'',
+  'OPENAI_IMAGE_MODEL=',
+  'OPENAI_IMAGE_MODEL=filled-later',
+  'GEMINI_IMAGE_MODEL=first',
+  'GEMINI_IMAGE_MODEL=second',
+  'GEMINI_USE_CONCAT_PROMPT=1 # not an inline comment',
+  'GEN_MEDIA_POLL_MS=25\r',
   'LAST=no-trailing-newline',
 ].join('\n');
+// Two env objects hold the same pairs, whatever order they were set in.
+function sameEnv(a, b) {
+  const norm = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  return norm(a) === norm(b);
+}
+function pick(obj, names) {
+  const out = {};
+  for (const k of Object.keys(obj)) if (names.includes(k)) out[k] = obj[k];
+  return out;
+}
 {
   const l = layout('parity');
   for (const [label, text] of [['LF', PARITY_TEXT], ['CRLF', PARITY_TEXT.replace(/\r?\n/g, '\r\n')]]) {
     const expected = {};
     frozenLoad(text, expected);
+    // The parser, every name: folding parseEnvLocal's pairs with the old first-non-empty
+    // rule gives exactly what the old copies set.
+    const folded = {};
+    for (const [k, v] of lib.parseEnvLocal(text)) if (!folded[k]) folded[k] = v;
+    check('parsing matches the old copies (' + label + ' file)', JSON.stringify(folded) === JSON.stringify(expected), JSON.stringify(folded) + ' vs ' + JSON.stringify(expected));
+    // The loader: the old result cut down to the allowed names.
     l.project(text);
     const actual = {};
     lib.loadEnvLocal({ cwd: l.repo, homedir: l.home, env: actual });
-    check('parsing matches the old copies (' + label + ' file)', JSON.stringify(actual) === JSON.stringify(expected), JSON.stringify(actual) + ' vs ' + JSON.stringify(expected));
+    const allowedExpected = pick(expected, lib.ALLOWED_KEYS);
+    // Ten allowed names appear in PARITY_TEXT; all ten must survive the cut.
+    check('loading matches the old copies for the allowed names (' + label + ' file)', Object.keys(allowedExpected).length === 10 && sameEnv(actual, allowedExpected), JSON.stringify(actual) + ' vs ' + JSON.stringify(allowedExpected));
   }
   const expected = {};
   frozenLoad(PARITY_TEXT, expected);
@@ -274,6 +313,125 @@ console.log('\n5. defaults and messages');
   check('describeLookup names all three places', d.includes('the environment') && d.includes("the project's .env.local") && d.includes('~/.claude/plugins/.env.local'), d);
   check('lookupPlaces lists the three places in lookup order', lib.lookupPlaces().length === 3 && /environment/.test(lib.lookupPlaces()[0]) && /project/.test(lib.lookupPlaces()[1]) && /plugins/.test(lib.lookupPlaces()[2]));
   check('machineEnvLocalPath is ~/.claude/plugins/.env.local', lib.machineEnvLocalPath('/h') === path.join('/h', '.claude', 'plugins', '.env.local'));
+}
+
+// Run loadEnvLocal() with no options in a child process whose working directory is cwd
+// and whose HOME is home, with exactly the given environment (plus PATH). The child
+// prints { before, after, res }: its whole process.env before and after the call, and
+// the call's return value.
+function childLoad(cwd, home, env) {
+  const code = 'const m = require(' + JSON.stringify(MODULE) + '); const before = Object.assign({}, process.env); const res = m.loadEnvLocal(); process.stdout.write(JSON.stringify({ before, after: Object.assign({}, process.env), res }));';
+  const r = spawnSync(process.execPath, ['-e', code], { cwd, encoding: 'utf8', env: Object.assign({ PATH: process.env.PATH, HOME: home, USERPROFILE: home }, env || {}) });
+  let json = null;
+  try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, json };
+}
+
+// --- 6. Only known names load from a file -------------------------------------------
+console.log('\n6. only known names load from a file');
+{
+  // The list itself, spelled out, so a name added or dropped is a visible test change.
+  const EXPECTED = ['OPENAI_API_KEY', 'GPT_MODEL', 'GPT_MAX_TOKENS', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_MAX_TOKENS', 'GEMINI_USE_CONCAT_PROMPT', 'OPENAI_IMAGE_MODEL', 'GEMINI_IMAGE_MODEL', 'FAL_KEY', 'FAL_VIDEO_MODEL', 'FAL_MATTE_MODEL', 'GEN_MEDIA_POLL_MS'];
+  check('ALLOWED_KEYS is exactly the expected list', JSON.stringify(lib.ALLOWED_KEYS.slice().sort()) === JSON.stringify(EXPECTED.slice().sort()), JSON.stringify(lib.ALLOWED_KEYS));
+  check('ALLOWED_KEYS cannot be changed at runtime', Object.isFrozen(lib.ALLOWED_KEYS));
+  check('no allowed name is a base URL, a proxy, or a NODE_* variable', !lib.ALLOWED_KEYS.some((k) => /BASE_URL|PROXY|^NODE_/i.test(k)), JSON.stringify(lib.ALLOWED_KEYS));
+
+  // The list matches what the scripts read: every process.env.NAME, process.env['NAME'],
+  // and the names gen-media.js passes to its envOr() and has() helpers (which read
+  // process.env[name]).
+  const scriptsDir = path.dirname(MODULE);
+  const read = new Set();
+  for (const f of ['ask-gpt.js', 'ask-gemini.js', 'gen-media.js', 'env-local.js']) {
+    const src = fs.readFileSync(path.join(scriptsDir, f), 'utf8');
+    for (const re of [/process\.env\.([A-Za-z_][A-Za-z0-9_]*)/g, /process\.env\[\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\]/g, /\b(?:envOr|has)\(\s*['"]([A-Z0-9_]+)['"]\s*\)/g]) {
+      let m;
+      while ((m = re.exec(src)) !== null) read.add(m[1]);
+    }
+  }
+  const unlisted = [...read].filter((k) => !lib.ALLOWED_KEYS.includes(k));
+  const unread = lib.ALLOWED_KEYS.filter((k) => !read.has(k));
+  check('every variable the scripts read is on the list', read.size > 0 && unlisted.length === 0, 'read but not listed: ' + unlisted.join(', '));
+  check('every name on the list is read by a script', unread.length === 0, 'listed but never read: ' + unread.join(', '));
+}
+const HOSTILE = envLine('OPENAI_BASE_URL', 'https://attacker.invalid/v1') + envLine('HTTPS_PROXY', 'http://attacker.invalid:8080') + envLine('https_proxy', 'http://attacker.invalid:8080') + envLine('NODE_OPTIONS', '--require /tmp/evil.js') + envLine('GOOGLE_API_KEY', KEY.above) + envLine('PATH', '/attacker/bin');
+{
+  const l = layout('hostile-project');
+  l.project(HOSTILE + envLine('OPENAI_API_KEY', KEY.project));
+  l.machine(HOSTILE + envLine('GEMINI_API_KEY', KEY.machine));
+  const env = {};
+  lib.loadEnvLocal({ cwd: l.nested, homedir: l.home, env });
+  check('a base URL, proxy, NODE_OPTIONS, or other unknown name in either file is ignored', sameEnv(env, { OPENAI_API_KEY: KEY.project, GEMINI_API_KEY: KEY.machine }), JSON.stringify(env));
+  const userSet = { OPENAI_BASE_URL: 'https://user-chose-this.invalid' };
+  lib.loadEnvLocal({ cwd: l.nested, homedir: l.home, env: userSet });
+  check('a real environment variable off the list is left exactly as the user set it', userSet.OPENAI_BASE_URL === 'https://user-chose-this.invalid' && userSet.OPENAI_API_KEY === KEY.project, JSON.stringify(userSet));
+}
+{
+  // The same, through the real process.env of a child with no options.
+  const l = layout('hostile-child');
+  l.project(HOSTILE + envLine('OPENAI_API_KEY', KEY.project));
+  l.machine(HOSTILE + envLine('FAL_KEY', KEY.machine));
+  const r = childLoad(l.nested, l.home, {});
+  const j = r.json;
+  const changed = j ? Object.keys(j.after).filter((k) => j.before[k] !== j.after[k]).sort() : null;
+  check('process.env: OPENAI_BASE_URL, HTTPS_PROXY, and NODE_OPTIONS from a file do not change it', r.status === 0 && j && j.after.OPENAI_BASE_URL === undefined && j.after.HTTPS_PROXY === undefined && j.after.https_proxy === undefined && j.after.NODE_OPTIONS === undefined && j.after.PATH === process.env.PATH, r.stdout + r.stderr);
+  check('process.env: the only variables that change are the allowed ones the files set', JSON.stringify(changed) === JSON.stringify(['FAL_KEY', 'OPENAI_API_KEY']), JSON.stringify(changed));
+}
+{
+  // Every allowed name loads, from the project file and from the machine file.
+  const value = (k) => k === 'GEN_MEDIA_POLL_MS' ? '42' : 'value-for-' + k.toLowerCase().replace(/_/g, '-');
+  const all = lib.ALLOWED_KEYS.map((k) => envLine(k, value(k))).join('');
+  const lp = layout('all-project');
+  lp.project(all);
+  const envP = {};
+  lib.loadEnvLocal({ cwd: lp.nested, homedir: lp.home, env: envP });
+  const missingP = lib.ALLOWED_KEYS.filter((k) => envP[k] !== value(k));
+  check('every allowed name loads from the project file', missingP.length === 0 && Object.keys(envP).length === lib.ALLOWED_KEYS.length, 'not loaded: ' + missingP.join(', '));
+  const lm = layout('all-machine');
+  lm.machine(all);
+  const envM = {};
+  lib.loadEnvLocal({ cwd: lm.nested, homedir: lm.home, env: envM });
+  const missingM = lib.ALLOWED_KEYS.filter((k) => envM[k] !== value(k));
+  check('every allowed name loads from the machine file', missingM.length === 0 && Object.keys(envM).length === lib.ALLOWED_KEYS.length, 'not loaded: ' + missingM.join(', '));
+}
+
+// --- 7. A whitespace-only value counts as unset -------------------------------------
+console.log('\n7. whitespace-only values');
+{
+  const l = layout('whitespace');
+  l.project(envLine('OPENAI_API_KEY', KEY.project) + envLine('GEMINI_API_KEY', KEY.project) + 'GPT_MODEL=" "\n');
+  l.machine('GPT_MODEL=machine-model\n');
+  const env = { OPENAI_API_KEY: ' ', GEMINI_API_KEY: '\t\r\n ', FAL_KEY: '  ' };
+  lib.loadEnvLocal({ cwd: l.nested, homedir: l.home, env });
+  check('a whitespace-only environment value falls back to the file', env.OPENAI_API_KEY === KEY.project && env.GEMINI_API_KEY === KEY.project, JSON.stringify(env));
+  check('a whitespace-only value with no file value to replace it is left alone', env.FAL_KEY === '  ', JSON.stringify(env.FAL_KEY));
+  check('a whitespace-only quoted value in the project file does not hide the machine file', env.GPT_MODEL === 'machine-model', JSON.stringify(env.GPT_MODEL));
+  const padded = { OPENAI_API_KEY: ' ' + KEY.env + ' ' };
+  lib.loadEnvLocal({ cwd: l.nested, homedir: l.home, env: padded });
+  check('an environment value with real content and stray spaces is still set, and wins', padded.OPENAI_API_KEY === ' ' + KEY.env + ' ', JSON.stringify(padded.OPENAI_API_KEY));
+}
+
+// --- 8. An unreadable file is skipped with a warning --------------------------------
+console.log('\n8. unreadable files');
+{
+  const l = layout('unreadable');
+  const projectFile = l.project(envLine('OPENAI_API_KEY', KEY.project));
+  const machineFile = l.machine(envLine('GEMINI_API_KEY', KEY.machine));
+  fs.chmodSync(projectFile, 0o000);
+  let readable = true;
+  try { fs.readFileSync(projectFile); } catch (e) { readable = false; }
+  if (readable) {
+    // Root (and some filesystems) read a mode 000 file anyway, so there is nothing to test.
+    console.log('  skip unreadable-file checks: a mode 000 file is still readable here (running as root?)');
+  } else {
+    const r = childLoad(l.nested, l.home, { OPENAI_API_KEY: KEY.env });
+    const j = r.json;
+    const lines = r.stderr.split('\n').filter(Boolean);
+    check('an unreadable project .env.local does not crash when the key is in the environment', r.status === 0 && j && j.after.OPENAI_API_KEY === KEY.env, r.stdout + r.stderr);
+    check('it warns in exactly one short stderr line that names the file', lines.length === 1 && lines[0].includes(projectFile) && lines[0].length < 300 && !/\n\s+at /.test(r.stderr), r.stderr);
+    check('the machine file is still read after the skipped one', j && j.after.GEMINI_API_KEY === KEY.machine && j.res.project === projectFile && JSON.stringify(j.res.read) === JSON.stringify([machineFile]), r.stdout);
+    check('no key value appears in the warning', !r.stderr.includes(KEY.env) && !r.stderr.includes(KEY.project) && !r.stderr.includes(KEY.machine), r.stderr);
+  }
+  fs.chmodSync(projectFile, 0o600);
 }
 
 for (const d of temps) fs.rmSync(d, { recursive: true, force: true });

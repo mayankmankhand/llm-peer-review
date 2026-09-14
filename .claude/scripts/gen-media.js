@@ -15,10 +15,12 @@
 //
 // The prompt, for image and video, comes from exactly one of:
 //   --prompt <text>        the prompt itself, as one argument.
-//   --prompt-file <path>   a UTF-8 file holding the prompt; one trailing newline is
-//                          dropped. Use it when the prompt carries backticks, $VARS, or
-//                          quotes, so the text never passes through a shell. Giving both
-//                          flags is an error, and so is giving neither.
+//   --prompt-file <path>   a UTF-8 file holding the prompt; one leading byte order mark
+//                          (which Windows PowerShell 5.1 `Out-File -Encoding utf8`
+//                          writes) and one trailing newline are dropped, every other
+//                          byte is sent as is. Use it when the prompt carries backticks,
+//                          $VARS, or quotes, so the text never passes through a shell.
+//                          Giving both flags is an error, and so is giving neither.
 //
 // Contract (mirrors session-init.js):
 //   - stdout = exactly one JSON object. Nothing else is ever written there, so the
@@ -351,7 +353,9 @@ async function main() {
   // --prompt-file whose temp file is gone must collect the paid job, not fail on it.
   if (needsPrompt && args['prompt-file'] !== undefined) {
     try {
-      args.prompt = fs.readFileSync(args['prompt-file'], 'utf8').replace(/\r?\n$/, '');
+      // Node keeps a UTF-8 byte order mark as U+FEFF when it decodes, so strip one here or
+      // the provider receives it as the prompt's first character.
+      args.prompt = fs.readFileSync(args['prompt-file'], 'utf8').replace(/^\uFEFF/, '').replace(/\r?\n$/, '');
     } catch (e) {
       return fail(`cannot read --prompt-file: ${e.message}`);
     }

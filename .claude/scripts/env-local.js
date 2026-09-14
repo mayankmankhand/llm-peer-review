@@ -23,18 +23,38 @@
 //   3. The machine file, ~/.claude/plugins/.env.local, found by that exact path: one
 //      file for every project on this machine.
 // So when both files set a variable, the project file wins, and the machine file only
-// fills what the project leaves out. An empty value counts as not set at every step,
-// as it always has: a project .env.local copied from .env.local.example with its keys
-// still blank does not hide the machine file's keys. Model and tuning variables
-// (GPT_MODEL, GEMINI_MAX_TOKENS, FAL_VIDEO_MODEL, ...) follow the same order, because
-// they come from the same files.
+// fills what the project leaves out. An empty or whitespace-only value counts as not
+// set at every step, in the environment too: a project .env.local copied from
+// .env.local.example with its keys still blank does not hide the machine file's keys,
+// and OPENAI_API_KEY=' ' in the environment is filled from a file, the same way
+// gen-media.js and the ask scripts trim a key before deciding it is there. Model and
+// tuning variables (GPT_MODEL, GEMINI_MAX_TOKENS, FAL_VIDEO_MODEL, ...) follow the same
+// order, because they come from the same files.
+//
+// Only known names load from a file. A file can set ONLY the variables in ALLOWED_KEYS
+// below, the exact names ask-gpt.js, ask-gemini.js, and gen-media.js read; every other
+// line is ignored. Why: under the plugin the machine file holds the user's keys for
+// every project, and the project file comes from whatever repo the command runs in,
+// which may be a clone nobody has read. If a file could set anything, that clone's
+// .env.local could set OPENAI_BASE_URL (the openai SDK reads it from process.env), a
+// proxy (HTTPS_PROXY), or NODE_OPTIONS, and quietly send the machine-wide
+// OPENAI_API_KEY to its own server the first time /tk:ask-gpt runs there. So no
+// *_BASE_URL, no proxy, and no NODE_* variable is ever taken from a file. A real
+// environment variable is untouched by this list: the user set it, so it still wins.
+// scripts/test-env-local.js greps the three scripts and fails when they read a name
+// this list lacks, or when the list keeps a name nothing reads.
+//
+// A file that exists but cannot be read (EACCES) is skipped with one short warning on
+// stderr naming it, so a bad permission on a project file never crashes a command whose
+// key is already in the environment or the other file.
 //
 // Parsing is unchanged from the three copies this replaces (scripts/test-env-local.js
 // keeps a frozen copy of that code and compares): one KEY=value per line, an optional
 // leading `export `, blank lines and `#` comment lines skipped, one pair of matching
 // surrounding quotes stripped, CRLF files fine because every line is trimmed, and the
 // first non-empty value of a key inside one file wins. No multiline values, no
-// variable expansion, no inline comments.
+// variable expansion, no inline comments. The two deliberate changes are the name
+// allowlist and the whitespace-only rule above.
 //
 // Dependency-free: gen-media.js runs without an npm install, so this module must too.
 
@@ -43,6 +63,29 @@ const os = require('os');
 const path = require('path');
 
 const FILE_NAME = '.env.local';
+
+// The only names a .env.local may set (see the header for why). Keep it to what the
+// scripts actually read: add a name here in the same change that starts reading it.
+// Never add a *_BASE_URL, proxy, or NODE_* variable.
+const ALLOWED_KEYS = Object.freeze([
+  // ask-gpt.js
+  'OPENAI_API_KEY',
+  'GPT_MODEL',
+  'GPT_MAX_TOKENS',
+  // ask-gemini.js
+  'GEMINI_API_KEY',
+  'GEMINI_MODEL',
+  'GEMINI_MAX_TOKENS',
+  'GEMINI_USE_CONCAT_PROMPT',
+  // gen-media.js (it also reads OPENAI_API_KEY and GEMINI_API_KEY)
+  'OPENAI_IMAGE_MODEL',
+  'GEMINI_IMAGE_MODEL',
+  'FAL_KEY',
+  'FAL_VIDEO_MODEL',
+  'FAL_MATTE_MODEL',
+  'GEN_MEDIA_POLL_MS',
+]);
+const ALLOWED = new Set(ALLOWED_KEYS);
 
 // The three places in lookup order, in plain English, for error messages.
 const PLACES = [
@@ -66,6 +109,11 @@ function parseEnvLocal(text) {
     pairs.push([key, value]);
   });
   return pairs;
+}
+
+// Set means a value with something other than whitespace in it.
+function isSet(value) {
+  return typeof value === 'string' && value.trim() !== '';
 }
 
 function isFile(p) {
@@ -107,14 +155,16 @@ function machineEnvLocalPath(homedir) {
   return path.join(homedir, '.claude', 'plugins', FILE_NAME);
 }
 
-// Fill env from the project file, then the machine file, never replacing a value that
-// is already set and non-empty. A missing file is not an error. Options, all optional
-// and there for tests: cwd (default process.cwd()), homedir (default os.homedir()),
-// env (default process.env).
+// Fill env from the project file, then the machine file, with the allowed names only,
+// never replacing a value that is already set (not empty, not only whitespace). A
+// missing file is not an error, and an unreadable one is skipped with a warning.
+// Options, all optional and there for tests: cwd (default process.cwd()), homedir
+// (default os.homedir()), env (default process.env).
 //
-// Returns { project, machine, read }: the path of each file that was read, or null
+// Returns { project, machine, read }: the path of each file that was found, or null
 // when there was none (machine is also null when it is the very file the project
-// search found), and read, those paths in the order they were applied.
+// search found), and read, the paths actually read, in the order they were applied
+// (a file skipped as unreadable is left out).
 function loadEnvLocal(options) {
   const opts = options || {};
   const env = opts.env || process.env;
@@ -125,11 +175,21 @@ function loadEnvLocal(options) {
   const machine = machinePath && machinePath !== project && isFile(machinePath) ? machinePath : null;
   // This order IS the precedence: a value the project file sets is already in env when
   // the machine file is read, so the machine file cannot replace it.
-  const read = [project, machine].filter(Boolean);
-  for (const file of read) {
-    for (const [key, value] of parseEnvLocal(fs.readFileSync(file, 'utf-8'))) {
-      // Only set if not already in the environment (an empty value counts as unset)
-      if (!env[key]) env[key] = value;
+  const read = [];
+  for (const file of [project, machine].filter(Boolean)) {
+    let text;
+    try {
+      text = fs.readFileSync(file, 'utf-8');
+    } catch (e) {
+      process.stderr.write(`env-local: skipping ${file}, cannot read it (${e.code || e.message})\n`);
+      continue;
+    }
+    read.push(file);
+    for (const [key, value] of parseEnvLocal(text)) {
+      // Any other name is ignored: see ALLOWED_KEYS.
+      if (!ALLOWED.has(key)) continue;
+      // Only set if not already set (an empty or whitespace-only value counts as unset)
+      if (!isSet(env[key])) env[key] = value;
     }
   }
   return { project, machine, read };
@@ -147,6 +207,7 @@ function describeLookup() {
 }
 
 module.exports = {
+  ALLOWED_KEYS,
   loadEnvLocal,
   parseEnvLocal,
   findProjectEnvLocal,
