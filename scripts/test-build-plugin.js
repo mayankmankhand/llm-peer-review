@@ -292,6 +292,23 @@ const liveSeedDiffs = RAW_SEEDS.filter(r => !exists(REPO, 'seed/' + r) || !fs.re
 check('live: every raw seed equals its seed/ source', liveSeedDiffs.length === 0, liveSeedDiffs.join(', '));
 const liveSeedTokens = walkFiles(path.join(live, 'seed')).filter(f => fs.readFileSync(f, 'utf8').includes('${CLAUDE_PLUGIN_ROOT}')).map(f => path.relative(live, f));
 check('live: no seed file carries ${CLAUDE_PLUGIN_ROOT}', liveSeedTokens.length === 0, liveSeedTokens.join(', '));
+// The Permissions table in the built toolkit-reference.md names exactly the allow rows
+// the built seed writes (issue #173): a seed row the table lacks, or a table row setup
+// never writes, is drift a reader would copy into their settings.
+const seedAllowRows = JSON.parse(read(live, 'seed/settings.local.json')).permissions.allow;
+const refRel = 'skills/shared/toolkit-reference.md';
+const tableRows = permissionTableRows(read(live, refRel));
+const drift = rowDrift(tableRows, seedAllowRows);
+check('live: the toolkit-reference Permissions table names exactly the seed allow rows', tableRows !== null && drift.missing.length === 0 && drift.extra.length === 0,
+  tableRows === null ? 'no Permissions table found' : 'in the seed but not the table: ' + drift.missing.join(', ') + '; in the table but not the seed: ' + drift.extra.join(', '));
+// Mutation: a temp copy of the reference with one row dropped from the table must fail.
+const refText = read(live, refRel);
+const droppedRow = tableRows && tableRows.length ? tableRows[0] : '';
+const firstDataLine = refText.split('\n').find(l => l.startsWith('|') && l.includes('`' + droppedRow + '`')) || '';
+const mutatedLine = firstDataLine.replace('`' + droppedRow + '`, ', '').replace('`' + droppedRow + '`', '');
+write(live, 'toolkit-reference.mutated.md', refText.replace(firstDataLine, mutatedLine));
+const mutatedDrift = rowDrift(permissionTableRows(read(live, 'toolkit-reference.mutated.md')), seedAllowRows);
+check('mutation: dropping one table row trips the drift assertion', droppedRow !== '' && mutatedLine !== firstDataLine && mutatedDrift.missing.length === 1 && mutatedDrift.missing[0] === droppedRow && mutatedDrift.extra.length === 0, JSON.stringify({ droppedRow, mutatedDrift }));
 
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');
@@ -414,6 +431,32 @@ function walkFiles(dir, acc) {
     if (fs.statSync(a).isDirectory()) walkFiles(a, acc); else acc.push(a);
   }
   return acc;
+}
+// The permission rows named in the first cell of each row of the Permissions table:
+// every backticked span there, `\|` unescaped. Null when the section or table is absent.
+function permissionTableRows(text) {
+  const start = text.indexOf('\n## Permissions\n');
+  if (start === -1) return null;
+  const next = text.indexOf('\n## ', start + 1);
+  const lines = text.slice(start, next === -1 ? text.length : next).split('\n');
+  const head = lines.findIndex(l => /^\|\s*Permission\s*\|/.test(l));
+  if (head === -1) return null;
+  const rows = [];
+  for (let i = head + 2; i < lines.length && lines[i].startsWith('|'); i++) {
+    const cell = lines[i].split(/(?<!\\)\|/)[1] || '';
+    for (const m of cell.matchAll(/`([^`]+)`/g)) rows.push(m[1].replace(/\\\|/g, '|'));
+  }
+  return rows;
+}
+// Rows each side has that the other lacks, counting duplicates (null table = all missing).
+function rowDrift(tableRows, seedRows) {
+  const left = [...(tableRows || [])];
+  const missing = [];
+  for (const r of seedRows) {
+    const i = left.indexOf(r);
+    if (i === -1) missing.push(r); else left.splice(i, 1);
+  }
+  return { missing, extra: left };
 }
 function writeTmp(content) {
   const f = path.join(os.tmpdir(), 'build-plugin-data-' + process.pid + '.json');

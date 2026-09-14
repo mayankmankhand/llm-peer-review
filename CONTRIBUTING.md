@@ -22,20 +22,41 @@ If you are arriving with your own commands or an existing workflow rather than a
 
 ## Releasing (Maintainer)
 
-To bump the toolkit version:
+Users receive the plugin from a release tag, not from main: the `tk` entry in `.claude-plugin/marketplace.json` pins the tag `v<version>`, so nothing merged to main reaches anyone until a release tags it.
 
-    bash scripts/setup/bump-version.sh <new-version>
+**Once per clone, install the pre-push hook:**
 
-The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`). Then manually:
+    bash scripts/setup/install-hooks.sh
+
+It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs the M11 tripwire, and a push to `main` or to a `v*` tag also runs the release gate and is blocked when the gate fails. Undo with `git config --unset core.hooksPath`.
+
+**The release gate** is `node scripts/release-check.js`. It runs every `scripts/test-*.js` suite (only exit codes count), checks that `plugin/` matches its source (`node scripts/build-plugin.js --check`), checks that the version in `plugin/.claude-plugin/plugin.json` went up if `plugin/` changed since the previous release tag, and checks that the marketplace entry is a `git-subdir` source on path `plugin` pinned to ref `v<version>`. Each check prints one `ok` or `FAIL` line with its reason.
+
+**Release order:**
+
+1. Bump the version: `bash scripts/setup/bump-version.sh <new-version>`. The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`), then rebuilds `plugin/`.
+2. In the same change, set the `tk` entry's `source` in `.claude-plugin/marketplace.json` to the full `git-subdir` object below, and do the manual steps below. Commit all of it as one release commit. The gate checks `source`, `path` and `ref` but not `url`, so copy `url` exactly: without it the entry passes the gate and still breaks every install once main is pushed.
+
+   ```json
+   "source": {
+     "source": "git-subdir",
+     "url": "mayankmankhand/llm-peer-review",
+     "path": "plugin",
+     "ref": "v<new-version>"
+   }
+   ```
+
+3. Run `node scripts/release-check.js` until it is green.
+4. Tag the release commit `v<new-version>` and push the tag. The hook runs the gate again, including the check that the tag matches the version in its commit's `plugin.json`.
+5. Merge to main and push main.
+6. Cut a GitHub release with `gh release create v<new-version>` so the latest release on GitHub matches the tag users install.
+
+Manual steps for the release commit:
 
 - Add a new section to CHANGELOG.md
 - Update AGENT-SETUP.md title and "What's new" block (rename the previous block to "What was new in vX.Y", and keep only the last three blocks inline - older entries point at CHANGELOG.md)
 - If this release bumps a default model, follow the model-bump reminder printed by `bump-version.sh`: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL` to the new value, then update `.env.local.example` and `API-KEYS.md`
-- If the installers changed since the last release, run `bash scripts/setup/test-installer-guarantees.sh` (and the `.ps1` mirror on Windows) before tagging
-- If `.claude/scripts/gen-media.js` changed, run `node scripts/test-gen-media.js` (no network or key needed)
-- If `.claude/scripts/pre-push-check.js` changed, run `node scripts/test-pre-push-check.js` (builds throwaway git repos under the temp directory; no network needed)
-- Commit, push, tag
-- Cut a GitHub release with `gh release create vX.Y.Z` so the latest release on GitHub reflects current main
+- If the installers changed since the last release, run `bash scripts/setup/test-installer-guarantees.sh` (and the `.ps1` mirror on Windows) before tagging; it is not a `scripts/test-*.js` suite, so the gate does not run it
 
 ## License
 

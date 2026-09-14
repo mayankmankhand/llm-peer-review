@@ -2,7 +2,7 @@
 
 <!-- Toolkit version: 7.0.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
-The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here.
+The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, versions and updates, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here.
 
 ## How We Work Together
 
@@ -123,9 +123,11 @@ model. That is a flat rule with no consent path.
 all for that repo, rather than captured and redacted.
 
 **If the ledger is empty**, `/error-analysis` distinguishes "capture has never run here"
-from "capture ran and found nothing". Capture fires at `/document`, so a project that
-never runs `/document`, or whose copy is shadowed by a global
-`~/.claude/commands/document.md`, silently records nothing.
+from "capture ran and found nothing". Capture fires at `/document`, so nothing is
+recorded where that stage has never run, or where cycles were closed through an older
+document command that has no capture stage: a customized `document.md` kept from a
+copy-install, or a global `~/.claude/commands/document.md` run by its bare name instead
+of the toolkit's command.
 
 ### Design Rules and Profile
 
@@ -254,63 +256,68 @@ Ask yourself: "Can I run this command and interpret the result?" If yes, just do
 
 ---
 
+## Versions and Updates
+
+<reference>
+
+**Where the plugin comes from.** Users receive the plugin from a release tag, not from main: the marketplace pins `tk` to the tag `v<version>`, so a change merged to main reaches no one until it is released.
+
+**The version guard.** Setup and `/upgrade` record in `.claude/.toolkit-state.json` the toolkit version the project was last set up or audited at. At the start of every session the plugin compares that version with its own, and when they differ Claude relays a notice in plain words:
+
+- **The plugin is newer than the project.** Run `/upgrade`, so the project's own files are checked against the newer conventions. Nothing is blocked in the meantime.
+- **The plugin is older than the project** (for example, a collaborator already upgraded it). Every push from this project is blocked by the pre-push check until the plugin is updated: run `claude plugin update tk@llm-peer-review`, then restart Claude Code. The block exists because an older plugin scans outgoing commits with older checks than the project was set up or audited with.
+
+A separate notice says when the old copy-install still sits beside the plugin: every command then exists twice, with and without the `tk:` prefix, and it is easy to run the stale copy. `/setup` migrates it.
+
+</reference>
+
+---
+
 ## Permissions
 
 <reference>
 
-Since v7.0.0 each plugin command carries an `allowed-tools` list for the scripts it runs (the plugin cache path with a wildcard on the version segment), so the `node .claude/scripts/...` rows below are needed only on a copy-install; the seed merges `defaultMode`, `additionalDirectories`, and the non-script rows.
+`/setup` merges a fixed baseline into the project's `.claude/settings.local.json`: every allow row in the table below, exactly as written there, plus `additionalDirectories: ["/tmp"]`. It adds a row only when it is missing, sets no `defaultMode`, and writes no row for a toolkit script: since v7.0.0 each plugin command carries an `allowed-tools` list for the scripts it runs, so the `node .claude/scripts/...` rows a copy-install needed are dead under the plugin, and setup removes the ones whose script the project no longer has.
 
-This project uses two settings files. `settings.json` is committed to the toolkit repo and holds a shared baseline that currently contains only a context-autocompact threshold override, no permissions. Neither installer copies it, so a downstream project has one only if it creates its own. `settings.local.json` is user-specific and not overwritten on re-setup - your real permissions live here.
+A project has two settings files. `.claude/settings.json` is committed and shared: setup merges in only the marketplace pointer and the enabled plugin, which is what makes a collaborator's Claude Code offer the install. `.claude/settings.local.json` is yours and never pushed: your real permissions live there, and setup only adds the missing baseline rows.
 
-These are defined in `.claude/settings.local.json`. Each one exists for a reason.
-
-The `glab` rows below are listed for completeness and are **not** seeded into a fresh install: a GitHub-hosted project never needs them. If your repo is on GitLab, add the `glab` entries you actually use to your own `settings.local.json`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
+The baseline has no `glab` rows: a GitHub-hosted project never needs them. On a GitLab repo, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, `Bash(glab issue reopen *)`, `Bash(glab mr create *)`, `Bash(glab mr view *)`, and `Bash(glab mr list *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
 
 Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, already covered by the `git config` row. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
 
 | Permission | Why it's here |
 |---|---|
-| `git init`, `git add`, `git rm`, `git commit` | Initializing repos, staging files, committing work |
-| `git push`, `git pull`, `git fetch` | Syncing with remote repositories |
-| `git branch`, `git checkout`, `git stash` | Branch management and stashing work in progress |
-| `git worktree` | Creating, listing, and removing worktrees for parallel sessions |
-| `git rev-parse`, `git rev-list` | Worktree detection, repo path queries, commit-range checks |
-| `git status`, `git log`, `git diff`, `git show` | Inspecting repo state and history |
-| `git config`, `git remote add`, `git remote set-url` | Git setup (e.g. safe.directory, remote URLs). `git config --get remote.origin.url` is also how commands detect whether this repo is on GitHub or GitLab |
-| `git check-ignore` | Verifying .gitignore rules before committing |
-| `gh repo create`, `gh repo view`, `gh repo edit`, `gh repo clone` | Repository scaffolding, viewing, cloning, and settings |
-| `gh auth status` | GitHub authentication status check |
-| `glab auth status` | GitLab authentication status check (GitLab repos only) |
-| `gh issue create`, `gh issue view`, `gh issue close`, `gh issue list`, `gh issue reopen` | `/create-issue` command and issue management (GitHub) |
-| `glab issue create`, `glab issue view`, `glab issue close`, `glab issue list`, `glab issue reopen` | The same, on GitLab repos |
-| `gh label list`, `gh label create` | Managing GitHub labels |
-| `gh pr create`, `gh pr view`, `gh pr diff`, `gh pr list` | Pull request workflows (GitHub). `/document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
-| `glab mr create`, `glab mr view`, `glab mr list` | Merge request workflows (GitLab) |
-| `gh api`, `gh release list` | GitHub API calls and release checks. `/review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
-| `npm install`, `npm uninstall` | Managing dependencies |
-| `npm audit`, `npm outdated` | Dependency security and freshness checks (used by `/review-deps`) |
-| `node .claude/scripts/ask-gpt.js` | Running the ask-gpt debate script |
-| `node .claude/scripts/ask-gemini.js` | Running the ask-gemini debate script |
-| `node .claude/scripts/browse.js` | Running the headless browser QA script |
-| `echo/cat * \| node .claude/scripts/browse.js *` | Piped input to browse.js (browse-api patterns). Kept as explicit entries because `echo *` / `cat *` wildcards may not match piped commands. Absolute-path variants pointing at the current project's `.claude/scripts/browse.js` are injected by setup.sh per project; stale `scripts/browse.js` entries from older installs are removed automatically on the next setup run. |
-| `node .claude/scripts/generate-index.js` | Running the codebase scanner that emits the file manifest consumed by `/index` to build `CODEBASE_MAP.md` |
-| `node .claude/scripts/pre-push-check.js` | Running the M11 pre-push tripwire (per-commit secret scan, never-push files, settings diff) before any push |
-| `node .claude/scripts/render-html.js` | Rendering HTML artifacts through the shared shells, plus the artifact index modes (`--index-add`, `--index-url`, `--index-sync`) |
-| `node .claude/scripts/session-init.js` | The one-call session context (map freshness, lessons, plans, worktree state) that `/explore`, `/create-plan`, `/execute`, and `/pair-debug` read at startup. Exact form, no wildcard: the script takes no arguments |
-| `node .claude/scripts/correction-ledger.js` | The correction ledger behind `/document`'s capture stage and `/error-analysis`. The data it writes lives under `~/.claude/`, outside the repo |
-| `node .claude/scripts/gen-media.js` | The design workflow's helper: `--kind seed` for seeded design directions, and image, video, and matte generation behind your own keys in `.env.local`. Prints a handoff prompt when the key is absent; Claude never reads the key |
-| `bash .claude/scripts/open-artifact.sh` | Opening a rendered artifact in the browser (the local viewport fallback) |
-| `open`, `xdg-open`, `powershell.exe`, `explorer.exe`, `wslpath` | The launchers `open-artifact.sh` reaches for per platform: `open` on macOS, `xdg-open` on Linux, `powershell.exe` then `explorer.exe` on WSL, plus `wslpath`, which converts the path for the WSL rungs |
-| `bash scripts/setup/bump-version.sh` | Running the version-bump script during release prep |
-| `bash -n scripts/setup/setup.sh`, `bash -n scripts/setup/bump-version.sh` | Syntax-checking setup scripts before release |
+| `Bash(git init *)`, `Bash(git add *)`, `Bash(git rm *)`, `Bash(git commit *)` | Initializing repos, staging files, committing work |
+| `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories |
+| `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git stash *)` | Branch management and stashing work in progress |
+| `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
+| `Bash(git config *)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Git setup (e.g. safe.directory, remote URLs). `git config --get remote.origin.url` is also how commands detect whether this repo is on GitHub or GitLab |
+| `Bash(git check-ignore *)` | Verifying .gitignore rules before committing |
+| `Bash(git worktree *)` | Creating, listing, and removing worktrees for parallel sessions |
+| `Bash(git rev-parse *)`, `Bash(git rev-list *)` | Worktree detection, repo path queries, commit-range checks |
+| `Bash(gh repo create *)`, `Bash(gh repo view *)`, `Bash(gh repo edit *)`, `Bash(gh repo clone *)` | Repository scaffolding, viewing, cloning, and settings |
+| `Bash(gh auth status *)` | GitHub authentication status check |
+| `Bash(gh issue create *)`, `Bash(gh issue view *)`, `Bash(gh issue close *)`, `Bash(gh issue list *)`, `Bash(gh issue reopen *)` | `/create-issue`, the cycle issue `/upgrade` opens, and issue management (GitHub) |
+| `Bash(gh label list *)`, `Bash(gh label create *)` | Managing GitHub labels |
+| `Bash(gh pr create *)`, `Bash(gh pr view *)`, `Bash(gh pr diff *)`, `Bash(gh pr list *)` | Pull request workflows (GitHub). `/document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
+| `Bash(gh api *)`, `Bash(gh release list *)` | GitHub API calls and release checks. `/review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
+| `Bash(npm install *)`, `Bash(npm uninstall *)` | Managing dependencies |
+| `Bash(npm audit *)`, `Bash(npm outdated *)` | Dependency security and freshness checks (used by `/review-deps`) |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
-| `Skill(review-commands)`, `Skill(review-commands:*)` | Allow the `/review-commands` skill to be invoked without a prompt |
-| `WebFetch` (github.com, raw.githubusercontent.com), `WebSearch` | Fetching GitHub content and web search |
-| `cp` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
-| `ls`, `diff`, `echo`, `mkdir`, `cat` | Reading directories, comparing files, writing output, creating folders |
-| `cd` | **Not included by default.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access. |
+| `WebFetch(domain:github.com)`, `WebFetch(domain:raw.githubusercontent.com)`, `WebSearch` | Fetching GitHub content and web search |
+| `Bash(cp *)` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
+| `Bash(ls *)`, `Bash(diff *)`, `Bash(echo *)`, `Bash(mkdir *)`, `Bash(cat *)` | Reading directories, comparing files, writing output, creating folders |
+| `Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)`, `Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)` | The two exact heading checks `/index` runs on its temp map before it replaces `CODEBASE_MAP.md`. Exact form, no wildcard |
+| `Skill(tk:explore)`, `Skill(tk:explore:*)`, `Skill(tk:create-plan)`, `Skill(tk:create-plan:*)`, `Skill(tk:execute)`, `Skill(tk:execute:*)`, `Skill(tk:review)`, `Skill(tk:review:*)`, `Skill(tk:document)`, `Skill(tk:document:*)` | The workflow stages, which hand off to each other through the Skill tool (M14) without a prompt |
+| `Skill(tk:index)`, `Skill(tk:index:*)`, `Skill(tk:upgrade)`, `Skill(tk:upgrade:*)` | Stages invoked by another stage: `/explore` generates a missing map with `/index`, and `/setup` chains into `/upgrade` after a migration |
+| `Skill(tk:project-context)`, `Skill(tk:project-context:*)`, `Skill(tk:design-rules)`, `Skill(tk:design-rules:*)` | Skills loaded by name mid-run: project context for review dispatches, and the design rules when `/explore` or `/execute` runs its design step |
+| `Skill(tk:review-commands)`, `Skill(tk:review-commands:*)`, `Skill(tk:review-copy)`, `Skill(tk:review-copy:*)`, `Skill(tk:playground)`, `Skill(tk:playground:*)`, `Skill(tk:audit-html)`, `Skill(tk:audit-html:*)` | Skills Claude may invoke on its own judgment: two review lenses, the playground (`/explore` dispatches it for prototypes and option comparisons), and the HTML audit |
 
-**Note:** `settings.local.json` also sets `defaultMode: acceptEdits` (auto-approves file edits after a command) and `additionalDirectories: ["/tmp"]` (lets Claude read/write `/tmp` for debate scripts and temp files). These are top-level settings, not permission entries.
+**Not in the baseline: `cd`.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access.
+
+**`additionalDirectories: ["/tmp"]`** is a top-level setting, not an allow row: it lets Claude read and write `/tmp`, where the debate transcripts and the per-run temp folders live.
+
+**API keys are never a permission row.** `/ask-gpt`, `/ask-gemini`, and `gen-media.js` look up each key in this order, first value wins: a real environment variable, then the project's own `.env.local` (searched from the working folder up to the git root), then `~/.claude/plugins/.env.local`, one file for every project on the machine. Only the toolkit's own key and model variables are read from those files, and Claude never reads them; `API-KEYS.md` in the toolkit repository has the details.
 
 </reference>
 

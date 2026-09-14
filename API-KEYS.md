@@ -93,22 +93,25 @@ Then restart PowerShell (or any open terminals) for the change to take effect.
 
 ### Option B: `.env.local` File (Easier, Less Safe)
 
-This stores your keys in a file on your disk. Where the file goes depends on how the toolkit is installed:
+This stores your keys in a plain-text file on your disk. The scripts look for each key in three places, in this order, and use the first value they find:
 
-- **Plugin (v7.0.0 and later):** the scripts run from the plugin's own folder under `~/.claude/plugins/` and look upward from there, so a file in your project is out of their reach. Put it at `~/.claude/plugins/.env.local`, one file per machine, shared by every project. Moving keys there from a project's old `.env.local` is a good moment to rotate them.
-- **Copy-install:** in your project folder, where it always was. It is listed in `.gitignore` so git skips it.
+1. **A real environment variable** (Option A). It always wins.
+2. **Your project's own `.env.local`.** The scripts search from the folder the command runs in up to the top of the git repository, and read only the nearest file. It is listed in `.gitignore`, so git skips it.
+3. **`~/.claude/plugins/.env.local`**, one file shared by every project on this machine. It only fills in what the first two leave out.
 
-Either way the keys sit in plain text on your disk.
+The order is the same on the plugin and on a copy-install, so a project `.env.local` you already have keeps working. A blank value counts as not set: a project file copied from the example with its keys still empty does not hide the keys in the shared file. Only the toolkit's own key and model variables (`OPENAI_API_KEY`, `GEMINI_API_KEY`, `FAL_KEY`, and the model and token settings further down) are read from these files, and every other line is ignored. That way a repository you cloned cannot use its own `.env.local` to send your shared keys to someone else's server.
+
+Pick the file that fits:
 
 ```bash
-# Plugin: one file per machine (run from your project folder, where setup put the template)
+# One file for every project on this machine (run from a project folder that has the template)
 cp .env.local.example ~/.claude/plugins/.env.local
 
-# Copy-install: from your project directory
+# Or keys for this project only: from your project directory
 cp .env.local.example .env.local
 ```
 
-Then open the file you just created (`~/.claude/plugins/.env.local` on the plugin, `.env.local` in your project on a copy-install) and paste your keys:
+Then open the file you just created and paste your keys:
 
 ```
 OPENAI_API_KEY=sk-proj-your-key-here

@@ -33,7 +33,7 @@ Detect the host first, then create the issue with the matching CLI. These two st
 
 !`cat .claude/skills/shared/host-cli.md`
 
-Then run the **"Create issue" row** from the invocation table above, for the detected host, from the project directory. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host.
+Then write the issue title and body to files, as the steps under the invocation table describe, and run the **"Create issue" row** for the detected host, from the project directory, with those two file paths. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host, and text typed inline between double quotes has its backticks run as commands.
 
 ## Issue Body Format (Keep It Short)
 ```
@@ -56,5 +56,5 @@ Then run the **"Create issue" row** from the invocation table above, for the det
 ## REMEMBER
 - Ask questions first
 - Keep it short (10-15 lines max)
-- Run the create command for the detected host (`gh issue create` or `glab issue create`) to actually create the issue
+- Write the title and body to files, then run the "Create issue" row for the detected host (`gh issue create` or `glab issue create`) with those paths to actually create the issue
 - No implementation details - that's for /explore

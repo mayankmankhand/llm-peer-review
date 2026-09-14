@@ -45,10 +45,10 @@ Every review that produces a report writes it to disk before rendering anything:
 
 - `<run-stamp>` is the same `YYYY-MM-DD-HHMMSS` the markdown report carries. Once per run: `mkdir -p reports/receipts/<run-stamp>`.
 - Each check's file is `reports/receipts/<run-stamp>/<lens>-<n>.txt`, where `<lens>` is the specialist that authored the finding (`orchestrator` uses the specialist's name; a direct run uses its own lens name; the orchestrator's inline path uses `inline`) and `<n>` is that finding's number within that lens's results, counting from 1.
-- Run each check so its output is saved and read back in one go:
+- Run each check so its output is saved and read back in one go, with the check inside `{ ... ; }` because a bare redirect captures only the last command of a compound or piped check:
 
   ```bash
-  <check> > reports/receipts/<run-stamp>/<lens>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<lens>-<n>.txt; cat reports/receipts/<run-stamp>/<lens>-<n>.txt
+  { <check> ; } > reports/receipts/<run-stamp>/<lens>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<lens>-<n>.txt; cat reports/receipts/<run-stamp>/<lens>-<n>.txt
   ```
 
   Tier 1 compares what `cat` printed against the finding's `expect`. The finding's HTML `receipt` becomes `{cmd, stdoutFile, exit}` with `stdoutFile` that path: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. `mkdir` and `cat` are on the toolkit's allow-list; the redirect may prompt once on a fresh install.

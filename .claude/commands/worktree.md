@@ -56,7 +56,7 @@ If either install fails, warn the user but do NOT stop. The worktree is still us
 
 ### Step 6: Copy environment
 
-Copy `.env.local` from the main repo root into the worktree root:
+Copy `.env.local` from the main repo root into the worktree root, so the worktree keeps the project's keys. The API scripts take each key from a real environment variable first, then the project's own `.env.local` (searched from the working folder up to the git root, which in a worktree is the worktree root, so the main repo's copy is out of reach), then `~/.claude/plugins/.env.local`:
 `cp .env.local .claude/worktrees/worktree-N/.env.local`
 
 - If `.env.local` does not exist in the main repo, skip and note it.

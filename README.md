@@ -311,7 +311,7 @@ Open your project in Claude Code and run `/tk:setup`. On a fresh project it writ
 
 ### Optional: API keys and Chromium
 
-- `/tk:ask-gpt`, `/tk:ask-gemini`, and the design workflow's media helper read their keys from the environment or from `~/.claude/plugins/.env.local` (one file per machine, not per project). [API-KEYS.md](API-KEYS.md) walks through it.
+- `/tk:ask-gpt`, `/tk:ask-gemini`, and the design workflow's media helper look for each key in a real environment variable first, then in the project's own `.env.local` (from the folder the command runs in up to the git root), then in `~/.claude/plugins/.env.local` (one file shared by every project on the machine). Only the toolkit's own key and model variables are read from those files. [API-KEYS.md](API-KEYS.md) walks through it.
 - `/tk:review-browser` needs Chromium once per machine: `npx --prefix ~/.claude/plugins/data/tk-llm-peer-review/current playwright-core install chromium` (on Linux and WSL also `sudo npx playwright-core install-deps chromium`). That `current` path is a link the plugin keeps pointing at its installed version.
 
 ### Recommended for a hands-off install: tell your AI agent
@@ -453,9 +453,17 @@ Restart Claude Code or run `/reload-plugins`. That moves the plugin; your projec
 
 Your own files are never overwritten by an update, because the update touches only the plugin cache. The two files the toolkit does write into a project, the short rules seed and the state file `.claude/.toolkit-state.json`, are the ones `/tk:upgrade` stamps.
 
+#### Version notices
+
+Updates reach you from tagged releases, not from every commit on main. Each project records the toolkit version it was last set up or audited at, and when a session starts on a different plugin version, Claude tells you at the start of its first reply:
+
+- **The plugin is newer than the project.** Run `/tk:upgrade` in the project. Nothing is blocked in the meantime.
+- **The plugin is older than the project** (a collaborator upgraded the project first, for example). Pushes from the project are blocked until you run `claude plugin update tk@llm-peer-review` and restart Claude Code, because an older plugin checks outgoing commits with older rules than the project was set up with.
+- **The old copy-install still sits beside the plugin.** Run `/tk:setup` to migrate it, so you stop running the stale unprefixed commands by accident.
+
 ### Moving a copy-install (v6.x or earlier) to the plugin
 
-Install the plugin, then run `/tk:setup` in the project. It detects the copy-install, classifies every managed file against the installer's manifest, and stops to ask about any file you edited locally (each one is backed up and becomes an `/tk:upgrade` finding with the diff as its receipt). On a clean or approved run it backs up and removes the toolkit's files, keeps every custom file, seeds the short rules file, merges the marketplace pointer and permissions, records the migration, and hands off to `/tk:upgrade`, which audits your custom files against every convention since the version you came from. The report ends with the one-line undo: `git checkout -- .claude VERSION .gitattributes` plus the backup folder. The first push after the migration stops to ask about the settings change, which is the tripwire doing its job. Setup does not move your API keys: the plugin's scripts cannot see a `.env.local` in your project, so copy those keys to `~/.claude/plugins/.env.local` or export them before the first `/tk:ask-gpt` (see [API-KEYS.md](API-KEYS.md)).
+Install the plugin, then run `/tk:setup` in the project. It detects the copy-install, classifies every managed file against the installer's manifest, and stops to ask about any file you edited locally (each one is backed up and becomes an `/tk:upgrade` finding with the diff as its receipt). On a clean or approved run it backs up and removes the toolkit's files, keeps every custom file, seeds the short rules file, merges the marketplace pointer and permissions, records the migration, and hands off to `/tk:upgrade`, which audits your custom files against every convention since the version you came from. The report ends with the one-line undo: `git checkout -- .claude VERSION .gitattributes` plus the backup folder. The first push after the migration stops to ask about the settings change, which is the tripwire doing its job. Your API keys need no move: the plugin's scripts read the project's own `.env.local` (after a real environment variable, before `~/.claude/plugins/.env.local`), so the file the copy-install used keeps working (see [API-KEYS.md](API-KEYS.md)).
 
 ### Copy-install updates (other editors)
 
@@ -624,7 +632,8 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 ## Troubleshooting
 
 - **"Unknown command: /tk:explore" right after installing or updating the plugin** - Run `/reload-plugins` or restart Claude Code. The same fix applies when a dispatch says an agent type such as `tk:review-code-finder` is not found: a plugin's agents register when the session loads them.
-- **`/tk:ask-gpt` says the key was not found, but `.env.local` is in the project** - On the plugin the scripts run from the plugin cache and look upward from there, so a project-level `.env.local` is out of reach. Export the keys, or put the file at `~/.claude/plugins/.env.local`. See [API-KEYS.md](API-KEYS.md).
+- **`/tk:ask-gpt` says the key was not found** - The message lists the three places it looked, in order: the environment, the project's `.env.local` (from the folder the command runs in up to the git root), and `~/.claude/plugins/.env.local`. Check that the key sits in one of them, that its line is spelled exactly (`OPENAI_API_KEY=...`), and that its value is not blank. A worktree is its own git root, so it needs its own copy of the project file (`/tk:worktree` makes one). See [API-KEYS.md](API-KEYS.md).
+- **A "Toolkit version notice" at the start of a session** - See [Version notices](#version-notices) under Update an Existing Project.
 - **`/tk:setup` stopped with exit code 3** - It found something that needs your decision (a dirty git tree, locally modified toolkit files, or a copy-install of unknown provenance) and touched nothing. Read its list; rerun with `--force` only after you have decided.
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
 - **`/ask-gpt` or `/ask-gemini` fails** - Check that `npm install --prefix .claude/scripts` was run and `.env.local` has valid API keys.

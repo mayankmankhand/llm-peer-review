@@ -12,7 +12,7 @@ You are updating documentation after code changes. Run the steps automatically, 
 - **LESSONS.md** / **LESSONS-detail.md** - Learning log (user-owned): `LESSONS.md` is the one-line index Claude reads each session, `LESSONS-detail.md` holds the full write-ups it opens on demand
 - **DESIGN-PROFILE.md** - The repo's design answers (user-owned): design system state, allowed variance, taste notes, directions tried, prompts to retry. Read by `/explore` and `/execute`; written by `/explore` and this command (see `.claude/skills/shared/design-rules.md`)
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes (update if it exists)
-- **`.claude/rules/toolkit.md`** - Toolkit workflow rules (toolkit-owned, **do not edit** - overwritten on update)
+- **`.claude/rules/toolkit.md`** - Toolkit workflow rules (the toolkit's seed; **this command never edits it**). On the plugin, setup writes it once and a plugin update never overwrites it; a copy-install update replaces it. A stale copy is `/upgrade`'s job, not this command's: `/upgrade` flags it, and the fix is to delete the file and run `/setup` (which writes a fresh copy only when the file is missing) or to merge the new seed text by hand and update its stamp.
 
 Keep README.md and CLAUDE.md consistent with each other. Never edit `toolkit.md`.
 
@@ -199,7 +199,7 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote.
 3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" Follow the worktree naming convention in toolkit.md if they say yes.
-4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR using the **"Create PR / MR" row** for the detected host. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab.
+4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then write the title and body to files, as the steps under the invocation table describe, and create the PR by running the **"Create PR / MR" row** for the detected host with those two file paths. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, and text typed inline between double quotes has its backticks run as commands.
 5. Show the user the PR URL.
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
@@ -234,12 +234,12 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-Write the JSON to a temp file, then run the helper from the project root. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
+Write the JSON to a per-run temp file: run `mktemp -d /tmp/document-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it. Then run the helper from the project root with that path as `<render-dir>`. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
 Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```
-node .claude/scripts/render-html.js --shell document --name cycle --stable --data /tmp/document-data.json
+node .claude/scripts/render-html.js --shell document --name cycle --stable --data <render-dir>/data.json
 ```
 
 **The name is `cycle`, not `document`.** `--name` feeds both the filename and the artifact index key, and the timestamped pages this replaces already own the key `document`. Rendering under that name would make the lookup below return an old cycle page's URL and update *that page* forever instead of publishing the standing one.

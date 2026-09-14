@@ -203,7 +203,7 @@ Produce a JSON payload matching the schema documented in the header comment of `
 - Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
 - Each step takes an optional `status` of `todo` | `doing` | `done`. At creation every step is `todo`, so it may be omitted entirely; `/execute` fills it in as it re-renders. Markdown stays the source of truth.
 
-Write the payload to a temp file (e.g. `/tmp/plan-data.json`).
+Write the payload to a per-run temp file: run `mktemp -d /tmp/plan-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it. That folder is `<render-dir>` below.
 
 ### Run the Helper
 
@@ -213,7 +213,7 @@ Check the publish gate first (see **"Render for the viewport"** in `.claude/skil
 
 ```bash
 node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
-     --out-dir plans --stable --data /tmp/plan-data.json
+     --out-dir plans --stable --data <render-dir>/data.json
 ```
 
 `<basename>` is the plan identifier *without* the `PLAN-` prefix (e.g. `issue-129` for the markdown plan `PLAN-issue-129.md`, or `auth-flow` for `PLAN-auth-flow.md`) - the template already supplies `PLAN-`, so do not repeat it or the filename doubles to `PLAN-PLAN-`. `--stable` writes exactly `plans/PLAN-<basename>.html` - no timestamp - and a re-plan for the same issue replaces the old view. Malformed JSON dies before any file is written, so there is never a broken page. The helper prints the output path to stdout.

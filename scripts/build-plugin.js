@@ -143,22 +143,8 @@ const SITE_OVERRIDES = {
     { phrase: '`.claude/commands/explore.md:55` - Should fix.', keep: true },
   ],
   'skills/shared/toolkit-reference.md': [
-    // The permissions intro: these are the rows a copy-install carries in the project's settings.local.json.
-    { phrase: 'the `node .claude/scripts/...` rows below are needed only on a copy-install', keep: true },
-    // Each table row below names one of those copy-install rows, so it keeps the copy-install path.
-    { phrase: '| `node .claude/scripts/ask-gpt.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/ask-gemini.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/browse.js` |', keep: true },
-    { phrase: '| `echo/cat * \\| node .claude/scripts/browse.js *` |', keep: true },
-    // Per-project absolute rows the old installer wrote point into the project itself.
-    { phrase: "pointing at the current project's `.claude/scripts/browse.js` are injected", keep: true },
-    { phrase: '| `node .claude/scripts/generate-index.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/pre-push-check.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/render-html.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/session-init.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/correction-ledger.js` |', keep: true },
-    { phrase: '| `node .claude/scripts/gen-media.js` |', keep: true },
-    { phrase: '| `bash .claude/scripts/open-artifact.sh` |', keep: true },
+    // The permissions intro: the script rows an old copy-install carried in the project's settings.local.json.
+    { phrase: 'the `node .claude/scripts/...` rows a copy-install needed', keep: true },
   ],
   'skills/shared/criteria-deps.md': [
     // Plugin package files sit at the plugin root, not in scripts/ (npm audit there fails with ENOLOCK).

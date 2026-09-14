@@ -80,7 +80,7 @@ The cumulative debate file `/tmp/ask-gemini-debate-<session-id>.md` is built inc
 
 Read the saved review yourself - the next step is responding to it as the author.
 
-If the script fails, show the error to the user. Common issues: missing API key in `.env.local` or environment variables, network errors, rate limits. Do not retry automatically.
+If the script fails, show the error to the user. Common issues: a missing API key (the script looks in a real environment variable first, then the project's own `.env.local` from the working folder up to the git root, then `~/.claude/plugins/.env.local`, and its error names all three), network errors, rate limits. Do not retry automatically.
 
 ## Step 4: Debate Cycle (Up to 3 Times)
 

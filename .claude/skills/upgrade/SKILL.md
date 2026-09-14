@@ -51,7 +51,7 @@ An empty range with zero candidates and no `manual` convention in range means th
 
 ### 2. Open the cycle's issue
 
-Every cycle has an issue, and this is one. Announce it in one line ("Opening the upgrade issue for <from> -> <to>; say \"no issue\" to skip."), then create it with the host's CLI, title `Upgrade toolkit <from> -> <to>`, body of five lines or fewer: the conventions in range by id and title, and the candidate count. Keep it short; the findings, not the issue, carry the detail. Detect the host once, here, and reuse the answer:
+Every cycle has an issue, and this is one. Announce it in one line ("Opening the upgrade issue for <from> -> <to>; say \"no issue\" to skip."), then create it with the host's CLI: write the title `Upgrade toolkit <from> -> <to>` and a body of five lines or fewer (the conventions in range by id and title, and the candidate count) to files, as the steps under the invocation table below describe, and run the "Create issue" row with those two file paths. Keep it short; the findings, not the issue, carry the detail. Detect the host once, here, and reuse the answer:
 
 !`cat .claude/skills/shared/host-cli.md`
 
@@ -85,7 +85,7 @@ On a clean fix loop, record that this project is audited up to the installed ver
 node .claude/scripts/upgrade-audit.js --stamp
 ```
 
-It sets `version` and `auditedVersion` in `.claude/.toolkit-state.json`; the next `/upgrade` starts its range there. Clean means: no finding NOT FIXED after two rounds, and no page still waiting on the user. A finding the user chose to leave open on purpose (an upstream-only script edit under C-6, carried in the digest with its diff) does not block the stamp: it is a decision, not a failure, and it would otherwise block every migration that carried a local edit. A run that paged and stopped leaves the state file alone, so the next run sees the same range.
+It sets `version` and `auditedVersion` in `.claude/.toolkit-state.json`; the next `/upgrade` starts its range there. The stamp never lowers a recorded version: run from an older plugin, it leaves the higher value in place. Clean means: no finding NOT FIXED after two rounds, and no page still waiting on the user. A finding the user chose to leave open on purpose (an upstream-only script edit under C-6, carried in the digest with its diff) does not block the stamp: it is a decision, not a failure, and it would otherwise block every migration that carried a local edit. A run that paged and stopped leaves the state file alone, so the next run sees the same range.
 
 ### 8. One sample cycle
 
@@ -98,6 +98,8 @@ Announce it ("Upgrade fixes are in; running one `/review` over them so the loop 
 <reference>
 
 When `/setup` migrated a copy-install, `.claude/.toolkit-migration.json` lists every toolkit script that carried a local edit, with the backup path of the user's copy. C-6 turns each into a finding whose receipt is the diff between the backup and the plugin's copy. The fix is never to edit the plugin: the user either files the change upstream (the finding's digest line says so, with the diff), or moves it into a script the project owns under a different name and points their own command at it. A finding the user chooses to upstream stays open in the digest with the issue link, which is the receipt that it was not dropped.
+
+A project migrated on 7.0.x gets repair checks from 7.1.0 on, whatever its range: a stale rules stamp is always checked; permission rows are checked in both directions (toolkit rows the seed now writes that are missing, retired rows still present), with `defaultMode` raised as a question rather than a fix; seeded lines that went stale are flagged; and a project file that still names a toolkit command, skill, or agent without its `tk:` prefix becomes a finding.
 
 </reference>
 
