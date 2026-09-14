@@ -12,7 +12,7 @@
 // never ships to a project). Its output, plugin/, is committed and never
 // hand-edited; --check fails when plugin/ no longer matches the source.
 //
-// What it changes on the way through (issue #167, Step 4):
+// What it changes on the way through (issue #167, Step 4; #172, #173, #176):
 //   * Paths. A plugin lives at ${CLAUDE_PLUGIN_ROOT}, which Claude Code
 //     substitutes anywhere in a plugin's markdown (verified: inline-cat lines,
 //     frontmatter allowed-tools, hook commands). Every `.claude/<dir>/...`
@@ -20,11 +20,24 @@
 //     `.claude/rules/html-outputs.md` maps to its relocated shared fragment;
 //     `.claude/rules/toolkit.md` is the project SEED and stays a project path;
 //     its own text gets command names scoped, nothing else.
+//   * Site overrides (#176). Some `.claude/<dir>/` mentions mean the PROJECT's
+//     own files (a project's commands, an old copy-install), not the toolkit's.
+//     This repository runs its own .claude/ prompts, so the source carries no
+//     markers; SITE_OVERRIDES names each such phrase per emitted file, to keep
+//     as written or to replace, and a phrase the source no longer contains is
+//     reported as unresolved so an edit cannot silently drop an override.
+//   * Inline cats (#172). Every `` !`cat ${CLAUDE_PLUGIN_ROOT}/...` `` is emitted
+//     with the path in double quotes: under a plugin root whose path holds a
+//     space the unquoted form inlines nothing (verified on Claude Code 2.1.270).
+//     `node|bash ${CLAUDE_PLUGIN_ROOT}/scripts/...` calls stay unquoted, because
+//     the allowed-tools rules generated for them match that exact text.
 //   * Names. A plugin's commands, skills, and agents resolve only under the
 //     scoped form `<plugin>:<name>` (Step 1, spike 5: bare names hit project
 //     files only, and the Skill tool says "invoke it by that full name"). So
 //     `/review` becomes `/tk:review`, `Skill(review)` becomes `Skill(tk:review)`,
 //     and `subagent_type=review-finder` becomes `subagent_type=tk:review-finder`.
+//     Family mentions follow: `/review-*` becomes `/tk:review-*` and `/ask-*`
+//     becomes `/tk:ask-*` (any `/<prefix>-*` whose prefix starts a real name).
 //     Only names that exist in the source are rewritten; built-ins such as
 //     `general-purpose` are untouched. A `skills:` list inside an agent stays
 //     bare: preload resolves bare skill names within the plugin (spike 5).
@@ -37,12 +50,18 @@
 //   * Allowlist. Only the four dirs above are read. node_modules, worktrees,
 //     and every settings*.json are never emitted (61 MB, 65 MB, and a
 //     never-push file respectively, measured 2026-09-12).
-//   * Hooks. One SessionStart hook links ${CLAUDE_PLUGIN_DATA}/current to the
-//     plugin root, giving downstream prose and permissions one path that
-//     survives version bumps (spike 4).
+//   * Hooks. One SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//     session-start.js"`, which links ${CLAUDE_PLUGIN_DATA}/current to the
+//     plugin root (one path for downstream prose and permissions that survives
+//     version bumps, spike 4) and runs the version guard (#174). A node call
+//     parses in every shell the hook may run under, PowerShell included, where
+//     the old `mkdir -p ... && ln -sfn ...` did not; the script always exits 0.
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
 //     manifest (issue #138 shipped the manifest in v5.5.0).
+//   * Seeds (#173). The project seed comes from the repository's seed/ folder
+//     (plus the rewritten .claude/rules/toolkit.md), and every emitted seed file
+//     is checked for old-layout text before it can ship.
 //
 // Dependency-free by design, like every script under scripts/ and .claude/scripts/.
 
@@ -69,6 +88,93 @@ const KEEP_PROJECT_PATHS = [
   '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
   '.claude/worktrees', '.claude/.no-correction-log',
 ];
+// The session hook's script. The build reports it as unresolved when the source
+// has no such script, so the hook can never point at a missing file.
+const SESSION_START_SCRIPT = 'session-start.js';
+
+// Per-site overrides for `.claude/<dir>/` mentions that mean a PROJECT path
+// (issue #176). Keyed by EMITTED file (`commands/review.md`, `seed/rules-toolkit.md`).
+// Each entry holds an exact phrase as it appears in the source, and either
+// `keep: true` (the phrase is protected from the path rewrite and ships as
+// written; command names inside it are still scoped) or `replace` (the phrase is
+// swapped for that text before any rewrite). A phrase missing from its file is
+// pushed to `unresolved`, so a later source edit that drops or rewords a site
+// fails --check instead of silently shipping a wrong path. Every phrase is
+// matched everywhere it occurs in that file, so each one carries enough context
+// to name only its site.
+const SITE_OVERRIDES = {
+  'commands/review.md': [
+    // Routing row: a project's own commands and skills changed, so /tk:review dispatches the commands finder for them.
+    { phrase: '`.claude/commands/` or `.claude/skills/` files changed', keep: true },
+  ],
+  'commands/index.md': [
+    // Example navigation bullet for the mapped project's own extension point.
+    { phrase: 'To add a new slash command: edit .claude/commands/<name>.md', keep: true },
+  ],
+  'commands/worktree.md': [
+    // Copy-install detection: the file sits inside the new worktree, not in the plugin.
+    { phrase: '(a `.claude/scripts/package.json` exists in the worktree)', keep: true },
+    // The same detection, in the summary line's skip reason.
+    { phrase: 'skipped - no .claude/scripts/package.json)', keep: true },
+  ],
+  'skills/project-context/SKILL.md': [
+    // An example of the reviewed project's file structure conventions.
+    { phrase: 'commands in `.claude/commands/`, skills in `.claude/skills/`', keep: true },
+  ],
+  'skills/review-commands/SKILL.md': [
+    // What the commands review covers: the project's own prompt files (skill description).
+    { phrase: 'Use for reviewing .claude/commands/*.md or .claude/skills/*/SKILL.md files.', keep: true },
+    // The same scope in the "Use this when" line.
+    { phrase: 'Reviewing slash command prompts (.claude/commands/*.md)', keep: true },
+  ],
+  'skills/shared/html-outputs.md': [
+    // Prompt files that stay markdown: a project's own commands and skills.
+    { phrase: '- `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)', keep: true },
+  ],
+  'skills/shared/model-routing.md': [
+    // Line "The pin lives in agent frontmatter under .claude/agents/" means the shipped agents and is rewritten.
+    // A file written mid-session is a project's own agent file; the plugin's agents are never written mid-session.
+    { phrase: 'a file written to `.claude/agents/` mid-session', keep: true },
+    // An older copy-install's own agents folder.
+    { phrase: 'an older copy-install that predates `.claude/agents/`', keep: true },
+  ],
+  'skills/shared/finding-contract.md': [
+    // An example finding location: a reviewed project's own command file, not a plugin file.
+    { phrase: '`.claude/commands/explore.md:55` - Should fix.', keep: true },
+  ],
+  'skills/shared/toolkit-reference.md': [
+    // The permissions intro: these are the rows a copy-install carries in the project's settings.local.json.
+    { phrase: 'the `node .claude/scripts/...` rows below are needed only on a copy-install', keep: true },
+    // Each table row below names one of those copy-install rows, so it keeps the copy-install path.
+    { phrase: '| `node .claude/scripts/ask-gpt.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/ask-gemini.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/browse.js` |', keep: true },
+    { phrase: '| `echo/cat * \\| node .claude/scripts/browse.js *` |', keep: true },
+    // Per-project absolute rows the old installer wrote point into the project itself.
+    { phrase: "pointing at the current project's `.claude/scripts/browse.js` are injected", keep: true },
+    { phrase: '| `node .claude/scripts/generate-index.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/pre-push-check.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/render-html.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/session-init.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/correction-ledger.js` |', keep: true },
+    { phrase: '| `node .claude/scripts/gen-media.js` |', keep: true },
+    { phrase: '| `bash .claude/scripts/open-artifact.sh` |', keep: true },
+  ],
+  'skills/shared/criteria-deps.md': [
+    // Plugin package files sit at the plugin root, not in scripts/ (npm audit there fails with ENOLOCK).
+    { phrase: '`--prefix .claude/scripts`', replace: '`--prefix "${CLAUDE_PLUGIN_ROOT}"`' },
+  ],
+  'skills/review-browser/SKILL.md': [
+    // The plugin's package.json is at the plugin root; quoted for a root path with a space.
+    { phrase: 'npm install --prefix .claude/scripts', replace: 'npm install --prefix "${CLAUDE_PLUGIN_ROOT}"' },
+    // Same root for the Chromium install through the plugin's playwright-core.
+    { phrase: 'npx --prefix .claude/scripts playwright-core', replace: 'npx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core' },
+  ],
+  'seed/rules-toolkit.md': [
+    // Setup removes a project's rows naming its old copy-install scripts; the seeded rules file never carries ${CLAUDE_PLUGIN_ROOT}.
+    { phrase: 'rows that point at a `.claude/scripts/` file the project no longer has', keep: true },
+  ],
+};
 
 function parseArgs(argv) {
   const o = { source: '', out: '', version: '', check: false, quiet: false };
@@ -140,11 +246,34 @@ function mapPath(ref, src) {
   return null;
 }
 
+function slashNamesOf(inv) {
+  return [...new Set([...inv.commands.map(c => c.name), ...inv.skillNames])].sort((a, b) => b.length - a.length);
+}
+
 function rewriteText(text, inv, src, unresolved, fileRel) {
   const longestFirst = (a, b) => b.length - a.length;
   const agentNames = inv.agents.map(a => a.name).sort(longestFirst);
-  const slashNames = [...new Set([...inv.commands.map(c => c.name), ...inv.skillNames])].sort(longestFirst);
+  const slashNames = slashNamesOf(inv);
 
+  // 0. Site overrides for this file (issue #176): replacements are substituted
+  //    now, kept phrases are parked behind placeholders the path rewrite cannot
+  //    match (U+0001, always written as a backslash-u escape so no editor or
+  //    diff can strip it; a control character is never part of a path token) and restored
+  //    right after it. A phrase that is not in the text is reported.
+  const kept = [];
+  for (const site of SITE_OVERRIDES[fileRel] || []) {
+    if (!text.includes(site.phrase)) {
+      unresolved.push(fileRel + ': site override phrase not found: ' + site.phrase);
+      continue;
+    }
+    if (site.keep) {
+      const holder = '\u0001' + kept.length + '\u0001';
+      kept.push(site.phrase);
+      text = text.split(site.phrase).join(holder);
+    } else {
+      text = text.split(site.phrase).join(site.replace);
+    }
+  }
   // 1. Every `.claude/...` path token. A token runs until whitespace, a quote,
   //    a backtick, a closing paren/bracket, or a trailing sentence dot. A token
   //    that is the tail of a longer path (`~/.claude/plugins/...`,
@@ -155,6 +284,10 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
     if (mapped === null) { unresolved.push(fileRel + ': ' + tok); return tok; }
     return mapped;
   });
+  kept.forEach((phrase, i) => { text = text.split('\u0001' + i + '\u0001').join(phrase); });
+  // 1b. Inline cats get the path in double quotes (issue #172): unquoted, a
+  //     plugin root whose path holds a space inlines nothing.
+  text = text.replace(/!`cat \$\{CLAUDE_PLUGIN_ROOT\}\/([^`"\s]+)`/g, (m0, rel) => '!`cat "${CLAUDE_PLUGIN_ROOT}/' + rel + '"`');
   // 2. Dispatch names: subagent_type=name, subagent_type: name, quoted forms.
   if (agentNames.length) {
     const re = new RegExp('(subagent_type\\s*[=:]\\s*["\'`]?)(' + agentNames.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
@@ -168,6 +301,11 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
     //    followed by a name character (so /review-* and file paths survive).
     const re2 = new RegExp('(^|[^\\w./:\\-])/(' + slashNames.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
     text = text.replace(re2, (m0, pre, name) => pre + '/' + PLUGIN_NAME + ':' + name);
+    // 5. Family mentions: `/review-*`, `/ask-*`. Same path guard as step 4, and
+    //    only a prefix that starts a real name (so `/tmp/playground-*` and any
+    //    other wildcard path stay as written).
+    text = text.replace(/(^|[^\w./:\-])\/([a-z0-9]+(?:-[a-z0-9]+)*)-\*/g, (m0, pre, prefix) =>
+      slashNames.some(n => n.startsWith(prefix + '-')) ? pre + '/' + PLUGIN_NAME + ':' + prefix + '-*' : m0);
   }
   return text;
 }
@@ -187,8 +325,11 @@ function scriptRules(text, inv, src) {
       rules.add('Bash(' + call + ')');
       if (m[2] === 'browse.js') { rules.add('Bash(echo * | ' + call + ' *)'); rules.add('Bash(cat * | ' + call + ' *)'); }
     }
-    for (const m of t.matchAll(/!`cat \$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9_./-]+)`/g)) {
-      const rel = m[1];
+    // The emitted form is quoted (`` !`cat "${CLAUDE_PLUGIN_ROOT}/x.md"` ``);
+    // the unquoted form is still followed, so a caller passing text that has
+    // not been through the quoting step gets the same rules.
+    for (const m of t.matchAll(/!`cat ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9_./-]+)\1`/g)) {
+      const rel = m[2];
       if (seen.has(rel)) continue;
       seen.add(rel);
       const abs = path.join(src, rel);
@@ -229,6 +370,72 @@ function injectAllowedTools(text, rules, description) {
     block = lines.join('\n');
   }
   return '---\n' + block + '\n---\n' + text.slice(m[0].length);
+}
+
+// The seed check (issue #173): a seed file lands in a PROJECT under the plugin
+// layout, where old copy-install text is wrong. Returns one problem string per
+// finding. Phrases kept by SITE_OVERRIDES for the file are deliberate project
+// paths and are removed before scanning. The retired-rows list is exempt: it is
+// the old copy-install rows by definition, read by the upgrade audit and never
+// written into a project as text.
+const SEED_CHECK_EXEMPT = new Set(['seed/retired-permission-rows.txt']);
+const STATE_FILE = '.claude/.toolkit-state.json';
+
+function seedProblems(rel, text, inv) {
+  if (SEED_CHECK_EXEMPT.has(rel)) return [];
+  for (const site of SITE_OVERRIDES[rel] || []) if (site.keep) text = text.split(site.phrase).join('');
+  const problems = [];
+  for (const bad of ['.claude/scripts/', 'setup.sh', '${CLAUDE_PLUGIN_ROOT}']) {
+    if (text.includes(bad)) problems.push('seed carries old-layout text ' + JSON.stringify(bad));
+  }
+  const names = slashNamesOf(inv);
+  if (names.length) {
+    // The step-4 path guard from rewriteText: `/name` not inside a path and not
+    // already scoped (in `/tk:name` the name follows a colon, never a slash).
+    const re = new RegExp('(^|[^\\w./:\\-])/(' + names.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
+    for (const m of text.matchAll(re)) problems.push('seed names a toolkit command without tk: /' + m[2]);
+    for (const m of text.matchAll(/(^|[^\w./:\-])\/([a-z0-9]+(?:-[a-z0-9]+)*)-\*/g)) {
+      if (names.some(n => n.startsWith(m[2] + '-'))) problems.push('seed names a toolkit command family without tk: /' + m[2] + '-*');
+    }
+  }
+  if (rel === 'seed/gitignore') {
+    for (const line of text.split(/\r?\n/)) {
+      if (gitignoreLineMatches(line, STATE_FILE)) problems.push('seed gitignore line ignores ' + STATE_FILE + ': ' + line.trim());
+    }
+  }
+  return problems;
+}
+
+// Does one .gitignore line ignore the file at `rel`? Enough of git's rules for a
+// seed check: comments, blanks and negations never ignore; a trailing slash
+// matches directories only; a pattern with an inner slash is anchored to the
+// root, any other pattern matches a name at any depth; `**`, `*`, `?` glob. A
+// pattern that matches a parent directory ignores everything inside it.
+function gitignoreLineMatches(line, rel) {
+  let p = line.replace(/\s+$/, '');
+  if (!p || p.startsWith('#') || p.startsWith('!')) return false;
+  const dirOnly = p.endsWith('/');
+  if (dirOnly) p = p.replace(/\/+$/, '');
+  const anchored = p.includes('/');
+  p = p.replace(/^\//, '');
+  let re = '';
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (c === '*' && p[i + 1] === '*') {
+      if (p[i + 2] === '/') { re += '(?:.*/)?'; i += 2; } else { re += '.*'; i += 1; }
+    } else if (c === '*') re += '[^/]*';
+    else if (c === '?') re += '[^/]';
+    else re += escapeRe(c);
+  }
+  const whole = new RegExp('^' + re + '$');
+  const parts = rel.split('/');
+  for (let i = 1; i <= parts.length; i++) {
+    const isDir = i < parts.length;
+    if (dirOnly && !isDir) continue;
+    const subject = anchored ? parts.slice(0, i).join('/') : parts[i - 1];
+    if (whole.test(subject)) return true;
+  }
+  return false;
 }
 
 function firstHeading(text) {
@@ -280,12 +487,16 @@ function build(src, version) {
     version,
     author: { name: 'Mayank Mankhand' },
   }, null, 2) + '\n');
+  if (!inv.scripts.some(s => s.rel === SESSION_START_SCRIPT)) {
+    unresolved.push('hooks/hooks.json: missing source scripts/' + SESSION_START_SCRIPT);
+  }
   put('hooks/hooks.json', JSON.stringify({
     hooks: {
       SessionStart: [{ hooks: [{
         type: 'command',
-        // A failing link never blocks a session (Windows without symlink rights).
-        command: 'mkdir -p "${CLAUDE_PLUGIN_DATA}" && ln -sfn "${CLAUDE_PLUGIN_ROOT}" "${CLAUDE_PLUGIN_DATA}/current" || true',
+        // One node call parses in bash and PowerShell alike. The script makes the
+        // link portably and always exits 0, so a hook never blocks a session.
+        command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + SESSION_START_SCRIPT + '"',
       }] }],
     },
   }, null, 2) + '\n');
@@ -310,21 +521,26 @@ function build(src, version) {
   ])].sort();
   put('managed-paths.json', JSON.stringify({ version, paths: managed }, null, 2) + '\n');
   // The project seed: what /tk:setup writes into a project (write-when-absent
-  // files, plus the gitignore lines and the permission baseline it merges).
-  // Sourced from the repository root and .claude/, exactly the files setup.sh
-  // seeds today, so the two install paths cannot drift on what a project gets.
+  // files, the gitignore lines and the permission baseline it merges, and the
+  // retired permission rows the upgrade audit removes). Sourced from the
+  // repository's seed/ folder (issue #173), which holds the DOWNSTREAM versions:
+  // this repository's own CLAUDE.md, .gitignore and settings are maintainer
+  // files and are never seeded. The one exception is the rules file, sourced
+  // from .claude/rules/toolkit.md because this repository runs it too.
   const repo = path.dirname(src);
+  const seedDir = path.join(repo, 'seed');
   const seedSources = {
-    'seed/CLAUDE.md': path.join(repo, 'CLAUDE.md'),
-    'seed/LESSONS.md': path.join(repo, 'LESSONS.md'),
-    'seed/LESSONS-detail.md': path.join(repo, 'LESSONS-detail.md'),
-    'seed/DESIGN-PROFILE.md': path.join(src, 'skills', 'shared', 'design-profile-template.md'),
-    'seed/env.local.example': path.join(repo, '.env.local.example'),
-    'seed/gitattributes': path.join(repo, '.gitattributes'),
-    'seed/gitignore': path.join(repo, '.gitignore'),
-    'seed/artifacts-README.md': path.join(repo, 'artifacts', 'README.md'),
+    'seed/CLAUDE.md': path.join(seedDir, 'CLAUDE.md'),
+    'seed/LESSONS.md': path.join(seedDir, 'LESSONS.md'),
+    'seed/LESSONS-detail.md': path.join(seedDir, 'LESSONS-detail.md'),
+    'seed/DESIGN-PROFILE.md': path.join(seedDir, 'DESIGN-PROFILE.md'),
+    'seed/env.local.example': path.join(seedDir, 'env.local.example'),
+    'seed/gitattributes': path.join(seedDir, 'gitattributes'),
+    'seed/gitignore': path.join(seedDir, 'gitignore'),
+    'seed/artifacts-README.md': path.join(seedDir, 'artifacts-README.md'),
+    'seed/retired-permission-rows.txt': path.join(seedDir, 'retired-permission-rows.txt'),
     'seed/rules-toolkit.md': path.join(src, 'rules', 'toolkit.md'),
-    'seed/settings.local.json': path.join(src, 'settings.local.json'),
+    'seed/settings.local.json': path.join(seedDir, 'settings.local.json'),
   };
   for (const [rel, abs] of Object.entries(seedSources)) {
     if (!fs.existsSync(abs)) { unresolved.push('seed: missing source ' + path.relative(repo, abs)); continue; }
@@ -334,7 +550,14 @@ function build(src, version) {
     // are rewritten exactly like a command file's. By convention it carries no
     // toolkit paths (it refers to fragments by name), so nothing else changes;
     // a path that slips in is reported as unresolved like anywhere else.
-    put(rel, rel === 'seed/rules-toolkit.md' ? Buffer.from(rewriteText(raw.toString('utf8'), inv, src, unresolved, rel), 'utf8') : raw);
+    const content = rel === 'seed/rules-toolkit.md' ? Buffer.from(rewriteText(raw.toString('utf8'), inv, src, unresolved, rel), 'utf8') : raw;
+    for (const problem of seedProblems(rel, content.toString('utf8'), inv)) unresolved.push(rel + ': ' + problem);
+    put(rel, content);
+  }
+  // An override keyed to a file the build never emits could never report a
+  // missing phrase, so the key itself is checked.
+  for (const key of Object.keys(SITE_OVERRIDES)) {
+    if (!files.has(key)) unresolved.push(key + ': site override names a file the build does not emit');
   }
   put('README.md', [
     '# tk (generated)',
@@ -412,4 +635,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, PLUGIN_NAME };
+module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, seedProblems, gitignoreLineMatches, SITE_OVERRIDES, PLUGIN_NAME };

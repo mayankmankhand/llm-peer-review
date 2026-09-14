@@ -106,7 +106,7 @@ const ERR = {
   MISSING_ARG: (arg) => `Missing required argument: ${arg}`,
   FILE_NOT_FOUND: (f) => `File not found: ${f}`,
   FILE_TOO_LARGE: (f, sizeMB) =>
-    `File is too large (${sizeMB} MB). Maximum size is 500KB. Try a smaller file or use /package-review to select specific files.`,
+    `File is too large (${sizeMB} MB). Maximum size is 500KB. Try a smaller file or use /tk:package-review to select specific files.`,
   API_ERROR: (msg) => `OpenAI API error: ${msg}`,
   UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use review, respond, or summary.`,
 };
@@ -139,7 +139,7 @@ function loadOutputTemplate() {
       throw new Error(
         `Shared output fragment not found at ${templatePath}. ` +
         `The summary inlines finding-contract.md and report-format.md for the canonical finding format. ` +
-        `Restore them from git with \`git checkout HEAD -- .claude/skills/shared/${name}\` or reinstall the toolkit.`
+        `Reinstall or update the tk plugin to restore them (in a copy-install or the toolkit repository, restore them from git with \`git checkout HEAD -- .claude/skills/shared/${name}\`).`
       );
     }
     const content = fs.readFileSync(templatePath, 'utf-8');
@@ -148,7 +148,7 @@ function loadOutputTemplate() {
       throw new Error(
         `Slice marker "${marker}" not found in ${templatePath}. ` +
         `loadOutputTemplate() uses this heading to isolate the base of the fragment. ` +
-        `If the heading was renamed in the shared fragment, update the marker in BOTH .claude/scripts/ask-gpt.js AND .claude/scripts/ask-gemini.js (mirror parity required).`
+        `If the heading was renamed in the shared fragment, update the marker in BOTH ask-gpt.js AND ask-gemini.js in the toolkit's scripts folder (mirror parity required).`
       );
     }
     return content.slice(0, splitIndex).trim();
@@ -326,10 +326,11 @@ Commands:
   respond   Get ChatGPT's response to Claude's feedback
   summary   Generate final debate summary
 
-Usage:
-  node .claude/scripts/ask-gpt.js review --context-file <path> [--review-type <type>]
-  node .claude/scripts/ask-gpt.js respond --context-file <path> --debate-file <path>
-  node .claude/scripts/ask-gpt.js summary --context-file <path> --debate-file <path>
+Usage (<scripts> is the toolkit's scripts folder: \${CLAUDE_PLUGIN_ROOT}/scripts
+under the tk plugin, .claude/scripts in a copy-install):
+  node <scripts>/ask-gpt.js review --context-file <path> [--review-type <type>]
+  node <scripts>/ask-gpt.js respond --context-file <path> --debate-file <path>
+  node <scripts>/ask-gpt.js summary --context-file <path> --debate-file <path>
 
 Options:
   --context-file   Path to file with content to review (required)
@@ -349,13 +350,13 @@ Environment:
 
 Examples:
   # Initial review
-  node .claude/scripts/ask-gpt.js review --context-file context.md --review-type plan
+  node <scripts>/ask-gpt.js review --context-file context.md --review-type plan
 
   # After Claude responds, get ChatGPT's follow-up
-  node .claude/scripts/ask-gpt.js respond --context-file context.md --debate-file debate.md
+  node <scripts>/ask-gpt.js respond --context-file context.md --debate-file debate.md
 
   # Generate final summary
-  node .claude/scripts/ask-gpt.js summary --context-file context.md --debate-file debate.md
+  node <scripts>/ask-gpt.js summary --context-file context.md --debate-file debate.md
   `);
 }
 
