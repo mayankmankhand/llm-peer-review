@@ -43,17 +43,25 @@
 //     collaborators never get), and stays quiet once `git rm --cached` untracks
 //     it, for an untracked or ignored record, outside a git repository, and
 //     with no git on PATH; untracking leaves C-9's lost rows and C-10's lost
-//     lines exactly as they were.
+//     lines exactly as they were;
+//   - seeded rules files (review fix R4): C-7 fires only when the text, stamp
+//     line left out, differs from the shipped seed and the stamp is older; an
+//     unchanged file (LF, CRLF, trailing blanks) is no finding and `--stamp`
+//     raises only its stamp version, byte for byte elsewhere, and a rerun is a
+//     no-op; an edited file, an equal or newer stamp, a missing or unstamped
+//     file, and a plugin root with no rules seed each keep their behavior; a
+//     migrated project clean but for its rules stamp reports 0 candidates.
 // Every emitted receipt is run through `bash -c` from its fixture project and
 // must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise (a future and an old
 // convention, `Runs: every upgrade` on an old one, a pattern with a backtick,
-// `$` and `"`). Six mutation checks prove the tests bite: a copy of the script
+// `$` and `"`). Seven mutation checks prove the tests bite: a copy of the script
 // with the regex receipt unquoted, one with the always-run exemption removed,
 // one restoring rows whose script file is gone, one that forgets the lines
 // earlier toolkit releases shipped, one that never asks git whether the
-// record is tracked, and one that trusts any ignore source named .gitignore
-// wherever it lives, must each fail the check that guards it.
+// record is tracked, one that trusts any ignore source named .gitignore
+// wherever it lives, and one that drops the rules text comparison, must each
+// fail the check that guards it.
 //
 //   node scripts/test-upgrade-audit.js
 //
@@ -102,6 +110,8 @@ const SEED_ALLOW = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.jso
 const RETIRED = read(path.join(PLUGIN, 'seed', 'retired-permission-rows.txt')).split(/\r?\n/).filter(l => l && !l.startsWith('#'));
 const SEED_RULES_TEXT = read(path.join(PLUGIN, 'seed', 'rules-toolkit.md'));
 const stampRules = (v) => SEED_RULES_TEXT.replace(/<!-- Toolkit version: [^|]+\|/, '<!-- Toolkit version: ' + v + ' |');
+// A rules file stamped v whose text an older seed wrote: one line the current seed lacks.
+const staleRules = (v) => stampRules(v) + '\nA line an older rules seed carried.\n';
 
 function audit(proj, args, opts) {
   const o = opts || {};
@@ -140,6 +150,8 @@ function receiptShows(f, r) {
     const listed = ((f.fields || []).find(x => x.label === label) || { value: '' }).value.split(' ; ');
     return outLines(r.stdout).map(l => l.replace(marker + ': ', '')).sort().join('\n') === listed.slice().sort().join('\n') && outLines(r.stdout).every(l => l.startsWith(marker + ': '));
   }
+  // A rules text finding: the grep shows the stamp line, and diff prints at least one differing line.
+  if (/exits 0 only when they differ/.test(f.receipt.expect)) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout) && /^[<>]/m.test(r.stdout);
   if (f.file.line) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout);
   if (rows) return outLines(r.stdout).length === rows.value.split(' ; ').length;
   return false;
@@ -197,7 +209,7 @@ check('no prompt-file convention flags the seeded rules file', !r.findings.some(
 check('C-2 flags the untyped review-finder dispatch', by('C-2').length === 1 && by('C-2')[0].file.line === 3);
 check('C-2 does not flag a project agent dispatch', !by('C-2').some(f => f.file.relPath === '.claude/commands/myteam-research.md'));
 check('C-3 flags pasted criteria', by('C-3').length === 1 && /PASTE/.test(by('C-3')[0].receipt.check));
-check('C-7 flags the stale seed stamp', by('C-7').length === 1 && /6\.3\.3/.test(by('C-7')[0].what) && /7\.1\.0/.test(by('C-7')[0].what));
+check('C-7 flags the old rules text under its stale stamp, worded as text that changed, not only an old stamp', by('C-7').length === 1 && /6\.3\.3/.test(by('C-7')[0].what) && /7\.1\.0/.test(by('C-7')[0].what) && /the seeded rules text changed since the project's copy/.test(by('C-7')[0].what) && /or the project edited its copy/.test(by('C-7')[0].what), by('C-7')[0] && by('C-7')[0].what);
 check('C-8 lists the dead permission entries and leaves a live custom script row', by('C-8').length === 1 && by('C-8')[0].fields[0].value.includes('render-html.js') && by('C-8')[0].fields[0].value.includes('browse.js') && !by('C-8')[0].fields[0].value.includes('our-report.js') && !by('C-8')[0].fields[0].value.includes('git add'));
 check('the clean custom rule yields nothing', !r.findings.some(f => f.file.relPath === '.claude/rules/bank-safety.md'));
 check('every finding has a receipt with a check and an expectation', r.findings.every(f => f.receipt && f.receipt.check && f.receipt.expect));
@@ -295,7 +307,7 @@ function commonFiles(root) {
 const STALE = path.join(TMP, 'stale');
 commonFiles(STALE);
 write(STALE, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }, null, 2));
-write(STALE, '.claude/rules/toolkit.md', stampRules('7.0.0'));
+write(STALE, '.claude/rules/toolkit.md', staleRules('7.0.0'));
 write(STALE, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.filter(x => x !== MISSING_ROW).concat(RETIRED_KEPT, OWNED_RETIRED, ['Skill(review-code)', 'Bash(make ours *)']), additionalDirectories: ['/tmp'] }, defaultMode: 'acceptEdits' }, null, 2) + '\n');
 write(STALE, '.gitattributes', '* text=auto\n\n*.sh text eol=lf\nscripts/** text eol=lf\n.claude/scripts/** text eol=lf\n');
 write(STALE, '.gitignore', 'node_modules/\n# Toolkit install manifest (auto-generated by setup on every run)\n.claude/.toolkit-manifest.json\n\n# Toolkit backups (originals preserved by setup.sh before overwrite/delete)\n.toolkit-backup-*/\n.claude/.toolkit-*.json\n');
@@ -841,6 +853,122 @@ write(STAMP, '.claude/.toolkit-state.json', NEWER);
 st = spawnSync('node', [SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
 check('--stamp refuses to lower a newer auditedVersion: one line, exit 0, nothing written', st.status === 0 && read(path.join(STAMP, '.claude', '.toolkit-state.json')) === NEWER && /not stamping/.test(st.stderr) && outLines(st.stderr).length === 1 && st.stdout === '', st.stderr);
 
+// --- 7b. C-7 compares the rules text, not only the stamp (review fix R4) ----------------
+console.log('\n7b. C-7 fires only when the rules text changed; --stamp raises an unchanged file\'s stamp');
+const RULES_REL = '.claude/rules/toolkit.md';
+const SEED_STAMP = (/<!-- Toolkit version: ([^ |]+)/.exec(SEED_RULES_TEXT) || [])[1];
+const stampRun = (proj, o) => spawnSync('node', [(o && o.script) || SCRIPT, '--project', proj, '--plugin-root', (o && o.pluginRoot) || PLUGIN, '--stamp'], { encoding: 'utf8' });
+const c7Of = (res) => res.findings.filter(f => f.id === 'C-7');
+const rulesOf = (dir) => read(path.join(dir, RULES_REL));
+// A project audited at 7.1.0, so C-7 is the only convention in range, with the
+// given rules text (null: no rules file).
+function rulesCase(name, rules, state) {
+  const dir = path.join(TMP, 'rules-' + name);
+  write(dir, '.claude/.toolkit-state.json', JSON.stringify(state || { version: '7.1.0', path: 'plugin', auditedVersion: '7.1.0' }));
+  if (rules !== null) write(dir, RULES_REL, rules);
+  return dir;
+}
+// The seed's text with one line of the project's own added after the stamp.
+const editedRules = (v) => { const l = stampRules(v).split('\n'); l.splice(4, 0, 'Our own house rule.', ''); return l.join('\n'); };
+// A copy-install migrated on 7.0.1 whose files all match the 7.1.0 seed; only
+// its rules stamp is behind.
+function migratedCleanCase(name) {
+  const dir = path.join(TMP, 'migrated-clean-' + name);
+  commonFiles(dir);
+  write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.1', path: 'copy-migrated', previousVersion: '6.3.3' }, null, 2));
+  write(dir, '.claude/.toolkit-migration.json', JSON.stringify({ at: '2026-09-13T09:00:00.000Z', from: '6.3.3', to: '7.0.1', backupDir: '.toolkit-backup-20260913-090000-plugin', removed: [], custom: [], deadPermissionCount: 0 }, null, 2) + '\n');
+  write(dir, RULES_REL, stampRules('7.0.1'));
+  write(dir, '.claude/settings.local.json', read(path.join(PLUGIN, 'seed', 'settings.local.json')));
+  write(dir, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')));
+  write(dir, '.gitignore', read(path.join(PLUGIN, 'seed', 'gitignore')));
+  write(dir, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-README.md')));
+  write(dir, '.claude/commands/myteam-ship.md', '# Ship\n\nRun Skill(tk:review-code), dispatch `subagent_type=tk:audit-skeptic`, then run /tk:review.\n');
+  return dir;
+}
+// The check the rules-text mutation below must break.
+const migratedCleanQuiet = (res) => res.status === 0 && res.findings.length === 0 && /0 candidate finding/.test(res.summary) && /6\.3\.3 -> 7\.1\.0 \[C-1, C-2, C-3, C-4, C-5, C-6, C-7, C-8, C-9, C-10, C-11\]/.test(res.summary);
+{
+  check('fixture: the shipped seed carries a stamp of its own, not the 7.0.0 the fixtures use', !!SEED_STAMP && SEED_STAMP !== '7.0.0' && stampRules('7.0.0') !== SEED_RULES_TEXT);
+  // Text equal, stamp older, LF endings.
+  const before = stampRules('7.0.0');
+  const want = before.replace('<!-- Toolkit version: 7.0.0 |', '<!-- Toolkit version: 7.1.0 |');
+  const dir = rulesCase('equal-lf', before);
+  const res = audit(dir);
+  check('text equal to the seed with an older stamp: no C-7 finding, with C-7 still in range', res.status === 0 && c7Of(res).length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-7\]/.test(res.summary), res.stdout + res.summary);
+  let st1 = stampRun(dir);
+  check('--stamp rewrites only the version in the stamp line (every other byte identical) and says so on stderr', st1.status === 0 && want !== before && rulesOf(dir) === want && /restamped \.claude\/rules\/toolkit\.md from 7\.0\.0 to 7\.1\.0/.test(st1.stderr), st1.stderr);
+  const st2 = stampRun(dir);
+  check('a second --stamp is a no-op for the rules file: the same bytes and no restamp line', st2.status === 0 && rulesOf(dir) === want && /stamped \.claude\/\.toolkit-state\.json/.test(st2.stderr) && !/restamped/.test(st2.stderr), st2.stderr);
+  check('after the restamp C-7 still reports nothing', c7Of(audit(dir)).length === 0);
+
+  // Text equal, stamp older, CRLF endings, trailing blanks on a line and blank lines at the end.
+  const crlfBefore = stampRules('7.0.0').split('\n').map((l, i) => (i === 4 ? l + '  \t' : l)).join('\r\n') + '\r\n\r\n';
+  const crlf = rulesCase('equal-crlf', crlfBefore);
+  const cres = audit(crlf);
+  check('a CRLF copy with trailing blanks and extra blank lines at the end is the seed text: no C-7 finding', cres.status === 0 && c7Of(cres).length === 0, cres.stdout + cres.summary);
+  st1 = stampRun(crlf);
+  const crlfAfter = rulesOf(crlf);
+  check('--stamp on the CRLF copy rewrites only the stamp version, and the file stays CRLF throughout', st1.status === 0 && crlfAfter === crlfBefore.replace('<!-- Toolkit version: 7.0.0 |', '<!-- Toolkit version: 7.1.0 |') && !/(^|[^\r])\n/.test(crlfAfter) && /restamped/.test(st1.stderr), st1.stderr);
+  check('  and a rerun leaves the CRLF bytes as they are', stampRun(crlf).status === 0 && rulesOf(crlf) === crlfAfter);
+
+  // Text edited by the project, stamp older.
+  const eBefore = editedRules('7.0.1');
+  const edited = rulesCase('edited', eBefore);
+  const eres = audit(edited);
+  const f = c7Of(eres)[0];
+  check('text the project edited, stamp older: one C-7 finding on the stamp line', eres.status === 0 && c7Of(eres).length === 1 && f.file.relPath === RULES_REL && f.file.line === 3 && f.severity === 'warn', JSON.stringify(c7Of(eres)));
+  check('  worded as rules text that changed since the project\'s copy or an edit of it, not only an old stamp', !!f && f.what.includes('differs from the rules seed this plugin (7.1.0) ships: the seeded rules text changed since the project\'s copy (stamped 7.0.1) was written, or the project edited its copy') && /stamp line out of both files, so the seed file's own stamp plays no part/.test(f.what), f && f.what);
+  const out = f ? runReceipt(edited, f) : { status: -1, stdout: '', out: '' };
+  check('  its receipt runs through bash and shows the stamp line and the added line on the project side', !!f && receiptShows(f, out) && /^> Our own house rule\.$/m.test(out.stdout) && !/^[<>] .*Toolkit version/m.test(out.stdout), out.out);
+  const est = stampRun(edited);
+  check('  --stamp leaves the edited file untouched (while still stamping the state file)', est.status === 0 && rulesOf(edited) === eBefore && !/restamped/.test(est.stderr) && JSON.parse(read(path.join(edited, '.claude', '.toolkit-state.json'))).auditedVersion === '7.1.0', est.stderr);
+  check('  the same receipt run over an unchanged copy (LF or CRLF) exits non-zero, so a skeptic can refute a wrong finding', !!f && runReceipt(dir, f).status !== 0 && runReceipt(crlf, f).status !== 0);
+  // A receipt whose evidence is gone must not confirm: diff of an empty side
+  // exits 1 like a real difference, so the receipt checks both files first.
+  const gone = f ? Object.assign({}, f, { receipt: Object.assign({}, f.receipt, { check: f.receipt.check.split(path.join(PLUGIN, 'seed', 'rules-toolkit.md')).join(path.join(TMP, 'seed-gone', 'rules-toolkit.md')) }) }) : null;
+  const goneOut = gone ? runReceipt(dir, gone) : { status: 0, out: '' };
+  check('  with the shipped seed path missing, the receipt over an unchanged copy exits non-zero and says it cannot read a file', !!gone && gone.receipt.check !== f.receipt.check && goneOut.status !== 0 && /cannot read the shipped seed or the project rules file/.test(goneOut.out) && !/^[<>]/m.test(goneOut.out), goneOut.status + ' ' + goneOut.out.slice(0, 200));
+  const wrongCwd = f ? runReceipt(TMP, f) : { status: 0, out: '' };
+  check('  run from a directory with no rules file, the receipt exits non-zero', !!f && !fs.existsSync(path.join(TMP, RULES_REL)) && wrongCwd.status !== 0 && /cannot read/.test(wrongCwd.out), wrongCwd.status + ' ' + wrongCwd.out.slice(0, 200));
+
+  // Text equal or edited, stamp equal or newer.
+  const current = rulesCase('equal-current', stampRules('7.1.0'));
+  const newer = rulesCase('equal-newer', stampRules('7.2.0'));
+  const editedCurrent = rulesCase('edited-current', editedRules('7.1.0'));
+  check('text equal with the stamp equal or newer, or edited with the stamp equal: no C-7 finding', [current, newer, editedCurrent].every(d => { const x = audit(d); return x.status === 0 && c7Of(x).length === 0; }));
+  const sc = stampRun(current); const sn = stampRun(newer);
+  check('--stamp never lowers a newer rules stamp and never rewrites an equal one', sc.status === 0 && sn.status === 0 && rulesOf(current) === stampRules('7.1.0') && rulesOf(newer) === stampRules('7.2.0') && !/restamped/.test(sc.stderr + sn.stderr), sc.stderr + sn.stderr);
+
+  // A missing or unstamped rules file keeps the behavior it had.
+  const missing = rulesCase('missing', null);
+  const mres = audit(missing);
+  const ms = stampRun(missing);
+  check('no rules file: no C-7 finding, and --stamp creates none', mres.status === 0 && c7Of(mres).length === 0 && ms.status === 0 && !fs.existsSync(path.join(missing, RULES_REL)), mres.summary + ms.stderr);
+  const unstampedText = SEED_RULES_TEXT.split('\n').filter(l => !/<!-- Toolkit version:/.test(l)).join('\n');
+  const unstamped = rulesCase('unstamped', unstampedText);
+  const ures = audit(unstamped);
+  const us = stampRun(unstamped);
+  check('a rules file with no stamp, even with the seed text: one C-7 finding for no usable version, as before', ures.status === 0 && c7Of(ures).length === 1 && c7Of(ures)[0].what === 'Should fix. The seeded rules file is stamped with no usable version while the plugin is 7.1.0.' && c7Of(ures)[0].file.line === 3, JSON.stringify(c7Of(ures)));
+  check('  and --stamp leaves it untouched', us.status === 0 && rulesOf(unstamped) === unstampedText && !/restamped/.test(us.stderr), us.stderr);
+
+  // A plugin root that ships no rules seed: nothing to compare, so the stamp alone decides.
+  const bare = path.join(TMP, 'plugin-no-rules-seed');
+  write(bare, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version: '7.1.0' }));
+  const noSeed = rulesCase('no-seed', stampRules('7.0.0'));
+  const nres = audit(noSeed, [], { pluginRoot: bare });
+  check('with no shipped rules seed: the old stamp finding and a note that the text was not compared', nres.status === 0 && c7Of(nres).length === 1 && /stamped 7\.0\.0 while the plugin is 7\.1\.0/.test(c7Of(nres)[0].what) && /C-7: no shipped seed\/rules-toolkit\.md under the plugin root, so the rules text was not compared/.test(nres.summary), nres.stdout + nres.summary);
+  const ns = stampRun(noSeed, { pluginRoot: bare });
+  check('  and --stamp leaves the rules file untouched', ns.status === 0 && rulesOf(noSeed) === stampRules('7.0.0') && !/restamped/.test(ns.stderr), ns.stderr);
+
+  // End to end: a migrated project clean but for its rules stamp.
+  const mc = migratedCleanCase('e2e');
+  const before7 = audit(mc);
+  check('a migrated project whose files match the seed and whose rules stamp alone is behind reports 0 candidates over C-1 to C-11', migratedCleanQuiet(before7), before7.stdout.slice(0, 400) + before7.summary);
+  const mst = stampRun(mc);
+  const after7 = audit(mc);
+  check('  --stamp records 7.1.0 and restamps the rules file; the next audit is C-7 alone with 0 candidates', mst.status === 0 && /restamped/.test(mst.stderr) && rulesOf(mc) === stampRules('7.1.0') && after7.status === 0 && after7.findings.length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-7\]/.test(after7.summary), mst.stderr + after7.summary);
+}
+
 console.log('\n8. mutation checks: the tests bite');
 const MUTANTS = path.join(TMP, 'mutants');
 function mutant(name, from, to) {
@@ -857,11 +985,11 @@ function mutant(name, from, to) {
   check('restored (the real script), both checks pass again', c2Shows(audit(MIG)) && quotingShows(audit(MECH, [], { conventions: FIXTURE_CONVENTIONS })));
 }
 {
-  // A project already audited at 7.1.0, whose rules stamp is still 7.0.0: only
-  // the always-run bullet can put C-7 in range.
+  // A project already audited at 7.1.0, whose rules stamp is still 7.0.0 over
+  // an older seed's text: only the always-run bullet can put C-7 in range.
   const ALWAYS = path.join(TMP, 'always');
   write(ALWAYS, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.1.0', auditedVersion: '7.1.0', path: 'plugin' }));
-  write(ALWAYS, '.claude/rules/toolkit.md', stampRules('7.0.0'));
+  write(ALWAYS, '.claude/rules/toolkit.md', staleRules('7.0.0'));
   const c7Fires = (res) => res.findings.some(f => f.id === 'C-7' && /stamped 7\.0\.0/.test(f.what));
   const m = mutant('no-always', '(c.always || afterFrom(c))', 'afterFrom(c)');
   check('the no-always mutation applies to the source', m.applied);
@@ -909,6 +1037,16 @@ function mutant(name, from, to) {
   check('the no-folder-scope mutation applies to the source', m.applied);
   check('without the folder-scope guard, the "global excludes file named .gitignore still asks for the seed line" check fails', !homeGitignoreAsksSeedLine(audit(home.dir, [], { script: m.path, env: home.env })));
   check('restored (the real script), that check passes again', homeGitignoreAsksSeedLine(audit(home.dir, [], { env: home.env })));
+}
+{
+  // Review fix R4's core condition: an older stamp over the seed's own text is
+  // no finding. Without the text comparison every file with an older stamp
+  // reads as changed, so C-7 fires on a project otherwise clean.
+  const mc = migratedCleanCase('mutant');
+  const m = mutant('no-rules-text', 'return rulesBody(text) === rulesBody(seedText);', 'return false;');
+  check('the no-rules-text mutation applies to the source', m.applied);
+  check('without the rules text comparison, the "migrated project clean but for its rules stamp reports 0 candidates" check fails', !migratedCleanQuiet(audit(mc, [], { script: m.path })));
+  check('restored (the real script), that check passes again', migratedCleanQuiet(audit(mc)));
 }
 
 console.log('\n9. the version helpers match session-start.js');
