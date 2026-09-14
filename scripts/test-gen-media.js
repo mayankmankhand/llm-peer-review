@@ -330,6 +330,30 @@ console.log('gen-media.js');
   check(resume.status === 0 && resume.json.requestId === 'req_test_123' && !resume.requests.some((q) => q.method === 'POST'), 'prompt-file/resume: a rerun whose prompt file is gone still collects the job');
 }
 
+// ─── the fixture reads headers the way a caller sends them ──────────────────
+{
+  // gen-media.js passes plain objects, but the OpenAI SDK passes a Headers instance;
+  // the fixture must see the bearer token either way, and never log the token.
+  const sb = sandbox('fixture-headers', {});
+  const probe = path.join(sb.dir, 'probe.js');
+  fs.writeFileSync(probe, [
+    "const token = 'Bearer ' + 'sk-' + 'test-x';",
+    "(async () => {",
+    "  await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: new Headers({ Authorization: token }), body: '{}' });",
+    "  await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { authorization: token }, body: '{}' });",
+    "  await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });",
+    "})();",
+  ].join('\n') + '\n');
+  const r = spawnSync(process.execPath, ['--require', PRELOAD, probe], { cwd: sb.dir, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: sb.dir, USERPROFILE: sb.dir, FAKE_FETCH_LOG: sb.log } });
+  const logText = fs.existsSync(sb.log) ? fs.readFileSync(sb.log, 'utf8') : '';
+  const reqs = logText.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  check(r.status === 0 && reqs.length === 3, 'fixture/headers: the probe made three requests');
+  check(reqs[0] && reqs[0].hasAuth === true && reqs[0].authScheme === 'Bearer', 'fixture/headers: a Headers instance carrying a bearer token logs hasAuth true');
+  check(reqs[1] && reqs[1].hasAuth === true && reqs[1].authScheme === 'Bearer', 'fixture/headers: a plain object with a lowercase authorization key logs hasAuth true');
+  check(reqs[2] && reqs[2].hasAuth === false && reqs[2].authScheme === null, 'fixture/headers: a request without auth logs hasAuth false');
+  check(!logText.includes('sk-' + 'test-x'), 'fixture/headers: the token itself is never logged');
+}
+
 // ─── bad flags ───────────────────────────────────────────────────────────────
 {
   const sb = sandbox('flags', {});

@@ -23,6 +23,22 @@ function record(entry) {
   if (LOG) fs.appendFileSync(LOG, JSON.stringify(entry) + '\n');
 }
 
+// One request header, read the way fetch itself reads it. Callers may pass a
+// Headers instance (the OpenAI SDK does), an array of pairs, or a plain object,
+// so the Headers class (Node 18+) does the reading when it exists; the fallback
+// reads a plain object under either spelling. Only presence and scheme are ever
+// logged, never the value.
+function headerOf(raw, name) {
+  if (!raw) return '';
+  if (typeof Headers === 'function') {
+    try { return new Headers(raw).get(name) || ''; } catch (e) { /* fall through to the plain-object read */ }
+  }
+  if (typeof raw !== 'object') return '';
+  const lower = name.toLowerCase();
+  const key = Object.keys(raw).find(k => k === name || k.toLowerCase() === lower);
+  return key === undefined ? '' : String(raw[key]);
+}
+
 function json(obj, status) {
   return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'content-type': 'application/json' } });
 }
@@ -31,8 +47,7 @@ globalThis.fetch = async function fakeFetch(url, init) {
   init = init || {};
   const u = String(url);
   const method = (init.method || 'GET').toUpperCase();
-  const headers = init.headers || {};
-  const auth = headers.Authorization || headers['x-goog-api-key'] || '';
+  const auth = headerOf(init.headers, 'Authorization') || headerOf(init.headers, 'x-goog-api-key');
   let body = null;
   try { body = init.body ? JSON.parse(init.body) : null; } catch (e) { body = String(init.body); }
   record({ url: u, method, hasAuth: Boolean(auth), authScheme: auth ? (auth.split(' ').length > 1 ? auth.split(' ')[0] : 'raw') : null, body });

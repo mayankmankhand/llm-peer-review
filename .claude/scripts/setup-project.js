@@ -51,11 +51,25 @@
 // session-start.js and pre-push-check.js: a value of any other shape is never
 // compared as a version and never echoed into the report.
 //
+// The migration record (.claude/.toolkit-migration.json) carries a count of the
+// dead permission rows it removed, never the rows: they come from the
+// gitignored settings.local.json and hold this machine's paths, and the backup
+// folder's copy of that file already keeps them. The seed gitignores the record.
+//
+// The undo line: a migration keeps its fixed line. Every other run that created
+// or changed something ends with an `Undo:` line built from what the run
+// actually wrote: the files and folders it created (delete), the tracked files
+// it changed that were clean before (`git checkout --`), and the changed files
+// git holds no copy of as they were (restore by hand). A run that changed
+// nothing prints no undo line. Paths are project-relative and shell-quoted.
+//
 // Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
 // needed: locally modified files, provenance unknown, or a dirty tree).
 // --dry-run prints the same report and exit code and writes nothing.
 //
-// Dependency-free, like every script under .claude/scripts/.
+// Dependency-free, like every script under .claude/scripts/. Run directly it
+// sets up the project; required, it only exports the undo-line helpers for
+// scripts/test-setup-project.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -214,6 +228,25 @@ function walkFiles(dir, rel, out) {
     if (fs.statSync(abs).isDirectory()) walkFiles(abs, r, out); else out.push(r);
   }
   return out;
+}
+// A project-relative path as shell text: bare when every character is safe,
+// otherwise single-quoted (an inner single quote becomes '\'').
+function shellQuote(rel) {
+  return /^[A-Za-z0-9_.\/@%+=:,-]+$/.test(rel) ? rel : "'" + rel.replace(/'/g, "'\\''") + "'";
+}
+// The undo line for a fresh or plugin-mode run, or null when the run changed
+// nothing. `u`: isRepo, created (files), createdDirs (deepest first), checkout
+// (tracked files that were clean before), byHand (changed files git cannot restore).
+function undoLine(u) {
+  const q = (list) => list.map(shellQuote).join(' ');
+  if (!u.created.length && !u.createdDirs.length && !u.checkout.length && !u.byHand.length) return null;
+  const parts = [];
+  if (!u.isRepo) parts.push('not a git repository, so there is no git undo');
+  if (u.created.length) parts.push('delete ' + q(u.created));
+  if (u.createdDirs.length) parts.push('then remove the new folders if empty: ' + q(u.createdDirs));
+  if (u.checkout.length) parts.push('git checkout -- ' + q(u.checkout));
+  if (u.byHand.length) parts.push('restore by hand (git holds no copy of them as they were): ' + q(u.byHand));
+  return 'Undo: ' + parts.join(' ; ');
 }
 function removeEmptyDirsUpTo(dir, stopAt) {
   let d = dir;
@@ -417,6 +450,21 @@ function main() {
   if (opts.dryRun) { process.stdout.write(out.join('\n') + '\n'); process.exit(0); }
 
   // --- 5. Apply --------------------------------------------------------------------
+  // What the undo line of a fresh or plugin-mode run needs, taken before anything
+  // is written: the bytes of every file this run may write, whether each folder
+  // it may create already exists, and for a tracked file whether it was clean
+  // (a `git checkout --` would also discard an uncommitted edit made before the run).
+  const mayWrite = seedWrite.map(s => s[0]).concat(['.gitignore', '.gitattributes', '.claude/settings.json', '.claude/settings.local.json', STATE_REL]);
+  const bytesBefore = new Map(mayWrite.map(rel => [rel, fs.existsSync(P(rel)) ? fs.readFileSync(P(rel)) : null]));
+  const mayCreateDirs = new Set(['plans', 'artifacts']);
+  for (const rel of mayWrite) for (let d = path.posix.dirname(rel); d !== '.'; d = path.posix.dirname(d)) mayCreateDirs.add(d);
+  const dirsBefore = new Map([...mayCreateDirs].map(d => [d, fs.existsSync(P(d))]));
+  const cleanTracked = new Set();
+  if (!migrating && top !== null) {
+    const tracked = (git(['ls-files', '-z', '--', ...mayWrite], project) || '').split('\0').filter(Boolean);
+    for (const rel of tracked) if (git(['diff', '--quiet', '--', rel], project) !== null) cleanTracked.add(rel);
+  }
+
   let backupDir = null;
   if (migrating && (removed.length || localChanged || settingsChanged || ignoreAdd.length || attrsAdd.length)) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
@@ -483,7 +531,8 @@ function main() {
   if (migrating) {
     fs.writeFileSync(P(MIGRATION_REL), JSON.stringify({
       at: stateNext.at, from: previousVersion, to: version, backupDir: backupDir ? path.relative(project, backupDir) : null,
-      removed, custom, deadPermissions: deadPerms,
+      // A count, never the rows (see the header): the backup folder keeps them.
+      removed, custom, deadPermissionCount: deadPerms.length,
       modified: modified.map(rel => ({ rel, backup: backupDir ? path.relative(project, path.join(backupDir, rel)) : null, pluginCopy: rel.startsWith('.claude/') ? rel.replace(/^\.claude\//, '') : null })),
     }, null, 2) + '\n');
   }
@@ -498,12 +547,27 @@ function main() {
     // project is already on the plugin.
     say('  Undo: git checkout -- .claude VERSION .gitattributes .gitignore ; then delete the seeded files listed above plus ' + STATE_REL + ' and ' + MIGRATION_REL + ', or restore from the backup folder.');
     say('  Next: run /tk:upgrade to audit your custom files against the ' + version + ' conventions' + (modified.length ? ' (it will carry your ' + modified.length + ' local edit(s) as findings)' : '') + '.');
-  } else if (mode === 'fresh') {
-    say('  Next: /tk:explore. The codebase map generates on first use.');
   } else {
-    say('  Nothing to migrate; seed checked.');
+    say(mode === 'fresh' ? '  Next: /tk:explore. The codebase map generates on first use.' : '  Nothing to migrate; seed checked.');
+    // Compared by bytes after the writes, so only what this run really created
+    // or changed is named; a folder counts when it did not exist before.
+    const created = [];
+    const checkout = [];
+    const byHand = [];
+    for (const rel of mayWrite) {
+      const was = bytesBefore.get(rel);
+      if (!fs.existsSync(P(rel))) continue;
+      if (was === null) created.push(rel);
+      else if (!was.equals(fs.readFileSync(P(rel)))) (cleanTracked.has(rel) ? checkout : byHand).push(rel);
+    }
+    const createdDirs = [...dirsBefore].filter(([d, existed]) => !existed && fs.existsSync(P(d))).map(([d]) => d + '/')
+      .sort((a, b) => (b.split('/').length - a.split('/').length) || a.localeCompare(b));
+    const undo = undoLine({ isRepo: top !== null, created, createdDirs, checkout, byHand });
+    if (undo) say('  ' + undo);
   }
   process.stdout.write(out.join('\n') + '\n');
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { shellQuote, undoLine };

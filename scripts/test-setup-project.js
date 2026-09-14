@@ -2,7 +2,8 @@
 'use strict';
 // test-setup-project.js - assertions for .claude/scripts/setup-project.js
 // (issue #167, Step 5; the version, .gitignore and .gitattributes cases of issue
-// #174). Builds a fixture plugin root and fixture projects in
+// #174; the migration record, undo line and seed .gitignore cases of 7.1.0).
+// Builds a fixture plugin root and fixture projects in
 // temp dirs; never touches a real project. Dependency-free; exits non-zero on
 // any failure.
 //
@@ -38,6 +39,63 @@ function run(project, pluginRoot, args) {
   const r = spawnSync('node', [SCRIPT, '--project', project, '--plugin-root', pluginRoot, ...(args || [])], { encoding: 'utf8' });
   return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
+// Every folder under root (not .git), for the undo checks: a run's new folders
+// are part of what its undo line must name.
+function dirSnapshot(root) {
+  const acc = [];
+  (function walk(d, rel) {
+    for (const n of fs.readdirSync(d).sort()) {
+      if (n === '.git') continue;
+      const a = path.join(d, n); const r = rel ? rel + '/' + n : n;
+      if (fs.statSync(a).isDirectory()) { acc.push(r + '/'); walk(a, r); }
+    }
+  })(root, '');
+  return acc;
+}
+const fileList = (root) => treeSnapshot(root).split('\n').filter(Boolean).map(l => l.slice(0, l.lastIndexOf(':')));
+// Shell words the way a POSIX shell reads the undo line's paths: whitespace
+// splits, single quotes hold anything but a single quote, a backslash escapes.
+function shellWords(s) {
+  const words = [];
+  let cur = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "'") {
+      const j = s.indexOf("'", i + 1);
+      if (j === -1) { cur = (cur || '') + s.slice(i); break; } // unbalanced: keep the rest as typed
+      cur = (cur || '') + s.slice(i + 1, j); i = j;
+    }
+    else if (c === '\\') { cur = (cur || '') + s[++i]; }
+    else if (/\s/.test(c)) { if (cur !== null) words.push(cur); cur = null; }
+    else cur = (cur || '') + c;
+  }
+  if (cur !== null) words.push(cur);
+  return words;
+}
+// The undo line when it is the report's last line, parsed into its clauses; null otherwise.
+function undoOf(out) {
+  const lines = out.replace(/\s+$/, '').split('\n');
+  const m = /^ {2}Undo: (.*)$/.exec(lines[lines.length - 1]);
+  if (!m) return null;
+  const u = { noGit: false, del: [], dirs: [], checkout: [], byHand: [], unknown: [] };
+  for (const clause of m[1].split(' ; ')) {
+    let c;
+    if (clause === 'not a git repository, so there is no git undo') u.noGit = true;
+    else if ((c = /^delete (.+)$/.exec(clause))) u.del = shellWords(c[1]);
+    else if ((c = /^then remove the new folders if empty: (.+)$/.exec(clause))) u.dirs = shellWords(c[1]);
+    else if ((c = /^git checkout -- (.+)$/.exec(clause))) u.checkout = shellWords(c[1]);
+    else if ((c = /^restore by hand \(git holds no copy of them as they were\): (.+)$/.exec(clause))) u.byHand = shellWords(c[1]);
+    else u.unknown.push(clause);
+  }
+  return u;
+}
+// Carry out an undo line the way a user would (the by-hand clause excepted).
+function applyUndo(root, u) {
+  for (const rel of u.del) fs.rmSync(path.join(root, rel));
+  for (const rel of u.dirs) fs.rmdirSync(path.join(root, rel));
+  if (u.checkout.length) git(root, ['checkout', '--', ...u.checkout]);
+}
+const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
 function treeSnapshot(root) {
   const acc = [];
   (function walk(d, rel) {
@@ -149,12 +207,18 @@ const mig = JSON.parse(read(repo, '.claude/.toolkit-migration.json'));
 const backups = fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-') && n.endsWith('-plugin'));
 check('one backup folder holds the removed files and the local edit', backups.length === 1 && exists(repo, backups[0] + '/.claude/scripts/render-html.js') && read(repo, backups[0] + '/.claude/scripts/render-html.js').includes('my local fix') && exists(repo, backups[0] + '/.claude/.toolkit-manifest.json') && exists(repo, backups[0] + '/.claude/settings.local.json'));
 check('the backup holds .gitattributes as it was before the merge', backups.length === 1 && read(repo, backups[0] + '/.gitattributes') === 'toolkit content of .gitattributes\n' + LFS_LINE + '\n');
-check('the migration record carries the local edit with its backup path', mig.modified.length === 1 && mig.modified[0].rel === '.claude/scripts/render-html.js' && mig.modified[0].backup === backups[0] + '/.claude/scripts/render-html.js' && mig.deadPermissions.length === 3 && mig.from === '6.3.3');
+check('the migration record carries the local edit with its backup path', mig.modified.length === 1 && mig.modified[0].rel === '.claude/scripts/render-html.js' && mig.modified[0].backup === backups[0] + '/.claude/scripts/render-html.js' && mig.from === '6.3.3');
+// The removed rows come from the gitignored settings.local.json and carry this
+// machine's paths; the record is committable, so it holds a count only.
+check('the migration record counts the dead permission rows and carries none of them', mig.deadPermissionCount === 3 && !('deadPermissions' in mig), JSON.stringify(mig));
+check('the migration record holds no absolute path from a removed row', !read(repo, '.claude/.toolkit-migration.json').includes('/abs/proj') && !read(repo, '.claude/.toolkit-migration.json').includes('browse.js'), read(repo, '.claude/.toolkit-migration.json'));
+check('the removed rows stay recoverable from the backup copy of settings.local.json', backups.length === 1 && read(repo, backups[0] + '/.claude/settings.local.json').includes('/abs/proj/.claude/scripts/browse.js'));
 check('the report ends with the undo line and the next step', /Undo: git checkout/.test(r.out) && /Next: run \/tk:upgrade/.test(r.out) && /1 local edit/.test(r.out));
 check('the undo line says to delete the state and migration files', /Undo: [^\n]*delete[^\n]*\.claude\/\.toolkit-state\.json[^\n]*\.claude\/\.toolkit-migration\.json/.test(r.out), r.out);
 const after = treeSnapshot(repo);
 r = run(repo, pluginRoot);
 check('a second run is idempotent', r.status === 0 && /already on the plugin/.test(r.out) && /Nothing to migrate/.test(r.out) && treeSnapshot(repo) === after, r.out);
+check('a second run that changes nothing prints no undo line', !/Undo:/.test(r.out), r.out);
 check('a second run makes no new backup', fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-')).length === 1);
 fs.rmSync(repo, { recursive: true, force: true });
 
@@ -216,7 +280,16 @@ repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-fresh-'));
 initRepo(repo);
 write(repo, 'README.md', '# app\n');
 commitAll(repo, 'init');
+let filesBefore = fileList(repo);
+let dirsBefore = dirSnapshot(repo);
+let treeBefore = treeSnapshot(repo);
 r = run(repo, pluginRoot);
+let undo = undoOf(r.out);
+check('a fresh setup ends with an Undo: line', undo !== null && undo.unknown.length === 0, r.out);
+check('its delete list is exactly the files the run created', undo !== null && sameSet(undo.del, fileList(repo).filter(f => !filesBefore.includes(f))), r.out);
+check('its folder list is exactly the folders the run created, deepest first', undo !== null && sameSet(undo.dirs, dirSnapshot(repo).filter(d => !dirsBefore.includes(d))) && undo.dirs.indexOf('.claude/rules/') < undo.dirs.indexOf('.claude/'), r.out);
+check('a fresh setup changed no existing file, so nothing to checkout or restore by hand', undo !== null && undo.checkout.length === 0 && undo.byHand.length === 0 && !undo.noGit, r.out);
+if (undo) { const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-undo-')); fs.cpSync(repo, copy, { recursive: true }); applyUndo(copy, undo); check('carrying out the fresh undo line restores the tree and its folders exactly', treeSnapshot(copy) === treeBefore && sameSet(dirSnapshot(copy), dirsBefore)); fs.rmSync(copy, { recursive: true, force: true }); }
 check('a fresh install seeds and registers without a backup', r.status === 0 && /fresh install/.test(r.out) && !fs.readdirSync(repo).some(n => n.startsWith('.toolkit-backup-')), r.out);
 check('the full seed lands, including the lessons detail file', ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', '.env.local.example', '.gitattributes', 'artifacts/README.md', '.claude/rules/toolkit.md', '.gitignore', '.claude/settings.json', '.claude/settings.local.json', '.claude/.toolkit-state.json'].every(f => exists(repo, f)));
 const freshState = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
@@ -242,7 +315,106 @@ check('lines already present with different spacing are not added again', r.stat
   && spacedIgnore.split('\n').filter(l => l.trim() === 'node_modules/').length === 1
   && spacedIgnore.split('\n').filter(l => l.trim() === '.claude/settings.local.json').length === 1
   && spacedIgnore.includes('artifacts/html/'), spacedIgnore);
+undo = undoOf(r.out);
+check('a committed .gitignore the run changed is named for git checkout, not deletion', undo !== null && sameSet(undo.checkout, ['.gitignore']) && !undo.del.includes('.gitignore') && undo.byHand.length === 0, r.out);
 fs.rmSync(repo, { recursive: true, force: true });
+
+// A file that existed but git cannot give back as it was: an untracked
+// .gitignore, and a tracked settings.json with an uncommitted edit (a checkout
+// would discard that edit too). Both are restored by hand.
+console.log('\n4-undo. files git cannot restore');
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-fresh-byhand-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+write(repo, '.claude/settings.json', JSON.stringify({ env: { X: '1' } }, null, 2) + '\n');
+commitAll(repo, 'init');
+write(repo, '.claude/settings.json', JSON.stringify({ env: { X: '2' } }, null, 2) + '\n');
+write(repo, '.gitignore', 'mine/\n');
+r = run(repo, pluginRoot);
+undo = undoOf(r.out);
+check('an untracked .gitignore and a dirty tracked settings.json are restored by hand, never checked out', r.status === 0 && undo !== null && sameSet(undo.byHand, ['.gitignore', '.claude/settings.json']) && undo.checkout.length === 0 && !undo.del.includes('.gitignore'), r.out);
+filesBefore = fileList(repo);
+r = run(repo, pluginRoot);
+check('a plugin-mode re-run that changes nothing prints no undo line', r.status === 0 && /Nothing to migrate/.test(r.out) && !/Undo:/.test(r.out) && sameSet(fileList(repo), filesBefore), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// The real seed/gitignore (7.1.0): the migration
+// record line is merged once on every path and never ignores the state file.
+console.log('\n4-seed. the shipped seed/gitignore and the migration record');
+const REAL_SEED_IGNORE = fs.readFileSync(path.resolve(__dirname, '..', 'seed', 'gitignore'), 'utf8');
+const MIG_LINE = '.claude/.toolkit-migration.json';
+const realSeedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-plugin-realseed-'));
+fs.cpSync(pluginRoot, realSeedRoot, { recursive: true });
+write(realSeedRoot, 'seed/gitignore', REAL_SEED_IGNORE);
+const countLine = (text, line) => text.split(/\r?\n/).filter(l => l.trim() === line).length;
+check('the shipped seed/gitignore carries the migration record line once', countLine(REAL_SEED_IGNORE, MIG_LINE) === 1);
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-realseed-fresh-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+commitAll(repo, 'init');
+r = run(repo, realSeedRoot);
+check('a fresh setup writes the migration record line once', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1, read(repo, '.gitignore'));
+check('git check-ignore -v .claude/.toolkit-state.json exits 1 in the seeded repo', spawnSync('git', ['check-ignore', '-v', '.claude/.toolkit-state.json'], { cwd: repo }).status === 1);
+check('git check-ignore --no-index agrees, so the state file is never ignored even once committed', spawnSync('git', ['check-ignore', '--no-index', '-q', '.claude/.toolkit-state.json'], { cwd: repo }).status === 1);
+write(repo, MIG_LINE, '{}\n');
+check('the migration record itself is ignored (git check-ignore exits 0)', spawnSync('git', ['check-ignore', '-q', MIG_LINE], { cwd: repo }).status === 0);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// A plugin-mode re-run of a project seeded before the line existed: only the
+// .gitignore changes, and the undo line names only that.
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-realseed-rerun-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+run(repo, pluginRoot);
+commitAll(repo, 'seeded by an older setup');
+treeBefore = treeSnapshot(repo);
+r = run(repo, realSeedRoot);
+undo = undoOf(r.out);
+const changedFiles = treeSnapshot(repo).split('\n').filter(l => !treeBefore.split('\n').includes(l)).map(l => l.slice(0, l.lastIndexOf(':')));
+check('a plugin-mode re-run adds the migration record line once', r.status === 0 && /already on the plugin/.test(r.out) && countLine(read(repo, '.gitignore'), MIG_LINE) === 1, r.out);
+check('that re-run changed only .gitignore', sameSet(changedFiles, ['.gitignore']), changedFiles.join(', '));
+check('its undo line names only .gitignore, for git checkout', undo !== null && undo.unknown.length === 0 && sameSet(undo.checkout, ['.gitignore']) && undo.del.length === 0 && undo.dirs.length === 0 && undo.byHand.length === 0, r.out);
+if (undo) { applyUndo(repo, undo); check('carrying out that undo line restores the tree exactly', treeSnapshot(repo) === treeBefore); run(repo, realSeedRoot); }
+r = run(repo, realSeedRoot);
+check('a second re-run neither duplicates the line nor prints an undo line', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1 && !/Undo:/.test(r.out), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// A migration merges the line too, once, and the record it writes is ignored.
+repo = makeCopyInstall(true);
+r = run(repo, realSeedRoot, ['--force']);
+check('a migration adds the migration record line once', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1, read(repo, '.gitignore'));
+check('after a migration the record is ignored and the state file is not', spawnSync('git', ['check-ignore', '-q', MIG_LINE], { cwd: repo }).status === 0 && spawnSync('git', ['check-ignore', '-q', '.claude/.toolkit-state.json'], { cwd: repo }).status === 1);
+check('the migration keeps its own undo line', /Undo: git checkout -- \.claude VERSION \.gitattributes \.gitignore ; then delete/.test(r.out), r.out);
+r = run(repo, realSeedRoot);
+check('a re-run after the migration does not add the line again', r.status === 0 && countLine(read(repo, '.gitignore'), MIG_LINE) === 1 && !/Undo:/.test(r.out), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+fs.rmSync(realSeedRoot, { recursive: true, force: true });
+
+// Paths are shell-quoted. Every path setup writes is a fixed name, so the
+// helpers are checked directly, and a project folder with a space proves the
+// line stays project-relative.
+console.log('\n4-quote. shell quoting in the undo line');
+const helpers = require(SCRIPT);
+check('a safe path stays bare', helpers.shellQuote('.claude/rules/toolkit.md') === '.claude/rules/toolkit.md');
+check('a path with a space is single-quoted', helpers.shellQuote('my notes/plan one.md') === "'my notes/plan one.md'");
+check('shell characters and an inner single quote are quoted safely', helpers.shellQuote("it's $HOME;x") === "'it'\\''s $HOME;x'");
+const qLine = helpers.undoLine({ isRepo: true, created: ['my notes/plan one.md', "it's $HOME;x"], createdDirs: ['my notes/'], checkout: ['a b/.gitignore'], byHand: [] });
+const qParsed = undoOf('  ' + qLine);
+check('a quoted undo line reads back to the same paths', qParsed !== null && JSON.stringify(qParsed.del) === JSON.stringify(['my notes/plan one.md', "it's $HOME;x"]) && JSON.stringify(qParsed.dirs) === JSON.stringify(['my notes/']) && JSON.stringify(qParsed.checkout) === JSON.stringify(['a b/.gitignore']), qLine);
+check('a run that changed nothing has no undo line', helpers.undoLine({ isRepo: false, created: [], createdDirs: [], checkout: [], byHand: [] }) === null);
+const spacedParent = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-space-'));
+repo = path.join(spacedParent, 'my project');
+fs.mkdirSync(repo);
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+commitAll(repo, 'init');
+treeBefore = treeSnapshot(repo);
+dirsBefore = dirSnapshot(repo);
+r = run(repo, pluginRoot);
+undo = undoOf(r.out);
+check('in a project folder with a space the undo line holds no absolute path', r.status === 0 && undo !== null && r.out.trim().split('\n').pop().indexOf(spacedParent) === -1 && undo.del.every(p => !path.isAbsolute(p)), r.out);
+if (undo) { applyUndo(repo, undo); check('and carrying it out from the project folder restores the tree', treeSnapshot(repo) === treeBefore && sameSet(dirSnapshot(repo), dirsBefore)); }
+fs.rmSync(spacedParent, { recursive: true, force: true });
 
 // An existing .gitattributes is the project's own: only a migration merges it.
 // It lacks the seed rule on purpose, so any merge would change it.
@@ -343,8 +515,11 @@ fs.rmSync(newerRoot, { recursive: true, force: true });
 console.log('\n5. a project that is not a git repository');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-'));
 write(repo, 'README.md', '# app\n');
+filesBefore = fileList(repo);
 r = run(repo, pluginRoot);
-check('a fresh non-repo project is seeded (nothing to undo)', r.status === 0 && exists(repo, '.claude/rules/toolkit.md'), r.out);
+check('a fresh non-repo project is seeded', r.status === 0 && exists(repo, '.claude/rules/toolkit.md'), r.out);
+undo = undoOf(r.out);
+check('its undo line says there is no git undo and lists the created files', undo !== null && undo.noGit && undo.unknown.length === 0 && undo.checkout.length === 0 && sameSet(undo.del, fileList(repo).filter(f => !filesBefore.includes(f))), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
 fs.rmSync(pluginRoot, { recursive: true, force: true });
