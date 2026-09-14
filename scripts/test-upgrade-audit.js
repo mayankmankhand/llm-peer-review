@@ -19,7 +19,12 @@
 //     must not trip C-11, beside real mentions that must;
 //   - .gitignore files git itself judges (a broad folder pattern, a negation, a
 //     negation under an ignored folder, two file patterns), where C-10 must
-//     agree with git and never advise deleting a broad line.
+//     agree with git and never advise deleting a broad line;
+//   - a migration recorded on native Windows (backslash paths, a drive letter,
+//     a `..` segment), where C-6 keeps its hashes and still refuses unsafe paths;
+//   - a retired Skill row for a skill the project owns (C-9 leaves it), a
+//     .gitattributes scripts rule in a project that keeps scripts (C-10 leaves
+//     it), and acceptEdits at the top level, under permissions, and in both.
 // Every emitted receipt is run through `bash -c` from its fixture project and
 // must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise (a future and an old
@@ -93,7 +98,9 @@ function receiptShows(f, r) {
   const rows = (f.fields || []).find(x => /rows|Entries/i.test(x.label));
   if (f.id === 'C-6') {
     const hashes = (r.stdout.match(/\b[0-9a-f]{64}\b/g) || []);
-    return r.stdout.includes(f.file.relPath) && (!/hash/.test(f.receipt.expect) || (hashes.length === 2 && hashes[0] !== hashes[1]));
+    // The record may spell the path with Windows backslashes (doubled in JSON).
+    const named = r.stdout.includes(f.file.relPath) || r.stdout.includes(f.file.relPath.split('/').join('\\\\'));
+    return named && (!/hash/.test(f.receipt.expect) || (hashes.length === 2 && hashes[0] !== hashes[1]));
   }
   if (/^absent: /.test(f.receipt.expect)) return r.stdout.trim() === f.receipt.expect;
   if (/missing: <row>/.test(f.receipt.expect)) return rows && outLines(r.stdout).length === rows.value.split(' ; ').length && outLines(r.stdout).every(l => l.startsWith('missing: '));
@@ -185,13 +192,53 @@ console.log('\n3. C-6 evidence is the copy-install record, never a diff against 
   check('the receipt shows the record line, the manifest hash and the backup copy\'s different hash', !!f && out.status === 0 && out.stdout.includes(sha(ORIGINAL)) && out.stdout.includes(sha(EDITED)) && sha(ORIGINAL) !== sha(EDITED) && /"rel": "\.claude\/scripts\/render-html\.js"/.test(out.stdout), out.out);
   check('the receipt diffs nothing against the plugin root', !!f && !/\bdiff\b/.test(f.receipt.check) && !f.receipt.check.includes(PLUGIN));
   check('the fix names the tagged file the backup came from', !!f && f.fix.includes('https://github.com/mayankmankhand/llm-peer-review/blob/v6.3.3/.claude/scripts/render-html.js') && /never against the current plugin copy/.test(f.fix), f && f.fix);
+  check('the convention\'s fix and the tagged base are separate sentences', !!f && /[a-z]\. Base for your backup: https:\/\//.test(f.fix) && !/\.\. Base/.test(f.fix), f && f.fix);
   check('the fields carry the backup and its base, not the current plugin copy', !!f && f.fields.some(x => x.label === 'Your copy' && x.value.endsWith('render-html.js')) && f.fields.some(x => x.label === 'Toolkit copy it came from' && /blob\/v6\.3\.3\//.test(x.value)) && !f.fields.some(x => /Plugin copy/.test(x.label)));
+}
+
+console.log('\n3b. C-6 on a migration recorded on native Windows (backslash paths)');
+{
+  // setup-project.js records paths with path.relative, which writes
+  // backslashes on Windows; the old installer's manifest keys may carry them too.
+  const WIN = path.join(TMP, 'windows-migrated');
+  const WIN_DIR = 'backups/.toolkit-backup-20260912-130000-plugin';
+  const winPath = (p) => p.split('/').join('\\');
+  const GPT_ORIGINAL = '// ask-gpt.js as the 6.3.3 installer wrote it\n';
+  const GPT_EDITED = GPT_ORIGINAL + '// my Windows fix\n';
+  write(WIN, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'copy-migrated', previousVersion: '6.3.3' }));
+  write(WIN, WIN_DIR + '/.claude/.toolkit-manifest.json', JSON.stringify({ version: '6.3.3', files: { '.claude/scripts/render-html.js': sha(ORIGINAL), [winPath('.claude/scripts/ask-gpt.js')]: sha(GPT_ORIGINAL) } }, null, 2) + '\n');
+  write(WIN, WIN_DIR + '/.claude/scripts/render-html.js', EDITED);
+  write(WIN, WIN_DIR + '/.claude/scripts/ask-gpt.js', GPT_EDITED.replace(/\n/g, '\r\n'));
+  write(WIN, '.claude/.toolkit-migration.json', JSON.stringify({ from: '6.3.3', to: '7.0.0', backupDir: winPath(WIN_DIR), modified: [
+    { rel: '.claude/scripts/render-html.js', backup: winPath(WIN_DIR + '/.claude/scripts/render-html.js'), pluginCopy: 'scripts/render-html.js' },
+    { rel: winPath('.claude/scripts/ask-gpt.js'), backup: winPath(WIN_DIR + '/.claude/scripts/ask-gpt.js'), pluginCopy: 'scripts/ask-gpt.js' },
+    { rel: '.claude/scripts/gen-media.js', backup: 'C:\\Users\\me\\gen-media.js', pluginCopy: 'scripts/gen-media.js' },
+    { rel: '..\\outside\\escape.js', backup: '..\\outside\\escape.js', pluginCopy: 'x' },
+  ] }, null, 2));
+  const res = audit(WIN);
+  const c6 = res.findings.filter(x => x.id === 'C-6');
+  const one = (rel) => c6.find(x => x.file.relPath === rel);
+  const render = one('.claude/scripts/render-html.js');
+  const gpt = one('.claude/scripts/ask-gpt.js');
+  const media = one('.claude/scripts/gen-media.js');
+  const shows = (f) => { const out = f ? runReceipt(WIN, f) : { status: -1, stdout: '' }; return { ok: !!f && receiptShows(f, out), out }; };
+  let s = shows(render);
+  check('a backslash backup path keeps the evidence: both hashes appear in the receipt', s.ok && s.out.stdout.includes(sha(ORIGINAL)) && s.out.stdout.includes(sha(EDITED)) && /hash/.test(render.receipt.expect), s.out.stdout);
+  check('  and the Your copy field names the backup with forward slashes', !!render && render.fields.some(x => x.label === 'Your copy' && x.value === WIN_DIR + '/.claude/scripts/render-html.js'), render && JSON.stringify(render.fields));
+  s = shows(gpt);
+  check('a backslash rel is normalized, and its receipt finds the record and manifest spelling and both hashes', s.ok && s.out.stdout.includes(sha(GPT_ORIGINAL)) && s.out.stdout.includes(sha(GPT_EDITED)) && /blob\/v6\.3\.3\/\.claude\/scripts\/ask-gpt\.js/.test(gpt.fix), s.out.stdout);
+  check('a drive-letter backup is still refused and never echoed', !!media && media.fields.some(x => x.label === 'Your copy' && x.value === '(no backup recorded)') && !/hash/.test(media.receipt.expect) && !/C:|Users/.test(res.stdout), media && JSON.stringify(media));
+  check('a `..` segment after normalization is still skipped and never echoed', c6.length === 3 && /skipped 1 migration record/.test(res.summary) && !/escape\.js|outside/.test(res.stdout), res.summary);
+  const badWin = allReceiptsShow(WIN, c6);
+  check('every C-6 receipt over the Windows record runs and shows its evidence', badWin.length === 0, badWin.join(' | '));
 }
 
 // --- 4. a 7.0.0-stamped project with the 7.0.x seed's stale text, and its clean twin -----
 const PWSH_ROW = RETIRED.find(x => x.startsWith('Bash(pwsh'));
 const RETIRED_KEPT = ['Bash(bash scripts/setup/bump-version.sh *)', 'Bash(grep "\\\\.md$")', PWSH_ROW, 'Skill(review)'];
 const MISSING_ROW = 'Skill(tk:upgrade)';
+// Retired rows naming the project's own playground skill: its own grants, never reported.
+const OWNED_RETIRED = ['Skill(playground)', 'Skill(playground:*)'];
 // Prose and URLs that name toolkit words without being mentions (the lesson on
 // detection patterns tested against ordinary prose).
 const PROSE = [
@@ -213,7 +260,7 @@ const STALE = path.join(TMP, 'stale');
 commonFiles(STALE);
 write(STALE, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }, null, 2));
 write(STALE, '.claude/rules/toolkit.md', stampRules('7.0.0'));
-write(STALE, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.filter(x => x !== MISSING_ROW).concat(RETIRED_KEPT, ['Skill(review-code)', 'Bash(make ours *)']), additionalDirectories: ['/tmp'] }, defaultMode: 'acceptEdits' }, null, 2) + '\n');
+write(STALE, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.filter(x => x !== MISSING_ROW).concat(RETIRED_KEPT, OWNED_RETIRED, ['Skill(review-code)', 'Bash(make ours *)']), additionalDirectories: ['/tmp'] }, defaultMode: 'acceptEdits' }, null, 2) + '\n');
 write(STALE, '.gitattributes', '* text=auto\n\n*.sh text eol=lf\nscripts/** text eol=lf\n.claude/scripts/** text eol=lf\n');
 write(STALE, '.gitignore', 'node_modules/\n# Toolkit install manifest (auto-generated by setup on every run)\n.claude/.toolkit-manifest.json\n\n# Toolkit backups (originals preserved by setup.sh before overwrite/delete)\n.toolkit-backup-*/\n.claude/.toolkit-*.json\n');
 write(STALE, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-README.md')).replace('node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/render-html.js', 'node .claude/scripts/render-html.js'));
@@ -226,7 +273,7 @@ write(STALE, '.claude/commands/myteam-ship.md', [
 ].join('\n'));
 
 console.log('\n4. a 7.0.0-stamped project audited at 7.1.0');
-check('the fixture rows are really in the shipped retired list, and the missing row in the seed', RETIRED_KEPT.every(x => RETIRED.includes(x)) && SEED_ALLOW.includes(MISSING_ROW) && !RETIRED.includes('Skill(review-code)'));
+check('the fixture rows are really in the shipped retired list, and the missing row in the seed', RETIRED_KEPT.concat(OWNED_RETIRED).every(x => RETIRED.includes(x)) && SEED_ALLOW.includes(MISSING_ROW) && !RETIRED.includes('Skill(review-code)'));
 check('the artifacts fixture really carries the old script path', read(path.join(STALE, 'artifacts/README.md')).includes('node .claude/scripts/render-html.js'));
 r = audit(STALE);
 by = (id) => r.findings.filter(f => f.id === id);
@@ -237,7 +284,12 @@ const c9Retired = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Re
 const c9Mode = by('C-9').find(f => /defaultMode/.test(f.what));
 check('C-9 reports the missing toolkit row, fixed by re-running /tk:setup', !!c9Missing && c9Missing.fields[0].value === MISSING_ROW && /\/tk:setup/.test(c9Missing.fix));
 check('C-9 reports exactly the retired rows the project still has', !!c9Retired && c9Retired.fields[0].value.split(' ; ').sort().join('\n') === RETIRED_KEPT.slice().sort().join('\n') && /remove/.test(c9Retired.fix), c9Retired && c9Retired.fields[0].value);
+check('C-9 leaves the retired Skill(playground) rows alone (the project owns a playground skill) and still reports the unowned Skill(review)', !!c9Retired && !/playground/.test(c9Retired.fields[0].value) && c9Retired.fields[0].value.split(' ; ').includes('Skill(review)') && !r.findings.some(f => f.id !== 'C-9' && (f.fields || []).some(x => /playground/.test(x.value))), c9Retired && c9Retired.fields[0].value);
 check('C-9 reports acceptEdits as its own finding, a question and never an auto-fix', !!c9Mode && c9Mode !== c9Retired && c9Mode !== c9Missing && /question for the user/.test(c9Mode.fix) && /never an auto-fix/.test(c9Mode.fix) && by('C-9').length === 3);
+{
+  const expectLine = read(path.join(STALE, '.claude/settings.local.json')).split('\n').findIndex(l => /"defaultMode"/.test(l)) + 1;
+  check('the top-level acceptEdits is worded as a leftover that may have no effect, to delete or move under permissions', !!c9Mode && /top-level/.test(c9Mode.what) && /leftover key an older toolkit seed wrote/.test(c9Mode.what) && /may have no effect/.test(c9Mode.what) && /delete the leftover key/.test(c9Mode.fix) && /move it under "permissions"/.test(c9Mode.fix) && c9Mode.file.line === expectLine, c9Mode && (c9Mode.what + ' / ' + c9Mode.fix + ' / ' + c9Mode.file.line));
+}
 const c10 = by('C-10');
 check('C-10 reports the .gitattributes line naming .claude/scripts/', c10.some(f => f.file.relPath === '.gitattributes' && f.file.line === 5));
 check('C-10 reports the manifest block, with the seed line for the rewritten comment', [2, 3, 5].every(n => c10.some(f => f.file.relPath === '.gitignore' && f.file.line === n)) && c10.find(f => f.file.relPath === '.gitignore' && f.file.line === 5).fields[0].value.startsWith('# Toolkit backups (files /tk:setup') && !c10.find(f => f.file.relPath === '.gitignore' && f.file.line === 3).fields);
@@ -339,6 +391,51 @@ console.log('\n4c. C-10: a line that ignores the state file is judged with the w
   // Apply the fix exactly as it reads, then let git and the audit judge it.
   fs.appendFileSync(path.join(k.dir, '.gitignore'), '!' + STATE_FILE + '\n');
   check('applying that fix leaves the state file tracked by git and C-10 quiet, with *.json still ignoring other files', !k.gitIgnored() && k.findings().length === 0 && spawnSync('git', ['check-ignore', '-q', 'package.json'], { cwd: k.dir, env: gitEnv }).status === 0);
+}
+
+console.log('\n4d. C-10: the .gitattributes rule for .claude/scripts/ stays while the project keeps scripts there');
+{
+  const STALE_ATTR = '* text=auto\n.claude/scripts/** text eol=lf\n';
+  function attrCase(name, files) {
+    const dir = path.join(TMP, 'gitattributes-' + name);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }));
+    write(dir, '.gitattributes', STALE_ATTR);
+    for (const rel of files) write(dir, rel, '// ours\n');
+    return { dir, findings: audit(dir).findings.filter(f => f.id === 'C-10' && f.file.relPath === '.gitattributes') };
+  }
+  let k = attrCase('keeps', ['.claude/scripts/our-report.js']);
+  check('a project that keeps its own script under .claude/scripts/ is not told to drop the rule', k.findings.length === 0, JSON.stringify(k.findings));
+  k = attrCase('nested', ['.claude/scripts/lib/our-helper.js']);
+  check('a script in a subfolder counts as kept too', k.findings.length === 0, JSON.stringify(k.findings));
+  k = attrCase('node-modules-only', ['.claude/scripts/node_modules/pkg/index.js']);
+  check('a folder holding only node_modules keeps no scripts: the rule is reported on line 2', k.findings.length === 1 && k.findings[0].file.line === 2 && allReceiptsShow(k.dir, k.findings).length === 0, JSON.stringify(k.findings));
+  k = attrCase('empty-folder', []);
+  fs.mkdirSync(path.join(k.dir, '.claude', 'scripts', 'empty'), { recursive: true });
+  k.findings = audit(k.dir).findings.filter(f => f.id === 'C-10' && f.file.relPath === '.gitattributes');
+  check('an empty .claude/scripts/ folder keeps no scripts: the rule is reported', k.findings.length === 1 && k.findings[0].file.line === 2, JSON.stringify(k.findings));
+}
+
+console.log('\n4e. C-9: the acceptEdits question is worded for where the key sits');
+{
+  function modeCase(name, settings) {
+    const dir = path.join(TMP, 'mode-' + name);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }));
+    write(dir, '.claude/settings.local.json', settings);
+    const findings = audit(dir).findings.filter(f => f.id === 'C-9' && /defaultMode/.test(f.what));
+    return { dir, findings, lineOf: (re) => settings.split('\n').findIndex(l => re.test(l)) + 1 };
+  }
+  const isQuestion = (f) => /question for the user/.test(f.fix) && /never an auto-fix/.test(f.fix);
+  const top = (f) => /top-level/.test(f.what) && /leftover key/.test(f.what) && /may have no effect/.test(f.what) && /move it under "permissions"/.test(f.fix);
+  const under = (f) => /under "permissions"/.test(f.what) && /auto-accepts every file edit/.test(f.what) && /whether auto-accepting file edits is wanted/.test(f.fix) && !/leftover/.test(f.what + f.fix);
+  let k = modeCase('permissions', JSON.stringify({ permissions: { allow: SEED_ALLOW, defaultMode: 'acceptEdits' } }, null, 2) + '\n');
+  check('under permissions: one question that asks whether auto-accepting edits is wanted, not a leftover', k.findings.length === 1 && under(k.findings[0]) && isQuestion(k.findings[0]) && k.findings[0].file.line === k.lineOf(/"defaultMode"/) && allReceiptsShow(k.dir, k.findings).length === 0, JSON.stringify(k.findings));
+  const both = '{\n  "defaultMode": "acceptEdits",\n  "env": { "defaultMode": "acceptEdits" },\n  "permissions": {\n    "allow": ' + JSON.stringify(SEED_ALLOW) + ',\n    "defaultMode": "acceptEdits"\n  }\n}\n';
+  k = modeCase('both', both);
+  const t = k.findings.find(top);
+  const u = k.findings.find(under);
+  check('both places: two questions, each pointing at its own line (a same-named key elsewhere is ignored)', k.findings.length === 2 && !!t && !!u && k.findings.every(isQuestion) && t.file.line === 2 && u.file.line === 6 && allReceiptsShow(k.dir, k.findings).length === 0, JSON.stringify(k.findings.map(f => [f.file.line, f.what])));
+  k = modeCase('none', JSON.stringify({ permissions: { allow: SEED_ALLOW, defaultMode: 'default' } }, null, 2));
+  check('a defaultMode other than acceptEdits is no finding', k.findings.length === 0, JSON.stringify(k.findings));
 }
 
 // --- 5. parser mechanics the real file does not exercise ----------------------------
