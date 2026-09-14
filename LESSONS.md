@@ -236,3 +236,12 @@
 
 - **A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.**
 - **A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.**
+
+## Issues 172-177 (v7.1.0, safe distribution)
+
+- **An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.**
+- **A user interrupt also stops running workflow agents, and nothing announces it.**
+- **A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.**
+- **Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.**
+- **Test an undo instruction by executing it, not by matching its text.**
+- **A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.**
