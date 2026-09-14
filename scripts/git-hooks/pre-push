@@ -12,17 +12,35 @@
 #      A non-zero exit blocks the push with the tripwire's own exit code.
 #   2. A push that updates refs/heads/main or a refs/tags/v* tag also runs the
 #      release gate (scripts/release-check.js) and blocks when it fails.
-#      Deleted refs (local sha all zeros) never trigger it.
+#      Deleted refs (local sha all zeros) never trigger it. The gate is told
+#      exactly what is pushed, since that need not be HEAD:
+#        refs/heads/main     -> --commit <local sha>
+#        refs/tags/<tag>     -> --pushing-tag <tag>:<local sha>
+#      so it checks the pushed commit and that each pushed tag is
+#      v<plugin.json version> of the commit it points at.
 #
 # Tests substitute the two scripts with TK_PRE_PUSH_CHECK and TK_RELEASE_CHECK
-# (paths to node scripts), so routing is tested without the real checks.
+# (paths to node scripts), so routing is tested without the real checks. A
+# substitution always prints a notice, so a variable left exported in a shell
+# can never switch off the secret scan or the gate unnoticed.
 #
 # Exit codes: 0 push may proceed; anything else blocks it.
 
+remote=$1
 tripwire=${TK_PRE_PUSH_CHECK:-.claude/scripts/pre-push-check.js}
 release_check=${TK_RELEASE_CHECK:-scripts/release-check.js}
 
+if [ -n "$TK_PRE_PUSH_CHECK" ]; then
+  echo "pre-push: TK_PRE_PUSH_CHECK is set; the real M11 tripwire (.claude/scripts/pre-push-check.js) was replaced by $TK_PRE_PUSH_CHECK" >&2
+fi
+if [ -n "$TK_RELEASE_CHECK" ]; then
+  echo "pre-push: TK_RELEASE_CHECK is set; the real release gate (scripts/release-check.js) was replaced by $TK_RELEASE_CHECK" >&2
+fi
+
 # Read the ref lines first: stdin is git's, and the checks must not eat it.
+# The loop reads git's stdin directly (no pipe), so it runs in this shell and
+# the `set --` below builds the release-check arguments with safe quoting.
+set --
 release=
 while read -r local_ref local_sha remote_ref remote_sha; do
   # A deletion pushes nothing, so it can never publish a release.
@@ -31,24 +49,31 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     *) continue ;;
   esac
   case $remote_ref in
-    refs/heads/main | refs/tags/v*) release="$release $remote_ref" ;;
+    refs/heads/main)
+      release="$release $remote_ref"
+      set -- "$@" --commit "$local_sha"
+      ;;
+    refs/tags/v*)
+      release="$release $remote_ref"
+      set -- "$@" --pushing-tag "${remote_ref#refs/tags/}:$local_sha"
+      ;;
   esac
 done
 
 node "$tripwire" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
-  echo "pre-push: tripwire exited $status; push to $1 blocked" >&2
+  echo "pre-push: tripwire exited $status; push to $remote blocked" >&2
   exit "$status"
 fi
 
 [ -z "$release" ] && exit 0
 
 echo "pre-push: release push to$release; running $release_check" >&2
-node "$release_check" </dev/null
+node "$release_check" "$@" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
-  echo "pre-push: release check exited $status; push to $1 blocked" >&2
+  echo "pre-push: release check exited $status; push to $remote blocked" >&2
   exit "$status"
 fi
 exit 0
