@@ -22,7 +22,7 @@ If you are arriving with your own commands or an existing workflow rather than a
 
 ## Releasing (Maintainer)
 
-Users receive the plugin from a release tag, not from main: the `tk` entry in `.claude-plugin/marketplace.json` pins the tag `v<version>`, so nothing merged to main reaches anyone until a release tags it.
+Users receive the plugin from a release tag, not from main: from 7.1.0 the `tk` entry in `.claude-plugin/marketplace.json` pins the tag `v<version>`, so nothing merged to main reaches anyone until a release tags it.
 
 **Once per clone, install the pre-push hook:**
 
