@@ -34,15 +34,26 @@
 //     gone), a colon-star row (`:*`) counts as a real row in C-8 and C-9, the
 //     C-9 fix names only the source that holds the rows, and C-6 words
 //     .gitattributes advice by what was checked (lines C-10 lists, none, or no
-//     backup copy to compare) while every other entry keeps its upstream advice.
+//     backup copy to compare) while every other entry keeps its upstream advice;
+//   - a migration record git still tracks (its own git repo per case): C-10
+//     reports it with row counts and never the rows, warn only when a row
+//     carries an absolute path, trusts an ignore rule only from a .gitignore
+//     in the record's folder or above it (never .git/info/exclude or a global
+//     excludes file, even one named .gitignore outside the project, which
+//     collaborators never get), and stays quiet once `git rm --cached` untracks
+//     it, for an untracked or ignored record, outside a git repository, and
+//     with no git on PATH; untracking leaves C-9's lost rows and C-10's lost
+//     lines exactly as they were.
 // Every emitted receipt is run through `bash -c` from its fixture project and
 // must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise (a future and an old
 // convention, `Runs: every upgrade` on an old one, a pattern with a backtick,
-// `$` and `"`). Four mutation checks prove the tests bite: a copy of the script
+// `$` and `"`). Six mutation checks prove the tests bite: a copy of the script
 // with the regex receipt unquoted, one with the always-run exemption removed,
-// one restoring rows whose script file is gone, and one that forgets the lines
-// earlier toolkit releases shipped, must each fail the check that guards it.
+// one restoring rows whose script file is gone, one that forgets the lines
+// earlier toolkit releases shipped, one that never asks git whether the
+// record is tracked, and one that trusts any ignore source named .gitignore
+// wherever it lives, must each fail the check that guards it.
 //
 //   node scripts/test-upgrade-audit.js
 //
@@ -72,6 +83,12 @@ function finish() {
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'upgrade-audit-test-'));
 process.on('exit', () => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) { /* best effort */ } });
+// Git settings that keep this machine's own git config out of the fixtures.
+// GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM skip the global and system config
+// files, but git still reads its default global excludes file
+// ($XDG_CONFIG_HOME/git/ignore or ~/.config/git/ignore) when core.excludesFile
+// is unset, so a command-scope core.excludesFile=/dev/null turns that off too.
+const HERMETIC_GIT = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.excludesFile', GIT_CONFIG_VALUE_0: '/dev/null' };
 
 // --- 0. the plugin root ----------------------------------------------------------
 console.log('\n0. a plugin root built at 7.1.0');
@@ -90,7 +107,7 @@ function audit(proj, args, opts) {
   const o = opts || {};
   const argv = [o.script || SCRIPT, '--project', proj, '--plugin-root', o.pluginRoot || PLUGIN];
   if (!o.defaultConventions) argv.push('--conventions', o.conventions || REAL_CONVENTIONS);
-  const r = spawnSync('node', argv.concat(args || []), { encoding: 'utf8' });
+  const r = spawnSync('node', argv.concat(args || []), { encoding: 'utf8', env: o.env });
   let findings = [];
   try { findings = (r.stdout || '').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch (e) { findings = null; }
   return { status: r.status, findings: findings || [], parsed: findings !== null, stdout: r.stdout || '', summary: r.stderr || '' };
@@ -114,6 +131,8 @@ function receiptShows(f, r) {
     return named && (!/hash/.test(f.receipt.expect) || (hashes.length === 2 && hashes[0] !== hashes[1]));
   }
   if (/^absent: /.test(f.receipt.expect)) return r.stdout.trim() === f.receipt.expect;
+  // A tracked migration record: git prints the record's path and nothing else.
+  if (/because it tracks the file/.test(f.receipt.expect)) return r.stdout.trim() === f.file.relPath;
   if (/missing: <row>/.test(f.receipt.expect)) return rows && outLines(r.stdout).length === rows.value.split(' ; ').length && outLines(r.stdout).every(l => l.startsWith('missing: '));
   // A lost-row or lost-line finding prints exactly its listed items, each once.
   for (const [marker, label] of [['restorable', 'Lost rows'], ['lost', 'Lost lines']]) {
@@ -374,7 +393,7 @@ console.log('\n4b. C-11: closing tags and root-relative paths are not mentions; 
 console.log('\n4c. C-10: a line that ignores the state file is judged with the whole .gitignore, as git does');
 {
   const STATE_FILE = '.claude/.toolkit-state.json';
-  const gitEnv = Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' });
+  const gitEnv = Object.assign({}, process.env, HERMETIC_GIT);
   // A git repo per case, so git itself confirms whether the state file is ignored.
   function ignoreCase(name, gitignore) {
     const dir = path.join(TMP, 'gitignore-' + name);
@@ -594,6 +613,159 @@ function repairCase(name, o) {
   }
 }
 
+// --- 4g. a migration record git still tracks ---------------------------------------------
+// A 7.0.x migration wrote the record and a project committed it; the 7.0.0 and
+// 7.0.1 format lists the removed rows, some with this machine's absolute paths.
+// Each case is its own git repo, so git itself says whether the record is tracked.
+console.log('\n4g. C-10: a migration record git still tracks');
+const RECORD_REL = '.claude/.toolkit-migration.json';
+const trackedEnv = Object.assign({}, process.env, HERMETIC_GIT);
+const gitIn = (dir, args) => spawnSync('git', args, { cwd: dir, env: trackedEnv, encoding: 'utf8' });
+// A made-up machine path, assembled so no fixture line spells it whole.
+const TRACKED_ABS_ROW = 'Bash(node ' + '/srv/' + 'someone-machine/app/.claude/scripts/our-sync.js *)';
+const TRACKED_REL_ROW = 'Bash(node .claude/scripts/our-lint.js *)';
+// o.git: 'none' (no repo), 'untracked' (repo, record never added), 'commit' (record committed).
+function trackedCase(name, record, o) {
+  const dir = path.join(TMP, 'tracked-' + name);
+  write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }));
+  write(dir, '.gitignore', o.gitignore || 'node_modules/\n');
+  write(dir, RECORD_REL, JSON.stringify(record, null, 2) + '\n');
+  if (o.git !== 'none') {
+    gitIn(dir, ['init', '-q']);
+    gitIn(dir, ['add', '.gitignore', '.claude/.toolkit-state.json']);
+    if (o.git === 'commit') gitIn(dir, ['add', '-f', RECORD_REL]);
+    gitIn(dir, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture']);
+  }
+  return dir;
+}
+const trackedOf = (res) => res.findings.filter(f => f.id === 'C-10' && f.file.relPath === RECORD_REL);
+// The core check the mutation below must break: one warn finding for a
+// committed record holding an absolute row and a relative one, counted, never listed.
+const trackedArrayFires = (res) => {
+  const f = trackedOf(res);
+  return res.status === 0 && f.length === 1 && f[0].severity === 'warn' && /^Should fix\. The migration record \.claude\/\.toolkit-migration\.json is committed to git\./.test(f[0].what)
+    && /This copy lists 2 permission rows, 1 of them with an absolute path on this machine\./.test(f[0].what);
+};
+const ARRAY_RECORD = { at: '2026-09-12T10:00:00.000Z', from: '6.3.3', to: '7.0.1', backupDir: '.toolkit-backup-20260912-100000-plugin', removed: [], custom: [], deadPermissions: [TRACKED_ABS_ROW, TRACKED_REL_ROW] };
+const RECORD = { from: '6.3.3', to: '7.0.1', deadPermissions: [TRACKED_REL_ROW] };
+const asksSeedLine = (f) => f.length === 1 && f[0].fix.includes('add the seed\'s line `.claude/.toolkit-migration.json` to .gitignore (re-running /tk:setup merges it)') && !/already ignores the file/.test(f[0].fix);
+// A global excludes file that happens to be named .gitignore, in a folder
+// outside the project (as when core.excludesFile points at a home folder's
+// .gitignore), set through a temp GIT_CONFIG_GLOBAL, never the real one. Git
+// reports it by its full path, which ends in /.gitignore but is no folder of
+// the work tree, so it stays this machine's rule alone.
+function homeGitignoreCase(name) {
+  const dir = trackedCase(name, RECORD, { git: 'commit' });
+  const homeIgnore = path.join(TMP, 'outside-home', '.gitignore');
+  write(path.dirname(homeIgnore), '.gitignore', RECORD_REL + '\n');
+  const config = path.join(TMP, 'outside-home-gitconfig');
+  fs.writeFileSync(config, '[core]\n\texcludesFile = ' + homeIgnore + '\n');
+  return { dir, env: Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' }) };
+}
+// The check the folder-scope mutation below must break.
+const homeGitignoreAsksSeedLine = (res) => {
+  const f = trackedOf(res);
+  return res.status === 0 && asksSeedLine(f) && /global excludes file/.test(f[0].fix) && !res.stdout.includes(TMP);
+};
+{
+  check('the shipped seed gitignore carries the record\'s ignore line the fix names', read(path.join(PLUGIN, 'seed', 'gitignore')).split(/\r?\n/).includes(RECORD_REL));
+  const dir = trackedCase('array', ARRAY_RECORD, { git: 'commit' });
+  check('fixture: git tracks the committed record', gitIn(dir, ['ls-files', '--error-unmatch', '--', RECORD_REL]).status === 0);
+  const res = audit(dir);
+  const f = trackedOf(res)[0];
+  check('a committed 7.0.x record with one absolute and one relative row: one warn finding that counts the rows', trackedArrayFires(res), JSON.stringify(trackedOf(res)) + res.summary);
+  check('  the wording says it only matters on this machine, pairs with the ignored backup folder, and older versions list this machine\'s rows', !!f && /only matters on this machine \(it pairs with the migration's backup folder, which git ignores\)/.test(f.what) && /older versions of it list this machine's permission rows/.test(f.what), f && f.what);
+  check('  no row, and no part of the machine path, reaches stdout or stderr', !(res.stdout + res.summary).includes('someone-machine') && !(res.stdout + res.summary).includes('our-sync') && !(res.stdout + res.summary).includes('our-lint'), res.stdout.slice(0, 400));
+  check('  the fix stops tracking with git rm --cached, keeps the file, adds the seed\'s ignore line, and leaves history alone', !!f && f.fix.includes('`git rm --cached .claude/.toolkit-migration.json`') && /the file stays on disk/.test(f.fix) && f.fix.includes('add the seed\'s line `.claude/.toolkit-migration.json` to .gitignore (re-running /tk:setup merges it)') && /Earlier commits keep their copy of the file; rewriting git history to remove it is a separate step the owner decides, never part of this fix\./.test(f.fix), f && f.fix);
+  const out = f ? runReceipt(dir, f) : { status: -1, stdout: '', out: '' };
+  check('  the receipt is shell-quoted, runs through bash from the project root, and prints only the tracked path', !!f && f.receipt.check === "git ls-files --error-unmatch -- '.claude/.toolkit-migration.json'" && receiptShows(f, out) && !/our-|someone/.test(out.out), out.out);
+  check('  every receipt of the run shows its evidence', allReceiptsShow(dir, res.findings).length === 0);
+  // No git on PATH at all: git() fails to start, and nothing is reported.
+  const noGitBin = path.join(TMP, 'no-git-bin');
+  fs.mkdirSync(noGitBin, { recursive: true });
+  const nogit = spawnSync(process.execPath, [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--conventions', REAL_CONVENTIONS], { encoding: 'utf8', env: Object.assign({}, process.env, { PATH: noGitBin }) });
+  check('with no git on PATH: exit 0, no tracked-record finding, no stack trace', nogit.status === 0 && !nogit.stdout.includes('committed to git') && !/TypeError|\n\s+at /.test(nogit.stderr), nogit.stderr);
+  const rm = gitIn(dir, ['rm', '-q', '--cached', '--', RECORD_REL]);
+  const after = audit(dir);
+  check('after git rm --cached: the file stays on disk and the audit reports no tracked record', rm.status === 0 && fs.existsSync(path.join(dir, RECORD_REL)) && after.status === 0 && trackedOf(after).length === 0, rm.stderr + JSON.stringify(trackedOf(after)));
+}
+{
+  const dir = trackedCase('count', { at: '2026-09-14T10:00:00.000Z', from: '6.3.3', to: '7.1.0', backupDir: '.toolkit-backup-20260914-100000-plugin', removed: [], custom: [], deadPermissionCount: 7 }, { git: 'commit' });
+  const res = audit(dir);
+  const f = trackedOf(res);
+  check('a tracked record in the 7.1.0 count format: one suggest finding with no row count', res.status === 0 && f.length === 1 && f[0].severity === 'suggest' && /^Optional\. /.test(f[0].what) && /This copy holds no permission rows\./.test(f[0].what) && !/\d/.test(f[0].what) && allReceiptsShow(dir, f).length === 0, JSON.stringify(f));
+}
+{
+  const dir = trackedCase('ignored-tracked', { from: '6.3.3', to: '7.0.1', deadPermissions: [TRACKED_REL_ROW] }, { git: 'commit', gitignore: 'node_modules/\n' + RECORD_REL + '\n' });
+  const res = audit(dir);
+  const f = trackedOf(res);
+  check('a tracked record the .gitignore already ignores, holding no absolute row: one suggest finding that names the ignoring line', res.status === 0 && f.length === 1 && f[0].severity === 'suggest' && /This copy lists 1 permission row, none with an absolute path\./.test(f[0].what) && f[0].fix.includes('.gitignore line 2 already ignores the file') && !/add the seed's line/.test(f[0].fix) && allReceiptsShow(dir, f).length === 0, JSON.stringify(f));
+}
+{
+  // Only a .gitignore reaches collaborators. An ignore rule that lives in
+  // .git/info/exclude or in a global excludes file is this machine's alone, so
+  // the fix still asks for the seed line, even when the global file is named
+  // .gitignore; a nested .gitignore above the record counts, one in another
+  // folder never does, and a winning `!` negation does not ignore the file.
+  let dir = trackedCase('info-exclude', RECORD, { git: 'commit' });
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), '\n' + RECORD_REL + '\n');
+  check('fixture: .git/info/exclude ignores the record', gitIn(dir, ['check-ignore', '-q', '--no-index', '--', RECORD_REL]).status === 0);
+  let f = trackedOf(audit(dir));
+  check('a tracked record ignored only by .git/info/exclude: the fix still asks for the seed line and says the local rule never reaches collaborators', asksSeedLine(f) && /this machine's own settings, \.git\/info\/exclude or a global excludes file, which collaborators never get/.test(f[0].fix), JSON.stringify(f));
+  dir = trackedCase('global-exclude', RECORD, { git: 'commit' });
+  const globalIgnore = path.join(TMP, 'global-excludes');
+  fs.writeFileSync(globalIgnore, RECORD_REL + '\n');
+  const globalConfig = path.join(TMP, 'global-gitconfig');
+  fs.writeFileSync(globalConfig, '[core]\n\texcludesFile = ' + globalIgnore + '\n');
+  const globalEnv = Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: '1' });
+  check('fixture: the global excludes file ignores the record', spawnSync('git', ['check-ignore', '-q', '--no-index', '--', RECORD_REL], { cwd: dir, env: globalEnv }).status === 0);
+  const gres = audit(dir, [], { env: globalEnv });
+  f = trackedOf(gres);
+  check('a tracked record ignored only by a global excludes file: the fix still asks for the seed line, and no machine path is printed', asksSeedLine(f) && /global excludes file/.test(f[0].fix) && !gres.stdout.includes(TMP), JSON.stringify(f));
+  dir = trackedCase('nested-gitignore', RECORD, { git: 'commit' });
+  write(dir, '.claude/.gitignore', '.toolkit-migration.json\n');
+  f = trackedOf(audit(dir));
+  check('a tracked record ignored by .claude/.gitignore: the fix names that line and asks for nothing more', f.length === 1 && f[0].fix.includes('.claude/.gitignore line 1 already ignores the file') && !/add the seed's line/.test(f[0].fix), JSON.stringify(f));
+  dir = trackedCase('negated', RECORD, { git: 'commit', gitignore: '.claude/*.json\n!' + RECORD_REL + '\n' });
+  f = trackedOf(audit(dir));
+  check('a tracked record a .gitignore negation re-includes: the fix asks for the seed line, not "already ignores"', asksSeedLine(f) && !/collaborators never get/.test(f[0].fix), JSON.stringify(f));
+  const home = homeGitignoreCase('home-gitignore');
+  const homeWhy = spawnSync('git', ['check-ignore', '-v', '--no-index', '--', RECORD_REL], { cwd: home.dir, env: home.env, encoding: 'utf8' });
+  check('fixture: git names the .gitignore outside the project, by its full path, as the source that ignores the record', homeWhy.status === 0 && homeWhy.stdout.split('\t')[0].endsWith(path.join('outside-home', '.gitignore') + ':1:' + RECORD_REL) && path.isAbsolute(homeWhy.stdout.split(':')[0]), homeWhy.stdout + homeWhy.stderr);
+  check('a tracked record ignored only by a global excludes file named .gitignore outside the project: the fix asks for the seed line, not "already ignores", and names no machine path', homeGitignoreAsksSeedLine(audit(home.dir, [], { env: home.env })));
+  // A .gitignore in another folder of the project, with patterns that match the
+  // record's name: git scopes them to sub/, so they never reach .claude/.
+  dir = trackedCase('sub-gitignore', RECORD, { git: 'commit' });
+  write(dir, 'sub/.gitignore', '.toolkit-migration.json\n' + RECORD_REL + '\n');
+  check('fixture: sub/.gitignore ignores the record\'s name under sub/ only', gitIn(dir, ['check-ignore', '-q', '--no-index', '--', 'sub/' + RECORD_REL]).status === 0 && gitIn(dir, ['check-ignore', '-q', '--no-index', '--', RECORD_REL]).status !== 0);
+  f = trackedOf(audit(dir, [], { env: trackedEnv }));
+  check('a tracked record at .claude/ with only sub/.gitignore ignoring that name under sub/: the fix asks for the seed line and never names sub/.gitignore', asksSeedLine(f) && !f[0].fix.includes('sub/.gitignore') && !/collaborators never get/.test(f[0].fix), JSON.stringify(f));
+}
+{
+  let dir = trackedCase('untracked', ARRAY_RECORD, { git: 'untracked' });
+  check('an untracked record in a git repo: no tracked-record finding', gitIn(dir, ['ls-files', '--error-unmatch', '--', RECORD_REL]).status !== 0 && trackedOf(audit(dir)).length === 0);
+  dir = trackedCase('ignored', ARRAY_RECORD, { git: 'untracked', gitignore: RECORD_REL + '\n' });
+  check('an ignored, untracked record: no tracked-record finding', gitIn(dir, ['check-ignore', '-q', RECORD_REL]).status === 0 && trackedOf(audit(dir)).length === 0);
+  dir = trackedCase('no-repo', ARRAY_RECORD, { git: 'none' });
+  const res = audit(dir);
+  check('not a git repository: exit 0, no tracked-record finding, no stack trace', gitIn(dir, ['rev-parse', '--show-toplevel']).status !== 0 && res.status === 0 && res.parsed && trackedOf(res).length === 0 && !/TypeError|\n\s+at /.test(res.summary), res.summary);
+}
+{
+  // Untracking changes nothing the record's other readers report: C-9's lost
+  // rows and C-10's lost lines are read from disk, before and after alike.
+  const k = repairCase('tracked', {});
+  gitIn(k.dir, ['init', '-q']);
+  gitIn(k.dir, ['add', '-f', RECORD_REL, '.claude/settings.local.json', '.gitattributes']);
+  gitIn(k.dir, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'fixture']);
+  const before = k.run();
+  const tf = trackedOf(before);
+  check('a damaged 7.0.x project with its record committed: the tracked-record finding (6 rows, 1 absolute) sits beside the lost rows and lines', tf.length === 1 && tf[0].severity === 'warn' && /lists 6 permission rows, 1 of them with an absolute path/.test(tf[0].what) && k.lostRows(before).length === 1 && k.lostLines(before).length === 1, JSON.stringify(tf) + before.summary);
+  check('  its receipts all run and show their evidence', allReceiptsShow(k.dir, before.findings).length === 0);
+  gitIn(k.dir, ['rm', '-q', '--cached', '--', RECORD_REL]);
+  const after = k.run();
+  check('  after git rm --cached, the lost-row and lost-line findings are byte for byte the same and the tracked finding is gone', trackedOf(after).length === 0 && JSON.stringify(k.lostRows(after)) === JSON.stringify(k.lostRows(before)) && JSON.stringify(k.lostLines(after)) === JSON.stringify(k.lostLines(before)), after.summary);
+}
+
 // --- 5. parser mechanics the real file does not exercise ----------------------------
 console.log('\n5. version range and parser mechanics (fixture conventions)');
 const FIXTURE_CONVENTIONS = path.join(TMP, 'conventions.md');
@@ -719,6 +891,24 @@ function mutant(name, from, to) {
   const mf = k.lostLines(mres)[0];
   check('without the historical toolkit lines, that line is reported and the "historical line is not reported" check fails', mres.status === 0 && !!mf && mf.fields[0].value.split(' ; ').includes(HISTORICAL) && !onlyLfs(mres), mres.summary);
   check('restored (the real script), only the LFS line is reported again', onlyLfs(k.res));
+}
+{
+  // The tracked-record check: with git's answer ignored, a committed record goes unreported.
+  const dir = trackedCase('mutant', ARRAY_RECORD, { git: 'commit' });
+  const m = mutant('no-tracked', String.raw`if (tracked !== null && tracked.split(/\r?\n/).includes(MIGRATION_REL)) {`, 'if (false) {');
+  check('the no-tracked-record mutation applies to the source', m.applied);
+  check('without the tracked check, the "committed record gets one warn finding" check fails', !trackedArrayFires(audit(dir, [], { script: m.path })));
+  check('restored (the real script), that check passes again', trackedArrayFires(audit(dir)));
+}
+{
+  // The folder-scope guard: trusting any ignore source whose name ends in
+  // .gitignore takes a global excludes file named .gitignore outside the
+  // project for the project's own, and prints that machine path in the fix.
+  const home = homeGitignoreCase('mutant-home-gitignore');
+  const m = mutant('no-folder-scope', "(m[1].endsWith('/.gitignore') && full.startsWith(m[1].slice(0, -'.gitignore'.length)))", "m[1].endsWith('.gitignore')");
+  check('the no-folder-scope mutation applies to the source', m.applied);
+  check('without the folder-scope guard, the "global excludes file named .gitignore still asks for the seed line" check fails', !homeGitignoreAsksSeedLine(audit(home.dir, [], { script: m.path, env: home.env })));
+  check('restored (the real script), that check passes again', homeGitignoreAsksSeedLine(audit(home.dir, [], { env: home.env })));
 }
 
 console.log('\n9. the version helpers match session-start.js');
