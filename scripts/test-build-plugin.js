@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 // test-build-plugin.js - assertions for scripts/build-plugin.js (issue #167, Step 4;
-// site overrides #176, quoted inline cats #172, seeds #173).
+// site overrides #176, quoted inline cats and the inline command guard #172,
+// seeds #173).
 //
 // Same shape as the other suites (test-render-html.js, test-pre-push-check.js):
 // dependency-free, prints one line per check, exits non-zero on any failure.
 // The rewrite rules are exercised against a small FIXTURE source tree built here;
 // section 5 builds the live .claude/ into a temp dir (never into plugin/), and
-// section 7 builds temp COPIES of the live source with planted breakage.
+// section 7 builds temp COPIES of the live source with planted breakage. A copy
+// never carries a never-push file (settings*.json, .env*), and every temp path is
+// removed on exit, a crash included.
 //
 //   node scripts/test-build-plugin.js
 //
@@ -21,6 +24,20 @@ const path = require('path');
 const BUILD = path.resolve(__dirname, 'build-plugin.js');
 const REPO = path.resolve(__dirname, '..');
 const lib = require(BUILD);
+
+// Every temp path this suite creates, removed when the process exits for any
+// reason (a failed check, a thrown error, Ctrl+C), so no copy is left behind.
+const tempPaths = [];
+function tmpDir(prefix) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempPaths.push(d);
+  return d;
+}
+process.on('exit', () => {
+  for (const p of tempPaths) { try { fs.rmSync(p, { recursive: true, force: true }); } catch (e) { /* best effort */ } }
+});
+process.on('SIGINT', () => process.exit(130));
+process.on('SIGTERM', () => process.exit(143));
 
 let passed = 0;
 const failures = [];
@@ -54,7 +71,7 @@ const BARE_FAMILY = /(^|[^\w./:\-])\/(review|ask)-\*/;
 
 // --- Fixture: a miniature toolkit source with every rewrite case planted ----
 function makeFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-'));
+  const root = tmpDir('build-plugin-');
   const src = path.join(root, '.claude');
   fs.writeFileSync(path.join(root, 'VERSION'), '9.9.9\n');
   write(src, 'commands/review.md', [
@@ -123,11 +140,19 @@ function makeFixture() {
 
 // A temp copy of the live source: .claude/ (without dependencies and worktrees),
 // seed/, VERSION, and the historical list, so a planted break never touches the repo.
+// Never-push files stay behind: .claude/settings*.json (the owner's permissions)
+// and any .env* file. seed/settings.local.json is the committed seed template and
+// is copied, since the build needs it.
+function neverCopy(abs) {
+  const rel = path.relative(REPO, abs).split(path.sep).join('/');
+  return /(^|\/)(node_modules|worktrees)(\/|$)/.test(rel)
+    || /(^|\/)\.env[^/]*$/.test(rel)
+    || /^\.claude\/(.*\/)?settings[^/]*\.json$/.test(rel);
+}
 function copyLiveSource() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-copy-'));
-  const skip = (p) => /(^|[\\/])(node_modules|worktrees)([\\/]|$)/.test(path.relative(REPO, p));
-  fs.cpSync(path.join(REPO, '.claude'), path.join(root, '.claude'), { recursive: true, filter: (p) => !skip(p) });
-  fs.cpSync(path.join(REPO, 'seed'), path.join(root, 'seed'), { recursive: true });
+  const root = tmpDir('build-plugin-copy-');
+  fs.cpSync(path.join(REPO, '.claude'), path.join(root, '.claude'), { recursive: true, filter: (p) => !neverCopy(p) });
+  fs.cpSync(path.join(REPO, 'seed'), path.join(root, 'seed'), { recursive: true, filter: (p) => !neverCopy(p) });
   fs.copyFileSync(path.join(REPO, 'VERSION'), path.join(root, 'VERSION'));
   write(root, 'scripts/historical-managed-paths.txt', read(REPO, 'scripts/historical-managed-paths.txt'));
   return { root, src: path.join(root, '.claude') };
@@ -160,7 +185,7 @@ check('settings path stays a project path', review.includes('`.claude/settings.l
 check('relocated html rules map to the shared fragment', review.includes('${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md'));
 check('inline-cat is rewritten with the path quoted', review.includes('!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`'));
 const fixtureCats = walkFiles(out).filter(f => f.endsWith('.md')).map(f => fs.readFileSync(f, 'utf8'));
-check('no emitted fixture markdown keeps an unquoted inline cat', !fixtureCats.some(t => UNQUOTED_CAT.test(t)));
+check('no emitted fixture markdown keeps an unquoted inline cat', !fixtureCats.some(t => UNQUOTED_CAT.test(t) || lib.unquotedInlineRoots(t).length));
 check('the relocated html rules inline cat is quoted too', read(out, 'skills/shared/hitl-loop.md').includes('!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`'));
 check('artifact file paths are not mistaken for commands', review.includes('artifacts/html/review.html') && review.includes('reports/review-orchestrator-x.md'));
 const agent = read(out, 'agents/review-finder.md');
@@ -194,6 +219,46 @@ const askGptFm = fm(read(out, 'commands/ask-gpt.md'));
 check('a command inlining a fragment that runs mktemp -d /tmp/ gets the mktemp rule', askGptFm.includes('  - ' + JSON.stringify(MKTEMP_RULE)), askGptFm);
 check('a command with no mktemp call anywhere in its chain gets no mktemp rule', !fm(review).includes(MKTEMP_RULE) && !fm(doc).includes(MKTEMP_RULE) && !fm(ci).includes(MKTEMP_RULE), fm(review) + fm(doc) + fm(ci));
 check('scriptRules adds the mktemp rule for a direct call and not for other temp paths', lib.scriptRules('Run `mktemp -d /tmp/x.XXXXXX`.\n', fxInv, fx.src).includes(MKTEMP_RULE) && !lib.scriptRules('Write to `/tmp/x.json`; see `mktemp -d "$TMPDIR/x"`.\n', fxInv, fx.src).includes(MKTEMP_RULE));
+
+// --- 2b. Inline commands: quoting and the guard (issue #172) ------------------
+console.log('\n2b. inline command quoting and the unquoted-root guard');
+const rw = (line) => lib.rewriteText(line + '\n', fxInv, fx.src, [], 'commands/probe.md');
+const HITL = '${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md';
+let got = rw('!`cat .claude/skills/shared/hitl-loop.md 2>/dev/null`');
+check('an inline cat with an extra argument gets its path quoted', got === '!`cat "' + HITL + '" 2>/dev/null`\n', got);
+got = rw('!`cat  .claude/skills/shared/hitl-loop.md`');
+check('an inline cat with two spaces gets its path quoted', got === '!`cat  "' + HITL + '"`\n', got);
+got = rw('!`cat .claude/skills/shared/hitl-loop.md .claude/skills/shared/browse-api.md`');
+check('every plugin root path in one inline cat is quoted', got === '!`cat "' + HITL + '" "${CLAUDE_PLUGIN_ROOT}/skills/shared/browse-api.md"`\n', got);
+got = rw('!`cat ".claude/skills/shared/hitl-loop.md"`');
+check('an inline cat already quoted in the source is not quoted twice', got === '!`cat "' + HITL + '"`\n', got);
+got = rw('!`cat .claude/skills/shared/*.md`');
+check('a glob tail stays outside the quotes so it still expands', got === '!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/"*.md`\n', got);
+got = rw('!`node .claude/scripts/render-html.js`');
+check('an inline command other than cat is not quoted (the guard reports it instead)', got === '!`node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js`\n', got);
+const ROOT = '${CLAUDE_PLUGIN_ROOT}';
+got = lib.quoteInlineCats('!`cat ' + ROOT + '/a.md,' + ROOT + '/b.md`');
+check('two roots in one token are quoted once, not written out twice', got === '!`cat "' + ROOT + '/a.md,' + ROOT + '/b.md"`' && !lib.unquotedInlineRoots(got).length, got);
+got = lib.quoteInlineCats('!`cat {' + ROOT + '/a.md,' + ROOT + '/b.md}`');
+check('two roots in one brace token are quoted once, not written out twice', got === '!`cat {"' + ROOT + '/a.md,' + ROOT + '/b.md}"`' && !lib.unquotedInlineRoots(got).length, got);
+got = lib.quoteInlineCats('!`cat ' + ROOT + '/a.md; node ' + ROOT + '/scripts/x.js --help`');
+check('a root after a shell operator is not quoted (it belongs to another command) and the guard reports it', got === '!`cat "' + ROOT + '/a.md"; node ' + ROOT + '/scripts/x.js --help`' && lib.unquotedInlineRoots(got).length === 1, got);
+got = lib.quoteInlineCats('!`cat ' + ROOT + '/a.md 2>/dev/null`');
+check('a cat argument before a redirect is still quoted', got === '!`cat "' + ROOT + '/a.md" 2>/dev/null`' && !lib.unquotedInlineRoots(got).length, got);
+got = lib.quoteInlineCats('!`cat ' + ROOT + '/a*.md,' + ROOT + '/b.md`');
+check('a root left bare after a glob in the same token is caught by the guard, not shipped silently', lib.unquotedInlineRoots(got).length === 1 && got.split(ROOT).length === 3, got);
+const guardHits = lib.unquotedInlineRoots([
+  '!`node ${CLAUDE_PLUGIN_ROOT}/scripts/x.js`',
+  '!`cat  ${CLAUDE_PLUGIN_ROOT}/a.md 2>/dev/null`',
+  '!`cat "${CLAUDE_PLUGIN_ROOT}/b.md" 2>/dev/null`',
+  "!`cat '${CLAUDE_PLUGIN_ROOT}/c.md'`",
+  'Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/x.js` by hand.',
+  '',
+].join('\n'));
+check('the guard names each inline command with an unquoted root, and nothing quoted or outside an inline command', JSON.stringify(guardHits) === JSON.stringify(['node ${CLAUDE_PLUGIN_ROOT}/scripts/x.js', 'cat  ${CLAUDE_PLUGIN_ROOT}/a.md 2>/dev/null']), JSON.stringify(guardHits));
+const viaArg = lib.scriptRules('!`cat "' + HITL + '" 2>/dev/null`\n', fxInv, fx.src);
+const viaSpaces = lib.scriptRules('!`cat  ' + HITL + '`\n', fxInv, fx.src);
+check('scriptRules follows an inline cat with an extra argument or two spaces', JSON.stringify(viaArg) === JSON.stringify(viaQuoted) && JSON.stringify(viaSpaces) === JSON.stringify(viaQuoted), viaArg.join(', ') + ' | ' + viaSpaces.join(', '));
 
 // --- 3. Layout and allowlist -------------------------------------------------
 console.log('\n3. emitted layout');
@@ -265,7 +330,7 @@ check('a home-directory path (~/.claude/...) is neither rewritten nor reported',
 
 // --- 5. The real source ------------------------------------------------------
 console.log('\n5. the live source builds');
-const live = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-live-'));
+const live = tmpDir('build-plugin-live-');
 const l = runBuild(['--out', live, '--quiet']);
 check('live .claude/ builds without error', l.status === 0, l.stderr);
 check('live build reports no unresolved reference', !/unresolved/.test(l.stderr), l.stderr);
@@ -289,6 +354,8 @@ const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path
 const liveUnquoted = liveMd.filter(f => UNQUOTED_CAT.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
 const liveQuoted = liveMd.reduce((n, f) => n + (fs.readFileSync(f, 'utf8').match(QUOTED_CAT) || []).length, 0);
 check('live: every emitted inline cat is quoted', liveUnquoted.length === 0 && liveQuoted > 100, 'unquoted in ' + liveUnquoted.join(', ') + '; quoted ' + liveQuoted);
+const liveGuard = walkFiles(live).filter(f => f.endsWith('.md')).flatMap(f => lib.unquotedInlineRoots(fs.readFileSync(f, 'utf8')).map(c => path.relative(live, f) + ': ' + c));
+check('live: no emitted markdown holds an unquoted plugin root in any inline command', liveGuard.length === 0, liveGuard.join('; '));
 const liveBareFamily = liveMd.filter(f => BARE_FAMILY.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
 check('live: no emitted markdown names a bare /review-* or /ask-* family', liveBareFamily.length === 0, liveBareFamily.join(', '));
 const liveHook = JSON.parse(read(live, 'hooks/hooks.json')).hooks.SessionStart[0].hooks[0].command;
@@ -335,7 +402,7 @@ check('live: the mktemp rule matches each command\'s own chain, and some command
 
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');
-const home = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-home-'));
+const home = tmpDir('build-plugin-home-');
 const cacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9');
 const cacheScripts = path.join(cacheRoot, 'scripts');
 fs.mkdirSync(cacheScripts, { recursive: true });
@@ -344,7 +411,7 @@ fs.mkdirSync(cacheScripts, { recursive: true });
 for (const f of ['ask-gpt.js', 'env-local.js']) fs.copyFileSync(path.join(REPO, '.claude', 'scripts', f), path.join(cacheScripts, f));
 fs.mkdirSync(path.join(cacheRoot, 'skills', 'shared'), { recursive: true });
 for (const f of ['finding-contract.md', 'report-format.md']) fs.copyFileSync(path.join(REPO, '.claude', 'skills', 'shared', f), path.join(cacheRoot, 'skills', 'shared', f));
-const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-proj-'));
+const proj = tmpDir('build-plugin-proj-');
 // A .git marks the project root, so the project lookup never climbs into the OS temp dir.
 fs.mkdirSync(path.join(proj, '.git'));
 fs.writeFileSync(path.join(proj, 'in.md'), 'x\n');
@@ -396,6 +463,9 @@ console.log('\n7. override and seed checks trip on a copy of the live source');
 const cp = copyLiveSource();
 const unresolvedOf = () => lib.build(cp.src, '9.9.9').unresolved;
 check('the untouched copy builds with no unresolved reference', unresolvedOf().length === 0, unresolvedOf().join('; '));
+const copiedNeverPush = walkFiles(cp.root).map(f => path.relative(cp.root, f).split(path.sep).join('/'))
+  .filter(r => /^\.claude\/(.*\/)?settings[^/]*\.json$/.test(r) || /(^|\/)\.env[^/]*$/.test(r) || /(^|\/)(node_modules|worktrees)\//.test(r));
+check('the copy carries no .claude settings*.json, .env* file, node_modules or worktrees', copiedNeverPush.length === 0 && exists(cp.root, 'seed/settings.local.json'), copiedNeverPush.join(', '));
 // Swap one file's content for a while, then put it back, so each plant is judged alone.
 function withPlant(rel, edit, fn) {
   const abs = path.join(cp.root, rel);
@@ -435,6 +505,34 @@ withPlant('.claude/rules/toolkit.md', t => t + '\nRun `node .claude/scripts/rend
   const u = unresolvedOf();
   check('the seed check trips when the rules seed gains a rewritten plugin root path', u.some(x => x === 'seed/rules-toolkit.md: seed carries old-layout text "${CLAUDE_PLUGIN_ROOT}"'), u.join('; '));
 });
+// Inline command quoting on the live copy (issue #172): the forms the old
+// single-space rewrite missed ship quoted, and the guard catches what no rewrite
+// quotes.
+withPlant('.claude/commands/review.md', t => t + '\n!`cat .claude/skills/shared/hitl-loop.md 2>/dev/null`\n\n!`cat  .claude/skills/shared/host-cli.md`\n', () => {
+  const built = lib.build(cp.src, '9.9.9');
+  const text = String(built.files.get('commands/review.md'));
+  check('live copy: a planted inline cat with an extra argument ships with its path quoted', text.includes('!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md" 2>/dev/null`'), text.slice(-300));
+  check('live copy: a planted inline cat with two spaces ships with its path quoted', text.includes('!`cat  "${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md"`'), text.slice(-300));
+  check('live copy: the planted cat forms leave no unresolved reference', built.unresolved.length === 0, built.unresolved.join('; '));
+});
+withPlant('.claude/commands/review.md', t => t + '\n!`head -n 5 .claude/skills/shared/hitl-loop.md`\n', () => {
+  const u = unresolvedOf();
+  check('the guard reports an unquoted plugin root left in a planted inline command', u.includes('commands/review.md: unquoted ${CLAUDE_PLUGIN_ROOT} in inline command !`head -n 5 ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`'), u.join('; '));
+  const c = runBuild(['--source', cp.src, '--out', path.join(cp.root, 'plugin-out'), '--check']);
+  check('--check fails on the planted unquoted inline command', c.status === 1 && /unresolved reference commands\/review\.md: unquoted \$\{CLAUDE_PLUGIN_ROOT\} in inline command/.test(c.stderr), c.stderr);
+});
+// conventions.md is copied byte for byte, so no rewrite can quote a cat planted there.
+withPlant('.claude/skills/shared/conventions.md', t => t + '\n!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`\n', () => {
+  const u = unresolvedOf();
+  check('the guard reports a planted unquoted inline cat in a file the build copies raw', u.includes('skills/shared/conventions.md: unquoted ${CLAUDE_PLUGIN_ROOT} in inline command !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`'), u.join('; '));
+});
+// The hook guard: a source without the hook's script is reported, never shipped.
+const hookAbs = path.join(cp.src, 'scripts', 'session-start.js');
+const hookText = fs.readFileSync(hookAbs);
+fs.rmSync(hookAbs);
+let uHook;
+try { uHook = unresolvedOf(); } finally { fs.writeFileSync(hookAbs, hookText); }
+check('a source without scripts/session-start.js is reported unresolved for the hook', uHook.includes('hooks/hooks.json: missing source scripts/session-start.js'), uHook.join('; '));
 check('the retired rows seed is exempt from the old-layout check', !unresolvedOf().some(x => x.startsWith('seed/retired-permission-rows.txt')) && read(REPO, 'seed/retired-permission-rows.txt').includes('.claude/scripts/'));
 const cpInv = lib.inventory(cp.src);
 const seedHits = (text, rel) => lib.seedProblems(rel || 'seed/CLAUDE.md', text, cpInv);
@@ -482,12 +580,12 @@ function rowDrift(tableRows, seedRows) {
   return { missing, extra: left };
 }
 function writeTmp(content) {
-  const f = path.join(os.tmpdir(), 'build-plugin-data-' + process.pid + '.json');
+  const f = path.join(tmpDir('build-plugin-data-'), 'data.json');
   fs.writeFileSync(f, content);
   return f;
 }
 
-for (const d of [fx.root, live, home, proj, cp.root]) fs.rmSync(d, { recursive: true, force: true });
+// Temp paths are removed by the exit handler registered at the top.
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
 console.log(failures.length + ' FAILED, ' + passed + ' passed:');

@@ -26,11 +26,15 @@
 //     markers; SITE_OVERRIDES names each such phrase per emitted file, to keep
 //     as written or to replace, and a phrase the source no longer contains is
 //     reported as unresolved so an edit cannot silently drop an override.
-//   * Inline cats (#172). Every `` !`cat ${CLAUDE_PLUGIN_ROOT}/...` `` is emitted
-//     with the path in double quotes: under a plugin root whose path holds a
-//     space the unquoted form inlines nothing (verified on Claude Code 2.1.270).
-//     `node|bash ${CLAUDE_PLUGIN_ROOT}/scripts/...` calls stay unquoted, because
-//     the allowed-tools rules generated for them match that exact text.
+//   * Inline cats (#172). Every `${CLAUDE_PLUGIN_ROOT}/...` path token in an
+//     inline `` !`cat ...` `` is emitted in double quotes, whatever the spacing
+//     and whatever other arguments sit beside it (`2>/dev/null`, a second path):
+//     under a plugin root whose path holds a space the unquoted form inlines
+//     nothing (verified on Claude Code 2.1.270). As a guard, an emitted markdown
+//     file that still holds an unquoted ${CLAUDE_PLUGIN_ROOT} inside ANY inline
+//     command is reported as unresolved, so a new inline form cannot ship broken.
+//     `node|bash ${CLAUDE_PLUGIN_ROOT}/scripts/...` calls in prose stay unquoted,
+//     because the allowed-tools rules generated for them match that exact text.
 //   * Names. A plugin's commands, skills, and agents resolve only under the
 //     scoped form `<plugin>:<name>` (Step 1, spike 5: bare names hit project
 //     files only, and the Skill tool says "invoke it by that full name"). So
@@ -221,6 +225,81 @@ function inventory(src) {
 
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+// Inline commands (issue #172). Claude Code runs the text of `` !`...` `` and
+// inlines its output; one line, no backtick inside.
+const ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}';
+const INLINE_COMMAND = /!`([^`\n]*)`/g;
+const INLINE_CAT = /^\s*cat\s/;
+
+// Offsets in one shell command where ${CLAUDE_PLUGIN_ROOT} sits outside every
+// quote. Single and double quotes both count (the root is substituted as text
+// before the shell sees it); a backslash escapes the next character.
+function unquotedRootOffsets(cmd) {
+  const hits = [];
+  let quote = '';
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (c === '\\' && quote !== "'") { i++; continue; }
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (cmd.startsWith(ROOT_TOKEN, i)) hits.push(i);
+  }
+  return hits;
+}
+
+// Quote every unquoted plugin root path token in each inline cat. A token runs
+// to whitespace, a quote, or a shell operator, except that a `<name>`
+// placeholder is part of the path (as in the path rewrite above); a glob tail
+// stays outside the quotes so it still expands
+// (`"${CLAUDE_PLUGIN_ROOT}/skills/shared/"*.md`).
+const ROOT_PATH_TOKEN = /^\$\{CLAUDE_PLUGIN_ROOT\}(?:[^\s"'`;|&<>()]|<[\w-]+>)*/;
+// Offset of the first shell operator outside every quote, or the command's
+// length when there is none. Only the leading cat's own arguments sit before
+// it: a root after `;`, `|` or `&&` belongs to another command (for example a
+// `node ${CLAUDE_PLUGIN_ROOT}/scripts/x.js` whose allowed-tools rule matches the
+// unquoted text), so it is left for the guard to report rather than quoted.
+function catArgsEnd(cmd) {
+  let quote = '';
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (c === '\\' && quote !== "'") { i++; continue; }
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || c === "'") { quote = c; continue; }
+    if (';|&<>()'.includes(c)) return i;
+  }
+  return cmd.length;
+}
+function quoteInlineCats(text) {
+  return text.replace(INLINE_COMMAND, (whole, cmd) => {
+    if (!INLINE_CAT.test(cmd)) return whole;
+    const argsEnd = catArgsEnd(cmd);
+    const hits = unquotedRootOffsets(cmd).filter(at => at < argsEnd);
+    if (!hits.length) return whole;
+    let quoted = '';
+    let last = 0;
+    for (const at of hits) {
+      // A second root inside the token just quoted (`a.md,${CLAUDE_PLUGIN_ROOT}/b.md`)
+      // is already covered; quoting it again would write the tail out twice.
+      if (at < last) continue;
+      const token = ROOT_PATH_TOKEN.exec(cmd.slice(at))[0];
+      const end = at + token.length;
+      const glob = token.slice(ROOT_TOKEN.length).search(/[*?[]/);
+      const head = glob === -1 ? token : token.slice(0, ROOT_TOKEN.length + glob);
+      quoted += cmd.slice(last, at) + '"' + head + '"' + token.slice(head.length);
+      last = end;
+    }
+    return '!`' + quoted + cmd.slice(last) + '`';
+  });
+}
+
+// The build guard: every inline command in `text` that still holds an unquoted
+// ${CLAUDE_PLUGIN_ROOT}, as written between the backticks.
+function unquotedInlineRoots(text) {
+  const found = [];
+  for (const m of text.matchAll(INLINE_COMMAND)) if (unquotedRootOffsets(m[1]).length) found.push(m[1]);
+  return found;
+}
+
 // The path map: `.claude/<x>` -> `${CLAUDE_PLUGIN_ROOT}/<x>` for emitted dirs,
 // with the one relocation the generator knows about. Returns null when the
 // reference cannot be resolved inside the plugin (reported, not invented).
@@ -276,9 +355,9 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
     return mapped;
   });
   kept.forEach((phrase, i) => { text = text.split('\u0001' + i + '\u0001').join(phrase); });
-  // 1b. Inline cats get the path in double quotes (issue #172): unquoted, a
-  //     plugin root whose path holds a space inlines nothing.
-  text = text.replace(/!`cat \$\{CLAUDE_PLUGIN_ROOT\}\/([^`"\s]+)`/g, (m0, rel) => '!`cat "${CLAUDE_PLUGIN_ROOT}/' + rel + '"`');
+  // 1b. Inline cats get each plugin root path in double quotes (issue #172):
+  //     unquoted, a plugin root whose path holds a space inlines nothing.
+  text = quoteInlineCats(text);
   // 2. Dispatch names: subagent_type=name, subagent_type: name, quoted forms.
   if (agentNames.length) {
     const re = new RegExp('(subagent_type\\s*[=:]\\s*["\'`]?)(' + agentNames.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
@@ -289,7 +368,8 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
     const re = new RegExp('Skill\\((' + slashNames.map(escapeRe).join('|') + ')(?=[):])', 'g');
     text = text.replace(re, (m0, name) => 'Skill(' + PLUGIN_NAME + ':' + name);
     // 4. Slash references: /name not preceded by a path character and not
-    //    followed by a name character (so /review-* and file paths survive).
+    //    followed by a name character or hyphen (so file paths survive, a
+    //    longer name is never cut short, and /review-* is left to step 5).
     const re2 = new RegExp('(^|[^\\w./:\\-])/(' + slashNames.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
     text = text.replace(re2, (m0, pre, name) => pre + '/' + PLUGIN_NAME + ':' + name);
     // 5. Family mentions: `/review-*`, `/ask-*`. Same path guard as step 4, and
@@ -320,15 +400,19 @@ function scriptRules(text, inv, src) {
       rules.add('Bash(' + call + ')');
       if (m[2] === 'browse.js') { rules.add('Bash(echo * | ' + call + ' *)'); rules.add('Bash(cat * | ' + call + ' *)'); }
     }
-    // The emitted form is quoted (`` !`cat "${CLAUDE_PLUGIN_ROOT}/x.md"` ``);
-    // the unquoted form is still followed, so a caller passing text that has
-    // not been through the quoting step gets the same rules.
-    for (const m of t.matchAll(/!`cat ("?)\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9_./-]+)\1`/g)) {
-      const rel = m[2];
-      if (seen.has(rel)) continue;
-      seen.add(rel);
-      const abs = path.join(src, rel);
-      if (fs.existsSync(abs)) scan(rewriteText(fs.readFileSync(abs, 'utf8'), inv, src, [], rel));
+    // Every plugin root path in an inline cat is followed. The emitted form is
+    // quoted (`` !`cat "${CLAUDE_PLUGIN_ROOT}/x.md"` ``); the unquoted form, extra
+    // arguments, and extra spaces are followed too, so a caller passing text that
+    // has not been through the quoting step gets the same rules.
+    for (const m of t.matchAll(INLINE_COMMAND)) {
+      if (!INLINE_CAT.test(m[1])) continue;
+      for (const p of m[1].matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9_./-]+)/g)) {
+        const rel = p[1];
+        if (seen.has(rel)) continue;
+        seen.add(rel);
+        const abs = path.join(src, rel);
+        if (fs.existsSync(abs) && fs.statSync(abs).isFile()) scan(rewriteText(fs.readFileSync(abs, 'utf8'), inv, src, [], rel));
+      }
     }
   };
   scan(text);
@@ -554,6 +638,15 @@ function build(src, version) {
   for (const key of Object.keys(SITE_OVERRIDES)) {
     if (!files.has(key)) unresolved.push(key + ': site override names a file the build does not emit');
   }
+  // The inline command guard (issue #172): the cat rewrite quotes what it knows,
+  // and anything it does not know (another command, a form added later) is
+  // reported here instead of shipping a path that breaks under a space.
+  for (const [rel, content] of files) {
+    if (!rel.endsWith('.md')) continue;
+    for (const cmd of unquotedInlineRoots(content.toString('utf8'))) {
+      unresolved.push(rel + ': unquoted ' + ROOT_TOKEN + ' in inline command !`' + cmd + '`');
+    }
+  }
   put('README.md', [
     '# tk (generated)',
     '',
@@ -630,4 +723,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, seedProblems, gitignoreLineMatches, SITE_OVERRIDES, PLUGIN_NAME };
+module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, seedProblems, gitignoreLineMatches, quoteInlineCats, unquotedInlineRoots, SITE_OVERRIDES, PLUGIN_NAME };
