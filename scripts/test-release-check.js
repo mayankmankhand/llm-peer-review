@@ -351,6 +351,11 @@ function runHook(stdin, extra) {
   h = runHook('refs/heads/mainline ' + SHA + ' refs/heads/mainline ' + ZERO + '\nrefs/tags/release-1 ' + SHA + ' refs/tags/release-1 ' + ZERO + '\n');
   check('hook: near-miss refs (mainline, non-v tag) do not run release-check', h.status === 0 && h.ran === 'tripwire', JSON.stringify(h));
 
+  // The gate reads only v[0-9]* tags as releases, so a v-word tag is no release
+  // and must not be routed there (it would be blocked as a mismatched version).
+  h = runHook('refs/tags/vendor-snapshot ' + SHA + ' refs/tags/vendor-snapshot ' + ZERO + '\n', { RELEASE_EXIT: '1' });
+  check('hook: refs/tags/vendor-snapshot push runs the tripwire only, never the gate', h.status === 0 && h.ran === 'tripwire' && h.args === '', JSON.stringify(h));
+
   h = runHook('refs/heads/main ' + SHA + ' refs/heads/main ' + ZERO + '\n', { TRIPWIRE_EXIT: '1' });
   check('hook: failing pre-push-check blocks with its exit code, release-check never runs', h.status === 1 && h.ran === 'tripwire', JSON.stringify(h));
 
@@ -382,6 +387,19 @@ function runHook(stdin, extra) {
   check('hook: TK_RELEASE_CHECK set prints that the real release gate was replaced', /TK_RELEASE_CHECK is set; the real release gate/.test(h.out), JSON.stringify(h));
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\n', { TK_PRE_PUSH_CHECK: '', TK_RELEASE_CHECK: '' });
   check('hook: seams unset (empty) run the default paths with no notice', h.status === 0 && h.ran === 'tripwire' && !/is set; the real/.test(h.out), JSON.stringify(h));
+
+  // dash's echo reads backslash escapes, and \c ends its output on the spot, so
+  // an echoed seam path holding \c would print cut short. printf '%s\n' keeps it.
+  if (process.platform !== 'win32') {
+    const oddDir = path.join(stubDir, 'odd\\cdir');
+    write(oddDir, 'release.js', fs.readFileSync(path.join(stubDir, 'release.js'), 'utf8'));
+    const oddGate = path.join(oddDir, 'release.js');
+    h = runHook('refs/tags/v1.1.0 ' + SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n', { TK_RELEASE_CHECK: oddGate });
+    check('hook: a seam value holding \\c prints intact in the seam notice',
+      h.out.includes('the real release gate (scripts/release-check.js) was replaced by ' + oddGate + '\n'), JSON.stringify(h));
+    check('hook: a seam value holding \\c prints intact in the release-push line, and that gate still runs',
+      h.out.includes('; running ' + oddGate + '\n') && h.status === 0 && h.ran === 'tripwire,release', JSON.stringify(h));
+  }
 }
 
 // --- install-hooks.sh and a real git push ----------------------------------------------

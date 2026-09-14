@@ -10,10 +10,12 @@
 #
 #   1. Every push runs the M11 tripwire (.claude/scripts/pre-push-check.js).
 #      A non-zero exit blocks the push with the tripwire's own exit code.
-#   2. A push that updates refs/heads/main or a refs/tags/v* tag also runs the
-#      release gate (scripts/release-check.js) and blocks when it fails.
-#      Deleted refs (local sha all zeros) never trigger it. The gate is told
-#      exactly what is pushed, since that need not be HEAD:
+#   2. A push that updates refs/heads/main or a release tag refs/tags/v[0-9]*
+#      also runs the release gate (scripts/release-check.js) and blocks when it
+#      fails. That tag pattern is the gate's own (it reads only v[0-9]* tags as
+#      releases), so a tag like vendor-snapshot is an ordinary push. Deleted
+#      refs (local sha all zeros) never trigger it. The gate is told exactly
+#      what is pushed, since that need not be HEAD:
 #        refs/heads/main     -> --commit <local sha>
 #        refs/tags/<tag>     -> --pushing-tag <tag>:<local sha>
 #      so it checks the pushed commit and that each pushed tag is
@@ -24,6 +26,10 @@
 # substitution always prints a notice, so a variable left exported in a shell
 # can never switch off the secret scan or the gate unnoticed.
 #
+# Messages go through printf '%s\n', never echo: dash's echo reads backslash
+# escapes in its argument, so a value like a seam path holding \c would be cut
+# short or rewritten.
+#
 # Exit codes: 0 push may proceed; anything else blocks it.
 
 remote=$1
@@ -31,10 +37,10 @@ tripwire=${TK_PRE_PUSH_CHECK:-.claude/scripts/pre-push-check.js}
 release_check=${TK_RELEASE_CHECK:-scripts/release-check.js}
 
 if [ -n "$TK_PRE_PUSH_CHECK" ]; then
-  echo "pre-push: TK_PRE_PUSH_CHECK is set; the real M11 tripwire (.claude/scripts/pre-push-check.js) was replaced by $TK_PRE_PUSH_CHECK" >&2
+  printf '%s\n' "pre-push: TK_PRE_PUSH_CHECK is set; the real M11 tripwire (.claude/scripts/pre-push-check.js) was replaced by $TK_PRE_PUSH_CHECK" >&2
 fi
 if [ -n "$TK_RELEASE_CHECK" ]; then
-  echo "pre-push: TK_RELEASE_CHECK is set; the real release gate (scripts/release-check.js) was replaced by $TK_RELEASE_CHECK" >&2
+  printf '%s\n' "pre-push: TK_RELEASE_CHECK is set; the real release gate (scripts/release-check.js) was replaced by $TK_RELEASE_CHECK" >&2
 fi
 
 # Read the ref lines first: stdin is git's, and the checks must not eat it.
@@ -53,7 +59,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       release="$release $remote_ref"
       set -- "$@" --commit "$local_sha"
       ;;
-    refs/tags/v*)
+    refs/tags/v[0-9]*)
       release="$release $remote_ref"
       set -- "$@" --pushing-tag "${remote_ref#refs/tags/}:$local_sha"
       ;;
@@ -63,17 +69,17 @@ done
 node "$tripwire" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
-  echo "pre-push: tripwire exited $status; push to $remote blocked" >&2
+  printf '%s\n' "pre-push: tripwire exited $status; push to $remote blocked" >&2
   exit "$status"
 fi
 
 [ -z "$release" ] && exit 0
 
-echo "pre-push: release push to$release; running $release_check" >&2
+printf '%s\n' "pre-push: release push to$release; running $release_check" >&2
 node "$release_check" "$@" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
-  echo "pre-push: release check exited $status; push to $remote blocked" >&2
+  printf '%s\n' "pre-push: release check exited $status; push to $remote blocked" >&2
   exit "$status"
 fi
 exit 0

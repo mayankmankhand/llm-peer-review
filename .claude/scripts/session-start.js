@@ -30,7 +30,9 @@
 //
 // The state file is looked for from the project folder upward to the git top
 // level: Claude opened in a subfolder sets CLAUDE_PROJECT_DIR to that subfolder,
-// but setup-project.js writes the state at the top level.
+// but setup-project.js writes the state at the top level. The walk never reaches
+// the home directory (its .claude is Claude Code's own config folder), and an
+// unusable state file on the way is skipped (see walkUp and readStateUp).
 //
 // Exit code: always 0. A hook that fails must never block or disturb a session,
 // so every error is swallowed (at most one short stderr line).
@@ -38,6 +40,7 @@
 // Dependency-free, like every script under .claude/scripts/.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const STATE_REL = path.join('.claude', '.toolkit-state.json');
@@ -158,15 +161,38 @@ function linkCurrent(dataDir, target, platform, fsImpl) {
   return true;
 }
 
-// The nearest `rel` from startDir upward, or null. The walk stops at the first
-// folder holding .git (a folder, or a file in a worktree or submodule), so a
-// state file belonging to an enclosing project is never read, or at the
-// filesystem root outside any repository.
-function findUp(startDir, rel) {
+// A path's spellings to compare: as given and its real path, case-folded on
+// Windows. Both sides of the home comparison use them, so a home directory or a
+// project reached through a symlink (process.cwd() is already resolved) still
+// matches.
+function pathForms(p) {
+  const forms = [path.resolve(p)];
+  try { forms.push(fs.realpathSync(p)); } catch (e) { /* a missing folder has no real path */ }
+  return process.platform === 'win32' ? forms.map(f => f.toLowerCase()) : forms;
+}
+function homeDirs() {
+  let home = '';
+  try { home = os.homedir(); } catch (e) { home = ''; }
+  return home ? pathForms(home) : [];
+}
+const isHome = (dir, home) => pathForms(dir).some(f => home.indexOf(f) !== -1);
+
+// Visit startDir and each folder above it, nearest first, until visit returns
+// something other than null (that value is returned) or the walk ends (null).
+// The walk ends:
+//   - before the home directory, which is never a project root: its .claude is
+//     the user's Claude Code config folder, so a project outside any repository
+//     must never read state from there;
+//   - after the first folder holding .git (a folder, or a file in a worktree or
+//     submodule), so a state file belonging to an enclosing project is never read;
+//   - at the filesystem root.
+function walkUp(startDir, visit) {
+  const home = homeDirs();
   let dir = path.resolve(startDir);
   for (;;) {
-    const candidate = path.join(dir, rel);
-    if (fs.existsSync(candidate)) return candidate;
+    if (isHome(dir, home)) return null;
+    const found = visit(dir);
+    if (found !== null) return found;
     if (fs.existsSync(path.join(dir, '.git'))) return null;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
@@ -174,12 +200,33 @@ function findUp(startDir, rel) {
   }
 }
 
+// The nearest existing `rel` from startDir upward, or null.
+function findUp(startDir, rel) {
+  return walkUp(startDir, (dir) => {
+    const candidate = path.join(dir, rel);
+    return fs.existsSync(candidate) ? candidate : null;
+  });
+}
+
+// The nearest usable state object from startDir upward, or null. A candidate
+// that cannot be used as state at all (unreadable, a folder, not JSON, or JSON
+// that is not an object) is skipped and the walk goes on, so a stray broken file
+// in a subfolder never silences the top-level state. A parseable object is used
+// even when its version keys are malformed: that yields no reference, exactly
+// as referenceVersion refuses to fall through to a later key, so a crafted stamp
+// can never hand the choice to a state file further up.
+function readStateUp(startDir) {
+  return walkUp(startDir, (dir) => {
+    const state = readJson(path.join(dir, STATE_REL));
+    return state !== null && typeof state === 'object' && !Array.isArray(state) ? state : null;
+  });
+}
+
 // The plain-text notices for this project, or [] when nothing applies. Both
 // versions are validated before use, so neither can carry text of its own.
 function notices(projectDir, runningRaw) {
   const out = [];
-  const statePath = findUp(projectDir, STATE_REL);
-  const state = statePath === null ? null : readJson(statePath);
+  const state = readStateUp(projectDir);
   const reference = referenceVersion(state);
   const running = validVersion(runningRaw);
   const cmp = reference === null || running === null ? null : compareVersions(running, reference);
@@ -258,4 +305,4 @@ if (require.main === module) {
   try { main(); } catch (e) { note(e.message); process.exitCode = 0; }
 }
 
-module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, findUp, linkCurrent, notices };
+module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, findUp, readStateUp, linkCurrent, notices };
