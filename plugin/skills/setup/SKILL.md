@@ -40,7 +40,7 @@ allowed-tools:
    It detects one of four situations and says which in its first lines: a fresh project; a copy-install with its manifest (every managed file is classified against the manifest hash); a copy-install without a manifest (an install from before v5.5.0, provenance unknown); or a project already on the plugin (seed check only). On a migration it refuses to start on a dirty git tree, because `git checkout` plus the backup folder is the undo.
 
 3. **Read the exit code.**
-   - **0, done.** Relay the report verbatim. It ends with the one-line undo (`git checkout -- .claude VERSION .gitattributes` plus the backup path) and, after a migration, with "Next: run /tk:upgrade".
+   - **0, done.** Relay the report verbatim. When the run changed anything, it ends with a one-line undo (after a migration, `git checkout` plus the backup folder; after a fresh or plugin run, the files to delete and any tracked files to check out) and, after a migration, with "Next: run /tk:upgrade".
    - **3, paged.** Relay what it found: locally modified toolkit files with their diff summaries, files of unknown provenance, or a dirty tree. State the recommended default (commit or stash first; on locally modified files, proceed, since each one is backed up and becomes an `/tk:upgrade` finding with the diff as its receipt). Ask one question. On a clear yes, rerun with `--force`; on anything else, stop.
    - **1, error.** Relay the message and stop. Do not retry blindly; the message names the cause.
 

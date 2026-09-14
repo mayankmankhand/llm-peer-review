@@ -47,9 +47,12 @@
 // version, dead-permissions lists settings.local.json entries that point at
 // removed scripts, permission-rows compares settings.local.json with the
 // plugin's shipped seed (rows it lacks, retired rows it still has, and a
-// `defaultMode` of acceptEdits as a question for the user), seed-lines finds
-// lines an older seed wrote into .gitattributes, .gitignore and
-// artifacts/README.md, unscoped-names finds toolkit command, skill and agent
+// `defaultMode` of acceptEdits as a question for the user) and with the
+// migration's backup of it (rows of the project's own a 7.0.x migration
+// removed although their script stayed), seed-lines finds lines an older seed
+// wrote into .gitattributes, .gitignore and artifacts/README.md, plus lines of
+// the project's own a 7.0.x migration dropped from a file it replaced (still in
+// the backup folder), unscoped-names finds toolkit command, skill and agent
 // names used without the tk: scope, local-edits reads
 // .claude/.toolkit-migration.json, and agent-tools reads every project-owned
 // agent whose name or description says it is a finder, reviewer, critic,
@@ -81,16 +84,44 @@ const LOCAL_SETTINGS = '.claude/settings.local.json';
 const TOOLKIT_REPO_URL = 'https://github.com/mayankmankhand/llm-peer-review';
 // Same rule as setup-project.js: a legacy toolkit row shape, or a row naming a
 // script under .claude/scripts/ that the project does not have. A custom
-// script's row is live (review of the v7.0.0 release, R2).
+// script's row is live (review of the v7.0.0 release, R2). The script name
+// stops before a colon that ends it: Claude Code writes "don't ask again" rows
+// as `Bash(node .claude/scripts/our-report.js:*)`, and reading that name as
+// `our-report.js:` made a kept script's row look dead.
 const LEGACY_DEAD_PERMISSION = [
   /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
 function deadPermission(row, exists) {
   if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
-  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+)/.exec(row);
+  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/.exec(row);
   return m !== null && !exists('.claude/scripts/' + m[1]);
 }
+// The project script a permission row runs, as a plain project-relative path
+// under .claude/scripts/, or null. The relative form is the extraction
+// deadPermission uses (the same regex, copied from setup-project.js;
+// scripts/test-upgrade-audit.js fails when the copies drift), and the absolute
+// form ends the name the same way. An absolute path
+// counts only when it resolves inside this project root, judged on the path as
+// written and on the real paths (a symlinked temp or home folder), so a row
+// naming a script in some other checkout never qualifies.
+const ROW_SCRIPT_REL = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/;
+const ROW_SCRIPT_ABS = /(?:^|[\s(])(\/[^\s)'"*]*\/\.claude\/scripts\/[^\s)'"*]+?):?(?=[\s)'"*]|$)/;
+function rowScriptRel(row, project) {
+  const m = ROW_SCRIPT_REL.exec(row);
+  if (m) { const rel = '.claude/scripts/' + m[1]; return safeRel(rel) ? rel : null; }
+  const a = ROW_SCRIPT_ABS.exec(row);
+  if (!a) return null;
+  const real = (p) => { try { return fs.realpathSync(p); } catch (e) { return null; } };
+  const written = path.resolve(a[1]);
+  for (const [root, abs] of [[project, written], [real(project), written], [real(project), real(written)]]) {
+    if (!root || !abs) continue;
+    const rel = path.relative(root, abs).split(path.sep).join('/');
+    if (rel.startsWith('.claude/scripts/') && safeRel(rel)) return rel;
+  }
+  return null;
+}
+function isFile(abs) { try { return fs.statSync(abs).isFile(); } catch (e) { return false; } }
 // Single-quote a string for a POSIX shell, so a receipt can name rows verbatim.
 function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
 // A project-relative path from a record the project controls (the migration
@@ -374,6 +405,70 @@ function seedReplacement(line, seedLines) {
   return (seedLines || []).find(s => s.trim() !== '' && head(s) === h && s.trim() !== line.trim()) || null;
 }
 
+// Lost project lines (C-10): files a 7.0.x migration replaced whole (it removed
+// the file, then reseeded it), so a line of the project's own survives only in
+// the backup folder. 7.1.0's setup line-merges these files instead
+// (KEEP_ON_MIGRATION in setup-project.js), so only a 7.0.x record names one.
+// Each entry names the shipped seed and every rule line an earlier toolkit
+// release put in that file; a backup line in neither, and not in the live file,
+// is the project's own. Adding another replaced file is one more entry.
+//
+// Every rule line the installers copied as a project's .gitattributes, from
+// git history: the toolkit repository's own .gitattributes at v4.5.1, v4.6.0,
+// v5.0.0, v5.2.0, v5.5.0, v6.0.0, v6.1.0, v6.1.1, v6.2.0, v6.3.0, v6.3.1,
+// v6.3.2 and v6.3.3 (scripts/setup/setup.sh and setup.ps1 copy
+// $TOOLKIT_ROOT/.gitattributes), and plugin/seed/gitattributes at v7.0.0 and
+// v7.0.1. v0-web-app and v1.0.0 shipped none. Comments and blanks are skipped
+// anyway, so only rules are listed.
+const SHIPPED_GITATTRIBUTES = ['* text=auto', '*.sh text eol=lf', 'scripts/** text eol=lf', '.claude/scripts/** text eol=lf'];
+const REPLACED_ON_MIGRATION = [
+  { rel: '.gitattributes', seed: 'gitattributes', shipped: SHIPPED_GITATTRIBUTES },
+];
+// A line as git reads an attributes rule: CR, a leading UTF-8 byte order mark
+// (git ignores one at the start of .gitattributes), surrounding blanks and
+// repeated blanks do not matter. The receipt normalizes the same way (tr -d '\r',
+// then awk drops a leading mark and '$1=$1' collapses spaces and tabs), so the
+// two always agree.
+function lineKey(l) { return String(l).replace(/\r/g, '').replace(/^\uFEFF/, '').replace(/^[ \t]+|[ \t]+$/g, '').replace(/[ \t]+/g, ' '); }
+// The backup copy of a replaced file, as a project-relative path, when the
+// record names the file (under `modified` with its backup path, or under
+// `removed` as a bare path whose copy sits at the same path in the backup
+// folder) and that copy exists; null otherwise. C-10 reads it for lost lines,
+// and C-6 words its advice by whether it exists, so the two never disagree.
+function replacedBackup(P, migration, rel) {
+  if (!migration) return null;
+  const backupDir = safeRelPath(migration.backupDir);
+  const backups = [];
+  for (const m of Array.isArray(migration.modified) ? migration.modified : []) {
+    if (!m || safeRelPath(m.rel) !== rel) continue;
+    const b = safeRelPath(m.backup);
+    if (b) backups.push(b); else if (backupDir) backups.push(backupDir + '/' + rel);
+  }
+  for (const r of Array.isArray(migration.removed) ? migration.removed : []) {
+    if (safeRelPath(r) === rel && backupDir) backups.push(backupDir + '/' + rel);
+  }
+  return backups.find(b => isFile(P(b))) || null;
+}
+// For each replaced file whose backup copy exists: the backup's lines of the
+// project's own that the live file lacks, as { rel, backup, lost }.
+function lostProjectLines(P, migration, pluginRoot) {
+  const out = [];
+  if (!migration) return out;
+  for (const file of REPLACED_ON_MIGRATION) {
+    const backup = replacedBackup(P, migration, file.rel);
+    if (!backup) continue;
+    const known = new Set([...(readLines(path.join(pluginRoot, 'seed', file.seed)) || []), ...file.shipped, ...(readLines(P(file.rel)) || [])].map(lineKey));
+    const lost = [];
+    for (const line of readLines(P(backup)) || []) {
+      const key = lineKey(line);
+      if (key === '' || key.startsWith('#') || known.has(key) || lost.includes(key)) continue;
+      lost.push(key);
+    }
+    if (lost.length) out.push({ rel: file.rel, backup, lost });
+  }
+  return out;
+}
+
 // The line of a "defaultMode" key in settings JSON, by where it sits: `top` for
 // the root object, `permissions` for the permissions object, so a file carrying
 // both points each finding at its own line. A small scan that tracks the key
@@ -459,6 +554,11 @@ function main() {
   const localExists = fs.existsSync(P(LOCAL_SETTINGS));
   const local = readJson(P(LOCAL_SETTINGS), null);
   const localAllow = (local && local.permissions && Array.isArray(local.permissions.allow) ? local.permissions.allow : []).filter(p => typeof p === 'string');
+  // The copy-install migration's record, when it is a readable JSON object.
+  // Missing or malformed, it is no record: nothing that reads it reports.
+  const migRead = readJson(P(MIGRATION_REL), null);
+  const migration = migRead && typeof migRead === 'object' && !Array.isArray(migRead) ? migRead : null;
+  const migrationName = () => { const to = migration ? validVersion(migration.to) : null; return to ? 'the ' + to + ' migration' : 'the migration from the copy-install'; };
 
   const findings = [];
   const emit = (f) => findings.push(f);
@@ -551,6 +651,55 @@ function main() {
             receipt: { check: 'grep -n -E -e ' + shq('"defaultMode"[[:space:]]*:[[:space:]]*"acceptEdits"') + ' -- ' + LOCAL_SETTINGS, expect: 'the defaultMode line' + (at ? ' (line ' + at + ')' : '') } });
         }
       }
+      // (d) Rows of the project's own a migration removed although their script
+      //     stayed: 7.0.0 treated every .claude/scripts/ row as dead (7.0.1
+      //     dropped one only when its script was gone), so a kept custom
+      //     script lost its grant. The candidates are the rows
+      //     in the migration's backup of settings.local.json (its backupDir,
+      //     inside the project) and the record's deadPermissions list (7.0.x
+      //     records carry the rows; a later one keeps only a count, so the
+      //     backup is the source there). Nothing else is a source. A candidate
+      //     is reported only when the live file has it in no permissions list
+      //     (a row the user moved to deny or ask stays where they put it), it
+      //     names a file under this project's .claude/scripts/ that exists now,
+      //     the retired list does not name it, and setup would not remove it
+      //     again as dead. The rows may carry this machine's absolute paths, so
+      //     they appear only inside this project's own finding, never in a note.
+      if (migration) {
+        if (retired === null) notes.push(c.id + ': no retired-permission-rows.txt under the plugin root, rows a migration removed not checked');
+        else {
+          const backupDir = safeRelPath(migration.backupDir);
+          const backupLocal = backupDir ? readJson(P(backupDir + '/' + LOCAL_SETTINGS), null) : null;
+          const backupAllow = backupLocal && backupLocal.permissions && Array.isArray(backupLocal.permissions.allow) ? backupLocal.permissions.allow : [];
+          const recorded = Array.isArray(migration.deadPermissions) ? migration.deadPermissions : [];
+          const inLive = new Set(['allow', 'deny', 'ask'].flatMap(k => (local && local.permissions && Array.isArray(local.permissions[k]) ? local.permissions[k] : [])));
+          const exists = (rel) => fs.existsSync(P(rel));
+          const lostRows = [];
+          for (const row of new Set(backupAllow.concat(recorded).filter(p => typeof p === 'string'))) {
+            const rel = rowScriptRel(row, project);
+            if (rel === null || inLive.has(row) || !isFile(P(rel)) || retired.has(row) || deadPermission(row, exists)) continue;
+            lostRows.push({ row, rel });
+          }
+          const n = lostRows.length;
+          // Where the rows can still be read, named only for the source that
+          // holds them: the backup copy only for rows it has (it may be gone,
+          // or lack a row the record lists), the record for the rest.
+          const inBackup = new Set(backupAllow);
+          const fromBackup = lostRows.filter(x => inBackup.has(x.row)).length;
+          const recordOnly = n - fromBackup;
+          const them = (k) => (k === 1 ? 'it' : 'them');
+          const source = !recordOnly ? 'the migration\'s backup copy of ' + LOCAL_SETTINGS + ' still has ' + them(n)
+            : !fromBackup ? 'the migration record ' + MIGRATION_REL + ' lists ' + them(n)
+              : 'the migration\'s backup copy of ' + LOCAL_SETTINGS + ' still has ' + fromBackup + ' of them, and the migration record ' + MIGRATION_REL + ' lists the other ' + recordOnly;
+          if (n) emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
+            what: 'Should fix. ' + LOCAL_SETTINGS + ' lost ' + (n === 1 ? 'a permission row' : n + ' permission rows') + ' of the project\'s own: ' + migrationName() + ' removed '
+              + (n === 1 ? 'it although the script it runs is' : 'them although the script each one runs is') + ' still in the project, so running ' + (n === 1 ? 'that script asks' : 'those scripts ask') + ' for permission again.',
+            fix: 'add each listed row back to "permissions.allow" in ' + LOCAL_SETTINGS + ', exactly as listed (' + source + '); leave every other row as it is', since: c.since,
+            fields: [{ label: 'Lost rows', value: lostRows.map(x => x.row).join(' ; ') }],
+            receipt: { check: lostRows.map(x => 'if test -f ' + shq(x.rel) + ' && ! grep -q -F -e ' + shq(JSON.stringify(x.row)) + ' -- ' + LOCAL_SETTINGS + " 2>/dev/null; then printf 'restorable: %s\\n' " + shq(x.row) + '; fi').join(' ; '),
+              expect: n + ' line(s) reading restorable: <row>, one per lost row whose script file exists and which ' + LOCAL_SETTINGS + ' lacks' } });
+        }
+      }
     } else if (c.detector === 'seed-lines') {
       let keeps = null;
       const ctx = { keepsScripts: () => (keeps === null ? (keeps = hasFilesUnder(P('.claude/scripts'))) : keeps) };
@@ -587,6 +736,24 @@ function main() {
             fields: replacement ? [{ label: 'Seed line', value: replacement.trim() }] : undefined,
             receipt });
         });
+      }
+      // Lines of the project's own a 7.0.x migration dropped from a file it
+      // replaced (a Git LFS rule in .gitattributes, say), still in the backup.
+      // The receipt prints one `lost:` line per listed line that the backup
+      // copy has and the live file lacks, both read as lineKey reads them (CR
+      // dropped, a leading byte order mark dropped, blanks collapsed); a
+      // missing live file lacks every line. stderr is redirected before the
+      // input, so a missing file prints no shell error.
+      for (const { rel, backup, lost } of lostProjectLines(P, migration, pluginRoot)) {
+        const n = lost.length;
+        const norm = (file) => "tr -d '\\r' 2>/dev/null < " + shq(file) + " | awk -v b=\"$b\" 'index($0, b) == 1 { $0 = substr($0, length(b) + 1) } { $1 = $1; print }' | grep -q -x -F -e \"$l\"";
+        emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: rel },
+          what: 'Should fix. ' + rel + ' lost ' + (n === 1 ? 'a line' : n + ' lines') + ' of the project\'s own: ' + migrationName() + ' replaced the file with the toolkit seed and dropped '
+            + (n === 1 ? 'it' : 'them') + '; the backup copy ' + backup + ' still has ' + (n === 1 ? 'it' : 'them') + '.',
+          fix: 'append the listed line' + (n === 1 ? '' : 's') + ' back to ' + rel + ', exactly as listed; keep every line the file has now', since: c.since,
+          fields: [{ label: 'Lost lines', value: lost.join(' ; ') }, { label: 'Backup copy', value: backup }],
+          receipt: { check: "b=$(printf '\\357\\273\\277'); for l in " + lost.map(shq).join(' ') + '; do if ' + norm(backup) + ' && ! { ' + norm(rel) + '; }; then printf \'lost: %s\\n\' "$l"; fi; done',
+            expect: n + ' line(s) reading lost: <line>, one per listed line the backup copy has and ' + rel + ' lacks' } });
       }
     } else if (c.detector === 'unscoped-names') {
       const owned = new Set(piecesUnder(P('.claude')));
@@ -643,7 +810,7 @@ function main() {
       // (kept in the backup folder) holds the hash it installed, which the
       // backup copy no longer matches. The current plugin copy is never the
       // base: it also carries every toolkit change since that install.
-      const mig = readJson(P(MIGRATION_REL), null);
+      const mig = migration;
       const from = validVersion(mig && mig.from) || validVersion(state && state.previousVersion);
       const backupDir = mig ? safeRelPath(mig.backupDir) : null;
       const manifestBackup = backupDir ? backupDir + '/' + MANIFEST_REL : null;
@@ -666,9 +833,38 @@ function main() {
         }
         // The convention's fix and the tagged base are two sentences.
         const baseFix = c.fix || 'compare your backup with the toolkit file at the tag it came from, never with the current plugin copy';
+        const where = from ? 'the ' + from + ' copy-install' : 'a copy-install';
+        // A file C-10 checks for lost lines (REPLACED_ON_MIGRATION, today only
+        // .gitattributes) is not a toolkit script: the plugin ships no copy of
+        // it (setup records its pluginCopy as null), it belongs to the project,
+        // and a 7.0.x migration replaced it with the toolkit seed. "File it
+        // upstream or carry it as a project-owned script" is wrong advice there,
+        // so its fix says whose file it is and claims only what was checked.
+        // With the backup copy, C-10 compared it line by line: the fix names how
+        // many lines C-10 lists to put back, or says it found none and what it
+        // does not count. Without the backup copy nothing was compared, so the
+        // fix says the toolkit cannot tell and asks the user to check. The
+        // finding is reworded rather than suppressed in favour of C-10, which
+        // lists only lines still missing, so the record's evidence stays in the
+        // audit either way. Every other entry (artifacts/README.md, VERSION,
+        // anything under .claude/) has no line-level check behind it, so it
+        // keeps the convention's advice and its tagged base unchanged.
+        const replaced = REPLACED_ON_MIGRATION.find(x => x.rel === rel);
+        const replacedCopy = replaced ? replacedBackup(P, migration, rel) : null;
+        let ownFix = null;
+        if (replaced) {
+          const head = rel + ' belongs to the project, not the toolkit, so nothing goes upstream and nothing is carried as a script: the migration replaced it with the toolkit seed';
+          const found = replacedCopy ? lostProjectLines(P, migration, pluginRoot).find(x => x.rel === rel) : null;
+          const k = found ? found.lost.length : 0;
+          ownFix = !replacedCopy
+            ? head + ', and its backup copy is gone, so the toolkit cannot tell which lines were the project\'s. Ask the user to check whether a rule of theirs (a Git LFS line, for example) is missing from ' + rel + ', and add back any they name.'
+            : k
+              ? head + ' and dropped ' + (k === 1 ? 'a line' : k + ' lines') + ' of yours that the backup copy ' + replacedCopy + ' still has. Append back the ' + (k === 1 ? 'line' : k + ' lines') + ' the C-10 finding for ' + rel + ' lists.'
+              : head + '. C-10 compared the backup copy ' + replacedCopy + ' with the live file and lists no line to put back: every line of the backup copy is blank, a comment, or already in the live file, the shipped seed, or a copy of the file an earlier toolkit release shipped.';
+        }
         emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: rel },
-          what: 'Should fix. ' + rel + ' carried a local edit the plugin copy replaced during the migration from ' + (from ? 'the ' + from + ' copy-install' : 'a copy-install') + '.',
-          fix: tagged ? baseFix.replace(/[.\s]+$/, '') + '. Base for your backup: ' + tagged : baseFix, since: c.since,
+          what: 'Should fix. ' + rel + (replaced ? ', a file of the project\'s own, carried a local edit the toolkit seed replaced during the migration from ' : ' carried a local edit the plugin copy replaced during the migration from ') + where + '.',
+          fix: replaced ? ownFix : tagged ? baseFix.replace(/[.\s]+$/, '') + '. Base for your backup: ' + tagged : baseFix, since: c.since,
           fields: [{ label: 'Your copy', value: backup || '(no backup recorded)' },
             { label: 'Toolkit copy it came from', value: tagged || '(no usable copy-install version recorded)' }],
           receipt: { check: checks.join(' ; '),
