@@ -146,7 +146,9 @@ fi
 # Check runtime scripts and the quarantined package.json (must exist).
 # Runtime scripts live in .claude/scripts/ alongside their own package.json
 # so end users of downstream projects don't inherit toolkit-only deps.
-for f in ask-gpt.js ask-gemini.js browse.js package.json; do
+# env-local.js is the dependency-free .env.local lookup that ask-gpt.js,
+# ask-gemini.js, and gen-media.js all require from their own folder (issue #177).
+for f in ask-gpt.js ask-gemini.js env-local.js browse.js package.json; do
   if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/$f" ]; then
     echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/$f"
     PREFLIGHT_OK=false
@@ -585,7 +587,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js; do
+for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1020,6 +1022,9 @@ shopt -u nullglob; shopt -s failglob
 echo "  Copying .claude/scripts/ runtime files ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/ask-gpt.js"     "$TARGET/.claude/scripts/ask-gpt.js"
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/ask-gemini.js"  "$TARGET/.claude/scripts/ask-gemini.js"
+# The shared .env.local lookup: ask-gpt.js, ask-gemini.js, and gen-media.js each
+# require it from their own folder, so it is copied beside them (issue #177).
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/env-local.js"   "$TARGET/.claude/scripts/env-local.js"
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/browse.js"      "$TARGET/.claude/scripts/browse.js"
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/package.json"   "$TARGET/.claude/scripts/package.json"
 # Lockfile is optional - shipping it gives reproducible installs but if the

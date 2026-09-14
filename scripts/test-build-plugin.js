@@ -192,28 +192,60 @@ check('live build emits all seven shells', fs.readdirSync(path.join(live, 'skill
 const render = spawnSync('node', [path.join(live, 'scripts', 'render-html.js'), '--shell', 'review', '--name', 'probe', '--out-dir', path.join(live, 'artifacts'), '--stable', '--no-abs', '--data', writeTmp('{"title":"probe","findings":[]}')], { cwd: live, encoding: 'utf8' });
 check('render-html.js finds its shells from the emitted layout', render.status === 0 && exists(live, 'artifacts/probe.html'), render.stderr);
 
-// --- 6. The key walk from a plugin cache layout ---------------------------------
+// --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-home-'));
-const cacheScripts = path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'scripts');
+const cacheRoot = path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9');
+const cacheScripts = path.join(cacheRoot, 'scripts');
 fs.mkdirSync(cacheScripts, { recursive: true });
-fs.copyFileSync(path.join(REPO, '.claude', 'scripts', 'ask-gpt.js'), path.join(cacheScripts, 'ask-gpt.js'));
-fs.mkdirSync(path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'skills', 'shared'), { recursive: true });
-for (const f of ['finding-contract.md', 'report-format.md']) fs.copyFileSync(path.join(REPO, '.claude', 'skills', 'shared', f), path.join(home, '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '9.9.9', 'skills', 'shared', f));
+// ask-gpt.js requires env-local.js from its own folder, so the cache holds both, as a
+// real plugin install does.
+for (const f of ['ask-gpt.js', 'env-local.js']) fs.copyFileSync(path.join(REPO, '.claude', 'scripts', f), path.join(cacheScripts, f));
+fs.mkdirSync(path.join(cacheRoot, 'skills', 'shared'), { recursive: true });
+for (const f of ['finding-contract.md', 'report-format.md']) fs.copyFileSync(path.join(REPO, '.claude', 'skills', 'shared', f), path.join(cacheRoot, 'skills', 'shared', f));
 const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'build-plugin-proj-'));
+// A .git marks the project root, so the project lookup never climbs into the OS temp dir.
+fs.mkdirSync(path.join(proj, '.git'));
 fs.writeFileSync(path.join(proj, 'in.md'), 'x\n');
+const machineEnv = path.join(home, '.claude', 'plugins', '.env.local');
+const projectEnv = path.join(proj, '.env.local');
+// Made-up keys, assembled here so no real-shaped key sits in the source. The fixture
+// lines below join name and value at runtime so the pre-push tripwire's
+// secret-assignment pattern never sees them as one quoted assignment.
+const machineKey = 'sk-' + 'test-machine-level';
+const projectKey = 'sk-' + 'test-project-level';
+// A preload replaces fetch inside the child: it prints the bearer token it was handed
+// and answers 401, so nothing leaves the machine and a check can see WHICH key won.
+const probe = path.join(home, 'probe-fetch.js');
+fs.writeFileSync(probe, [
+  "'use strict';",
+  'globalThis.fetch = async function (url, init) {',
+  "  const auth = new Headers((init && init.headers) || {}).get('authorization') || '';",
+  "  process.stderr.write('PROBE-AUTH ' + auth + '\\n');",
+  "  return new Response('{\"error\":{\"message\":\"probe\"}}', { status: 401, headers: { 'content-type': 'application/json' } });",
+  '};',
+  '',
+].join('\n'));
 const nodePath = path.join(REPO, '.claude', 'scripts', 'node_modules');
 function askGpt(env) {
-  return spawnSync('node', [path.join(cacheScripts, 'ask-gpt.js'), 'review', '--context-file', path.join(proj, 'in.md')], { cwd: proj, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: home, NODE_PATH: nodePath }, env || {}), timeout: 20000 });
+  return spawnSync('node', ['--require', probe, path.join(cacheScripts, 'ask-gpt.js'), 'review', '--context-file', path.join(proj, 'in.md')], { cwd: proj, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: home, USERPROFILE: home, NODE_PATH: nodePath }, env || {}), timeout: 20000 });
 }
 if (fs.existsSync(nodePath)) {
   delete process.env.OPENAI_API_KEY;
   let r = askGpt({ OPENAI_API_KEY: '' });
-  check('with no key anywhere the script reports the missing key', /OPENAI_API_KEY not found/.test(r.stdout + r.stderr), (r.stdout + r.stderr).slice(0, 200));
-  fs.writeFileSync(path.join(home, '.claude', 'plugins', '.env.local'), 'OPENAI_API_KEY=sk-test-plugins-level\n');
+  let out = r.stdout + r.stderr;
+  check('with no key anywhere the script reports the missing key', /OPENAI_API_KEY not found/.test(out), out.slice(0, 300));
+  check('the missing-key message names all three places a key can live', out.includes('the environment') && out.includes("the project's .env.local") && out.includes('~/.claude/plugins/.env.local'), out.slice(0, 300));
+  fs.writeFileSync(machineEnv, ['OPENAI_API_KEY', machineKey].join('=') + '\n');
   r = askGpt({ OPENAI_API_KEY: '' });
-  check('a key at ~/.claude/plugins/.env.local is found from the cache', !/OPENAI_API_KEY not found/.test(r.stdout + r.stderr), (r.stdout + r.stderr).slice(0, 200));
-  fs.rmSync(path.join(home, '.claude', 'plugins', '.env.local'));
+  out = r.stdout + r.stderr;
+  check('a key at ~/.claude/plugins/.env.local is found from the cache', !/OPENAI_API_KEY not found/.test(out) && out.includes('PROBE-AUTH Bearer ' + machineKey + '\n'), out.slice(0, 300));
+  fs.writeFileSync(projectEnv, ['OPENAI_API_KEY', projectKey].join('=') + '\n');
+  r = askGpt({ OPENAI_API_KEY: '' });
+  out = r.stdout + r.stderr;
+  check("a project .env.local in the working directory is found from the cache and wins over the machine file", out.includes('PROBE-AUTH Bearer ' + projectKey + '\n') && !out.includes(machineKey), out.slice(0, 300));
+  fs.rmSync(projectEnv);
+  fs.rmSync(machineEnv);
 } else {
   console.log('  skip key-walk checks: .claude/scripts/node_modules not installed');
 }

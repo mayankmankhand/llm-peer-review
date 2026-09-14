@@ -73,7 +73,8 @@
 #  22. DESIGN-PROFILE.md is seeded once from the installed template: a
 #      fresh install creates it, a re-run skips it and keeps a local edit.
 #      gen-media.js is a managed dep-free script and enters the manifest
-#      like its siblings (issue #160)
+#      like its siblings (issue #160), and so does env-local.js, the shared
+#      .env.local lookup gen-media.js and both ask scripts require (issue #177)
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -1042,6 +1043,18 @@ if grep -qE '"\.claude/scripts/gen-media\.js": "[0-9a-f]{64}"' "$PROFILE_SCRATCH
 else
   fail "manifest lacks gen-media.js"
 fi
+# gen-media.js, ask-gpt.js, and ask-gemini.js all require ./env-local.js, so an
+# install without it breaks every key lookup at the first run (issue #177).
+if cmp -s "$PROFILE_SCRATCH/.claude/scripts/env-local.js" "$TOOLKIT_ROOT/.claude/scripts/env-local.js"; then
+  ok "env-local.js installed beside the scripts that require it"
+else
+  fail "env-local.js missing or different after install"
+fi
+if grep -qE '"\.claude/scripts/env-local\.js": "[0-9a-f]{64}"' "$PROFILE_SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then
+  ok "manifest carries env-local.js"
+else
+  fail "manifest lacks env-local.js"
+fi
 if grep -qF '"DESIGN-PROFILE.md"' "$PROFILE_SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then
   fail "manifest tracks the user-owned DESIGN-PROFILE.md"
 else
@@ -1072,6 +1085,10 @@ assert_grep "LOCAL EDIT MARKER" "$PROFILE_SCRATCH/DESIGN-PROFILE.md" "local prof
 # The row FORM is deliberately not pinned: session-init.js is granted in the
 # exact form (no trailing " *") because it takes no arguments, while the rest
 # carry a wildcard. What must exist is a Bash() entry naming the script.
+#
+# env-local.js is the one exemption: a module the ask scripts and gen-media.js
+# require (issue #177), never run with node itself, so a row for it would grant
+# nothing anyone uses.
 echo "[23] every installed .claude/scripts/*.js has a permission row"
 PERM_FILE="$PROFILE_SCRATCH/.claude/settings.local.json"
 if [ -f "$PERM_FILE" ]; then
@@ -1082,6 +1099,7 @@ if [ -f "$PERM_FILE" ]; then
     # package.json's lockfile sibling is data, not an entry point.
     case "$script_name" in
       *-lock.js) continue ;;
+      env-local.js) continue ;;
     esac
     if grep -qF "Bash(node .claude/scripts/$script_name" "$PERM_FILE"; then
       ok "permission row present for $script_name"

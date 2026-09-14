@@ -13,6 +13,13 @@
 //   --request-id   with video or matte: collect a job an earlier run submitted (exit 3)
 //                  instead of submitting a new one. --prompt and --image are not needed.
 //
+// The prompt, for image and video, comes from exactly one of:
+//   --prompt <text>        the prompt itself, as one argument.
+//   --prompt-file <path>   a UTF-8 file holding the prompt; one trailing newline is
+//                          dropped. Use it when the prompt carries backticks, $VARS, or
+//                          quotes, so the text never passes through a shell. Giving both
+//                          flags is an error, and so is giving neither.
+//
 // Contract (mirrors session-init.js):
 //   - stdout = exactly one JSON object. Nothing else is ever written there, so the
 //     caller (Claude, through the Bash tool) can JSON.parse it.
@@ -31,9 +38,11 @@
 //     Exit 1: { ok: false, error } - anything else (bad flags, API error, Node too old).
 //   - Zero dependencies. Node 18+ for the global fetch.
 //
-// Keys come from .env.local, found by the same upward walk ask-gpt.js uses, and a
-// real environment variable always wins. Claude never reads .env.local itself; this
-// script does, which is why it is the only place the design workflow touches a key.
+// Keys and model ids come from the environment first, then the project's .env.local
+// (searched from the working directory up to the git root), then
+// ~/.claude/plugins/.env.local: the lookup ask-gpt.js and ask-gemini.js share, in
+// env-local.js beside this file (issue #177). Claude never reads .env.local itself;
+// this script does, which is why it is the only place the design workflow touches a key.
 //
 // Model ids change often on every provider. Every default below can be overridden
 // from .env.local (see .env.local.example and API-KEYS.md). When a provider answers
@@ -68,32 +77,13 @@ if (typeof fetch !== 'function') {
   finish({ ok: false, error: `Node 18 or newer required, found ${process.version}` }, 1);
 }
 
-// ─── .env.local (same walk and parse rules as ask-gpt.js) ────────────────────
+// ─── .env.local ──────────────────────────────────────────────────────────────
 
-function findEnvLocal(startDir) {
-  let dir = startDir;
-  for (let depth = 0; depth < 6; depth++) {
-    const candidate = path.join(dir, '.env.local');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return path.join(startDir, '..', '..', '.env.local');
-}
-
-function loadEnvLocal() {
-  const envPath = findEnvLocal(__dirname);
-  if (!fs.existsSync(envPath)) return;
-  fs.readFileSync(envPath, 'utf-8').split('\n').forEach((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return;
-    const match = trimmed.match(/^(?:export\s+)?([^=]+)=(.*)$/);
-    if (!match) return;
-    const key = match[1].trim();
-    const value = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
-    if (!process.env[key]) process.env[key] = value;
-  });
+// The shared lookup (env-local.js, issue #177). Required on first use rather than at
+// the top, so --kind seed never needs the file and a missing sibling still ends in one
+// JSON object through main's catch instead of a stack trace with nothing on stdout.
+function envLocal() {
+  return require('./env-local.js');
 }
 
 // ─── Flags ───────────────────────────────────────────────────────────────────
@@ -128,7 +118,11 @@ function envOr(name) {
 
 // Poll interval for the fal.ai queue. An env knob so the test suite can run the
 // timeout branch in milliseconds instead of seconds; nobody else needs to set it.
-const POLL_MS = parseInt(process.env.GEN_MEDIA_POLL_MS, 10) || 3000;
+// Read at poll time, after .env.local is loaded, so it follows the same lookup order
+// as every other variable (a module-level read would see the environment only).
+function pollMs() {
+  return parseInt(process.env.GEN_MEDIA_POLL_MS, 10) || 3000;
+}
 
 // ─── Small utilities ─────────────────────────────────────────────────────────
 
@@ -207,7 +201,7 @@ const HANDOFF = {
 };
 
 function handoff(kind, args, missingKeys) {
-  diag(`no key for ${kind} (${missingKeys.join(' or ')}); handing the prompt back`);
+  diag(`no key for ${kind} (${missingKeys.join(' or ')}) in ${envLocal().describeLookup()}; handing the prompt back`);
   finish({ ok: false, missingKeys, handoffPrompt: HANDOFF[kind](args), expectedFile: args.out }, 2);
 }
 
@@ -302,7 +296,7 @@ async function falQueue(model, input, args, deadline) {
         transient += 1;
         if (transient > 5) throw e;
         diag(`status poll failed (${e.message}); retrying`);
-        await sleep(Math.min(POLL_MS, deadline.remainingMs() || 1));
+        await sleep(Math.min(pollMs(), deadline.remainingMs() || 1));
         continue;
       }
       const status = String(st.status || '').toUpperCase();
@@ -311,7 +305,7 @@ async function falQueue(model, input, args, deadline) {
         throw new Error(`fal.ai job ${requestId} ended with status ${status}`);
       }
       diag(`status ${status || 'unknown'}, waiting`);
-      await sleep(Math.min(POLL_MS, deadline.remainingMs() || 1));
+      await sleep(Math.min(pollMs(), deadline.remainingMs() || 1));
     }
 
     const result = await readJsonResponse(await fetch(responseUrl, { headers, signal: deadline.signal() }), 'fal.ai result');
@@ -343,13 +337,27 @@ async function main() {
     return finish({ ok: true, seed: crypto.randomBytes(24).toString('base64') }, 0);
   }
 
-  loadEnvLocal();
+  envLocal().loadEnvLocal();
 
   const resuming = Boolean(args['request-id']);
   if (resuming && kind === 'image') return fail('--request-id applies to video and matte only');
   if (!args.out) return fail('--out is required for image, video, and matte');
   if (fs.existsSync(args.out)) return fail(`refusing to overwrite existing file: ${args.out}`);
-  if (!resuming && kind !== 'matte' && !args.prompt) return fail('--prompt is required for image and video');
+  if (args.prompt !== undefined && args['prompt-file'] !== undefined) {
+    return fail('--prompt and --prompt-file are alternatives: give one of them, not both');
+  }
+  const needsPrompt = !resuming && kind !== 'matte';
+  // The file is read only when its prompt is used. A resume rerun that still carries a
+  // --prompt-file whose temp file is gone must collect the paid job, not fail on it.
+  if (needsPrompt && args['prompt-file'] !== undefined) {
+    try {
+      args.prompt = fs.readFileSync(args['prompt-file'], 'utf8').replace(/\r?\n$/, '');
+    } catch (e) {
+      return fail(`cannot read --prompt-file: ${e.message}`);
+    }
+    if (!args.prompt) return fail(`--prompt-file is empty: ${args['prompt-file']}`);
+  }
+  if (needsPrompt && !args.prompt) return fail('--prompt or --prompt-file is required for image and video');
   if (!resuming && kind === 'matte' && !args.image) return fail('--image (the input clip) is required for matte');
   if (args.image && !fs.existsSync(args.image)) return fail(`input file not found: ${args.image}`);
   // The output directory is checked here, before any provider is called, so a missing

@@ -4,8 +4,11 @@
 // test-gen-media.js - exercises .claude/scripts/gen-media.js without a network or a key.
 //
 // Every branch runs the script as a child process from a SANDBOX copy under the OS temp
-// dir, with its own .env.local written beside it, so the script's upward .env.local walk
-// stops in the sandbox and can never reach this repo's real file. The child is started
+// dir (next to a copy of the env-local.js module it requires), with the sandbox as its
+// working directory and its own .env.local written there, so the project .env.local
+// lookup stops in the sandbox and can never reach this repo's real file. HOME is the
+// sandbox too, so the machine file lookup (~/.claude/plugins/.env.local, issue #177)
+// can never reach the real one either. The child is started
 // with `--require scripts/fixtures/fake-fetch.js`, which replaces global fetch inside the
 // child and records every request to a JSONL log the assertions read back.
 //
@@ -42,7 +45,8 @@ function sandbox(label, keys) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-media-' + label + '-'));
   const copy = path.join(dir, 'gen-media.js');
   fs.copyFileSync(SCRIPT, copy);
-  // Written even when empty: the walk stops at the first .env.local it meets.
+  fs.copyFileSync(path.join(path.dirname(SCRIPT), 'env-local.js'), path.join(dir, 'env-local.js'));
+  // Written even when empty: the project lookup reads only the first .env.local it meets.
   const lines = Object.entries(keys).map(([k, v]) => k + '=' + v);
   fs.writeFileSync(path.join(dir, '.env.local'), lines.join('\n') + '\n');
   return { dir, copy, log: path.join(dir, 'requests.jsonl'), out: (name) => path.join(dir, name) };
@@ -52,7 +56,7 @@ function run(sb, args, mode) {
   const r = spawnSync(process.execPath, ['--require', PRELOAD, sb.copy].concat(args), {
     cwd: sb.dir,
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, FAKE_FETCH_LOG: sb.log, FAKE_FETCH_MODE: mode || 'complete', GEN_MEDIA_POLL_MS: '20' },
+    env: { PATH: process.env.PATH, HOME: sb.dir, USERPROFILE: sb.dir, FAKE_FETCH_LOG: sb.log, FAKE_FETCH_MODE: mode || 'complete', GEN_MEDIA_POLL_MS: '20' },
   });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
@@ -228,6 +232,76 @@ console.log('gen-media.js');
   contract(r, 'overwrite');
   check(r.status === 1 && /overwrite/.test(r.json.error) && r.requests.length === 0, 'overwrite: exit 1 before any request');
   check(fs.readFileSync(sb.out('hero.png'), 'utf8') === 'KEEP ME', 'overwrite: existing file untouched');
+}
+
+// ─── --prompt-file: the prompt arrives byte for byte ─────────────────────────
+{
+  // Everything a shell would expand or mangle: backticks, $VAR, ${VAR}, $(cmd), both
+  // quote kinds, a backslash, a literal \n, an inner newline, and a non-ASCII letter.
+  const tricky = 'A `crystal` on "dark" glass, it\'s $HOME and ${PATH} and $(whoami); \\ and \\n stay\nline two: 50% *off* café';
+  const sb = sandbox('prompt-file', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(sb.out('prompt.txt'), tricky + '\n');
+  const out = sb.out('hero.png');
+  const r = run(sb, ['--kind', 'image', '--prompt-file', sb.out('prompt.txt'), '--out', out]);
+  contract(r, 'prompt-file');
+  check(r.status === 0 && r.json.ok === true && fs.existsSync(out), 'prompt-file: exit 0 and the image lands');
+  check(r.requests.length === 1 && r.requests[0].body && r.requests[0].body.prompt === tricky, 'prompt-file: backticks, $VAR, and both quote kinds arrive byte-identical, the trailing newline dropped');
+
+  const vsb = sandbox('prompt-file-video', { FAL_KEY: FAKE.FAL_KEY });
+  fs.writeFileSync(vsb.out('prompt.txt'), tricky + '\n');
+  const v = run(vsb, ['--kind', 'video', '--prompt-file', vsb.out('prompt.txt'), '--out', vsb.out('loop.mp4')]);
+  contract(v, 'prompt-file/video');
+  check(v.status === 0 && v.requests[0].method === 'POST' && v.requests[0].body.prompt === tricky, 'prompt-file/video: the same bytes reach the fal.ai submit');
+}
+
+// ─── --prompt-file: only one trailing line ending is dropped ─────────────────
+{
+  const sb = sandbox('prompt-file-crlf', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(sb.out('prompt.txt'), 'first line\r\nsecond line\r\n');
+  const r = run(sb, ['--kind', 'image', '--prompt-file', sb.out('prompt.txt'), '--out', sb.out('hero.png')]);
+  check(r.status === 0 && r.requests[0].body.prompt === 'first line\r\nsecond line', 'prompt-file/eol: a CRLF file loses only its final line ending');
+  const sb2 = sandbox('prompt-file-two', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(sb2.out('prompt.txt'), 'ends with a blank line\n\n');
+  const r2 = run(sb2, ['--kind', 'image', '--prompt-file', sb2.out('prompt.txt'), '--out', sb2.out('hero.png')]);
+  check(r2.status === 0 && r2.requests[0].body.prompt === 'ends with a blank line\n', 'prompt-file/eol: of two trailing newlines, one is kept');
+}
+
+// ─── --prompt-file with no key: the handoff carries the file's prompt ────────
+{
+  const sb = sandbox('prompt-file-handoff', {});
+  const text = 'a "quoted" `ticked` $PROMPT';
+  fs.writeFileSync(sb.out('prompt.txt'), text + '\n');
+  const r = run(sb, ['--kind', 'image', '--prompt-file', sb.out('prompt.txt'), '--out', sb.out('hero.png')]);
+  contract(r, 'prompt-file/handoff');
+  check(r.status === 2 && r.json.handoffPrompt.includes('Prompt: ' + text + '\n\nPNG'), 'prompt-file/handoff: the file prompt reaches the handoff unchanged');
+  check(r.stderr.includes('the environment') && r.stderr.includes("the project's .env.local") && r.stderr.includes('~/.claude/plugins/.env.local'), 'prompt-file/handoff: the missing-key diagnostic names all three places a key can live');
+}
+
+// ─── --prompt and --prompt-file: exactly one ─────────────────────────────────
+{
+  const sb = sandbox('prompt-both', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY });
+  fs.writeFileSync(sb.out('prompt.txt'), 'from the file\n');
+  const both = run(sb, ['--kind', 'image', '--prompt', 'inline', '--prompt-file', sb.out('prompt.txt'), '--out', sb.out('hero.png')]);
+  contract(both, 'prompt-both');
+  check(both.status === 1 && /--prompt and --prompt-file/.test(both.json.error) && /not both/.test(both.json.error), 'prompt-both: both flags is exit 1 with a clear error');
+  check(both.requests.length === 0 && !fs.existsSync(sb.out('hero.png')), 'prompt-both: no request, no file');
+
+  const nsb = sandbox('prompt-neither', { FAL_KEY: FAKE.FAL_KEY });
+  const neither = run(nsb, ['--kind', 'video', '--out', nsb.out('loop.mp4')]);
+  contract(neither, 'prompt-neither');
+  check(neither.status === 1 && /--prompt or --prompt-file is required/.test(neither.json.error), 'prompt-neither: neither flag is exit 1 naming both');
+  check(neither.requests.length === 0, 'prompt-neither: no request');
+
+  const missing = run(sandbox('prompt-missing', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY }), ['--kind', 'image', '--prompt-file', sb.out('no-such-prompt.txt'), '--out', sb.out('m.png')]);
+  check(missing.status === 1 && /cannot read --prompt-file/.test(missing.json.error) && missing.requests.length === 0, 'prompt-file: an unreadable file is exit 1 before any request');
+  fs.writeFileSync(sb.out('empty.txt'), '\n');
+  const empty = run(sandbox('prompt-empty', { OPENAI_API_KEY: FAKE.OPENAI_API_KEY }), ['--kind', 'image', '--prompt-file', sb.out('empty.txt'), '--out', sb.out('e.png')]);
+  check(empty.status === 1 && /--prompt-file is empty/.test(empty.json.error) && empty.requests.length === 0, 'prompt-file: an empty file is exit 1 before any request');
+
+  const rsb = sandbox('prompt-file-resume', { FAL_KEY: FAKE.FAL_KEY });
+  const resume = run(rsb, ['--kind', 'video', '--request-id', 'req_test_123', '--prompt-file', rsb.out('gone.txt'), '--out', rsb.out('loop.mp4')]);
+  contract(resume, 'prompt-file/resume');
+  check(resume.status === 0 && resume.json.requestId === 'req_test_123' && !resume.requests.some((q) => q.method === 'POST'), 'prompt-file/resume: a rerun whose prompt file is gone still collects the job');
 }
 
 // ─── bad flags ───────────────────────────────────────────────────────────────

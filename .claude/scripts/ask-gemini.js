@@ -9,6 +9,7 @@
  *
  * Intentionally kept as a standalone script (no shared provider module) for
  * independent model flexibility, per-provider error handling, and simpler debugging.
+ * The one shared piece is the .env.local lookup, in env-local.js beside this file.
  *
  * Commands:
  *   review   - Get initial review from Gemini
@@ -27,7 +28,11 @@
  *   GEMINI_MAX_TOKENS         Optional maxOutputTokens override (default: 32000).
  *                             Covers thinking + visible output for reasoning models.
  *   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use concatenated prompts instead of systemInstruction
- * 
+ *
+ *   Each variable is read from the environment first, then the project's
+ *   .env.local (searched from the working directory up to the git root), then
+ *   ~/.claude/plugins/.env.local. See env-local.js (issue #177).
+ *
  * Scope & Assumptions:
  *   - Designed for Linux/WSL environments
  *   - Expects simple .env.local format (KEY=value, no quotes needed)
@@ -37,59 +42,20 @@
 
 const fs = require('fs');
 const path = require('path');
+const { loadEnvLocal, describeLookup } = require('./env-local.js');
 
 /**
- * Load environment variables from .env.local
+ * Load environment variables from .env.local, before anything below reads them.
  *
- * This is a simple implementation for learning purposes.
- * For production use, consider the 'dotenv' package which handles
- * more edge cases (quoted values, multiline, variable expansion).
- *
- * Resolution: walk upward from this script looking for the project root.
- * The first directory with a `.env.local` OR a `.git` OR a `package.json`
- * counts as root. This survives:
- *   - the canonical install at `<project>/.claude/scripts/`
- *   - dev runs from inside the toolkit repo
- *   - symlinked installs (Node sets __dirname to the symlink target)
- *   - worktrees that inherit the same layout
- * If no marker is found within 6 levels we give up; .env.local is optional
- * and the script continues with whatever's already in process.env.
+ * The lookup is shared with ask-gpt.js and gen-media.js in env-local.js
+ * (issue #177): a real environment variable always wins, then the project's
+ * .env.local (searched from the working directory upward, stopping at the git
+ * root), then ~/.claude/plugins/.env.local. It starts from the working
+ * directory rather than this script's folder because a plugin install runs
+ * the script from the plugin cache, outside every project. Both files are
+ * optional; a missing key is reported by initGemini().
  */
-function findEnvLocal(startDir) {
-  let dir = startDir;
-  for (let depth = 0; depth < 6; depth++) {
-    const candidate = path.join(dir, '.env.local');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  // Fallback to the canonical install location. The existsSync at the call
-  // site treats a missing file as "no env to load" without erroring.
-  return path.join(startDir, '..', '..', '.env.local');
-}
-const envPath = findEnvLocal(__dirname);
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  envContent.split('\n').forEach(line => {
-    // Skip empty lines and comments
-    const trimmedLine = line.trim();
-    if (!trimmedLine || trimmedLine.startsWith('#')) {
-      return;
-    }
-    
-    const match = trimmedLine.match(/^(?:export\s+)?([^=]+)=(.*)$/);
-    if (match) {
-      const key = match[1].trim();
-      // Strip surrounding quotes (single or double) that some tutorials show
-      const value = match[2].trim().replace(/^(['"])(.*)\1$/, '$2');
-      // Only set if not already in environment
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
-    }
-  });
-}
+loadEnvLocal();
 
 // Model defaults. When bumping the default here, append the previous default
 // to KNOWN_STALE_GEMINI_MODELS so users with that value in .env.local are
@@ -137,7 +103,7 @@ const MAX_FILE_SIZE = 500 * 1024; // 500KB
 
 // Error messages
 const ERR = {
-  MISSING_KEY: 'GEMINI_API_KEY not found. Add it to .env.local',
+  MISSING_KEY: `GEMINI_API_KEY not found in ${describeLookup()}. Set it in any one of them.`,
   MISSING_ARG: (arg) => `Missing required argument: ${arg}`,
   FILE_NOT_FOUND: (f) => `File not found: ${f}`,
   FILE_TOO_LARGE: (f, sizeMB) =>
@@ -379,6 +345,9 @@ Environment:
   GEMINI_MAX_TOKENS         maxOutputTokens budget (default: 32000)
                             Covers thinking + visible output for reasoning models.
   GEMINI_USE_CONCAT_PROMPT  Set to "1" to use fallback concatenated prompts
+
+  Each one is read from the environment first, then the project's .env.local
+  (from the working directory up to the git root), then ~/.claude/plugins/.env.local.
 
 Examples:
   # Initial review

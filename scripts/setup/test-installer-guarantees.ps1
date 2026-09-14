@@ -85,7 +85,8 @@
 #  22. DESIGN-PROFILE.md is seeded once from the installed template: a
 #      fresh install creates it, a re-run skips it and keeps a local edit.
 #      gen-media.js is a managed dep-free script and enters the manifest
-#      like its siblings (issue #160)
+#      like its siblings (issue #160), and so does env-local.js, the shared
+#      .env.local lookup gen-media.js and both ask scripts require (issue #177)
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -1309,6 +1310,18 @@ try {
   } else {
     Failed "manifest lacks gen-media.js"
   }
+  # gen-media.js, ask-gpt.js, and ask-gemini.js all require ./env-local.js, so an
+  # install without it breaks every key lookup at the first run (issue #177).
+  if (Test-FilesEqual (Join-Path $profileScratch ".claude\scripts\env-local.js") (Join-Path $ToolkitRoot ".claude\scripts\env-local.js")) {
+    Ok "env-local.js installed beside the scripts that require it"
+  } else {
+    Failed "env-local.js missing or different after install"
+  }
+  if ($profileManifestText -match '"\.claude/scripts/env-local\.js": "[0-9a-f]{64}"') {
+    Ok "manifest carries env-local.js"
+  } else {
+    Failed "manifest lacks env-local.js"
+  }
   if ($profileManifestText.Contains('"DESIGN-PROFILE.md"')) {
     Failed "manifest tracks the user-owned DESIGN-PROFILE.md"
   } else {
@@ -1337,6 +1350,10 @@ try {
   # The row FORM is deliberately not pinned: session-init.js is granted in the
   # exact form (no trailing " *") because it takes no arguments, while the rest
   # carry a wildcard. What must exist is a Bash() entry naming the script.
+  #
+  # env-local.js is the one exemption: a module the ask scripts and gen-media.js
+  # require (issue #177), never run with node itself, so a row for it would grant
+  # nothing anyone uses.
   Write-Host "[23] every installed .claude\scripts\*.js has a permission row"
   $permFile = Join-Path $profileScratch ".claude\settings.local.json"
   if (Test-Path -LiteralPath $permFile -PathType Leaf) {
@@ -1346,6 +1363,7 @@ try {
     foreach ($js in (Get-ChildItem -LiteralPath $scriptsDir -Filter "*.js" -File -ErrorAction SilentlyContinue)) {
       # package.json's lockfile sibling is data, not an entry point.
       if ($js.Name -like "*-lock.js") { continue }
+      if ($js.Name -eq "env-local.js") { continue }
       if ($permText.Contains("Bash(node .claude/scripts/" + $js.Name)) {
         Ok "permission row present for $($js.Name)"
       } else {

@@ -121,7 +121,9 @@ if (-not (Test-Path -LiteralPath $CommandsDir -PathType Container)) {
 # Check runtime scripts and the quarantined package.json (must exist).
 # Runtime scripts live in .claude\scripts\ alongside their own package.json
 # so end users of downstream projects don't inherit toolkit-only deps.
-foreach ($f in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json")) {
+# env-local.js is the dependency-free .env.local lookup that ask-gpt.js,
+# ask-gemini.js, and gen-media.js all require from their own folder (issue #177).
+foreach ($f in @("ask-gpt.js", "ask-gemini.js", "env-local.js", "browse.js", "package.json")) {
   $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -518,7 +520,7 @@ if (Test-Path -LiteralPath $pfAgentsDir -PathType Container) {
     Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\agents" $src.Name)
   }
 }
-foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
+foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "env-local.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js")) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
 }
 $pfLockSrc = Join-Path $ToolkitRoot ".claude\scripts\package-lock.json"
@@ -1108,7 +1110,10 @@ if (Test-Path -LiteralPath $skillsRoot -PathType Container) {
 # leak into the downstream project's root package.json. Setup scripts stay
 # in the toolkit repo and are not copied to the target.
 Write-Host "  Copying .claude\scripts\ runtime files ..."
-$runtimeFiles = @("ask-gpt.js", "ask-gemini.js", "browse.js", "package.json")
+# env-local.js is the shared .env.local lookup: ask-gpt.js, ask-gemini.js, and
+# gen-media.js each require it from their own folder, so it is copied beside
+# them (issue #177). Mirrors setup.sh.
+$runtimeFiles = @("ask-gpt.js", "ask-gemini.js", "env-local.js", "browse.js", "package.json")
 foreach ($name in $runtimeFiles) {
   try {
     $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
