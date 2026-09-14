@@ -53,13 +53,13 @@ Install host project deps; toolkit deps depend on how the toolkit is installed.
 1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
 2. **Toolkit deps** - two cases:
    - **Plugin install (v7.0.0 and later, the normal case):** nothing to do. The toolkit's dependencies live with the plugin under `~/.claude/plugins/`, installed once per machine when the plugin is installed and shared by every worktree and every project.
-   - **Copy-install (a `${CLAUDE_PLUGIN_ROOT}/scripts/package.json` exists in the worktree):** run `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Without it, `/tk:review-browser`, `/tk:ask-gpt`, and `/tk:ask-gemini` will not work in the new worktree. Skip if there is no toolkit package.json.
+   - **Copy-install (a `.claude/scripts/package.json` exists in the worktree):** run `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Without it, `/tk:review-browser`, `/tk:ask-gpt`, and `/tk:ask-gemini` will not work in the new worktree. Skip if there is no toolkit package.json.
 
 If either install fails, warn the user but do NOT stop. The worktree is still usable for general work, but the affected toolkit features will not run until the missing deps are installed manually.
 
 ### Step 6: Copy environment
 
-Copy `.env.local` from the main repo root into the worktree root:
+Copy `.env.local` from the main repo root into the worktree root, so the worktree keeps the project's keys. The API scripts take each key from a real environment variable first, then the project's own `.env.local` (searched from the working folder up to the git root, which in a worktree is the worktree root, so the main repo's copy is out of reach), then `~/.claude/plugins/.env.local`:
 `cp .env.local .claude/worktrees/worktree-N/.env.local`
 
 - If `.env.local` does not exist in the main repo, skip and note it.
@@ -87,7 +87,7 @@ Worktree ready!
   Path:         /full/absolute/path/to/.claude/worktrees/worktree-N
   Branch:       worktree-N
   Host npm:     installed (or: failed - run manually / skipped - no package.json)
-  Toolkit npm:  plugin - nothing to install (or: installed / failed - run manually / skipped - no ${CLAUDE_PLUGIN_ROOT}/scripts/package.json)
+  Toolkit npm:  plugin - nothing to install (or: installed / failed - run manually / skipped - no .claude/scripts/package.json)
   .env:         copied (or: skipped - not found / already exists)
   Map:          copied (or: skipped - not found / already exists)
 

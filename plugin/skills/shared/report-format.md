@@ -45,17 +45,17 @@ Every review that produces a report writes it to disk before rendering anything:
 
 - `<run-stamp>` is the same `YYYY-MM-DD-HHMMSS` the markdown report carries. Once per run: `mkdir -p reports/receipts/<run-stamp>`.
 - Each check's file is `reports/receipts/<run-stamp>/<lens>-<n>.txt`, where `<lens>` is the specialist that authored the finding (`orchestrator` uses the specialist's name; a direct run uses its own lens name; the orchestrator's inline path uses `inline`) and `<n>` is that finding's number within that lens's results, counting from 1.
-- Run each check so its output is saved and read back in one go:
+- Run each check so its output is saved and read back in one go, with the check inside `{ ... ; }` because a bare redirect captures only the last command of a compound or piped check:
 
   ```bash
-  <check> > reports/receipts/<run-stamp>/<lens>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<lens>-<n>.txt; cat reports/receipts/<run-stamp>/<lens>-<n>.txt
+  { <check> ; } > reports/receipts/<run-stamp>/<lens>-<n>.txt 2>&1; echo "exit $?" >> reports/receipts/<run-stamp>/<lens>-<n>.txt; cat reports/receipts/<run-stamp>/<lens>-<n>.txt
   ```
 
   Tier 1 compares what `cat` printed against the finding's `expect`. The finding's HTML `receipt` becomes `{cmd, stdoutFile, exit}` with `stdoutFile` that path: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. `mkdir` and `cat` are on the toolkit's allow-list; the redirect may prompt once on a fresh install.
 
 **The markdown and the HTML are named on different principles, deliberately.** The markdown is timestamped per run because it is the archive: every run's full report, kept. The HTML page is `--stable --name review` because it is the standing page: one per repository, replaced in place, carrying only what is still open. One accumulates on purpose; the other refuses to.
 
-This applies to the orchestrator and to a directly-typed `/review-*` run alike, which is why it lives here rather than in either call site.
+This applies to the orchestrator and to a directly-typed `/tk:review-*` run alike, which is why it lives here rather than in either call site.
 
 **The markdown on disk is the canonical copy and is always complete.** It carries every finding, the full Audited out log, and every attachment. The HTML view may carry less; the markdown never carries less than the HTML. Chat scrollback is not a file: without this write, the report exists nowhere once the conversation is cleared, and every claim that a shortened view is safe "because the long version survives in the markdown" is false.
 
@@ -75,7 +75,7 @@ This applies to the orchestrator and to a directly-typed `/review-*` run alike, 
 
 ## Audit-Aware Report Sections
 
-These two additions apply to any run that performs the M2 audit: `/tk:review` after dedup, a directly-typed `/review-*` skill after its own pass, and the session auditing a debate's Recommended Actions - whose report surface is the in-chat audit result M2 defines, not a rendered file. M2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` defines who the runner is and how the tiers work; this section defines only what the resulting report looks like.
+These two additions apply to any run that performs the M2 audit: `/tk:review` after dedup, a directly-typed `/tk:review-*` skill after its own pass, and the session auditing a debate's Recommended Actions - whose report surface is the in-chat audit result M2 defines, not a rendered file. M2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` defines who the runner is and how the tiers work; this section defines only what the resulting report looks like.
 
 They are not part of the authoring contract above. A receipt's *check* is authored with the finding; the **Receipt** row reports what that check actually output, which does not exist until tier 1 has run.
 

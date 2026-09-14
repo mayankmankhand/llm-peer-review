@@ -33,6 +33,24 @@
 // with one schema on both paths. Custom files in the managed directories are
 // never touched: only paths the manifest (or managed-paths.json) names go.
 //
+// Two managed root files hold user content too and are never removed (issue
+// #174): a migration line-merges .gitattributes like .gitignore (a Git LFS rule
+// a project added survives), and artifacts/README.md is written only when absent.
+//
+// State and the version guard (issue #174): a fresh setup also records
+// `auditedVersion` (its seed already satisfies the running version, so it is
+// audited by construction); a migration does not, so session-start.js asks for
+// /tk:upgrade. A re-run on a project already on the plugin raises `version` and
+// `at` to the running version when it is newer, never lowers them, and never
+// changes an existing `auditedVersion` or `previousVersion`. When neither exists
+// (every fresh 7.0.x install, whose setup did not write auditedVersion),
+// `version` itself is the audit reference, so the raise first copies the old
+// `version` (and `at`) into `auditedVersion` (and `auditedAt`): otherwise the
+// raise would silently empty /tk:upgrade's audit range and hide its notice.
+// Every version read from the project is validated by the helpers shared with
+// session-start.js and pre-push-check.js: a value of any other shape is never
+// compared as a version and never echoed into the report.
+//
 // Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
 // needed: locally modified files, provenance unknown, or a dirty tree).
 // --dry-run prints the same report and exit code and writes nothing.
@@ -51,6 +69,9 @@ const STATE_REL = '.claude/.toolkit-state.json';
 const MANIFEST_REL = '.claude/.toolkit-manifest.json';
 const MIGRATION_REL = '.claude/.toolkit-migration.json';
 const MANAGED_DIRS = ['.claude/commands', '.claude/agents', '.claude/skills', '.claude/scripts', '.claude/rules'];
+// Managed paths a migration keeps instead of removing: each can carry lines or
+// text the user added, which a remove-and-reseed would silently delete.
+const KEEP_ON_MIGRATION = ['.gitattributes', 'artifacts/README.md'];
 // A permission row is dead when it can no longer allow anything real. Two kinds:
 // the toolkit's own legacy row shapes (an absolute-path browse.js pipe that an
 // old installer injected, the pre-skill review-commands row), and any row that
@@ -117,6 +138,70 @@ function dirtyTree(project) {
   }
   return false;
 }
+// >>> version helpers (issue #174) >>>
+// Byte-identical in session-start.js, pre-push-check.js and setup-project.js,
+// from this marker to the closing one. Each script must run on its own (the
+// pre-push check is also copied alone into non-plugin installs), so there is no
+// shared module; scripts/test-pre-push-check.js fails when the copies drift.
+//
+// A version is only ever taken from a string of one fixed, harmless shape:
+// dotted numbers (one to four parts), an optional -suffix of letters, digits and
+// dots, at most 32 characters. The state file these read is committed to the
+// project, so a cloned repository controls it, and session-start.js prints the
+// version into Claude's context: any other text there would be injected into
+// it. A value of any other shape is no usable version - never printed, never
+// compared, never a block.
+const VERSION_SHAPE = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?$/;
+const VERSION_MAX_LENGTH = 32;
+// The version as a safe string (surrounding whitespace dropped), or null.
+function validVersion(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length <= VERSION_MAX_LENGTH && VERSION_SHAPE.test(t) ? t : null;
+}
+// Dotted numeric parts, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Null for
+// anything validVersion refuses, so a malformed value never produces a verdict.
+function parseVersion(v) {
+  const t = validVersion(v);
+  return t === null ? null : t.split('-')[0].split('.').map(Number);
+}
+// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unusable.
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (pa === null || pb === null) return null;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+// The version a project is recorded at: auditedVersion (a /tk:upgrade stamped
+// it, or a fresh setup wrote it), else previousVersion (a migration's old
+// copy-install version), else version. The first key that names a version
+// decides, validated: null when none names one or that value is unusable (no
+// fall-through to a later key, so a malformed stamp cannot pick the reference).
+function referenceVersion(state) {
+  if (!state || typeof state !== 'object') return null;
+  for (const key of ['auditedVersion', 'previousVersion', 'version']) {
+    if (typeof state[key] === 'string' && state[key].trim() !== '') return validVersion(state[key]);
+  }
+  return null;
+}
+// <<< version helpers <<<
+const parseableVersion = (v) => parseVersion(v) !== null;
+// A version read from the project (the state file, a manifest, VERSION) as
+// report text. This report reaches Claude through the /tk:setup skill, and a
+// cloned repository controls those files, so only a validated version is ever
+// shown, with the prefix; anything else is named, never echoed.
+// (referenceVersion stays in the block to keep the copies identical; this
+// script reads the state keys one by one.)
+function shownVersion(v, prefix) {
+  if (typeof v !== 'string' || v.trim() === '') return 'no version';
+  const t = validVersion(v);
+  return t === null ? 'an unreadable version' : (prefix || '') + t;
+}
 function readJson(abs, fallback) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; }
 }
@@ -171,9 +256,9 @@ function main() {
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
   say('  Install type: ' + ({
-    plugin: 'already on the plugin (v' + (state && state.version) + ') - seed check only',
-    'migrate-manifest': 'migration from copy-install v' + previousVersion + ' (manifest present)',
-    'migrate-unknown': 'migration from copy-install v' + previousVersion + ' (NO manifest: provenance unknown)',
+    plugin: 'already on the plugin (' + shownVersion(state && state.version, 'v') + ') - seed check only',
+    'migrate-manifest': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (manifest present)',
+    'migrate-unknown': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (NO manifest: provenance unknown)',
     fresh: 'fresh install',
   })[mode]);
   if (opts.dryRun) say('  Dry run: nothing will be written.');
@@ -192,6 +277,9 @@ function main() {
     const managed = mode === 'migrate-manifest' ? Object.keys(manifest.files) : managedShipped;
     for (const rel of managed) {
       if (!fs.existsSync(P(rel)) || fs.statSync(P(rel)).isDirectory()) continue;
+      // Kept and merged below, so nothing of the user's is lost and an edit to
+      // one of them is no reason to page.
+      if (KEEP_ON_MIGRATION.includes(rel)) continue;
       if (mode === 'migrate-manifest') {
         if (sha256NoCR(P(rel)) !== manifest.files[rel]) modified.push(rel);
       }
@@ -219,7 +307,9 @@ function main() {
     'LESSONS.md': 'LESSONS.md',
     'DESIGN-PROFILE.md': 'DESIGN-PROFILE.md',
     '.env.local.example': 'env.local.example',
-    '.gitattributes': 'gitattributes',
+    // artifacts/README.md is never removed by a migration (KEEP_ON_MIGRATION),
+    // so the absent-after-removal rule below writes it only when it is absent.
+    // .gitattributes is not listed here: it is line-merged further down.
     'artifacts/README.md': 'artifacts-README.md',
     '.claude/rules/toolkit.md': 'rules-toolkit.md',
   };
@@ -238,8 +328,33 @@ function main() {
   // .gitignore line merge
   const seedIgnore = fs.readFileSync(path.join(seedDir, 'gitignore'), 'utf8').split(/\r?\n/);
   const curIgnore = fs.existsSync(P('.gitignore')) ? fs.readFileSync(P('.gitignore'), 'utf8').split(/\r?\n/) : [];
-  const ignoreAdd = seedIgnore.filter(l => l.trim() !== '' && !l.startsWith('#') && !curIgnore.includes(l));
-  if (!curIgnore.includes('.claude/settings.local.json')) ignoreAdd.push('.claude/settings.local.json');
+  // Lines compare trimmed, against the file AND the lines already queued, so a
+  // line the seed carries (seed/gitignore lists .claude/settings.local.json, and
+  // the line below guarantees it for older seeds) is never written twice.
+  const ignoreSeen = new Set(curIgnore.map(l => l.trim()));
+  const ignoreAdd = [];
+  for (const l of seedIgnore.concat(['.claude/settings.local.json'])) {
+    const t = l.trim();
+    if (t === '' || t.startsWith('#') || ignoreSeen.has(t)) continue;
+    ignoreSeen.add(t);
+    ignoreAdd.push(l);
+  }
+
+  // .gitattributes (issue #174). Absent: the seed is written whole, comments
+  // included, as before. Present during a migration: every existing line stays
+  // and only the seed's missing rules are appended (the old remove-and-reseed
+  // replaced the file, so the merge is what a migration owes it; lines compare
+  // with whitespace collapsed, so a rule spaced differently is not added twice).
+  // Present on a fresh or plugin run: untouched, as it always was - the project
+  // chose its own attributes and a new `* text=auto` could renormalize its files.
+  const seedAttrsText = fs.readFileSync(path.join(seedDir, 'gitattributes'), 'utf8');
+  const attrsExists = fs.existsSync(P('.gitattributes'));
+  const curAttrs = attrsExists ? fs.readFileSync(P('.gitattributes'), 'utf8').split(/\r?\n/) : [];
+  const attrKey = (l) => l.trim().replace(/\s+/g, ' ');
+  const curAttrKeys = new Set(curAttrs.map(attrKey));
+  const attrsAdd = attrsExists && migrating
+    ? seedAttrsText.split(/\r?\n/).filter(l => l.trim() !== '' && !l.trim().startsWith('#') && !curAttrKeys.has(attrKey(l)))
+    : [];
 
   // .claude/settings.json key merge (the plugin registration for collaborators)
   const settings = readJson(P('.claude/settings.json'), {});
@@ -273,6 +388,19 @@ function main() {
   say('  Seed files to write: ' + (seedWrite.length ? seedWrite.map(s => s[0]).join(', ') : '(none)'));
   if (seedSkip.length) say('  Seed files already present (yours, untouched): ' + seedSkip.join(', '));
   say('  .gitignore lines to add: ' + ignoreAdd.length);
+  say('  .gitattributes: ' + (!attrsExists ? 'create from the seed' : migrating ? attrsAdd.length + ' lines to add (your lines are kept)' : 'already present (yours, untouched)'));
+  const stateCmp = mode === 'plugin' ? compareVersions(version, state.version) : null;
+  const stateRaise = mode === 'plugin' && (stateCmp === 1 || (stateCmp === null && parseableVersion(version) && !parseableVersion(state.version)));
+  // The reference rule session-start.js and upgrade-audit.js read is
+  // auditedVersion, else previousVersion, else version. With only `version` set,
+  // raising it would move the reference, so the old value is kept as auditedVersion.
+  const namesVersion = (v) => typeof v === 'string' && v.trim() !== '';
+  const stateBackfill = stateRaise && !namesVersion(state.auditedVersion) && !namesVersion(state.previousVersion) && parseableVersion(state.version);
+  if (mode === 'plugin') {
+    say('  .claude/.toolkit-state.json: ' + (stateRaise ? shownVersion(state.version, 'version ') + ' -> ' + version
+      + (stateBackfill ? ' (auditedVersion ' + validVersion(state.version) + ' recorded, so /tk:upgrade still audits from it)' : '')
+      : shownVersion(state.version, 'version ') + ' kept' + (stateCmp === -1 ? ' (this plugin is older; a recorded version is never lowered)' : '')));
+  }
   say('  .claude/settings.json: ' + (settingsChanged ? 'register marketplace ' + MARKETPLACE + ' and enable ' + PLUGIN + ' (the first push will page on this change: that is the tripwire doing its job)' : 'already registers the plugin'));
   say('  .claude/settings.local.json: ' + (local ? 'merge' : 'create') + ' (' + addedPerms.length + ' entries added, ' + deadPerms.length + ' dead script entries removed)');
 
@@ -290,7 +418,7 @@ function main() {
 
   // --- 5. Apply --------------------------------------------------------------------
   let backupDir = null;
-  if (migrating && (removed.length || localChanged || settingsChanged || ignoreAdd.length)) {
+  if (migrating && (removed.length || localChanged || settingsChanged || ignoreAdd.length || attrsAdd.length)) {
     const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
     backupDir = P('.toolkit-backup-' + stamp + '-plugin');
     fs.mkdirSync(backupDir, { recursive: true });
@@ -301,7 +429,7 @@ function main() {
       fs.copyFileSync(P(rel), dest);
     };
     for (const rel of removed) backup(rel);
-    for (const rel of ['.claude/settings.local.json', '.claude/settings.json', '.gitignore']) backup(rel);
+    for (const rel of ['.claude/settings.local.json', '.claude/settings.json', '.gitignore', '.gitattributes']) backup(rel);
     for (const rel of removed) {
       fs.rmSync(P(rel), { force: true });
       removeEmptyDirsUpTo(path.dirname(P(rel)), P('.claude'));
@@ -321,6 +449,12 @@ function main() {
     const prefix = curIgnore.length && curIgnore[curIgnore.length - 1] !== '' ? '\n' : '';
     fs.appendFileSync(P('.gitignore'), prefix + '\n# Added by the LLM Peer Review toolkit (/tk:setup)\n' + ignoreAdd.join('\n') + '\n');
   }
+  if (!attrsExists) {
+    fs.writeFileSync(P('.gitattributes'), seedAttrsText);
+  } else if (attrsAdd.length) {
+    const prefix = curAttrs.length && curAttrs[curAttrs.length - 1] !== '' ? '\n' : '';
+    fs.appendFileSync(P('.gitattributes'), prefix + '\n# Added by the LLM Peer Review toolkit (/tk:setup)\n' + attrsAdd.join('\n') + '\n');
+  }
   if (settingsChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.json'), JSON.stringify(settings, null, 2) + '\n'); }
   if (localChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.local.json'), JSON.stringify(localNext, null, 2) + '\n'); }
   const stateNext = {
@@ -331,7 +465,21 @@ function main() {
     plugin: PLUGIN,
     previousVersion: mode === 'plugin' ? (state.previousVersion || null) : previousVersion,
   };
-  if (mode !== 'plugin') fs.writeFileSync(P(STATE_REL), JSON.stringify(stateNext, null, 2) + '\n');
+  // A fresh seed satisfies the running version by construction, so it is
+  // audited at that version; a migration's custom files are not, and /tk:upgrade
+  // stamps them after its audit.
+  if (mode === 'fresh') { stateNext.auditedVersion = version; stateNext.auditedAt = stateNext.at; }
+  if (mode !== 'plugin') {
+    fs.writeFileSync(P(STATE_REL), JSON.stringify(stateNext, null, 2) + '\n');
+  } else if (stateRaise) {
+    // Re-run on the plugin: raise version and at, every other key as it was
+    // (an existing auditedVersion and previousVersion included). When version
+    // was the audit reference, its old value moves into auditedVersion first so
+    // the reference stays put. An equal or older plugin writes nothing, which
+    // keeps a repeat run idempotent.
+    const backfill = stateBackfill ? Object.assign({ auditedVersion: validVersion(state.version) }, typeof state.at === 'string' ? { auditedAt: state.at } : {}) : {};
+    fs.writeFileSync(P(STATE_REL), JSON.stringify(Object.assign({}, state, backfill, { version, at: stateNext.at }), null, 2) + '\n');
+  }
   if (migrating) {
     fs.writeFileSync(P(MIGRATION_REL), JSON.stringify({
       at: stateNext.at, from: previousVersion, to: version, backupDir: backupDir ? path.relative(project, backupDir) : null,
@@ -343,9 +491,12 @@ function main() {
   // --- 6. Report ------------------------------------------------------------------
   say('');
   say('Done.');
-  if (backupDir) say('  Backup: ' + path.relative(project, backupDir) + ' (every removed file, plus the settings and .gitignore as they were)');
+  if (backupDir) say('  Backup: ' + path.relative(project, backupDir) + ' (every removed file, plus the settings, .gitignore and .gitattributes as they were)');
   if (migrating) {
-    say('  Undo: git checkout -- .claude VERSION .gitattributes .gitignore ; then delete the seeded files listed above, or restore from the backup folder.');
+    // The state and migration files are new and untracked, so `git checkout`
+    // leaves them behind; left in place they would make the next run think the
+    // project is already on the plugin.
+    say('  Undo: git checkout -- .claude VERSION .gitattributes .gitignore ; then delete the seeded files listed above plus ' + STATE_REL + ' and ' + MIGRATION_REL + ', or restore from the backup folder.');
     say('  Next: run /tk:upgrade to audit your custom files against the ' + version + ' conventions' + (modified.length ? ' (it will carry your ' + modified.length + ' local edit(s) as findings)' : '') + '.');
   } else if (mode === 'fresh') {
     say('  Next: /tk:explore. The codebase map generates on first use.');

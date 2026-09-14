@@ -193,7 +193,7 @@ function appendJsonl(file, record) {
 // script runs under a pre-approved permission, any JSON array reads cleanly,
 // and an unguarded unlink turned `--data package.json` typed by mistake into a
 // deleted project file (holistic review, R2). The documented hand-off location
-// is /tmp/correction-rows.json (document.md), so the temp directory is the only
+// is /tmp/correction-rows-<session>.json (document.md), so the temp directory is the only
 // place this script is entitled to delete from. Anywhere else the file is left
 // alone and one stderr line says so, because the private layer in it is still
 // worth cleaning up by hand. Both sides are compared as real paths so a
@@ -696,9 +696,10 @@ function emptyStatus(rollup) {
     return {
       empty: true,
       reason: 'never-captured',
-      message: 'Capture has never run on this machine. It fires at /document, so this means ' +
-               'either /document has not run since this shipped, a global ~/.claude/commands/document.md ' +
-               'is shadowing the project copy, or a customized document.md was kept instead of the update.'
+      message: 'Capture has never run on this machine. It fires at the document stage (/tk:document), so ' +
+               'either that stage has not run here since capture shipped, or cycles were closed through an ' +
+               'older document command without the capture stage (a customized document.md kept from a ' +
+               'copy-install, or a global ~/.claude/commands/document.md typed as /document).'
     };
   }
   return {

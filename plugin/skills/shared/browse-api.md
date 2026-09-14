@@ -2,10 +2,10 @@
 
 ## Invoking the Script
 
-Write your action sequence as JSON, save to a temp file, and pipe it to the script:
+Write your action sequence as JSON to a per-run temp file and pipe it to the script. Run `mktemp -d /tmp/browse-run.XXXXXX`; it prints a new, empty folder, so two sessions driving a browser at once never read each other's actions. Write the JSON to `actions.json` inside it, then pipe that file (`<run-dir>` is the folder `mktemp` printed):
 
 ```bash
-cat /tmp/browse-actions.json | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js
+cat <run-dir>/actions.json | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js
 ```
 
 Or inline:

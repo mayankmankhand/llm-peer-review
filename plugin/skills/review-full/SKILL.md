@@ -9,6 +9,7 @@ allowed-tools:
   - Agent
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -60,33 +61,33 @@ Each sub-agent should use the severity scale and Finding ID format below. If a s
 
 ## Reading Budget
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md"`
 
 ## Severity Levels and Anchors
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Finding IDs
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`
 
 ## Audit Before the Report (M2)
 
 On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 
 ## Output Format
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md"`
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`
 
 ## HTML Companion (when gate fires)
 
 After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
 
 For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/tk:review-full` as a multi-specialist run for chip purposes.
 
@@ -98,7 +99,7 @@ After the standard review, step back and evaluate as a staff architect:
 - **Cross-domain conflicts?** - Do code, UX, plan, and operations all tell the same story?
 - **Release risk** - What's most likely to go wrong in production?
 - **What's missing?** - Monitoring, rollback, documentation, user communication?
-- **Deeper reviews needed?** - Recommend specific /review-* commands for areas that need more attention
+- **Deeper reviews needed?** - Recommend specific /tk:review-* commands for areas that need more attention
 
 </guidelines>
 
@@ -119,4 +120,4 @@ State one of:
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

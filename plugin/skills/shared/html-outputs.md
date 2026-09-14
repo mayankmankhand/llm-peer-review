@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Documents when toolkit commands produce HTML output, why, and how that HTML must behave. Exists so HTML treatment stays consistent across `/tk:create-plan`, `/review-*`, `/tk:document`, `/tk:explore`, `/ask-*`, `/tk:codebase-to-course`, and the `/tk:playground` skill, without each command's prompt restating the rules.
+Documents when toolkit commands produce HTML output, why, and how that HTML must behave. Exists so HTML treatment stays consistent across `/tk:create-plan`, `/tk:review-*`, `/tk:document`, `/tk:explore`, `/tk:ask-*`, `/tk:codebase-to-course`, and the `/tk:playground` skill, without each command's prompt restating the rules.
 
 ## Reader/Claude Principle (core rule)
 
@@ -208,7 +208,7 @@ Everything above governs the *toolkit's* command outputs. This section covers th
 
 The principle is the same and has two layers:
 
-1. **Toolkit command outputs already render HTML for you.** `/tk:create-plan`, `/tk:document`, and the `/review-*` family produce HTML views per the rules above. You do not need to do anything for those.
+1. **Toolkit command outputs already render HTML for you.** `/tk:create-plan`, `/tk:document`, and the `/tk:review-*` family produce HTML views per the rules above. You do not need to do anything for those.
 2. **Your project's own long human-read markdown can get an optional HTML view.** Source stays markdown. The HTML view is additive, rendered from the markdown, and never replaces it.
 
 This is *additive and shape-aware*, never a migration. Every project qualifies for the audit; not every project will have a high-value candidate. A philosophy/decide-once project may legitimately yield "nothing here benefits from an HTML view," and that is a valid result.
@@ -238,7 +238,7 @@ These stay markdown regardless of length or complexity:
 - `CODEBASE_MAP.md` (Claude reads it, not the user)
 - `README.md`, `SETUP.md`, `API-KEYS.md`, `AGENT-SETUP.md`, `CONTRIBUTING.md`, `DEMO-SCRIPT.md` (GitHub and GitLab render these natively)
 - `CLAUDE.md`, `LESSONS.md` (index, read every session), `LESSONS-detail.md` (read on demand), `DESIGN-PROFILE.md` (read before design work), `.claude/rules/*.md` (read by Claude every session)
-- `${CLAUDE_PLUGIN_ROOT}/commands/*.md`, `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (prompt files)
+- `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)
 - `CHANGELOG.md` (per-release notes, host-native)
 - `/tk:create-issue` output (issues are markdown on GitHub and GitLab alike)
 

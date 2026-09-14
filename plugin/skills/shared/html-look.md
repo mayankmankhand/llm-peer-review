@@ -1,6 +1,6 @@
 # HTML Visual Look
 
-Shared visual reference for HTML output produced by toolkit commands and the `/tk:playground` skill. Inline this file into commands/skills via `` !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md` `` (same pattern as `report-format.md`).
+Shared visual reference for HTML output produced by toolkit commands and the `/tk:playground` skill. Inline this file into commands/skills via `` !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md"` `` (same pattern as `report-format.md`).
 
 This is the minimal v1: typography, colors, severity badges, and the copy-button pattern.
 

@@ -11,24 +11,24 @@ allowed-tools:
 
 This is the expertise of `/tk:review-security`, loaded into the finder that reviews through the Staff Security Engineer lens. The direct-run skill inlines the same criteria file, so there is one source (issue #167).
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-security.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-security.md"`
 
 ## Reading Budget
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md"`
 
 ## Severity Levels and Anchors
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Finding IDs
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`
 
 ## Noise Control
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/do-not-report.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/do-not-report.md"`
 
 ## What a Finding Contains
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`

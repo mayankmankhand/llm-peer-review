@@ -123,7 +123,7 @@ Combine the subagent responses into a single map content string (do NOT write th
 
 ## Navigation Guide
 {3-6 short bullets synthesized from the module guide. Examples:
-- "To add a new slash command: edit ${CLAUDE_PLUGIN_ROOT}/commands/<name>.md"
+- "To add a new slash command: edit .claude/commands/<name>.md"
 - "To change auth behavior: src/auth/ is the entry point"
 Skip this section if the project has no obvious extension points.}
 ```
@@ -174,7 +174,7 @@ Tell the user:
 
 - **Empty repo (0 tracked files):** The scanner emits an empty file list. Skip Steps 2-3. In Step 4, write a minimal `CODEBASE_MAP.md` with just the header and a note: "No tracked files yet. Commit some files and run `/tk:index` to regenerate."
 - **Single tiny project:** Manifest has 1 chunk. Spawn 1 subagent. The flow works identically.
-- **Scanner script missing:** Tell the user the toolkit is incomplete and to re-run `setup.sh`.
+- **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/tk:setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
 - **Not a git repo:** Scanner errors out. Tell the user to `git init` first.
 - **All subagents fail:** Do NOT write a partial/empty map. Report the failure and leave any existing `CODEBASE_MAP.md` and `INDEX.md` untouched.
 - **Per-chunk overflow detected:** Step 2's confirm prompt covers this. If the user proceeds anyway, the oversized subagent may truncate or fail - report the gap in Step 7.

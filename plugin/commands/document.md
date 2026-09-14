@@ -3,6 +3,7 @@ description: "Update Documentation Task"
 allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
@@ -24,7 +25,7 @@ You are updating documentation after code changes. Run the steps automatically, 
 - **LESSONS.md** / **LESSONS-detail.md** - Learning log (user-owned): `LESSONS.md` is the one-line index Claude reads each session, `LESSONS-detail.md` holds the full write-ups it opens on demand
 - **DESIGN-PROFILE.md** - The repo's design answers (user-owned): design system state, allowed variance, taste notes, directions tried, prompts to retry. Read by `/tk:explore` and `/tk:execute`; written by `/tk:explore` and this command (see `${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md`)
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes (update if it exists)
-- **`.claude/rules/toolkit.md`** - Toolkit workflow rules (toolkit-owned, **do not edit** - overwritten on update)
+- **`.claude/rules/toolkit.md`** - Toolkit workflow rules (the toolkit's seed; **this command never edits it**). On the plugin, setup writes it once and a plugin update never overwrites it; a copy-install update replaces it. A stale copy is `/tk:upgrade`'s job, not this command's: `/tk:upgrade` flags it, and the fix is to delete the file and run `/tk:setup` (which writes a fresh copy only when the file is missing) or to merge the new seed text by hand and update its stamp.
 
 Keep README.md and CLAUDE.md consistent with each other. Never edit `toolkit.md`.
 
@@ -196,7 +197,7 @@ This covers every push in this command, including the branch push in Section 8.
 
 **Host CLI (used by Sections 8 and 9).** Both sections call the issue/PR CLI, but Section 8 is skipped when you are not in a worktree while Section 9 always runs. Detect the host here, outside that conditional, and reuse the result in both.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md"`
 
 ## 8. Worktree Cleanup
 
@@ -211,7 +212,7 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote.
 3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" Follow the worktree naming convention in toolkit.md if they say yes.
-4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR using the **"Create PR / MR" row** for the detected host. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab.
+4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on GitHub or single-quoted inline on GitLab, and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
 5. Show the user the PR URL.
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
@@ -246,12 +247,12 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-Write the JSON to a temp file, then run the helper from the project root. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
+Write the JSON to a per-run temp file: run `mktemp -d /tmp/document-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it. Then run the helper from the project root with that path as `<render-dir>`. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
 Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell document --name cycle --stable --data /tmp/document-data.json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell document --name cycle --stable --data <render-dir>/data.json
 ```
 
 **The name is `cycle`, not `document`.** `--name` feeds both the filename and the artifact index key, and the timestamped pages this replaces already own the key `document`. Rendering under that name would make the lookup below return an old cycle page's URL and update *that page* forever instead of publishing the standing one.
@@ -276,4 +277,4 @@ After the HTML is written (or deliberately skipped), write the current `HEAD` SH
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

@@ -11,20 +11,20 @@ allowed-tools:
 
 This is the expertise of `/tk:review-plan`, loaded into the finder that reviews through the Staff PM (scope) lens. The direct-run skill inlines the same criteria file, so there is one source (issue #167).
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-plan.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-plan.md"`
 
 ## Reading Budget
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md"`
 
 ## Severity Levels and Anchors
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Finding IDs
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`
 
 ## What a Finding Contains
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`

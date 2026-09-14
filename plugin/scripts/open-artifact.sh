@@ -34,7 +34,9 @@ FILE="${1:-}"
 
 if [ -z "$FILE" ]; then
   echo "open-artifact.sh: no file given" >&2
-  echo "Usage: bash .claude/scripts/open-artifact.sh <file>" >&2
+  # $0 is the path this script was run by, so the hint is right in every layout
+  # (the plugin's scripts folder, or .claude/scripts in a copy-install).
+  echo "Usage: bash $0 <file>" >&2
   exit 1
 fi
 

@@ -3,6 +3,7 @@ description: "Initial Exploration Stage"
 allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -32,7 +33,7 @@ Before diving into questions, pick a gear with the user.
 
 Two places below read an issue: mode detection here, and the worktree rename in the Worktree Setup phase. Either one can be the first to fire, or the first can never fire at all. So detect the host **once, here, unconditionally**, before Phase 1 begins, and reuse that result for the rest of the session.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md"`
 
 ### Pick a Mode
 Don't try to guess silently. Always ask, but pre-fill your best guess so it's a one-keystroke decision when you guess right.
@@ -207,8 +208,8 @@ If they say skip, present a vision-mode closing summary:
 - **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
 - **HTML option comparison - REQUIRED when 2+ options are being compared.** This is not optional when the gate fires. The gate: the exploration surfaced **two or more distinct, named directions the user is actively deciding between**, each with at least one tradeoff or consideration. It does NOT fire for a single recommendation, a set you have already narrowed to one, or open discussion with no competing options. When fewer than 2 options are on the table, skip this entirely. When it fires, you MUST work through these steps:
   - **Announce** per `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: "Generating an HTML view because you are comparing N options. Say 'skip HTML' if you want markdown only." Honor "skip HTML" if the user replies with that phrase.
-  - **Generate the canonical record via the helper** - do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/explore-shell.html` (option cards, `scopeDial`, `decisions`; read its header for the exact fields). Set `scopeDial` to exactly one of `Expand` | `Hold` | `Reduce`. Write the JSON to a temp file. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
-    `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell explore --name explore-<topic-slug> --data /tmp/explore-data.json`
+  - **Generate the canonical record via the helper** - do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/explore-shell.html` (option cards, `scopeDial`, `decisions`; read its header for the exact fields). Set `scopeDial` to exactly one of `Expand` | `Hold` | `Reduce`. Write the JSON to a per-run temp file: run `mktemp -d /tmp/explore-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it; that folder is `<render-dir>` below. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
+    `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell explore --name explore-<topic-slug> --data <render-dir>/data.json`
     The helper computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path. This persisted file is the canonical record of the exploration. Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
   - **Offer an optional playground** - ask "Want this interactive? (drag, toggle, slider)". If yes, dispatch the `playground` skill for a *separate, throwaway* interactive version in `/tmp/` (export-loop only). The playground is disposable; the `artifacts/html/` record above stays canonical.
   - **Detecting a playground reply** - if the user's message starts with `Playground result`, treat the rest as structured state (selection, drag order, slider values, toggle states) and feed it into the closing summary. Otherwise treat the reply as natural-language decision input. `/tk:explore` never modifies the playground output - the export loop is the only path back.
@@ -300,4 +301,4 @@ We will go back and forth until you have no further questions. Do NOT assume any
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

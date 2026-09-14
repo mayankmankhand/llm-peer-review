@@ -37,7 +37,7 @@ Gather lightweight project context so subagents can make informed decisions. Thi
 
 4. **Conventions** - Scan a few representative files to identify:
    - Naming patterns (camelCase, snake_case, kebab-case)
-   - File structure conventions (e.g., commands in `${CLAUDE_PLUGIN_ROOT}/commands/`, skills in `${CLAUDE_PLUGIN_ROOT}/skills/`)
+   - File structure conventions (e.g., commands in `.claude/commands/`, skills in `.claude/skills/`)
    - Any patterns called out in CLAUDE.md or rules files
 
 5. **Output a compact summary** - Keep it to 10-15 lines max. Include:

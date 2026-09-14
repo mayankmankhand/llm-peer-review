@@ -3,6 +3,7 @@ description: "Unified Review"
 allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -59,7 +60,7 @@ Categorize the changes and pick relevant specialists:
 | The same code files (any code change) | Security | `subagent_type=tk:review-security-finder` |
 | `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.html` files | UX Quality | `subagent_type=tk:review-ux-finder` |
 | Active `PLAN-*.md` exists in `plans/` | Plan Compliance | `subagent_type=tk:review-plan-finder` |
-| `${CLAUDE_PLUGIN_ROOT}/commands/` or `${CLAUDE_PLUGIN_ROOT}/skills/` files changed | Command Quality | `subagent_type=tk:review-commands-finder` |
+| `.claude/commands/` or `.claude/skills/` files changed | Command Quality | `subagent_type=tk:review-commands-finder` |
 | `package.json` or lockfile changed | Dependency Security | `subagent_type=tk:review-deps-finder` |
 | Visual/UI changes AND a dev server is running | Browser QA | `subagent_type=tk:review-browser-finder` |
 | `README.md`, `index.html`, or files in `docs/`, `pages/`, `content/`, `posts/` (exclude `CHANGELOG.md`, ADRs, API refs, generated docs) | Copy Clarity | `subagent_type=tk:review-copy-finder` |
@@ -105,7 +106,7 @@ Run notes:
 
 The role, the criteria, the review lens, and the single-pass contract used to be pasted here; they now live in the agent and the two skills it preloads, so a `/tk:review` that compacts mid-run loses nothing and four dispatches no longer carry four copies of the manual. What the finder returns is fixed by the `dispatch-contract` skill; the orchestrator parses that format, so it is inlined here from the one file both share:
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/dispatch-format.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/dispatch-format.md"`
 
 **If a subagent fails** (error, timeout, empty response, or output that will not parse as JSONL), re-dispatch that one finder once with the same prompt - and when it was running on a pinned model, dispatch the retry one tier up per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. Malformed output counts as a failure precisely because it is silent: a specialist that returns prose instead of JSONL has produced nothing the run can use. Still failing after the one retry: note it in the final report: "Note: [Specialist name] review did not complete. Run `/tk:review [type]` to retry."
 
@@ -153,9 +154,9 @@ The orchestrator report uses the two-sentence finding contract inlined below fro
 The orchestrator fills this structure from the surviving JSON findings (Phases 3-4): each finding's `what` becomes the dash summary line, `context` becomes the unlabeled sub-bullet under it when present, `fix` becomes the **Fix:** row, and any `fields[]` attachments become labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
 
 <shared_template>
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md"`
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`
 </shared_template>
 
 ### Orchestrator Supplement
@@ -209,7 +210,7 @@ End the report with one line so the user knows what happens next: _"The loop now
 
 After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template (it covers the gate and the data-injection steps):
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
 
 For orchestrator output specifically:
 - Pass `--name review --stable` to the helper: the HTML is one standing page per repository, not one per run. Set `lenses` to the specialists this run dispatched, so the renderer replaces only their findings and carries the other lenses' open findings forward (the fragment above says how). Two paths dispatch nothing and still need the right value: on `/tk:review full`, omit `lenses` exactly as `/tk:review-full` does, because a full check replaces the whole page; on the Phase 1.5 inline path, set `lenses` to the domains the file-type table flagged for the diff, because those are the lenses this run checked (review of the #162 cycle, R5 and R16)
@@ -222,7 +223,7 @@ For orchestrator output specifically:
 
 What happens after the report is governed by the shared auto-loop fragment (the M-rule IDs cited in this file refer to it):
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 
 Once the report is out, continue without waiting for a human "fix it" (the HTML comes at step 6, after the loop, so it shows what the loop left open):
 
@@ -240,7 +241,7 @@ Two separate per-run opt-outs: saying "report only" on the invocation keeps the 
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`
 
 <rules>
 ## REMEMBER: Specialists report; the loop fixes. After the report, continue per the auto loop above and chain into `/tk:document` (M14); "report only" keeps a run report-first (M10), "no chaining" stops after this stage.

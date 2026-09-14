@@ -1,6 +1,6 @@
 # Debate HTML Render
 
-Shared reference for turning an `/tk:ask-gpt` or `/tk:ask-gemini` debate summary into an HTML view. Inlined into both commands via `` !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-debate.md` ``.
+Shared reference for turning an `/tk:ask-gpt` or `/tk:ask-gemini` debate summary into an HTML view. Inlined into both commands via `` !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-debate.md"` ``.
 
 This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
 
@@ -29,13 +29,13 @@ Steps:
    - `rounds`: `[{n, claude, model}]` - one per debate round; `claude` and `model` are the two positions (trusted inline HTML allowed).
    - `synthesis`: `{agreed:[], disagreed:[], actions:[...]}`. Each action: `{id, severity, file:{relPath, absPath, line}, what, context, fix, fields:[{label, value}]}`, mirroring the review finding shape: `what` is sentence one, `context` the optional sentence two (omit the key when there is none), `fix` the fix line, and `fields` attachments only, never prose. Rows carrying the retired labels (Why it matters / Example / Suggested fix) are refused by the helper and dropped with a stderr note. `severity` is `"block" | "warn" | "suggest"`. `what`, `context`, `fix`, and field `value`s may contain trusted inline HTML.
 
-2. **Write the JSON to a temp file**, e.g. `/tmp/debate-data.json`.
+2. **Write the JSON to a per-run temp file.** Run `mktemp -d /tmp/debate-render.XXXXXX`; it prints a new, empty folder, so two projects rendering at once never share a payload. Write the JSON to `data.json` inside it; that folder is `<render-dir>` below.
 
 3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
    Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell debate --name debate-<model> --data /tmp/debate-data.json
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell debate --name debate-<model> --data <render-dir>/data.json
    ```
    - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.

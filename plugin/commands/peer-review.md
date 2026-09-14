@@ -32,7 +32,7 @@ For EACH finding in the pasted feedback:
 
 Severity on every finding below follows the shared rubric, the same one the review skills read. It is not decoration: this evaluation is the audit step those labels feed (M2 names it the deliberate exception - verifying each finding against the code replaces the skeptic tiers), and the Action Plan the auto loop processes is ordered by it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Output Format
 

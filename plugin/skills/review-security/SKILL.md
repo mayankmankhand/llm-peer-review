@@ -9,6 +9,7 @@ allowed-tools:
   - Agent
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -35,35 +36,35 @@ Be thorough but concise. Read the change like an attacker, not like an author.
 
 </rules>
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-security.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-security.md"`
 
 ## Reading Budget
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md"`
 
 ## Severity Levels and Anchors
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Finding IDs
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`
 
 ## Noise Control
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/do-not-report.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/do-not-report.md"`
 
 ## Audit Before the Report (M2)
 
 On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 
 ## Output Format
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md"`
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`
 
 Security findings use that shape unchanged: the exploit sentence above is sentence two, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described.
 
@@ -71,7 +72,7 @@ Security findings use that shape unchanged: the exploit sentence above is senten
 
 After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
 
 For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["security"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
 
@@ -97,4 +98,4 @@ After the standard review, step back and evaluate as a staff security engineer:
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

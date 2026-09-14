@@ -3,6 +3,7 @@ description: "Execute Plan"
 allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -106,11 +107,11 @@ After completing each step, update the plan file:
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 
-**Re-render the plan's HTML view** whenever you update the markdown status (issue #161). Rebuild the same payload `/tk:create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`, and run the helper with the same stable name:
+**Re-render the plan's HTML view** whenever you update the markdown status (issue #161). Rebuild the same payload `/tk:create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it to a fresh per-run temp file each time (`mktemp -d /tmp/plan-render.XXXXXX` prints a new, empty folder, so two projects rendering at once never share a payload; write the JSON to `data.json` inside it, and that folder is `<render-dir>` below), then run the helper with the same stable name:
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell plan --name PLAN-<basename> \
-     --out-dir plans --stable --data /tmp/plan-data.json
+     --out-dir plans --stable --data <render-dir>/data.json
 ```
 
 `--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
@@ -139,4 +140,4 @@ Saying "no chaining" on this run stops here (M14). That is a different opt-out f
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

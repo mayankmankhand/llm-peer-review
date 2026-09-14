@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 7.0.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 7.0.1 | Managed by LLM Peer Review. On the plugin, setup seeds this file once and a plugin update never overwrites it; a copy-install update replaces it. -->
 
 This project runs the LLM Peer Review toolkit as a Claude Code plugin named `tk`, so its commands are typed with that prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit's `toolkit-reference` fragment: it ships inside the plugin, and its stable path on this machine is `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`; open it there when a question is not answered here. In the toolkit's own repository the same commands run unprefixed.
 
@@ -14,7 +14,7 @@ This project runs the LLM Peer Review toolkit as a Claude Code plugin named `tk`
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Show your work** - Tell me what you're doing and why
-5. **Use the Skill tool for /tk:create-plan, /tk:review, and /review-*** - Never manually replicate these commands or skills. If the user says "create plan" or "review", invoke the appropriate command or skill via the Skill tool so the template is followed.
+5. **Use the Skill tool for /tk:create-plan, /tk:review, and /tk:review-*** - Never manually replicate these commands or skills. If the user says "create plan" or "review", invoke the appropriate command or skill via the Skill tool so the template is followed.
 6. **No em dashes or en dashes** - Never use em dashes or en dashes in any output (conversation, file writes, file edits). Use regular hyphens or rewrite the sentence.
 7. **Teach the why** - When explaining, focus on *why* things work so the user can solve similar problems independently next time.
 
@@ -36,4 +36,4 @@ If Claude can run it (tests, builds, dev servers, installs, status checks), Clau
 
 ## Your Files
 
-`CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md`, `DESIGN-PROFILE.md`, `plans/`, and `.claude/settings.local.json` are yours: the toolkit seeds them once and never overwrites them. The one exception is the permissions list in `settings.local.json`, where setup adds missing toolkit rows and removes rows that point at a `${CLAUDE_PLUGIN_ROOT}/scripts/` file the project no longer has, plus a few retired toolkit rows. Your own commands, skills, agents, and rules under `.claude/` are yours too; `/tk:upgrade` audits them against the toolkit's conventions and fixes what drifted. Toolkit scripts are upstream-only: file an issue rather than patching a copy.
+`CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md`, `DESIGN-PROFILE.md`, `plans/`, and `.claude/settings.local.json` are yours: the toolkit seeds them once and never overwrites them. The one exception is the permissions list in `settings.local.json`, where setup adds missing toolkit rows and removes rows that point at a `.claude/scripts/` file the project no longer has, plus a few retired toolkit rows. Your own commands, skills, agents, and rules under `.claude/` are yours too; `/tk:upgrade` audits them against the toolkit's conventions and fixes what drifted. Toolkit scripts are upstream-only: file an issue rather than patching a copy.

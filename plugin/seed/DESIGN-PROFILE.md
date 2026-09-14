@@ -1,16 +1,14 @@
 <!--
-  design-profile-template.md - the seed for DESIGN-PROFILE.md (issue #160).
+  DESIGN-PROFILE.md - this project's design profile (issue #160).
 
-  Both installers copy this file to <project>/DESIGN-PROFILE.md ONCE, on a fresh
-  install, and never overwrite it afterwards: the seeded copy is user-owned, like
-  CLAUDE.md and LESSONS.md. /explore reads it before any design work and offers to
-  create it from this template when it is missing. /explore and /document write it;
-  /execute only reads it. The rules that use these sections live in
-  .claude/skills/shared/design-rules.md.
+  /tk:setup writes this file ONCE, when the project has none, and never overwrites
+  it afterwards: it is user-owned, like CLAUDE.md and LESSONS.md. /tk:explore reads
+  it before any design work and offers to create it from the toolkit's template when
+  it is missing. /tk:explore and /tk:document write it; /tk:execute only reads it.
+  The rules that use these sections live in the toolkit's `design-rules` skill.
 
-  This template ships through the shared-fragment glob, so it is present in every
-  install. It is a template, not this repository's own profile: keep every value
-  below blank here.
+  It starts blank: every value below is filled in as this project answers the
+  design questions.
 -->
 # Design Profile
 
@@ -36,13 +34,13 @@ and never overwrites a design system you already have. Edit it freely.
 
 ## Taste notes
 
-<!-- Reactions captured while reacting to idea lists in /explore: what felt right,
+<!-- Reactions captured while reacting to idea lists in /tk:explore: what felt right,
      what felt tacky, what to avoid. One line each, newest last. -->
 
 ## Directions tried
 
 <!-- One line per direction: name, seed, best critic score, kept or dropped. Written
-     by /document at the end of a cycle. -->
+     by /tk:document at the end of a cycle. -->
 
 ## Prompts to retry on newer models
 

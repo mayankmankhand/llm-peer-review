@@ -5,6 +5,7 @@ user-invocable: false
 allowed-tools:
   - "Bash(cat * | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js *)"
   - "Bash(echo * | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js *)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
@@ -15,24 +16,24 @@ allowed-tools:
 
 This is the expertise of `/tk:review-browser`, loaded into the finder that reviews through the Staff QA lens. The direct-run skill inlines the same criteria file, so there is one source (issue #167).
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-browser.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-browser.md"`
 
 ## Reading Budget
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/reading-budget.md"`
 
 ## Severity Levels and Anchors
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
 ## Finding IDs
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`
 
 ## Browse Script API
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/browse-api.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/browse-api.md"`
 
 ## What a Finding Contains
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`

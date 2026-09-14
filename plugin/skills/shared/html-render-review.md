@@ -1,6 +1,6 @@
 # Review HTML Render
 
-Shared reference for turning a review's findings into an HTML view. Inlined into the review skills and the `/tk:review` orchestrator via `` !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md` ``.
+Shared reference for turning a review's findings into an HTML view. Inlined into the review skills and the `/tk:review` orchestrator via `` !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"` ``.
 
 This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
 
@@ -46,13 +46,13 @@ Steps:
    - Audit rows (any audited run - orchestrated or direct): each surviving finding's `fields[]` ends with `{"label": "Receipt", "value": "<code>check</code> - what the output showed"}`, and one extra group `{label: "Audited out"}` is appended after the others, holding the killed findings with their assigned `id` and a field row `{"label": "Audit verdict", "value": "RECEIPT FAILED" / "REFUTED" / "REFUTED 2/3"}`, plus `{"label": "Split note", "value": "..."}` when the skeptic attached one. A downgraded finding stays in its specialist group at its new `severity`, with its Receipt value ending in `downgraded from Block: <ballots>`. No shell change: `groups[]` and `fields[]` are generic. A run with no findings renders neither (M2's empty-run rule).
    - `summary`: `[{emoji?, label, value}]` - the footer count strip.
 
-2. **Write the JSON to a temp file**, e.g. `/tmp/review-data.json`.
+2. **Write the JSON to a per-run temp file.** Run `mktemp -d /tmp/review-render.XXXXXX`; it prints a new, empty folder, so two projects rendering at once never share a payload. Write the JSON to `data.json` inside it; that folder is `<render-dir>` below.
 
 3. **Run the helper from the project root, once, at the end of the run.** On an auto run that is after the auto-fix loop has settled (the runner's After the Report section says where), with the loop's FIXED findings in `alreadyFixed` and only the unfixed ones open; on a "report only" run, right after the report. A page rendered before the loop was stale within minutes of being published. The review page is `--stable`: one standing page per repository at `artifacts/html/review.html`, replaced in place rather than added to. The name is the bare `review` because the identity is the repo. Before overwriting, the helper reads the page it is replacing and fills `sinceLast` with what changed, so pass every surviving finding from the lenses that ran and name those lenses in `lenses` - the comparison is what produces the memory, and a finding from a lens that ran and is not in the payload is reported resolved.
    Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell review --name review --out-dir artifacts/html --stable --data /tmp/review-data.json
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell review --name review --out-dir artifacts/html --stable --data <render-dir>/data.json
    ```
    - The name is always the bare `review`, for every caller. A direct `/tk:review-code` run and an orchestrated `/tk:review` write the same standing page, because the page is the repository's open findings and not a record of which command produced them. Which lens ran belongs in `lenses` (which is what keeps a direct run from overwriting the other lenses' findings), in `chips`, and in the markdown filename, not in the page's identity.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.

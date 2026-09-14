@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "mkdir -p \"${CLAUDE_PLUGIN_DATA}\" && ln -sfn \"${CLAUDE_PLUGIN_ROOT}\" \"${CLAUDE_PLUGIN_DATA}/current\" || true"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js\""
           }
         ]
       }

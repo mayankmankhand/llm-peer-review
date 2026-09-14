@@ -88,7 +88,7 @@ Collapsible `<details>` panels for inline "why" annotations, long code blocks, o
 
 Inline the shared HTML look reference. This gives the playground consistent typography, color tokens, and severity badge colors with the rest of the toolkit's HTML output.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md"`
 
 ## Copy Button (Mandatory)
 
@@ -191,4 +191,4 @@ rm /tmp/playground-*.html
 
 Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs. It was an always-on rules file until v7.0.0 (issue #167); now it loads with the commands that need it.
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`

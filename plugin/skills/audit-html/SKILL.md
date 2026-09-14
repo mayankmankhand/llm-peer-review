@@ -9,6 +9,7 @@ allowed-tools:
   - Bash
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
 ---
@@ -17,7 +18,7 @@ allowed-tools:
 
 **Use this when:** You want to know which of *your own* long human-read markdown files (status trackers, dashboards, decision logs, runbooks) would benefit from an HTML view alongside the markdown source.
 
-**Don't use this when:** You want to render an existing toolkit output (`/tk:create-plan`, `/tk:document`, `/review-*` already produce HTML themselves), generate an interactive playground (`/tk:playground`), or convert your markdown into HTML and throw away the source (this skill is additive and never converts).
+**Don't use this when:** You want to render an existing toolkit output (`/tk:create-plan`, `/tk:document`, `/tk:review-*` already produce HTML themselves), generate an interactive playground (`/tk:playground`), or convert your markdown into HTML and throw away the source (this skill is additive and never converts).
 
 ## Critical Rules
 
@@ -34,7 +35,7 @@ allowed-tools:
 
 The two-layer principle, signals, and hard vetoes this skill applies are documented in the project's HTML output rules. Inline them so the skill, its docs, and the rules file never drift:
 
-!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`
 
 The "Your Own Files (downstream projects)" section above defines:
 - the two layers (toolkit outputs already HTML-render; your own markdown can get optional additive views)
@@ -135,9 +136,9 @@ No new view will be built.
 
 The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed (a count gate like the one the review page had before it became a standing page; raised to 5 here because audit candidates are softer than review findings).
 
-Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a temp file. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON to a per-run temp file: run `mktemp -d /tmp/audit-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it; that folder is `<render-dir>` below. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 
-`node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell audit --name audit-html --data /tmp/audit-data.json`
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell audit --name audit-html --data <render-dir>/data.json`
 
 Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
 
@@ -146,9 +147,9 @@ Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_P
 When the user says "yes, generate the view" after seeing the report:
 
 1. Read the source markdown for the top candidate.
-2. Do NOT hand-write the HTML. Convert the markdown's structure into a JSON payload matching the schema documented in the header of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/docview-shell.html` (sections with heading/level/blocks; block types: prose, list, table, code). The shell builds the viewing behaviors in once: tables are sortable, long sections collapse automatically (explicit `collapsed: true/false` overrides). Write the payload to a temp file (e.g. `/tmp/docview-data.json`).
+2. Do NOT hand-write the HTML. Convert the markdown's structure into a JSON payload matching the schema documented in the header of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/docview-shell.html` (sections with heading/level/blocks; block types: prose, list, table, code). The shell builds the viewing behaviors in once: tables are sortable, long sections collapse automatically (explicit `collapsed: true/false` overrides). Write the payload to a per-run temp file: run `mktemp -d /tmp/docview-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it; that folder is `<render-dir>` in step 3.
 3. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell docview --name <source-basename> --stable --data /tmp/docview-data.json`
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell docview --name <source-basename> --stable --data <render-dir>/data.json`
    `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
 4. Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
 5. Confirm in chat, reporting the local path and, when the publish in step 4 succeeded, the link alongside it, per the "What to tell the user" line in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Always state that the source markdown is unchanged.

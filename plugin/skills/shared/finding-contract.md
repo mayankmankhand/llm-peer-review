@@ -38,7 +38,7 @@ Eleven hedges are banned outright, because an uncalibrated hedge reads as anywhe
 
 **Receipt rule (every finding must be provable).** A finding must point at the specific evidence that proves it - the exact `file:line` (already required in the format) and, when the claim is about behavior, the concrete code or pattern you can cite. If you cannot point to the line or snippet that demonstrates the problem, do not report it. This keeps reviews honest: a real issue always has a receipt, and "confident findings that point at nothing" are the fastest way to lose the reader's trust. The receipt grounds the finding; it does not lower its severity (the Universal Anchors in severity-anchors.md still apply). What you author here is the *check*; the **Receipt** row that reports what the check actually output is audit-time output, not something you author.
 
-Whether you write the finding directly (a direct `/review-*` call) or the orchestrator formats it from a structured JSON finding (`what` plus the `context` and `fix` fields, in the `/tk:review` dispatch path), the shape is identical - only the serialization differs.
+Whether you write the finding directly (a direct `/tk:review-*` call) or the orchestrator formats it from a structured JSON finding (`what` plus the `context` and `fix` fields, in the `/tk:review` dispatch path), the shape is identical - only the serialization differs.
 
 - **R1** 🚫 `file:line` - Blocks. [Sentence one: severity word, defect, harm verb. 18 words or fewer.]
   - [Sentence two, only if it answers who is hit, when it fires, or why now. 22 words or fewer. Omit the line entirely otherwise.]
@@ -83,7 +83,7 @@ Sentence one is 12 words and names the harm with a verb from the list. Sentence 
 
 ### Command review example
 
-- **R3** ⚠️ `${CLAUDE_PLUGIN_ROOT}/commands/explore.md:55` - Should fix. A vague instruction here probably stalls exploration on the wrong files.
+- **R3** ⚠️ `.claude/commands/explore.md:55` - Should fix. A vague instruction here probably stalls exploration on the wrong files.
   - It fires on every run, so the cost is paid before the user has asked anything.
   - **Fix:** One list: name the four things to look for. Ten minutes, or leave the wandering.
 

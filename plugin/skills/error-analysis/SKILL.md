@@ -47,7 +47,7 @@ This prints the rollup without writing it. It carries `rows`, `ever_captured`, `
 
 When `rows` is 0, the `status.reason` field says which kind of empty it is, and the two call for opposite responses:
 
-- **`never-captured`** - capture has never run on this machine. Say so, and give the three reasons it happens: `/tk:document` has not run since this shipped, a global `~/.claude/commands/document.md` is shadowing the project copy, or a customized `document.md` was kept instead of taking the update. Do not present this as "you have made no mistakes."
+- **`never-captured`** - capture has never run on this machine. Say so, and give the reasons `status.message` names: the document stage (`/tk:document`) has not run here since capture shipped, or cycles were closed through an older document command that has no capture stage (a customized `document.md` kept from a copy-install, or a global `~/.claude/commands/document.md` run by its bare name instead of the toolkit's command). Do not present this as "you have made no mistakes."
 - **`nothing-found`** - capture has run and genuinely found nothing to record. Say that plainly.
 
 Stop after this. There is nothing to code.

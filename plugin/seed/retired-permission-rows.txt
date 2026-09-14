@@ -1,0 +1,64 @@
+# retired-permission-rows.txt - permission rows the toolkit seed used to carry and no
+# longer does (issue #173). A project migrated onto the plugin with /tk:setup on 7.0.0
+# or 7.0.1 received every row of that release seed in .claude/settings.local.json;
+# the rows below are the ones the current seed drops: maintainer-only grants from the
+# toolkit repository, rows naming a script under the old copy-install scripts folder
+# (plugin commands carry their own script permissions), browser launcher rows Claude
+# never runs directly (the artifact opener script runs them itself), and unscoped
+# Skill rows the tk: rows replace.
+# The upgrade audit removes these rows from migrated projects.
+#
+# Format: one row per line, exactly as the JSON string in the allow list, sorted.
+# Lines starting with # are comments. Generated, not hand-edited: the union of the
+# allow rows in plugin/seed/settings.local.json at tags v7.0.0 and v7.0.1, minus the
+# allow rows in seed/settings.local.json.
+Bash(awk '{a+=$1; r+=$2} END {print "added:", a, "removed:", r, "total:", a+r}')
+Bash(awk '{print length, $0}')
+Bash(bash -n scripts/setup/bump-version.sh)
+Bash(bash -n scripts/setup/setup.sh)
+Bash(bash .claude/scripts/open-artifact.sh *)
+Bash(bash scripts/setup/bump-version.sh *)
+Bash(cat * | node .claude/scripts/browse.js *)
+Bash(command -v pwsh)
+Bash(echo * | node .claude/scripts/browse.js *)
+Bash(explorer.exe *)
+Bash(grep "\\.md$")
+Bash(grep -E "\\.js$")
+Bash(grep -n "^!\\`cat" .claude/skills/audit-html/SKILL.md)
+Bash(grep -rn '!`cat' .claude/skills/)
+Bash(grep -v ".html$")
+Bash(node .claude/scripts/ask-gemini.js *)
+Bash(node .claude/scripts/ask-gpt.js *)
+Bash(node .claude/scripts/browse.js *)
+Bash(node .claude/scripts/correction-ledger.js *)
+Bash(node .claude/scripts/gen-media.js *)
+Bash(node .claude/scripts/generate-index.js *)
+Bash(node .claude/scripts/pre-push-check.js *)
+Bash(node .claude/scripts/pre-push-check.js)
+Bash(node .claude/scripts/render-html.js *)
+Bash(node .claude/scripts/session-init.js)
+Bash(open *)
+Bash(powershell.exe *)
+Bash(pwsh -NoProfile -Command '& { $ErrorActionPreference='\\''Stop'\\''; try { [scriptblock]::Create\(\(Get-Content -Raw scripts/setup/setup.ps1\)\) | Out-Null; Write-Output '\\''setup.ps1 syntax OK'\\'' } catch { Write-Output "setup.ps1 syntax error: $_"; exit 1 } }')
+Bash(sed -n '/^\\*\\*Repeat this cycle up to 3 times total/,/^\\*\\*Convergence gate/p' .claude/commands/ask-gemini.md)
+Bash(sed -n '/^\\*\\*Repeat this cycle up to 3 times total/,/^\\*\\*Convergence gate/p' .claude/commands/ask-gpt.md)
+Bash(wslpath *)
+Bash(xdg-open *)
+Edit(/.claude/skills/shared/**)
+Skill(audit-html)
+Skill(audit-html:*)
+Skill(create-plan)
+Skill(create-plan:*)
+Skill(execute)
+Skill(execute:*)
+Skill(explore)
+Skill(explore:*)
+Skill(playground)
+Skill(playground:*)
+Skill(review)
+Skill(review-commands)
+Skill(review-commands:*)
+Skill(review-copy)
+Skill(review-copy:*)
+Skill(review:*)
+WebFetch(domain:thariqs.github.io)
