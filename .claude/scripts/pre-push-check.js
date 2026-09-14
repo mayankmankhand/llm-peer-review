@@ -35,6 +35,8 @@
 //                      plugin scans with older patterns than the project was
 //                      set up or audited with. Newer or equal never blocks;
 //                      session-start.js tells the user to run /tk:upgrade.
+//                      A recorded value that is not a plain version (see the
+//                      helpers) is no reference: never printed, never a block.
 //
 // Fail closed, never open. A file this script cannot parse is REPORTED as
 // unscannable, not skipped: a scanner that stays silent about what it could
@@ -343,20 +345,38 @@ function mask(line) {
 }
 
 // --- Version guard helpers (issue #174) -------------------------------------
-// A copy of these three lives in session-start.js; keep the two in step. They
-// are duplicated rather than shared because scripts/setup/setup.sh copies this
-// file alone into non-plugin installs, and a shared module would not come along.
+// Copies of the block below live in session-start.js and setup-project.js
+// (scripts/setup/setup.sh copies this file alone into non-plugin installs). It
+// keeps single quotes, unlike the rest of this file, so it stays byte-identical
+// to the other two copies.
+// >>> version helpers (issue #174) >>>
+// Byte-identical in session-start.js, pre-push-check.js and setup-project.js,
+// from this marker to the closing one. Each script must run on its own (the
+// pre-push check is also copied alone into non-plugin installs), so there is no
+// shared module; scripts/test-pre-push-check.js fails when the copies drift.
 //
-// Dotted numeric versions, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Returns
-// null for anything that is not a dotted run of numbers, so a malformed value
-// never produces a verdict (and never blocks).
-function parseVersion(v) {
-  if (typeof v !== "string") return null;
-  const core = v.trim().replace(/^v/, "").split("-")[0];
-  if (!/^\d+(\.\d+)*$/.test(core)) return null;
-  return core.split(".").map(Number);
+// A version is only ever taken from a string of one fixed, harmless shape:
+// dotted numbers (one to four parts), an optional -suffix of letters, digits and
+// dots, at most 32 characters. The state file these read is committed to the
+// project, so a cloned repository controls it, and session-start.js prints the
+// version into Claude's context: any other text there would be injected into
+// it. A value of any other shape is no usable version - never printed, never
+// compared, never a block.
+const VERSION_SHAPE = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?$/;
+const VERSION_MAX_LENGTH = 32;
+// The version as a safe string (surrounding whitespace dropped), or null.
+function validVersion(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t.length <= VERSION_MAX_LENGTH && VERSION_SHAPE.test(t) ? t : null;
 }
-// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unparseable.
+// Dotted numeric parts, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Null for
+// anything validVersion refuses, so a malformed value never produces a verdict.
+function parseVersion(v) {
+  const t = validVersion(v);
+  return t === null ? null : t.split('-')[0].split('.').map(Number);
+}
+// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unusable.
 function compareVersions(a, b) {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -368,15 +388,19 @@ function compareVersions(a, b) {
   }
   return 0;
 }
-// The version a project is recorded at: auditedVersion, else previousVersion,
-// else version. Null when the state names none.
+// The version a project is recorded at: auditedVersion (a /tk:upgrade stamped
+// it, or a fresh setup wrote it), else previousVersion (a migration's old
+// copy-install version), else version. The first key that names a version
+// decides, validated: null when none names one or that value is unusable (no
+// fall-through to a later key, so a malformed stamp cannot pick the reference).
 function referenceVersion(state) {
-  if (!state || typeof state !== "object") return null;
-  for (const key of ["auditedVersion", "previousVersion", "version"]) {
-    if (typeof state[key] === "string" && state[key].trim() !== "") return state[key];
+  if (!state || typeof state !== 'object') return null;
+  for (const key of ['auditedVersion', 'previousVersion', 'version']) {
+    if (typeof state[key] === 'string' && state[key].trim() !== '') return validVersion(state[key]);
   }
   return null;
 }
+// <<< version helpers <<<
 
 // The version of the plugin this copy runs from, or null for the source copy
 // and every non-plugin install (no manifest one folder above the script).
@@ -557,9 +581,12 @@ if (RUNNING_VERSION !== null) {
   } catch {
     state = null;
   }
+  // Both sides validated: the report prints them, and only a version of the
+  // fixed shape is ever printed (the same rule as session-start.js).
   const reference = referenceVersion(state);
-  if (reference !== null && compareVersions(RUNNING_VERSION, reference) === -1) {
-    hits.versionBehind = { running: RUNNING_VERSION, reference: reference };
+  const running = validVersion(RUNNING_VERSION);
+  if (reference !== null && running !== null && compareVersions(running, reference) === -1) {
+    hits.versionBehind = { running: running, reference: reference };
   }
 }
 

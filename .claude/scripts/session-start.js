@@ -22,9 +22,15 @@
 // nothing applies.
 //
 // The recorded-version rule matches pre-push-check.js, which blocks a push when
-// the running plugin is OLDER than the project's reference. Its helpers are
-// duplicated there on purpose: that script is also copied into non-plugin
-// installs, which would not carry a shared module.
+// the running plugin is OLDER than the project's reference, and setup-project.js,
+// which writes the state. The version helpers are duplicated in both on purpose:
+// the pre-push check is also copied into non-plugin installs, which would not
+// carry a shared module. Only a validated version is ever printed (see the
+// helpers), because this output lands in Claude's context.
+//
+// The state file is looked for from the project folder upward to the git top
+// level: Claude opened in a subfolder sets CLAUDE_PROJECT_DIR to that subfolder,
+// but setup-project.js writes the state at the top level.
 //
 // Exit code: always 0. A hook that fails must never block or disturb a session,
 // so every error is swallowed (at most one short stderr line).
@@ -46,17 +52,34 @@ function readJson(abs) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return null; }
 }
 
-// --- version helpers (a copy lives in pre-push-check.js; keep the two in step) ---
-// Dotted numeric versions, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Returns
-// null for anything that is not a dotted run of numbers, so a malformed value
-// never produces a verdict.
-function parseVersion(v) {
+// >>> version helpers (issue #174) >>>
+// Byte-identical in session-start.js, pre-push-check.js and setup-project.js,
+// from this marker to the closing one. Each script must run on its own (the
+// pre-push check is also copied alone into non-plugin installs), so there is no
+// shared module; scripts/test-pre-push-check.js fails when the copies drift.
+//
+// A version is only ever taken from a string of one fixed, harmless shape:
+// dotted numbers (one to four parts), an optional -suffix of letters, digits and
+// dots, at most 32 characters. The state file these read is committed to the
+// project, so a cloned repository controls it, and session-start.js prints the
+// version into Claude's context: any other text there would be injected into
+// it. A value of any other shape is no usable version - never printed, never
+// compared, never a block.
+const VERSION_SHAPE = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?$/;
+const VERSION_MAX_LENGTH = 32;
+// The version as a safe string (surrounding whitespace dropped), or null.
+function validVersion(v) {
   if (typeof v !== 'string') return null;
-  const core = v.trim().replace(/^v/, '').split('-')[0];
-  if (!/^\d+(\.\d+)*$/.test(core)) return null;
-  return core.split('.').map(Number);
+  const t = v.trim();
+  return t.length <= VERSION_MAX_LENGTH && VERSION_SHAPE.test(t) ? t : null;
 }
-// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unparseable.
+// Dotted numeric parts, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Null for
+// anything validVersion refuses, so a malformed value never produces a verdict.
+function parseVersion(v) {
+  const t = validVersion(v);
+  return t === null ? null : t.split('-')[0].split('.').map(Number);
+}
+// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unusable.
 function compareVersions(a, b) {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -70,15 +93,17 @@ function compareVersions(a, b) {
 }
 // The version a project is recorded at: auditedVersion (a /tk:upgrade stamped
 // it, or a fresh setup wrote it), else previousVersion (a migration's old
-// copy-install version), else version. Null when the state names none.
+// copy-install version), else version. The first key that names a version
+// decides, validated: null when none names one or that value is unusable (no
+// fall-through to a later key, so a malformed stamp cannot pick the reference).
 function referenceVersion(state) {
   if (!state || typeof state !== 'object') return null;
   for (const key of ['auditedVersion', 'previousVersion', 'version']) {
-    if (typeof state[key] === 'string' && state[key].trim() !== '') return state[key];
+    if (typeof state[key] === 'string' && state[key].trim() !== '') return validVersion(state[key]);
   }
   return null;
 }
-// --- end of the duplicated helpers ---------------------------------------------
+// <<< version helpers <<<
 
 // Make `<dataDir>/current` point at target. Factored with the platform and fs
 // injected so the Windows branch is testable anywhere. win32 uses a junction
@@ -133,12 +158,31 @@ function linkCurrent(dataDir, target, platform, fsImpl) {
   return true;
 }
 
-// The plain-text notices for this project, or [] when nothing applies.
-function notices(projectDir, running) {
+// The nearest `rel` from startDir upward, or null. The walk stops at the first
+// folder holding .git (a folder, or a file in a worktree or submodule), so a
+// state file belonging to an enclosing project is never read, or at the
+// filesystem root outside any repository.
+function findUp(startDir, rel) {
+  let dir = path.resolve(startDir);
+  for (;;) {
+    const candidate = path.join(dir, rel);
+    if (fs.existsSync(candidate)) return candidate;
+    if (fs.existsSync(path.join(dir, '.git'))) return null;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+// The plain-text notices for this project, or [] when nothing applies. Both
+// versions are validated before use, so neither can carry text of its own.
+function notices(projectDir, runningRaw) {
   const out = [];
-  const state = readJson(path.join(projectDir, STATE_REL));
+  const statePath = findUp(projectDir, STATE_REL);
+  const state = statePath === null ? null : readJson(statePath);
   const reference = referenceVersion(state);
-  const cmp = reference === null ? null : compareVersions(running, reference);
+  const running = validVersion(runningRaw);
+  const cmp = reference === null || running === null ? null : compareVersions(running, reference);
   if (cmp === -1) {
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was last set up or audited with toolkit ' + reference + ', but this session runs the tk plugin '
@@ -150,7 +194,7 @@ function notices(projectDir, running) {
       + running + ', which is newer. Run /tk:upgrade in this project so its own files are checked against the newer '
       + 'conventions.');
   }
-  if (fs.existsSync(path.join(projectDir, MANIFEST_REL))) {
+  if (findUp(projectDir, MANIFEST_REL) !== null) {
     out.push('Toolkit install notice - tell the user this in plain words at the start of your reply: '
       + 'the old copy-install of the toolkit is still in this project beside the tk plugin, so both /review and '
       + '/tk:review exist and it is easy to run the stale one. Run /tk:setup to migrate the project onto the plugin.');
@@ -214,4 +258,4 @@ if (require.main === module) {
   try { main(); } catch (e) { note(e.message); process.exitCode = 0; }
 }
 
-module.exports = { parseVersion, compareVersions, referenceVersion, linkCurrent, notices };
+module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, findUp, linkCurrent, notices };

@@ -47,6 +47,9 @@
 // `version` itself is the audit reference, so the raise first copies the old
 // `version` (and `at`) into `auditedVersion` (and `auditedAt`): otherwise the
 // raise would silently empty /tk:upgrade's audit range and hide its notice.
+// Every version read from the project is validated by the helpers shared with
+// session-start.js and pre-push-check.js: a value of any other shape is never
+// compared as a version and never echoed into the report.
 //
 // Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
 // needed: locally modified files, provenance unknown, or a dirty tree).
@@ -135,15 +138,34 @@ function dirtyTree(project) {
   }
   return false;
 }
-// Dotted numeric version compare, any -suffix ignored: -1, 0 or 1, or null when
-// either side is unparseable. The same rule as the copies in session-start.js
-// and pre-push-check.js; each script stays self-contained.
-function parseVersion(v) {
+// >>> version helpers (issue #174) >>>
+// Byte-identical in session-start.js, pre-push-check.js and setup-project.js,
+// from this marker to the closing one. Each script must run on its own (the
+// pre-push check is also copied alone into non-plugin installs), so there is no
+// shared module; scripts/test-pre-push-check.js fails when the copies drift.
+//
+// A version is only ever taken from a string of one fixed, harmless shape:
+// dotted numbers (one to four parts), an optional -suffix of letters, digits and
+// dots, at most 32 characters. The state file these read is committed to the
+// project, so a cloned repository controls it, and session-start.js prints the
+// version into Claude's context: any other text there would be injected into
+// it. A value of any other shape is no usable version - never printed, never
+// compared, never a block.
+const VERSION_SHAPE = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?$/;
+const VERSION_MAX_LENGTH = 32;
+// The version as a safe string (surrounding whitespace dropped), or null.
+function validVersion(v) {
   if (typeof v !== 'string') return null;
-  const core = v.trim().replace(/^v/, '').split('-')[0];
-  return /^\d+(\.\d+)*$/.test(core) ? core.split('.').map(Number) : null;
+  const t = v.trim();
+  return t.length <= VERSION_MAX_LENGTH && VERSION_SHAPE.test(t) ? t : null;
 }
-const parseableVersion = (v) => parseVersion(v) !== null;
+// Dotted numeric parts, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Null for
+// anything validVersion refuses, so a malformed value never produces a verdict.
+function parseVersion(v) {
+  const t = validVersion(v);
+  return t === null ? null : t.split('-')[0].split('.').map(Number);
+}
+// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unusable.
 function compareVersions(a, b) {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
@@ -154,6 +176,31 @@ function compareVersions(a, b) {
     if (x !== y) return x < y ? -1 : 1;
   }
   return 0;
+}
+// The version a project is recorded at: auditedVersion (a /tk:upgrade stamped
+// it, or a fresh setup wrote it), else previousVersion (a migration's old
+// copy-install version), else version. The first key that names a version
+// decides, validated: null when none names one or that value is unusable (no
+// fall-through to a later key, so a malformed stamp cannot pick the reference).
+function referenceVersion(state) {
+  if (!state || typeof state !== 'object') return null;
+  for (const key of ['auditedVersion', 'previousVersion', 'version']) {
+    if (typeof state[key] === 'string' && state[key].trim() !== '') return validVersion(state[key]);
+  }
+  return null;
+}
+// <<< version helpers <<<
+const parseableVersion = (v) => parseVersion(v) !== null;
+// A version read from the project (the state file, a manifest, VERSION) as
+// report text. This report reaches Claude through the /tk:setup skill, and a
+// cloned repository controls those files, so only a validated version is ever
+// shown, with the prefix; anything else is named, never echoed.
+// (referenceVersion stays in the block to keep the copies identical; this
+// script reads the state keys one by one.)
+function shownVersion(v, prefix) {
+  if (typeof v !== 'string' || v.trim() === '') return 'no version';
+  const t = validVersion(v);
+  return t === null ? 'an unreadable version' : (prefix || '') + t;
 }
 function readJson(abs, fallback) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; }
@@ -209,9 +256,9 @@ function main() {
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
   say('  Install type: ' + ({
-    plugin: 'already on the plugin (v' + (state && state.version) + ') - seed check only',
-    'migrate-manifest': 'migration from copy-install v' + previousVersion + ' (manifest present)',
-    'migrate-unknown': 'migration from copy-install v' + previousVersion + ' (NO manifest: provenance unknown)',
+    plugin: 'already on the plugin (' + shownVersion(state && state.version, 'v') + ') - seed check only',
+    'migrate-manifest': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (manifest present)',
+    'migrate-unknown': 'migration from copy-install ' + shownVersion(previousVersion, 'v') + ' (NO manifest: provenance unknown)',
     fresh: 'fresh install',
   })[mode]);
   if (opts.dryRun) say('  Dry run: nothing will be written.');
@@ -281,8 +328,17 @@ function main() {
   // .gitignore line merge
   const seedIgnore = fs.readFileSync(path.join(seedDir, 'gitignore'), 'utf8').split(/\r?\n/);
   const curIgnore = fs.existsSync(P('.gitignore')) ? fs.readFileSync(P('.gitignore'), 'utf8').split(/\r?\n/) : [];
-  const ignoreAdd = seedIgnore.filter(l => l.trim() !== '' && !l.startsWith('#') && !curIgnore.includes(l));
-  if (!curIgnore.includes('.claude/settings.local.json')) ignoreAdd.push('.claude/settings.local.json');
+  // Lines compare trimmed, against the file AND the lines already queued, so a
+  // line the seed carries (seed/gitignore lists .claude/settings.local.json, and
+  // the line below guarantees it for older seeds) is never written twice.
+  const ignoreSeen = new Set(curIgnore.map(l => l.trim()));
+  const ignoreAdd = [];
+  for (const l of seedIgnore.concat(['.claude/settings.local.json'])) {
+    const t = l.trim();
+    if (t === '' || t.startsWith('#') || ignoreSeen.has(t)) continue;
+    ignoreSeen.add(t);
+    ignoreAdd.push(l);
+  }
 
   // .gitattributes (issue #174). Absent: the seed is written whole, comments
   // included, as before. Present during a migration: every existing line stays
@@ -341,9 +397,9 @@ function main() {
   const namesVersion = (v) => typeof v === 'string' && v.trim() !== '';
   const stateBackfill = stateRaise && !namesVersion(state.auditedVersion) && !namesVersion(state.previousVersion) && parseableVersion(state.version);
   if (mode === 'plugin') {
-    say('  .claude/.toolkit-state.json: ' + (stateRaise ? 'version ' + (state.version || '(none)') + ' -> ' + version
-      + (stateBackfill ? ' (auditedVersion ' + state.version + ' recorded, so /tk:upgrade still audits from it)' : '')
-      : 'version ' + state.version + ' kept' + (stateCmp === -1 ? ' (this plugin is older; a recorded version is never lowered)' : '')));
+    say('  .claude/.toolkit-state.json: ' + (stateRaise ? shownVersion(state.version, 'version ') + ' -> ' + version
+      + (stateBackfill ? ' (auditedVersion ' + validVersion(state.version) + ' recorded, so /tk:upgrade still audits from it)' : '')
+      : shownVersion(state.version, 'version ') + ' kept' + (stateCmp === -1 ? ' (this plugin is older; a recorded version is never lowered)' : '')));
   }
   say('  .claude/settings.json: ' + (settingsChanged ? 'register marketplace ' + MARKETPLACE + ' and enable ' + PLUGIN + ' (the first push will page on this change: that is the tripwire doing its job)' : 'already registers the plugin'));
   say('  .claude/settings.local.json: ' + (local ? 'merge' : 'create') + ' (' + addedPerms.length + ' entries added, ' + deadPerms.length + ' dead script entries removed)');
@@ -421,7 +477,7 @@ function main() {
     // was the audit reference, its old value moves into auditedVersion first so
     // the reference stays put. An equal or older plugin writes nothing, which
     // keeps a repeat run idempotent.
-    const backfill = stateBackfill ? Object.assign({ auditedVersion: state.version }, typeof state.at === 'string' ? { auditedAt: state.at } : {}) : {};
+    const backfill = stateBackfill ? Object.assign({ auditedVersion: validVersion(state.version) }, typeof state.at === 'string' ? { auditedAt: state.at } : {}) : {};
     fs.writeFileSync(P(STATE_REL), JSON.stringify(Object.assign({}, state, backfill, { version, at: stateNext.at }), null, 2) + '\n');
   }
   if (migrating) {
