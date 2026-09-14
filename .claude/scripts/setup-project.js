@@ -94,14 +94,18 @@ const KEEP_ON_MIGRATION = ['.gitattributes', 'artifacts/README.md'];
 // row for a removed toolkit script is dead; a row for a script the project still
 // has, its own custom tool included, is live and kept. The first version treated
 // every .claude/scripts/ row as dead and deleted a kept custom script's row on
-// every run (review of the v7.0.0 release, R2).
+// every run (review of the v7.0.0 release, R2). The script name stops before a
+// colon that ends it: Claude Code writes "don't ask again" rows as
+// `Bash(node .claude/scripts/our-report.js:*)`, and reading that name as
+// `our-report.js:` deleted a kept script's row on every run the same way.
+// upgrade-audit.js carries the same regex; its test fails when the copies drift.
 const LEGACY_DEAD_PERMISSION = [
   /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
 function deadPermission(row, willExist) {
   if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
-  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+)/.exec(row);
+  const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/.exec(row);
   return m !== null && !willExist('.claude/scripts/' + m[1]);
 }
 
@@ -243,7 +247,9 @@ function undoLine(u) {
   const parts = [];
   if (!u.isRepo) parts.push('not a git repository, so there is no git undo');
   if (u.created.length) parts.push('delete ' + q(u.created));
-  if (u.createdDirs.length) parts.push('then remove the new folders if empty: ' + q(u.createdDirs));
+  // "then" only follows a delete clause: a run whose only change is a new folder
+  // (plans/ recreated on a re-run) starts with the folder clause.
+  if (u.createdDirs.length) parts.push((u.created.length ? 'then ' : '') + 'remove the new folders if empty: ' + q(u.createdDirs));
   if (u.checkout.length) parts.push('git checkout -- ' + q(u.checkout));
   if (u.byHand.length) parts.push('restore by hand (git holds no copy of them as they were): ' + q(u.byHand));
   return 'Undo: ' + parts.join(' ; ');

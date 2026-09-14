@@ -2,7 +2,8 @@
 'use strict';
 // test-setup-project.js - assertions for .claude/scripts/setup-project.js
 // (issue #167, Step 5; the version, .gitignore and .gitattributes cases of issue
-// #174; the migration record, undo line and seed .gitignore cases of 7.1.0).
+// #174; the migration record, undo line and seed .gitignore cases of 7.1.0;
+// colon-star permission rows and the folder-only undo line).
 // Builds a fixture plugin root and fixture projects in
 // temp dirs; never touches a real project. Dependency-free; exits non-zero on
 // any failure.
@@ -82,7 +83,7 @@ function undoOf(out) {
     let c;
     if (clause === 'not a git repository, so there is no git undo') u.noGit = true;
     else if ((c = /^delete (.+)$/.exec(clause))) u.del = shellWords(c[1]);
-    else if ((c = /^then remove the new folders if empty: (.+)$/.exec(clause))) u.dirs = shellWords(c[1]);
+    else if ((c = /^(?:then )?remove the new folders if empty: (.+)$/.exec(clause))) u.dirs = shellWords(c[1]);
     else if ((c = /^git checkout -- (.+)$/.exec(clause))) u.checkout = shellWords(c[1]);
     else if ((c = /^restore by hand \(git holds no copy of them as they were\): (.+)$/.exec(clause))) u.byHand = shellWords(c[1]);
     else u.unknown.push(clause);
@@ -402,6 +403,22 @@ const qLine = helpers.undoLine({ isRepo: true, created: ['my notes/plan one.md',
 const qParsed = undoOf('  ' + qLine);
 check('a quoted undo line reads back to the same paths', qParsed !== null && JSON.stringify(qParsed.del) === JSON.stringify(['my notes/plan one.md', "it's $HOME;x"]) && JSON.stringify(qParsed.dirs) === JSON.stringify(['my notes/']) && JSON.stringify(qParsed.checkout) === JSON.stringify(['a b/.gitignore']), qLine);
 check('a run that changed nothing has no undo line', helpers.undoLine({ isRepo: false, created: [], createdDirs: [], checkout: [], byHand: [] }) === null);
+check('a folder-only undo line has no leading "then"', helpers.undoLine({ isRepo: true, created: [], createdDirs: ['plans/'], checkout: [], byHand: [] }) === 'Undo: remove the new folders if empty: plans/');
+check('"then" still joins the folder clause to a delete clause', helpers.undoLine({ isRepo: true, created: ['a.md'], createdDirs: ['plans/'], checkout: [], byHand: [] }) === 'Undo: delete a.md ; then remove the new folders if empty: plans/');
+// A real re-run whose only change is a recreated plans/ folder.
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-folder-only-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+run(repo, pluginRoot);
+commitAll(repo, 'seeded');
+fs.rmdirSync(path.join(repo, 'plans'));
+treeBefore = treeSnapshot(repo);
+dirsBefore = dirSnapshot(repo);
+r = run(repo, pluginRoot);
+undo = undoOf(r.out);
+check('a re-run that only recreates plans/ ends with "Undo: remove the new folders if empty: plans/", no stray "then"', r.status === 0 && /\n {2}Undo: remove the new folders if empty: plans\/\n?$/.test(r.out) && !/Undo: then/.test(r.out) && undo !== null && undo.unknown.length === 0 && sameSet(undo.dirs, ['plans/']) && undo.del.length === 0 && undo.checkout.length === 0, r.out);
+if (undo) { applyUndo(repo, undo); check('carrying it out restores the tree and folders exactly', treeSnapshot(repo) === treeBefore && sameSet(dirSnapshot(repo), dirsBefore)); }
+fs.rmSync(repo, { recursive: true, force: true });
 const spacedParent = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-space-'));
 repo = path.join(spacedParent, 'my project');
 fs.mkdirSync(repo);
@@ -511,6 +528,37 @@ r = run(repo, newerRoot);
 check('a second re-run on the same plugin leaves the backfilled reference alone', r.status === 0 && treeSnapshot(repo) === snap, r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 fs.rmSync(newerRoot, { recursive: true, force: true });
+
+// Claude Code writes "don't ask again" rows as `Bash(node <script>:*)`. The
+// script name ends before the colon, so a row for a script the project has is
+// live and kept on every run, and a row for a script that is gone is dead.
+console.log('\n4d. colon-star permission rows');
+const COLON_KEPT = 'Bash(node .claude/scripts/our-report.js:*)';
+const COLON_DEAD = 'Bash(node .claude/scripts/gone-tool.js:*)';
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-colon-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+write(repo, '.claude/scripts/our-report.js', 'console.log("ours");\n');
+write(repo, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)', COLON_KEPT, COLON_DEAD] } }, null, 2) + '\n');
+commitAll(repo, 'init');
+r = run(repo, pluginRoot);
+let colonAllow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+check('a fresh setup keeps a colon-star row whose script exists', r.status === 0 && colonAllow.includes(COLON_KEPT), r.out + JSON.stringify(colonAllow));
+check('  and removes a colon-star row whose script is gone', !colonAllow.includes(COLON_DEAD) && /1 dead script entries removed/.test(r.out), r.out);
+r = run(repo, pluginRoot);
+colonAllow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+check('a plugin-mode re-run keeps it too and removes nothing', r.status === 0 && colonAllow.includes(COLON_KEPT) && /0 dead script entries removed/.test(r.out), r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+repo = makeCopyInstall(true);
+{
+  const s1 = JSON.parse(read(repo, '.claude/settings.local.json'));
+  s1.permissions.allow.push('Bash(node .claude/scripts/my-tool.js:*)', 'Bash(node .claude/scripts/ask-gpt.js:*)');
+  write(repo, '.claude/settings.local.json', JSON.stringify(s1, null, 2) + '\n'); // may be ignored by git, so not committed; --force covers either way
+}
+r = run(repo, pluginRoot, ['--force']);
+colonAllow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+check('a migration keeps the colon-star row of a kept custom script and removes the one for a removed toolkit script', r.status === 0 && colonAllow.includes('Bash(node .claude/scripts/my-tool.js:*)') && !colonAllow.includes('Bash(node .claude/scripts/ask-gpt.js:*)') && JSON.parse(read(repo, '.claude/.toolkit-migration.json')).deadPermissionCount === 4, r.out + JSON.stringify(colonAllow));
+fs.rmSync(repo, { recursive: true, force: true });
 
 console.log('\n5. a project that is not a git repository');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-'));

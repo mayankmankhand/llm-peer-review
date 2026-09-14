@@ -24,14 +24,25 @@
 //     a `..` segment), where C-6 keeps its hashes and still refuses unsafe paths;
 //   - a retired Skill row for a skill the project owns (C-9 leaves it), a
 //     .gitattributes scripts rule in a project that keeps scripts (C-10 leaves
-//     it), and acceptEdits at the top level, under permissions, and in both.
+//     it), and acceptEdits at the top level, under permissions, and in both;
+//   - projects a 7.0.x migration damaged (its record with the removed rows as
+//     an array or only a count, a backup folder or none, a malformed record):
+//     C-9 restores a kept custom script's row (relative or absolute inside the
+//     project) and nothing else, C-10 restores the Git LFS line dropped from
+//     .gitattributes (CRLF and byte-order-mark backups too, never a respaced or
+//     historical toolkit line; its receipt stays quiet when the live file is
+//     gone), a colon-star row (`:*`) counts as a real row in C-8 and C-9, the
+//     C-9 fix names only the source that holds the rows, and C-6 words
+//     .gitattributes advice by what was checked (lines C-10 lists, none, or no
+//     backup copy to compare) while every other entry keeps its upstream advice.
 // Every emitted receipt is run through `bash -c` from its fixture project and
 // must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise (a future and an old
 // convention, `Runs: every upgrade` on an old one, a pattern with a backtick,
-// `$` and `"`). Two mutation checks prove the tests bite: a copy of the script
-// with the regex receipt unquoted, and one with the always-run exemption
-// removed, must each fail the check that guards it.
+// `$` and `"`). Four mutation checks prove the tests bite: a copy of the script
+// with the regex receipt unquoted, one with the always-run exemption removed,
+// one restoring rows whose script file is gone, and one that forgets the lines
+// earlier toolkit releases shipped, must each fail the check that guards it.
 //
 //   node scripts/test-upgrade-audit.js
 //
@@ -104,6 +115,12 @@ function receiptShows(f, r) {
   }
   if (/^absent: /.test(f.receipt.expect)) return r.stdout.trim() === f.receipt.expect;
   if (/missing: <row>/.test(f.receipt.expect)) return rows && outLines(r.stdout).length === rows.value.split(' ; ').length && outLines(r.stdout).every(l => l.startsWith('missing: '));
+  // A lost-row or lost-line finding prints exactly its listed items, each once.
+  for (const [marker, label] of [['restorable', 'Lost rows'], ['lost', 'Lost lines']]) {
+    if (!new RegExp(marker + ': <').test(f.receipt.expect)) continue;
+    const listed = ((f.fields || []).find(x => x.label === label) || { value: '' }).value.split(' ; ');
+    return outLines(r.stdout).map(l => l.replace(marker + ': ', '')).sort().join('\n') === listed.slice().sort().join('\n') && outLines(r.stdout).every(l => l.startsWith(marker + ': '));
+  }
   if (f.file.line) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout);
   if (rows) return outLines(r.stdout).length === rows.value.split(' ; ').length;
   return false;
@@ -438,6 +455,145 @@ console.log('\n4e. C-9: the acceptEdits question is worded for where the key sit
   check('a defaultMode other than acceptEdits is no finding', k.findings.length === 0, JSON.stringify(k.findings));
 }
 
+// --- 4f. repairs for what a 7.0.x migration lost ---------------------------------------
+// The shape of a project migrated from 6.3.3 by the 7.0.0 setup: its record
+// lists the removed rows and names .gitattributes under both removed and
+// modified, its backup folder holds the old settings.local.json and
+// .gitattributes, the custom script is still there, and the live file lost both
+// the script's row and the project's Git LFS rule. Claude Code's "don't ask
+// again" rows end in `:*`, so a colon-star row is a real row of the project's
+// own too. The record also names other locally modified entries, whose C-6
+// advice stays the convention's upstream advice with its tagged base.
+console.log('\n4f. C-9 and C-10 restore what a 7.0.x migration lost; C-6 advice for a project-owned file');
+const REPAIR_BACKUP = '.toolkit-backup-20260914-041924-plugin';
+const CUSTOM_ROW = 'Bash(node .claude/scripts/our-report.js *)';
+const GONE_ROW = 'Bash(node .claude/scripts/old-tool.js *)';
+const PRESENT_ROW = 'Bash(node .claude/scripts/our-present.js *)';
+const DENIED_ROW = 'Bash(node .claude/scripts/our-denied.js *)';
+const ARRAY_ONLY_ROW = 'Bash(node .claude/scripts/our-array-only.js *)';
+const COLON_ROW = 'Bash(node .claude/scripts/our-colon.js:*)';
+const COLON_GONE_ROW = 'Bash(node .claude/scripts/our-colon-gone.js:*)';
+const LIVE_COLON_ROW = 'Bash(node .claude/scripts/our-present.js:*)';
+const LIVE_COLON_GONE_ROW = 'Bash(node .claude/scripts/our-live-gone.js:*)';
+const OTHER_MODIFIED = ['artifacts/README.md', '.env.local.example', 'VERSION', '.claude/commands/review.md'];
+const RETIRED_SCRIPT_ROW = RETIRED.find(x => x === 'Bash(node .claude/scripts/ask-gpt.js *)');
+const LFS = '*.psd filter=lfs diff=lfs merge=lfs -text';
+const HISTORICAL = '.claude/scripts/** text eol=lf';
+const OLD_ATTRS = ['# Auto-detect text files and normalize line endings', '* text=auto', '', '# Force LF line endings for shell scripts and toolkit scripts', '*.sh text eol=lf', 'scripts/** text eol=lf', HISTORICAL];
+function repairCase(name, o) {
+  const dir = path.join(TMP, 'repair-' + name);
+  const outside = path.join(TMP, 'repair-elsewhere-' + name);
+  const absIn = 'Bash(node ' + dir + '/.claude/scripts/our-abs.js *)';
+  const goneAbs = 'Bash(node ' + dir + '/.claude/scripts/our-gone-abs.js *)';
+  const absOut = 'Bash(node ' + outside + '/.claude/scripts/our-report.js *)';
+  const absInColon = 'Bash(node ' + dir + '/.claude/scripts/our-abs.js:*)';
+  write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'copy-migrated', previousVersion: '6.3.3', auditedVersion: '7.0.0' }, null, 2));
+  for (const f of ['our-report.js', 'our-present.js', 'our-denied.js', 'our-array-only.js', 'our-abs.js', 'our-colon.js', 'ask-gpt.js']) write(dir, '.claude/scripts/' + f, '// ours\n');
+  write(outside, '.claude/scripts/our-report.js', '// another checkout\n');
+  const backupRows = ['Bash(git add *)', CUSTOM_ROW, GONE_ROW, PRESENT_ROW, DENIED_ROW, RETIRED_SCRIPT_ROW, absIn, goneAbs, absOut, COLON_ROW, COLON_GONE_ROW, absInColon];
+  if (!o.noBackup) {
+    write(dir, REPAIR_BACKUP + '/.claude/settings.local.json', JSON.stringify({ permissions: { allow: backupRows } }, null, 2) + '\n');
+    // bomFirst: a byte order mark, then the LFS rule as the first line.
+    const attrLines = o.bomFirst ? ['\uFEFF' + LFS].concat(OLD_ATTRS, ['*.bin    binary', '']) : OLD_ATTRS.concat([LFS, '*.bin    binary', '']);
+    if (!o.noAttrBackup) write(dir, REPAIR_BACKUP + '/.gitattributes', attrLines.join(o.crlf ? '\r\n' : '\n'));
+  }
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(git add *)', PRESENT_ROW, LIVE_COLON_ROW, LIVE_COLON_GONE_ROW]), deny: [DENIED_ROW] } }, null, 2) + '\n');
+  // The live file is the current seed plus one rule of the project's spaced
+  // differently (liveHasLfs: plus the LFS rule, so nothing is lost; noLiveAttrs: no file).
+  if (!o.noLiveAttrs) write(dir, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')) + '*.bin binary\n' + (o.liveHasLfs ? LFS + '\n' : ''));
+  const record = { at: '2026-09-14T04:19:24.824Z', from: '6.3.3', to: '7.0.0', backupDir: REPAIR_BACKUP, removed: ['.claude/scripts/ask-gpt.js', '.gitattributes'], custom: ['.claude/scripts/our-report.js'] };
+  if (o.count) record.deadPermissionCount = 7; else record.deadPermissions = [CUSTOM_ROW, GONE_ROW, ARRAY_ONLY_ROW, absOut, COLON_ROW, COLON_GONE_ROW];
+  if (!o.removedOnly) record.modified = [{ rel: '.gitattributes', backup: REPAIR_BACKUP + '/.gitattributes', pluginCopy: null }]
+    .concat(OTHER_MODIFIED.map(rel => ({ rel, backup: REPAIR_BACKUP + '/' + rel, pluginCopy: rel.startsWith('.claude/') ? rel.replace(/^\.claude\//, '') : null })));
+  write(dir, '.claude/.toolkit-migration.json', o.rawRecord !== undefined ? o.rawRecord : JSON.stringify(record, null, 2) + '\n');
+  const run = (args, opts) => audit(dir, args, opts);
+  const res = run();
+  const lostRows = (x) => x.findings.filter(f => f.id === 'C-9' && (f.fields || []).some(y => y.label === 'Lost rows'));
+  const lostLines = (x) => x.findings.filter(f => f.id === 'C-10' && (f.fields || []).some(y => y.label === 'Lost lines'));
+  const listed = (f, label) => f.fields.find(y => y.label === label).value.split(' ; ').sort().join('\n');
+  return { dir, outside, absIn, goneAbs, absOut, absInColon, res, run, lostRows, lostLines, listed };
+}
+{
+  check('the fixture\'s retired script row is really on the shipped retired list', !!RETIRED_SCRIPT_ROW);
+  const k = repairCase('array', {});
+  const rows = k.lostRows(k.res);
+  check('a 7.0.0-shaped record (rows array) and backup settings: one C-9 lost-rows finding, exit 0', k.res.status === 0 && rows.length === 1 && rows[0].severity === 'warn', k.res.summary + JSON.stringify(rows));
+  const got = rows.length ? k.listed(rows[0], 'Lost rows') : '';
+  check('  it restores the custom row, the absolute row inside the project, and a row only the record lists', got === [CUSTOM_ROW, k.absIn, ARRAY_ONLY_ROW, COLON_ROW, k.absInColon].sort().join('\n'), got);
+  check('  it restores a colon-star row (relative and absolute) whose script exists', got.split('\n').includes(COLON_ROW) && got.split('\n').includes(k.absInColon), got);
+  check('  it never restores a row whose script is gone (relative, absolute, or colon-star)', !got.includes(GONE_ROW) && !got.includes(k.goneAbs) && !got.includes(COLON_GONE_ROW));
+  check('  it never restores a retired row, even when its script file exists', !got.includes(RETIRED_SCRIPT_ROW));
+  check('  it never restores a row the live file already has, in allow or in deny', !got.includes(PRESENT_ROW) && !got.includes(DENIED_ROW));
+  check('  it never restores an absolute row outside the project, and never prints that path', !got.includes(k.absOut) && !(k.res.stdout + k.res.summary).includes(k.outside));
+  check('  the wording says what was lost and why, and the fix puts the rows back in permissions.allow', rows.length === 1 && /lost 5 permission rows of the project's own: the 7\.0\.0 migration removed them although the script each one runs is still in the project/.test(rows[0].what) && /add each listed row back to "permissions\.allow"/.test(rows[0].fix), rows[0] && rows[0].what + ' / ' + rows[0].fix);
+  check('  rows from both sources: the fix says the backup copy has 4 and the record lists the other 1', rows.length === 1 && rows[0].fix.includes('(the migration\'s backup copy of .claude/settings.local.json still has 4 of them, and the migration record .claude/.toolkit-migration.json lists the other 1)'), rows[0] && rows[0].fix);
+  const lines = k.lostLines(k.res);
+  check('C-10: the LFS line the migration dropped is reported, once for the file, with its backup copy', lines.length === 1 && lines[0].file.relPath === '.gitattributes' && k.listed(lines[0], 'Lost lines') === LFS && lines[0].fields.some(y => y.label === 'Backup copy' && y.value === REPAIR_BACKUP + '/.gitattributes') && /dropped it; the backup copy/.test(lines[0].what) && /append the listed line back to \.gitattributes/.test(lines[0].fix), JSON.stringify(lines));
+  check('  a line the live file has with different spacing, and a line an earlier release shipped, are not reported', lines.length === 1 && !/binary/.test(lines[0].fields[0].value) && !lines[0].fields[0].value.includes(HISTORICAL) && !read(path.join(k.dir, '.gitattributes')).includes(HISTORICAL));
+  bad = allReceiptsShow(k.dir, k.res.findings);
+  check('  every receipt runs through bash from the fixture root and prints its expected lines (' + k.res.findings.length + ' findings)', bad.length === 0 && rows.length === 1 && lines.length === 1, bad.join(' | '));
+  const c6 = k.run(['--from', '6.3.3']);
+  const attr6 = c6.findings.find(f => f.id === 'C-6' && f.file.relPath === '.gitattributes');
+  check('C-6: the modified .gitattributes entry no longer gets upstream-script advice', !!attr6 && !/upstream-only|issue upstream|project-owned script|Base for your backup/.test(attr6.fix) && /belongs to the project/.test(attr6.fix) && /C-10 finding for \.gitattributes/.test(attr6.fix) && /nothing goes upstream/.test(attr6.fix), attr6 && attr6.fix);
+  check('  with its backup copy and a lost line, the fix names the backup copy and the one line C-10 lists', !!attr6 && attr6.fix.includes('dropped a line of yours that the backup copy ' + REPAIR_BACKUP + '/.gitattributes still has. Append back the line the C-10 finding for .gitattributes lists.') && !/cannot tell|lists no line/.test(attr6.fix), attr6 && attr6.fix);
+  const mig6 = audit(MIG).findings.find(f => f.id === 'C-6');
+  check('  a toolkit script entry keeps its upstream advice and tagged base', !!mig6 && /upstream/.test(mig6.fix) && /Base for your backup: https:\/\//.test(mig6.fix));
+  // Every other modified entry gets the convention's fix and tagged base, word
+  // for word as before the .gitattributes wording existed, and the old sentence.
+  const baseFix = mig6 ? mig6.fix.split('. Base for your backup: ')[0] : '';
+  for (const rel of OTHER_MODIFIED) {
+    const f = c6.findings.find(x => x.id === 'C-6' && x.file.relPath === rel);
+    check('  ' + rel + ' keeps the convention\'s fix, its tagged base, and the plugin-copy sentence exactly', !!f && baseFix !== '' && f.fix === baseFix + '. Base for your backup: https://github.com/mayankmankhand/llm-peer-review/blob/v6.3.3/' + rel
+      && f.what === 'Should fix. ' + rel + ' carried a local edit the plugin copy replaced during the migration from the 6.3.3 copy-install.' && !/belongs to the project|toolkit seed/.test(f.what + f.fix), f && f.what + ' / ' + f.fix);
+  }
+  const c8 = c6.findings.find(f => f.id === 'C-8');
+  check('C-8 treats a live colon-star row as a real row: listed when its script is gone, kept when it exists', !!c8 && c8.fields[0].value.split(' ; ').includes(LIVE_COLON_GONE_ROW) && !c8.fields[0].value.includes(LIVE_COLON_ROW), c8 && c8.fields[0].value);
+  bad = allReceiptsShow(k.dir, c6.findings);
+  check('  every receipt of the full-range run passes too (' + c6.findings.length + ' findings)', bad.length === 0, bad.join(' | '));
+}
+{
+  let k = repairCase('count', { count: true, removedOnly: true });
+  let rows = k.lostRows(k.res);
+  check('a record with deadPermissionCount and no array still restores from the backup settings', k.res.status === 0 && rows.length === 1 && k.listed(rows[0], 'Lost rows') === [CUSTOM_ROW, k.absIn, COLON_ROW, k.absInColon].sort().join('\n'), rows[0] && rows[0].fields[0].value);
+  check('  every row is in the backup copy, so the fix names the backup copy and not the record', rows.length === 1 && rows[0].fix.includes('(the migration\'s backup copy of .claude/settings.local.json still has them)') && !rows[0].fix.includes('migration record'), rows[0] && rows[0].fix);
+  check('  a record naming .gitattributes only under removed still finds the lost LFS line', k.lostLines(k.res).length === 1 && k.lostLines(k.res)[0].fields[0].value === LFS);
+  check('  its receipts run and print their lines', allReceiptsShow(k.dir, k.res.findings).length === 0);
+  k = repairCase('crlf', { crlf: true });
+  check('a CRLF backup .gitattributes reports the LFS line once, and its receipt prints it', k.lostLines(k.res).length === 1 && k.lostLines(k.res)[0].fields[0].value === LFS && allReceiptsShow(k.dir, k.lostLines(k.res)).length === 0, JSON.stringify(k.lostLines(k.res)));
+  k = repairCase('bom', { bomFirst: true });
+  check('a backup .gitattributes that opens with a byte order mark reports the LFS line without the mark, and its receipt prints it', k.lostLines(k.res).length === 1 && k.lostLines(k.res)[0].fields[0].value === LFS && allReceiptsShow(k.dir, k.lostLines(k.res)).length === 0, JSON.stringify(k.lostLines(k.res)) + allReceiptsShow(k.dir, k.lostLines(k.res)).join(' | '));
+  k = repairCase('no-live-attrs', {});
+  fs.rmSync(path.join(k.dir, '.gitattributes'));
+  {
+    const res = k.run();
+    const f = k.lostLines(res)[0];
+    const out = f ? runReceipt(k.dir, f) : { status: -1, out: '', stdout: '' };
+    check('no live .gitattributes: every project line is lost, and the receipt prints them with no shell error and exit 0', !!f && k.listed(f, 'Lost lines') === [LFS, '*.bin binary'].sort().join('\n') && out.status === 0 && receiptShows(f, out) && out.out === out.stdout && !/No such file/.test(out.out), out.out);
+  }
+  k = repairCase('no-attr-backup', { noAttrBackup: true });
+  check('no backup copy of .gitattributes: no lost-line finding, and the rows are still restored', k.res.status === 0 && k.lostLines(k.res).length === 0 && k.lostRows(k.res).length === 1);
+  {
+    const attr = k.run(['--from', '6.3.3']).findings.find(f => f.id === 'C-6' && f.file.relPath === '.gitattributes');
+    check('  its C-6 fix says the backup copy is gone, the toolkit cannot tell, and asks the user to check for a rule such as a Git LFS line', !!attr && /backup copy is gone, so the toolkit cannot tell which lines were the project's/.test(attr.fix) && /Ask the user to check whether a rule of theirs \(a Git LFS line, for example\) is missing from \.gitattributes/.test(attr.fix), attr && attr.fix);
+    check('  and claims nothing it did not check: no C-10 finding, no backup copy holding lines, no "nothing missing"', !!attr && !/C-10|still has|still holds|lists no line|no line of yours is missing|Base for your backup/.test(attr.fix), attr && attr.fix);
+  }
+  k = repairCase('nothing-lost', { liveHasLfs: true });
+  {
+    const attr = k.run(['--from', '6.3.3']).findings.find(f => f.id === 'C-6' && f.file.relPath === '.gitattributes');
+    check('a backup copy whose every line the live file has: no lost-line finding, and C-6 says what C-10 compared and that it lists nothing', k.lostLines(k.res).length === 0 && !!attr && attr.fix.includes('C-10 compared the backup copy ' + REPAIR_BACKUP + '/.gitattributes with the live file and lists no line to put back') && !/Append back|cannot tell/.test(attr.fix), attr && attr.fix);
+  }
+  k = repairCase('no-backup', { count: true, noBackup: true });
+  check('missing backup folder (count record): no lost-row or lost-line finding, no crash', k.res.status === 0 && k.res.parsed && k.lostRows(k.res).length === 0 && k.lostLines(k.res).length === 0 && !/TypeError|SyntaxError|\n\s+at /.test(k.res.summary), k.res.summary);
+  k = repairCase('no-backup-array', { noBackup: true });
+  rows = k.lostRows(k.res);
+  check('missing backup folder (rows array): only the record\'s own restorable rows, no crash', k.res.status === 0 && rows.length === 1 && k.listed(rows[0], 'Lost rows') === [CUSTOM_ROW, ARRAY_ONLY_ROW, COLON_ROW].sort().join('\n') && allReceiptsShow(k.dir, rows).length === 0, rows[0] && rows[0].fields[0].value);
+  check('  the fix says the migration record lists them and never that a backup copy has them', rows.length === 1 && rows[0].fix.includes('(the migration record .claude/.toolkit-migration.json lists them)') && !/backup/.test(rows[0].fix), rows[0] && rows[0].fix);
+  for (const [label, raw] of [['malformed', '{"from": "6.3.3", "deadPermissions": ['], ['array', '[1, 2]'], ['string', '"nope"']]) {
+    k = repairCase('record-' + label, { rawRecord: raw });
+    check('a migration record that is ' + label + ' JSON: no lost-row or lost-line finding, exit 0, no stack trace', k.res.status === 0 && k.res.parsed && k.lostRows(k.res).length === 0 && k.lostLines(k.res).length === 0 && !/TypeError|SyntaxError|\n\s+at /.test(k.res.summary), k.res.summary);
+  }
+}
+
 // --- 5. parser mechanics the real file does not exercise ----------------------------
 console.log('\n5. version range and parser mechanics (fixture conventions)');
 const FIXTURE_CONVENTIONS = path.join(TMP, 'conventions.md');
@@ -540,6 +696,30 @@ function mutant(name, from, to) {
   check('without the always-run exemption, C-7 stops firing for a 7.1.0-audited project with a stale stamp', !c7Fires(audit(ALWAYS, [], { script: m.path })));
   check('restored (the real script), C-7 fires again', c7Fires(audit(ALWAYS)));
 }
+{
+  // F1's core condition: a row is restored only when its script file exists.
+  // Relative rows for a missing script are also caught as dead, so the absolute
+  // in-project row for a missing script is the one this mutation exposes.
+  const k = repairCase('mutant-exists', {});
+  const goneKept = (res) => { const f = k.lostRows(res)[0]; return !!f && !f.fields[0].value.includes(GONE_ROW) && !f.fields[0].value.includes(k.goneAbs); };
+  const m = mutant('no-exists', 'rel === null || inLive.has(row) || !isFile(P(rel)) || retired.has(row)', 'rel === null || inLive.has(row) || retired.has(row)');
+  check('the no-script-exists mutation applies to the source', m.applied);
+  const mres = k.run([], { script: m.path });
+  const mf = k.lostRows(mres)[0];
+  check('without the script-exists condition, the gone absolute row is restored and the "row whose script is gone is not restored" check fails', mres.status === 0 && !!mf && mf.fields[0].value.includes(k.goneAbs) && !goneKept(mres), mres.summary);
+  check('restored (the real script), that check passes again', goneKept(k.res));
+}
+{
+  // F2's core condition: a line an earlier toolkit release shipped is not the project's own.
+  const k = repairCase('mutant-historical', {});
+  const onlyLfs = (res) => { const f = k.lostLines(res)[0]; return !!f && k.listed(f, 'Lost lines') === LFS; };
+  const m = mutant('no-historical', '...file.shipped, ', '');
+  check('the no-historical-lines mutation applies to the source', m.applied);
+  const mres = k.run([], { script: m.path });
+  const mf = k.lostLines(mres)[0];
+  check('without the historical toolkit lines, that line is reported and the "historical line is not reported" check fails', mres.status === 0 && !!mf && mf.fields[0].value.split(' ; ').includes(HISTORICAL) && !onlyLfs(mres), mres.summary);
+  check('restored (the real script), only the LFS line is reported again', onlyLfs(k.res));
+}
 
 console.log('\n9. the version helpers match session-start.js');
 {
@@ -551,6 +731,11 @@ console.log('\n9. the version helpers match session-start.js');
     pieces.push(i < 0 ? null : block.slice(i, block.indexOf('\n}\n', i) + 2));
   }
   check('each helper is copied verbatim from the session-start.js block', pieces.every(p => p !== null && mine.includes(p)), pieces.filter(p => p === null || !mine.includes(p)).map(p => String(p).slice(0, 60)).join(' | '));
+  // The lost-row check extracts a row's script path with the regex setup-project.js's deadPermission uses.
+  // Both copies of deadPermission and ROW_SCRIPT_REL carry it, colon-star ending included.
+  const rowRegex = String.raw`/(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/`;
+  const setup = read(path.join(REPO, '.claude', 'scripts', 'setup-project.js')).replace(/\r\n/g, '\n');
+  check('the row script-path regex is the one deadPermission uses in setup-project.js', setup.includes('const m = ' + rowRegex + '.exec(row);') && mine.includes('const m = ' + rowRegex + '.exec(row);') && mine.includes('const ROW_SCRIPT_REL = ' + rowRegex + ';'));
 }
 
 console.log('\n10. errors and usage');
