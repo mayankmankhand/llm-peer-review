@@ -1,0 +1,54 @@
+#!/bin/sh
+# pre-push - the toolkit repo's maintainer-only push gate (issue #175).
+#
+# Install once per clone:   bash scripts/setup/install-hooks.sh
+# Undo:                     git config --unset core.hooksPath
+#
+# Git runs this from the top of the working tree with the remote name and URL
+# as arguments, and one line per pushed ref on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+#
+#   1. Every push runs the M11 tripwire (.claude/scripts/pre-push-check.js).
+#      A non-zero exit blocks the push with the tripwire's own exit code.
+#   2. A push that updates refs/heads/main or a refs/tags/v* tag also runs the
+#      release gate (scripts/release-check.js) and blocks when it fails.
+#      Deleted refs (local sha all zeros) never trigger it.
+#
+# Tests substitute the two scripts with TK_PRE_PUSH_CHECK and TK_RELEASE_CHECK
+# (paths to node scripts), so routing is tested without the real checks.
+#
+# Exit codes: 0 push may proceed; anything else blocks it.
+
+tripwire=${TK_PRE_PUSH_CHECK:-.claude/scripts/pre-push-check.js}
+release_check=${TK_RELEASE_CHECK:-scripts/release-check.js}
+
+# Read the ref lines first: stdin is git's, and the checks must not eat it.
+release=
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # A deletion pushes nothing, so it can never publish a release.
+  case $local_sha in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+  case $remote_ref in
+    refs/heads/main | refs/tags/v*) release="$release $remote_ref" ;;
+  esac
+done
+
+node "$tripwire" </dev/null
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "pre-push: tripwire exited $status; push to $1 blocked" >&2
+  exit "$status"
+fi
+
+[ -z "$release" ] && exit 0
+
+echo "pre-push: release push to$release; running $release_check" >&2
+node "$release_check" </dev/null
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "pre-push: release check exited $status; push to $1 blocked" >&2
+  exit "$status"
+fi
+exit 0
