@@ -67,6 +67,9 @@ const MANAGED = ['.claude/commands/review.md', '.claude/commands/explore.md', '.
   '.claude/rules/toolkit.md', '.claude/rules/html-outputs.md', '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md'];
 write(pluginRoot, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED }));
 
+const LFS_LINE = '*.psd filter=lfs diff=lfs merge=lfs -text';
+const ARTIFACTS_NOTES = '# Our artifacts notes\n\nKept by hand.\n';
+
 // --- fixture: a copy-install with a manifest, custom files, and one local edit ---
 function makeCopyInstall(withManifest) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-proj-'));
@@ -92,6 +95,11 @@ function makeCopyInstall(withManifest) {
     // one local edit AFTER the manifest was recorded
     fs.appendFileSync(path.join(repo, '.claude/scripts/render-html.js'), '// my local fix\n');
   }
+  // User content in the two managed root files a migration keeps (issue #174):
+  // a Git LFS rule and the project's own artifacts notes. Neither may be lost,
+  // and neither counts as a local edit that pages.
+  fs.appendFileSync(path.join(repo, '.gitattributes'), LFS_LINE + '\n');
+  write(repo, 'artifacts/README.md', ARTIFACTS_NOTES);
   commitAll(repo, 'copy-install state');
   return repo;
 }
@@ -126,11 +134,20 @@ const gi = read(repo, '.gitignore');
 check('.gitignore is line-merged', gi.startsWith('mine/') && gi.includes('node_modules/') && gi.includes('artifacts/html/') && gi.includes('.claude/settings.local.json'));
 const st = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
 check('state file has the one schema', st.version === '7.0.0' && st.path === 'copy-migrated' && st.previousVersion === '6.3.3' && st.marketplace === 'llm-peer-review' && st.plugin === 'tk' && typeof st.at === 'string');
+check('a migration does not record auditedVersion (its custom files are not audited yet)', !('auditedVersion' in st) && !('auditedAt' in st), JSON.stringify(st));
+const ga = read(repo, '.gitattributes');
+check('a Git LFS line in .gitattributes survives a forced migration', ga.startsWith('toolkit content of .gitattributes\n' + LFS_LINE + '\n'), ga);
+check('.gitattributes gains the missing seed rule exactly once', ga.split('\n').filter(l => l === '*.sh text eol=lf').length === 1, ga);
+check('an existing artifacts/README.md is kept byte for byte', read(repo, 'artifacts/README.md') === ARTIFACTS_NOTES);
+const migKept = JSON.parse(read(repo, '.claude/.toolkit-migration.json'));
+check('the kept root files are neither removed nor counted as local edits', ['.gitattributes', 'artifacts/README.md'].every(rel => !migKept.removed.includes(rel) && !migKept.modified.some(m => m.rel === rel)), JSON.stringify({ removed: migKept.removed, modified: migKept.modified }));
 const mig = JSON.parse(read(repo, '.claude/.toolkit-migration.json'));
 const backups = fs.readdirSync(repo).filter(n => n.startsWith('.toolkit-backup-') && n.endsWith('-plugin'));
 check('one backup folder holds the removed files and the local edit', backups.length === 1 && exists(repo, backups[0] + '/.claude/scripts/render-html.js') && read(repo, backups[0] + '/.claude/scripts/render-html.js').includes('my local fix') && exists(repo, backups[0] + '/.claude/.toolkit-manifest.json') && exists(repo, backups[0] + '/.claude/settings.local.json'));
+check('the backup holds .gitattributes as it was before the merge', backups.length === 1 && read(repo, backups[0] + '/.gitattributes') === 'toolkit content of .gitattributes\n' + LFS_LINE + '\n');
 check('the migration record carries the local edit with its backup path', mig.modified.length === 1 && mig.modified[0].rel === '.claude/scripts/render-html.js' && mig.modified[0].backup === backups[0] + '/.claude/scripts/render-html.js' && mig.deadPermissions.length === 3 && mig.from === '6.3.3');
 check('the report ends with the undo line and the next step', /Undo: git checkout/.test(r.out) && /Next: run \/tk:upgrade/.test(r.out) && /1 local edit/.test(r.out));
+check('the undo line says to delete the state and migration files', /Undo: [^\n]*delete[^\n]*\.claude\/\.toolkit-state\.json[^\n]*\.claude\/\.toolkit-migration\.json/.test(r.out), r.out);
 const after = treeSnapshot(repo);
 r = run(repo, pluginRoot);
 check('a second run is idempotent', r.status === 0 && /already on the plugin/.test(r.out) && /Nothing to migrate/.test(r.out) && treeSnapshot(repo) === after, r.out);
@@ -198,11 +215,66 @@ commitAll(repo, 'init');
 r = run(repo, pluginRoot);
 check('a fresh install seeds and registers without a backup', r.status === 0 && /fresh install/.test(r.out) && !fs.readdirSync(repo).some(n => n.startsWith('.toolkit-backup-')), r.out);
 check('the full seed lands, including the lessons detail file', ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', '.env.local.example', '.gitattributes', 'artifacts/README.md', '.claude/rules/toolkit.md', '.gitignore', '.claude/settings.json', '.claude/settings.local.json', '.claude/.toolkit-state.json'].every(f => exists(repo, f)));
-check('fresh state path is plugin', JSON.parse(read(repo, '.claude/.toolkit-state.json')).path === 'plugin');
+const freshState = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+check('fresh state path is plugin', freshState.path === 'plugin');
+check('a fresh setup records auditedVersion and auditedAt at the running version', freshState.auditedVersion === '7.0.0' && freshState.auditedAt === freshState.at, JSON.stringify(freshState));
 check('plans and artifacts folders exist', fs.existsSync(path.join(repo, 'plans')) && fs.existsSync(path.join(repo, 'artifacts')));
 check('a fresh settings.local.json carries no dead script entries', !JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow.some(p => /\.claude\/scripts\//.test(p)));
 check('the report points at the first command', /Next: \/tk:explore/.test(r.out));
 fs.rmSync(repo, { recursive: true, force: true });
+
+console.log('\n4b. a re-run on a project already on the plugin (issue #174)');
+// A second fixture plugin root, identical but one version newer.
+const newerRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-plugin-newer-'));
+fs.cpSync(pluginRoot, newerRoot, { recursive: true });
+write(newerRoot, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version: '7.1.0' }));
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-rerun-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+commitAll(repo, 'init');
+run(repo, pluginRoot);
+// A real project's state after /tk:upgrade on a migrated install: all four fields set.
+const seeded = Object.assign(JSON.parse(read(repo, '.claude/.toolkit-state.json')), { previousVersion: '6.3.3', at: '2026-01-01T00:00:00.000Z', custom: 'kept' });
+write(repo, '.claude/.toolkit-state.json', JSON.stringify(seeded, null, 2) + '\n');
+let snap = treeSnapshot(repo);
+r = run(repo, newerRoot, ['--dry-run']);
+check('a dry run on a newer plugin reports the raise and writes nothing', r.status === 0 && /version 7\.0\.0 -> 7\.1\.0/.test(r.out) && treeSnapshot(repo) === snap, r.out);
+r = run(repo, newerRoot);
+let rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+check('a newer plugin raises version and at', r.status === 0 && rerun.version === '7.1.0' && rerun.at !== '2026-01-01T00:00:00.000Z', JSON.stringify(rerun));
+check('a newer plugin leaves auditedVersion, auditedAt and previousVersion alone', rerun.auditedVersion === '7.0.0' && rerun.auditedAt === seeded.auditedAt && rerun.previousVersion === '6.3.3' && rerun.custom === 'kept' && rerun.path === 'plugin', JSON.stringify(rerun));
+snap = treeSnapshot(repo);
+r = run(repo, pluginRoot);
+rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+check('an older plugin never lowers the recorded version', r.status === 0 && rerun.version === '7.1.0' && /never lowered/.test(r.out) && treeSnapshot(repo) === snap, r.out);
+r = run(repo, newerRoot);
+check('an equal plugin writes nothing', r.status === 0 && /version 7\.1\.0 kept/.test(r.out) && treeSnapshot(repo) === snap, r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+// A fresh 7.0.x install: its setup never wrote auditedVersion and previousVersion
+// is null, so `version` is the audit reference. Raising it must not move the
+// reference, or /tk:upgrade's range goes empty and its notice disappears.
+repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-rerun-70x-'));
+initRepo(repo);
+write(repo, 'README.md', '# app\n');
+commitAll(repo, 'init');
+run(repo, pluginRoot);
+const old70x = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+delete old70x.auditedVersion; delete old70x.auditedAt;
+Object.assign(old70x, { previousVersion: null, at: '2026-01-01T00:00:00.000Z' });
+write(repo, '.claude/.toolkit-state.json', JSON.stringify(old70x, null, 2) + '\n');
+snap = treeSnapshot(repo);
+r = run(repo, newerRoot, ['--dry-run']);
+check('a dry run on a 7.0.x-shaped state reports the raise and the kept audit reference, writes nothing', r.status === 0 && /version 7\.0\.0 -> 7\.1\.0 \(auditedVersion 7\.0\.0 recorded/.test(r.out) && treeSnapshot(repo) === snap, r.out);
+r = run(repo, newerRoot);
+rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
+const refOf = (st) => st.auditedVersion || st.previousVersion || st.version;
+check('a 7.0.x-shaped state raises version but keeps the audit reference at the old version', r.status === 0 && rerun.version === '7.1.0' && rerun.auditedVersion === '7.0.0' && rerun.auditedAt === '2026-01-01T00:00:00.000Z' && rerun.previousVersion === null && refOf(rerun) === '7.0.0', JSON.stringify(rerun));
+snap = treeSnapshot(repo);
+r = run(repo, newerRoot);
+check('a second re-run on the same plugin leaves the backfilled reference alone', r.status === 0 && treeSnapshot(repo) === snap, r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+fs.rmSync(newerRoot, { recursive: true, force: true });
 
 console.log('\n5. a project that is not a git repository');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-'));

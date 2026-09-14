@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+'use strict';
+// test-session-start.js - assertions for .claude/scripts/session-start.js, the
+// plugin's SessionStart hook (issue #174): the ${CLAUDE_PLUGIN_DATA}/current
+// link and the version guard notices. Builds a fake plugin root (a
+// .claude-plugin/plugin.json and a copy of the script under scripts/) and fake
+// projects in temp dirs; never touches a real plugin data folder or project.
+// Dependency-free; exits non-zero on any failure.
+//
+//   node scripts/test-session-start.js
+
+const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const SOURCE = path.resolve(__dirname, '..', '.claude', 'scripts', 'session-start.js');
+let passed = 0;
+const failures = [];
+function check(name, cond, detail) {
+  if (cond) { passed++; console.log('  ok  ' + name); }
+  else { failures.push(name + (detail ? ' - ' + detail : '')); console.log('  FAIL ' + name + (detail ? ' - ' + String(detail).slice(0, 300) : '')); }
+}
+function write(root, rel, content) {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content);
+}
+
+const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'session-start-'));
+let counter = 0;
+const fresh = (label) => path.join(sandbox, label + '-' + (++counter));
+
+// A fake installed plugin: plugin.json one folder above the script, as in plugin/.
+function makePluginRoot(version) {
+  const root = fresh('plugin');
+  if (version !== null) write(root, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version }));
+  write(root, 'scripts/session-start.js', fs.readFileSync(SOURCE));
+  return root;
+}
+function makeProject(state, withManifest) {
+  const dir = fresh('project');
+  fs.mkdirSync(dir, { recursive: true });
+  if (state) write(dir, '.claude/.toolkit-state.json', JSON.stringify(state, null, 2) + '\n');
+  if (withManifest) write(dir, '.claude/.toolkit-manifest.json', JSON.stringify({ toolkitVersion: '6.3.3', files: {} }) + '\n');
+  return dir;
+}
+// Run the hook with a controlled environment. The inherited CLAUDE_* variables
+// are dropped first, so a run inside a real Claude Code session cannot leak its
+// own project or data folder into a check.
+function run(pluginRoot, opts) {
+  const o = opts || {};
+  const env = Object.assign({}, process.env);
+  delete env.CLAUDE_PLUGIN_DATA; delete env.CLAUDE_PROJECT_DIR; delete env.CLAUDE_PLUGIN_ROOT;
+  if (o.data) env.CLAUDE_PLUGIN_DATA = o.data;
+  if (o.project) env.CLAUDE_PROJECT_DIR = o.project;
+  const input = o.input !== undefined ? o.input : JSON.stringify({ source: o.source || 'startup' });
+  const r = spawnSync(process.execPath, [path.join(pluginRoot, 'scripts', 'session-start.js')], { env, input, cwd: o.cwd || sandbox, encoding: 'utf8', timeout: 10000 });
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+const pointsAt = (link, target) => {
+  try { return fs.lstatSync(link).isSymbolicLink() && fs.realpathSync(link) === fs.realpathSync(target); } catch (e) { return false; }
+};
+const RELAY = /^Toolkit version notice - tell the user this in plain words at the start of your reply:/;
+
+const plugin = makePluginRoot('7.1.0');
+
+console.log('\n1. the current link');
+let data = fresh('data');
+let r = run(plugin, { data, project: makeProject(null) });
+check('the link is created, the data folder with it, and points at the plugin root', r.status === 0 && pointsAt(path.join(data, 'current'), plugin), JSON.stringify(r));
+check('a run with nothing to report prints nothing', r.stdout === '', r.stdout);
+r = run(plugin, { data, project: makeProject(null) });
+check('a second run keeps the link in place', r.status === 0 && pointsAt(path.join(data, 'current'), plugin), JSON.stringify(r));
+
+data = fresh('data');
+const oldRoot = fresh('old-plugin');
+fs.mkdirSync(oldRoot, { recursive: true });
+fs.mkdirSync(data, { recursive: true });
+fs.symlinkSync(oldRoot, path.join(data, 'current'), 'dir');
+r = run(plugin, { data, project: makeProject(null) });
+check('an existing link to an older plugin is re-pointed', r.status === 0 && pointsAt(path.join(data, 'current'), plugin), JSON.stringify(r));
+check('re-pointing leaves no temp link behind', fs.readdirSync(data).join(',') === 'current', fs.readdirSync(data).join(','));
+check('re-pointing never touches the old plugin folder', fs.existsSync(oldRoot));
+
+data = fresh('data');
+r = run(plugin, { project: makeProject({ version: '7.1.0', auditedVersion: '7.1.0' }) });
+check('no CLAUDE_PLUGIN_DATA: no link, exit 0, silent', r.status === 0 && r.stdout === '' && !fs.existsSync(data), JSON.stringify(r));
+
+const blocker = fresh('not-a-folder');
+fs.writeFileSync(blocker, 'a file where a folder should be\n');
+r = run(plugin, { data: path.join(blocker, 'data'), project: makeProject({ version: '7.2.0', auditedVersion: '7.2.0' }) });
+check('an unwritable CLAUDE_PLUGIN_DATA still exits 0', r.status === 0, JSON.stringify(r));
+check('an unwritable CLAUDE_PLUGIN_DATA does not stop the version notice', RELAY.test(r.stdout), r.stdout);
+
+console.log('\n2. the link function, with the platform and fs injected');
+const mod = require(path.join(plugin, 'scripts', 'session-start.js'));
+function spyFs() {
+  const calls = [];
+  const spy = {};
+  for (const name of ['mkdirSync', 'lstatSync', 'readlinkSync', 'unlinkSync', 'symlinkSync', 'renameSync', 'rmSync']) {
+    spy[name] = (...args) => { calls.push({ name, args }); return fs[name](...args); };
+  }
+  return { spy, calls };
+}
+data = fresh('data');
+const winOld = fresh('win-old');
+fs.mkdirSync(winOld, { recursive: true });
+fs.mkdirSync(data, { recursive: true });
+fs.symlinkSync(winOld, path.join(data, 'current'), 'dir');
+let s = spyFs();
+let ok = false;
+try { ok = mod.linkCurrent(data, plugin, 'win32', s.spy); } catch (e) { ok = e.message; }
+const symlinkCall = s.calls.find(c => c.name === 'symlinkSync');
+const unlinkIdx = s.calls.findIndex(c => c.name === 'unlinkSync');
+const symlinkIdx = s.calls.findIndex(c => c.name === 'symlinkSync');
+check('win32 creates a junction', ok === true && symlinkCall && symlinkCall.args[2] === 'junction', JSON.stringify(s.calls));
+check('win32 removes the old link first and never renames over it', unlinkIdx !== -1 && unlinkIdx < symlinkIdx && !s.calls.some(c => c.name === 'renameSync'), JSON.stringify(s.calls.map(c => c.name)));
+check('win32 leaves the link pointing at the new root', pointsAt(path.join(data, 'current'), plugin));
+
+data = fresh('data');
+fs.mkdirSync(data, { recursive: true });
+fs.symlinkSync(winOld, path.join(data, 'current'), 'dir');
+s = spyFs();
+try { ok = mod.linkCurrent(data, plugin, 'linux', s.spy); } catch (e) { ok = e.message; }
+const posixSymlink = s.calls.find(c => c.name === 'symlinkSync');
+check('POSIX links a temp name beside the old link and renames it over', ok === true && posixSymlink && posixSymlink.args[2] === 'dir' && posixSymlink.args[1] !== path.join(data, 'current')
+  && s.calls.some(c => c.name === 'renameSync' && c.args[1] === path.join(data, 'current')) && !s.calls.some(c => c.name === 'unlinkSync'), JSON.stringify(s.calls.map(c => c.name)));
+check('POSIX leaves the link pointing at the new root', pointsAt(path.join(data, 'current'), plugin));
+
+// A real folder named current: the stale copy the 7.0.x hook's `ln -sfn` leaves
+// under Git Bash on Windows. It must be replaced, or the stable path keeps
+// serving the old plugin.
+function staleCopy() {
+  const d = fresh('data');
+  fs.mkdirSync(path.join(d, 'current', 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(d, 'current', 'scripts', 'pre-push-check.js'), '// old copy\n');
+  return d;
+}
+data = staleCopy();
+s = spyFs();
+try { ok = mod.linkCurrent(data, plugin, 'linux', s.spy); } catch (e) { ok = e.message; }
+check('POSIX replaces a stale copied folder named current with the link', ok === true && pointsAt(path.join(data, 'current'), plugin), String(ok));
+check('POSIX deletes the stale copy and leaves nothing beside the link', fs.readdirSync(data).join(',') === 'current', fs.readdirSync(data).join(','));
+
+data = staleCopy();
+s = spyFs();
+try { ok = mod.linkCurrent(data, plugin, 'win32', s.spy); } catch (e) { ok = e.message; }
+const names = s.calls.map(c => c.name);
+check('win32 moves a stale copy aside, makes the junction, then deletes the copy', ok === true
+  && names.indexOf('renameSync') !== -1 && names.indexOf('renameSync') < names.indexOf('symlinkSync') && names.indexOf('symlinkSync') < names.indexOf('rmSync')
+  && s.calls.find(c => c.name === 'symlinkSync').args[2] === 'junction', JSON.stringify(names));
+check('win32 leaves the junction in place of the stale copy, nothing beside it', pointsAt(path.join(data, 'current'), plugin) && fs.readdirSync(data).join(',') === 'current', fs.readdirSync(data).join(','));
+
+data = staleCopy();
+const failing = Object.assign({}, fs, { symlinkSync: () => { throw new Error('no link for you'); } });
+ok = null;
+try { mod.linkCurrent(data, plugin, 'win32', failing); } catch (e) { ok = e.message; }
+check('when the link cannot be made, the stale copy is moved back and the error surfaces', ok === 'no link for you'
+  && fs.readFileSync(path.join(data, 'current', 'scripts', 'pre-push-check.js'), 'utf8') === '// old copy\n' && fs.readdirSync(data).join(',') === 'current', fs.readdirSync(data).join(','));
+
+data = staleCopy();
+r = run(plugin, { data, project: makeProject(null) });
+check('the hook itself replaces a stale copy, exit 0, silent', r.status === 0 && r.stdout === '' && r.stderr === '' && pointsAt(path.join(data, 'current'), plugin), JSON.stringify(r));
+
+console.log('\n3. the version rule');
+check('7.0.1 < 7.1.0 < 7.10.0', mod.compareVersions('7.0.1', '7.1.0') === -1 && mod.compareVersions('7.1.0', '7.10.0') === -1 && mod.compareVersions('7.10.0', '7.9.0') === 1);
+check('a -suffix is ignored and missing parts count as zero', mod.compareVersions('7.1.0-beta.2', '7.1.0') === 0 && mod.compareVersions('7.1', '7.1.0') === 0);
+check('an unparseable version gives no verdict', mod.compareVersions('seven', '7.1.0') === null && mod.compareVersions('7.1.0', undefined) === null);
+check('reference prefers auditedVersion, then previousVersion, then version',
+  mod.referenceVersion({ version: '7.1.0', previousVersion: '6.3.3', auditedVersion: '7.0.1' }) === '7.0.1'
+  && mod.referenceVersion({ version: '7.1.0', previousVersion: '6.3.3' }) === '6.3.3'
+  && mod.referenceVersion({ version: '7.1.0', previousVersion: null }) === '7.1.0'
+  && mod.referenceVersion(null) === null);
+
+console.log('\n4. the notices');
+data = fresh('data');
+r = run(plugin, { data, project: makeProject({ version: '7.2.0', auditedVersion: '7.2.0' }) });
+check('(a) an older plugin: relayed notice naming both versions and the update command', r.status === 0 && RELAY.test(r.stdout) && /toolkit 7\.2\.0/.test(r.stdout) && /7\.1\.0, which is older/.test(r.stdout) && /blocked/.test(r.stdout) && /claude plugin update tk@llm-peer-review/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.10.0' }) });
+check('(a) compares numerically: 7.1.0 is older than 7.10.0', /which is older/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.0.1', previousVersion: null }) });
+check('(b) a newer plugin: relayed notice pointing at /tk:upgrade', r.status === 0 && RELAY.test(r.stdout) && /toolkit 7\.0\.1/.test(r.stdout) && /which is newer/.test(r.stdout) && /\/tk:upgrade/.test(r.stdout) && !/blocked/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.1.0', previousVersion: '6.3.3', path: 'copy-migrated' }) });
+check('(b) a migrated project not yet audited is measured from previousVersion', /toolkit 6\.3\.3/.test(r.stdout) && /\/tk:upgrade/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject(null, true) });
+check('(c) a leftover copy-install manifest: relayed notice pointing at /tk:setup', r.status === 0 && /^Toolkit install notice - tell the user this in plain words/.test(r.stdout) && /\/review and \/tk:review/.test(r.stdout) && /\/tk:setup/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.0.1' }, true) });
+check('(b) and (c) together print both notices', /\/tk:upgrade/.test(r.stdout) && /\/tk:setup/.test(r.stdout), r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.0.0', previousVersion: '6.3.3', auditedVersion: '7.1.0' }) });
+check('matching versions are silent', r.status === 0 && r.stdout === '', r.stdout);
+r = run(plugin, { data, project: makeProject({ version: '7.1.0', auditedVersion: '7.1.0-rc.1' }) });
+check('a -suffix on the recorded version still matches', r.stdout === '', r.stdout);
+r = run(plugin, { data, project: makeProject(null) });
+check('no state file is silent', r.status === 0 && r.stdout === '', r.stdout);
+const broken = makeProject(null);
+write(broken, '.claude/.toolkit-state.json', '{ not json');
+r = run(plugin, { data, project: broken });
+check('an unreadable state file is silent and exits 0', r.status === 0 && r.stdout === '', JSON.stringify(r));
+r = run(plugin, { data, cwd: makeProject({ version: '7.0.1' }) });
+check('without CLAUDE_PROJECT_DIR the working folder is the project', /\/tk:upgrade/.test(r.stdout), r.stdout);
+
+console.log('\n5. hook sources and stdin');
+data = fresh('data');
+r = run(plugin, { data, source: 'compact', project: makeProject({ version: '7.2.0' }, true) });
+check('source compact prints no notices', r.status === 0 && r.stdout === '', r.stdout);
+check('source compact still makes the link', pointsAt(path.join(data, 'current'), plugin));
+for (const source of ['resume', 'clear']) {
+  r = run(plugin, { data, source, project: makeProject({ version: '7.2.0' }) });
+  check('source ' + source + ' prints the notices', /which is older/.test(r.stdout), r.stdout);
+}
+r = run(plugin, { data, input: 'not json at all', project: makeProject({ version: '7.2.0' }) });
+check('unparseable stdin still prints the notices and exits 0', r.status === 0 && /which is older/.test(r.stdout), JSON.stringify(r));
+r = run(plugin, { data, input: '', project: makeProject({ version: '7.2.0' }) });
+check('empty stdin still prints the notices', /which is older/.test(r.stdout), r.stdout);
+
+console.log('\n6. not running from a plugin');
+const bare = makePluginRoot(null);
+data = fresh('data');
+r = run(bare, { data, project: makeProject({ version: '7.2.0' }, true) });
+check('no plugin.json: exit 0, no output on either stream, no link', r.status === 0 && r.stdout === '' && r.stderr === '' && !fs.existsSync(path.join(data, 'current')), JSON.stringify(r));
+r = spawnSync(process.execPath, [SOURCE], { input: JSON.stringify({ source: 'startup' }), cwd: sandbox, encoding: 'utf8', env: Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: fresh('data') }) });
+check('the repository source copy exits 0 silently', r.status === 0 && r.stdout === '' && r.stderr === '', JSON.stringify({ status: r.status, stdout: r.stdout, stderr: r.stderr }));
+
+// A stdin that is never closed must not hang a session start: the safety
+// timeout ends the read and the hook still reports.
+console.log('\n7. a stdin that never closes');
+const started = Date.now();
+const env = Object.assign({}, process.env);
+delete env.CLAUDE_PLUGIN_DATA; delete env.CLAUDE_PROJECT_DIR;
+env.CLAUDE_PROJECT_DIR = makeProject({ version: '7.2.0' });
+const child = spawn(process.execPath, [path.join(plugin, 'scripts', 'session-start.js')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+let childOut = '';
+child.stdout.on('data', (c) => { childOut += c; });
+const killer = setTimeout(() => child.kill('SIGKILL'), 8000);
+child.on('close', (code) => {
+  clearTimeout(killer);
+  const elapsed = Date.now() - started;
+  check('an open stdin is abandoned after the timeout and the hook exits 0', code === 0 && elapsed < 8000, 'code ' + code + ' after ' + elapsed + 'ms');
+  check('the notices still print after the timeout', /which is older/.test(childOut), childOut);
+  finish();
+});
+
+function finish() {
+  fs.rmSync(sandbox, { recursive: true, force: true });
+  console.log('');
+  if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
+  console.log(failures.length + ' FAILED, ' + passed + ' passed:');
+  failures.forEach(f => console.log('  - ' + f));
+  process.exit(1);
+}

@@ -25,6 +25,16 @@
 //   3. Settings diff - .claude/settings.json changed in this push: the hunks
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
+//   4. Version guard - only when this copy runs from inside the tk plugin (a
+//                      .claude-plugin/plugin.json sits one folder above it;
+//                      the source copy and non-plugin installs have none and
+//                      skip this entirely). The version the scan ran as goes
+//                      to stderr, and the push is a hit when that version is
+//                      OLDER than the one the project recorded in
+//                      .claude/.toolkit-state.json (issue #174): an older
+//                      plugin scans with older patterns than the project was
+//                      set up or audited with. Newer or equal never blocks;
+//                      session-start.js tells the user to run /tk:upgrade.
 //
 // Fail closed, never open. A file this script cannot parse is REPORTED as
 // unscannable, not skipped: a scanner that stays silent about what it could
@@ -46,7 +56,8 @@
 //
 // Contract (mirrors session-init.js / generate-index.js):
 //   - stdout = the hit report, and ONLY on a hit. Clean runs print nothing.
-//   - stderr = diagnostics only (LESSONS: stdout may be captured by an LLM).
+//   - stderr = diagnostics only (LESSONS: stdout may be captured by an LLM),
+//     including the "tk pre-push check <version>" line of a plugin run.
 //   - Exit codes: 0 clean (push may proceed silently)
 //                 1 hit   (block the push and page the human - M11)
 //                 2 error (could not check; fall back to the M11 prose checks,
@@ -57,6 +68,7 @@
 
 const { execFileSync } = require("child_process");
 const fs = require("fs");
+const path = require("path");
 
 // Repo-relative paths of this script. Its pattern list would match itself, so
 // the scanner skips these files (the alternative - an allowlist - was
@@ -330,6 +342,53 @@ function mask(line) {
   return out.trim().slice(0, 200);
 }
 
+// --- Version guard helpers (issue #174) -------------------------------------
+// A copy of these three lives in session-start.js; keep the two in step. They
+// are duplicated rather than shared because scripts/setup/setup.sh copies this
+// file alone into non-plugin installs, and a shared module would not come along.
+//
+// Dotted numeric versions, any -suffix ignored: 7.0.1 < 7.1.0 < 7.10.0. Returns
+// null for anything that is not a dotted run of numbers, so a malformed value
+// never produces a verdict (and never blocks).
+function parseVersion(v) {
+  if (typeof v !== "string") return null;
+  const core = v.trim().replace(/^v/, "").split("-")[0];
+  if (!/^\d+(\.\d+)*$/.test(core)) return null;
+  return core.split(".").map(Number);
+}
+// -1, 0 or 1 as a is older than, equal to, or newer than b; null when either is unparseable.
+function compareVersions(a, b) {
+  const pa = parseVersion(a);
+  const pb = parseVersion(b);
+  if (pa === null || pb === null) return null;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+// The version a project is recorded at: auditedVersion, else previousVersion,
+// else version. Null when the state names none.
+function referenceVersion(state) {
+  if (!state || typeof state !== "object") return null;
+  for (const key of ["auditedVersion", "previousVersion", "version"]) {
+    if (typeof state[key] === "string" && state[key].trim() !== "") return state[key];
+  }
+  return null;
+}
+
+// The version of the plugin this copy runs from, or null for the source copy
+// and every non-plugin install (no manifest one folder above the script).
+function runningPluginVersion() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(__dirname, "..", ".claude-plugin", "plugin.json"), "utf8"));
+    return meta && typeof meta.version === "string" ? meta.version : null;
+  } catch {
+    return null;
+  }
+}
+
 // --- 1. Which commits would a push publish? -------------------------------
 // Preference order for the range base:
 //   upstream (@{u})       - the branch has been pushed before: exactly what
@@ -475,11 +534,34 @@ function scanCommit(sha, hits) {
 }
 
 // --- Main -----------------------------------------------------------------
+// Name the version that ran first, on stderr, so it shows on every outcome
+// (clean, hit, or could-not-check) without breaking the silent-stdout contract.
+const RUNNING_VERSION = runningPluginVersion();
+if (RUNNING_VERSION !== null) process.stderr.write("tk pre-push check " + RUNNING_VERSION + "\n");
+
 const { commits, base } = outgoingCommits();
 if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
 
-const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), buildStale: null };
+const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), buildStale: null, versionBehind: null };
 for (const sha of commits) scanCommit(sha, hits);
+
+// Version guard (issue #174). The state file is read from the repository root
+// the scan covers, falling back to the working folder outside a readable repo.
+// No state file, no reference, or an unparseable version: no verdict, no block.
+if (RUNNING_VERSION !== null) {
+  const topLevel = git(["rev-parse", "--show-toplevel"]);
+  const root = topLevel === null ? process.cwd() : topLevel.trim();
+  let state = null;
+  try {
+    state = JSON.parse(fs.readFileSync(path.join(root, ".claude", ".toolkit-state.json"), "utf8"));
+  } catch {
+    state = null;
+  }
+  const reference = referenceVersion(state);
+  if (reference !== null && compareVersions(RUNNING_VERSION, reference) === -1) {
+    hits.versionBehind = { running: RUNNING_VERSION, reference: reference };
+  }
+}
 
 // Generated-plugin freshness (issue #167). Only the toolkit repository carries
 // both the marketplace file and the maintainer generator; every downstream copy
@@ -569,7 +651,8 @@ const clean =
   hits.neverPush.length === 0 &&
   hits.unscannable.length === 0 &&
   hits.settingsCommits.size === 0 &&
-  hits.buildStale === null;
+  hits.buildStale === null &&
+  hits.versionBehind === null;
 if (clean) process.exit(0); // silent when clean, by contract
 
 const out = [];
@@ -602,6 +685,14 @@ if (hits.settingsCommits.size > 0) {
 if (hits.buildStale !== null) {
   out.push("Generated plugin/ is stale against .claude/ in the commit being pushed (run: node scripts/build-plugin.js, then commit):");
   for (const line of hits.buildStale.split("\n")) out.push("  " + line);
+  out.push("");
+}
+if (hits.versionBehind !== null) {
+  out.push("Toolkit plugin is older than this project's recorded version (issue #174):");
+  out.push("  This check ran as tk " + hits.versionBehind.running + ", but .claude/.toolkit-state.json records toolkit " + hits.versionBehind.reference + ".");
+  out.push("  An older plugin scans with older checks than this project was set up or audited with.");
+  out.push("  Fix: run `claude plugin update tk@llm-peer-review` and restart Claude Code (or open a session in this");
+  out.push("  project so the newer installed version is the one running), then push again.");
   out.push("");
 }
 out.push("Commits scanned: " + commits.length + (base === null ? " (no remote base - full history)" : ""));

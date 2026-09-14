@@ -518,10 +518,101 @@ function mailtoTests() {
   cleanup(sb);
 }
 
+// --- 10. the version guard (issue #174) ---------------------------------------
+// Only a copy running from inside the plugin has a version: plugin.json sits one
+// folder above the script. A fake plugin root carries a copy of the tripwire, and
+// the project records its version in .claude/.toolkit-state.json. An OLDER plugin
+// blocks; newer or equal passes and names the version on stderr; the source copy
+// (no plugin.json) behaves exactly as before.
+function makePluginCopy(version) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tripwire-plugin-'));
+  fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'tk', version: version }));
+  fs.copyFileSync(TRIPWIRE, path.join(root, 'scripts', 'pre-push-check.js'));
+  return root;
+}
+function runCopy(pluginRoot, cwd) {
+  const r = spawnSync('node', [path.join(pluginRoot, 'scripts', 'pre-push-check.js')], { cwd: cwd, encoding: 'utf-8' });
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+function guardRepo(label, state) {
+  const sb = makeRepo(label);
+  commitFile(sb, 'README.md', 'seed\n', 'init');
+  if (state) commitFile(sb, '.claude/.toolkit-state.json', JSON.stringify(state, null, 2) + '\n', 'record toolkit state');
+  commitFile(sb, 'src/app.js', 'console.log("ordinary code");\n', 'add code');
+  return sb;
+}
+
+function versionGuardTests() {
+  console.log('\n10. the version guard (issue #174)');
+  const roots = [];
+  const plugin = (v) => { const root = makePluginCopy(v); roots.push(root); return root; };
+  try {
+    let sb = guardRepo('guard-older', { version: '7.1.0', auditedVersion: '7.1.0', previousVersion: null });
+    let r = runCopy(plugin('7.0.1'), sb.repo);
+    check('an older plugin than the recorded version blocks with exit 1', r.status === 1, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    check('the block uses the tripwire header and names both versions',
+      r.stdout.indexOf('PRE-PUSH TRIPWIRE HIT - push blocked (M11)') === 0 && r.stdout.indexOf('tk 7.0.1') !== -1 && r.stdout.indexOf('toolkit 7.1.0') !== -1,
+      r.stdout.slice(0, 400));
+    check('the block names the fix in plain words', r.stdout.indexOf('claude plugin update tk@llm-peer-review') !== -1, r.stdout.slice(0, 400));
+    check('the version line goes to stderr', r.stderr.indexOf('tk pre-push check 7.0.1') !== -1, r.stderr.slice(0, 200));
+    // Run from a subfolder: the state file is read from the repository root.
+    fs.mkdirSync(path.join(sb.repo, 'src', 'deep'), { recursive: true });
+    r = runCopy(plugin('7.0.1'), path.join(sb.repo, 'src', 'deep'));
+    check('the guard reads the state file from the repository root, not the working folder', r.status === 1, 'exit ' + r.status);
+    cleanup(sb);
+
+    sb = guardRepo('guard-numeric', { version: '7.10.0' });
+    r = runCopy(plugin('7.9.0'), sb.repo);
+    check('versions compare numerically: 7.9.0 is older than 7.10.0', r.status === 1, 'exit ' + r.status);
+    cleanup(sb);
+
+    sb = guardRepo('guard-newer', { version: '7.1.0', auditedVersion: '7.1.0' });
+    r = runCopy(plugin('7.2.0'), sb.repo);
+    check('a newer plugin passes', r.status === 0 && r.stdout === '', 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    check('a newer plugin prints the version line on stderr', r.stderr.indexOf('tk pre-push check 7.2.0') !== -1, r.stderr.slice(0, 200));
+    r = runCopy(plugin('7.1.0'), sb.repo);
+    check('an equal plugin passes and prints the version line', r.status === 0 && r.stdout === '' && r.stderr.indexOf('tk pre-push check 7.1.0') !== -1, 'exit ' + r.status + ' :: ' + r.stderr.slice(0, 200));
+    cleanup(sb);
+
+    // The reference is auditedVersion, else previousVersion, else version: a
+    // migrated project not yet audited is measured from the copy-install version.
+    sb = guardRepo('guard-previous', { version: '7.2.0', previousVersion: '6.3.3', path: 'copy-migrated' });
+    r = runCopy(plugin('7.0.1'), sb.repo);
+    check('previousVersion is the reference when no auditedVersion is recorded', r.status === 0, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    cleanup(sb);
+
+    sb = guardRepo('guard-nostate', null);
+    r = runCopy(plugin('7.0.1'), sb.repo);
+    check('no state file never blocks', r.status === 0 && r.stdout === '', 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    cleanup(sb);
+
+    // The guard adds to a real hit rather than replacing it.
+    sb = guardRepo('guard-plus-secret', { version: '7.1.0' });
+    commitFile(sb, 'ci/token.env', 'CI_TOKEN' + '=' + GITLAB_PAT + '\n', 'add a token');
+    r = runCopy(plugin('7.0.1'), sb.repo);
+    check('an older plugin and a secret are both reported', r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1 && r.stdout.indexOf('older than this project') !== -1, r.stdout.slice(0, 400));
+    cleanup(sb);
+
+    // No plugin.json beside the script: the source copy is unchanged, even with
+    // a state file that a plugin copy would block on.
+    sb = guardRepo('guard-source', { version: '99.0.0', auditedVersion: '99.0.0' });
+    r = run(sb.repo);
+    check('without plugin.json an older-looking state does not block', r.status === 0 && r.stdout === '', 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    check('without plugin.json no version line is printed', r.stderr.indexOf('tk pre-push check') === -1, r.stderr.slice(0, 200));
+    cleanup(sb);
+  } catch (e) {
+    check('version guard test set up its repos', false, e.message);
+  }
+  for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
 mailtoTests();
+versionGuardTests();
 
 console.log('');
 if (failures.length === 0) {
