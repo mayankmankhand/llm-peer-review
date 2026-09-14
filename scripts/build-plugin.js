@@ -44,7 +44,8 @@
 //   * Permissions. A plugin cannot ship permission entries, but a command's
 //     `allowed-tools` frontmatter pre-approves the scripts it runs while it is
 //     active (spike 1). Each emitted command and skill gains one rule per
-//     toolkit script it invokes, plus the host rows in HOST_ROWS.
+//     toolkit script it invokes, `Bash(mktemp -d /tmp/*)` when it creates a
+//     per-run temp folder, plus the host rows in HOST_ROWS.
 //   * Packages. package.json and package-lock.json move from scripts/ to the
 //     plugin root, where Claude Code installs them on plugin install and update.
 //   * Allowlist. Only the four dirs above are read. node_modules, worktrees,
@@ -81,6 +82,10 @@ const HOST_ROWS = {
   'create-issue': ['Bash(gh issue create *)', 'Bash(glab issue create *)'],
   'upgrade': ['Bash(gh issue create *)', 'Bash(glab issue create *)'],
 };
+// The rule for a per-run temp folder. The same row is in seed/settings.local.json;
+// a command or skill whose text or inlined chain runs `mktemp -d /tmp/...` also
+// carries it, so the call works in a project that never ran /tk:setup.
+const MKTEMP_RULE = 'Bash(mktemp -d /tmp/*)';
 // Project-side paths that must NOT be rewritten: the seed writes them into the
 // project, and settings never ship in a plugin.
 const KEEP_PROJECT_PATHS = [
@@ -305,6 +310,10 @@ function scriptRules(text, inv, src) {
   const seen = new Set();
   const rules = new Set();
   const scan = (t) => {
+    // Per-run temp folders (render payloads, the gh body file): Claude Code asks
+    // before an unlisted mktemp (measured), so a project that never ran
+    // /tk:setup would stop on every render without this rule.
+    if (/\bmktemp -d \/tmp\//.test(t)) rules.add(MKTEMP_RULE);
     for (const m of t.matchAll(/\b(node|bash) \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([a-z0-9-]+\.(?:js|sh))/g)) {
       const call = m[1] + ' ${CLAUDE_PLUGIN_ROOT}/scripts/' + m[2];
       rules.add('Bash(' + call + ' *)');

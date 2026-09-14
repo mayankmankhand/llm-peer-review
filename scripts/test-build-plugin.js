@@ -73,7 +73,7 @@ function makeFixture() {
     '',
   ].join('\n'));
   write(src, 'commands/create-issue.md', '# Create Issue\n\nRun `gh issue create`.\n');
-  write(src, 'commands/ask-gpt.md', '# Ask GPT\n\nA debate.\n');
+  write(src, 'commands/ask-gpt.md', '# Ask GPT\n\nA debate.\n\n!`cat .claude/skills/shared/temp-folder.md`\n');
   write(src, 'commands/document.md', '# Document\n\nRun `node .claude/scripts/correction-ledger.js --rollup` and open `bash .claude/scripts/open-artifact.sh x`.\n');
   write(src, 'agents/review-finder.md', '---\nname: review-finder\ndescription: finder for /review\ntools: Read\n---\n\nSee `.claude/skills/shared/model-routing.md`.\n');
   write(src, 'skills/review-code/SKILL.md', '---\nname: review-code\ndescription: code review\nallowed-tools:\n  - Read\n  - Bash\n---\n\n# Code Review\n\n!`cat .claude/skills/shared/html-render-review.md`\n');
@@ -83,6 +83,7 @@ function makeFixture() {
   write(src, 'skills/shared/html-outputs.md', 'Relocated HTML rules. Open with `bash .claude/scripts/open-artifact.sh`.\n');
   write(src, 'skills/shared/model-routing.md', 'roster\n');
   write(src, 'skills/shared/browse-api.md', 'api\n');
+  write(src, 'skills/shared/temp-folder.md', 'Run `mktemp -d /tmp/fixture-render.XXXXXX` and write `data.json` inside it.\n');
   write(src, 'skills/shared/shells/review-shell.html', '<!-- rendered by .claude/scripts/render-html.js -->\n<html></html>\n');
   write(src, 'skills/shared/shells/tokens.css', ':root{}\n');
   write(src, 'scripts/render-html.js', '// shells at path.join(__dirname, "..", "skills", "shared", "shells")\nconsole.log("render");\n');
@@ -188,6 +189,11 @@ const viaQuoted = lib.scriptRules('!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hi
 check('scriptRules follows a quoted inline-cat chain', viaQuoted.includes('Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)') && viaQuoted.includes('Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)'), viaQuoted.join(', '));
 const viaBare = lib.scriptRules('!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`\n', fxInv, fx.src);
 check('scriptRules still follows the unquoted form', JSON.stringify(viaBare) === JSON.stringify(viaQuoted), viaBare.join(', '));
+const MKTEMP_RULE = 'Bash(mktemp -d /tmp/*)';
+const askGptFm = fm(read(out, 'commands/ask-gpt.md'));
+check('a command inlining a fragment that runs mktemp -d /tmp/ gets the mktemp rule', askGptFm.includes('  - ' + JSON.stringify(MKTEMP_RULE)), askGptFm);
+check('a command with no mktemp call anywhere in its chain gets no mktemp rule', !fm(review).includes(MKTEMP_RULE) && !fm(doc).includes(MKTEMP_RULE) && !fm(ci).includes(MKTEMP_RULE), fm(review) + fm(doc) + fm(ci));
+check('scriptRules adds the mktemp rule for a direct call and not for other temp paths', lib.scriptRules('Run `mktemp -d /tmp/x.XXXXXX`.\n', fxInv, fx.src).includes(MKTEMP_RULE) && !lib.scriptRules('Write to `/tmp/x.json`; see `mktemp -d "$TMPDIR/x"`.\n', fxInv, fx.src).includes(MKTEMP_RULE));
 
 // --- 3. Layout and allowlist -------------------------------------------------
 console.log('\n3. emitted layout');
@@ -309,6 +315,23 @@ const mutatedLine = firstDataLine.replace('`' + droppedRow + '`, ', '').replace(
 write(live, 'toolkit-reference.mutated.md', refText.replace(firstDataLine, mutatedLine));
 const mutatedDrift = rowDrift(permissionTableRows(read(live, 'toolkit-reference.mutated.md')), seedAllowRows);
 check('mutation: dropping one table row trips the drift assertion', droppedRow !== '' && mutatedLine !== firstDataLine && mutatedDrift.missing.length === 1 && mutatedDrift.missing[0] === droppedRow && mutatedDrift.extra.length === 0, JSON.stringify({ droppedRow, mutatedDrift }));
+
+// Every live command whose emitted text or inlined chain runs `mktemp -d /tmp/` carries
+// the rule (host-cli.md reaches create-issue through its inline cat), and the rule is
+// never added to a command whose chain has no such call.
+const liveMktemp = { with: [], without: [] };
+const liveInv = lib.inventory(path.join(REPO, '.claude'));
+for (const f of fs.readdirSync(path.join(live, 'commands')).filter(n => n.endsWith('.md'))) {
+  const t = read(live, 'commands/' + f);
+  // The body only: the frontmatter already names the rule and would match itself.
+  const body = t.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  const calls = lib.scriptRules(body, liveInv, path.join(REPO, '.claude')).includes('Bash(mktemp -d /tmp/*)');
+  const has = fm(t).includes('Bash(mktemp -d /tmp/*)');
+  (has ? liveMktemp.with : liveMktemp.without).push(f);
+  if (calls !== has) liveMktemp.mismatch = (liveMktemp.mismatch || []).concat(f);
+}
+check('live: create-issue and document carry the mktemp rule', liveMktemp.with.includes('create-issue.md') && liveMktemp.with.includes('document.md'), JSON.stringify(liveMktemp));
+check('live: the mktemp rule matches each command\'s own chain, and some commands go without it', !liveMktemp.mismatch && liveMktemp.without.length > 0, JSON.stringify(liveMktemp));
 
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');

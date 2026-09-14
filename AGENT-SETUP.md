@@ -118,7 +118,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 **On the plugin:** `claude plugin marketplace update llm-peer-review && claude plugin update tk@llm-peer-review`, restart or `/reload-plugins`, then invoke the `tk:upgrade` skill in each project that has files of its own under `.claude/` or a `CLAUDE.md` that mentions toolkit pieces. It audits those files against the conventions that changed since the project's last audited version (`docs/CONVENTIONS.md`), through the normal M2 audit and auto-fix loop, and stops once to ask before editing any prompt file. The update itself never touches the project.
 
-**Migrating a copy-install to the plugin:** install the plugin (Step 1), then run `tk:setup` in the project (Step 1b). It classifies every managed file against the installer's manifest, stops to ask about locally modified ones, backs up and removes the toolkit's files, keeps every custom file, seeds, merges settings, records the migration, and hands off to `tk:upgrade`. The undo is `git checkout -- .claude VERSION .gitattributes` plus the backup folder it names. Setup never reads or moves the project's `.env.local`, and the plugin's scripts cannot see it, so tell the user to copy their API keys to `~/.claude/plugins/.env.local` or export them (Step 3).
+**Migrating a copy-install to the plugin:** install the plugin (Step 1), then run `tk:setup` in the project (Step 1b). It classifies every managed file against the installer's manifest, stops to ask about locally modified ones, backs up and removes the toolkit's files, keeps every custom file, seeds, merges settings, records the migration, and hands off to `tk:upgrade`. The undo is `git checkout -- .claude VERSION .gitattributes` plus the backup folder it names. Setup never reads or moves the project's `.env.local`, and it does not need to: the plugin's scripts still read it (see Step 3 for the lookup order), so a project that kept its keys there keeps working.
 
 **On a copy-install (other editors):** **run the same Step 1c command again**. It's safe to rerun.
 
@@ -209,7 +209,7 @@ The user's project does NOT need a root `package.json` for the toolkit to work. 
 
 ### Step 3: Set up API keys (optional, requires user input)
 
-**On the plugin** the scripts read keys from the environment or from `~/.claude/plugins/.env.local` (one file per machine); a project-level `.env.local` is not found from the plugin cache. Tell the user to create that file from the template below, or to export the keys; `API-KEYS.md` has both. Do NOT fill in keys yourself.
+**On the plugin** the scripts look up each key in this order, first value wins: a real environment variable, then the project's own `.env.local` (searched from the working folder up to the git root), then `~/.claude/plugins/.env.local` (one file for every project on the machine). Only the toolkit's own key and model variables are read from these files; any other line is ignored. Tell the user to put their keys in either file (the project `.env.local` can be created from the template below) or to export them; `API-KEYS.md` has the details. Do NOT fill in keys yourself.
 
 **On a copy-install,** only needed if the user installed dependencies in Step 2:
 
@@ -267,7 +267,7 @@ On any install or update, `/audit-html` can scan the user's own markdown for fil
 - **"Unknown command" for `/tk:...` right after a plugin install or update, or an agent type such as `tk:review-code-finder` not found** - Run `/reload-plugins` or restart Claude Code
 - **`tk:setup` exits 3** - It needs a decision (dirty tree, locally modified toolkit files, unknown provenance) and touched nothing; show the user its list and rerun with `--force` only when they say yes
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in the project root with `.md` files inside (copy-install only)
-- **`/ask-gpt` or `/ask-gemini` fails** - On the plugin, the keys must be exported or in `~/.claude/plugins/.env.local` (a project-level `.env.local` is out of the scripts' reach); on a copy-install, check that `npm install` was run and `.env.local` has valid API keys
+- **`/ask-gpt` or `/ask-gemini` fails** - On the plugin, a key is read from the environment, then the project's `.env.local` (from the working folder up to the git root), then `~/.claude/plugins/.env.local`, and only the toolkit's own key and model variables are read from those files, so check that one of the three holds a valid key under its exact name; on a copy-install, check that `npm install` was run and `.env.local` has valid API keys
 - **"Permission denied"** - Ensure you have write access to the target project directory
 - **Commands exist but don't appear in the editor** - Make sure the editor workspace root is the project folder that contains `.claude/`, not a parent directory
 - **Script errors with `/bin/bash^M` or "bad interpreter"** - Line-ending issue. Delete the folder and clone fresh, or run `git add --renormalize . && git checkout -- .`

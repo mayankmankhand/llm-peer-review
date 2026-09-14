@@ -28,9 +28,9 @@ Users receive the plugin from a release tag, not from main: the `tk` entry in `.
 
     bash scripts/setup/install-hooks.sh
 
-It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs the M11 tripwire, and a push to `main` or to a `v*` tag also runs the release gate and is blocked when the gate fails. Undo with `git config --unset core.hooksPath`.
+It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs the M11 tripwire, and a push to `main` or to a tag named `v` followed by a digit (the hook matches `refs/tags/v[0-9]*`, so `v7.1.0` counts and `vendor-snapshot` does not) also runs the release gate and is blocked when the gate fails. Undo with `git config --unset core.hooksPath`.
 
-**The release gate** is `node scripts/release-check.js`. It runs every `scripts/test-*.js` suite (only exit codes count), checks that `plugin/` matches its source (`node scripts/build-plugin.js --check`), checks that the version in `plugin/.claude-plugin/plugin.json` went up if `plugin/` changed since the previous release tag, and checks that the marketplace entry is a `git-subdir` source on path `plugin` pinned to ref `v<version>`. Each check prints one `ok` or `FAIL` line with its reason.
+**The release gate** is `node scripts/release-check.js`. It runs every `scripts/test-*.js` suite, its own `scripts/test-release-check.js` included (only exit codes count; that test points the gate only at scratch repos, so it cannot recurse), checks that `plugin/` matches its source (`node scripts/build-plugin.js --check`), checks that the version in `plugin/.claude-plugin/plugin.json` went up if `plugin/` changed since the previous release tag, and checks that the marketplace entry is a `git-subdir` source on path `plugin` pinned to ref `v<version>`. Each check prints one `ok` or `FAIL` line with its reason.
 
 **Release order:**
 

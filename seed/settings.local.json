@@ -58,6 +58,7 @@
       "Bash(echo *)",
       "Bash(mkdir *)",
       "Bash(cat *)",
+      "Bash(mktemp -d /tmp/*)",
       "Bash(grep -q \"^# Codebase Map$\" CODEBASE_MAP.md.tmp)",
       "Bash(grep -q \"^## Module Guide$\" CODEBASE_MAP.md.tmp)",
       "Skill(tk:explore)",

@@ -303,10 +303,11 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(gh api *)`, `Bash(gh release list *)` | GitHub API calls and release checks. `/review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
 | `Bash(npm install *)`, `Bash(npm uninstall *)` | Managing dependencies |
 | `Bash(npm audit *)`, `Bash(npm outdated *)` | Dependency security and freshness checks (used by `/review-deps`) |
-| `Read`, `Edit`, `Write`, `Glob`, `Grep` | Claude's built-in file tools (included for documentation) |
+| `Read`, `Edit`, `Write`, `Glob`, `Grep` | The built-in file tools setup allows. These are real allow rows: `Edit` and `Write` approve file edits inside the project without a prompt |
 | `WebFetch(domain:github.com)`, `WebFetch(domain:raw.githubusercontent.com)`, `WebSearch` | Fetching GitHub content and web search |
 | `Bash(cp *)` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
 | `Bash(ls *)`, `Bash(diff *)`, `Bash(echo *)`, `Bash(mkdir *)`, `Bash(cat *)` | Reading directories, comparing files, writing output, creating folders |
+| `Bash(mktemp -d /tmp/*)` | Per-run temp folders under `/tmp` (render payloads, browser actions, media prompts, the GitHub issue and PR body file), so two sessions never share a file. Each plugin command or skill that calls it also carries this rule in its own `allowed-tools`, so it works before `/setup` has run |
 | `Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)`, `Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)` | The two exact heading checks `/index` runs on its temp map before it replaces `CODEBASE_MAP.md`. Exact form, no wildcard |
 | `Skill(tk:explore)`, `Skill(tk:explore:*)`, `Skill(tk:create-plan)`, `Skill(tk:create-plan:*)`, `Skill(tk:execute)`, `Skill(tk:execute:*)`, `Skill(tk:review)`, `Skill(tk:review:*)`, `Skill(tk:document)`, `Skill(tk:document:*)` | The workflow stages, which hand off to each other through the Skill tool (M14) without a prompt |
 | `Skill(tk:index)`, `Skill(tk:index:*)`, `Skill(tk:upgrade)`, `Skill(tk:upgrade:*)` | Stages invoked by another stage: `/explore` generates a missing map with `/index`, and `/setup` chains into `/upgrade` after a migration |

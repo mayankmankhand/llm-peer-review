@@ -33,7 +33,7 @@ Detect the host first, then create the issue with the matching CLI. These two st
 
 !`cat .claude/skills/shared/host-cli.md`
 
-Then write the issue title and body to files, as the steps under the invocation table describe, and run the **"Create issue" row** for the detected host, from the project directory, with those two file paths. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host, and text typed inline between double quotes has its backticks run as commands.
+Then run the **"Create issue" row** for the detected host, from the project directory, following the quoting rule under the invocation table: the title and labels in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on GitHub or single-quoted inline on GitLab, and never double quotes or `$(...)`. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
 
 ## Issue Body Format (Keep It Short)
 ```
@@ -56,5 +56,5 @@ Then write the issue title and body to files, as the steps under the invocation 
 ## REMEMBER
 - Ask questions first
 - Keep it short (10-15 lines max)
-- Write the title and body to files, then run the "Create issue" row for the detected host (`gh issue create` or `glab issue create`) with those paths to actually create the issue
+- Run the "Create issue" row for the detected host (`gh issue create` or `glab issue create`) to actually create the issue: single-quoted title, body file on GitHub, never `$(...)`
 - No implementation details - that's for /explore

@@ -11,8 +11,10 @@
 // two scripts swapped for stubs (TK_PRE_PUSH_CHECK, TK_RELEASE_CHECK) that log
 // that they ran and what arguments the gate received; a final few `git push`
 // runs keep the real gate, to prove the pushed commit and tag reach it. The
-// hook's seam notices (TK_* set) are asserted too. release-check.js excludes
-// this file from its default suite set, so the gate never runs its own test.
+// hook's seam notices (TK_* set) are asserted too. release-check.js runs this
+// file as part of its default suite set; that cannot recurse, because every
+// gate run below targets a scratch repo whose suites are stubs, never this
+// repository (asserted at the end).
 //
 // Dependency-free; exits non-zero on any failure.
 //
@@ -59,7 +61,11 @@ function initRepo(repo) {
   git(repo, ['config', 'commit.gpgsign', 'false']); git(repo, ['config', 'tag.gpgsign', 'false']);
 }
 function commitAll(repo, msg) { git(repo, ['add', '-A']); git(repo, ['commit', '-qm', msg]); }
+// Every folder the gate is pointed at, so the end of the run can prove none of
+// them is this repository (the default suite set includes this file).
+const gateTargets = [];
 function run(repo, args, env) {
+  gateTargets.push(repo);
   const r = spawnSync('node', [SCRIPT, '--repo', repo, ...args], { encoding: 'utf8', env: Object.assign({}, process.env, env || {}) });
   return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
@@ -285,12 +291,17 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--suites', 'stubs/crash.js']);
   check('suite killed by a signal (no exit code): suites FAIL', r.status === 1 && isFail(r.out, 'suites') && /exit signal SIGKILL/.test(r.out), r.out);
 
-  // Default set: scripts/test-*.js without this test itself.
+  // Default set: every scripts/test-*.js, the gate's own test included (a stub
+  // here, so nothing recurses), and nothing that is not a test-*.js file.
   write(repo, 'scripts/test-alpha.js', 'process.exit(0);\n');
-  write(repo, 'scripts/test-release-check.js', 'process.exit(1);\n');
+  write(repo, 'scripts/test-release-check.js', "console.log('own test stub ran');\nprocess.exit(0);\n");
   write(repo, 'scripts/helper.js', 'process.exit(1);\n');
   r = run(repo, []);
-  check('default suites: runs scripts/test-*.js and skips test-release-check.js', r.status === 0 && /scripts\/test-alpha\.js: exit 0/.test(r.out) && !/test-release-check/.test(r.out) && !/helper\.js/.test(r.out), r.out);
+  check('default suites: runs scripts/test-*.js and skips other scripts', r.status === 0 && /scripts\/test-alpha\.js: exit 0/.test(r.out) && !/helper\.js/.test(r.out), r.out);
+  check('default suites: include scripts/test-release-check.js, the gate\'s own test', /scripts\/test-release-check\.js: exit 0/.test(r.out) && /2 suites exited 0/.test(line(r.out, 'suites')), r.out);
+  write(repo, 'scripts/test-release-check.js', 'process.exit(1);\n');
+  r = run(repo, []);
+  check('default suites: a failing own test blocks the gate like any suite', r.status === 1 && /1 of 2 suites exited non-zero: scripts\/test-release-check\.js$/.test(line(r.out, 'suites')), r.out);
 
   r = spawnSync('node', [SCRIPT, '--repo', repo, '--bogus'], { encoding: 'utf8' });
   check('unknown argument: exit 2', r.status === 2, r.stdout + r.stderr);
@@ -475,6 +486,13 @@ function runHook(stdin, extra) {
   p = push(['feature:main'], real);
   check('real gate: git push of the release commit to main passes', p.status === 0 && /release-check: \d+ passed, 0 failed/.test(p.out), JSON.stringify(p));
 }
+
+// The gate's default suite set includes this file, so a gate run aimed at this
+// repository would run this file again and again. Every direct run above, and
+// the subfolder run (cwd a scratch repo), targets a scratch repo; the hook runs
+// use stubs or a scratch repo's own copy of the gate.
+const intoRepo = gateTargets.filter(t => { const rel = path.relative(ROOT, path.resolve(t)); return !rel.startsWith('..') && !path.isAbsolute(rel); });
+check('no gate run in this file targets this repository (the default set runs this file)', gateTargets.length > 0 && intoRepo.length === 0, intoRepo.join(', '));
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1); }

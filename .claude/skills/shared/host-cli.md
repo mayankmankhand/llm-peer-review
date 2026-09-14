@@ -23,17 +23,21 @@ Flags **and** output field names differ between hosts. Use the whole row, not ju
 
 | Action | GitHub (`gh`) | GitLab (`glab`) |
 |---|---|---|
-| Create issue | `gh issue create --title "$(cat <title-file>)" --body-file <body-file> --label "L"` | `glab issue create --title "$(cat <title-file>)" --description "$(cat <body-file>)" --label "L"` |
+| Create issue | `gh issue create --title '<title>' --body-file <body-file> --label 'L'` | `glab issue create --title '<title>' --description '<body>' --label 'L'` |
 | Read issue | `gh issue view <N> --json title,body` -> fields `title`, `body` | `glab issue view <N> --output json` -> fields `title`, `description` |
-| Create PR / MR | `gh pr create --base main --title "$(cat <title-file>)" --body-file <body-file>` | `glab mr create --target-branch main --title "$(cat <title-file>)" --description "$(cat <body-file>)"` |
+| Create PR / MR | `gh pr create --base main --title '<title>' --body-file <body-file>` | `glab mr create --target-branch main --title '<title>' --description '<body>'` |
 | Most recent PR / MR (URL) | `gh pr list --limit 1 --json number,url` -> field `url` | `glab mr list --per-page 1 --output json` -> field `web_url` |
 | Most recently merged | see the fenced block below | see the fenced block below |
 
-**The two create rows read their title and body from files, never from text typed between double quotes.** Inside double quotes the shell runs every markdown backtick span as a command and expands every `$`, and `gh` still exits 0 and posts the mangled text. So, before running either row:
+**Every free-text argument in the two create rows (title, GitLab body, label) goes in single quotes, with each `'` inside the text written as `'\''`.** Single quotes expand nothing, so backticks and `$` reach the host exactly as written. Never double quotes: inside them the shell runs every markdown backtick span as a command and expands every `$`, and the host still exits 0 and posts the mangled text. Never `$(...)` either (not even `"$(cat <file>)"`): Claude Code asks for approval on any command substitution, even when the command itself is allowed (measured), so every issue and PR would stop and wait.
+
+On GitHub the body travels as a file, not as an argument:
 
 1. Run `mktemp -d /tmp/host-text.XXXXXX`. It prints the path of a new, empty folder that no other run shares, so two sessions creating issues at once never overwrite each other's text.
-2. Write the title to `title.txt` and the body to `body.md` inside that folder, with the file-writing tool rather than `echo`.
-3. Run the row with `<title-file>` and `<body-file>` replaced by those two paths.
+2. Write the body to `body.md` inside that folder with the file-writing tool, never `echo`.
+3. Run the row with `<body-file>` replaced by that path and the title single-quoted as above.
+
+`glab` has no body-file flag, so on GitLab the body is the single-quoted `'<body>'` argument itself, under the same rule; line breaks inside single quotes are kept.
 
 The merged-PR lookup is the one call where a table cell would mangle the command, because a `|` inside a markdown cell has to be escaped and the escape would reach the shell. Run these exactly as written:
 
@@ -53,7 +57,7 @@ glab mr list --merged --order merged_at --sort desc --per-page 1 \
 ## Notes
 
 - **"PR" throughout the toolkit means "MR" on GitLab.** The prose keeps one word for readability; only the commands differ.
-- **`"$(cat <file>)"` is safe where typed text is not:** the shell does not expand the output of a command substitution a second time, so backticks and `$` in the file reach the host exactly as written.
+- **A `'` inside single-quoted text:** close the quote, add an escaped quote, reopen. The title `Fix the user's $49 plan` is passed as `--title 'Fix the user'\''s $49 plan'`, and the host receives it unchanged.
 - **Never take the first row of a merged list without ordering it first.** Left alone, `gh pr list --limit 1` and `glab mr list --per-page 1` both sort by CREATION date, not merge date, so either one returns a stale entry when an older PR is merged late. The two hosts fix this differently, which is why the block above is not symmetrical: `gh` has no server-side merge-date sort, so it fetches a page and sorts in `--jq`; `glab` takes `--order merged_at --sort desc`, so the server returns the right row and `--per-page 1` is safe.
 - On a GitLab issue URL, the number is not the last segment of a fixed-depth path: groups nest arbitrarily and `/-/` separates the project path from the resource. **GitLab serves the same issue under two paths** and the API returns the second one: `glab issue view <N> --output json --jq='.web_url'` prints `/-/work_items/<N>`, not `/-/issues/<N>`. Anchor on `/-/(issues|work_items)/(\d+)` for GitLab and `/issues/<N>` for GitHub, take the LAST such match, and ignore any trailing `/`, query string, or `#` fragment. `glab issue view` accepts either form and a bare number interchangeably, so the number is all you need once it is extracted.
 - **The GitLab column has been executed** against `glab 1.115.0` on a live repo (~270 issues, 31 merged MRs). Every row above ran as written, and GitHub-style `--body` / `--base` correctly error with `Unknown flag`. One version caveat remains untested: `--output json` has moved between glab builds, and older ones want `-F json`.

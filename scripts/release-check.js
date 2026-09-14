@@ -14,12 +14,15 @@
 // pre-push hook (scripts/git-hooks/pre-push) runs before a push to main or a
 // release tag. Each check prints one `ok` or `FAIL` line with its reason:
 //
-//   1. Suites      - every scripts/test-*.js except this script's own test, one
-//                    `node <file>` each. ONLY the exit code counts: a past
-//                    release misread a failure summary as passes, so no output
-//                    is ever parsed. --suites overrides the set (a comma list
-//                    of paths, repo-relative or absolute, each may use * or ?
-//                    in its file name); --skip-suites skips the check.
+//   1. Suites      - every scripts/test-*.js, this script's own test included,
+//                    one `node <file>` each. That test cannot recurse: it only
+//                    ever points the gate at scratch repos it builds, whose
+//                    suites are stubs, never at this one. ONLY the exit
+//                    code counts: a past release misread a failure summary as
+//                    passes, so no output is ever parsed. --suites overrides
+//                    the set (a comma list of paths, repo-relative or
+//                    absolute, each may use * or ? in its file name);
+//                    --skip-suites skips the check.
 //   2. Build       - `node scripts/build-plugin.js --check` exits 0 (plugin/
 //                    matches its source). Skipped with a note when the repo has
 //                    no build-plugin.js (the tests' scratch repos).
@@ -59,7 +62,6 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const OWN_TEST = 'scripts/test-release-check.js';
 const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]...';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
 // hook when the push comes from a linked worktree. Inherited by a suite, it
@@ -156,7 +158,7 @@ function defaultSuites() {
   const dir = path.join(REPO, 'scripts');
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).filter(n => /^test-.*\.js$/.test(n)).sort()
-    .map(n => 'scripts/' + n).filter(rel => rel !== OWN_TEST);
+    .map(n => 'scripts/' + n);
 }
 
 // Print the end of a failing suite's output as context for the human. The
