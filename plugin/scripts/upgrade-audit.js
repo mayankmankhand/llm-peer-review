@@ -29,6 +29,10 @@
 // /tk:upgrade run: it sets `version` and `auditedVersion` to the plugin version
 // and exits, and it refuses (one line, exit 0, nothing written) when the state
 // already records a newer version than the plugin, so a stamp never lowers it.
+// After recording, it also raises the version stamp of .claude/rules/toolkit.md
+// when that file's text is the shipped seed's and its stamp is older (review
+// fix R4): only the version inside the stamp line changes, never downward,
+// never when the text differs, and a rerun finds nothing left to raise.
 //
 // Convention format (one section each, parsed here and written by hand there):
 //
@@ -43,8 +47,10 @@
 //
 // `Looks behind` may repeat; each backticked value is a JavaScript regular
 // expression applied per line. The non-regex detectors need no pattern:
-// seed-stamp compares the seeded rules file's version stamp with the plugin
-// version, dead-permissions lists settings.local.json entries that point at
+// seed-stamp reports the seeded rules file when its stamp is unusable, or when
+// the stamp is older than the plugin version AND its text, stamp line left out,
+// differs from the plugin's shipped seed/rules-toolkit.md (a file whose text is
+// the seed's is current whatever its stamp says), dead-permissions lists settings.local.json entries that point at
 // removed scripts, permission-rows compares settings.local.json with the
 // plugin's shipped seed (rows it lacks, retired rows it still has, and a
 // `defaultMode` of acceptEdits as a question for the user) and with the
@@ -211,6 +217,58 @@ function git(args, cwd) {
 }
 function readJson(abs, fallback) { try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; } }
 function readLines(abs) { try { return fs.readFileSync(abs, 'utf8').split(/\r?\n/); } catch (e) { return null; } }
+function readText(abs) { try { return fs.readFileSync(abs, 'utf8'); } catch (e) { return null; } }
+
+// The seeded rules file's stamp (C-7): the first line carrying
+// `<!-- Toolkit version: X`, the match the stamp check has always read.
+const RULES_STAMP = /<!-- Toolkit version: ([^ |]+)/;
+// The replacement scripts/setup/bump-version.sh makes on a stamp (setup-project.js
+// makes the same one when it seeds the file), applied here to the stamp line alone.
+const RULES_STAMP_BUMP = /<!-- Toolkit version: [^|]+\|/;
+const RULES_SEED = path.join('seed', 'rules-toolkit.md');
+// The rules text as C-7 compares it (review fix R4): trailing blanks and a CR
+// dropped from each line, the stamp line left out, blank lines at the end
+// dropped. CRLF endings, a trailing space and an older stamp are no difference,
+// and neither is the seed's own stamp, which can lag the plugin version. The
+// receipt reads both files with RULES_BODY_AWK, which does the same steps in
+// the same order, so the receipt's diff and this comparison always agree.
+function rulesBody(text) {
+  const lines = String(text).split('\n');
+  const at = lines.findIndex(l => RULES_STAMP.test(l));
+  if (at >= 0) lines.splice(at, 1);
+  const out = lines.map(l => l.replace(/[ \t\r]+$/, ''));
+  while (out.length && out[out.length - 1] === '') out.pop();
+  return out.join('\n');
+}
+const RULES_BODY_AWK = '!s && /<!-- Toolkit version: [^ |]+/ { s = 1; next } { sub(/[ \\t\\r]+$/, "") } $0 == "" { b++; next } { for (; b > 0; b--) print ""; print }';
+function rulesMatchSeed(text, seedText) { return rulesBody(text) === rulesBody(seedText); }
+// The stamp half of --stamp for the rules file: when its text is the shipped
+// seed's and its stamp is older than the plugin, rewrite only the version in
+// the stamp line. The file is read and written as latin1, so every other byte
+// (CRLF endings, a byte order mark, any non-ASCII text) goes back exactly as it
+// was. A missing file, no seed, an unusable, equal or newer stamp, or text that
+// differs leaves the file alone, so a rerun is a no-op.
+function restampRules(P, pluginRoot, toVersion) {
+  const abs = P(SEED_RULES);
+  if (!isFile(abs)) return;
+  const seedText = readText(path.join(pluginRoot, RULES_SEED));
+  const text = readText(abs);
+  if (seedText === null || text === null) return;
+  const m = RULES_STAMP.exec(text);
+  const stamped = m ? validVersion(m[1]) : null;
+  if (stamped === null || compareVersions(stamped, toVersion) >= 0 || !rulesMatchSeed(text, seedText)) return;
+  const lines = fs.readFileSync(abs, 'latin1').split('\n');
+  const at = lines.findIndex(l => RULES_STAMP.test(l));
+  const line = at < 0 ? '' : lines[at].replace(RULES_STAMP_BUMP, '<!-- Toolkit version: ' + toVersion + ' |');
+  if (at < 0 || line === lines[at]) return;
+  lines[at] = line;
+  try { fs.writeFileSync(abs, lines.join('\n'), 'latin1'); } catch (e) {
+    console.error('upgrade-audit: could not restamp ' + SEED_RULES + ' (' + (e.code || 'write failed') + ')');
+    process.exitCode = 1;
+    return;
+  }
+  console.error('upgrade-audit: restamped ' + SEED_RULES + ' from ' + stamped + ' to ' + toVersion + ': its text matches the shipped seed');
+}
 
 function parseConventions(text) {
   const out = [];
@@ -531,6 +589,10 @@ function main() {
     fs.mkdirSync(path.dirname(P(STATE_REL)), { recursive: true });
     fs.writeFileSync(P(STATE_REL), JSON.stringify(next, null, 2) + '\n');
     console.error('upgrade-audit: stamped ' + STATE_REL + ' as audited up to ' + toVersion);
+    // A rules file whose text is the shipped seed's is current (C-7 does not
+    // report it), so its stamp follows the audit. One whose text differs keeps
+    // its stamp, and C-7 reports it again on the next upgrade.
+    restampRules(P, pluginRoot, toVersion);
     return;
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
@@ -585,9 +647,32 @@ function main() {
       }
     } else if (c.detector === 'seed-stamp') {
       if (fs.existsSync(P(SEED_RULES))) {
-        const m = /<!-- Toolkit version: ([^ |]+)/.exec(fs.readFileSync(P(SEED_RULES), 'utf8'));
+        const text = fs.readFileSync(P(SEED_RULES), 'utf8');
+        const m = RULES_STAMP.exec(text);
         const stamped = m ? validVersion(m[1]) : null;
-        if (stamped === null || compareVersions(stamped, toVersion) < 0) emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: 3 },
+        const seedAbs = path.join(pluginRoot, RULES_SEED);
+        const seedText = stamped === null ? null : readText(seedAbs);
+        // A stamp at or above the plugin version is current, as it always was.
+        // An older stamp is a finding only when the text differs from the
+        // shipped seed (review fix R4): every release moves the stamp, so the
+        // stamp alone would report every project on every release. With no
+        // shipped seed to compare, or no usable stamp, the stamp alone decides.
+        const behind = stamped === null || compareVersions(stamped, toVersion) < 0;
+        if (behind && stamped !== null && seedText === null) notes.push(c.id + ': no shipped seed/rules-toolkit.md under the plugin root, so the rules text was not compared and the stamp alone decides');
+        if (behind && seedText !== null) {
+          const at = text.split('\n').findIndex(l => RULES_STAMP.test(l)) + 1;
+          if (!rulesMatchSeed(text, seedText)) emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: at },
+            what: 'Should fix. The seeded rules file\'s text differs from the rules seed this plugin (' + toVersion + ') ships: the seeded rules text changed since the project\'s copy (stamped ' + stamped + ') was written, or the project edited its copy. The comparison leaves the stamp line out of both files, so the seed file\'s own stamp plays no part.',
+            fix: c.fix || 'merge the shipped seed text into the rules file by hand and update its stamp, or delete the file and run /tk:setup for a fresh seed', since: c.since,
+            // diff exits 1 on a difference, so the check turns that 1 into a 0.
+            // An unreadable input would make awk print nothing and diff exit 1
+            // too, so both files are tested first: a missing seed (a plugin
+            // update removed its cache directory) or a run from the wrong
+            // directory fails the receipt instead of confirming the finding.
+            receipt: { check: 'grep -n -F -e ' + shq('Toolkit version') + ' -- ' + shq(SEED_RULES) + ' ; if test -f ' + shq(seedAbs) + ' && test -r ' + shq(seedAbs) + ' && test -f ' + shq(SEED_RULES) + ' && test -r ' + shq(SEED_RULES) +
+                ' ; then diff <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(seedAbs) + ') <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(SEED_RULES) + ') ; test $? -eq 1 ; else echo ' + shq('receipt: cannot read the shipped seed or the project rules file') + ' >&2 ; false ; fi',
+              expect: 'line ' + at + ' shows the stamp ' + stamped + ', below ' + toVersion + '; diff then prints the lines where the shipped seed (<) and the project copy (>) differ, with the stamp line left out of both, trailing blanks and CR ignored; the check exits 0 only when they differ, and exits non-zero when either file cannot be read' } });
+        } else if (behind) emit({ id: c.id, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: 3 },
           what: 'Should fix. The seeded rules file is stamped ' + (stamped || 'with no usable version') + ' while the plugin is ' + toVersion + '.',
           fix: c.fix || 'delete the rules file and run /tk:setup for a fresh seed, or merge the new seed text by hand and update the stamp', since: c.since,
           receipt: { check: 'grep -n -F -e ' + shq('Toolkit version') + ' -- ' + shq(SEED_RULES), expect: 'the stamp reads a version below ' + toVersion + ' (or no version)' } });

@@ -20,7 +20,7 @@ A convention describes the toolkit's contract with a project's own files. It is 
 
 `regex` needs one or more `Looks behind` patterns; the other detectors carry their check in the script and take none. `manual` is the one detector the script does not run: the `/tk:upgrade` skill reads the files in scope itself, judges each against the `Looks behind` prose, and emits findings in the same shape with a file-read receipt. Use it only for a judgment no grep expresses.
 
-`Runs: every upgrade` takes an entry out of the version range: it is checked on every upgrade, whatever version the project was last audited at. Use it only for a check whose subject can fall behind on any release, such as a stamp that every release moves; an entry without the bullet runs only when its `Since` lies in the range.
+`Runs: every upgrade` takes an entry out of the version range: it is checked on every upgrade, whatever version the project was last audited at. Use it only for a check whose subject can fall behind on any release, such as the seeded rules text, which any release can change; an entry without the bullet runs only when its `Since` lies in the range.
 
 A hit is a candidate, not a verdict. Every finding goes through the M2 audit before anything is fixed, and the audit is where a false positive dies: a path pattern that matched a file the project itself owns, a dispatch name that only looks like a toolkit agent. The receipt on each finding is the grep that found it, so a skeptic can refute it from the bytes.
 
@@ -89,9 +89,9 @@ Why: the plugin's scripts are replaced whole on every update, so an edit to a co
 - **Runs:** every upgrade
 - **Scope:** seed-stamp
 - **Detector:** seed-stamp
-- **Fix:** delete the seeded rules file and run `/tk:setup`, which writes a fresh one only when it is missing, or merge the new seed text by hand and update its stamp
+- **Fix:** merge the shipped seed's rules text into the file by hand and update its stamp, or delete the seeded rules file and run `/tk:setup`, which writes a fresh one only when it is missing; a file whose text already matches the seed needs no fix, because the audit's `--stamp` at the end of a clean run raises its stamp
 
-Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns. Its version stamp is how `/tk:upgrade` knows which seed text the project last received; a stale stamp means rules the project's sessions still read every turn are behind. Every release moves the stamp, so this entry runs on every upgrade rather than only when its `Since` is in range: a project audited at 7.0.0 or later would otherwise never be told its rules text is stale.
+Why: `.claude/rules/toolkit.md` is the one toolkit-shaped file a project owns, and the project's sessions read it every turn. The detector compares the file's text with the rules seed the installed plugin ships, leaving the stamp line out of both (CRLF line endings and trailing blanks do not count), and fires only when the file's stamp is older than the plugin and the text differs: the seeded rules text changed since the project's copy was written, or the project edited its copy. A file whose text matches the seed is current whatever its stamp says, so an older stamp alone is no finding, and the seed file's own stamp plays no part. The audit's `--stamp` rewrites only the version in such a file's stamp line, never lowers a stamp, and never raises the stamp of a file whose text differs. A file with no usable stamp is still reported, and a project with no rules file is not. The seed's text can change on any release, so this entry runs on every upgrade rather than only when its `Since` is in range: a project audited at 7.0.0 or later would otherwise never be told its rules text is stale.
 
 ### C-8: Permissions point at the plugin, not at removed scripts
 - **Since:** 7.0.0

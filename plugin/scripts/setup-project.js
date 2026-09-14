@@ -58,13 +58,33 @@
 // State and the version guard (issue #174): a fresh setup also records
 // `auditedVersion` (its seed already satisfies the running version, so it is
 // audited by construction); a migration does not, so session-start.js asks for
-// /tk:upgrade. A re-run on a project already on the plugin raises `version` and
-// `at` to the running version when it is newer, never lowers them, and never
-// changes an existing `auditedVersion` or `previousVersion`. When neither exists
+// /tk:upgrade. That holds only for a project really new to the toolkit: this
+// run wrote the rules file and found no plugin-era stamp. A project with no
+// state file whose .claude/rules/toolkit.md already carries a 7.x stamp (a
+// clone whose git ignores the state file) was set up on the plugin before, so
+// the stamp's version, validated, becomes `previousVersion` and no
+// `auditedVersion` is written: the version guard and /tk:upgrade then measure
+// from that stamp (review of 7.1.0, R1). When that stamp is newer than the
+// running plugin, the guard blocks pushes until the plugin is updated, and the
+// report says so and sends the user to update the plugin, not to /tk:explore.
+// In that case `version` records the stamp's version too, never the older
+// running one: `upgrade-audit.js --stamp` refuses only when the state already
+// records a newer `version` or `auditedVersion`, so an older `version` would let
+// a /tk:upgrade on the older plugin write that older version as audited, which
+// becomes the reference and silently lifts the block the report promised.
+// A re-run on a project already on the
+// plugin raises `version` and `at` to the running version when it is newer,
+// never lowers them, and never changes an existing `auditedVersion` or
+// `previousVersion`. When neither exists
 // (every fresh 7.0.x install, whose setup did not write auditedVersion),
 // `version` itself is the audit reference, so the raise first copies the old
 // `version` (and `at`) into `auditedVersion` (and `auditedAt`): otherwise the
 // raise would silently empty /tk:upgrade's audit range and hide its notice.
+// When that old `version` is unreadable or missing there is no reference to
+// keep, which /tk:upgrade reads as "audit every convention", so the raise
+// records `previousVersion: 'unknown'` instead (the literal a migration uses for
+// an unknown copy-install version) and the audit still covers everything
+// (review of 7.1.0, R9).
 // Every version read from the project is validated by the helpers shared with
 // session-start.js and pre-push-check.js: a value of any other shape is never
 // compared as a version and never echoed into the report.
@@ -327,6 +347,27 @@ const VERSION_OWNER_REASON = {
   review: 'it sits beside .claude/commands/review.md',
   stamp: 'it holds the same version as the toolkit stamp in .claude/rules/toolkit.md',
 };
+// The version a plugin-era stamp in dir's .claude/rules/toolkit.md names (7.0.0
+// or later, validated), or null. copyInstallMarkers reads the same stamp but
+// treats a 7.x one as no marker and reports nothing about it, and its block
+// must stay byte-identical with session-start.js, so the fresh branch reads it
+// here. Found with no state file, it means the project was set up on the plugin
+// before (a clone whose git ignores the state file), so it is not new.
+function pluginEraStamp(dir) {
+  const abs = path.join(dir, '.claude', 'rules', 'toolkit.md');
+  let head = null;
+  try {
+    if (!fs.statSync(abs).isFile()) return null;
+    const fd = fs.openSync(abs, 'r');
+    try {
+      const buf = Buffer.alloc(COPY_STAMP_READ_BYTES);
+      head = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, buf.length, 0));
+    } finally { fs.closeSync(fd); }
+  } catch (e) { return null; }
+  const m = COPY_STAMP.exec(head);
+  const v = m ? validVersion(m[1]) : null;
+  return v !== null && compareVersions(v, '7.0.0') !== -1 ? v : null;
+}
 const parseableVersion = (v) => parseVersion(v) !== null;
 // A version read from the project (the state file, a manifest, VERSION) as
 // report text. This report reaches Claude through the /tk:setup skill, and a
@@ -447,6 +488,14 @@ function main() {
     : toolkitVersionFile ? versionFileBytes.toString('utf8').trim()
     : fromStamp ? (markers.stamp.version || 'unknown') : null;
   const shownPrevious = fromStamp && !markers.stamp.version ? 'of an unknown version' : shownVersion(previousVersion, 'v');
+  // A fresh-looking project whose rules file already carries a plugin-era
+  // stamp: set up on the plugin before, its state file missing (R1).
+  const priorPluginStamp = mode === 'fresh' ? pluginEraStamp(project) : null;
+  // How that stamp stands against this plugin: -1 the project is behind (audit
+  // the range), 0 level, 1 a newer plugin seeded it, which the version guard
+  // blocks pushes on until this plugin is updated, so the report says so.
+  const priorStampCmp = priorPluginStamp !== null ? compareVersions(priorPluginStamp, version) : null;
+  const PLUGIN_UPDATE = '`claude plugin update ' + PLUGIN + '@' + MARKETPLACE + '`';
 
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
@@ -459,6 +508,15 @@ function main() {
   if (fromStamp) {
     say('  ' + (hasVersionFile ? 'No VERSION file of the toolkit\'s' : 'No VERSION file') + ': recognized by the toolkit stamp in .claude/rules/toolkit.md (an install from before VERSION was copied into projects); '
       + (markers.stamp.version ? 'its version is read from that stamp.' : 'the stamp names no version, so it is recorded as unknown and /tk:upgrade audits every convention.'));
+  }
+  if (priorPluginStamp !== null) {
+    say('  No .claude/.toolkit-state.json, but .claude/rules/toolkit.md already carries the plugin\'s stamp ' + priorPluginStamp
+      + ': this project was set up on the plugin before (a clone whose git ignores the state file looks like this). previousVersion '
+      + priorPluginStamp + (priorStampCmp === 1 ? ' and version ' + priorPluginStamp + ' (never lower than the stamp) are' : ' is') + ' recorded and no audited version, '
+      + (priorStampCmp === 1 ? 'but this plugin (v' + version + ') is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated (run '
+          + PLUGIN_UPDATE + ', then restart Claude Code).'
+        : priorStampCmp === 0 ? 'which is this plugin\'s own version, so /tk:upgrade has no conventions to audit.'
+        : 'so /tk:upgrade audits from ' + priorPluginStamp + '.'));
   }
   if (opts.dryRun) say('  Dry run: nothing will be written.');
 
@@ -532,6 +590,12 @@ function main() {
     if (absentAfterRemoval) seedWrite.push([rel, seedName]); else seedSkip.push(rel);
   }
   if (!lessonsPreexisted && !fs.existsSync(P('LESSONS-detail.md'))) seedWrite.push(['LESSONS-detail.md', 'LESSONS-detail.md']);
+  // A fresh run is audited at the running version only when the project is
+  // really new to the toolkit: this run seeds the rules file, and no plugin-era
+  // stamp was there before it (R1). A rules file this run does not write is not
+  // known to satisfy the running version, so nothing claims it was audited.
+  const rulesSeeded = seedWrite.some(s => s[0] === '.claude/rules/toolkit.md');
+  const freshAudited = mode === 'fresh' && rulesSeeded && priorPluginStamp === null;
   // Version-stamp the seeded rules file so /tk:upgrade can tell when it is behind.
   const stampRules = (text) => text.replace(/<!-- Toolkit version: [^|]+\|/, '<!-- Toolkit version: ' + version + ' |');
 
@@ -597,6 +661,7 @@ function main() {
 
   say('  Seed files to write: ' + (seedWrite.length ? seedWrite.map(s => s[0]).join(', ') : '(none)'));
   if (seedSkip.length) say('  Seed files already present (yours, untouched): ' + seedSkip.join(', '));
+  if (mode === 'fresh' && !rulesSeeded && priorPluginStamp === null) say('  .claude/rules/toolkit.md is already present with no toolkit stamp, so it is not seeded and no audited version is recorded.');
   say('  .gitignore lines to add: ' + ignoreAdd.length);
   say('  .gitattributes: ' + (!attrsExists ? 'create from the seed' : migrating ? attrsAdd.length + ' lines to add (your lines are kept)' : 'already present (yours, untouched)'));
   const stateCmp = mode === 'plugin' ? compareVersions(version, state.version) : null;
@@ -606,9 +671,15 @@ function main() {
   // raising it would move the reference, so the old value is kept as auditedVersion.
   const namesVersion = (v) => typeof v === 'string' && v.trim() !== '';
   const stateBackfill = stateRaise && !namesVersion(state.auditedVersion) && !namesVersion(state.previousVersion) && parseableVersion(state.version);
+  // The same raise over an unreadable or missing `version`: there was no usable
+  // reference, which /tk:upgrade reads as "audit every convention". Raising
+  // `version` alone would make it the reference and empty the range, so
+  // previousVersion records `unknown`, which no reader takes for a version (R9).
+  const stateUnknownStart = stateRaise && !namesVersion(state.auditedVersion) && !namesVersion(state.previousVersion) && !parseableVersion(state.version);
   if (mode === 'plugin') {
     say('  .claude/.toolkit-state.json: ' + (stateRaise ? shownVersion(state.version, 'version ') + ' -> ' + version
       + (stateBackfill ? ' (auditedVersion ' + validVersion(state.version) + ' recorded, so /tk:upgrade still audits from it)' : '')
+      + (stateUnknownStart ? ' (previousVersion recorded as unknown, so /tk:upgrade still audits every convention)' : '')
       : shownVersion(state.version, 'version ') + ' kept' + (stateCmp === -1 ? ' (this plugin is older; a recorded version is never lowered)' : '')));
   }
   say('  .claude/settings.json: ' + (settingsChanged ? 'register marketplace ' + MARKETPLACE + ' and enable ' + PLUGIN + ' (the first push will page on this change: that is the tripwire doing its job)' : 'already registers the plugin'));
@@ -693,27 +764,34 @@ function main() {
   }
   if (settingsChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.json'), JSON.stringify(settings, null, 2) + '\n'); }
   if (localChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.local.json'), JSON.stringify(localNext, null, 2) + '\n'); }
+  // The version a new state file records: the running plugin's, except over a
+  // plugin-era stamp newer than it, which is recorded instead so nothing this
+  // project carries is lowered and a --stamp on the older plugin refuses (R1).
+  const stateVersion = priorStampCmp === 1 ? priorPluginStamp : version;
   const stateNext = {
-    version,
+    version: stateVersion,
     path: mode === 'plugin' ? (state.path || 'plugin') : (migrating ? 'copy-migrated' : 'plugin'),
     at: new Date().toISOString(),
     marketplace: MARKETPLACE,
     plugin: PLUGIN,
-    previousVersion: mode === 'plugin' ? (state.previousVersion || null) : previousVersion,
+    previousVersion: mode === 'plugin' ? (state.previousVersion || null) : priorPluginStamp !== null ? priorPluginStamp : previousVersion,
   };
   // A fresh seed satisfies the running version by construction, so it is
   // audited at that version; a migration's custom files are not, and /tk:upgrade
-  // stamps them after its audit.
-  if (mode === 'fresh') { stateNext.auditedVersion = version; stateNext.auditedAt = stateNext.at; }
+  // stamps them after its audit. Neither is a project whose rules file was
+  // already there (freshAudited), which /tk:upgrade audits from its stamp.
+  if (freshAudited) { stateNext.auditedVersion = version; stateNext.auditedAt = stateNext.at; }
   if (mode !== 'plugin') {
     fs.writeFileSync(P(STATE_REL), JSON.stringify(stateNext, null, 2) + '\n');
   } else if (stateRaise) {
     // Re-run on the plugin: raise version and at, every other key as it was
     // (an existing auditedVersion and previousVersion included). When version
     // was the audit reference, its old value moves into auditedVersion first so
-    // the reference stays put. An equal or older plugin writes nothing, which
-    // keeps a repeat run idempotent.
-    const backfill = stateBackfill ? Object.assign({ auditedVersion: validVersion(state.version) }, typeof state.at === 'string' ? { auditedAt: state.at } : {}) : {};
+    // the reference stays put; when version was unusable, previousVersion
+    // records `unknown` so the audit still covers everything. An equal or older
+    // plugin writes nothing, which keeps a repeat run idempotent.
+    const backfill = stateBackfill ? Object.assign({ auditedVersion: validVersion(state.version) }, typeof state.at === 'string' ? { auditedAt: state.at } : {})
+      : stateUnknownStart ? { previousVersion: 'unknown' } : {};
     fs.writeFileSync(P(STATE_REL), JSON.stringify(Object.assign({}, state, backfill, { version, at: stateNext.at }), null, 2) + '\n');
   }
   if (migrating) {
@@ -753,7 +831,10 @@ function main() {
     if (undo) say('  ' + undo);
     say('  Next: run /tk:upgrade to audit your custom files against the ' + version + ' conventions' + (modified.length ? ' (it will carry your ' + modified.length + ' local edit(s) as findings)' : '') + '.');
   } else {
-    say(mode === 'fresh' ? '  Next: /tk:explore. The codebase map generates on first use.' : '  Nothing to migrate; seed checked.');
+    say(mode !== 'fresh' ? '  Nothing to migrate; seed checked.'
+      : priorStampCmp === -1 ? '  Next: run /tk:upgrade to audit this project\'s own files from ' + priorPluginStamp + ' against the ' + version + ' conventions.'
+      : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later (' + PLUGIN_UPDATE + '), then restart Claude Code. Pushes stay blocked until then.'
+      : '  Next: /tk:explore. The codebase map generates on first use.');
     if (undo) say('  ' + undo);
   }
   process.stdout.write(out.join('\n') + '\n');

@@ -316,7 +316,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 
 **Not in the baseline: `cd`.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access.
 
-**`additionalDirectories: ["/tmp"]`** is a top-level setting, not an allow row: it lets Claude read and write `/tmp`, where the debate transcripts and the per-run temp folders live.
+**`additionalDirectories: ["/tmp"]`** sits under `permissions` beside the `allow` list, not as an allow row: it lets Claude read and write `/tmp`, where the debate transcripts and the per-run temp folders live.
 
 **API keys are never a permission row.** `/tk:ask-gpt`, `/tk:ask-gemini`, and `gen-media.js` look up each key in this order, first value wins: a real environment variable, then the project's own `.env.local` (searched from the working folder up to the git root), then `~/.claude/plugins/.env.local`, one file for every project on the machine. Only the toolkit's own key and model variables are read from those files, and Claude never reads them; `API-KEYS.md` in the toolkit repository has the details.
 
