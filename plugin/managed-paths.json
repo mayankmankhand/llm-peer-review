@@ -125,6 +125,11 @@
     ".env.local.example",
     ".gitattributes",
     "VERSION",
-    "artifacts/README.md"
+    "artifacts/README.md",
+    "scripts/ask-gemini.js",
+    "scripts/ask-gpt.js",
+    "scripts/browse.js",
+    "scripts/dev-lead-gemini.js",
+    "scripts/dev-lead-gpt.js"
   ]
 }

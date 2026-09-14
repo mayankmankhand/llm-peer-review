@@ -52,8 +52,9 @@
 // removed although their script stayed), seed-lines finds lines an older seed
 // wrote into .gitattributes, .gitignore and artifacts/README.md, plus lines of
 // the project's own a 7.0.x migration dropped from a file it replaced (still in
-// the backup folder), unscoped-names finds toolkit command, skill and agent
-// names used without the tk: scope, local-edits reads
+// the backup folder) and a migration record git still tracks (it asks git and
+// reads only row counts from the record), unscoped-names finds toolkit command,
+// skill and agent names used without the tk: scope, local-edits reads
 // .claude/.toolkit-migration.json, and agent-tools reads every project-owned
 // agent whose name or description says it is a finder, reviewer, critic,
 // skeptic, verifier, judge, or auditor and flags one with no `tools:` line or
@@ -121,6 +122,10 @@ function rowScriptRel(row, project) {
   }
   return null;
 }
+// Does a permission row name an absolute path? A token that starts at the
+// filesystem root (`/home/...`, or Claude Code's `//home/...` rule form) or at a
+// Windows drive (`C:\`, `C:/`). Used only to count such rows, never to echo one.
+const ABSOLUTE_IN_ROW = /(?:^|[\s(='"])(?:\/+[^\s)'"*]|[A-Za-z]:[\\/])/;
 function isFile(abs) { try { return fs.statSync(abs).isFile(); } catch (e) { return false; } }
 // Single-quote a string for a POSIX shell, so a receipt can name rows verbatim.
 function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
@@ -754,6 +759,55 @@ function main() {
           fields: [{ label: 'Lost lines', value: lost.join(' ; ') }, { label: 'Backup copy', value: backup }],
           receipt: { check: "b=$(printf '\\357\\273\\277'); for l in " + lost.map(shq).join(' ') + '; do if ' + norm(backup) + ' && ! { ' + norm(rel) + '; }; then printf \'lost: %s\\n\' "$l"; fi; done',
             expect: n + ' line(s) reading lost: <line>, one per listed line the backup copy has and ' + rel + ' lacks' } });
+      }
+      // A migration record git still tracks. A 7.0.x migration wrote the record
+      // and projects committed it; 7.0.0 and 7.0.1 records list the permission
+      // rows the migration removed, some with this machine's absolute paths, so
+      // every later commit of the file carries them. 7.1.0's seed gitignores the
+      // record, but ignoring a file never untracks one git already has. Git
+      // itself decides (not a git repository, or no git at all: git() returns
+      // null and nothing is reported), and the finding names only counts from
+      // the record, never a row. The lost-row and lost-line checks read the
+      // record from disk, so untracking it changes neither.
+      const tracked = git(['ls-files', '--error-unmatch', '--', MIGRATION_REL], project);
+      if (tracked !== null && tracked.split(/\r?\n/).includes(MIGRATION_REL)) {
+        const rows = migration && Array.isArray(migration.deadPermissions) ? migration.deadPermissions.filter(p => typeof p === 'string') : null;
+        const absolute = rows ? rows.filter(p => ABSOLUTE_IN_ROW.test(p)).length : 0;
+        // Split the way the other C-10 findings split: a copy that spreads this
+        // machine's paths through every commit does harm (warn); a copy in the
+        // count format, or with no absolute path, is only clutter (suggest).
+        const warn = absolute > 0;
+        // check-ignore --no-index judges the ignore rules even for a tracked
+        // file, so the fix never asks for a line the project already carries.
+        // Only a .gitignore reaches collaborators: .git/info/exclude and a
+        // global excludes file (core.excludesFile) stay on this machine, so a
+        // match counts only when its source is a .gitignore in the record's
+        // own folder or one above it inside the work tree. Verbose output is
+        // `source:line:pattern<TAB>path`, the source relative to the top level
+        // (an absolute or ../ path for a file outside the work tree), and it
+        // also prints a winning `!` negation, which does not ignore the file.
+        const why = git(['check-ignore', '-v', '--no-index', '--', MIGRATION_REL], project);
+        const m = why === null ? null : /^(.*?):(\d+):(.*)\t/.exec(why.split(/\r?\n/)[0]);
+        const full = (git(['rev-parse', '--show-prefix'], project) || '') + MIGRATION_REL;
+        const byGitignore = !!m && !m[3].startsWith('!') && (m[1] === '.gitignore'
+          || (m[1].endsWith('/.gitignore') && full.startsWith(m[1].slice(0, -'.gitignore'.length))));
+        const ignoredElsewhere = !!m && !m[3].startsWith('!') && !byGitignore;
+        // (A source git quotes, for unusual characters, never matches: the fix
+        // then asks for the seed line, which is harmless when already present.)
+        const holds = rows === null
+          ? (migration ? ' This copy holds no permission rows.' : '')
+          : ' This copy lists ' + (rows.length === 1 ? '1 permission row' : rows.length + ' permission rows') + ', '
+            + (absolute === 0 ? 'none with an absolute path' : absolute + (rows.length === 1 ? '' : ' of them') + ' with an absolute path on this machine') + '.';
+        emit({ id: c.id, severity: warn ? 'warn' : 'suggest', convention: c.title, file: { relPath: MIGRATION_REL },
+          what: (warn ? 'Should fix. ' : 'Optional. ') + 'The migration record ' + MIGRATION_REL + ' is committed to git. It only matters on this machine (it pairs with the migration\'s backup folder, which git ignores), and older versions of it list this machine\'s permission rows, which every commit of the file would share.' + holds,
+          fix: 'stop tracking the record and keep the file: run `git rm --cached ' + MIGRATION_REL + '` from the project root (the file stays on disk); '
+            + (byGitignore
+              ? m[1] + ' line ' + m[2] + ' already ignores the file, so it stays out of later commits'
+              : 'add the seed\'s line `' + MIGRATION_REL + '` to .gitignore (re-running /tk:setup merges it) so it stays out of later commits'
+                + (ignoredElsewhere ? ' for every collaborator (git ignores it here only through this machine\'s own settings, .git/info/exclude or a global excludes file, which collaborators never get)' : ''))
+            + '. Earlier commits keep their copy of the file; rewriting git history to remove it is a separate step the owner decides, never part of this fix.',
+          since: c.since, fields: [{ label: 'Command', value: 'git rm --cached ' + MIGRATION_REL }],
+          receipt: { check: 'git ls-files --error-unmatch -- ' + shq(MIGRATION_REL), expect: 'one line, ' + MIGRATION_REL + ', which git prints only because it tracks the file' } });
       }
     } else if (c.detector === 'unscoped-names') {
       const owned = new Set(piecesUnder(P('.claude')));
