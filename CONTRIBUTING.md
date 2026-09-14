@@ -28,14 +28,14 @@ Users receive the plugin from a release tag, not from main: the `tk` entry in `.
 
     bash scripts/setup/install-hooks.sh
 
-It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs the M11 tripwire, and a push to `main` or to a tag named `v` followed by a digit (the hook matches `refs/tags/v[0-9]*`, so `v7.1.0` counts and `vendor-snapshot` does not) also runs the release gate and is blocked when the gate fails. Undo with `git config --unset core.hooksPath`.
+It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs the M11 tripwire, and a push to `main` or to a tag named `v` followed by a digit (the hook matches `refs/tags/v[0-9]*`, so `v7.1.0` counts and `vendor-snapshot` does not) also runs the release gate and is blocked when the gate fails. Push from a checkout of what you push: the tripwire scans the commits between `HEAD` and its upstream, so the hook refuses any pushed branch or tag that is not the checked-out commit (for example `git push origin other-branch`, or a tag pushed while you stand on a later commit) and says where to push it from. Undo with `git config --unset core.hooksPath`.
 
-**The release gate** is `node scripts/release-check.js`. It runs every `scripts/test-*.js` suite, its own `scripts/test-release-check.js` included (only exit codes count; that test points the gate only at scratch repos, so it cannot recurse), checks that `plugin/` matches its source (`node scripts/build-plugin.js --check`), checks that the version in `plugin/.claude-plugin/plugin.json` went up if `plugin/` changed since the previous release tag, and checks that the marketplace entry is a `git-subdir` source on path `plugin` pinned to ref `v<version>`. Each check prints one `ok` or `FAIL` line with its reason.
+**The release gate** is `node scripts/release-check.js`. It runs every `scripts/test-*.js` suite, its own `scripts/test-release-check.js` included (only exit codes count; that test points the gate only at scratch repos, so it cannot recurse), checks that `plugin/` matches its source (`node scripts/build-plugin.js --check`), checks that the version in `plugin/.claude-plugin/plugin.json` went up if `plugin/` changed since the previous release tag, checks that the marketplace entry is a `git-subdir` source whose `url` names this repository (read from the clone's `origin` remote; `owner/repo`, `https://github.com/owner/repo` and `git@github.com:owner/repo`, with or without `.git` on the last two, all count) on path `plugin` pinned to ref `v<version>`, and checks that the tag `v<version>` exists locally on the checked commit or one of its ancestors. On a push to `main` the hook also has it ask the remote being pushed to for that tag, which must already be there on the same commit, so main cannot go out before its release tag (a remote that cannot be reached blocks the push). That holds even when the same push carries the tag: `git push` is not atomic, so a tag the remote refuses (it already holds that name at another commit) would still let main land. Each check prints one `ok` or `FAIL` line with its reason.
 
 **Release order:**
 
 1. Bump the version: `bash scripts/setup/bump-version.sh <new-version>`. The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`), then rebuilds `plugin/`.
-2. In the same change, set the `tk` entry's `source` in `.claude-plugin/marketplace.json` to the full `git-subdir` object below, and do the manual steps below. Commit all of it as one release commit. The gate checks `source`, `path` and `ref` but not `url`, so copy `url` exactly: without it the entry passes the gate and still breaks every install once main is pushed.
+2. In the same change, set the `tk` entry's `source` in `.claude-plugin/marketplace.json` to the full `git-subdir` object below, and do the manual steps below. Commit all of it as one release commit. The gate checks every field, `url` included, against this clone's `origin`.
 
    ```json
    "source": {
@@ -46,9 +46,9 @@ It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs t
    }
    ```
 
-3. Run `node scripts/release-check.js` until it is green.
-4. Tag the release commit `v<new-version>` and push the tag. The hook runs the gate again, including the check that the tag matches the version in its commit's `plugin.json`.
-5. Merge to main and push main.
+3. Tag the release commit `v<new-version>` locally (the gate checks that the tag exists), then run `node scripts/release-check.js` until it is green. If a fix needs another commit, move the tag onto it with `git tag -f v<new-version>`; nothing is published yet.
+4. With the release commit still checked out, push the tag. The hook runs the gate again, including the check that the tag matches the version in its commit's `plugin.json`.
+5. Merge to main and push main from a checkout of `main`, as its own push after the tag. The gate confirms the tag is already on that remote at the same commit. If step 3 moved a tag that was already pushed, the remote still holds the old commit and the gate blocks main until that is resolved.
 6. Cut a GitHub release with `gh release create v<new-version>` so the latest release on GitHub matches the tag users install.
 
 Manual steps for the release commit:

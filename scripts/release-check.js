@@ -6,6 +6,7 @@
 //   node scripts/release-check.js [--repo <dir>] [--suites <list|glob>]
 //                                 [--skip-suites] [--commit <sha>]
 //                                 [--pushing-tag <tag>[:<sha>]]...
+//                                 [--remote <name|url>]
 //
 // Why it exists: the toolkit ships as the `tk` plugin, and Claude Code caches a
 // plugin by its version. Commits that changed plugin/ without bumping
@@ -36,10 +37,23 @@
 //                    at the commit must be strictly greater than the tag's. No
 //                    previous tag passes with a note.
 //   4. Marketplace - the `tk` entry in .claude-plugin/marketplace.json must be
-//                    a git-subdir source on path "plugin" pinned to ref
-//                    v<plugin.json version>, so users install the tagged tree.
+//                    a git-subdir source whose url names this repository, on
+//                    path "plugin", pinned to ref v<plugin.json version>, so
+//                    users install the tagged tree (review finding R2: a
+//                    missing or foreign url passed and broke every install).
+//                    This repository is read from the clone's `origin` remote.
+//   5. Release tag - the tag v<plugin.json version> must exist locally and
+//                    point at the checked commit or one of its ancestors; for a
+//                    commit named by --commit while --remote is given (the
+//                    hook's push to main) it must also already be on that
+//                    remote at the same commit, even when this same push
+//                    carries the tag: git push is not atomic, so a tag the
+//                    remote refuses (it holds another commit under that name,
+//                    or a protection rule) would still let main land. The
+//                    marketplace pins that tag, so main without it installs
+//                    nothing (R2). A remote that cannot be reached fails.
 //
-// Which commit checks 3 and 4 read: HEAD by default (a manual run). The hook
+// Which commit checks 3, 4 and 5 read: HEAD by default (a manual run). The hook
 // names what is actually being pushed instead, because the pushed commit need
 // not be HEAD (`git push origin other-branch:main`):
 //   --commit <sha>             the commit being pushed to main (repeatable).
@@ -47,7 +61,9 @@
 //                              object being pushed (the hook passes it, since
 //                              `git push origin X:refs/tags/v1` need not match
 //                              any local tag); without it the local tag is read.
-// Each distinct commit named gets its own checks 3 and 4, read from committed
+//   --remote <name|url>        the remote a push to main goes to; check 5 asks
+//                              it (git ls-remote) for the release tag.
+// Each distinct commit named gets its own checks 3, 4 and 5, read from committed
 // state (`git show <sha>:<path>`). The suites and the build check always run on
 // the working tree. --repo points every check at another clone (tests).
 //
@@ -62,7 +78,7 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]...';
+const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
 // hook when the push comes from a linked worktree. Inherited by a suite, it
 // would point the suite's scratch `git init` and `git commit` at the real
@@ -80,9 +96,12 @@ for (const k of LOCAL_REPO_ENV) delete CHILD_ENV[k];
 // A hung suite must not hang a push forever; 10 minutes is far above any
 // suite's real runtime.
 const SUITE_TIMEOUT_MS = 10 * 60 * 1000;
+// The same for asking a remote about the release tag. A credential prompt can
+// never be answered from inside a hook, so git is told not to ask.
+const REMOTE_TIMEOUT_MS = 2 * 60 * 1000;
 
 function parseArgs(argv) {
-  const o = { repo: process.cwd(), suites: null, skipSuites: false, commits: [], tags: [] };
+  const o = { repo: process.cwd(), suites: null, skipSuites: false, commits: [], tags: [], remote: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -94,6 +113,7 @@ function parseArgs(argv) {
     else if (a === '--suites') o.suites = value();
     else if (a === '--skip-suites') o.skipSuites = true;
     else if (a === '--commit') o.commits.push(value());
+    else if (a === '--remote') o.remote = value();
     else if (a === '--pushing-tag') {
       // A tag name can never contain ':' (git refname rules), so the first
       // colon always separates the name from the pushed object.
@@ -308,12 +328,48 @@ function checkVersionBump(target) {
 }
 
 // --- 4. marketplace ref --------------------------------------------------------------
+// The owner/repo a marketplace `url` names, in exactly the forms the git-subdir
+// source accepts: owner/repo, https://github.com/owner/repo(.git) and
+// git@github.com:owner/repo(.git). Anything else is null, including the
+// shorthand with a .git suffix, which is not one of those forms.
+function marketplaceRepo(url) {
+  if (typeof url !== 'string') return null;
+  const short = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/.exec(url);
+  if (short) return /\.git$/.test(short[2]) ? null : short[1] + '/' + short[2];
+  const full = /^(?:https:\/\/github\.com\/|git@github\.com:)([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?$/.exec(url);
+  return full ? full[1] + '/' + full[2] : null;
+}
+
+// The repository this clone is, as owner/repo, read from its `origin` remote
+// (`git remote get-url`, so insteadOf rewrites apply). Why origin and not a
+// constant: the marketplace entry must name the repository the marketplace is
+// published from, which for the maintainer's clone is its origin. A constant
+// would go stale on a rename or a fork, and would let a scratch repo in the
+// tests pass only by naming the real repository. origin accepts more URL shapes
+// than the marketplace does (ssh://, a user@ prefix, a trailing slash). Missing
+// or not on GitHub, the url cannot be verified, and check 4 fails saying so.
+// Memoized: every checked commit compares against the same answer.
+let originRepoMemo = null;
+function originRepo() {
+  if (originRepoMemo) return originRepoMemo;
+  const r = git(['remote', 'get-url', 'origin']);
+  if (r.status !== 0 || !r.out) {
+    originRepoMemo = { id: null, why: 'this clone has no origin remote to name the expected repository (git remote get-url origin exited ' + r.status + ')' };
+    return originRepoMemo;
+  }
+  const m = /^(?:https?|ssh|git):\/\/(?:[^@/]+@)?github\.com(?::\d+)?\/([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(r.out)
+    || /^(?:[^@/:]+@)?github\.com:([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/.exec(r.out);
+  originRepoMemo = m ? { id: m[1] + '/' + m[2], why: '' } : { id: null, why: 'origin ' + JSON.stringify(r.out) + ' is not a GitHub repository URL, so the expected repository is unknown' };
+  return originRepoMemo;
+}
+
 function checkMarketplace(target) {
   const name = 'marketplace ref';
   const at = target.label + ': ';
   if (target.found.version === null) { report(name, false, at + 'cannot derive the expected ref: ' + target.found.why); return; }
   const expectedRef = 'v' + target.found.version;
-  const expected = 'source {"source": "git-subdir", "path": "plugin", "ref": "' + expectedRef + '"}';
+  const origin = originRepo();
+  const expected = 'source {"source": "git-subdir", "url": "' + (origin.id || '<owner>/<repo>') + '", "path": "plugin", "ref": "' + expectedRef + '"}';
   const r = git(['show', target.sha + ':.claude-plugin/marketplace.json']);
   if (r.status !== 0) { report(name, false, at + '.claude-plugin/marketplace.json is not committed; expected the tk entry to have ' + expected); return; }
   let market;
@@ -329,33 +385,111 @@ function checkMarketplace(target) {
   if (s.source !== 'git-subdir') wrong.push('source is ' + JSON.stringify(s.source));
   if (s.path !== 'plugin') wrong.push('path is ' + JSON.stringify(s.path));
   if (s.ref !== expectedRef) wrong.push('ref is ' + JSON.stringify(s.ref));
+  // GitHub owner and repository names are case-insensitive, so is this match.
+  const named = marketplaceRepo(s.url);
+  if (s.url === undefined || s.url === null || s.url === '') wrong.push('url is missing');
+  else if (!named) wrong.push('url ' + JSON.stringify(s.url) + ' is not owner/repo, https://github.com/owner/repo or git@github.com:owner/repo');
+  else if (!origin.id) wrong.push('url cannot be verified: ' + origin.why);
+  else if (named.toLowerCase() !== origin.id.toLowerCase()) wrong.push('url names ' + named + ', not this repository ' + origin.id + ' (its origin remote)');
   if (wrong.length) { report(name, false, at + 'tk ' + wrong.join(', ') + '; expected ' + expected); return; }
-  report(name, true, at + 'tk installs git-subdir plugin at ' + expectedRef);
+  report(name, true, at + 'tk installs git-subdir plugin from ' + origin.id + ' at ' + expectedRef);
 }
 
-// Checks T, 3 and 4. Every commit named by --commit or --pushing-tag is
+// --- 5. release tag ------------------------------------------------------------------
+// The tag names of a remote's `git ls-remote` answer, each with the commit it
+// ends at: the peeled `^{}` line for an annotated tag, else the plain sha.
+function remoteTagCommits(out) {
+  const plain = {};
+  const peeled = {};
+  for (const l of out.split('\n')) {
+    const m = /^([0-9a-f]+)\s+refs\/tags\/(.+?)(\^\{\})?$/.exec(l.trim());
+    if (m) (m[3] ? peeled : plain)[m[2]] = m[1];
+  }
+  const commits = {};
+  for (const t of Object.keys(plain)) commits[t] = peeled[t] || plain[t];
+  return commits;
+}
+
+function checkReleaseTag(target, pushedTags) {
+  const name = 'release tag';
+  const at = target.label + ': ';
+  if (target.found.version === null) { report(name, false, at + 'cannot derive the expected tag: ' + target.found.why); return; }
+  const tag = 'v' + target.found.version;
+  const short = target.sha.slice(0, 12);
+  // The local tag first: the marketplace pins it, so it must exist and hold
+  // the checked commit's tree or an ancestor of it (main may be a merge on top).
+  if (git(['rev-parse', '-q', '--verify', 'refs/tags/' + tag]).status !== 0) {
+    report(name, false, at + 'tag ' + tag + ' does not exist locally; the marketplace pins it, so tag the release commit (git tag ' + tag + ' <release commit>) and run the gate again');
+    return;
+  }
+  const tagCommit = resolveCommit('refs/tags/' + tag);
+  if (!tagCommit) { report(name, false, at + 'tag ' + tag + ' does not point at a commit'); return; }
+  const anc = git(['merge-base', '--is-ancestor', tagCommit, target.sha]);
+  if (anc.status === 1) {
+    report(name, false, at + 'tag ' + tag + ' points at ' + tagCommit.slice(0, 12) + ', which is not ' + short + ' or one of its ancestors; users would install a tree this commit does not contain');
+    return;
+  }
+  if (anc.status !== 0) { report(name, false, at + 'git merge-base --is-ancestor ' + tagCommit.slice(0, 12) + ' ' + short + ' failed (exit ' + anc.status + '): ' + anc.err); return; }
+  const local = 'tag ' + tag + ' is on ' + (tagCommit === target.sha ? short : 'its ancestor ' + tagCommit.slice(0, 12));
+  // The remote only for a push to main. A tag push is what creates the remote
+  // tag, so it is never asked to find it there already.
+  if (!target.viaCommit || opts.remote === null) { report(name, true, at + local); return; }
+  // The remote is always asked, even when this same push also carries the tag.
+  // git push is not atomic by default: if the remote refuses the tag (it already
+  // holds that name at another commit, say after a local `git tag -f`, or a
+  // protected-tag rule rejects it), main still lands, pinned to a tag holding
+  // another tree or none. So the tag must be published before main is.
+  const carried = pushedTags.some(p => p.tag === tag && p.sha === tagCommit);
+  const r = spawnSync('git', ['ls-remote', '--tags', '--', opts.remote, 'refs/tags/' + tag, 'refs/tags/' + tag + '^{}'], {
+    cwd: REPO, env: Object.assign({}, CHILD_ENV, { GIT_TERMINAL_PROMPT: '0' }), encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'], timeout: REMOTE_TIMEOUT_MS,
+  });
+  if (r.status !== 0) {
+    const why = r.status === null ? (r.error ? 'error ' + r.error.code : 'killed by ' + r.signal) : 'exit ' + r.status;
+    const err = (r.stderr || '').trim().split('\n')[0] || '';
+    report(name, false, at + 'cannot reach remote ' + opts.remote + ' to confirm tag ' + tag + ' is published (git ls-remote ' + why + (err ? ': ' + err : '') + '); the push stays blocked until the remote answers');
+    return;
+  }
+  const onRemote = remoteTagCommits(r.stdout || '')[tag];
+  // A push carrying the tag alongside main cannot count on it landing (above).
+  const alongside = carried ? ' (this push carries it alongside main, but git push is not atomic, so a refused tag would still let main land)' : '';
+  if (!onRemote) {
+    report(name, false, at + 'tag ' + tag + ' is not on remote ' + opts.remote + alongside + '; push the tag on its own first (git push ' + opts.remote + ' ' + tag + '), then main, or every install fails to find the pinned ref');
+    return;
+  }
+  if (onRemote !== tagCommit) {
+    report(name, false, at + 'tag ' + tag + ' on remote ' + opts.remote + ' points at ' + onRemote.slice(0, 12) + ', not ' + tagCommit.slice(0, 12) + ' like the local tag' + alongside + '; users would install that other tree');
+    return;
+  }
+  report(name, true, at + local + ', and on remote ' + opts.remote);
+}
+
+// Checks T, 3, 4 and 5. Every commit named by --commit or --pushing-tag is
 // checked once, labelled with how it was named; with neither, HEAD.
 function checkCommits() {
   const targets = [];
   const add = (sha, label) => {
     const known = targets.find(t => t.sha === sha);
     if (known) { known.label += ', ' + label; return known; }
-    const t = { sha, label, found: pluginVersionAt(sha, sha.slice(0, 12)) };
+    const t = { sha, label, found: pluginVersionAt(sha, sha.slice(0, 12)), viaCommit: false };
     targets.push(t);
     return t;
   };
   const unresolved = (what) => {
     report('version bump', false, what + ': cannot resolve to a commit (not a git repo, an empty one, or an unknown object)');
     report('marketplace ref', false, what + ': cannot resolve to a commit, so there is no committed marketplace.json to read');
+    report('release tag', false, what + ': cannot resolve to a commit, so there is no version to name the tag');
   };
+  const pushedTags = [];
   for (const t of opts.tags) {
     const sha = resolveCommit(t.rev);
     const target = sha ? add(sha, 'tag ' + t.tag) : null;
+    if (sha) pushedTags.push({ tag: t.tag, sha });
     checkTag(t, sha, target ? target.found : null);
   }
   for (const c of opts.commits) {
     const sha = resolveCommit(c);
-    if (sha) add(sha, 'commit ' + sha.slice(0, 12)); else unresolved('commit ' + c);
+    if (sha) add(sha, 'commit ' + sha.slice(0, 12)).viaCommit = true; else unresolved('commit ' + c);
   }
   if (!opts.tags.length && !opts.commits.length) {
     const sha = resolveCommit('HEAD');
@@ -364,6 +498,7 @@ function checkCommits() {
   for (const t of targets) {
     checkVersionBump(t);
     checkMarketplace(t);
+    checkReleaseTag(t, pushedTags);
   }
 }
 

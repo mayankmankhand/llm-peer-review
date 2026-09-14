@@ -2,10 +2,13 @@
 'use strict';
 // test-release-check.js - assertions for scripts/release-check.js, the
 // maintainer-only release gate, and for scripts/git-hooks/pre-push and
-// scripts/setup/install-hooks.sh that wire it into `git push` (issue #175).
+// scripts/setup/install-hooks.sh that wire it into `git push` (issue #175),
+// including the review fixes: the marketplace url and the release tag (R2) and
+// the hook refusing a pushed ref that is not the checked-out commit (R11).
 //
 // Every case builds a scratch git repo under the OS temp directory (with a
-// local user.email/user.name) holding a minimal plugin/.claude-plugin/plugin.json,
+// local user.email/user.name and a made-up GitHub origin that is never
+// contacted) holding a minimal plugin/.claude-plugin/plugin.json,
 // .claude-plugin/marketplace.json, and stub suites passed with --suites, so a
 // run never reads or writes this repo's history. The hook is tested with its
 // two scripts swapped for stubs (TK_PRE_PUSH_CHECK, TK_RELEASE_CHECK) that log
@@ -76,6 +79,9 @@ function line(out, name) {
 const isOk = (out, name) => line(out, name).startsWith('  ok   ');
 const isFail = (out, name) => line(out, name).startsWith('  FAIL ');
 
+// The scratch repos' origin, which the gate reads as "this repository". Only
+// its name is ever used; nothing talks to it.
+const ORIGIN = 'https://github.com/example/toolkit.git';
 function gitSubdir(ref) { return { source: 'git-subdir', url: 'example/toolkit', path: 'plugin', ref }; }
 function setPlugin(repo, version, source) {
   write(repo, 'plugin/.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version }, null, 2) + '\n');
@@ -84,6 +90,7 @@ function setPlugin(repo, version, source) {
 function makeRepo(version, source) {
   const repo = tmp('release-check-');
   initRepo(repo);
+  git(repo, ['remote', 'add', 'origin', ORIGIN]);
   setPlugin(repo, version, source);
   write(repo, 'plugin/commands/explore.md', '# Explore\n');
   write(repo, 'stubs/pass.js', "console.log('all good');\nprocess.exit(0);\n");
@@ -98,7 +105,8 @@ function makeRepo(version, source) {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
   let r = run(repo, ['--skip-suites']);
   check('no tags: version bump passes with a note', isOk(r.out, 'version bump') && /no earlier v\* release tag/.test(line(r.out, 'version bump')), r.out);
-  check('no tags, matching ref: whole run exits 0', r.status === 0, r.out);
+  check('no tags, matching ref: only the release tag check fails (v1.0.0 not tagged yet)',
+    r.status === 1 && isOk(r.out, 'marketplace ref') && isFail(r.out, 'release tag') && /tag v1\.0\.0 does not exist locally/.test(line(r.out, 'release tag')) && (r.out.match(/^ {2}FAIL /mg) || []).length === 1, r.out);
   check('scratch repo without build-plugin.js: build check skipped cleanly', isOk(r.out, 'build') && /skipped: no scripts\/build-plugin\.js/.test(line(r.out, 'build')), r.out);
   check('--skip-suites: suites line says skipped', isOk(r.out, 'suites') && /skipped/.test(line(r.out, 'suites')), r.out);
 
@@ -137,7 +145,10 @@ function makeRepo(version, source) {
 
   commitAll(repo, 'bump to 1.1.0');
   r = run(repo, ['--skip-suites']);
-  check('bumped to 1.1.0 with ref v1.1.0: run exits 0', r.status === 0, r.out);
+  check('bumped to 1.1.0 but v1.1.0 not tagged: release tag FAIL', r.status === 1 && isFail(r.out, 'release tag') && isOk(r.out, 'version bump'), r.out);
+  git(repo, ['tag', 'v1.1.0']);
+  r = run(repo, ['--skip-suites']);
+  check('bumped to 1.1.0 with ref v1.1.0, tagged: run exits 0', r.status === 0 && isOk(r.out, 'release tag'), r.out);
   check('bumped: version bump ok and marketplace ref ok', isOk(r.out, 'version bump') && isOk(r.out, 'marketplace ref'), r.out);
 
   // --- 4. marketplace ref --------------------------------------------------------
@@ -251,9 +262,93 @@ function releaseRepo(version, tag, opt) {
   check('--commit and --pushing-tag on the same commit: checked once, labelled with both', r.status === 0 && bumpLines.length === 1 && /tag v1\.1\.0, commit /.test(bumpLines[0]), r.out);
 }
 
+// --- 4 and 5. marketplace url and release tag (R2) -----------------------------------
+{
+  const repo = releaseRepo('1.1.0', 'v1.1.0');
+  const withUrl = (url) => { const s = gitSubdir('v1.1.0'); if (url === undefined) delete s.url; else s.url = url; return s; };
+  const commitUrl = (url, msg) => { setPlugin(repo, '1.1.0', withUrl(url)); git(repo, ['add', '-A']); git(repo, ['commit', '-q', '--allow-empty', '-m', msg]); };
+  let r;
+  for (const form of ['example/toolkit', 'https://github.com/example/toolkit', 'https://github.com/example/toolkit.git', 'git@github.com:example/toolkit', 'git@github.com:example/toolkit.git', 'Example/Toolkit']) {
+    commitUrl(form, 'url ' + form);
+    r = run(repo, ['--skip-suites']);
+    check('url ' + form + ' naming origin example/toolkit: marketplace ref ok', r.status === 0 && isOk(r.out, 'marketplace ref') && /from example\/toolkit at v1\.1\.0/.test(line(r.out, 'marketplace ref')), r.out);
+  }
+  commitUrl(undefined, 'no url');
+  r = run(repo, ['--skip-suites']);
+  check('entry with no url: marketplace FAIL says url is missing and shows the expected url', r.status === 1 && isFail(r.out, 'marketplace ref') && /url is missing/.test(line(r.out, 'marketplace ref')) && /"url": "example\/toolkit"/.test(line(r.out, 'marketplace ref')), r.out);
+  commitUrl('someone-else/toolkit', 'foreign url');
+  r = run(repo, ['--skip-suites']);
+  check('url naming another repository: marketplace FAIL names both', r.status === 1 && isFail(r.out, 'marketplace ref') && /url names someone-else\/toolkit, not this repository example\/toolkit/.test(line(r.out, 'marketplace ref')), r.out);
+  for (const bad of ['https://gitlab.com/example/toolkit', 'example/toolkit.git', 'https://github.com/example/toolkit/tree/main', 'ssh://git@github.com/example/toolkit.git']) {
+    commitUrl(bad, 'bad url');
+    r = run(repo, ['--skip-suites']);
+    check('url ' + bad + ' outside the accepted forms: marketplace FAIL', r.status === 1 && isFail(r.out, 'marketplace ref') && /is not owner\/repo, https:\/\/github\.com\/owner\/repo or git@github\.com:owner\/repo/.test(line(r.out, 'marketplace ref')), r.out);
+  }
+  commitUrl('example/toolkit', 'url back');
+  // The release commit moved past the tag with plugin/ unchanged: the tag on an
+  // ancestor still passes check 5 (main is often a merge on top of the release).
+  r = run(repo, ['--skip-suites']);
+  check('tag v1.1.0 on an ancestor of HEAD: release tag ok, names the ancestor', r.status === 0 && isOk(r.out, 'release tag') && /is on its ancestor [0-9a-f]{12}/.test(line(r.out, 'release tag')), r.out);
+
+  // Where "this repository" comes from: origin.
+  git(repo, ['remote', 'set-url', 'origin', 'ssh://git@github.com/example/toolkit.git/']);
+  r = run(repo, ['--skip-suites']);
+  check('origin in ssh:// form with a trailing slash: still read as example/toolkit', r.status === 0 && isOk(r.out, 'marketplace ref'), r.out);
+  git(repo, ['remote', 'set-url', 'origin', 'git@github.com:someone-else/toolkit.git']);
+  r = run(repo, ['--skip-suites']);
+  check('origin naming another repository than the url: marketplace FAIL', r.status === 1 && /not this repository someone-else\/toolkit \(its origin remote\)/.test(line(r.out, 'marketplace ref')), r.out);
+  git(repo, ['remote', 'set-url', 'origin', 'https://git.example.com/example/toolkit.git']);
+  r = run(repo, ['--skip-suites']);
+  check('origin not on GitHub: marketplace FAIL, url cannot be verified', r.status === 1 && /url cannot be verified: origin .* is not a GitHub repository URL/.test(line(r.out, 'marketplace ref')), r.out);
+  git(repo, ['remote', 'remove', 'origin']);
+  r = run(repo, ['--skip-suites']);
+  check('no origin remote: marketplace FAIL, never a silent pass', r.status === 1 && /url cannot be verified: this clone has no origin remote/.test(line(r.out, 'marketplace ref')) && /"url": "<owner>\/<repo>"/.test(line(r.out, 'marketplace ref')), r.out);
+  git(repo, ['remote', 'add', 'origin', ORIGIN]);
+
+  // The local tag on a commit that is not an ancestor of the checked one.
+  const good = git(repo, ['rev-parse', 'HEAD']);
+  git(repo, ['checkout', '-q', '-b', 'side', 'HEAD~1']);
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'side']);
+  git(repo, ['tag', '-f', 'v1.1.0']);
+  git(repo, ['checkout', '-q', '--detach', good]);
+  r = run(repo, ['--skip-suites']);
+  check('tag v1.1.0 on a side commit that is not an ancestor: release tag FAIL', r.status === 1 && isFail(r.out, 'release tag') && /is not [0-9a-f]{12} or one of its ancestors/.test(line(r.out, 'release tag')), r.out);
+  git(repo, ['tag', '-f', 'v1.1.0', good]);
+
+  // The remote, only for a --commit target (a push to main).
+  const bare = tmp('release-tag-remote-');
+  git(bare, ['init', '-q', '--bare']);
+  r = run(repo, ['--skip-suites', '--remote', bare, '--commit', good]);
+  check('--remote without the tag: release tag FAIL tells to push the tag first', r.status === 1 && isFail(r.out, 'release tag') && line(r.out, 'release tag').includes('tag v1.1.0 is not on remote ' + bare + '; push the tag on its own first'), r.out);
+  r = run(repo, ['--skip-suites', '--remote', bare, '--pushing-tag', 'v1.1.0']);
+  check('--remote with only a pushed tag: the remote is not asked (the tag push creates it)', r.status === 0 && isOk(r.out, 'release tag') && !/remote/.test(line(r.out, 'release tag')), r.out);
+  // git push is not atomic, so a tag carried alongside main never stands in for
+  // the remote's answer: the remote could refuse the tag and still take main.
+  r = run(repo, ['--skip-suites', '--remote', bare, '--commit', good, '--pushing-tag', 'v1.1.0']);
+  check('--remote without the tag, main and the tag in the same push: release tag FAIL, push the tag on its own first',
+    r.status === 1 && isFail(r.out, 'release tag') && /tag v1\.1\.0 is not on remote .* \(this push carries it alongside main, but git push is not atomic.*; push the tag on its own first/.test(line(r.out, 'release tag')), r.out);
+  r = run(repo, ['--skip-suites', '--commit', good]);
+  check('--commit without --remote (a manual run): release tag checks only the local tag', r.status === 0 && !/remote/.test(line(r.out, 'release tag')), r.out);
+  git(repo, ['push', '-q', bare, 'refs/tags/v1.1.0']);
+  r = run(repo, ['--skip-suites', '--remote', bare, '--commit', good]);
+  check('--remote holding the tag on the same commit: release tag ok', r.status === 0 && line(r.out, 'release tag').includes('and on remote ' + bare), r.out);
+  git(repo, ['push', '-q', '-f', bare, 'side:refs/tags/v1.1.0']);
+  r = run(repo, ['--skip-suites', '--remote', bare, '--commit', good]);
+  check('--remote whose tag points at another commit: release tag FAIL', r.status === 1 && /on remote .* points at [0-9a-f]{12}, not [0-9a-f]{12} like the local tag/.test(line(r.out, 'release tag')), r.out);
+  r = run(repo, ['--skip-suites', '--remote', bare, '--commit', good, '--pushing-tag', 'v1.1.0']);
+  check('--remote whose tag points at another commit, the moved tag in the same push as main: release tag FAIL (the remote would refuse the tag and take main)',
+    r.status === 1 && isFail(r.out, 'release tag') && /on remote .* points at [0-9a-f]{12}, not [0-9a-f]{12} like the local tag \(this push carries it alongside main/.test(line(r.out, 'release tag')), r.out);
+  const gone = path.join(tmp('release-no-remote-'), 'missing.git');
+  r = run(repo, ['--skip-suites', '--remote', gone, '--commit', good]);
+  check('--remote that cannot be reached: release tag FAIL with a clear message, never a pass', r.status === 1 && isFail(r.out, 'release tag') && line(r.out, 'release tag').includes('cannot reach remote ' + gone + ' to confirm tag v1.1.0 is published (git ls-remote exit 128'), r.out);
+  r = run(repo, ['--skip-suites', '--remote']);
+  check('--remote with no value: usage error exit 2', r.status === 2, r.out);
+}
+
 // --- 1. suites -------------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  git(repo, ['tag', 'v1.0.0']);
   let r = run(repo, ['--suites', 'stubs/fail.js']);
   check('stub suite exiting 1 that prints "0 failed": run exits 1', r.status === 1, r.out);
   check('failing stub: suites FAIL and its exit code printed', isFail(r.out, 'suites') && /stubs\/fail\.js: exit 1/.test(r.out), r.out);
@@ -310,6 +405,7 @@ function releaseRepo(version, tag, opt) {
 // --- 2. build check ----------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  git(repo, ['tag', 'v1.0.0']);
   write(repo, 'scripts/build-plugin.js', "process.exit(process.argv.includes('--check') ? 0 : 3);\n");
   let r = run(repo, ['--skip-suites']);
   check('build-plugin.js --check exits 0: build ok', r.status === 0 && isOk(r.out, 'build') && !/skipped/.test(line(r.out, 'build')), r.out);
@@ -326,6 +422,13 @@ write(stubDir, 'release.js', "const fs = require('fs');\nfs.appendFileSync(proce
 // The hook's default tripwire path is relative to its cwd; this stand-in lets a
 // run with TK_PRE_PUSH_CHECK unset still work, to prove no notice is printed.
 write(stubDir, '.claude/scripts/pre-push-check.js', "require('fs').appendFileSync(process.env.HOOK_LOG, 'tripwire\\n');\nprocess.exit(0);\n");
+// The hook refuses any pushed ref that is not the checked-out commit (R11), so
+// the stub folder is a git repo and the routing cases push its HEAD. A second
+// commit gives a real object that is not HEAD.
+initRepo(stubDir);
+commitAll(stubDir, 'stubs');
+git(stubDir, ['commit', '-q', '--allow-empty', '-m', 'later']);
+const STUB_OLD = git(stubDir, ['rev-parse', 'HEAD~1']);
 function hookEnv(log, extra) {
   return Object.assign({}, process.env, {
     HOOK_LOG: log, TK_PRE_PUSH_CHECK: path.join(stubDir, 'tripwire.js'), TK_RELEASE_CHECK: path.join(stubDir, 'release.js'),
@@ -339,8 +442,11 @@ function runHook(stdin, extra) {
   return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), ran: readLog(log), args };
 }
 {
-  const SHA = 'a'.repeat(40);
-  const TAG_SHA = 'c'.repeat(40);
+  const SHA = git(stubDir, ['rev-parse', 'HEAD']);
+  // An annotated tag's own object id, which the hook must peel to HEAD.
+  git(stubDir, ['tag', '-a', '-m', 'release', 'v1.1.0']);
+  const TAG_SHA = git(stubDir, ['rev-parse', 'refs/tags/v1.1.0']);
+  check('hook fixture: the annotated tag object differs from the commit it points at', TAG_SHA !== SHA, TAG_SHA);
   let h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\n');
   check('hook: feature-branch push runs the tripwire only', h.status === 0 && h.ran === 'tripwire', JSON.stringify(h));
 
@@ -384,12 +490,31 @@ function runHook(stdin, extra) {
 
   // The gate is told what is pushed, not left to read HEAD.
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/main ' + ZERO + '\n');
-  check('hook: main push passes --commit <local sha>', h.status === 0 && h.args === '--commit ' + SHA, JSON.stringify(h));
+  check('hook: main push passes --remote <remote> --commit <local sha>', h.status === 0 && h.args === '--remote origin --commit ' + SHA, JSON.stringify(h));
   h = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
   check('hook: tag push passes --pushing-tag <tag>:<local sha>', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\nrefs/heads/main ' + SHA + ' refs/heads/main ' + ZERO + '\nHEAD ' + TAG_SHA + ' refs/tags/v2.0.0 ' + ZERO + '\n');
   check('hook: main plus tag in one push passes both, and nothing for the feature ref',
-    h.status === 0 && h.args === '--commit ' + SHA + ' --pushing-tag v2.0.0:' + TAG_SHA, JSON.stringify(h));
+    h.status === 0 && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v2.0.0:' + TAG_SHA, JSON.stringify(h));
+  h = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
+  check('hook: a tag-only push names no remote (the tag push is what publishes the tag)', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+
+  // R11: the tripwire scans HEAD and its upstream, so a pushed ref that is not
+  // the checked-out commit is refused before anything runs.
+  h = runHook('refs/heads/other ' + STUB_OLD + ' refs/heads/other ' + ZERO + '\n');
+  check('hook: a branch that is not the checked-out commit is refused (exit 1), tripwire never runs',
+    h.status === 1 && h.ran === '' && /refs\/heads\/other \([0-9a-f]{40}\) pushed to refs\/heads\/other is not the checked-out commit/.test(h.out) && /Check out other and push from it\./.test(h.out), JSON.stringify(h));
+  h = runHook('refs/heads/other ' + STUB_OLD + ' refs/heads/main ' + ZERO + '\n', { RELEASE_EXIT: '0' });
+  check('hook: other-branch:main is refused before the gate', h.status === 1 && h.ran === '' && h.args === '', JSON.stringify(h));
+  h = runHook('refs/tags/v0.9.0 ' + STUB_OLD + ' refs/tags/v0.9.0 ' + ZERO + '\n');
+  check('hook: a tag on a commit that is not checked out is refused with the tag advice',
+    h.status === 1 && h.ran === '' && /tag v0\.9\.0 \([0-9a-f]{40}\) is not the checked-out commit/.test(h.out) && /push the tag from there/.test(h.out), JSON.stringify(h));
+  h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\nrefs/heads/other ' + STUB_OLD + ' refs/heads/other ' + ZERO + '\n');
+  check('hook: one stray ref in a multi-ref push refuses the whole push', h.status === 1 && h.ran === '' && /refs\/heads\/other/.test(h.out) && !/refs\/heads\/feature \(/.test(h.out), JSON.stringify(h));
+  h = runHook('refs/heads/feature ' + 'f'.repeat(40) + ' refs/heads/feature ' + ZERO + '\n');
+  check('hook: an object this clone does not have is refused', h.status === 1 && h.ran === '', JSON.stringify(h));
+  h = runHook('refs/heads/feature --output=x refs/heads/feature ' + ZERO + '\n');
+  check('hook: a local sha that is not an object id is refused, never passed to git', h.status === 1 && h.ran === '' && !fs.existsSync(path.join(stubDir, 'x')), JSON.stringify(h));
 
   // Test seams are never silent.
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\n');
@@ -461,7 +586,7 @@ function runHook(stdin, extra) {
   p = push(['feature:main']);
   const featureSha = git(repo, ['rev-parse', 'feature']);
   check('git push to main: hook ran release-check', p.status === 0 && p.ran === 'tripwire,release', JSON.stringify(p));
-  check('git push to main: git\'s own ref line reaches release-check as --commit <pushed sha>', p.args === '--commit ' + featureSha, JSON.stringify(p));
+  check('git push to main: git\'s own ref line reaches release-check as --remote <remote> --commit <pushed sha>', p.args === '--remote ' + remote + ' --commit ' + featureSha, JSON.stringify(p));
   p = push([':refs/heads/main']);
   check('git push deleting main: release-check not run', p.status === 0 && p.ran === 'tripwire', JSON.stringify(p));
 
@@ -474,17 +599,54 @@ function runHook(stdin, extra) {
   p = push(['refs/tags/v1.2.0'], real);
   check('real gate: git push of tag v1.2.0 on a 1.0.0 commit is blocked and not published',
     p.status !== 0 && /FAIL tag version - pushed tag v1\.2\.0 does not match plugin\.json version 1\.0\.0/.test(p.out) && git(remote, ['tag', '--list', 'v1.2.0']) === '', JSON.stringify(p));
-  // An unbumped branch pushed to main while HEAD (feature) is the tagged
-  // release: the gate must read the pushed commit, not HEAD.
+  // R11 end to end: an unbumped branch pushed while HEAD is feature is refused
+  // by the hook itself, before the tripwire or the gate, whatever the target.
   git(repo, ['checkout', '-q', '-b', 'unbumped']);
   write(repo, 'plugin/commands/explore.md', '# Explore\n\nUnbumped.\n');
   git(repo, ['add', 'plugin']); git(repo, ['commit', '-qm', 'unbumped plugin change']);
   git(repo, ['checkout', '-q', 'feature']);
   p = push(['unbumped:main'], real);
-  check('real gate: git push unbumped:main from the tagged release checkout is blocked (checks the pushed commit)',
+  check('git push unbumped:main while feature is checked out: refused by the hook, nothing ran, main not published',
+    p.status !== 0 && p.ran === '' && /refs\/heads\/unbumped \([0-9a-f]{40}\) pushed to refs\/heads\/main is not the checked-out commit/.test(p.out) && git(remote, ['branch', '--list', 'main']) === '', JSON.stringify(p));
+  p = push(['unbumped']);
+  check('git push of a branch that is not checked out: refused, branch not published', p.status !== 0 && p.ran === '' && git(remote, ['branch', '--list', 'unbumped']) === '', JSON.stringify(p));
+  // From its own checkout the same push reaches the gate, which reads the
+  // pushed commit and blocks the unbumped change.
+  git(repo, ['checkout', '-q', 'unbumped']);
+  p = push(['unbumped:main'], real);
+  check('real gate: git push unbumped:main from its checkout is blocked by the version bump check',
     p.status !== 0 && /FAIL version bump - commit [0-9a-f]{12}: plugin\/ changed since v1\.0\.0 without a version bump/.test(p.out) && git(remote, ['branch', '--list', 'main']) === '', JSON.stringify(p));
+  git(repo, ['checkout', '-q', 'feature']);
   p = push(['feature:main'], real);
-  check('real gate: git push of the release commit to main passes', p.status === 0 && /release-check: \d+ passed, 0 failed/.test(p.out), JSON.stringify(p));
+  check('real gate: git push of the release commit to main passes, its tag v1.0.0 already on the remote',
+    p.status === 0 && /release-check: \d+ passed, 0 failed/.test(p.out) && /ok {3}release tag - commit [0-9a-f]{12}: tag v1\.0\.0 is on [0-9a-f]{12}, and on remote /.test(p.out), JSON.stringify(p));
+
+  // R2 end to end, in the documented release order: tag locally, push the tag
+  // from the tagged checkout, then main. Main before the tag is blocked.
+  git(repo, ['checkout', '-q', '-b', 'rel', 'feature']);
+  write(repo, 'plugin/commands/explore.md', '# Explore\n\nRelease 1.1.0.\n');
+  setPlugin(repo, '1.1.0', gitSubdir('v1.1.0'));
+  git(repo, ['add', 'plugin', '.claude-plugin']); git(repo, ['commit', '-qm', 'release 1.1.0']);
+  git(repo, ['tag', '-a', '-m', 'release', 'v1.1.0']);
+  p = push(['rel:main'], real);
+  check('real gate: main pushed before its release tag is blocked (tag not on the remote)',
+    p.status !== 0 && /FAIL release tag - commit [0-9a-f]{12}: tag v1\.1\.0 is not on remote /.test(p.out) && git(remote, ['rev-parse', 'main']) === featureSha, JSON.stringify(p));
+  p = push(['rel:main', 'refs/tags/v1.1.0'], real);
+  check('real gate: main and its release tag in one push, tag not yet on the remote: blocked, neither published',
+    p.status !== 0 && /FAIL release tag - tag v1\.1\.0, commit [0-9a-f]{12}: tag v1\.1\.0 is not on remote .*push the tag on its own first/.test(p.out) && git(remote, ['rev-parse', 'main']) === featureSha && git(remote, ['tag', '--list', 'v1.1.0']) === '', JSON.stringify(p));
+  p = push(['refs/tags/v1.1.0'], real);
+  check('real gate: the annotated release tag pushed from the tagged checkout passes', p.status === 0 && git(remote, ['tag', '--list', 'v1.1.0']) === 'v1.1.0', JSON.stringify(p));
+  p = push(['rel:main'], real);
+  check('real gate: main pushed after its release tag passes', p.status === 0 && /ok {3}release tag - .*and on remote /.test(p.out) && git(remote, ['rev-parse', 'main']) === git(repo, ['rev-parse', 'rel']), JSON.stringify(p));
+  // The published tag moved locally onto a fix commit (git tag -f), then main
+  // and the moved tag pushed together. Without the gate the remote would refuse
+  // the tag (already exists) yet still take main, pinned to the old tree.
+  const relSha = git(repo, ['rev-parse', 'rel']);
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'fix after tagging']);
+  git(repo, ['tag', '-f', '-a', '-m', 'release', 'v1.1.0']);
+  p = push(['rel:main', 'refs/tags/v1.1.0'], real);
+  check('real gate: main pushed with a moved release tag the remote holds at another commit is blocked, main not moved',
+    p.status !== 0 && /FAIL release tag - .*on remote .* points at [0-9a-f]{12}, not [0-9a-f]{12} like the local tag/.test(p.out) && git(remote, ['rev-parse', 'main']) === relSha && git(remote, ['rev-parse', 'v1.1.0^{commit}']) === relSha, JSON.stringify(p));
 }
 
 // The gate's default suite set includes this file, so a gate run aimed at this
