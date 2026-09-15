@@ -28,8 +28,9 @@ This command supports optional focus arguments:
 - `/review code` - just code quality
 - `/review code,ux` - specific combination
 - `/review full` - invokes the review-full skill (same as `/review-full`)
+- `/review <base>..<end>` - a commit range plus any uncommitted work, e.g. `/review a1b2c3d..HEAD`; it combines with focus names (`/review code a1b2c3d..HEAD`). `/execute` passes one when it chains here (M14)
 
-If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `security` = review-security, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full.
+If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `security` = review-security, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full. An argument containing `..` is the range, never a focus name (no focus name contains `..`).
 
 </reference>
 
@@ -37,9 +38,32 @@ If focus arguments are provided, skip the detection phase and dispatch only the 
 
 <procedure>
 
+### Phase 0: Resolve the scope (every run)
+
+`/execute` commits every green step, so uncommitted work alone can be empty when there is plenty to review (#182). Decide what this run covers before anything else, with one call from the project root, run as literal words (never inside `$(...)`):
+
+- with a range argument: `node .claude/scripts/session-init.js --scope <base>..<end>`, passing the range exactly as it was typed
+- without one: `node .claude/scripts/session-init.js --scope`
+
+It prints one JSON object (the full shape is in the script's header comment). Read:
+
+- **`range.end` is the pinned end.** The review covers `range.base..range.end` plus the uncommitted work, and nothing after it. This run's own fix commits land after the report, so everything after the pinned end (`<range.end>..HEAD`, plus what is uncommitted once the report is out) is the diff of the fixes M3 verifies and where M5's follow-up generation looks.
+- **`source`** says where the range came from: `argument` (the range you were given), `unpushed` (no argument: the newest unpushed commits, counted from the merge-base with the upstream, else with the remote's default branch), or `none` (no range; `message` says why in one plain sentence).
+- **`range.commits`** lists up to 20 commits, newest first. `range.capped` is true when older unpushed commits were left out, `range.omitted` counts them, and `range.fullBase` is where they start.
+- **The changed files** are `range.files` plus the `files` lists under `uncommitted.staged`, `uncommitted.unstaged` and `uncommitted.untracked`; `totals.lines` sums their added and deleted lines. From here on, "the diff" and "the changed files" mean this scope.
+
+Name the scope in one line before anything is dispatched, and open the report with the same line:
+
+- **Commits in range:** "Reviewing N commits (`<base>..<end>`, short shas) plus uncommitted work." Drop "plus uncommitted work" when there is none. When `range.capped` is true, add: "M older unpushed commits were left out; `/review <range.fullBase>..HEAD` includes them."
+- **A range argument that `source` reports as `none`:** stop. Say "That range cannot be reviewed: <message>" and ask for one whose base is an ancestor of its end.
+- **No commits in range, uncommitted work present:** "Reviewing uncommitted work only; no commits in range." Add the `message` when there is one.
+- **No commits in range and nothing uncommitted:** on the auto-detect path, stop with "Nothing to review: no commits in range and no uncommitted changes (<message, when there is one>). Pass a range: `/review <base>..HEAD`." A focus call continues as it always has.
+
+**Fallback:** if the script is missing (an older install) or its output carries an `error` field, review the uncommitted work only (`git diff --name-only`, `git diff --name-only --cached`, and `git status --short` for untracked files; `git diff --numstat` for the size gate) and say in the scope line that no commit range was checked.
+
 ### Phase 1: Detect (skip if focus arguments provided)
 
-Run `git diff --name-only` (staged + unstaged) and `git diff --name-only --cached` to see all changed files. Also check for untracked files with `git status --short`.
+The changed files come from the scope (Phase 0).
 
 Categorize the changes and pick relevant specialists:
 
@@ -58,14 +82,14 @@ Categorize the changes and pick relevant specialists:
 - A file can trigger multiple specialists (e.g., a `.tsx` file triggers both Code and UX)
 - **Security runs on every code change, alongside Code Quality.** The same files that select Code Quality also select Security (review-security). Code Quality asks "is this written well?"; Security asks "what can a malicious user make this do?" - different lenses, both run. Security has its own danger-spot gate, so it stays quiet on changes that touch no security-sensitive sink.
 - When copy and UX both run on the same artifact, copy focuses on meaning/orientation while UX focuses on usability/accessibility. Deduplicate overlapping findings in synthesis.
-- If no changes are detected (clean working tree), tell the user: "No changes detected. Use `/review code` to force a specific review."
+- An empty scope never reaches this table: Phase 0 already stopped the run, or it is a focus call, which skips detection
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
 
 ### Phase 1.5: Size gate (skip the fan-out for tiny diffs)
 
 This gate applies only to the auto-detect path. (Explicit focus calls like `/review code` and `/review full` skip detection entirely, so they never reach this gate - the specialist you named always runs, regardless of size.)
 
-Count the changed lines: run `git diff --numstat` (staged + unstaged) and sum the added + removed columns across all changed files. **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged. Author a `receipt` for each inline finding and run the Phase 4 audit before writing the report - tier 1 inline, tiers 2 and 3 via fresh subagents per the inline-path note in Phase 4.
+Count the changed lines: `totals.lines` from the scope, which sums added and deleted lines across the range, staged, unstaged and untracked work (a review of the uncommitted work alone once missed every committed line). **If the total is under 50 changed lines AND none of the selected specialists is a never-gate one, skip Phase 2 and review the diff inline** in a single pass: you (the orchestrator) read the changed files and produce the report yourself, using the same severity anchors, finding IDs, and output format the specialists would use, covering whichever domains the file-type table flagged. Author a `receipt` for each inline finding and run the Phase 4 audit before writing the report - tier 1 inline, tiers 2 and 3 via fresh subagents per the inline-path note in Phase 4.
 
 **Never-gate specialists:** Dependency Security (selected when a `package.json`/lockfile changed) and Security (selected whenever code changes). Either one's presence disables the size gate for the whole run - diff size is not a proxy for risk. A one-line change can introduce a severe vulnerability or pull in a bad dependency, so neither security pass is ever skipped for being small. (Trade-off: because Security is selected on any code change, code reviews fan out to subagents rather than taking the fast inline path - the deliberate cost of never size-gating security.)
 
@@ -76,7 +100,7 @@ The inline path continues into the same auto loop after the report (see "After t
 Each specialist is a typed finder agent that already carries its expertise (issue #167). The agent's `skills:` frontmatter preloads its `review-<kind>-criteria` skill (the How to Review criteria, reading budget, severity anchors, finding ids, and the finding contract) and the `dispatch-contract` skill (single pass, JSONL out, never audits its own findings), and its expert role is the first line of its body. Nothing from a SKILL.md is read here or pasted into a prompt: the prompt carries only what differs per run.
 
 1. Gather project context with the `project-context` skill: invoke it through the Skill tool (`Skill(project-context)`; it is agent-only, never a slash command) and follow its instructions. Its summary goes into every finder prompt.
-2. Read the changed files once, here, so each finder receives the relevant excerpts instead of re-opening every file (paste-don't-read).
+2. Read the changed files once, here, so each finder receives the relevant excerpts instead of re-opening every file (paste-don't-read). A change committed in the range shows in `git diff <range.base> <range.end> -- <path>`, and uncommitted work in `git diff HEAD -- <path>` (an untracked file is new in full); single-quote a path that holds a space.
 3. Spawn one subagent per selected specialist with the Agent tool, using the exact `subagent_type=` value in the Finder column of the Phase 1 table (one typed finder per kind; the table holds the dispatchable name, so copy it rather than composing one). Its model, effort, and tool set (no file-editing tools) come from its frontmatter per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that rule: when the type is not found and the toolkit plugin was installed or updated this session, run `/reload-plugins` once and retry; otherwise dispatch `general-purpose` carrying what the roster row declares plus what the agent's two skills would have preloaded, pasted as the fragments those skills include rather than the SKILL.md files, whose include lines do not expand when pasted: every file named on an include line of `.claude/skills/review-<kind>-criteria/SKILL.md`, in its order (for most kinds `criteria-<kind>.md`, `reading-budget.md`, `severity-anchors.md`, `finding-id-system.md`, and `finding-contract.md` from `.claude/skills/shared/`; security adds `do-not-report.md` and browser adds `browse-api.md`), then the contract paragraph of `.claude/skills/dispatch-contract/SKILL.md` followed by `.claude/skills/shared/dispatch-format.md`.
 
 **Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder - in practice most runs select 1 to 4 specialists, so the second wave is the exception, not the norm. Browser QA is always sequential (it drives a browser), so it runs last if included. As each specialist returns, run its findings' receipt checks right away instead of waiting for the whole wave - M2's Concurrency note (inlined under "After the Report") is authoritative for this tier-1 overlap.
@@ -86,8 +110,11 @@ Each specialist is a typed finder agent that already carries its expertise (issu
 Project context:
 [PASTE PROJECT CONTEXT SUMMARY HERE]
 
+Scope:
+[THE PHASE 0 SCOPE LINE, e.g. "Reviewing 6 commits (a1b2c3d..e4f5a6b) plus uncommitted work."]
+
 Files to review (excerpts already read for you):
-[PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
+[PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE IN THE SCOPE, committed in the range or uncommitted. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
 
 Run notes:
 [ONLY WHAT THIS RUN NEEDS, OR OMIT THE SECTION: the focus arguments; the plan file path for the plan finder; the dev server URL for the browser finder; which other specialists run alongside, so copy and UX split meaning from usability.]
@@ -121,7 +148,7 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 
 ### Phase 5: Report
 
-1. **Derive the markdown report** from the surviving findings using the format below: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
+1. **Derive the markdown report** from the surviving findings using the format below, opening with the Phase 0 scope line: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
 2. **Write that markdown to disk** per the "Where the report is written" section of the shared template inlined below. Use `orchestrator` as the `<who>` segment. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
 3. **Derive the HTML** (when the gate fires) from the SAME findings structure, at the END of the run - see HTML Companion below. On an auto run that is after the loop below has settled, so the page shows what was fixed and what is still open; on a "report only" run it is right after this report, since nothing gets fixed. The page used to be rendered here, before any fix, and was stale within minutes of being published. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written. The HTML is a reader's view and may carry less than the markdown; the markdown never carries less than the HTML.
 
@@ -186,6 +213,7 @@ The inlined template defines the **Overall Verdict** line, the **readability bac
 Rendered exactly as the template's "Audited out" section defines it - placement, verdict labels, the `Audited out: none` line, the empty-run rule, and the never-omit rule. The orchestrator's only addition is the `[specialist]` tag on each ID, as everywhere else: `- **R7** [code] \`RECEIPT FAILED\` - [What] (check output did not show the claim)`.
 
 ### Summary (orchestrator-specific)
+- Scope: `<base>..<end>` (N commits) plus uncommitted work, as Phase 0 named it
 - Specialists run: X of Y
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X (audit survivors)
@@ -218,11 +246,11 @@ Once the report is out, continue without waiting for a human "fix it" (the HTML 
 
 1. **Non-issues are already gone** - the Phase 4 audit (M2) dropped them to the Audited out log with their verdict lines; do not re-litigate them here.
 2. **Auto-fix the survivors** - subject to the intent-reversal guard (M7) and the always-ask actions (M9).
-3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6. Mechanical findings re-run their own check; judgment findings go to `subagent_type=fix-verifier` shards, the typed verifier M3 names.
+3. **Re-verify every fix** per M3 (which defines the mechanical-vs-judgment split and the "R3: FIXED" / "R3: NOT FIXED" verdict format), M5 (including its one-generation rule for newly discovered findings), and M6. Mechanical findings re-run their own check; judgment findings go to `subagent_type=fix-verifier` shards, the typed verifier M3 names, carrying the diff of the fixes: everything after the pinned end (`git diff <range.end>` shows every tracked change since it, committed or not; add any new untracked file in full).
 4. **Route each finding to its exit** - page only per M1; everything else lands in the digest or the log.
 5. **Close the run in chat** - summarize the digest with receipts (M8): what was fixed, what the audit and the loop dropped, and any page that needs the user.
 6. **Write the digest to disk and render the standing page** - append a `## Digest` section to the markdown report Phase 5 wrote: one line per finding with its verdict and receipt (`R3: FIXED - <check>`, `R5: NOT FIXED - <what was tried>`, `R7: PAGED - <what needs the human>`), plus any finding the loop discovered on the way. Chat scrollback is not a file, and the fixes were the one part of the run that had none. Then render the HTML per the HTML Companion section when its gate fires, which with a standing page in place is every run, a clean one included, so the page can go empty: fixed findings in `alreadyFixed`, unfixed ones open, `lenses` set to the specialists that ran, `disposition` recounted; publish and record it per the fragment. This is the run's one render.
-7. **Chain into `/document`** (M14) - once the loop has settled, announce the handoff in one line ("Review complete - chaining into `/document` per M14. Say \"no chaining\" to stop here.") and invoke `/document` through the Skill tool. M14 is authoritative for the conditions. **Do not chain** while a hard stop is still open: an M5 revert to the last green checkpoint, an unresolved blocker, an M11 tripwire hit, or a page still waiting on the human's answer. An M9 approval already granted does **not** block, so a cycle that edited prompt files still chains once the approvals are in. A cycle summary written over a reverted state is exactly the bookkeeping drift M8 exists to prevent. The debate stages are never chained into. To get that window, drive the two stages yourself: say "no chaining" when you approve the plan (`/execute` then runs and stops), type `/review no chaining` (the review runs and stops), run the debate, then type `/document`.
+7. **Chain into `/document`** (M14) - once the loop has settled, announce the handoff in one line ("Review complete - chaining into `/document` per M14. Say \"no chaining\" to stop here.") and invoke `/document` through the Skill tool. M14 is authoritative for the conditions. **Do not chain** while a hard stop is still open: an M5 revert to the last green checkpoint, an unresolved blocker, an M11 tripwire hit, or a page still waiting on the human's answer. An M9 approval already granted does **not** block, so a cycle that edited prompt files still chains once the approvals are in. A cycle summary written over a reverted state is exactly the bookkeeping drift M8 exists to prevent. The debate stages are never chained into. To get that window, drive the two stages yourself: say "no chaining" when you approve the plan (`/execute` then runs and stops), type `/review <start>..HEAD no chaining` with the plan's `**Start commit:**` sha (the review runs and stops), run the debate, then type `/document`.
 
 Two separate per-run opt-outs: saying "report only" on the invocation keeps the entire run report-first (M10), and saying "no chaining" runs the review and stops without invoking `/document` (M14).
 

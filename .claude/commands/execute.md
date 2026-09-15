@@ -88,13 +88,15 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 <procedure>
 Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for legacy plan files.
 
+**Record where the run starts (#182).** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that has a finished step but no start line was begun before this rule: write none, and the handoff below covers that case.
+
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task
 - Change 🟨 to 🟩 when completing a task
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 
-**Re-render the plan's HTML view** whenever you update the markdown status (issue #161). Rebuild the same payload `/create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it to a fresh per-run temp file each time (`mktemp -d /tmp/plan-render.XXXXXX` prints a new, empty folder, so two projects rendering at once never share a payload; write the JSON to `data.json` inside it, and that folder is `<render-dir>` below), then run the helper with the same stable name:
+**Re-render the plan's HTML view** whenever you update the markdown status (issue #161). Rebuild the same payload `/create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `.claude/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Then run the helper with the same stable name:
 
 ```bash
 node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
@@ -112,7 +114,7 @@ This exists because the page used to be frozen at creation: a plan page sat besi
 
 ## Chain Into /review (M14)
 
-On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool.
+On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool with the argument `<start>..HEAD`, where `<start>` is the sha on the plan's `**Start commit:**` line. The range is what the review covers: this run committed every step, and a review of uncommitted work alone reported "No changes detected" after exactly such a run (#182). When the plan has no start line (a run begun before that rule), invoke `/review` with no argument, and it covers the newest unpushed commits instead.
 
 **Do not chain** when either brake is engaged:
 
