@@ -9,14 +9,22 @@
 #   <local ref> <local sha> <remote ref> <remote sha>
 #
 #   0. Every pushed ref (deletions aside) must be the checked-out commit. The
-#      tripwire scans the commits between HEAD and its upstream, not the refs
-#      named on the command line, so `git push origin other-branch` or a tag
+#      tripwire scans the commits HEAD adds to each destination, and the build
+#      and version checks read HEAD, so `git push origin other-branch` or a tag
 #      pushed from a checkout past it would skip the scan of what is actually
 #      published (review finding R11). A pushed tag is compared by the commit it
 #      points at, so an annotated tag passes from a checkout of its commit. Any
 #      mismatch blocks the push (exit 1) before anything else runs, with one line
 #      per ref saying where to push it from.
-#   1. Every push runs the M11 tripwire (.claude/scripts/pre-push-check.js).
+#   1. Every push runs the M11 tripwire (.claude/scripts/pre-push-check.js) as
+#      `--remote <remote>`, with the ref lines read below on its stdin, every
+#      line including deletions (the tripwire validates each field and skips
+#      deletions itself). It scans what each destination lacks: the remote sha
+#      of an existing ref, or the remote's default branch for a new one (issue
+#      #178; it once scanned HEAD's upstream whatever the push named). The lines
+#      are data, printed with printf '%s' into a pipe: no eval, no command built
+#      from them. A push to a URL instead of a named remote cannot be ranged,
+#      so the tripwire exits 2 and the push is blocked.
 #      A non-zero exit blocks the push with the tripwire's own exit code.
 #   2. A push that updates refs/heads/main or a release tag refs/tags/v[0-9]*
 #      also runs the release gate (scripts/release-check.js) and blocks when it
@@ -55,12 +63,16 @@ fi
 # Read the ref lines first: stdin is git's, and the checks must not eat it.
 # The loop reads git's stdin directly (no pipe), so it runs in this shell and
 # the `set --` below builds the release-check arguments with safe quoting.
+# Every line is also kept in $refs, verbatim field by field, for the tripwire.
 set --
 release=
 main_pushed=
 refused=
+refs=
 head=$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null)
 while read -r local_ref local_sha remote_ref remote_sha; do
+  refs="$refs$local_ref $local_sha $remote_ref $remote_sha
+"
   # A deletion pushes nothing, so it can never publish a release.
   case $local_sha in
     *[!0]*) ;;
@@ -77,10 +89,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     refused=1
     case $remote_ref in
       refs/tags/*)
-        printf '%s\n' "pre-push: tag ${remote_ref#refs/tags/} ($local_sha) is not the checked-out commit, and the M11 tripwire scans only HEAD and its upstream. Check out the tagged commit on its branch and push the tag from there." >&2
+        printf '%s\n' "pre-push: tag ${remote_ref#refs/tags/} ($local_sha) is not the checked-out commit, and the M11 tripwire scans only what HEAD adds. Check out the tagged commit on its branch and push the tag from there." >&2
         ;;
       *)
-        printf '%s\n' "pre-push: $local_ref ($local_sha) pushed to $remote_ref is not the checked-out commit, and the M11 tripwire scans only HEAD and its upstream. Check out ${local_ref#refs/heads/} and push from it." >&2
+        printf '%s\n' "pre-push: $local_ref ($local_sha) pushed to $remote_ref is not the checked-out commit, and the M11 tripwire scans only what HEAD adds. Check out ${local_ref#refs/heads/} and push from it." >&2
         ;;
     esac
     continue
@@ -104,7 +116,7 @@ if [ -n "$refused" ]; then
 fi
 [ -n "$main_pushed" ] && set -- --remote "$remote" "$@"
 
-node "$tripwire" </dev/null
+printf '%s' "$refs" | node "$tripwire" --remote "$remote"
 status=$?
 if [ "$status" -ne 0 ]; then
   printf '%s\n' "pre-push: tripwire exited $status; push to $remote blocked" >&2

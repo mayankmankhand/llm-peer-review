@@ -45,6 +45,15 @@ const path = require('path');
 
 const TRIPWIRE = path.resolve(__dirname, '..', '.claude', 'scripts', 'pre-push-check.js');
 
+// Hermetic git (issue #178). Every child git and tripwire run inherits these, so
+// no global or system config reaches a fixture, and every repo this suite
+// creates sets core.excludesFile=/dev/null, because git without a global config
+// still reads its default ignore file (~/.config/git/ignore). On a machine whose
+// ignore file lists .claude/, `git add` failed and the version-guard group
+// stopped before most of its checks ran.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
+
 let passed = 0;
 const failures = [];
 
@@ -103,6 +112,7 @@ function makeRepo(label) {
   g(['config', 'user.email', 'test@example.com']);
   g(['config', 'user.name', 'Test']);
   g(['config', 'commit.gpgsign', 'false']);
+  g(['config', 'core.excludesFile', '/dev/null']);
   return { root: root, repo: repo, g: g };
 }
 
@@ -665,12 +675,391 @@ function helperIdentityTests() {
   check('the setup-project.js copy is identical to the session-start.js copy', first !== null && blocks[2] === first);
 }
 
+// --- 12. whole-value placeholders do not block (issue #178) ---------------------
+// secret-assignment matched a key name, = or :, and ANY quoted run of 8 or more
+// characters, so a quoted placeholder blocked a push on its length alone. Every
+// silent fixture is first checked against the v7.1.0 pattern, kept below as
+// OLD_SECRET_ASSIGNMENT, so none of them could pass without the fix (the #168
+// lesson: a false-positive test needs a fixture the old pattern matched).
+//
+// assign() joins a key, its operator and a quoted value at runtime, so no line
+// of this file holds all three together: the header note's rule, split before
+// the = or :, applies to placeholders and hostile values alike.
+const OLD_SECRET_ASSIGNMENT = new RegExp('(password|passwd|pwd|secret|token|api[_-]?key)["\']?\\s*[:=]\\s*["\'][^"\']{8,}["\']', 'i');
+const DQ = '"';
+const SQ = "'";
+function assign(key, op, quote, value) { return key + op + quote + value + quote; }
+
+const PLACEHOLDER_FILES = [
+  { label: 'a .js file (the ROOT_TOKEN line from the issue)', file: 'scripts/build.js', before: ['// build helpers'], after: [],
+    fixtures: [assign('const ROOT_TOKEN', ' = ', SQ, '${CLAUDE_PLUGIN_ROOT}') + ';', assign('const apiKey', ' = ', DQ, 'your-api-key-here') + ';'] },
+  { label: 'a compose file', file: 'docker-compose.yml', before: ['services:', '  db:', '    environment:'], after: [],
+    fixtures: ['      ' + assign('POSTGRES_PASSWORD', ': ', DQ, '${DB_PASSWORD}'), '      ' + assign('password', ': ', DQ, '${DB_PASSWORD}')] },
+  { label: 'a GitHub workflow', file: '.github/workflows/release.yml', before: ['jobs:', '  publish:', '    steps:', '      - uses: actions/setup-node@v4', '        with:'], after: [],
+    fixtures: ['          ' + assign('token', ': ', DQ, '${{ secrets.NPM_TOKEN }}'), '          ' + assign('NODE_AUTH_TOKEN', ': ', SQ, '${{secrets.NPM_TOKEN}}')] },
+  { label: 'a .md file (the API-KEYS.md lines)', file: 'docs/keys.md', before: ['# Keys', '', '```bash'], after: ['```'],
+    fixtures: [assign('export OPENAI_API_KEY', '=', DQ, 'sk-proj-your-key-here'), assign('export GEMINI_API_KEY', '=', DQ, 'AIzaSy-your-key-here')] },
+  { label: 'a .sh file', file: 'deploy/run.sh', before: ['#!/bin/sh'], after: [],
+    fixtures: [assign('export GITHUB_TOKEN', '=', DQ, '${GITHUB_TOKEN}'), assign('API_KEY', '=', SQ, 'YOUR_API_KEY_HERE')] },
+];
+
+// Shapes that are NOT a whole placeholder, each still a hit. Every value is 8
+// characters or more, so the v7.1.0 pattern matched each line too: these guard
+// the exemption from growing, and pass before and after the fix.
+const HOSTILE = [
+  ['a default value', assign('DB_PASSWORD', '=', DQ, '${DB_PASSWORD:-hunter22}')],
+  ['a literal after the variable', assign('API_TOKEN', '=', DQ, '${API_TOKEN}hunter22')],
+  ['a literal before the variable', assign('API_TOKEN', '=', DQ, 'hunter22${API_TOKEN}')],
+  ['a literal after the expression', assign('token', ': ', DQ, '${{ secrets.NPM_TOKEN }}hunter22')],
+  ['a literal inside the expression', assign('token', ': ', DQ, "${{ secrets.NPM_TOKEN || 'hunter22' }}")],
+  ['angle brackets holding a digit', assign('api_key', ' = ', DQ, '<your-key-here-9>')],
+  ['a your- shape holding a digit', assign('api_key', ' = ', DQ, 'your-key-here-2')],
+  ['"your" that is not a whole segment', assign('api_key', ' = ', DQ, 'yourkeyhere')],
+  ['a variable name starting with a digit', assign('api_key', ' = ', DQ, '${1PASSWORD}')],
+  ['a placeholder closed by the other quote', assign('api_key', ' = ', DQ, '${API_TOKEN}').slice(0, -1) + SQ + ' + rest'],
+  ['a placeholder, then a real assignment on the same line', assign('token', ' = ', DQ, '${NPM_TOKEN}') + '; ' + assign('password', ' = ', DQ, 'hunter2hunter2')],
+];
+
+// Token patterns still read inside a value secret-assignment refused.
+const TOKEN_INSIDE = [
+  ['openai-key', 'a your- shape whose body is an sk- key', assign('OPENAI_API_KEY', '=', DQ, 'sk-your-' + 'abcdefghijklmnopqrstuv')],
+  ['github-token', 'a ${NAME} whose name is a GitHub token', assign('GH_TOKEN', '=', DQ, '${' + 'gh' + 'p_' + 'A1b2C3d4E5f6G7h8J9k0L1m2' + '}')],
+];
+
+function hitOn(stdout, pattern, file, lineNo) {
+  return new RegExp('\\[' + pattern + '\\] ' + file.replace(/[.]/g, '\\.') + ' @ [0-9a-f]{7} line ' + lineNo + ':').test(stdout);
+}
+
+function placeholderTests() {
+  console.log('\n12. whole-value placeholders do not block; everything else still does (issue #178)');
+  for (const f of PLACEHOLDER_FILES) {
+    const missed = f.fixtures.filter((l) => !OLD_SECRET_ASSIGNMENT.test(l));
+    check('fixture: every placeholder line in ' + f.label + ' matched the v7.1.0 pattern', missed.length === 0, missed.join(' | '));
+    const sb = makeRepo('placeholder');
+    try {
+      commitFile(sb, 'README.md', 'seed\n', 'init');
+      commitFile(sb, f.file, f.before.concat(f.fixtures, f.after, ['']).join('\n'), 'add ' + f.file);
+      const r = run(sb.repo);
+      check('placeholders in ' + f.label + ' do not block the push', r.status === 0 && r.stdout === '', 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    } catch (e) {
+      check(f.label + ' placeholder test set up a repo', false, e.message);
+    }
+    cleanup(sb);
+  }
+
+  const hb = makeRepo('hostile');
+  try {
+    commitFile(hb, 'README.md', 'seed\n', 'init');
+    commitFile(hb, 'config/hostile.env', HOSTILE.map((h) => h[1]).concat(['']).join('\n'), 'add values that are not placeholders');
+    const r = run(hb.repo);
+    check('lines that are not whole placeholders block the push', r.status === 1, 'exit ' + r.status);
+    HOSTILE.forEach(function (h, i) {
+      check('fixture: ' + h[0] + ' matched the v7.1.0 pattern', OLD_SECRET_ASSIGNMENT.test(h[1]));
+      check('still a hit: ' + h[0], hitOn(r.stdout, 'secret-assignment', 'config/hostile.env', i + 1), r.stdout.slice(0, 600));
+    });
+    check('the real value after a placeholder is masked', r.stdout.indexOf('hunter2hunter2') === -1 && r.stdout.indexOf(assign('password', ' = ', DQ, '****')) !== -1, r.stdout.slice(0, 600));
+    check('the placeholder before it stays readable in the report', r.stdout.indexOf(assign('token', ' = ', DQ, '${NPM_TOKEN}') + '; ') !== -1, r.stdout.slice(0, 600));
+  } catch (e) {
+    check('hostile-value test set up a repo', false, e.message);
+  }
+  cleanup(hb);
+
+  const tb = makeRepo('token-inside');
+  try {
+    commitFile(tb, 'README.md', 'seed\n', 'init');
+    commitFile(tb, 'config/inside.env', TOKEN_INSIDE.map((t) => t[2]).concat(['']).join('\n'), 'add tokens inside placeholder shapes');
+    const r = run(tb.repo);
+    check('a token inside a refused placeholder still blocks the push', r.status === 1, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    TOKEN_INSIDE.forEach(function (t, i) {
+      check('fixture: ' + t[1] + ' matched the v7.1.0 pattern', OLD_SECRET_ASSIGNMENT.test(t[2]));
+      check('[' + t[0] + '] still fires on ' + t[1], hitOn(r.stdout, t[0], 'config/inside.env', i + 1), r.stdout.slice(0, 600));
+      check('secret-assignment itself stays silent on ' + t[1], !hitOn(r.stdout, 'secret-assignment', 'config/inside.env', i + 1), r.stdout.slice(0, 600));
+    });
+  } catch (e) {
+    check('token-inside test set up a repo', false, e.message);
+  }
+  cleanup(tb);
+}
+
+// --- 12b. a secret-assignment value is masked to its own closing quote (#178) ----
+// The old value class stopped at the first quote of either kind, so a value
+// holding an apostrophe matched only up to it and the report printed the rest.
+// The key and operator stay readable; the whole value is hidden.
+function secretMaskTests() {
+  console.log('\n12b. a secret-assignment value is masked whole, key kept (issue #178)');
+  const APOSTROPHE_TAIL = 's-horse-battery-staple';
+  const ESCAPED_TAIL = 'ijklmnopqrst';
+  const lines = [
+    assign('const password', ' = ', DQ, 'Tr0ub4dor' + SQ + APOSTROPHE_TAIL) + ';',
+    assign('password', ' = ', DQ, 'abcdefgh' + '\\' + DQ + ESCAPED_TAIL),
+  ];
+  const sb = makeRepo('mask-value');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'src/login.js', lines.concat(['']).join('\n'), 'add two passwords');
+    const r = run(sb.repo);
+    check('both values are hits', r.status === 1 && hitOn(r.stdout, 'secret-assignment', 'src/login.js', 1) && hitOn(r.stdout, 'secret-assignment', 'src/login.js', 2), r.stdout.slice(0, 600));
+    check('a value holding an apostrophe is masked to its closing quote (no tail in the report)', r.stdout.indexOf(APOSTROPHE_TAIL) === -1, r.stdout.slice(0, 600));
+    check('a value holding an escaped quote is masked past it', r.stdout.indexOf(ESCAPED_TAIL) === -1, r.stdout.slice(0, 600));
+    check('the key, operator and quotes stay readable around the mask', r.stdout.indexOf(assign('const password', ' = ', DQ, '****') + ';') !== -1, r.stdout.slice(0, 600));
+  } catch (e) {
+    check('value-mask test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
+// --- 13. the scan covers what the destination lacks (issue #178) -----------------
+// The script used to read no arguments and scan @{u}..HEAD, so a push of HEAD
+// anywhere but its upstream published commits nobody scanned. Each case below
+// replays one of the issue's reproductions against a bare remote, through both
+// of the new forms: Claude's `<remote> <branch-or-tag>` and the hook's
+// `--remote <remote>` with git's ref lines on stdin.
+const ZERO = '0'.repeat(40);
+const TOKEN_LINE = 'CI_TOKEN' + '=' + GITLAB_PAT + '\n';
+
+function runWith(repo, args, input) {
+  const r = spawnSync('node', [TRIPWIRE].concat(args), { cwd: repo, encoding: 'utf-8', input: input === undefined ? '' : input });
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+}
+
+// A repo on branch main with a bare remote named origin.
+function remoteRepo(label) {
+  const sb = makeRepo(label);
+  sb.g(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  sb.bare = path.join(sb.root, 'origin.git');
+  execFileSync('git', ['init', '-q', '--bare', sb.bare], { stdio: ['ignore', 'pipe', 'ignore'] });
+  sb.g(['remote', 'add', 'origin', sb.bare]);
+  sb.sha = function (rev) { return sb.g(['rev-parse', rev]).trim(); };
+  return sb;
+}
+
+function show(r) { return 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300) + ' :: ' + r.stderr.slice(0, 300); }
+
+// The issue's first case: topic tracks origin/topic, which already holds a
+// flagged commit pushed without the check; then HEAD goes to develop or main.
+function rangeTopicTests() {
+  console.log('\n13. the scan covers what the destination lacks (issue #178)');
+  const sb = remoteRepo('range-topic');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    sb.g(['push', '-q', '-u', 'origin', 'main']);
+    sb.g(['push', '-q', 'origin', 'main:develop']);
+    sb.g(['checkout', '-q', '-b', 'topic']);
+    commitFile(sb, 'ci/token.env', TOKEN_LINE, 'add a token');
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'clean 1');
+    sb.g(['push', '-q', '--no-verify', '-u', 'origin', 'topic']);
+    commitFile(sb, 'src/b.js', 'console.log(2);\n', 'clean 2');
+    const head = sb.sha('HEAD');
+    const develop = sb.sha('refs/remotes/origin/develop');
+    const main = sb.sha('refs/remotes/origin/main');
+    const topic = sb.sha('refs/remotes/origin/topic');
+
+    let r = run(sb.repo);
+    check('no destination: HEAD\'s upstream origin/topic is the base, 1 clean commit, exit 0, and stderr names it',
+      r.status === 0 && r.stdout === '' && r.stderr.indexOf('pre-push-check: scanned 1 commit for upstream refs/remotes/origin/topic (base ' + topic.slice(0, 7) + ')') !== -1, show(r));
+
+    r = runWith(sb.repo, ['origin', 'develop']);
+    check('origin develop: the token already on origin/topic is new to develop and blocks', r.status === 1 && r.stdout.indexOf('[gitlab-pat] ci/token.env') !== -1, show(r));
+    check('origin develop: stderr names the destination, its base and the 3 commits scanned',
+      r.stderr.indexOf('pre-push-check: scanned 3 commits for origin refs/heads/develop (base ' + develop.slice(0, 7) + ')') !== -1, show(r));
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/develop ' + develop + '\n');
+    check('ref line HEAD -> refs/heads/develop: blocks the same way', r.status === 1 && r.stdout.indexOf('[gitlab-pat] ci/token.env') !== -1, show(r));
+
+    r = runWith(sb.repo, ['origin', 'main']);
+    check('origin main: blocks (HEAD:main)', r.status === 1 && r.stdout.indexOf('[gitlab-pat] ci/token.env') !== -1, show(r));
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/main ' + main + '\n');
+    check('ref line HEAD -> refs/heads/main: blocks', r.status === 1 && r.stdout.indexOf('[gitlab-pat] ci/token.env') !== -1, show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/develop ' + develop + '\nHEAD ' + head + ' refs/heads/main ' + main + '\n');
+    check('two ref lines over the same commits: merged, each commit scanned and reported once',
+      r.status === 1 && (r.stdout.match(/\[gitlab-pat\]/g) || []).length === 1 && r.stdout.indexOf('Commits scanned: 3') !== -1
+      && r.stderr.indexOf('scanned 3 commits for origin refs/heads/develop (base ' + develop.slice(0, 7) + '), origin refs/heads/main (base ' + main.slice(0, 7) + ')') !== -1, show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], 'refs/heads/topic ' + head + ' refs/heads/topic ' + topic + '\n');
+    check('ref line to the upstream itself: only the clean commit is new there, exit 0', r.status === 0 && r.stdout === '' && /scanned 1 commit for origin refs\/heads\/topic/.test(r.stderr), show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], '(delete) ' + ZERO + ' refs/heads/develop ' + develop + '\n');
+    check('a deletion alone publishes nothing: exit 0, stderr says it was skipped',
+      r.status === 0 && r.stdout === '' && r.stderr.indexOf('scanned 0 commits for origin refs/heads/develop (deleted, nothing to scan)') !== -1, show(r));
+    r = runWith(sb.repo, ['--remote', 'origin'], '(delete) ' + ZERO + ' refs/heads/old ' + develop + '\nHEAD ' + head + ' refs/heads/develop ' + develop + '\n');
+    check('a deletion beside a real push: the push is still scanned and blocks', r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1, show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], '');
+    check('no ref lines at all: nothing is pushed, exit 0, stderr says so', r.status === 0 && r.stdout === '' && r.stderr.indexOf('scanned 0 commits for origin (no refs pushed)') !== -1, show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/develop ' + 'e'.repeat(40) + '\n');
+    check('a remote sha this clone lacks: exit 2 with "fetch first", never scanned as a new ref', r.status === 2 && r.stdout === '' && /Fetch first/.test(r.stderr), show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], 'refs/heads/main ' + main + ' refs/heads/main ' + ZERO + '\n');
+    check('a ref line whose local sha is not HEAD: exit 2, naming the checked-out commit', r.status === 2 && r.stdout === '' && /is not the checked-out commit/.test(r.stderr), show(r));
+
+    // Tags: a tag destination is a new ref (no network lookup) and must be HEAD.
+    sb.g(['tag', 'v1.0.0']);
+    r = runWith(sb.repo, ['origin', 'v1.0.0']);
+    check('origin v1.0.0 (a tag at HEAD): a new ref scanned from the merge-base with origin/main, blocks',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1
+      && r.stderr.indexOf('scanned 3 commits for origin refs/tags/v1.0.0 (new ref, base ' + main.slice(0, 7) + ' from refs/remotes/origin/main)') !== -1, show(r));
+    sb.g(['tag', '-a', '-m', 'release', 'v1.1.0']);
+    r = runWith(sb.repo, ['--remote', 'origin'], 'refs/tags/v1.1.0 ' + sb.sha('refs/tags/v1.1.0') + ' refs/tags/v1.1.0 ' + ZERO + '\n');
+    check('ref line for an annotated tag at HEAD: its object peels to HEAD, and the push blocks', r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1, show(r));
+    sb.g(['tag', 'older', 'HEAD~1']);
+    r = runWith(sb.repo, ['origin', 'older']);
+    check('origin older (a tag that is not HEAD): exit 2', r.status === 2 && r.stdout === '' && /not the checked-out commit/.test(r.stderr), show(r));
+    sb.g(['branch', 'twin']);
+    sb.g(['tag', 'twin']);
+    r = runWith(sb.repo, ['origin', 'twin']);
+    check('origin twin (a name that is both a tag and a branch): exit 2 rather than a guess', r.status === 2 && r.stdout === '' && /names both a tag and a branch/.test(r.stderr), show(r));
+
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/develop ' + develop + '\r\n');
+    check('a ref line ending in CRLF is read like one ending in LF', r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1, show(r));
+  } catch (e) {
+    check('topic range test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
+// A branch tracking a LOCAL branch: @{u} named that branch, so the check read
+// only base..child and an unpushed flagged commit on base went out.
+function rangeLocalUpstreamTests() {
+  const sb = remoteRepo('range-local-upstream');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    sb.g(['push', '-q', '-u', 'origin', 'main']);
+    const main = sb.sha('refs/remotes/origin/main');
+    sb.g(['checkout', '-q', '-b', 'base']);
+    commitFile(sb, 'ci/token.env', TOKEN_LINE, 'unpushed token on base');
+    sb.g(['checkout', '-q', '-b', 'child', '--track', 'base']);
+    commitFile(sb, 'src/child.js', 'console.log(3);\n', 'clean child commit');
+    let r = run(sb.repo);
+    check('a branch tracking a local branch: @{u} is not trusted, the merge-base with origin/main is, and the token on base blocks',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1
+      && r.stderr.indexOf('scanned 2 commits for origin, no remote upstream (base ' + main.slice(0, 7) + ' from refs/remotes/origin/main)') !== -1, show(r));
+    r = runWith(sb.repo, ['origin', 'child']);
+    check('origin child: a new branch on origin, scanned from the merge-base with origin/main, blocks',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1 && r.stderr.indexOf('for origin refs/heads/child (new ref, base ' + main.slice(0, 7) + ' from refs/remotes/origin/main)') !== -1, show(r));
+  } catch (e) {
+    check('local-upstream range test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
+// HEAD pushed to a second, empty remote: everything is new there.
+function rangeSecondRemoteTests() {
+  const sb = remoteRepo('range-second-remote');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'ci/token.env', TOKEN_LINE, 'add a token');
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'clean 1');
+    sb.g(['push', '-q', '--no-verify', '-u', 'origin', 'main']);
+    commitFile(sb, 'src/b.js', 'console.log(2);\n', 'clean 2');
+    const backup = path.join(sb.root, 'backup.git');
+    execFileSync('git', ['init', '-q', '--bare', backup], { stdio: ['ignore', 'pipe', 'ignore'] });
+    sb.g(['remote', 'add', 'backup', backup]);
+    let r = run(sb.repo);
+    check('no destination: 1 clean commit past origin/main, exit 0', r.status === 0 && r.stdout === '', show(r));
+    r = runWith(sb.repo, ['backup', 'main']);
+    check('backup main (an empty second remote): all 4 commits scanned and the token blocks',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat]') !== -1 && r.stdout.indexOf('Commits scanned: 4 (no remote base - full history)') !== -1
+      && r.stderr.indexOf('scanned 4 commits for backup refs/heads/main (new ref, no remote base - full history)') !== -1, show(r));
+    r = runWith(sb.repo, ['--remote', 'backup'], 'refs/heads/main ' + sb.sha('HEAD') + ' refs/heads/main ' + ZERO + '\n');
+    check('ref line to the empty second remote: blocks the same way', r.status === 1 && r.stdout.indexOf('Commits scanned: 4') !== -1, show(r));
+  } catch (e) {
+    check('second-remote range test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
+// .claude/settings.json and .env already on the upstream but new to the
+// destination: the never-push check and the settings diff use each
+// destination's own base, and a path is exempt only if every base has it.
+function rangeNeverPushTests() {
+  const sb = remoteRepo('range-never-push');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, '.claude/settings.json', '{\n  "permissions": { "allow": [] }\n}\n', 'shared settings');
+    sb.g(['push', '-q', '-u', 'origin', 'main']);
+    sb.g(['push', '-q', 'origin', 'main:develop']);
+    sb.g(['checkout', '-q', '-b', 'topic']);
+    commitFile(sb, '.claude/settings.json', '{\n  "permissions": { "allow": ["Bash(curl *)"] }\n}\n', 'widen permissions');
+    commitFile(sb, '.env', 'LOCAL_ONLY=1\n', 'add an env file');
+    sb.g(['push', '-q', '--no-verify', '-u', 'origin', 'topic']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'clean');
+    let r = run(sb.repo);
+    check('no destination: settings and .env are already on origin/topic, exit 0', r.status === 0 && r.stdout === '', show(r));
+    r = runWith(sb.repo, ['origin', 'develop']);
+    check('origin develop: .env is new to develop and blocks as a never-push file', r.status === 1 && /Never-push files in outgoing commits:\n {2}\.env @ [0-9a-f]{7}/.test(r.stdout), show(r));
+    check('origin develop: the settings change is shown against develop', r.stdout.indexOf('Shared settings file (.claude/settings.json) changes in this push:') !== -1
+      && r.stdout.indexOf('+  "permissions": { "allow": ["Bash(curl *)"] }') !== -1, show(r));
+
+    commitFile(sb, '.env', 'LOCAL_ONLY=2\n', 'edit the env file');
+    const head = sb.sha('HEAD');
+    const topic = sb.sha('refs/remotes/origin/topic');
+    const develop = sb.sha('refs/remotes/origin/develop');
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/topic ' + topic + '\n');
+    check('ref line to topic: the edited .env exists at topic\'s base, so it is not re-reported', r.status === 0 && r.stdout === '', show(r));
+    r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/topic ' + topic + '\nHEAD ' + head + ' refs/heads/develop ' + develop + '\n');
+    check('ref lines to topic and develop: .env is at topic\'s base but not develop\'s, so it blocks', r.status === 1 && /\.env @ [0-9a-f]{7}/.test(r.stdout), show(r));
+    check('ref lines to topic and develop: the settings diff is given per base, and develop\'s shows the change',
+      r.stdout.indexOf('  For origin refs/heads/topic (base ' + topic.slice(0, 7) + '):\n  (no change against this base)') !== -1
+      && r.stdout.indexOf('  For origin refs/heads/develop (base ' + develop.slice(0, 7) + '):\n') !== -1 && r.stdout.indexOf('+  "permissions": { "allow": ["Bash(curl *)"] }') !== -1, show(r));
+  } catch (e) {
+    check('never-push range test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
+// Input that cannot name a destination exits 2 (could not check), never 0.
+function rangeInvalidTests() {
+  const sb = remoteRepo('range-invalid');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'second');
+    sb.g(['push', '-q', '-u', 'origin', 'main']);
+    const head = sb.sha('HEAD');
+    const cases = [
+      ['one argument', ['origin'], ''],
+      ['three arguments', ['origin', 'main', 'extra'], ''],
+      ['--remote with no name', ['--remote'], ''],
+      ['--remote with an extra argument', ['--remote', 'origin', 'main'], ''],
+      ['a remote that does not exist', ['nosuch', 'main'], ''],
+      ['a remote that reads as an option', ['--output=x', 'main'], ''],
+      ['a destination that reads as an option', ['origin', '--output=x'], ''],
+      ['a full ref name instead of a branch or tag name', ['origin', 'refs/heads/main'], ''],
+      ['HEAD as the destination', ['origin', 'HEAD'], ''],
+      ['a refspec as the destination', ['origin', 'HEAD:main'], ''],
+      ['a name git refuses', ['origin', 'bad..name'], ''],
+      ['--remote naming a remote that does not exist', ['--remote', 'nosuch'], 'refs/heads/main ' + head + ' refs/heads/main ' + ZERO + '\n'],
+      ['a remote given as --remote=value', ['--remote=origin'], 'refs/heads/main ' + head + ' refs/heads/main ' + ZERO + '\n'],
+      ['a ref line with three fields', ['--remote', 'origin'], 'refs/heads/main ' + head + ' refs/heads/main\n'],
+      ['a short local sha', ['--remote', 'origin'], 'refs/heads/main ' + head.slice(0, 12) + ' refs/heads/main ' + ZERO + '\n'],
+      ['a remote sha that is not hex', ['--remote', 'origin'], 'refs/heads/main ' + head + ' refs/heads/main ' + 'g'.repeat(40) + '\n'],
+      ['a remote ref outside refs/heads/ and refs/tags/', ['--remote', 'origin'], 'refs/heads/main ' + head + ' refs/notes/commits ' + ZERO + '\n'],
+      ['a local ref that reads as an option', ['--remote', 'origin'], '--output=x ' + head + ' refs/heads/main ' + ZERO + '\n'],
+    ];
+    for (const [label, args, input] of cases) {
+      const r = runWith(sb.repo, args, input);
+      check('exit 2 for ' + label, r.status === 2 && r.stdout === '' && /pre-push-check: /.test(r.stderr), show(r));
+    }
+    check('no argument or ref line was ever run as a git option (no file named x)', !fs.existsSync(path.join(sb.repo, 'x')) && !fs.existsSync(path.join(sb.repo, '--output=x')));
+  } catch (e) {
+    check('invalid-argument test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
 mailtoTests();
 versionGuardTests();
 helperIdentityTests();
+placeholderTests();
+secretMaskTests();
+rangeTopicTests();
+rangeLocalUpstreamTests();
+rangeSecondRemoteTests();
+rangeNeverPushTests();
+rangeInvalidTests();
 
 console.log('');
 if (failures.length === 0) {

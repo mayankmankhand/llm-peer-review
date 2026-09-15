@@ -2,11 +2,19 @@
 
 // pre-push-check.js - the M11 pre-push tripwire (issue #149), hardened from the
 // prose instructions each session used to improvise. Run from the project root
-// before ANY push:
+// before ANY push, naming where the push goes (issue #178):
 //
+//   node .claude/scripts/pre-push-check.js <remote> <branch-or-tag>
+//       Claude's M11 call, for a push of HEAD to that branch or tag.
+//   node .claude/scripts/pre-push-check.js --remote <remote>
+//       The repo hook's call: git's pre-push ref lines on stdin, one per
+//       pushed ref, "<local ref> <local sha> <remote ref> <remote sha>".
 //   node .claude/scripts/pre-push-check.js
+//       No destination named: HEAD's upstream, as before 7.2.0, when that is a
+//       remote-tracking branch; otherwise the new-ref rule against origin.
 //
-// What it checks, over the commits the next `git push` would publish:
+// What it checks, over the commits the push adds to its destination (section 1
+// below says how that range is worked out):
 //   1. Secret scan   - every outgoing commit's ADDED lines against a fixed
 //                      pattern list. Per-commit on purpose: a secret added in
 //                      one commit and removed in a later one is invisible in
@@ -16,12 +24,12 @@
 //                      file, env files, the correction ledger's files, netrc)
 //                      NEWLY introduced by the outgoing commits (they must never
 //                      leave the machine). A path that already exists at the
-//                      range base is published history rather than news - this
-//                      repo tracks settings.local.json as the seed template -
-//                      and re-alarming on it every time would train the
-//                      override reflex the tripwire exists to prevent. With no
-//                      remote base nothing can be proven published, so every
-//                      match blocks.
+//                      base of EVERY destination is published history rather
+//                      than news - this repo tracks settings.local.json as the
+//                      seed template - and re-alarming on it every time would
+//                      train the override reflex the tripwire exists to
+//                      prevent. With no remote base nothing can be proven
+//                      published, so every match blocks.
 //   3. Settings diff - .claude/settings.json changed in this push: the hunks
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
@@ -59,10 +67,15 @@
 // Contract (mirrors session-init.js / generate-index.js):
 //   - stdout = the hit report, and ONLY on a hit. Clean runs print nothing.
 //   - stderr = diagnostics only (LESSONS: stdout may be captured by an LLM),
-//     including the "tk pre-push check <version>" line of a plugin run.
+//     including the "tk pre-push check <version>" line of a plugin run and one
+//     "pre-push-check: scanned <n> commits for <what> (<base>)" line naming
+//     the destinations and bases a finished scan covered.
 //   - Exit codes: 0 clean (push may proceed silently)
 //                 1 hit   (block the push and page the human - M11)
-//                 2 error (could not check; fall back to the M11 prose checks,
+//                 2 error (could not check: arguments or ref lines that do not
+//                          validate, a remote that does not exist, a remote sha
+//                          this clone lacks, a pushed ref that is not HEAD, or
+//                          git failing; fall back to the M11 prose checks,
 //                          NEVER push unchecked)
 //   - Strictly read-only, zero dependencies, no shell interpolation: git runs
 //     via execFileSync with argument arrays (LESSONS: never interpolate
@@ -231,18 +244,53 @@ const PATTERNS = [
   // it only hides text on a published page, where masking a mailto link costs
   // nothing.
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/(?!(?:mailto|tel):)[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
+  // A key name, then = or :, then a quoted value of 8 characters or more.
+  //
+  // A placeholder is not a value (issue #178). The pattern never looked at the
+  // value, so `const ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'` blocked a push while
+  // the 7-character '${NAME}' passed: length alone decided. The negative
+  // lookahead right after the opening quote refuses the match when the WHOLE
+  // value, up to the quote that opened it, is exactly one of three shapes:
+  //   ${IDENT}           a shell or compose variable; IDENT is a letter or _
+  //                      followed by letters, digits and _
+  //   ${{ a.b }}         a GitHub Actions expression over a dotted path of such
+  //                      identifiers, inner spaces optional
+  //   your-key-here      letter segments joined by - or _, no digit, one whole
+  //                      segment being "your" (sk-proj-your-key-here included)
+  // Anything more is treated as a value: a default (${X:-lit}), a literal before
+  // or after (lit${X}, ${X}lit, ${{ a.b }}lit), an expression holding a literal
+  // (${{ a || 'lit' }}), angle brackets, a digit. A refused position does not
+  // end the search - the regex is tried at every later position, so a real
+  // assignment after a placeholder on the same line still hits - and the token
+  // patterns above still scan inside placeholder text, so a real sk- body under
+  // a "your" name is still caught.
+  //
+  // What is detected is otherwise unchanged: the (?=[^"']{8,}["']) lookahead is
+  // the old rule, under which the first quote of either kind ends the value. The
+  // rest of the match, to the SAME quote that opened the value (a backslash
+  // escapes one character), only decides what mask() hides: the old match
+  // stopped at an apostrophe inside "Tr0ub4dor's...", and the report printed
+  // the rest of the secret. A value with the other quote inside its first 8
+  // characters is still not detected; widening that is a separate change.
   {
     name: "secret-assignment",
-    re: /(password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*["'][^"']{8,}["']/i,
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["'])(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/i,
+    // What mask() hides of a match: the value only. Group 1 is the key through
+    // the opening quote and group 3 the closing quote (empty when the line ends
+    // first), so the key, the operator and both quotes stay readable.
+    hide: (m) => [m.index + m[1].length, m.index + m[0].length - m[3].length],
   },
 ];
 
 // Global twins of the patterns above, DERIVED from PATTERNS with .map(), so a new
 // pattern is masked automatically and there is no second list to keep in sync.
-// Used only for masking: replace() with a
-// non-global regex rewrites one occurrence, which would leave a second secret
-// on the same line readable in the report.
-const MASK_PATTERNS = PATTERNS.map((p) => new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"));
+// Used only for masking: a non-global regex finds one occurrence, which would
+// leave a second secret on the same line readable in the report. Each twin
+// carries its pattern's hide rule, if it has one.
+const MASK_PATTERNS = PATTERNS.map((p) => ({
+  re: new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"),
+  hide: p.hide,
+}));
 
 // Run git with an argument ARRAY (never a shell string). core.quotePath=false
 // keeps non-ASCII paths unescaped; paths containing a quote, backslash, or
@@ -338,9 +386,26 @@ function existsInBase(path, base) {
 // Mask EVERY secret on the line, not just the match that triggered the report:
 // one line can carry two credentials, and a separate report line is emitted per
 // matching pattern - so masking only the trigger republishes its neighbour.
+//
+// Every pattern reads the ORIGINAL line, the text the scan read, and marks the
+// characters it hides; each marked run is then printed as **** (issue #178). A
+// match keeps its first 4 characters unless its pattern has a hide rule
+// (secret-assignment hides its whole value and nothing else). Rewriting the
+// line one pattern at a time instead would let one rewrite change what the
+// next pattern sees, so the mask could stop following the scan's own rule.
 function mask(line) {
-  let out = line;
-  for (const re of MASK_PATTERNS) out = out.replace(re, (m) => m.slice(0, 4) + "****");
+  const hidden = new Array(line.length).fill(false);
+  for (const p of MASK_PATTERNS) {
+    for (const m of line.matchAll(p.re)) {
+      const [from, to] = p.hide ? p.hide(m) : [m.index + 4, m.index + m[0].length];
+      for (let i = from; i < to; i++) hidden[i] = true;
+    }
+  }
+  let out = "";
+  for (let i = 0; i < line.length; i++) {
+    if (!hidden[i]) out += line[i];
+    else if (i === 0 || !hidden[i - 1]) out += "****";
+  }
   return out.trim().slice(0, 200);
 }
 
@@ -414,39 +479,192 @@ function runningPluginVersion() {
 }
 
 // --- 1. Which commits would a push publish? -------------------------------
-// Preference order for the range base:
-//   upstream (@{u})       - the branch has been pushed before: exactly what
-//                           `git push` would send.
-//   remote default branch - never-pushed branch: everything since it forked.
-//                           origin/HEAD exists after a clone but NOT after a
-//                           hand-added remote, so the common default branch
-//                           names are probed too.
-//   nothing               - empty/new remote: every commit on HEAD is outgoing.
-function outgoingCommits() {
+// What a push publishes is what its DESTINATION lacks (issue #178). Before 7.2.0
+// the script read no arguments and scanned @{u}..HEAD whatever the push named,
+// so HEAD pushed to another branch (HEAD:develop, HEAD:main), to a second
+// remote, or from a branch tracking a local branch published commits no scan
+// had read. Now the push names its destinations and each one gets a base:
+//   existing ref - the remote's own sha from git's ref line, or, for Claude's
+//                  <remote> <branch> call, refs/remotes/<remote>/<branch>; the
+//                  scan is <base>..HEAD. A remote sha this clone does not have
+//                  cannot be ranged, so it exits 2 (fetch first) rather than
+//                  being guessed at as a new ref.
+//   new ref      - a branch the remote does not have yet, or a tag (Claude's
+//                  call makes no network request to look one up): everything
+//                  since HEAD forked from the remote's default branch, found as
+//                  refs/remotes/<remote>/HEAD, else main, else master. That
+//                  HEAD ref exists after a clone but NOT after a hand-added
+//                  remote, which is why the names are probed too. With none of
+//                  them, all of HEAD's history.
+//   deleted ref  - publishes nothing, so nothing is scanned for it.
+// The commit lists are merged and each commit is scanned once. Every pushed ref
+// must be HEAD, because the build check and the version guard below read HEAD.
+// Two costs are accepted: commits already on another branch of the remote are
+// scanned again, and a new ref on a remote with no default branch scans all
+// history.
+//
+// With no arguments HEAD's upstream (@{u}) is the destination, as before, but
+// only when it is a remote-tracking ref (refs/remotes/...). A branch tracking a
+// LOCAL branch resolved @{u} to that branch, so the unpushed commits behind it
+// were never scanned; it now takes the new-ref rule against origin.
+const ZERO_OID = /^0+$/;
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+
+function usage(msg) {
+  fail(msg + " Usage: pre-push-check.js <remote> <branch-or-tag> | --remote <remote> (git's ref lines on stdin) | no arguments (HEAD's upstream).");
+}
+
+// The full sha of the commit a revision names, or null. Callers pass only a
+// validated object id, HEAD, or a name under refs/, so nothing here can be
+// read by git as an option.
+function commitOf(rev) {
+  const out = git(["rev-parse", "--verify", "-q", rev + "^{commit}"]);
+  return out === null ? null : out.trim();
+}
+
+function checkRemote(remote) {
+  if (remote === undefined || remote === "" || remote.startsWith("-")) usage("invalid remote " + JSON.stringify(remote) + ".");
+  const remotes = git(["remote"]);
+  if (remotes === null || !remotes.split("\n").includes(remote)) {
+    fail("no remote named " + JSON.stringify(remote) + " in this repository (see `git remote`); a push to a URL cannot be checked.");
+  }
+}
+
+// The base of a ref the remote does not have yet: the merge-base of HEAD with
+// the remote's default branch, or null (all history) when there is none.
+function newRefBase(remote) {
+  const candidates = [];
+  const remoteHead = git(["symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD"]);
+  if (remoteHead !== null) candidates.push(remoteHead.trim());
+  candidates.push("refs/remotes/" + remote + "/main", "refs/remotes/" + remote + "/master");
+  for (const candidate of candidates) {
+    const mergeBase = git(["merge-base", "HEAD", candidate]);
+    if (mergeBase !== null) return { base: mergeBase.trim(), from: candidate };
+  }
+  return { base: null, from: null };
+}
+
+function newRef(label, remote, prefix) {
+  const found = newRefBase(remote);
+  const note = found.base === null
+    ? prefix + "no remote base - full history"
+    : prefix + "base " + found.base.slice(0, 7) + " from " + found.from;
+  return { label, base: found.base, note };
+}
+
+// No arguments: HEAD's upstream, trusted only under refs/remotes/.
+function upstreamDestination() {
   if (git(["symbolic-ref", "--quiet", "--short", "HEAD"]) === null) {
     fail("detached HEAD - cannot determine what a push would publish.");
   }
-  let base = null;
-  const upstream = git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
-  if (upstream !== null) {
-    base = upstream.trim();
+  const upstream = git(["rev-parse", "--symbolic-full-name", "@{u}"]);
+  const ref = upstream === null ? "" : upstream.trim();
+  if (ref.startsWith("refs/remotes/")) {
+    const base = commitOf(ref);
+    if (base !== null) return { label: "upstream " + ref, base, note: "base " + base.slice(0, 7) };
+  }
+  return newRef("origin, no remote upstream", "origin", "");
+}
+
+// <remote> <branch-or-tag>: the push sends HEAD there. A plain name only, so
+// the check never has to guess what a full ref, a refspec or HEAD would mean.
+function namedDestination(remote, name, head) {
+  if (name.startsWith("-") || name.startsWith("refs/") || name === "HEAD" || git(["check-ref-format", "refs/heads/" + name]) === null) {
+    usage("invalid destination " + JSON.stringify(name) + ": name a branch or tag, such as main or v1.2.0.");
+  }
+  const isTag = git(["rev-parse", "--verify", "-q", "refs/tags/" + name]) !== null;
+  const tracking = commitOf("refs/remotes/" + remote + "/" + name);
+  const isBranch = tracking !== null || git(["rev-parse", "--verify", "-q", "refs/heads/" + name]) !== null;
+  if (isTag && isBranch) fail(JSON.stringify(name) + " names both a tag and a branch here, so what the push updates is unclear.");
+  if (isTag) {
+    const tagged = commitOf("refs/tags/" + name);
+    if (tagged !== head) {
+      fail("tag " + name + " is on " + (tagged === null ? "no commit" : tagged.slice(0, 12)) + ", not the checked-out commit " + head.slice(0, 12) + ": this check scans what HEAD adds, so check out the tagged commit and run it there.");
+    }
+    return newRef(remote + " refs/tags/" + name, remote, "new ref, ");
+  }
+  if (tracking !== null) return { label: remote + " refs/heads/" + name, base: tracking, note: "base " + tracking.slice(0, 7) };
+  return newRef(remote + " refs/heads/" + name, remote, "new ref, ");
+}
+
+// --remote <remote>: git's pre-push lines on stdin, validated field by field
+// before any of them reaches git.
+function refLineDestinations(remote, head) {
+  if (process.stdin.isTTY) usage("--remote expects git's pre-push ref lines on stdin.");
+  let text;
+  try {
+    text = fs.readFileSync(0, "utf8");
+  } catch {
+    fail("could not read the ref lines on stdin.");
+  }
+  const destinations = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line === "") continue;
+    const fields = line.split(" ");
+    const [localRef, localSha, remoteRef, remoteSha] = fields;
+    if (fields.length !== 4 || localRef === "" || localRef.startsWith("-") || !OBJECT_ID.test(localSha) || !OBJECT_ID.test(remoteSha)
+      || !/^refs\/(?:heads|tags)\//.test(remoteRef) || git(["check-ref-format", remoteRef]) === null) {
+      usage("invalid ref line " + JSON.stringify(line) + ": expected <local ref> <local sha> <remote ref under refs/heads/ or refs/tags/> <remote sha>.");
+    }
+    const label = remote + " " + remoteRef;
+    if (ZERO_OID.test(localSha)) {
+      destinations.push({ label, deleted: true, note: "deleted, nothing to scan" });
+      continue;
+    }
+    if (commitOf(localSha) !== head) {
+      fail(remoteRef + " would receive " + localSha.slice(0, 12) + ", which is not the checked-out commit " + head.slice(0, 12) + ": this check scans what HEAD adds, so check that commit out and push from it.");
+    }
+    if (ZERO_OID.test(remoteSha)) {
+      destinations.push(newRef(label, remote, "new ref, "));
+      continue;
+    }
+    const base = commitOf(remoteSha);
+    if (base === null) {
+      fail(remote + " has " + remoteRef + " at " + remoteSha.slice(0, 12) + ", a commit this clone does not have, so what the push adds cannot be worked out. Fetch first (git fetch " + remote + "), then push again.");
+    }
+    destinations.push({ label, base, note: "base " + base.slice(0, 7) });
+  }
+  return destinations;
+}
+
+// Resolve the destinations the arguments name, then the merged commit list.
+// `summary` is the stderr line's description of what was checked.
+function outgoingCommits(argv) {
+  let destinations;
+  let remote = null;
+  if (argv.length === 0) {
+    destinations = [upstreamDestination()];
+  } else if (argv[0] === "--remote" || argv.length === 2) {
+    if (argv.length !== 2) usage("--remote takes one remote name.");
+    remote = argv[0] === "--remote" ? argv[1] : argv[0];
+    checkRemote(remote);
   } else {
-    const candidates = [];
-    const remoteHead = git(["symbolic-ref", "refs/remotes/origin/HEAD"]);
-    if (remoteHead !== null) candidates.push(remoteHead.trim().replace("refs/remotes/", ""));
-    candidates.push("origin/main", "origin/master");
-    for (const candidate of candidates) {
-      const mergeBase = git(["merge-base", "HEAD", candidate]);
-      if (mergeBase !== null) {
-        base = mergeBase.trim();
-        break;
+    usage("expected no arguments, two, or --remote with one.");
+  }
+  let head = null;
+  if (remote !== null) {
+    head = commitOf("HEAD");
+    if (head === null) fail("no commit at HEAD - nothing a push could publish.");
+    destinations = argv[0] === "--remote" ? refLineDestinations(remote, head) : [namedDestination(remote, argv[1], head)];
+  }
+  const range = destinations.filter((d) => !d.deleted);
+  const commits = [];
+  const seen = new Set();
+  for (const d of range) {
+    const out = git(["rev-list", d.base === null ? "HEAD" : d.base + "..HEAD"]);
+    if (out === null) fail("git rev-list failed - cannot enumerate outgoing commits.");
+    for (const sha of out.split("\n").filter(Boolean)) {
+      if (!seen.has(sha)) {
+        seen.add(sha);
+        commits.push(sha);
       }
     }
   }
-  const range = base === null ? ["HEAD"] : [base + "..HEAD"];
-  const out = git(["rev-list", ...range]);
-  if (out === null) fail("git rev-list failed - cannot enumerate outgoing commits.");
-  return { commits: out.split("\n").filter(Boolean), base };
+  const summary = destinations.length === 0
+    ? remote + " (no refs pushed)"
+    : destinations.map((d) => d.label + " (" + d.note + ")").join(", ");
+  return { commits, destinations: range, summary };
 }
 
 // --- 2. Scan one commit ---------------------------------------------------
@@ -563,11 +781,20 @@ function scanCommit(sha, hits) {
 const RUNNING_VERSION = runningPluginVersion();
 if (RUNNING_VERSION !== null) process.stderr.write("tk pre-push check " + RUNNING_VERSION + "\n");
 
-const { commits, base } = outgoingCommits();
-if (commits.length === 0) process.exit(0); // nothing outgoing, nothing to say
+const { commits, destinations, summary } = outgoingCommits(process.argv.slice(2));
+// One stderr line naming what the scan covered, on every run that got this far
+// (issue #178): a range is only trustworthy when a reader can see it.
+function reportScanned() {
+  process.stderr.write("pre-push-check: scanned " + commits.length + " commit" + (commits.length === 1 ? "" : "s") + " for " + summary + "\n");
+}
+if (commits.length === 0) {
+  reportScanned();
+  process.exit(0); // nothing outgoing, nothing to say on stdout
+}
 
 const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), buildStale: null, versionBehind: null };
 for (const sha of commits) scanCommit(sha, hits);
+reportScanned();
 
 // Version guard (issue #174). The state file is read from the repository root
 // the scan covers, falling back to the working folder outside a readable repo.
@@ -663,10 +890,12 @@ if (fs.existsSync(BUILD_CHECK_MARKER) && fs.existsSync(BUILD_SCRIPT)) {
 
 // Keep only never-push paths this push would actually publish for the first
 // time; one base lookup per distinct path, after the walk rather than inside it.
+// A path counts as published only when it exists at EVERY destination's base
+// (issue #178): a .env already on origin/topic is still news to develop.
 const publishedAlready = new Map();
 for (const candidate of hits.neverPushRaw) {
   if (!publishedAlready.has(candidate.path)) {
-    publishedAlready.set(candidate.path, existsInBase(candidate.path, base));
+    publishedAlready.set(candidate.path, destinations.every((d) => existsInBase(candidate.path, d.base)));
   }
   if (!publishedAlready.get(candidate.path)) {
     hits.neverPush.push(candidate.path + " @ " + candidate.short);
@@ -702,11 +931,24 @@ if (hits.unscannable.length > 0) {
 }
 if (hits.settingsCommits.size > 0) {
   out.push("Shared settings file (" + SETTINGS_PATH + ") changes in this push:");
-  const diffArgs = base === null
-    ? ["show", "HEAD", "--no-color", "--", SETTINGS_PATH]
-    : ["diff", "--no-color", base + "..HEAD", "--", SETTINGS_PATH];
-  const diff = git(diffArgs);
-  out.push(diff === null || diff.trim() === "" ? "  (touched in: " + [...hits.settingsCommits].join(", ") + ")" : diff.trimEnd());
+  // One diff per distinct base, each against what that destination has
+  // (issue #178). With a single base the output is what it always was.
+  const byBase = new Map();
+  for (const d of destinations) {
+    const key = d.base === null ? "" : d.base;
+    if (!byBase.has(key)) byBase.set(key, []);
+    byBase.get(key).push(d.label);
+  }
+  for (const [key, labels] of byBase) {
+    if (byBase.size > 1) out.push("  For " + labels.join(", ") + (key === "" ? " (no remote base):" : " (base " + key.slice(0, 7) + "):"));
+    const diffArgs = key === ""
+      ? ["show", "HEAD", "--no-color", "--", SETTINGS_PATH]
+      : ["diff", "--no-color", key + "..HEAD", "--", SETTINGS_PATH];
+    const diff = git(diffArgs);
+    if (diff !== null && diff.trim() !== "") out.push(diff.trimEnd());
+    else if (byBase.size > 1 && diff !== null) out.push("  (no change against this base)");
+    else out.push("  (touched in: " + [...hits.settingsCommits].join(", ") + ")");
+  }
   out.push("");
 }
 if (hits.buildStale !== null) {
@@ -722,7 +964,7 @@ if (hits.versionBehind !== null) {
   out.push("  project so the newer installed version is the one running), then push again.");
   out.push("");
 }
-out.push("Commits scanned: " + commits.length + (base === null ? " (no remote base - full history)" : ""));
+out.push("Commits scanned: " + commits.length + (destinations.some((d) => d.base === null) ? " (no remote base - full history)" : ""));
 // Silent when clean, by contract: an empty report writes nothing, not a bare
 // newline, so a caller capturing stdout sees exactly what the report holds.
 if (out.length) process.stdout.write(out.join("\n") + "\n");
