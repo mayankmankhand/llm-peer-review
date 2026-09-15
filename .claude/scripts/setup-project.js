@@ -372,6 +372,18 @@ function referenceVersion(state) {
   }
   return null;
 }
+// The one plugin update instruction (issue #183), used by the version notice in
+// session-start.js, the version block in pre-push-check.js and the stamp report
+// in setup-project.js, and quoted word for word by the docs. The marketplace
+// update comes first: measured on Claude Code 2.1.270, `claude plugin update`
+// alone does not fetch a GitHub marketplace's cached catalog, so a new release
+// tag is not seen until `claude plugin marketplace update` has run. A plugin
+// installed for one project only takes the same update with --scope project.
+// It reads as the middle of a sentence: each caller adds the words before it
+// and the punctuation after it.
+const PLUGIN_UPDATE_STEPS = 'run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`'
+  + ' (for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`),'
+  + ' then restart Claude Code';
 // <<< version helpers <<<
 // >>> copy-install markers (7.1.0) >>>
 // Byte-identical in setup-project.js and session-start.js, from this marker to
@@ -692,7 +704,6 @@ function main() {
   // the range), 0 level, 1 a newer plugin seeded it, which the version guard
   // blocks pushes on until this plugin is updated, so the report says so.
   const priorStampCmp = priorPluginStamp !== null ? compareVersions(priorPluginStamp, version) : null;
-  const PLUGIN_UPDATE = '`claude plugin update ' + PLUGIN + '@' + MARKETPLACE + '`';
 
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
@@ -710,8 +721,8 @@ function main() {
     say('  No .claude/.toolkit-state.json, but .claude/rules/toolkit.md already carries the plugin\'s stamp ' + priorPluginStamp
       + ': this project was set up on the plugin before (a clone whose git ignores the state file looks like this). previousVersion '
       + priorPluginStamp + (priorStampCmp === 1 ? ' and version ' + priorPluginStamp + ' (never lower than the stamp) are' : ' is') + ' recorded and no audited version, '
-      + (priorStampCmp === 1 ? 'but this plugin (v' + version + ') is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated (run '
-          + PLUGIN_UPDATE + ', then restart Claude Code).'
+      + (priorStampCmp === 1 ? 'but this plugin (v' + version + ') is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated. To update it, '
+          + PLUGIN_UPDATE_STEPS + '.'
         : priorStampCmp === 0 ? 'which is this plugin\'s own version, so /tk:upgrade has no conventions to audit.'
         : 'so /tk:upgrade audits from ' + priorPluginStamp + '.'));
   }
@@ -1126,7 +1137,7 @@ function main() {
   } else {
     say(mode !== 'fresh' ? '  Nothing to migrate; seed checked.'
       : priorStampCmp === -1 ? '  Next: run /tk:upgrade to audit this project\'s own files from ' + priorPluginStamp + ' against the ' + version + ' conventions.'
-      : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later (' + PLUGIN_UPDATE + '), then restart Claude Code. Pushes stay blocked until then.'
+      : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later: ' + PLUGIN_UPDATE_STEPS + '. Pushes stay blocked until then.'
       : '  Next: /tk:explore. The codebase map generates on first use.');
     if (undo) say('  ' + undo);
   }

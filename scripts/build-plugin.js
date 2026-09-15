@@ -49,7 +49,8 @@
 //     `allowed-tools` frontmatter pre-approves the scripts it runs while it is
 //     active (spike 1). Each emitted command and skill gains one rule per
 //     toolkit script it invokes, `Bash(mktemp -d /tmp/*)` when it creates a
-//     per-run temp folder, plus the host rows in HOST_ROWS.
+//     per-run temp folder, an exact rule per install into the plugin root it
+//     shows (PLUGIN_ROOT_INSTALLS, #180), plus the host rows in HOST_ROWS.
 //   * Packages. package.json and package-lock.json move from scripts/ to the
 //     plugin root, where Claude Code installs them on plugin install and update.
 //   * Allowlist. Only the four dirs above are read. node_modules, worktrees,
@@ -63,10 +64,15 @@
 //     the old `mkdir -p ... && ln -sfn ...` did not; the script always exits 0.
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
-//     manifest (issue #138 shipped the manifest in v5.5.0).
+//     manifest (issue #138 shipped the manifest in v5.5.0), and the content
+//     hashes of every root helper script copy the toolkit shipped (#180), so
+//     that migration sweeps only the toolkit's own copies.
 //   * Seeds (#173). The project seed comes from the repository's seed/ folder
 //     (plus the rewritten .claude/rules/toolkit.md), and every emitted seed file
 //     is checked for old-layout text before it can ship.
+//   * Stamps (#183). The three files carrying a `<!-- Toolkit version: X |`
+//     stamp are emitted stamped with the build's version, so a scratch build
+//     made with --version carries that version everywhere plugin.json does.
 //
 // Dependency-free by design, like every script under scripts/ and .claude/scripts/.
 
@@ -79,27 +85,68 @@ const EMIT_DIRS = ['commands', 'agents', 'skills', 'scripts'];
 const RUNTIME_SCRIPT_EXT = new Set(['.js', '.sh']);
 const PACKAGE_FILES = ['package.json', 'package-lock.json'];
 const NEVER_EMIT = /(^|\/)(node_modules|worktrees|settings(\.local)?\.json|\.toolkit-[^/]*)(\/|$)/;
-// Host-CLI rows a command needs beyond its scripts (the seed still merges the
-// git/gh/glab baseline into settings.local.json; these are the two commands
-// whose first outward action is an issue create).
+// Host-CLI rows for the commands that run one of the two create rows in
+// host-cli.md, both hosts' form of each (#181): "Create issue" (/create-issue,
+// and the cycle issue /upgrade opens) and "Create PR / MR" (/document's
+// worktree PR). The seed merges the same gh and glab rows into
+// settings.local.json; carried here as well, the create call runs without an
+// approval stop in a project whose settings lack the row.
 const HOST_ROWS = {
   'create-issue': ['Bash(gh issue create *)', 'Bash(glab issue create *)'],
+  'document': ['Bash(gh pr create *)', 'Bash(glab mr create *)'],
   'upgrade': ['Bash(gh issue create *)', 'Bash(glab issue create *)'],
 };
+// Installs into the plugin root (#180). The Browser QA skill has Claude install
+// the plugin's own packages and Chromium with `--prefix "${CLAUDE_PLUGIN_ROOT}"`,
+// a machine path no seed row can name, so a file whose text shows one of these
+// commands whole gets a rule for exactly that command, quotes included. Never a
+// wildcard: one would pre-approve installing any package into the plugin, and
+// installing any other package asks once (owner decision, #180).
+const PLUGIN_ROOT_INSTALLS = [
+  'npm install --prefix "${CLAUDE_PLUGIN_ROOT}"',
+  'npx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core install chromium',
+];
 // The rule for a per-run temp folder. The same row is in seed/settings.local.json;
 // a command or skill whose text or inlined chain runs `mktemp -d /tmp/...` also
 // carries it, so the call works in a project that never ran /tk:setup.
 const MKTEMP_RULE = 'Bash(mktemp -d /tmp/*)';
 // Project-side paths that must NOT be rewritten: the seed writes them into the
-// project, and settings never ship in a plugin.
+// project, settings never ship in a plugin, and a project's own
+// .claude/CLAUDE.md (project instructions Claude Code also reads from there,
+// which /tk:upgrade's C-11 audits, #179) has no plugin copy to point at.
 const KEEP_PROJECT_PATHS = [
   '.claude/rules', '.claude/settings.json', '.claude/settings.local.json',
   '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
-  '.claude/worktrees', '.claude/.no-correction-log',
+  '.claude/worktrees', '.claude/.no-correction-log', '.claude/CLAUDE.md',
 ];
 // The session hook's script. The build reports it as unresolved when the source
 // has no such script, so the hook can never point at a missing file.
 const SESSION_START_SCRIPT = 'session-start.js';
+// The stamped files (#183), by emitted path: the three files
+// scripts/setup/bump-version.sh stamps in the source. Each emitted copy gets the
+// build's version in its stamp, by the replacement bump-version.sh makes (the
+// first `<!-- Toolkit version: X |`), so a build made with --version 7.2.0 from
+// a 7.1.0 source is stamped 7.2.0, and a build at the VERSION file's version
+// changes nothing, since a release bump stamps the source alike. A stamped file
+// the build does not emit, or one with no stamp, is reported unresolved.
+const STAMPED_FILES = ['seed/rules-toolkit.md', 'skills/shared/html-outputs.md', 'skills/shared/toolkit-reference.md'];
+const TOOLKIT_STAMP = /<!-- Toolkit version: [^|]+\|/;
+// What --version accepts: the version shape the scripts' version helpers accept
+// (dotted numbers, an optional -suffix), so a typo such as v7.2.0 cannot become
+// a plugin.json version the version guard ignores or a stamp it cannot read.
+const VERSION_ARG = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.]+)?$/;
+// The committed list of root helper script hashes (#180): every copy of each
+// root helper script (the scripts/ paths in historical-managed-paths.txt) that
+// the toolkit ever shipped, as `<path> <sha256>` lines, each sha256 taken over
+// the file with every carriage return removed, the way setup-project.js hashes
+// the project's copy. The build emits it as managed-paths.json's
+// historicalHelperHashes, and a manifest-less migration sweeps a root helper
+// only when its content matches one. It is data, not a git history read at
+// build time, so --check gives the same answer in a shallow clone and in the
+// commit tree the pre-push check exports; scripts/test-build-plugin.js
+// recomputes it from the history when the history is there.
+const HELPER_HASHES_FILE = 'historical-helper-hashes.txt';
+const ROOT_HELPER = /^scripts\/[^/]+$/;
 
 // Per-site overrides for `.claude/<dir>/` mentions that mean a PROJECT path
 // (issue #176). Keyed by EMITTED file (`commands/review.md`, `seed/rules-toolkit.md`).
@@ -159,6 +206,12 @@ const SITE_OVERRIDES = {
     // Plugin package files sit at the plugin root, not in scripts/ (npm audit there fails with ENOLOCK).
     { phrase: '`--prefix .claude/scripts`', replace: '`--prefix "${CLAUDE_PLUGIN_ROOT}"`' },
   ],
+  'skills/setup/SKILL.md': [
+    // How setup recognizes a copy-install with no manifest: the project's old review.md beside VERSION (#180).
+    { phrase: '`VERSION` beside `.claude/commands/review.md`', keep: true },
+    // The same project file, as one way a VERSION is the copy-install's own.
+    { phrase: '`.claude/commands/review.md` sits beside it', keep: true },
+  ],
   'skills/review-browser/SKILL.md': [
     // The plugin's package.json is at the plugin root; quoted for a root path with a space.
     { phrase: 'npm install --prefix .claude/scripts', replace: 'npm install --prefix "${CLAUDE_PLUGIN_ROOT}"' },
@@ -181,6 +234,12 @@ function parseArgs(argv) {
     else if (a === '--check') o.check = true;
     else if (a === '--quiet') o.quiet = true;
     else { console.error('build-plugin: unknown argument ' + a); process.exit(2); }
+  }
+  // A --version given with no value, or with a value of another shape, stops the
+  // build (#183): the version lands in plugin.json and in every stamp.
+  if (o.version !== '' && !(typeof o.version === 'string' && VERSION_ARG.test(o.version))) {
+    console.error('build-plugin: --version needs a version such as 7.2.0, got ' + (o.version === undefined ? 'nothing' : JSON.stringify(o.version)));
+    process.exit(2);
   }
   return o;
 }
@@ -394,6 +453,12 @@ function scriptRules(text, inv, src) {
     // before an unlisted mktemp (measured), so a project that never ran
     // /tk:setup would stop on every render without this rule.
     if (/\bmktemp -d \/tmp\//.test(t)) rules.add(MKTEMP_RULE);
+    // An install into the plugin root, as a whole command: after a line start,
+    // a space or a backtick, and up to a line end or a backtick, so a longer
+    // command (another package, another npx call) gets no rule.
+    for (const cmd of PLUGIN_ROOT_INSTALLS) {
+      if (new RegExp('(?:^|[\\s`])' + escapeRe(cmd) + '(?=[`\\r]|$)', 'm').test(t)) rules.add('Bash(' + cmd + ')');
+    }
     for (const m of t.matchAll(/\b(node|bash) \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([a-z0-9-]+\.(?:js|sh))/g)) {
       const call = m[1] + ' ${CLAUDE_PLUGIN_ROOT}/scripts/' + m[2];
       rules.add('Bash(' + call + ' *)');
@@ -598,7 +663,32 @@ function build(src, version) {
     '.env.local.example', '.gitattributes', 'VERSION', 'artifacts/README.md',
     ...historical,
   ])].sort();
-  put('managed-paths.json', JSON.stringify({ version, paths: managed }, null, 2) + '\n');
+  // The hashes of every shipped copy of each root helper script (#180), read from
+  // the committed list: `#` comments and blank lines skipped, every other line
+  // `<path> <64 lowercase hex>`. Each root helper in the managed list needs at
+  // least one hash and each line must name one, or the build reports it: a helper
+  // with no hash is never swept, and a line for any other path is never read.
+  const rootHelpers = managed.filter(rel => ROOT_HELPER.test(rel));
+  const helperFile = path.join(path.dirname(src), 'scripts', HELPER_HASHES_FILE);
+  const helperHashes = new Map();
+  if (fs.existsSync(helperFile)) {
+    fs.readFileSync(helperFile, 'utf8').split(/\r?\n/).forEach((raw, i) => {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) return;
+      const m = /^(\S+) ([0-9a-f]{64})$/.exec(line);
+      const where = 'scripts/' + HELPER_HASHES_FILE + ' line ' + (i + 1);
+      if (!m) { unresolved.push(where + ': not "<path> <sha256 in lowercase hex>": ' + line.slice(0, 120)); return; }
+      if (!rootHelpers.includes(m[1])) { unresolved.push(where + ': ' + m[1] + ' is not a root helper script in managed-paths.json'); return; }
+      if (!helperHashes.has(m[1])) helperHashes.set(m[1], new Set());
+      helperHashes.get(m[1]).add(m[2]);
+    });
+  }
+  for (const rel of rootHelpers) {
+    if (!helperHashes.has(rel)) unresolved.push('managed-paths.json: no historical hash for the root helper script ' + rel + ' in scripts/' + HELPER_HASHES_FILE);
+  }
+  const historicalHelperHashes = {};
+  for (const rel of [...helperHashes.keys()].sort()) historicalHelperHashes[rel] = [...helperHashes.get(rel)].sort();
+  put('managed-paths.json', JSON.stringify({ version, paths: managed, historicalHelperHashes }, null, 2) + '\n');
   // The project seed: what /tk:setup writes into a project (write-when-absent
   // files, the gitignore lines and the permission baseline it merges, and the
   // retired permission rows the upgrade audit removes). Sourced from the
@@ -632,6 +722,16 @@ function build(src, version) {
     const content = rel === 'seed/rules-toolkit.md' ? Buffer.from(rewriteText(raw.toString('utf8'), inv, src, unresolved, rel), 'utf8') : raw;
     for (const problem of seedProblems(rel, content.toString('utf8'), inv)) unresolved.push(rel + ': ' + problem);
     put(rel, content);
+  }
+  // The stamps follow the build's version (#183). The replacement is a function,
+  // so no `$` in a version is read as a replacement pattern.
+  for (const rel of STAMPED_FILES) {
+    if (!files.has(rel)) { unresolved.push(rel + ': stamped file not emitted, so its toolkit version stamp cannot follow ' + version); continue; }
+    const content = files.get(rel);
+    const text = content.toString('utf8');
+    if (!TOOLKIT_STAMP.test(text)) { unresolved.push(rel + ': no "<!-- Toolkit version: X |" stamp to set to ' + version); continue; }
+    const stamped = text.replace(TOOLKIT_STAMP, () => '<!-- Toolkit version: ' + version + ' |');
+    put(rel, Buffer.isBuffer(content) ? Buffer.from(stamped, 'utf8') : stamped);
   }
   // An override keyed to a file the build never emits could never report a
   // missing phrase, so the key itself is checked.
@@ -723,4 +823,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, seedProblems, gitignoreLineMatches, quoteInlineCats, unquotedInlineRoots, SITE_OVERRIDES, PLUGIN_NAME };
+module.exports = { build, rewriteText, injectAllowedTools, scriptRules, mapPath, inventory, seedProblems, gitignoreLineMatches, quoteInlineCats, unquotedInlineRoots, SITE_OVERRIDES, PLUGIN_NAME, HOST_ROWS, PLUGIN_ROOT_INSTALLS, STAMPED_FILES, HELPER_HASHES_FILE };
