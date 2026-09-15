@@ -1183,13 +1183,16 @@ const recordedQuiet = (res) => res.status === 0 && missingOf(res) === null && JS
   const keys = [REPORT_ROW, LINT_ROW].slice().sort();
   check('--stamp records both lost-row candidates in the offered-rows record, present or declined, and says so', st.status === 0 && JSON.stringify(recordRowsOf(dir)) === JSON.stringify(keys) && /recorded 2 permission rows of the project's own that C-9 offers back in the offered-rows record/.test(st.stderr), st.stderr + JSON.stringify(recordRowsOf(dir)));
   res = audit(dir);
-  check('  after the stamp the declined row is not offered again', res.status === 0 && lostOf(res) === null, JSON.stringify(lostOf(res)));
+  // C-9 still runs after the stamp (it runs on every upgrade), so the record alone keeps the row out.
+  const c9InRange = (x) => /7\.1\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(x.summary);
+  check('  after the stamp C-9 still runs, and the declined row is not offered again', res.status === 0 && c9InRange(res) && lostOf(res) === null, res.summary + JSON.stringify(lostOf(res)));
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW } }, null, 2) + '\n');
   res = audit(dir);
-  check('  and a row the owner removes afterwards is not offered again either', res.status === 0 && lostOf(res) === null, JSON.stringify(lostOf(res)));
-  const before = read(recordPathOf(dir));
+  check('  and a row the owner removes afterwards is not offered again either', res.status === 0 && c9InRange(res) && lostOf(res) === null, res.summary + JSON.stringify(lostOf(res)));
+  const recordText = () => { try { return read(recordPathOf(dir)); } catch (e) { return null; } };
+  const before = recordText();
   st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
-  check('  a second --stamp finds nothing new to record and leaves the record as it was', st.status === 0 && read(recordPathOf(dir)) === before && !/offered-rows record/.test(st.stderr), st.stderr);
+  check('  a second --stamp finds nothing new to record and leaves the record as it was', st.status === 0 && before !== null && recordText() === before && !/offered-rows record/.test(st.stderr), st.stderr);
   // Setup reads the same record: a seed row it records survives the stamp's write.
   const seeded = offeredCase('stamp-keeps-setup-rows', { allow: SEED_ALLOW.concat([LINT_ROW]), record: [MISSING_ROW] });
   st = spawnSync('node', [SCRIPT, '--project', seeded, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
@@ -1215,7 +1218,7 @@ console.log('\n4j. finding keys: the same finding keeps its key across runs; ide
   const b = audit(dir);
   const keysOf = (res) => res.findings.map(f => f.key);
   check('every finding carries a key that starts with its convention id, unique within the run', a.findings.length > 0 && a.findings.every(f => typeof f.key === 'string' && f.key.startsWith(f.id + ':')) && new Set(keysOf(a)).size === a.findings.length, JSON.stringify(keysOf(a)));
-  check('two runs over the same files give the same keys in the same order', JSON.stringify(keysOf(a)) === JSON.stringify(keysOf(b)) && a.findings.length > 0);
+  check('two runs over the same files give the same keys in the same order', a.findings.length > 0 && keysOf(a).every(k => typeof k === 'string') && JSON.stringify(keysOf(a)) === JSON.stringify(keysOf(b)));
   // (A 12-character digest may be all digits; a line number is a short segment of its own.)
   check('no key carries a line number or a machine path', a.findings.every(f => typeof f.key === 'string' && !f.key.includes(TMP) && !/:\d{1,6}(#\d+)?$/.test(f.key) && !f.key.includes(':' + f.file.line + ':')), JSON.stringify(keysOf(a)));
   for (const rel of ['.claude/commands/myteam-ship.md', '.gitignore']) fs.writeFileSync(path.join(dir, rel), '# added one\n# added two\n# added three\n' + read(path.join(dir, rel)));
