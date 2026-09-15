@@ -281,9 +281,9 @@ A separate notice says when the old copy-install still sits beside the plugin: e
 
 A project has two settings files. `.claude/settings.json` is committed and shared: setup merges in only the marketplace pointer and the enabled plugin, which is what makes a collaborator's Claude Code offer the install. `.claude/settings.local.json` is yours and never pushed: your real permissions live there, and setup only adds the missing baseline rows.
 
-The baseline has no `glab` rows: a GitHub-hosted project never needs them. On a GitLab repo, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, `Bash(glab issue reopen *)`, `Bash(glab mr create *)`, `Bash(glab mr view *)`, and `Bash(glab mr list *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
+The baseline carries the four `glab` rows the toolkit's own host commands run, the GitLab twins of its `gh issue create`, `gh issue view`, `gh pr create` and `gh pr list` rows, so a GitLab repo needs no extra row for them and a GitHub-hosted project simply never runs them. For other GitLab work, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, `Bash(glab issue reopen *)`, and `Bash(glab mr view *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
 
-Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, already covered by the `git config` row. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
+Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, which the baseline allows as that exact command and nothing broader. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
 
 | Permission | Why it's here |
 |---|---|
@@ -291,7 +291,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories |
 | `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git stash *)` | Branch management and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
-| `Bash(git config *)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Git setup (e.g. safe.directory, remote URLs). `git config --get remote.origin.url` is also how commands detect whether this repo is on GitHub or GitLab |
+| `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |
 | `Bash(git check-ignore *)` | Verifying .gitignore rules before committing |
 | `Bash(git worktree *)` | Creating, listing, and removing worktrees for parallel sessions |
 | `Bash(git rev-parse *)`, `Bash(git rev-list *)` | Worktree detection, repo path queries, commit-range checks |
@@ -301,14 +301,14 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(gh label list *)`, `Bash(gh label create *)` | Managing GitHub labels |
 | `Bash(gh pr create *)`, `Bash(gh pr view *)`, `Bash(gh pr diff *)`, `Bash(gh pr list *)` | Pull request workflows (GitHub). `/document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
 | `Bash(gh api *)`, `Bash(gh release list *)` | GitHub API calls and release checks. `/review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
-| `Bash(npm install *)`, `Bash(npm uninstall *)` | Managing dependencies |
+| `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab mr create *)`, `Bash(glab mr list *)` | The same host commands on a GitLab repo: `/create-issue` and the cycle issue `/upgrade` opens, reading an issue, and `/document`'s merge request and its link |
+| `Bash(npm install)`, `Bash(npm install --prefix .claude/worktrees/*)`, `Bash(npm uninstall *)` | A plain `npm install` of the project's own dependencies, the install `/worktree` runs inside a new worktree, and removing a package. Installing any other package is not pre-approved and asks once, because an install can run that package's own install scripts |
 | `Bash(npm audit *)`, `Bash(npm outdated *)` | Dependency security and freshness checks (used by `/review-deps`) |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | The built-in file tools setup allows. These are real allow rows: `Edit` and `Write` approve file edits inside the project without a prompt |
 | `WebFetch(domain:github.com)`, `WebFetch(domain:raw.githubusercontent.com)`, `WebSearch` | Fetching GitHub content and web search |
 | `Bash(cp *)` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
 | `Bash(ls *)`, `Bash(diff *)`, `Bash(echo *)`, `Bash(mkdir *)`, `Bash(cat *)` | Reading directories, comparing files, writing output, creating folders |
 | `Bash(mktemp -d /tmp/*)` | Per-run temp folders under `/tmp` (render payloads, browser actions, media prompts, the GitHub issue and PR body file), so two sessions never share a file. Each plugin command or skill that calls it also carries this rule in its own `allowed-tools`, so it works before `/setup` has run |
-| `Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)`, `Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)` | The two exact heading checks `/index` runs on its temp map before it replaces `CODEBASE_MAP.md`. Exact form, no wildcard |
 | `Skill(tk:explore)`, `Skill(tk:explore:*)`, `Skill(tk:create-plan)`, `Skill(tk:create-plan:*)`, `Skill(tk:execute)`, `Skill(tk:execute:*)`, `Skill(tk:review)`, `Skill(tk:review:*)`, `Skill(tk:document)`, `Skill(tk:document:*)` | The workflow stages, which hand off to each other through the Skill tool (M14) without a prompt |
 | `Skill(tk:index)`, `Skill(tk:index:*)`, `Skill(tk:upgrade)`, `Skill(tk:upgrade:*)` | Stages invoked by another stage: `/explore` generates a missing map with `/index`, and `/setup` chains into `/upgrade` after a migration |
 | `Skill(tk:project-context)`, `Skill(tk:project-context:*)`, `Skill(tk:design-rules)`, `Skill(tk:design-rules:*)` | Skills loaded by name mid-run: project context for review dispatches, and the design rules when `/explore` or `/execute` runs its design step |

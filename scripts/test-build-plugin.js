@@ -2,7 +2,7 @@
 'use strict';
 // test-build-plugin.js - assertions for scripts/build-plugin.js (issue #167, Step 4;
 // site overrides #176, quoted inline cats and the inline command guard #172,
-// seeds #173).
+// seeds #173, narrowed seed rows #180).
 //
 // Same shape as the other suites (test-render-html.js, test-pre-push-check.js):
 // dependency-free, prints one line per check, exits non-zero on any failure.
@@ -382,6 +382,26 @@ const mutatedLine = firstDataLine.replace('`' + droppedRow + '`, ', '').replace(
 write(live, 'toolkit-reference.mutated.md', refText.replace(firstDataLine, mutatedLine));
 const mutatedDrift = rowDrift(permissionTableRows(read(live, 'toolkit-reference.mutated.md')), seedAllowRows);
 check('mutation: dropping one table row trips the drift assertion', droppedRow !== '' && mutatedLine !== firstDataLine && mutatedDrift.missing.length === 1 && mutatedDrift.missing[0] === droppedRow && mutatedDrift.extra.length === 0, JSON.stringify({ droppedRow, mutatedDrift }));
+// The seed rows grant only what the toolkit runs (issue #180): `git config` is
+// the host-detection read alone, `npm install` is the plain install and the
+// worktree install, the /index grep rows are gone, and every gh or glab host
+// command host-cli.md tells Claude to run has its row, on both hosts.
+const liveRetired = read(live, 'seed/retired-permission-rows.txt').split(/\r?\n/).filter(l => l && !l.startsWith('#'));
+const NARROWED_ROWS = ['Bash(git config --get remote.origin.url)', 'Bash(npm install)', 'Bash(npm install --prefix .claude/worktrees/*)'];
+const DROPPED_ROWS = ['Bash(git config *)', 'Bash(npm install *)', 'Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)', 'Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)'];
+check('live: the seed carries the narrowed git config and npm install rows', NARROWED_ROWS.every(x => seedAllowRows.includes(x)), NARROWED_ROWS.filter(x => !seedAllowRows.includes(x)).join(', '));
+const broadSeedRows = seedAllowRows.filter(x => /^Bash\(git config(:\*| \*)\)$/.test(x) || /^Bash\(npm (install|i|ci)(:\*| \*)\)$/.test(x) || x.includes('CODEBASE_MAP.md.tmp'));
+check('live: the seed carries no broad git config or npm install row and no /index grep row', broadSeedRows.length === 0, broadSeedRows.join(', '));
+check('live: every row the seed dropped is on the retired list, and no seed row is', DROPPED_ROWS.every(x => liveRetired.includes(x)) && !seedAllowRows.some(x => liveRetired.includes(x)),
+  DROPPED_ROWS.filter(x => !liveRetired.includes(x)).concat(seedAllowRows.filter(x => liveRetired.includes(x))).join(', '));
+const hostCommands = [...new Set([...read(REPO, '.claude/skills/shared/host-cli.md').matchAll(/`((?:gh|glab) (?:issue|pr|mr) [a-z]+)[^`]*`/g)].map(m => m[1]))];
+check('live: every gh and glab issue, PR and MR command in host-cli.md has its seed row', hostCommands.includes('glab mr list') && hostCommands.includes('gh issue create') && hostCommands.every(c => seedAllowRows.includes('Bash(' + c + ' *)')),
+  hostCommands.filter(c => !seedAllowRows.includes('Bash(' + c + ' *)')).join(', ') + ' of ' + hostCommands.join(', '));
+// Claude Code matches `Bash(x:*)` exactly as `Bash(x *)`, so two such rows are one rule written twice.
+const spellingKey = (row) => row.replace(/^(Bash|PowerShell)\(([\s\S]*):\*\)$/, '$1($2 *)');
+check('live: no two seed rows are the same rule in two spellings', new Set(seedAllowRows.map(spellingKey)).size === seedAllowRows.length);
+const permissionsSection = refText.slice(refText.indexOf('\n## Permissions\n'), refText.indexOf('\n## ', refText.indexOf('\n## Permissions\n') + 1));
+check('live: the Permissions section no longer claims a safe.directory use or a broad git config row', refText.includes('\n## Permissions\n') && !permissionsSection.includes('safe.directory') && !permissionsSection.includes('`Bash(git config *)`'), permissionsSection.slice(0, 200));
 
 // Every live command whose emitted text or inlined chain runs `mktemp -d /tmp/` carries
 // the rule (host-cli.md reaches create-issue through its inline cat), and the rule is

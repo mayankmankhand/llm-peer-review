@@ -1,17 +1,19 @@
 # retired-permission-rows.txt - permission rows the toolkit seed used to carry and no
-# longer does (issue #173). A project migrated onto the plugin with /tk:setup on 7.0.0
-# or 7.0.1 received every row of that release seed in .claude/settings.local.json;
-# the rows below are the ones the current seed drops: maintainer-only grants from the
-# toolkit repository, rows naming a script under the old copy-install scripts folder
-# (plugin commands carry their own script permissions), browser launcher rows Claude
-# never runs directly (the artifact opener script runs them itself), and unscoped
-# Skill rows the tk: rows replace.
-# The upgrade audit removes these rows from migrated projects.
+# longer does (issues #173 and #180). A project set up or migrated with /tk:setup on
+# 7.0.0, 7.0.1 or 7.1.0 received every row of that release seed in
+# .claude/settings.local.json; the rows below are the ones the current seed drops:
+# maintainer-only grants from the toolkit repository, rows naming a script under the
+# old copy-install scripts folder (plugin commands carry their own script permissions),
+# browser launcher rows Claude never runs directly (the artifact opener script runs
+# them itself), unscoped Skill rows the tk: rows replace, two broad rows narrowed to
+# the commands the toolkit runs (`git config` and `npm install`), and the two exact
+# grep heading checks of /index's old map-finalizing steps.
+# The upgrade audit removes these rows from projects that still carry them.
 #
 # Format: one row per line, exactly as the JSON string in the allow list, sorted.
 # Lines starting with # are comments. Generated, not hand-edited: the union of the
-# allow rows in plugin/seed/settings.local.json at tags v7.0.0 and v7.0.1, minus the
-# allow rows in seed/settings.local.json.
+# allow rows in plugin/seed/settings.local.json at tags v7.0.0, v7.0.1 and v7.1.0,
+# minus the allow rows in seed/settings.local.json.
 Bash(awk '{a+=$1; r+=$2} END {print "added:", a, "removed:", r, "total:", a+r}')
 Bash(awk '{print length, $0}')
 Bash(bash -n scripts/setup/bump-version.sh)
@@ -22,9 +24,12 @@ Bash(cat * | node .claude/scripts/browse.js *)
 Bash(command -v pwsh)
 Bash(echo * | node .claude/scripts/browse.js *)
 Bash(explorer.exe *)
+Bash(git config *)
 Bash(grep "\\.md$")
 Bash(grep -E "\\.js$")
 Bash(grep -n "^!\\`cat" .claude/skills/audit-html/SKILL.md)
+Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)
+Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)
 Bash(grep -rn '!`cat' .claude/skills/)
 Bash(grep -v ".html$")
 Bash(node .claude/scripts/ask-gemini.js *)
@@ -37,6 +42,7 @@ Bash(node .claude/scripts/pre-push-check.js *)
 Bash(node .claude/scripts/pre-push-check.js)
 Bash(node .claude/scripts/render-html.js *)
 Bash(node .claude/scripts/session-init.js)
+Bash(npm install *)
 Bash(open *)
 Bash(powershell.exe *)
 Bash(pwsh -NoProfile -Command '& { $ErrorActionPreference='\\''Stop'\\''; try { [scriptblock]::Create\(\(Get-Content -Raw scripts/setup/setup.ps1\)\) | Out-Null; Write-Output '\\''setup.ps1 syntax OK'\\'' } catch { Write-Output "setup.ps1 syntax error: $_"; exit 1 } }')
