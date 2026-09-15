@@ -648,6 +648,19 @@ function strayBesideMap(sb) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// Is `dir` outside every root, compared as real paths the way removeHandoff()
+// compares them? A root that does not exist holds nothing.
+function outsideRoots(dir, roots) {
+  let real;
+  try { real = fs.realpathSync(dir); } catch (e) { return false; }
+  return !roots.some(function (root) {
+    let base;
+    try { base = fs.realpathSync(root); } catch (e) { return false; }
+    const rel = path.relative(base, real);
+    return rel === '' || !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel));
+  });
+}
+
 // --- the hand-off file is deleted only from the temp directory ---------------
 // --add and --set-axial remove the --data file after reading it, because it
 // carries the private layer untruncated. The path is the caller's and the script
@@ -657,40 +670,58 @@ function strayBesideMap(sb) {
 // (holistic review, R2).
 {
   const sb = makeSandbox('handoff');
-  const inside = writeRows(sb, [{ scope: 'toolkit', open_code: 'inside the temp directory' }]);
-  run(sb, ['--add', '--data', inside]);
+  // The script takes "the temp directory" to be os.tmpdir() or /tmp. Every child in
+  // this block runs with its own fresh temp folder, so "inside" is a place this
+  // block controls rather than whatever the machine's TMPDIR happens to be.
+  const childTemp = path.join(sb.root, 'child-tmp');
+  fs.mkdirSync(childTemp, { recursive: true });
+  const tempEnv = { TMPDIR: childTemp, TMP: childTemp, TEMP: childTemp };
+  const tempRoots = [childTemp, '/tmp'];
+
+  const inside = path.join(childTemp, 'correction-rows-handoff.json');
+  fs.writeFileSync(inside, JSON.stringify([{ scope: 'toolkit', open_code: 'inside the temp directory' }]), 'utf-8');
+  run(sb, ['--add', '--data', inside], { env: tempEnv });
   check('--add removes a hand-off file that lives in the temp directory',
     !fs.existsSync(inside), 'the consumed file is still there');
 
-  // The outside fixture must be under neither os.tmpdir() nor /tmp, and every
-  // sandbox is under os.tmpdir(), so it lands in a gitignored corner of this
-  // repo instead and is removed on the way out. It is named like the realistic
-  // typo. A checkout that itself lives under /tmp fails the precondition check
-  // by name rather than passing the wrong test.
-  const outsideParent = path.resolve(__dirname, '..', 'artifacts', 'html');
-  fs.mkdirSync(outsideParent, { recursive: true });
-  const outsideDir = fs.mkdtempSync(path.join(outsideParent, 'ledger-handoff-'));
+  // The outside fixture must be under neither temp root. The repo's gitignored
+  // artifacts/html serves when the checkout is outside both. A checkout under /tmp
+  // (a scratch clone, as the release rehearsal uses) has every repo path inside
+  // /tmp, which the script treats as temp whatever TMPDIR says, and the suite
+  // failed there (issue #183). So /var/tmp stands in: a standard temp folder on
+  // Linux and macOS that the script does not treat as one. Either way the folder is
+  // named like the realistic typo and removed on the way out.
+  const repoRoot = path.resolve(__dirname, '..');
+  const candidates = [
+    { usable: function () { return outsideRoots(repoRoot, tempRoots); }, parent: path.join(repoRoot, 'artifacts', 'html') },
+    { usable: function () { return outsideRoots('/var/tmp', tempRoots); }, parent: '/var/tmp' }
+  ];
+  let outsideDir = null;
+  for (let i = 0; i < candidates.length && outsideDir === null; i++) {
+    if (!candidates[i].usable()) continue;
+    try {
+      fs.mkdirSync(candidates[i].parent, { recursive: true });
+      outsideDir = fs.mkdtempSync(path.join(candidates[i].parent, 'ledger-handoff-'));
+    } catch (e) { outsideDir = null; }
+  }
   try {
-    const outside = path.join(outsideDir, 'package.json');
-    fs.writeFileSync(outside, JSON.stringify([{ scope: 'toolkit', open_code: 'outside the temp directory' }]), 'utf-8');
-    const realOutside = fs.realpathSync(outsideDir);
-    const underTemp = [os.tmpdir(), '/tmp'].some(function (root) {
-      let base;
-      try { base = fs.realpathSync(root); } catch (e) { return false; }
-      const rel = path.relative(base, realOutside);
-      return rel === '' || !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel));
-    });
-    check('the outside fixture really is outside the temp directory', !underTemp, realOutside);
-
-    const res = runRaw(sb, ['--add', '--data', outside]);
-    check('--add still appends from a --data file outside the temp directory',
-      res.status === 0 && JSON.parse(res.stdout || '{}').added === 1, res.stderr || ('exit ' + res.status));
-    check('--add leaves a --data file outside the temp directory in place',
-      fs.existsSync(outside), 'the file was deleted: `--data package.json` typed in a project would remove that file');
-    check('--add says on stderr that it left the file alone',
-      /left .+ in place/.test(res.stderr), JSON.stringify(res.stderr));
+    check('the outside fixture really is outside the temp directory',
+      outsideDir !== null && outsideRoots(outsideDir, tempRoots),
+      outsideDir === null ? 'no writable folder outside ' + tempRoots.join(' and ') + ': tried the repo and /var/tmp'
+        : fs.realpathSync(outsideDir));
+    if (outsideDir !== null) {
+      const outside = path.join(outsideDir, 'package.json');
+      fs.writeFileSync(outside, JSON.stringify([{ scope: 'toolkit', open_code: 'outside the temp directory' }]), 'utf-8');
+      const res = runRaw(sb, ['--add', '--data', outside], { env: tempEnv });
+      check('--add still appends from a --data file outside the temp directory',
+        res.status === 0 && JSON.parse(res.stdout || '{}').added === 1, res.stderr || ('exit ' + res.status));
+      check('--add leaves a --data file outside the temp directory in place',
+        fs.existsSync(outside), 'the file was deleted: `--data package.json` typed in a project would remove that file');
+      check('--add says on stderr that it left the file alone',
+        /left .+ in place/.test(res.stderr), JSON.stringify(res.stderr));
+    }
   } finally {
-    fs.rmSync(outsideDir, { recursive: true, force: true });
+    if (outsideDir !== null) fs.rmSync(outsideDir, { recursive: true, force: true });
   }
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
