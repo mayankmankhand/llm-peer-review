@@ -47,11 +47,18 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { chromium } = require('playwright-core');
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
+// Native Windows limits that remain (issue #183): screenshotDir and
+// serverPidFile below are POSIX paths. On native Windows '/tmp' means \tmp on
+// the current drive, not the user's temp folder. That folder usually does not
+// exist, so the PID file write fails and an autoStart run stops with a JSON
+// error; screenshots still work, because Playwright creates the folder, but
+// they land in \tmp. The dev server spawn and stop further down do handle
+// win32; full native Windows support is not a goal (Linux, macOS and WSL are).
 const CONFIG = {
   navigationTimeoutMs: 10000,
   actionTimeoutMs: 5000,
@@ -87,6 +94,7 @@ const ERR = {
     ? `${action} on "${target}" timed out after ${ms}ms. Element not found, or page not fully loaded.`
     : `${action} timed out after ${ms}ms. Is the page fully loaded?`,
   SERVER_START_TIMEOUT: (ms) => `Dev server did not become ready within ${ms}ms.`,
+  SERVER_SPAWN_FAILED: (command, msg) => `Could not start the dev server with "${command}": ${msg}`,
   NO_DEV_SCRIPT: 'No "dev" or "start" script found in project package.json.',
 };
 
@@ -130,9 +138,64 @@ async function detectServer(ports) {
 let autoStartedProcess = null;
 
 /**
- * Kill a process by PID, ignoring errors if it is already gone.
+ * The platform the dev server helpers act for: process.platform, except that
+ * scripts/test-browse-spawn.js sets TK_BROWSE_TEST_PLATFORM to walk the win32
+ * path on Linux (and the POSIX path anywhere). Nothing else sets it.
+ */
+function hostPlatform() {
+  return process.env.TK_BROWSE_TEST_PLATFORM || process.platform;
+}
+
+/**
+ * How to start the dev server for a package.json script on a platform, as
+ * { command, args, options } for spawn().
+ *
+ * POSIX, unchanged: npm directly, in a new process group (detached), so
+ * killProcess can stop npm and the server it started together.
+ *
+ * win32 (issue #183): npm is a .cmd shim there, and Node cannot launch a .cmd
+ * file without a shell (Node docs, "Spawning .bat and .cmd files on Windows"),
+ * so autoStart never worked. It runs through the shell as one command string:
+ * scriptName is only ever "dev" or "start", so there is nothing to escape, and
+ * an args array with shell: true draws Node's DEP0190 warning. Not detached:
+ * on Windows that gives the child a console window of its own, and killProcess
+ * stops the tree by parent PID there, not by process group.
+ */
+function devServerCommand(scriptName, projectDir, platform) {
+  if (platform === 'win32') {
+    return {
+      command: `npm run ${scriptName}`,
+      args: [],
+      options: { cwd: projectDir, stdio: 'ignore', shell: true, windowsHide: true },
+    };
+  }
+  return {
+    command: 'npm',
+    args: ['run', scriptName],
+    options: {
+      cwd: projectDir,
+      stdio: 'ignore',
+      detached: true, // New process group so we can kill npm + its children together
+    },
+  };
+}
+
+/**
+ * Kill a process and what it started, ignoring errors if it is already gone.
  */
 function killProcess(pid) {
+  if (!pid) return; // a spawn that failed has no process to kill
+  if (hostPlatform() === 'win32') {
+    // Issue #183: Windows has no process group to signal, and a plain kill
+    // stops only the shell, leaving npm and the server running. taskkill /T
+    // ends the whole tree and /F forces it. spawnSync, because this also runs
+    // in the 'exit' handler, where nothing asynchronous gets to finish.
+    const r = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 });
+    if (r.error) {
+      try { process.kill(pid); } catch (_) { /* already gone */ }
+    }
+    return;
+  }
   try {
     // Kill the entire process group (negative PID) so child servers
     // spawned by npm are also terminated, not just the npm wrapper.
@@ -229,20 +292,27 @@ async function startServer(projectDir) {
     CONFIG.defaultPorts.filter((_, i) => aliveBeforeStates[i])
   );
 
-  // Spawn the dev server
-  const child = spawn('npm', ['run', scriptName], {
-    cwd: projectDir,
-    stdio: 'ignore',
-    detached: true, // New process group so we can kill npm + its children together
-  });
+  // Spawn the dev server (devServerCommand holds the per-platform form)
+  const server = devServerCommand(scriptName, projectDir, hostPlatform());
+  const commandLine = [server.command, ...server.args].join(' ');
+  const child = spawn(server.command, server.args, server.options);
+
+  // Issue #183: a spawn that cannot start its command (no npm on PATH, or no
+  // shell) reports it through an 'error' event. With no listener that event
+  // threw and ended this script with a stack trace instead of its JSON; now
+  // the poll below turns it into the JSON error.
+  let spawnError = null;
+  child.on('error', (err) => { spawnError = err; });
 
   autoStartedProcess = child;
-  // unref so the parent's event loop isn't held open by the detached child.
-  // We still kill the whole process group on cleanup via process.kill(-pid).
+  // unref so the parent's event loop isn't held open by the child. Cleanup
+  // still stops it and what it started, through killProcess.
   child.unref();
 
-  // Write PID file
-  fs.writeFileSync(CONFIG.serverPidFile, String(child.pid), 'utf-8');
+  // Write PID file (a spawn that failed has no PID to record)
+  if (child.pid) {
+    fs.writeFileSync(CONFIG.serverPidFile, String(child.pid), 'utf-8');
+  }
 
   // Poll until a port that was NOT already alive starts responding. Probe all
   // default ports in parallel each tick. If a port that WAS alive in the
@@ -254,6 +324,11 @@ async function startServer(projectDir) {
     const liveStates = await Promise.all(
       CONFIG.defaultPorts.map((p) => checkPort(p, CONFIG.portCheckTimeoutMs))
     );
+    // A failed spawn is reported by now: the event fires on the next tick.
+    if (spawnError) {
+      stopAutoStartedServer();
+      throw new Error(ERR.SERVER_SPAWN_FAILED(commandLine, spawnError.message));
+    }
     CONFIG.defaultPorts.forEach((port, i) => {
       if (!liveStates[i]) portsAliveBeforeSpawn.delete(port);
     });
