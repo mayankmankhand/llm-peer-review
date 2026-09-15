@@ -1147,8 +1147,11 @@ console.log('\n4e. state stamping: a lost state file, an unreadable version (rev
   fs.cpSync(repo, newerForMutant, { recursive: true });
   const newerForStampMutant = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-lost-state-newer-stamp-mutant-'));
   fs.cpSync(repo, newerForStampMutant, { recursive: true });
-  const OLDER_SAID = /already carries the plugin's stamp 7\.1\.0: [^\n]*previousVersion 7\.1\.0 and version 7\.1\.0 \(never lower than the stamp\) are recorded and no audited version, but this plugin \(v7\.0\.0\) is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated \(run `claude plugin update tk@llm-peer-review`, then restart Claude Code\)\./;
-  const UPDATE_NEXT = /Next: update the plugin to 7\.1\.0 or later \(`claude plugin update tk@llm-peer-review`\), then restart Claude Code\. Pushes stay blocked until then\./;
+  // The one plugin update message (issue #183): the marketplace update, then the
+  // plugin update with its project-scope form, then the restart, in that order.
+  const UPDATE_STEPS = /run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review` \(for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`\), then restart Claude Code/.source;
+  const OLDER_SAID = new RegExp(/already carries the plugin's stamp 7\.1\.0: [^\n]*previousVersion 7\.1\.0 and version 7\.1\.0 \(never lower than the stamp\) are recorded and no audited version, but this plugin \(v7\.0\.0\) is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated\. To update it, /.source + UPDATE_STEPS + /\./.source);
+  const UPDATE_NEXT = new RegExp(/Next: update the plugin to 7\.1\.0 or later: /.source + UPDATE_STEPS + /\. Pushes stay blocked until then\./.source);
   check('R1 newer-stamp fixture: a 7.1.0-stamped rules file and no state file', read(repo, RULES).includes('Toolkit version: 7.1.0 |') && stateOf(repo) === null);
   snap = fullSnapshot(repo);
   r = run(repo, pluginRoot, ['--dry-run']);

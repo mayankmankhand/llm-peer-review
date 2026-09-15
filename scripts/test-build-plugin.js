@@ -2,7 +2,9 @@
 'use strict';
 // test-build-plugin.js - assertions for scripts/build-plugin.js (issue #167, Step 4;
 // site overrides #176, quoted inline cats and the inline command guard #172,
-// seeds #173, narrowed seed rows #180).
+// seeds #173, narrowed seed rows #180; the setup skill's project paths, the
+// plugin-root install rules and the root helper hashes #180, the /document
+// create rows #181, the review scope row #182, stamps that follow --version #183).
 //
 // Same shape as the other suites (test-render-html.js, test-pre-push-check.js):
 // dependency-free, prints one line per check, exits non-zero on any failure.
@@ -17,6 +19,7 @@
 // Exit codes: 0 every check passed, 1 at least one check failed.
 
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -68,6 +71,25 @@ const RAW_SEEDS = ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFI
 const UNQUOTED_CAT = /!`cat \$\{CLAUDE_PLUGIN_ROOT\}/;
 const QUOTED_CAT = /!`cat "\$\{CLAUDE_PLUGIN_ROOT\}\/[^`"\s]+"`/g;
 const BARE_FAMILY = /(^|[^\w./:\-])\/(review|ask)-\*/;
+// The emitted files that carry a toolkit version stamp (#183), written out here
+// rather than read from the build script, so the checks judge the script.
+const STAMPED = ['seed/rules-toolkit.md', 'skills/shared/html-outputs.md', 'skills/shared/toolkit-reference.md'];
+const stampOf = (text) => (/<!-- Toolkit version: ([^ |]+) \|/.exec(text) || [])[1];
+// The exact install rules the Browser QA skill needs in the plugin (#180).
+const NPM_INSTALL_RULE = 'Bash(npm install --prefix "${CLAUDE_PLUGIN_ROOT}")';
+const NPX_CHROMIUM_RULE = 'Bash(npx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core install chromium)';
+// The two create rows in host-cli.md, as a command's text names them, and the rows
+// each needs on both hosts (#181).
+const CREATE_ROWS = {
+  '"Create issue" row': ['Bash(gh issue create *)', 'Bash(glab issue create *)'],
+  '"Create PR / MR" row': ['Bash(gh pr create *)', 'Bash(glab mr create *)'],
+};
+// The root helper hash list (#180) and the sha256 setup-project.js compares with
+// it: over the file with every carriage return removed.
+const HASHES_REL = 'scripts/historical-helper-hashes.txt';
+const shaNoCR = (buf) => crypto.createHash('sha256').update(Buffer.from(Buffer.from(buf).toString('latin1').replace(/\r/g, ''), 'latin1')).digest('hex');
+const FIXTURE_HASH_A = shaNoCR('// an early copy of ask-gpt.js\n');
+const FIXTURE_HASH_B = shaNoCR('// a later copy of ask-gpt.js\n');
 
 // --- Fixture: a miniature toolkit source with every rewrite case planted ----
 function makeFixture() {
@@ -81,6 +103,7 @@ function makeFixture() {
     'Debates are the `/ask-*` family; an already scoped `/tk:review-*` stays single. Scratch pages are `/tmp/playground-*.html`, and skill files match `.claude/skills/review-*/SKILL.md`.',
     'Spawn a subagent with `subagent_type=review-finder` and a fallback `subagent_type=general-purpose`.',
     'Read `.claude/skills/project-context/SKILL.md` and `.claude/rules/toolkit.md`; settings live in `.claude/settings.local.json`.',
+    'A project may keep its own instructions in `.claude/CLAUDE.md`.',
     'The old rules file was `.claude/rules/html-outputs.md`.',
     'Artifacts go to artifacts/html/review.html and reports/review-orchestrator-x.md.',
     '',
@@ -94,10 +117,11 @@ function makeFixture() {
   write(src, 'commands/document.md', '# Document\n\nRun `node .claude/scripts/correction-ledger.js --rollup` and open `bash .claude/scripts/open-artifact.sh x`.\n');
   write(src, 'agents/review-finder.md', '---\nname: review-finder\ndescription: finder for /review\ntools: Read\n---\n\nSee `.claude/skills/shared/model-routing.md`.\n');
   write(src, 'skills/review-code/SKILL.md', '---\nname: review-code\ndescription: code review\nallowed-tools:\n  - Read\n  - Bash\n---\n\n# Code Review\n\n!`cat .claude/skills/shared/html-render-review.md`\n');
-  write(src, 'skills/review-browser/SKILL.md', '---\nname: review-browser\ndescription: browser qa\nallowed-tools: Read Bash\n---\n\nDrive `node .claude/scripts/browse.js` per `.claude/skills/shared/browse-api.md`.\n');
+  write(src, 'skills/review-browser/SKILL.md', '---\nname: review-browser\ndescription: browser qa\nallowed-tools: Read Bash\n---\n\nDrive `node .claude/scripts/browse.js` per `.claude/skills/shared/browse-api.md`.\n\n```bash\nnpm install --prefix .claude/scripts\nnpx --prefix .claude/scripts playwright-core install chromium\n```\n');
   write(src, 'skills/shared/hitl-loop.md', 'M11: run `node .claude/scripts/pre-push-check.js` before a push.\n\n!`cat .claude/rules/html-outputs.md`\n');
   write(src, 'skills/shared/html-render-review.md', 'Run `node .claude/scripts/render-html.js --shell review`.\n');
-  write(src, 'skills/shared/html-outputs.md', 'Relocated HTML rules. Open with `bash .claude/scripts/open-artifact.sh`.\n');
+  write(src, 'skills/shared/html-outputs.md', '# HTML outputs\n\n<!-- Toolkit version: 9.9.9 | Managed by LLM Peer Review. -->\n\nRelocated HTML rules. Open with `bash .claude/scripts/open-artifact.sh`.\n');
+  write(src, 'skills/shared/toolkit-reference.md', '# Toolkit reference\n\n<!-- Toolkit version: 9.9.9 | Managed by LLM Peer Review. -->\n\n');
   write(src, 'skills/shared/model-routing.md', 'roster\n');
   write(src, 'skills/shared/browse-api.md', 'api\n');
   write(src, 'skills/shared/temp-folder.md', 'Run `mktemp -d /tmp/fixture-render.XXXXXX` and write `data.json` inside it.\n');
@@ -129,7 +153,10 @@ function makeFixture() {
   write(root, 'seed/artifacts-README.md', '# artifacts\n');
   write(root, 'seed/retired-permission-rows.txt', '# retired rows\nBash(node .claude/scripts/browse.js *)\nBash(bash -n scripts/setup/setup.sh)\nSkill(review)\n');
   write(root, 'seed/settings.local.json', '{ "permissions": { "allow": ["Bash(git add *)", "Skill(tk:review)"] } }\n');
-  write(root, 'scripts/historical-managed-paths.txt', '# a comment line is ignored\n\n.claude/commands/review-code.md\n.claude/skills/shared/output-template.md\n');
+  write(root, 'scripts/historical-managed-paths.txt', '# a comment line is ignored\n\n.claude/commands/review-code.md\n.claude/skills/shared/output-template.md\nscripts/ask-gpt.js\n');
+  // Out of order, one hash twice, a comment and a blank line: the build emits each
+  // root helper's hashes sorted, each once.
+  write(root, HASHES_REL, '# copies of the root helper\n\nscripts/ask-gpt.js ' + FIXTURE_HASH_B + '\nscripts/ask-gpt.js ' + FIXTURE_HASH_A + '\nscripts/ask-gpt.js ' + FIXTURE_HASH_B + '\n');
   for (const emitted of Object.keys(lib.SITE_OVERRIDES)) {
     const abs = path.join(src, sourceRelOf(emitted));
     fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -155,7 +182,48 @@ function copyLiveSource() {
   fs.cpSync(path.join(REPO, 'seed'), path.join(root, 'seed'), { recursive: true, filter: (p) => !neverCopy(p) });
   fs.copyFileSync(path.join(REPO, 'VERSION'), path.join(root, 'VERSION'));
   write(root, 'scripts/historical-managed-paths.txt', read(REPO, 'scripts/historical-managed-paths.txt'));
+  if (exists(REPO, HASHES_REL)) write(root, HASHES_REL, read(REPO, HASHES_REL));
   return { root, src: path.join(root, '.claude') };
+}
+
+// git in this repository, arguments as an array; stdout (text, or a Buffer when
+// `raw`), or null when git fails.
+function repoGit(args, raw) {
+  const r = spawnSync('git', args, { cwd: REPO, encoding: raw ? 'buffer' : 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return r.status === 0 ? r.stdout : null;
+}
+// Whether this checkout carries its full git history (a shallow clone or an
+// exported tree does not), which the recomputation of the helper hashes needs.
+function fullHistory() {
+  const shallow = repoGit(['rev-parse', '--is-shallow-repository']);
+  return shallow !== null && shallow.trim() === 'false';
+}
+// Every copy of each root helper script in HEAD's history, as CR-stripped
+// sha256 values, sorted and each once: the list scripts/historical-helper-hashes.txt
+// must hold. --full-history keeps a copy that only a merged side branch carried.
+// A commit that deleted the file holds no copy and is skipped.
+function helperHashesFromHistory(rootHelpers) {
+  const out = {};
+  for (const rel of rootHelpers) {
+    const log = repoGit(['log', '--full-history', '--format=%H', 'HEAD', '--', rel]);
+    if (log === null) return null;
+    const hashes = new Set();
+    for (const commit of log.split('\n').filter(Boolean)) {
+      const blob = repoGit(['cat-file', 'blob', commit + ':' + rel], true);
+      if (blob !== null) hashes.add(shaNoCR(blob));
+    }
+    out[rel] = [...hashes].sort();
+  }
+  return out;
+}
+// The newest copy of `rel` in HEAD's history, as a Buffer, or null.
+function newestHistoricalCopy(rel) {
+  const log = repoGit(['log', '--full-history', '--format=%H', 'HEAD', '--', rel]);
+  for (const commit of (log || '').split('\n').filter(Boolean)) {
+    const blob = repoGit(['cat-file', 'blob', commit + ':' + rel], true);
+    if (blob !== null) return blob;
+  }
+  return null;
 }
 
 function runBuild(args, cwd) {
@@ -219,6 +287,17 @@ const askGptFm = fm(read(out, 'commands/ask-gpt.md'));
 check('a command inlining a fragment that runs mktemp -d /tmp/ gets the mktemp rule', askGptFm.includes('  - ' + JSON.stringify(MKTEMP_RULE)), askGptFm);
 check('a command with no mktemp call anywhere in its chain gets no mktemp rule', !fm(review).includes(MKTEMP_RULE) && !fm(doc).includes(MKTEMP_RULE) && !fm(ci).includes(MKTEMP_RULE), fm(review) + fm(doc) + fm(ci));
 check('scriptRules adds the mktemp rule for a direct call and not for other temp paths', lib.scriptRules('Run `mktemp -d /tmp/x.XXXXXX`.\n', fxInv, fx.src).includes(MKTEMP_RULE) && !lib.scriptRules('Write to `/tmp/x.json`; see `mktemp -d "$TMPDIR/x"`.\n', fxInv, fx.src).includes(MKTEMP_RULE));
+// /document creates the worktree PR through host-cli.md's "Create PR / MR" row (#181).
+check('host rows are added for document: the PR create row on GitHub and the MR create row on GitLab', fm(doc).includes('  - "Bash(gh pr create *)"') && fm(doc).includes('  - "Bash(glab mr create *)"'), fm(doc));
+// Installs into the plugin root (#180): exact rules, quotes included, never a wildcard.
+check('the Browser QA skill gets an exact rule for each install into the plugin root it shows', fm(rb).includes('  - ' + JSON.stringify(NPM_INSTALL_RULE)) && fm(rb).includes('  - ' + JSON.stringify(NPX_CHROMIUM_RULE)), fm(rb));
+const installRules = (text) => lib.scriptRules(text, fxInv, fx.src).filter(x => x.includes('--prefix'));
+let installGot = installRules('```bash\nnpm install --prefix "${CLAUDE_PLUGIN_ROOT}"\nnpx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core install chromium\n```\n');
+check('scriptRules: each whole install command in a code block gets its exact rule', JSON.stringify(installGot) === JSON.stringify([NPM_INSTALL_RULE, NPX_CHROMIUM_RULE].sort()), JSON.stringify(installGot));
+installGot = installRules('Run `npm install --prefix "${CLAUDE_PLUGIN_ROOT}"` once.\n');
+check('scriptRules: an install command in a backtick span gets its exact rule', JSON.stringify(installGot) === JSON.stringify([NPM_INSTALL_RULE]), JSON.stringify(installGot));
+installGot = installRules('npm install --prefix "${CLAUDE_PLUGIN_ROOT}" left-pad\nnpx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core install chromium --force\nnpx --prefix "${CLAUDE_PLUGIN_ROOT}" playwright-core\n');
+check('scriptRules: a longer or shorter command (another package, another npx call) gets no install rule', installGot.length === 0, JSON.stringify(installGot));
 
 // --- 2b. Inline commands: quoting and the guard (issue #172) ------------------
 console.log('\n2b. inline command quoting and the unquoted-root guard');
@@ -280,6 +359,26 @@ check('managed-paths lists copy-install paths', managed.paths.includes('.claude/
 check('managed-paths adds every historical path and skips comments and blanks', managed.paths.includes('.claude/commands/review-code.md') && managed.paths.includes('.claude/skills/shared/output-template.md') && !managed.paths.some(p => p === '' || p.startsWith('#')));
 check('managed-paths lists each path once', new Set(managed.paths).size === managed.paths.length);
 check('managed-paths never lists node_modules or settings', !managed.paths.some(p => /node_modules|settings/.test(p)));
+check('managed-paths carries historicalHelperHashes beside version and paths: each root helper\'s hashes from the committed list, sorted, each once (#180)',
+  JSON.stringify(Object.keys(managed)) === JSON.stringify(['version', 'paths', 'historicalHelperHashes'])
+  && JSON.stringify(managed.historicalHelperHashes) === JSON.stringify({ 'scripts/ask-gpt.js': [FIXTURE_HASH_A, FIXTURE_HASH_B].sort() }), JSON.stringify(managed.historicalHelperHashes));
+check('a project\'s own .claude/CLAUDE.md stays a project path: kept as written, never mapped to the plugin root (#179)', lib.mapPath('.claude/CLAUDE.md', fx.src) === '.claude/CLAUDE.md'
+  && review.includes('instructions in `.claude/CLAUDE.md`.') && !review.includes('${CLAUDE_PLUGIN_ROOT}/CLAUDE.md'), String(lib.mapPath('.claude/CLAUDE.md', fx.src)));
+// Stamps (#183): the build's version lands in every stamped file of the output and
+// nowhere in the source.
+check('a build at the VERSION file\'s version keeps each stamp at that version', STAMPED.every(rel => stampOf(read(out, rel)) === '9.9.9'), STAMPED.map(rel => rel + ': ' + stampOf(read(out, rel))).join(', '));
+const fxStamped = path.join(fx.root, 'plugin-stamped');
+const fxStampedRun = runBuild(['--source', fx.src, '--out', fxStamped, '--version', '1.2.3', '--quiet']);
+check('--version 1.2.3 stamps all three stamped files 1.2.3, as plugin.json says, with the rest of each file unchanged', fxStampedRun.status === 0
+  && JSON.parse(read(fxStamped, '.claude-plugin/plugin.json')).version === '1.2.3'
+  && STAMPED.every(rel => exists(fxStamped, rel) && stampOf(read(fxStamped, rel)) === '1.2.3' && read(fxStamped, rel) === read(out, rel).replace('<!-- Toolkit version: 9.9.9 |', '<!-- Toolkit version: 1.2.3 |')),
+  fxStampedRun.stderr + STAMPED.map(rel => rel + ': ' + (exists(fxStamped, rel) ? stampOf(read(fxStamped, rel)) : 'missing')).join(', '));
+check('--version leaves the source stamps alone', stampOf(read(fx.src, 'rules/toolkit.md')) === '9.9.9' && stampOf(read(fx.src, 'skills/shared/html-outputs.md')) === '9.9.9' && stampOf(read(fx.src, 'skills/shared/toolkit-reference.md')) === '9.9.9');
+for (const [label, args] of [['a v-prefixed version', ['--version', 'v7.2.0']], ['a version with a stamp separator', ['--version', '7.2.0 | x']], ['no version after the flag', ['--version']]]) {
+  const badOut = path.join(fx.root, 'plugin-bad-version');
+  const r = runBuild(['--source', fx.src, '--out', badOut, ...args]);
+  check('--version with ' + label + ' exits 2, names the problem, and writes nothing', r.status === 2 && /--version needs a version such as 7\.2\.0/.test(r.stderr) && !exists(badOut, '.'), 'exit ' + r.status + ' ' + r.stderr);
+}
 check('the seed carries every project file the installer seeds', [...RAW_SEEDS, 'rules-toolkit.md'].every(r => exists(out, 'seed/' + r)));
 check('every raw seed equals its seed/ source byte for byte', RAW_SEEDS.every(r => fs.readFileSync(path.join(out, 'seed', r)).equals(fs.readFileSync(path.join(fx.root, 'seed', r)))), RAW_SEEDS.filter(r => !fs.readFileSync(path.join(out, 'seed', r)).equals(fs.readFileSync(path.join(fx.root, 'seed', r)))).join(', '));
 check('the maintainer root files are never seeded', read(out, 'seed/CLAUDE.md') !== read(fx.root, 'CLAUDE.md') && read(out, 'seed/gitignore') !== read(fx.root, '.gitignore'));
@@ -420,6 +519,89 @@ for (const f of fs.readdirSync(path.join(live, 'commands')).filter(n => n.endsWi
 check('live: create-issue and document carry the mktemp rule', liveMktemp.with.includes('create-issue.md') && liveMktemp.with.includes('document.md'), JSON.stringify(liveMktemp));
 check('live: the mktemp rule matches each command\'s own chain, and some commands go without it', !liveMktemp.mismatch && liveMktemp.without.length > 0, JSON.stringify(liveMktemp));
 
+// The setup skill names the PROJECT's old copy-install file .claude/commands/review.md
+// twice (#180): both mentions ship as written, and the plugin's own review.md is never named.
+const liveSetup = read(live, 'skills/setup/SKILL.md');
+check('live: the setup skill still says `.claude/commands/review.md` at both places, and never names the plugin\'s review.md',
+  liveSetup.includes('`VERSION` beside `.claude/commands/review.md`') && liveSetup.includes('`.claude/commands/review.md` sits beside it')
+  && !liveSetup.includes('${CLAUDE_PLUGIN_ROOT}/commands/review.md'), (liveSetup.match(/.{40}commands\/review\.md.{20}/g) || []).join(' | '));
+// The Browser QA install (#180): an exact rule for each install line the skill shows,
+// each rule's command as written in the skill, and no wildcard install into the plugin anywhere.
+const liveBrowser = read(live, 'skills/review-browser/SKILL.md');
+const liveBrowserBody = liveBrowser.replace(/^---\n[\s\S]*?\n---\n?/, '');
+check('live: the Browser QA skill allows exactly its two installs into the plugin root, each rule the command its text shows',
+  [NPM_INSTALL_RULE, NPX_CHROMIUM_RULE].every(rule => fm(liveBrowser).includes('  - ' + JSON.stringify(rule)) && liveBrowserBody.includes('\n' + rule.slice('Bash('.length, -1) + '\n')), fm(liveBrowser));
+const wildInstalls = walkFiles(live).filter(f => f.endsWith('.md')).flatMap(f => (fm(fs.readFileSync(f, 'utf8')).match(/^ {2}- "Bash\((?:npm|npx) [^\n]*\*[^\n]*\)"$/gm) || []).map(l => path.relative(live, f) + ': ' + l.trim()));
+check('live: no emitted command or skill pre-approves an npm or npx command with a wildcard', wildInstalls.length === 0, wildInstalls.join('; '));
+// Host create rows (#181): each command or skill whose text runs a host-cli.md create
+// row carries both hosts' rows for it, and no other command carries host rows.
+const hostRowProblems = [];
+const liveEntries = fs.readdirSync(path.join(live, 'commands')).filter(n => n.endsWith('.md')).map(n => ['commands/' + n, path.basename(n, '.md')])
+  .concat(fs.readdirSync(path.join(live, 'skills')).filter(d => d !== 'shared' && exists(live, 'skills/' + d + '/SKILL.md')).map(d => ['skills/' + d + '/SKILL.md', d]));
+for (const [rel, name] of liveEntries) {
+  const t = read(live, rel);
+  const body = t.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  const wanted = Object.keys(CREATE_ROWS).filter(k => body.includes(k)).flatMap(k => CREATE_ROWS[k]);
+  const lacking = wanted.filter(row => !fm(t).includes('  - ' + JSON.stringify(row)));
+  if (lacking.length) hostRowProblems.push(rel + ' runs a create row but lacks ' + lacking.join(', '));
+  if ((lib.HOST_ROWS || {})[name] && !wanted.length) hostRowProblems.push(rel + ' has host rows but runs no create row');
+}
+const liveDocFm = fm(read(live, 'commands/document.md'));
+check('live: /document carries the PR and MR create rows', liveDocFm.includes('  - "Bash(gh pr create *)"') && liveDocFm.includes('  - "Bash(glab mr create *)"'), liveDocFm);
+check('live: every command or skill that runs a host-cli.md create row carries both hosts\' rows for it, and no other carries host rows', hostRowProblems.length === 0 && liveEntries.length > 20, hostRowProblems.join('; '));
+check('live: every host row is a seed row too, so the seed and the commands grant the same create calls', Object.keys(lib.HOST_ROWS || {}).length > 0 && Object.values(lib.HOST_ROWS).flat().every(row => seedAllowRows.includes(row)), JSON.stringify(lib.HOST_ROWS));
+// The review scope (#182): review.md runs `session-init.js --scope`, so it must allow the call.
+check('live: commands/review.md allows node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *', fm(read(live, 'commands/review.md')).includes('  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"'), fm(read(live, 'commands/review.md')));
+// Stamps (#183): a scratch build made with --version is stamped with it in exactly the
+// three stamped files, and no emitted file keeps a stamp naming another version.
+const liveStamped = tmpDir('build-plugin-stamped-');
+const liveStampedRun = runBuild(['--out', liveStamped, '--version', '9.9.9', '--quiet']);
+const stampCarriers = walkFiles(liveStamped).filter(f => fs.readFileSync(f, 'utf8').includes('Toolkit version: 9.9.9')).map(f => path.relative(liveStamped, f).split(path.sep).join('/')).sort();
+const otherStamps = walkFiles(liveStamped).flatMap(f => [...fs.readFileSync(f, 'utf8').matchAll(/<!-- Toolkit version: (\d[^ |]*) \|/g)].filter(m => m[1] !== '9.9.9').map(m => path.relative(liveStamped, f) + ': ' + m[1]));
+check('live: --version 9.9.9 stamps exactly the three stamped files, and plugin.json agrees', liveStampedRun.status === 0 && JSON.stringify(stampCarriers) === JSON.stringify(STAMPED)
+  && JSON.parse(read(liveStamped, '.claude-plugin/plugin.json')).version === '9.9.9', stampCarriers.join(', ') + ' ' + liveStampedRun.stderr);
+check('live: no file in that build keeps a stamp naming another version', liveStampedRun.status === 0 && otherStamps.length === 0, otherStamps.join('; '));
+
+// Root helper hashes (#180): the emitted field lists every root helper script of the
+// managed list, each with sorted lowercase sha256 values held once.
+const liveManaged = JSON.parse(read(live, 'managed-paths.json'));
+const liveRootHelpers = liveManaged.paths.filter(rel => /^scripts\/[^/]+$/.test(rel));
+const liveHelperHashes = liveManaged.historicalHelperHashes || null;
+check('live: managed-paths.json carries historicalHelperHashes for exactly its root helper scripts, each list sorted, lowercase sha256, once each',
+  liveHelperHashes !== null && liveRootHelpers.length === 5 && JSON.stringify(Object.keys(liveHelperHashes).sort()) === JSON.stringify(liveRootHelpers.slice().sort())
+  && Object.values(liveHelperHashes).every(list => Array.isArray(list) && list.length > 0 && list.every(h => /^[0-9a-f]{64}$/.test(h)) && JSON.stringify(list) === JSON.stringify([...new Set(list)].sort())),
+  JSON.stringify(liveHelperHashes));
+if (fullHistory()) {
+  const fromHistory = helperHashesFromHistory(liveRootHelpers);
+  const expectedLines = fromHistory === null ? '' : Object.keys(fromHistory).sort().flatMap(rel => fromHistory[rel].map(h => rel + ' ' + h)).join('\n');
+  check('live: the emitted hashes are exactly the copies recomputed from git history (the committed list is current)',
+    fromHistory !== null && liveHelperHashes !== null && JSON.stringify(fromHistory) === JSON.stringify(Object.fromEntries(Object.keys(liveHelperHashes).sort().map(rel => [rel, liveHelperHashes[rel]]))),
+    'expected ' + HASHES_REL + ' data lines:\n' + expectedLines);
+  const browseCopy = newestHistoricalCopy('scripts/browse.js');
+  const crlfCopy = browseCopy === null ? null : Buffer.from(browseCopy.toString('latin1').replace(/\r?\n/g, '\r\n'), 'latin1');
+  check('live: a real historical copy of scripts/browse.js, and its CRLF form, hash to a listed value', browseCopy !== null && liveHelperHashes !== null
+    && (liveHelperHashes['scripts/browse.js'] || []).includes(shaNoCR(browseCopy)) && (liveHelperHashes['scripts/browse.js'] || []).includes(shaNoCR(crlfCopy)) && !crlfCopy.equals(browseCopy),
+    browseCopy === null ? 'no copy in history' : shaNoCR(browseCopy));
+  // End to end: the built setup script reads the built list. A copy-install with no
+  // manifest (VERSION beside .claude/commands/review.md) whose root scripts/ holds that
+  // historical browse.js in CRLF form and an ask-gpt.js of its own: a dry run lists the
+  // first for removal and keeps the second, writing nothing.
+  const proj = tmpDir('build-plugin-migrate-');
+  spawnSync('git', ['init', '-q'], { cwd: proj });
+  write(proj, '.claude/commands/review.md', '# review\n');
+  write(proj, 'VERSION', '4.2.0\n');
+  if (crlfCopy !== null) write(proj, 'scripts/browse.js', crlfCopy);
+  write(proj, 'scripts/ask-gpt.js', '// our own ask-gpt helper\n');
+  const dry = spawnSync('node', [path.join(live, 'scripts', 'setup-project.js'), '--project', proj, '--dry-run'], { encoding: 'utf8' });
+  const dryOut = (dry.stdout || '') + (dry.stderr || '');
+  check('live: the built setup script sweeps the historical browse.js and keeps the project\'s own ask-gpt.js (dry run, nothing written)',
+    /Among them, helper scripts an early installer copied to the root scripts\/ folder, each matching a copy the toolkit shipped \(every other file there is yours, untouched\): scripts\/browse\.js\n/.test(dryOut)
+    && /Kept as your own: scripts\/ask-gpt\.js in the root scripts\/ folder carries the name of a helper script/.test(dryOut)
+    && exists(proj, 'scripts/browse.js') && read(proj, 'scripts/ask-gpt.js') === '// our own ask-gpt helper\n' && !exists(proj, '.claude/.toolkit-state.json'), dryOut);
+} else {
+  console.log('  skip history checks for the helper hashes: this checkout has no full git history');
+}
+
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');
 const home = tmpDir('build-plugin-home-');
@@ -545,6 +727,33 @@ withPlant('.claude/commands/review.md', t => t + '\n!`head -n 5 .claude/skills/s
 withPlant('.claude/skills/shared/conventions.md', t => t + '\n!`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`\n', () => {
   const u = unresolvedOf();
   check('the guard reports a planted unquoted inline cat in a file the build copies raw', u.includes('skills/shared/conventions.md: unquoted ${CLAUDE_PLUGIN_ROOT} in inline command !`cat ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`'), u.join('; '));
+});
+// The root helper hash list (#180): a helper left with no hash, a line naming a path
+// that is no root helper, and a line of the wrong shape are each reported.
+check('the copy carries the committed root helper hash list', exists(cp.root, HASHES_REL));
+if (exists(cp.root, HASHES_REL)) {
+  withPlant(HASHES_REL, t => t.split('\n').filter(l => !l.startsWith('scripts/browse.js ')).join('\n'), () => {
+    const u = unresolvedOf();
+    check('a root helper script with no hash left in the list is reported unresolved', u.includes('managed-paths.json: no historical hash for the root helper script scripts/browse.js in scripts/historical-helper-hashes.txt'), u.join('; '));
+  });
+  withPlant(HASHES_REL, t => t + 'scripts/our-tool.js ' + 'a'.repeat(64) + '\n', () => {
+    const u = unresolvedOf();
+    check('a hash line naming a path that is no root helper script is reported unresolved', u.some(x => /^scripts\/historical-helper-hashes\.txt line \d+: scripts\/our-tool\.js is not a root helper script in managed-paths\.json$/.test(x)), u.join('; '));
+  });
+  withPlant(HASHES_REL, t => t + 'scripts/browse.js ' + 'A'.repeat(64) + '\n', () => {
+    const u = unresolvedOf();
+    check('a hash line that is not a path and a lowercase sha256 is reported unresolved', u.some(x => /^scripts\/historical-helper-hashes\.txt line \d+: not "<path> <sha256 in lowercase hex>"/.test(x)), u.join('; '));
+  });
+}
+// Stamps (#183): a stamped file that lost its stamp cannot follow the version, so it is reported.
+withPlant('.claude/skills/shared/html-outputs.md', t => t.replace(/<!-- Toolkit version: [^|]+\|[^\n]*\n/, ''), () => {
+  const u = unresolvedOf();
+  check('a stamped file with no toolkit version stamp is reported unresolved', u.includes('skills/shared/html-outputs.md: no "<!-- Toolkit version: X |" stamp to set to 9.9.9'), u.join('; '));
+});
+// The setup skill's kept phrases (#180) are watched like every override: a reworded one is reported.
+withPlant('.claude/skills/setup/SKILL.md', t => t.split('`.claude/commands/review.md` sits beside it').join('`.claude/commands/review.md` is next to it'), () => {
+  const u = unresolvedOf();
+  check('a reworded setup skill phrase the build keeps is reported unresolved', u.includes('skills/setup/SKILL.md: site override phrase not found: `.claude/commands/review.md` sits beside it'), u.join('; '));
 });
 // The hook guard: a source without the hook's script is reported, never shipped.
 const hookAbs = path.join(cp.src, 'scripts', 'session-start.js');

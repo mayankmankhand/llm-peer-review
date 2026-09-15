@@ -1,0 +1,45 @@
+# Every copy of each root helper script the toolkit ever shipped (issue #180):
+# one `<path> <sha256>` line per distinct copy, for the scripts/ paths that
+# historical-managed-paths.txt lists (the helpers early installers copied into
+# a project's root scripts/ folder, byte for byte). Each sha256 is taken over the
+# file with every carriage return removed, the way setup-project.js hashes the
+# project's copy, so a CRLF checkout matches too. build-plugin.js emits these as
+# managed-paths.json's historicalHelperHashes: a migration of a copy-install
+# with no manifest removes a root helper only when its content matches a copy
+# listed here, and keeps any other file of that name as the project's own.
+#
+# Committed data, so build-plugin.js --check gives the same answer without git
+# history. scripts/test-build-plugin.js recomputes the list from the history and
+# fails on any difference, printing the lines it expects. The copies stopped
+# changing when the helpers moved under .claude/scripts/ (v4.3.0); regenerate
+# only when historical-managed-paths.txt gains a root helper. From the
+# repository root:
+#   for p in $(grep '^scripts/' scripts/historical-managed-paths.txt); do
+#     for c in $(git log --full-history --format=%H HEAD -- "$p"); do
+#       git cat-file -e "$c:$p" 2>/dev/null &&
+#         echo "$p $(git show "$c:$p" | tr -d '\r' | sha256sum | cut -d' ' -f1)"
+#     done
+#   done | sort -u
+scripts/ask-gemini.js 291389e79a4fec25fcf2c933015062bc170765a4cd10be54f6c8d4ad8e2093c8
+scripts/ask-gemini.js 8bd9c85ff093cb15b0f4fb7155ec719f9c864f503ae6f2716b8713c310c34ed4
+scripts/ask-gemini.js 9140559a8bdc79d07c348c3ae90ec6d18d102be0dd58b7da6fd9dd941c4a9750
+scripts/ask-gemini.js a8f2f61cc30798b30a228575e70a0c2421174744455a83108ad15ae47234ef00
+scripts/ask-gemini.js aeacb72244e0bca2a74168a9e045f1f1d31830e9e39db461bf3b354d1267c218
+scripts/ask-gemini.js eff96bb5fcedfc508247433adb8018fc0a72eff40e178a97f928e25521ea7aa8
+scripts/ask-gpt.js 13ca874cc6368b99222ea070dcb0cacd78ebe293d6cc93e1e2face41c771c974
+scripts/ask-gpt.js 19f271c1628149757c86cf13d24e24348f42dc594b34d000a2c108762073aa56
+scripts/ask-gpt.js 6fc54d27bd183f59340a6c313aa718302fde9e96b4a7905337bb5b5651817638
+scripts/ask-gpt.js 9a8c374231cb35fdabddc2583d99589025e7e9411b7786159dd303c4ee813b6a
+scripts/ask-gpt.js a94dc916a0c18e26ce3c5c4c0b3c70f190e6b515eb4bc0d37b70f0725054cc0b
+scripts/ask-gpt.js c5fbfc46886e17a79f0aee553180c72da5035e656b3499df3bc798bf1751b15b
+scripts/browse.js 1515327c2e2745f4aaa749f76eb913d55db4ac94370055f4258dce53a31cc288
+scripts/browse.js 4585405b16ddd98b744b1d564e794fe28a671e8662f4d48c45fd07a18e072caa
+scripts/browse.js 5b7142b67b4a682d748ce3d8c91aadf298f7065279ee5844e453e101f084776f
+scripts/browse.js b92e911d816b0f2f3d25d3349a9eb89686606abd293b00e1358767715d746681
+scripts/dev-lead-gemini.js 59407e201e22f66212d908b95acbc22aae7068b06d407a0262e1052d9d7efb4b
+scripts/dev-lead-gemini.js 5a4184f235c137d64913ba79211c9cb38fd3513a70418bed60f224cbdbe727a8
+scripts/dev-lead-gemini.js b7c307a3369bf4a45ad96dba1dcf490d424d8dd2b4c9edc8264746c4d2672367
+scripts/dev-lead-gemini.js f1c5a0c7f5b31d550d9b6c7767124cdf2b550646a7aeb408269632bb06b6ea90
+scripts/dev-lead-gpt.js b23d965fc5ae4cf1dbfd2eb231a80e71a26928d210dc95c557652ca265f024bd
+scripts/dev-lead-gpt.js ce2bb9a02e038e067bdbda1edb67cf0ee18a830787e8f99397d875842ac34112
+scripts/dev-lead-gpt.js f67eab4c55139721712183177e5f63aefbba70647b0b5692e224c88a8aabea1c

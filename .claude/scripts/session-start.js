@@ -108,6 +108,18 @@ function referenceVersion(state) {
   }
   return null;
 }
+// The one plugin update instruction (issue #183), used by the version notice in
+// session-start.js, the version block in pre-push-check.js and the stamp report
+// in setup-project.js, and quoted word for word by the docs. The marketplace
+// update comes first: measured on Claude Code 2.1.270, `claude plugin update`
+// alone does not fetch a GitHub marketplace's cached catalog, so a new release
+// tag is not seen until `claude plugin marketplace update` has run. A plugin
+// installed for one project only takes the same update with --scope project.
+// It reads as the middle of a sentence: each caller adds the words before it
+// and the punctuation after it.
+const PLUGIN_UPDATE_STEPS = 'run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`'
+  + ' (for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`),'
+  + ' then restart Claude Code';
 // <<< version helpers <<<
 // >>> copy-install markers (7.1.0) >>>
 // Byte-identical in setup-project.js and session-start.js, from this marker to
@@ -311,7 +323,7 @@ function notices(projectDir, runningRaw) {
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was last set up or audited with toolkit ' + reference + ', but this session runs the tk plugin '
       + running + ', which is older. Pushes from this project will be blocked by the pre-push check until the plugin '
-      + 'is updated: run `claude plugin update tk@llm-peer-review`, then restart Claude Code.');
+      + 'is updated: ' + PLUGIN_UPDATE_STEPS + '.');
   } else if (cmp === 1) {
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was set up or audited with toolkit ' + reference + ', and this session runs the tk plugin '
@@ -382,4 +394,4 @@ if (require.main === module) {
   try { main(); } catch (e) { note(e.message); process.exitCode = 0; }
 }
 
-module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, copyInstallMarkers, copyInstallBeside, findUp, readStateUp, linkCurrent, notices };
+module.exports = { validVersion, parseVersion, compareVersions, referenceVersion, PLUGIN_UPDATE_STEPS, copyInstallMarkers, copyInstallBeside, findUp, readStateUp, linkCurrent, notices };

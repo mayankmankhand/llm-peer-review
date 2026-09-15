@@ -201,9 +201,14 @@ check('a short newline payload (under 32 characters) is no version, no reference
   && mod.compareVersions('7.0.0', SHORT_NEWLINE) === null && mod.compareVersions(SHORT_NEWLINE, '7.2.0') === null);
 
 console.log('\n4. the notices');
+// The one plugin update message (issue #183): the marketplace update, then the
+// plugin update with its project-scope form, then the restart, in that order.
+const UPDATE_STEPS = /run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review` \(for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`\), then restart Claude Code/;
 data = fresh('data');
 r = run(plugin, { data, project: makeProject({ version: '7.2.0', auditedVersion: '7.2.0' }) });
-check('(a) an older plugin: relayed notice naming both versions and the update command', r.status === 0 && RELAY.test(r.stdout) && /toolkit 7\.2\.0/.test(r.stdout) && /7\.1\.0, which is older/.test(r.stdout) && /blocked/.test(r.stdout) && /claude plugin update tk@llm-peer-review/.test(r.stdout), r.stdout);
+check('(a) an older plugin: relayed notice naming both versions and the update steps, marketplace update first', r.status === 0 && RELAY.test(r.stdout) && /toolkit 7\.2\.0/.test(r.stdout) && /7\.1\.0, which is older/.test(r.stdout) && /blocked/.test(r.stdout) && UPDATE_STEPS.test(r.stdout), r.stdout);
+check('(a) the notice prints the shared message the script exports, word for word', typeof mod.PLUGIN_UPDATE_STEPS === 'string' && new RegExp('^' + UPDATE_STEPS.source + '$').test(mod.PLUGIN_UPDATE_STEPS)
+  && r.stdout.includes('until the plugin is updated: ' + mod.PLUGIN_UPDATE_STEPS + '.\n'), String(mod.PLUGIN_UPDATE_STEPS) + ' :: ' + r.stdout);
 r = run(plugin, { data, project: makeProject({ version: '7.10.0' }) });
 check('(a) compares numerically: 7.1.0 is older than 7.10.0', /which is older/.test(r.stdout), r.stdout);
 r = run(plugin, { data, project: makeProject({ version: '7.0.1', previousVersion: null }) });

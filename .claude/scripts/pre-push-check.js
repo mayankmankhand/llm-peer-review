@@ -465,6 +465,18 @@ function referenceVersion(state) {
   }
   return null;
 }
+// The one plugin update instruction (issue #183), used by the version notice in
+// session-start.js, the version block in pre-push-check.js and the stamp report
+// in setup-project.js, and quoted word for word by the docs. The marketplace
+// update comes first: measured on Claude Code 2.1.270, `claude plugin update`
+// alone does not fetch a GitHub marketplace's cached catalog, so a new release
+// tag is not seen until `claude plugin marketplace update` has run. A plugin
+// installed for one project only takes the same update with --scope project.
+// It reads as the middle of a sentence: each caller adds the words before it
+// and the punctuation after it.
+const PLUGIN_UPDATE_STEPS = 'run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`'
+  + ' (for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`),'
+  + ' then restart Claude Code';
 // <<< version helpers <<<
 
 // The version of the plugin this copy runs from, or null for the source copy
@@ -960,8 +972,8 @@ if (hits.versionBehind !== null) {
   out.push("Toolkit plugin is older than this project's recorded version (issue #174):");
   out.push("  This check ran as tk " + hits.versionBehind.running + ", but .claude/.toolkit-state.json records toolkit " + hits.versionBehind.reference + ".");
   out.push("  An older plugin scans with older checks than this project was set up or audited with.");
-  out.push("  Fix: run `claude plugin update tk@llm-peer-review` and restart Claude Code (or open a session in this");
-  out.push("  project so the newer installed version is the one running), then push again.");
+  out.push("  Fix: " + PLUGIN_UPDATE_STEPS + ", then push again.");
+  out.push("  If the newer version is already installed, opening a session in this project makes it the one running.");
   out.push("");
 }
 out.push("Commits scanned: " + commits.length + (destinations.some((d) => d.base === null) ? " (no remote base - full history)" : ""));

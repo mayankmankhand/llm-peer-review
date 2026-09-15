@@ -546,6 +546,10 @@ function runCopy(pluginRoot, cwd) {
   const r = spawnSync('node', [path.join(pluginRoot, 'scripts', 'pre-push-check.js')], { cwd: cwd, encoding: 'utf-8' });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
+// The one plugin update message (issue #183), as the version-helper block defines
+// it: the marketplace update, then the plugin update with its project-scope form,
+// then the restart, in that order. Sections 10 and 11 both read it.
+const UPDATE_STEPS = /run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review` \(for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`\), then restart Claude Code/;
 function guardRepo(label, state) {
   const sb = makeRepo(label);
   commitFile(sb, 'README.md', 'seed\n', 'init');
@@ -565,7 +569,8 @@ function versionGuardTests() {
     check('the block uses the tripwire header and names both versions',
       r.stdout.indexOf('PRE-PUSH TRIPWIRE HIT - push blocked (M11)') === 0 && r.stdout.indexOf('tk 7.0.1') !== -1 && r.stdout.indexOf('toolkit 7.1.0') !== -1,
       r.stdout.slice(0, 400));
-    check('the block names the fix in plain words', r.stdout.indexOf('claude plugin update tk@llm-peer-review') !== -1, r.stdout.slice(0, 400));
+    check('the block names the fix in plain words: the marketplace update, then the plugin update and its project-scope form, then the restart and the push',
+      new RegExp('  Fix: ' + UPDATE_STEPS.source + ', then push again\\.\\n').test(r.stdout), r.stdout.slice(0, 900));
     check('the version line goes to stderr', r.stderr.indexOf('tk pre-push check 7.0.1') !== -1, r.stderr.slice(0, 200));
     // Run from a subfolder: the state file is read from the repository root.
     fs.mkdirSync(path.join(sb.repo, 'src', 'deep'), { recursive: true });
@@ -673,6 +678,22 @@ function helperIdentityTests() {
   check('the block holds the helpers it guards', first !== null && ['validVersion', 'parseVersion', 'compareVersions', 'referenceVersion'].every(function (n) { return first.indexOf('function ' + n + '(') !== -1; }));
   check('the pre-push-check.js copy is identical to the session-start.js copy', first !== null && blocks[1] === first);
   check('the setup-project.js copy is identical to the session-start.js copy', first !== null && blocks[2] === first);
+  // The one update message lives in the block (issue #183): the block alone
+  // defines it, and every update instruction the three scripts print reads it.
+  // The block is plain declarations, so it runs on its own to hand the text over.
+  let steps = null;
+  try { steps = first === null ? null : new Function(first + '\nreturn typeof PLUGIN_UPDATE_STEPS === "string" ? PLUGIN_UPDATE_STEPS : null;')(); } catch (e) { steps = null; }
+  check('the block defines the one plugin update message: the marketplace update, then the plugin update and its project-scope form, then the restart',
+    steps !== null && new RegExp('^' + UPDATE_STEPS.source + '$').test(steps), String(steps));
+  const spelled = [];
+  files.forEach(function (name, i) {
+    let text = '';
+    try { text = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'scripts', name), 'utf-8').replace(/\r\n/g, '\n'); } catch (e) { spelled.push(name + ': unreadable'); return; }
+    const outside = blocks[i] === null ? text : text.split(blocks[i]).join('');
+    if (/claude plugin (marketplace )?update/.test(outside)) spelled.push(name + ': spells a plugin update command outside the block');
+    if (outside.indexOf('PLUGIN_UPDATE_STEPS') === -1) spelled.push(name + ': never uses PLUGIN_UPDATE_STEPS');
+  });
+  check('each of the three scripts prints its update instruction from the block\'s message and spells no update command of its own', spelled.length === 0, spelled.join('; '));
 }
 
 // --- 12. whole-value placeholders do not block (issue #178) ---------------------
