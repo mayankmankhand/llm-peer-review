@@ -397,14 +397,17 @@ function imageTests() {
   // Markup shapes that previously fell through the regex with no data URI, no
   // note, and no stderr line (issue #155 review, R20). Also asserts the swap is
   // anchored to src: a duplicate path in alt must not absorb the data URI.
+  // The unquoted shape names the image relative to the render's working folder
+  // (dir): an unquoted attribute value ends at a space, and the temp folder's
+  // path may hold one (issue #183).
   const shapes = render(dir, 'shapes', {
     title: 'Shapes',
     findings: [{ id: 'R1', severity: 'warns', what: 'x', fields: [
       { label: 'GtInAlt',  value: '<img alt="cart > checkout" src="' + small + '">' },
-      { label: 'Unquoted', value: '<img src=' + small + '>' },
+      { label: 'Unquoted', value: '<img src=' + path.basename(small) + '>' },
       { label: 'DupInAlt', value: '<img alt="' + small + '" src="' + small + '">' }
     ] }]
-  });
+  }, null, dir);
   const uriCount = (shapes.html.match(/data:image\/png;base64,/g) || []).length;
   check('a ">" inside an attribute no longer breaks the match', uriCount >= 1);
   check('all three img shapes embed (quoted-with-gt, unquoted, duplicated)',
