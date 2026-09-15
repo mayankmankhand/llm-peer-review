@@ -32,9 +32,11 @@
 //   fields are also hard-truncated on write, so a long pasted block can never land
 //   in the ledger wholesale.
 //
-// Storage is PER MACHINE, outside any repo, under ~/.claude/. Every row carries the
-// repo it came from, so repo-specific and cross-repo questions are both a filter on
-// one dataset rather than a decision made at write time (when n=1 makes it unanswerable).
+// Storage is PER MACHINE, outside any repo, under ~/.claude/ (or the absolute folder
+// named by TK_LEDGER_DIR, for test runs; see the storage paths below). Every row
+// carries the repo it came from, so repo-specific and cross-repo questions are both a
+// filter on one dataset rather than a decision made at write time (when n=1 makes it
+// unanswerable).
 //
 // Append-only JSONL throughout, mirroring render-html.js's index: one JSON line per
 // record via fs.appendFileSync, never read-then-rewrite, so concurrent sessions
@@ -55,12 +57,32 @@ function die(msg) {
 }
 
 // --- storage paths (per machine, outside every repo) ---
-const CLAUDE_DIR = path.join(os.homedir(), '.claude');
-const LEDGER_PATH = path.join(CLAUDE_DIR, 'correction-ledger.jsonl');
-const HEARTBEAT_PATH = path.join(CLAUDE_DIR, 'correction-heartbeat.jsonl');
-const ROLLUP_PATH = path.join(CLAUDE_DIR, 'correction-rollup.json');
-const AXIAL_MAP_PATH = path.join(CLAUDE_DIR, 'correction-axial-map.json');
-const TRANSCRIPT_ROOT = path.join(CLAUDE_DIR, 'projects');
+//
+// TK_LEDGER_DIR moves the four files this script writes (ledger, heartbeat, rollup,
+// axial map) into another folder (#182). A chained /document in a scratch or test
+// project otherwise records its heartbeat in the real ~/.claude/, and the rollup
+// then reports that capture has run on a machine where no real project ever
+// captured. Only an absolute path is used: a relative one would land wherever the
+// command happened to start, so it is ignored with one warning. The transcript root
+// deliberately stays under the real home, so capture still reads the session's real
+// transcripts; only where its results go moves.
+const HOME_CLAUDE_DIR = path.join(os.homedir(), '.claude');
+function ledgerDir() {
+  const moved = process.env.TK_LEDGER_DIR;
+  if (!moved) return HOME_CLAUDE_DIR;
+  if (!path.isAbsolute(moved)) {
+    console.error('correction-ledger.js: TK_LEDGER_DIR is not an absolute path, so it was ignored and ' +
+      HOME_CLAUDE_DIR + ' is used: ' + JSON.stringify(moved));
+    return HOME_CLAUDE_DIR;
+  }
+  return path.resolve(moved);
+}
+const LEDGER_DIR = ledgerDir();
+const LEDGER_PATH = path.join(LEDGER_DIR, 'correction-ledger.jsonl');
+const HEARTBEAT_PATH = path.join(LEDGER_DIR, 'correction-heartbeat.jsonl');
+const ROLLUP_PATH = path.join(LEDGER_DIR, 'correction-rollup.json');
+const AXIAL_MAP_PATH = path.join(LEDGER_DIR, 'correction-axial-map.json');
+const TRANSCRIPT_ROOT = path.join(HOME_CLAUDE_DIR, 'projects');
 
 // Presence of this file in a repo means: never log anything from this repo. Checked
 // before any write, so opted-out work is never captured rather than captured and
@@ -609,10 +631,39 @@ function runHeartbeat() {
 // human-labeled and machine-labeled rows would make a count meaningless.
 // ==========================================================================
 
+// The axial map as it is on disk, as { map } or { error }. A missing file is an
+// empty map, and so is a file holding only whitespace: there is nothing in it to
+// lose, and the old writer (truncate, then write) could leave exactly that behind.
+// Anything else has to parse to a JSON object. A parse failure used to count as an
+// empty map, so the next --set-axial replaced every entry the file still held (#183).
+function readAxialMapFile() {
+  let raw;
+  try { raw = fs.readFileSync(AXIAL_MAP_PATH, 'utf-8'); }
+  catch (e) {
+    if (e.code === 'ENOENT') return { map: {} };
+    return { error: 'could not read the axial map ' + AXIAL_MAP_PATH + ': ' + e.message };
+  }
+  raw = raw.replace(/^﻿/, ''); // an editor's byte-order mark is not a broken map
+  if (raw.trim() === '') return { map: {} };
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { return { error: 'the axial map ' + AXIAL_MAP_PATH + ' does not parse as JSON (' + e.message + ')' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { error: 'the axial map ' + AXIAL_MAP_PATH + ' is not a JSON object' };
+  }
+  return { map: parsed };
+}
+
+// The rollup only reads the map, so a broken one costs labels, not data: every row
+// counts as unlabeled, and one stderr line says why instead of the labels silently
+// vanishing.
 function readAxialMap() {
-  if (!fs.existsSync(AXIAL_MAP_PATH)) return {};
-  try { return JSON.parse(fs.readFileSync(AXIAL_MAP_PATH, 'utf-8')) || {}; }
-  catch (e) { return {}; }
+  const current = readAxialMapFile();
+  if (current.error) {
+    console.error('correction-ledger.js: ' + current.error + '; counting every row as unlabeled');
+    return {};
+  }
+  return current.map;
 }
 
 function buildRollup() {
@@ -731,7 +782,114 @@ function runRollup(writeIt) {
 // It also keeps every write in this feature behind the one Bash permission the
 // script already needs. Writing ~/.claude/ directly from a skill would need a
 // filesystem permission no install grants, so the write would simply be refused.
+//
+// Merging in code was not enough on its own (#183). Two runs saving at once each
+// read the map, merged their own entries and rewrote the whole file, so one run's
+// entries vanished; and a run that read the file while another was halfway through
+// rewriting it saw a parse failure, took that as an empty map, and wiped every
+// earlier entry. With HOME pointed at a throwaway folder, two runs started together
+// lost one of their two entries in more than half of 40 tries, and 20 at once
+// sometimes wiped all 50 earlier entries. So the read, merge and write now happen
+// under a lock, the new map lands by rename (a reader sees the old file or the new
+// one, never part of one), and a map that exists but does not parse is refused.
 // ==========================================================================
+
+const AXIAL_LOCK_PATH = AXIAL_MAP_PATH + '.lock';
+// The locked work takes milliseconds. A run gives up after LOCK_WAIT_MS with
+// nothing written; a lock older than LOCK_STALE_MS belongs to a run that died
+// holding it, and is cleared. The stale age is shorter than the wait, so one waiting
+// run outlasts a dead lock rather than failing on it.
+const LOCK_WAIT_MS = 15000;
+const LOCK_STALE_MS = 10000;
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Clear a lock left by a run that died. The old lock is renamed aside under a
+// unique name before it is deleted, and deleted only if what moved is still that
+// same old file. Two runs can see the same dead lock; a plain delete would let the
+// second one remove the fresh lock the first has just taken, and both would then
+// write. If the rename caught a fresh lock, it is linked back into place (unless a
+// newer lock already stands there). Returns true when the caller should try again
+// at once.
+function clearStaleLock(lockPath) {
+  let seen;
+  try { seen = fs.statSync(lockPath); }
+  catch (e) { return e.code === 'ENOENT'; }
+  if (Date.now() - seen.mtimeMs < LOCK_STALE_MS) return false;
+  const aside = lockPath + '.stale-' + process.pid + '-' + Math.random().toString(36).slice(2);
+  try { fs.renameSync(lockPath, aside); }
+  catch (e) { return e.code === 'ENOENT'; }
+  let moved = null;
+  try { moved = fs.statSync(aside); } catch (e) { return true; }
+  const sameOldFile = moved.ino === seen.ino && moved.dev === seen.dev &&
+    Date.now() - moved.mtimeMs >= LOCK_STALE_MS;
+  if (!sameOldFile) {
+    try { fs.linkSync(aside, lockPath); } catch (e) { /* a newer lock already stands */ }
+  }
+  try { fs.unlinkSync(aside); } catch (e) { /* best effort */ }
+  return sameOldFile;
+}
+
+// Take the lock: a file created with the 'wx' flag, which fails when the file
+// already exists, so only one run at a time can hold it. Returns the token written
+// into the lock, which releaseLock() checks, or null after LOCK_WAIT_MS.
+function acquireLock(lockPath) {
+  const token = process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let backoff = 5;
+  for (;;) {
+    let fd = null;
+    try {
+      fd = fs.openSync(lockPath, 'wx');
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+    if (fd !== null) {
+      try { fs.writeSync(fd, token); }
+      catch (e) {
+        try { fs.closeSync(fd); } catch (e2) { /* already closed */ }
+        try { fs.unlinkSync(lockPath); } catch (e2) { /* best effort */ }
+        throw e;
+      }
+      fs.closeSync(fd);
+      return token;
+    }
+    if (clearStaleLock(lockPath)) continue;
+    if (Date.now() >= deadline) return null;
+    // A short, growing, jittered wait, so runs that collided do not retry in step.
+    sleepMs(backoff + Math.floor(Math.random() * backoff));
+    backoff = Math.min(backoff * 2, 100);
+  }
+}
+
+// Remove the lock only while it still holds this run's token: a lock cleared as
+// stale and retaken belongs to another run now.
+function releaseLock(lockPath, token) {
+  try {
+    if (fs.readFileSync(lockPath, 'utf-8') === token) fs.unlinkSync(lockPath);
+  } catch (e) { /* already gone */ }
+}
+
+// Write to a temp file in the same folder, flush it, and rename it over the target.
+// A rename within one folder replaces the file in a single step.
+function writeFileAtomic(target, content) {
+  const tmp = target + '.tmp-' + process.pid + '-' + Math.random().toString(36).slice(2);
+  try {
+    const fd = fs.openSync(tmp, 'wx');
+    try {
+      fs.writeFileSync(fd, content, 'utf-8'); // loops until every byte is written
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (e2) { /* never created */ }
+    throw e;
+  }
+}
 
 function runSetAxial() {
   if (!opts.data) die('--set-axial requires --data <file> containing a JSON object of open_code to category');
@@ -742,19 +900,42 @@ function runSetAxial() {
     die('--data must contain a JSON object mapping open codes to category names');
   }
 
-  const existing = readAxialMap();
-  const before = Object.keys(existing).length;
-  const merged = Object.assign({}, existing, incoming);   // incoming wins on conflict
   fs.mkdirSync(path.dirname(AXIAL_MAP_PATH), { recursive: true });
-  fs.writeFileSync(AXIAL_MAP_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  removeHandoff(opts.data); // temp directory only, same guard as --add
+  let token;
+  try { token = acquireLock(AXIAL_LOCK_PATH); }
+  catch (e) { die('could not take the axial map lock ' + AXIAL_LOCK_PATH + ': ' + e.message + '. Nothing was written.'); }
+  if (token === null) {
+    die('another run has held the axial map lock ' + AXIAL_LOCK_PATH + ' for over ' + (LOCK_WAIT_MS / 1000) +
+      ' seconds. Nothing was written; run --set-axial again in a moment.');
+  }
 
-  process.stdout.write(JSON.stringify({
-    existing: before,
-    incoming: Object.keys(incoming).length,
-    total: Object.keys(merged).length,
-    map: AXIAL_MAP_PATH
-  }) + '\n');
+  // die() exits on the spot, and a finally block does not run after process.exit,
+  // so failures are collected here and reported only once the lock is released.
+  let failure = null;
+  let result = null;
+  try {
+    const current = readAxialMapFile();
+    if (current.error) {
+      failure = current.error + '. Nothing was written: fix the file or move it aside, then run --set-axial again.';
+    } else {
+      const merged = Object.assign({}, current.map, incoming);   // incoming wins on conflict
+      writeFileAtomic(AXIAL_MAP_PATH, JSON.stringify(merged, null, 2) + '\n');
+      result = {
+        existing: Object.keys(current.map).length,
+        incoming: Object.keys(incoming).length,
+        total: Object.keys(merged).length,
+        map: AXIAL_MAP_PATH
+      };
+    }
+  } catch (e) {
+    failure = 'could not write the axial map ' + AXIAL_MAP_PATH + ': ' + e.message + '. The map on disk is unchanged.';
+  } finally {
+    releaseLock(AXIAL_LOCK_PATH, token);
+  }
+  if (failure) die(failure);   // the hand-off file is kept, so the same run can be retried
+
+  removeHandoff(opts.data); // temp directory only, same guard as --add
+  process.stdout.write(JSON.stringify(result) + '\n');
 }
 
 // --- dispatch ---

@@ -14,6 +14,10 @@
 // Every test runs against a SANDBOX HOME and a throwaway project directory, so a
 // run never reads or writes the real ledger.
 //
+// Also covered: TK_LEDGER_DIR, which moves the written files but never the
+// transcript root (issue #182), and the axial map's lock, temp-and-rename write,
+// and refusal to replace a map that does not parse (issue #183).
+//
 // Usage: node scripts/test-correction-ledger.js
 
 const { execFileSync, spawn, spawnSync } = require('child_process');
@@ -402,6 +406,261 @@ console.log('\ncorrection-ledger.js\n');
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// Start several node processes at the same moment and wait for all of them. One
+// launcher process spawns them together and prints their exit codes, so a
+// concurrency test still reads top to bottom like the rest of this file. Each job
+// is an argument list for node; the jobs share the launcher's cwd and environment.
+function runTogether(sb, jobs, env) {
+  const launcher = [
+    "const { spawn } = require('child_process');",
+    'const jobs = JSON.parse(process.argv[1]);',
+    'const codes = new Array(jobs.length);',
+    'let left = jobs.length;',
+    'jobs.forEach(function (args, i) {',
+    "  const p = spawn(process.execPath, args, { stdio: 'ignore' });",
+    "  p.on('close', function (code) { codes[i] = code; if (--left === 0) process.stdout.write(JSON.stringify(codes)); });",
+    '});'
+  ].join('\n');
+  const r = spawnSync(process.execPath, ['-e', launcher, JSON.stringify(jobs)], {
+    cwd: sb.proj,
+    env: Object.assign({}, process.env, { HOME: sb.home }, env || {}),
+    encoding: 'utf-8',
+    timeout: 120000
+  });
+  try { return JSON.parse(r.stdout); } catch (e) { return null; }
+}
+
+function axialMapFile(sb) { return path.join(sb.home, '.claude', 'correction-axial-map.json'); }
+
+// Files in the folder that holds the map, other than the map itself: a lock or a
+// temp file left behind would show up here.
+function strayBesideMap(sb) {
+  const dir = path.dirname(axialMapFile(sb));
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter(function (n) { return n !== 'correction-axial-map.json'; });
+}
+
+// --- TK_LEDGER_DIR moves what the script writes, never the transcripts (#182) --
+// A chained /document in a scratch project wrote its heartbeat into the real
+// ~/.claude/, and the rollup then said capture had run on a machine where no
+// real project ever captured. The variable moves the four written files; the
+// transcript root stays under HOME, so capture still reads real sessions.
+{
+  const sb = makeSandbox('ledgerdir');
+  seedTranscripts(sb);
+  const moved = path.join(sb.root, 'moved ledger');
+  const env = { TK_LEDGER_DIR: moved };
+  const names = ['correction-ledger.jsonl', 'correction-heartbeat.jsonl', 'correction-rollup.json', 'correction-axial-map.json'];
+
+  const first = JSON.parse(run(sb, ['--candidates'], { env: env }));
+  check('with TK_LEDGER_DIR set, --candidates still reads the transcripts under HOME',
+    first.scanned === true && first.candidates.length > 0, JSON.stringify({ scanned: first.scanned, candidates: first.candidates.length }));
+
+  run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'toolkit', open_code: 'moved row' }])], { env: env });
+  run(sb, ['--heartbeat', '--candidate-count', '1', '--added-count', '1'], { env: env });
+  const axialIn = path.join(sb.root, 'axial-moved.json');
+  fs.writeFileSync(axialIn, JSON.stringify({ 'moved row': 'moved category' }), 'utf-8');
+  run(sb, ['--set-axial', '--data', axialIn], { env: env });
+  const rolled = JSON.parse(run(sb, ['--rollup'], { env: env }));
+
+  check('TK_LEDGER_DIR holds the ledger, heartbeat, rollup and axial map',
+    names.every(function (n) { return fs.existsSync(path.join(moved, n)); }),
+    fs.existsSync(moved) ? fs.readdirSync(moved).join(', ') : 'the folder was never created');
+  check('TK_LEDGER_DIR leaves none of the four under HOME',
+    names.every(function (n) { return !fs.existsSync(path.join(sb.home, '.claude', n)); }),
+    fs.readdirSync(path.join(sb.home, '.claude')).join(', '));
+  check('the rollup reads the moved ledger and the moved axial map',
+    rolled.rows === 1 && rolled.kinds.human && rolled.kinds.human.buckets[0].axial_code === 'moved category',
+    JSON.stringify({ rows: rolled.rows, kinds: Object.keys(rolled.kinds) }));
+
+  const again = JSON.parse(run(sb, ['--candidates'], { env: env }));
+  check('--candidates reads the moved heartbeat', again.everCaptured === true && again.scanned === true,
+    JSON.stringify({ everCaptured: again.everCaptured, scanned: again.scanned }));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+{
+  const sb = makeSandbox('ledgerdir-relative');
+  const rel = runRaw(sb, ['--heartbeat'], { env: { TK_LEDGER_DIR: path.join('relative', 'ledger') } });
+  check('a relative TK_LEDGER_DIR is ignored: the heartbeat lands under HOME',
+    rel.status === 0 && fs.existsSync(path.join(sb.home, '.claude', 'correction-heartbeat.jsonl')) &&
+    !fs.existsSync(path.join(sb.proj, 'relative')), 'exit ' + rel.status + ' ' + rel.stderr);
+  check('a relative TK_LEDGER_DIR prints exactly one warning',
+    (rel.stderr.match(/TK_LEDGER_DIR/g) || []).length === 1, JSON.stringify(rel.stderr));
+
+  const empty = runRaw(sb, ['--heartbeat'], { env: { TK_LEDGER_DIR: '' } });
+  check('an empty TK_LEDGER_DIR means the default folder, with no warning',
+    empty.status === 0 && empty.stderr.indexOf('TK_LEDGER_DIR') === -1 &&
+    fs.readFileSync(path.join(sb.home, '.claude', 'correction-heartbeat.jsonl'), 'utf-8').split('\n').filter(Boolean).length === 2,
+    JSON.stringify(empty.stderr));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- 20 --set-axial runs at once keep every entry (#183) -----------------------
+// Without a lock each run read the map, merged, and rewrote it: runs overwrote
+// each other's entries, and a run that read a half-written file took it for an
+// empty map and wiped the earlier entries too.
+{
+  const sb = makeSandbox('axial-concurrent');
+  fs.mkdirSync(path.dirname(axialMapFile(sb)), { recursive: true });
+  const earlier = {};
+  for (let i = 0; i < 50; i++) earlier['earlier code ' + i] = 'category ' + (i % 5);
+  fs.writeFileSync(axialMapFile(sb), JSON.stringify(earlier, null, 2) + '\n', 'utf-8');
+  const jobs = [];
+  for (let i = 0; i < 20; i++) {
+    const f = path.join(sb.root, 'axial-' + i + '.json');
+    const one = {};
+    one['concurrent code ' + i] = 'category ' + i;
+    fs.writeFileSync(f, JSON.stringify(one), 'utf-8');
+    jobs.push([SCRIPT, '--set-axial', '--data', f]);
+  }
+  const codes = runTogether(sb, jobs);
+  let map = null;
+  try { map = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { map = null; }
+  const keys = map ? Object.keys(map) : [];
+  check('20 --set-axial runs started together all exit 0',
+    Array.isArray(codes) && codes.length === 20 && codes.every(function (c) { return c === 0; }), JSON.stringify(codes));
+  check('20 --set-axial runs started together keep all 20 new entries',
+    keys.filter(function (k) { return /^concurrent code /.test(k); }).length === 20,
+    map ? keys.filter(function (k) { return /^concurrent code /.test(k); }).length + ' of 20 kept' : 'the map does not parse');
+  check('20 --set-axial runs started together keep all 50 earlier entries',
+    keys.filter(function (k) { return /^earlier code /.test(k); }).length === 50,
+    map ? keys.filter(function (k) { return /^earlier code /.test(k); }).length + ' of 50 kept' : 'the map does not parse');
+  check('no lock or temp file is left beside the map', strayBesideMap(sb).length === 0, strayBesideMap(sb).join(', '));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the map is swapped in by rename, never rewritten in place (#183) -----------
+// The rollup reads the map without taking the lock, so it must never see half a
+// file. A rename swaps a complete new file in, and the path then names a different
+// file; a rewrite in place truncates the same file first, and that gap is where a
+// reader found an "empty" map.
+{
+  const sb = makeSandbox('axial-rename');
+  fs.mkdirSync(path.dirname(axialMapFile(sb)), { recursive: true });
+  fs.writeFileSync(axialMapFile(sb), JSON.stringify({ 'kept code': 'category K' }), 'utf-8');
+  const before = fs.statSync(axialMapFile(sb));
+  const f = path.join(sb.root, 'axial-rename.json');
+  fs.writeFileSync(f, JSON.stringify({ 'added code': 'category A' }), 'utf-8');
+  run(sb, ['--set-axial', '--data', f]);
+  const after = fs.statSync(axialMapFile(sb));
+  const map = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8'));
+  check('--set-axial swaps in a new map file rather than rewriting the old one in place',
+    after.ino !== before.ino && map['kept code'] === 'category K' && map['added code'] === 'category A',
+    'inode ' + before.ino + ' -> ' + after.ino);
+  check('the swap leaves no temp file beside the map', strayBesideMap(sb).length === 0, strayBesideMap(sb).join(', '));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- a map that does not parse is refused, never replaced (#183) ---------------
+// A parse failure used to count as an empty map, so the next write replaced
+// every entry the damaged file still held.
+{
+  const sb = makeSandbox('axial-broken');
+  fs.mkdirSync(path.dirname(axialMapFile(sb)), { recursive: true });
+  const broken = '{\n  "first code": "category A",\n  "second code": "category B"\n';
+  fs.writeFileSync(axialMapFile(sb), broken, 'utf-8');
+  const before = fs.readFileSync(axialMapFile(sb));
+  const f = path.join(sb.root, 'axial-new.json');
+  fs.writeFileSync(f, JSON.stringify({ 'third code': 'category C' }), 'utf-8');
+
+  const res = runRaw(sb, ['--set-axial', '--data', f]);
+  check('--set-axial exits non-zero when the existing map does not parse', res.status !== 0, 'exit ' + res.status);
+  check('the map that does not parse is left byte-identical', fs.readFileSync(axialMapFile(sb)).equals(before),
+    JSON.stringify(fs.readFileSync(axialMapFile(sb), 'utf-8').slice(0, 120)));
+  check('the refusal names the problem and says nothing was written',
+    /does not parse/.test(res.stderr) && /Nothing was written/.test(res.stderr), JSON.stringify(res.stderr));
+  check('a refused run keeps its hand-off file, so the same run can be retried', fs.existsSync(f));
+  check('a refused run leaves no lock or temp file', strayBesideMap(sb).length === 0, strayBesideMap(sb).join(', '));
+
+  const roll = runRaw(sb, ['--show-rollup']);
+  check('the rollup still runs over a broken map, and says why every row is unlabeled',
+    roll.status === 0 && /does not parse/.test(roll.stderr), 'exit ' + roll.status + ' ' + JSON.stringify(roll.stderr));
+
+  // Each case below gets its own hand-off file, so no case can pass or fail only
+  // because an earlier run consumed the file.
+  fs.writeFileSync(axialMapFile(sb), '["a list", "not a map"]\n', 'utf-8');
+  const listBefore = fs.readFileSync(axialMapFile(sb));
+  const fList = path.join(sb.root, 'axial-list.json');
+  fs.writeFileSync(fList, JSON.stringify({ 'third code': 'category C' }), 'utf-8');
+  const notObject = runRaw(sb, ['--set-axial', '--data', fList]);
+  check('a map that parses to something other than an object is refused too',
+    notObject.status !== 0 && /not a JSON object/.test(notObject.stderr) && fs.readFileSync(axialMapFile(sb)).equals(listBefore),
+    'exit ' + notObject.status + ' ' + JSON.stringify(notObject.stderr));
+
+  fs.writeFileSync(axialMapFile(sb), '\n', 'utf-8');
+  const fBlank = path.join(sb.root, 'axial-blank.json');
+  fs.writeFileSync(fBlank, JSON.stringify({ 'third code': 'category C' }), 'utf-8');
+  const blank = runRaw(sb, ['--set-axial', '--data', fBlank]);
+  let blankMap = {};
+  try { blankMap = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { blankMap = {}; }
+  check('a map file holding only whitespace counts as empty, with nothing in it to lose',
+    blank.status === 0 && blankMap['third code'] === 'category C', 'exit ' + blank.status + ' ' + blank.stderr);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- the lock: a live one is waited for, a dead one is cleared -------------------
+{
+  const sb = makeSandbox('axial-lock');
+  const dir = path.dirname(axialMapFile(sb));
+  fs.mkdirSync(dir, { recursive: true });
+  const lock = axialMapFile(sb) + '.lock';
+  const observed = path.join(sb.root, 'observed.json');
+
+  // A live lock: another run holds it for a second. The watcher records whether
+  // the map already had the new entry while the lock was held, then releases it.
+  fs.writeFileSync(lock, 'another run', 'utf-8');
+  const f = path.join(sb.root, 'axial-wait.json');
+  fs.writeFileSync(f, JSON.stringify({ 'waited code': 'category W' }), 'utf-8');
+  const watcher = [
+    '-e',
+    "const fs = require('fs');" +
+    'setTimeout(function () {' +
+    '  let early = false;' +
+    '  try { early = "waited code" in JSON.parse(fs.readFileSync(process.argv[1], "utf-8")); } catch (e) { early = false; }' +
+    '  fs.writeFileSync(process.argv[2], JSON.stringify({ early: early }));' +
+    '  fs.unlinkSync(process.argv[3]);' +
+    '}, 1000);',
+    axialMapFile(sb), observed, lock
+  ];
+  const codes = runTogether(sb, [watcher, [SCRIPT, '--set-axial', '--data', f]]);
+  let seen = {};
+  try { seen = JSON.parse(fs.readFileSync(observed, 'utf-8')); } catch (e) { seen = {}; }
+  let map = {};
+  try { map = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { map = {}; }
+  check('--set-axial waits while another run holds the lock', seen.early === false,
+    'the map already had the entry while the lock was held: ' + JSON.stringify(seen));
+  check('--set-axial writes once the lock is released', Array.isArray(codes) && codes[1] === 0 && map['waited code'] === 'category W',
+    JSON.stringify(codes));
+
+  // A dead lock: a run that crashed an hour ago.
+  fs.writeFileSync(lock, 'a run that died', 'utf-8');
+  const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  fs.utimesSync(lock, hourAgo, hourAgo);
+  const g = path.join(sb.root, 'axial-stale.json');
+  fs.writeFileSync(g, JSON.stringify({ 'after a dead lock': 'category S' }), 'utf-8');
+  const res = runRaw(sb, ['--set-axial', '--data', g]);
+  let after = {};
+  try { after = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { after = {}; }
+  check('a lock older than the stale age is cleared and the write goes through',
+    res.status === 0 && after['after a dead lock'] === 'category S' && after['waited code'] === 'category W', 'exit ' + res.status + ' ' + res.stderr);
+  check('the dead lock is gone afterwards, and nothing else is left beside the map',
+    !fs.existsSync(lock) && strayBesideMap(sb).length === 0, strayBesideMap(sb).join(', '));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// Is `dir` outside every root, compared as real paths the way removeHandoff()
+// compares them? A root that does not exist holds nothing.
+function outsideRoots(dir, roots) {
+  let real;
+  try { real = fs.realpathSync(dir); } catch (e) { return false; }
+  return !roots.some(function (root) {
+    let base;
+    try { base = fs.realpathSync(root); } catch (e) { return false; }
+    const rel = path.relative(base, real);
+    return rel === '' || !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel));
+  });
+}
+
 // --- the hand-off file is deleted only from the temp directory ---------------
 // --add and --set-axial remove the --data file after reading it, because it
 // carries the private layer untruncated. The path is the caller's and the script
@@ -411,40 +670,58 @@ console.log('\ncorrection-ledger.js\n');
 // (holistic review, R2).
 {
   const sb = makeSandbox('handoff');
-  const inside = writeRows(sb, [{ scope: 'toolkit', open_code: 'inside the temp directory' }]);
-  run(sb, ['--add', '--data', inside]);
+  // The script takes "the temp directory" to be os.tmpdir() or /tmp. Every child in
+  // this block runs with its own fresh temp folder, so "inside" is a place this
+  // block controls rather than whatever the machine's TMPDIR happens to be.
+  const childTemp = path.join(sb.root, 'child-tmp');
+  fs.mkdirSync(childTemp, { recursive: true });
+  const tempEnv = { TMPDIR: childTemp, TMP: childTemp, TEMP: childTemp };
+  const tempRoots = [childTemp, '/tmp'];
+
+  const inside = path.join(childTemp, 'correction-rows-handoff.json');
+  fs.writeFileSync(inside, JSON.stringify([{ scope: 'toolkit', open_code: 'inside the temp directory' }]), 'utf-8');
+  run(sb, ['--add', '--data', inside], { env: tempEnv });
   check('--add removes a hand-off file that lives in the temp directory',
     !fs.existsSync(inside), 'the consumed file is still there');
 
-  // The outside fixture must be under neither os.tmpdir() nor /tmp, and every
-  // sandbox is under os.tmpdir(), so it lands in a gitignored corner of this
-  // repo instead and is removed on the way out. It is named like the realistic
-  // typo. A checkout that itself lives under /tmp fails the precondition check
-  // by name rather than passing the wrong test.
-  const outsideParent = path.resolve(__dirname, '..', 'artifacts', 'html');
-  fs.mkdirSync(outsideParent, { recursive: true });
-  const outsideDir = fs.mkdtempSync(path.join(outsideParent, 'ledger-handoff-'));
+  // The outside fixture must be under neither temp root. The repo's gitignored
+  // artifacts/html serves when the checkout is outside both. A checkout under /tmp
+  // (a scratch clone, as the release rehearsal uses) has every repo path inside
+  // /tmp, which the script treats as temp whatever TMPDIR says, and the suite
+  // failed there (issue #183). So /var/tmp stands in: a standard temp folder on
+  // Linux and macOS that the script does not treat as one. Either way the folder is
+  // named like the realistic typo and removed on the way out.
+  const repoRoot = path.resolve(__dirname, '..');
+  const candidates = [
+    { usable: function () { return outsideRoots(repoRoot, tempRoots); }, parent: path.join(repoRoot, 'artifacts', 'html') },
+    { usable: function () { return outsideRoots('/var/tmp', tempRoots); }, parent: '/var/tmp' }
+  ];
+  let outsideDir = null;
+  for (let i = 0; i < candidates.length && outsideDir === null; i++) {
+    if (!candidates[i].usable()) continue;
+    try {
+      fs.mkdirSync(candidates[i].parent, { recursive: true });
+      outsideDir = fs.mkdtempSync(path.join(candidates[i].parent, 'ledger-handoff-'));
+    } catch (e) { outsideDir = null; }
+  }
   try {
-    const outside = path.join(outsideDir, 'package.json');
-    fs.writeFileSync(outside, JSON.stringify([{ scope: 'toolkit', open_code: 'outside the temp directory' }]), 'utf-8');
-    const realOutside = fs.realpathSync(outsideDir);
-    const underTemp = [os.tmpdir(), '/tmp'].some(function (root) {
-      let base;
-      try { base = fs.realpathSync(root); } catch (e) { return false; }
-      const rel = path.relative(base, realOutside);
-      return rel === '' || !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel));
-    });
-    check('the outside fixture really is outside the temp directory', !underTemp, realOutside);
-
-    const res = runRaw(sb, ['--add', '--data', outside]);
-    check('--add still appends from a --data file outside the temp directory',
-      res.status === 0 && JSON.parse(res.stdout || '{}').added === 1, res.stderr || ('exit ' + res.status));
-    check('--add leaves a --data file outside the temp directory in place',
-      fs.existsSync(outside), 'the file was deleted: `--data package.json` typed in a project would remove that file');
-    check('--add says on stderr that it left the file alone',
-      /left .+ in place/.test(res.stderr), JSON.stringify(res.stderr));
+    check('the outside fixture really is outside the temp directory',
+      outsideDir !== null && outsideRoots(outsideDir, tempRoots),
+      outsideDir === null ? 'no writable folder outside ' + tempRoots.join(' and ') + ': tried the repo and /var/tmp'
+        : fs.realpathSync(outsideDir));
+    if (outsideDir !== null) {
+      const outside = path.join(outsideDir, 'package.json');
+      fs.writeFileSync(outside, JSON.stringify([{ scope: 'toolkit', open_code: 'outside the temp directory' }]), 'utf-8');
+      const res = runRaw(sb, ['--add', '--data', outside], { env: tempEnv });
+      check('--add still appends from a --data file outside the temp directory',
+        res.status === 0 && JSON.parse(res.stdout || '{}').added === 1, res.stderr || ('exit ' + res.status));
+      check('--add leaves a --data file outside the temp directory in place',
+        fs.existsSync(outside), 'the file was deleted: `--data package.json` typed in a project would remove that file');
+      check('--add says on stderr that it left the file alone',
+        /left .+ in place/.test(res.stderr), JSON.stringify(res.stderr));
+    }
   } finally {
-    fs.rmSync(outsideDir, { recursive: true, force: true });
+    if (outsideDir !== null) fs.rmSync(outsideDir, { recursive: true, force: true });
   }
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
