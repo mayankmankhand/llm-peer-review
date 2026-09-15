@@ -41,10 +41,10 @@
 //
 // `--rollback-to <x.y.z>` (issue #183) is the one path that lowers the record:
 // run from the project root while this release is still the running plugin,
-// before an older release is reinstalled, it sets every version key the older
-// release's guard reads that is above the target to the target, prints each
-// change, and refuses with exit 1 when there is nothing it may lower (see
-// rollbackRecord).
+// before an older release is reinstalled, it sets each of auditedVersion,
+// previousVersion and version that is above the target to the target (the older
+// release's version guard and its --stamp read them), prints each change, and
+// refuses with exit 1 when there is nothing it may lower (see rollbackRecord).
 //
 // Convention format (one section each, parsed here and written by hand there):
 //
@@ -886,36 +886,39 @@ function recordLostRowOffers(P, project, pluginRoot) {
 
 // --rollback-to <x.y.z> (issue #183): the one path that lowers the recorded
 // version. Run it from the project root while this release is still the running
-// plugin and before the older release is reinstalled. That older release's
-// version guard (its session-start.js notice and its pre-push-check.js block)
-// reads the first present key of auditedVersion, previousVersion and version,
-// and blocks every push while that version is newer than itself; its own
-// --stamp never lowers a key. So each of those keys whose version is above the
-// target is set to the target, and every other key, a key whose value is no
-// usable version included, stays exactly as it was. It prints each key it
-// changed, before and after. It refuses, with exit 1 and nothing written, when
-// the target is not a plain x.y.z version, when there is no readable state file,
-// when the state records no usable version, and when the recorded version is not
-// above the target. --stamp alone still never lowers anything.
+// plugin and before the older release is reinstalled. That older release reads
+// three keys: its version guard (the session-start.js notice and the
+// pre-push-check.js block) takes the first present key of auditedVersion,
+// previousVersion and version and blocks every push while that version is newer
+// than itself, and its --stamp refuses to write while auditedVersion or version
+// is newer, so a newer `version` alone would end every /tk:upgrade on it without
+// its stamp. Neither ever lowers a key. So each of the three keys whose version
+// is above the target is set to the target, and every other key, a key whose
+// value is no usable version included, stays exactly as it was. It prints each
+// key it changed, before and after. It refuses, with exit 1 and nothing written,
+// when the target is not a plain x.y.z version, when there is no readable state
+// file, and when no key records a usable version above the target. --stamp
+// alone still never lowers anything.
 function rollbackRecord(P, target) {
   const refuse = (why) => { console.error('upgrade-audit: not rolling back: ' + why); process.exit(1); };
   if (!/^\d+\.\d+\.\d+$/.test(target) || validVersion(target) === null) refuse('--rollback-to takes a release version such as 7.1.0');
   if (!fs.existsSync(P(STATE_REL))) refuse('this project has no ' + STATE_REL + ', so there is no recorded version to lower');
   const state = readJson(P(STATE_REL), null);
   if (state === null || typeof state !== 'object' || Array.isArray(state)) refuse(STATE_REL + ' is not a readable JSON object');
-  const recorded = referenceVersion(state);
-  if (recorded === null) refuse(STATE_REL + ' records no usable version');
-  if (compareVersions(recorded, target) !== 1) refuse(STATE_REL + ' records ' + recorded + ', which is not above ' + target + '; a rollback only lowers the record');
+  const keys = ['auditedVersion', 'previousVersion', 'version'];
+  if (keys.every(k => validVersion(state[k]) === null)) refuse(STATE_REL + ' records no usable version');
   const next = Object.assign({}, state);
   const changed = [];
-  for (const k of ['auditedVersion', 'previousVersion', 'version']) {
+  for (const k of keys) {
     const v = validVersion(state[k]);
     if (v !== null && compareVersions(v, target) === 1) { next[k] = target; changed.push(k + ': ' + v + ' -> ' + target); }
   }
+  if (!changed.length) refuse(STATE_REL + ' records no version above ' + target + '; a rollback only lowers the record');
   try { fs.writeFileSync(P(STATE_REL), JSON.stringify(next, null, 2) + '\n'); } catch (e) { refuse('could not write ' + STATE_REL + ' (' + (e.code || 'write failed') + ')'); }
   console.error('upgrade-audit: rolled back ' + STATE_REL + ' to ' + target + ':');
   for (const line of changed) console.error('upgrade-audit:   ' + line);
-  console.error('upgrade-audit: every other key is as it was. Now reinstall the ' + target + ' release: its version guard accepts a recorded version equal to its own.');
+  // The state file is committed so every collaborator's guard reads the same record.
+  console.error('upgrade-audit: every other key is as it was. Commit ' + STATE_REL + ', then reinstall the ' + target + ' release: its version guard accepts a recorded version equal to its own.');
 }
 
 function main() {
