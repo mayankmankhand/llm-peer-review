@@ -12,6 +12,32 @@ If you last installed v4.3.3, twenty-three releases have shipped on top of it. v
 
 ---
 
+## Unreleased (planned v7.2.0)
+
+**A minor release on top of v7.1.0, which stays additive on v7.0.0 and v6.0.0 (#178, #179, #180, #181, #182, #183).** The loop runs as before. What changes: the review that `/execute` chains into sees the work again, and setup, `/tk:upgrade` and the push check stop surprising the projects that use them.
+
+### Fixed
+
+- **A review chained from `/execute` reviewed nothing** (#182). `/execute` commits every green step, and `/review` looked only at uncommitted work, so it reported "No changes detected". `/review` now resolves its scope first with `session-init.js --scope`: `/execute` writes the plan's `**Start commit:**` once and hands over `<start>..HEAD`, and a `/review` typed on a clean tree covers the newest 20 unpushed commits and says how many it left out. The review names its range in its first line, pins the end so its own fix commits are verified as the fix, and sizes, detects and dispatches over the range plus uncommitted work. `/tk:upgrade` commits its fixes with named paths and reviews its own range.
+- **The push check** (#178) no longer blocks a whole-value placeholder (`${NAME}`, `${{ secrets.X }}`, `your-key-here`) while a real value later on the same line still blocks, hides a flagged value up to its closing quote, and scans what the push's destination lacks, from the repository's hook (git's own ref lines) and from Claude's M11 call, which now names `<remote> <ref>`.
+- **`/tk:setup`** (#180) backs up `.claude/settings.local.json` and `.claude/settings.json` on every run that changes them, stops with nothing written when one does not parse, names the rows it adds and removes, keeps the file's indentation, never adds back a row this working copy was already offered (a record in the git directory, so a clone starts fresh), and sweeps an early install's root helper script only when its content matches a toolkit copy. The seed narrows `git config` to the one read the toolkit makes and `npm install` to a plain install and the worktree install, adds the four `glab` rows, and retires the `/index` grep rows.
+- **`/tk:upgrade`** (#179): C-9, C-10 and C-11 run on every upgrade. C-9 treats `Bash(x:*)` and `Bash(x *)` as one row, counts a row in allow, ask or deny as present, restores only rows a migration record names, and never offers back a recorded row. C-10 flags lines naming toolkit paths the project does not have, with their comment lines. C-11 also reads `LESSONS.md`, `DESIGN-PROFILE.md`, `.claude/CLAUDE.md` and `CLAUDE.local.md`. Every receipt checks what its detector checks, and every finding carries a stable key the rerun uses to decide it is fixed.
+- **Approval stops in default permission mode** (#181): scratch files go in a folder from one `mktemp -d` call and are written with the file-writing tool; the debate session id comes from `ask-gpt.js session` and `ask-gemini.js session`; `/index` finishes its map with `generate-index.js --finalize`; GitLab issue and merge request bodies go through `--description-file`.
+- **Leftovers** (#183): every suite passes with a space in the temp path, with a global git ignore file, and from a checkout under `/tmp`; the three scripts that tell you to update name both update steps; `--version` builds restamp every stamped file; `generate-index.js` reads `git ls-files -z`; `browse.js` starts the dev server on Windows and reports a failed start as JSON; `--set-axial` writes the axial map under a lock.
+
+### Added
+
+- **Rollback, teammate and automatic-update steps** in `toolkit-reference.md` and the README, and `upgrade-audit.js --rollback-to <version>`, the one command that lowers a project's recorded version before an older release is reinstalled.
+- **`TK_LEDGER_DIR`** moves the correction ledger and its summary files for a test run; capture still reads the real session transcripts.
+- **Tests:** `test-session-init.js`, `test-generate-index.js`, `test-debate-session.js` and `test-browse-spawn.js` are new.
+
+### Notes on what was deliberately left out
+
+- **A plugin command's script permission ends at your next message,** so in default mode a script a command runs after you answer a question still asks for approval. Documented; the fix is for a later release.
+- **Also left for later releases:** detecting a secret that contains an apostrophe, the seeded `Bash(git push *)` row also covering force pushes, the `openai` 7 and `@google/genai` 2 upgrades, full native Windows support for `browse.js`, and verification sessions writing auto-memory into the real `~/.claude`.
+
+---
+
 ## v7.1.0 - Updates You Can Check and Undo (2026-09-14)
 
 **A minor release on top of v7.0.1, which stays additive on v7.0.0 and v6.0.0 (#172, #173, #174, #175, #176, #177).** Nothing here changes how the loop runs. What changes is how an update reaches a project: from a release tag, announced at session start, with a repair path for projects migrated on 7.0.x.
@@ -27,7 +53,7 @@ A read-only audit after v7.0.1 found that what the toolkit shipped could quietly
 - **A version guard.** The plugin's SessionStart hook is now a Node script, `session-start.js`. It links `~/.claude/plugins/data/tk-llm-peer-review/current` to the running plugin (a junction on Windows), then tells Claude to relay a notice when the project's recorded version (`auditedVersion`, else `previousVersion`, else `version` in `.claude/.toolkit-state.json`) is older than the plugin (run `/tk:upgrade`), newer than the plugin (update the plugin; pushes will be blocked), or when an old copy-install still sits in a project with no state file. The pre-push tripwire prints the version it ran as and blocks a push from a plugin older than the record. Recorded versions are validated before they are compared or printed.
 - **One key lookup, `env-local.js`,** shared by `ask-gpt.js`, `ask-gemini.js` and `gen-media.js`. Per variable, first value wins: the environment, then the project's `.env.local` (from the working directory up to the git root), then `~/.claude/plugins/.env.local`. Blank values count as unset, and only the toolkit's own key and model variables are read from either file, so a cloned repository's `.env.local` cannot redirect a machine-wide key.
 - **`seed/`,** the files `/tk:setup` writes, written for a downstream plugin project: a clean `CLAUDE.md`, lessons and design-profile templates with `tk:` names, `settings.local.json` with only the toolkit's rows and no `defaultMode`, a `.gitignore` that never ignores the state file, and `retired-permission-rows.txt`, the rows the 7.0.0 and 7.0.1 seeds shipped that the new seed drops.
-- **Upgrade repairs for 7.0.x migrations.** C-9: permission rows match the shipped seed, in both directions, plus rows of the project's own that a 7.0.0 migration removed although their script is still there; `defaultMode` is raised as a question and never changed without an answer. C-10: seeded root files carry no copy-install lines, a `.gitignore` or `.gitattributes` line the migration dropped comes back, and a migration record git still tracks is flagged. C-11: the project's own files name toolkit commands, skills and agents with the `tk:` prefix. All three are dated 7.1.0, so every 7.0.x project has them in range on its first upgrade.
+- **Upgrade repairs for 7.0.x migrations.** C-9: permission rows match the shipped seed, in both directions, plus rows of the project's own that a 7.0.0 migration removed although their script is still there (since changed in 7.2.0: C-9 to C-11 run on every upgrade, and C-9 restores only rows a migration record names); `defaultMode` is raised as a question and never changed without an answer. C-10: seeded root files carry no copy-install lines, a `.gitignore` or `.gitattributes` line the migration dropped comes back, and a migration record git still tracks is flagged. C-11: the project's own files name toolkit commands, skills and agents with the `tk:` prefix. All three are dated 7.1.0, so every 7.0.x project has them in range on its first upgrade.
 - **`gen-media.js --prompt-file`,** so a prompt holding `$`, backticks or quotes arrives byte for byte.
 - **Tests:** `test-session-start.js`, `test-env-local.js` and `test-release-check.js` are new.
 
@@ -52,10 +78,10 @@ A read-only audit after v7.0.1 found that what the toolkit shipped could quietly
 
 ### Notes on what was deliberately left out
 
-- **Rollback and collaborator docs, and `autoUpdate`,** the rest of #175, are deferred.
-- **The commands finder on a project's own commands** is fixed in the build but not yet proven end to end: the verification scenario's change was small enough that the review size gate reviewed it inline, by design.
-- **On GitLab, creating an issue or merge request still stops for one approval** when its body has lines starting with `#`: `glab` has no body-file flag, and a multi-line single-quoted body is not auto-approved.
-- **Known gaps, left for later releases:** C-9's lost-rows check is not limited to 7.0.0 records, C-10's stale-line predicates are narrow, C-11 skips `LESSONS.md`, and a plugin-mode setup re-run rewrites `settings.local.json` without a backup.
+- **Rollback and collaborator docs, and `autoUpdate`,** the rest of #175, are deferred (since changed in 7.2.0: all three are documented).
+- **The commands finder on a project's own commands** is fixed in the build but not yet proven end to end: the verification scenario's change was small enough that the review size gate reviewed it inline, by design (since changed in 7.2.0: the review chained from `/execute` sees committed work).
+- **On GitLab, creating an issue or merge request still stops for one approval** when its body has lines starting with `#`: `glab` has no body-file flag, and a multi-line single-quoted body is not auto-approved (since changed in 7.2.0: bodies go through `--description-file`, with the inline form as the fallback).
+- **Known gaps, left for later releases:** C-9's lost-rows check is not limited to 7.0.0 records, C-10's stale-line predicates are narrow, C-11 skips `LESSONS.md`, and a plugin-mode setup re-run rewrites `settings.local.json` without a backup (since changed in 7.2.0: all four are fixed).
 
 **Suites at the tag:** build-plugin 124, setup-project 227, upgrade-audit 211, session-start 97, env-local 52, release-check 140, pre-push-check 77, render-html 308, correction-ledger 59, gen-media 133 checks; installer guarantees 149.
 

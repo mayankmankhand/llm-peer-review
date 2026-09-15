@@ -317,12 +317,23 @@ Or from a terminal: `claude plugin marketplace add mayankmankhand/llm-peer-revie
 
 ### Seed your project
 
-Open your project in Claude Code and run `/tk:setup`. On a fresh project it writes the short rules file `.claude/rules/toolkit.md`, `LESSONS.md`, `DESIGN-PROFILE.md`, `CLAUDE.md` (a short template: a Toolkit section plus project sections that are yours to fill in), the `plans/` and `artifacts/` folders, the gitignore lines, and a pointer to the marketplace in `.claude/settings.json` so a collaborator's Claude Code offers the install. Every file is write-when-absent: your existing files are never overwritten. On a project that carried the copy-installed toolkit, it migrates instead; see [Update an Existing Project](#update-an-existing-project).
+Open your project in Claude Code and run `/tk:setup`. On a fresh project it writes the short rules file `.claude/rules/toolkit.md`, `LESSONS.md`, `DESIGN-PROFILE.md`, `CLAUDE.md` (a short template: a Toolkit section plus project sections that are yours to fill in), the `plans/` and `artifacts/` folders, the gitignore lines, and a pointer to the marketplace in `.claude/settings.json` so a collaborator's Claude Code offers the install. Every file is write-when-absent: your existing files are never overwritten. The permission rows are the one list setup merges into an existing file: it backs up `.claude/settings.local.json` and `.claude/settings.json` before changing either, names every row it adds or removes, never adds back a row you deleted in that working copy, and stops without writing anything when a settings file does not parse. On a project that carried the copy-installed toolkit, it migrates instead; see [Update an Existing Project](#update-an-existing-project).
 
 ### Optional: API keys and Chromium
 
 - `/tk:ask-gpt`, `/tk:ask-gemini`, and the design workflow's media helper look for each key in a real environment variable first, then in the project's own `.env.local` (from the folder the command runs in up to the git root), then in `~/.claude/plugins/.env.local` (one file shared by every project on the machine). Only the toolkit's own key and model variables are read from those files. [API-KEYS.md](API-KEYS.md) walks through it.
 - `/tk:review-browser` needs Chromium once per machine: `npx --prefix ~/.claude/plugins/data/tk-llm-peer-review/current playwright-core install chromium` (on Linux and WSL also `sudo npx playwright-core install-deps chromium`). That `current` path is a link the plugin keeps pointing at its installed version.
+
+### Cloning a project that uses the toolkit
+
+A clone carries the project's `.claude/settings.json`, which names the toolkit's marketplace and switches the plugin on, but not the plugin itself and not your local permissions. On a machine that has not installed the toolkit:
+
+```bash
+claude plugin marketplace add mayankmankhand/llm-peer-review
+claude plugin install tk@llm-peer-review
+```
+
+Then restart Claude Code, open the project, and run `/tk:setup`: it writes the permission rows, which live in `.claude/settings.local.json` and are never committed. Opening the project in Claude Code and trusting the folder adds the marketplace from the project's settings too, and Claude Code then shows the same install command.
 
 ### Recommended for a hands-off install: tell your AI agent
 
@@ -459,7 +470,14 @@ npx --prefix .claude/scripts playwright-core install chromium
 /plugin update tk@llm-peer-review
 ```
 
-Restart Claude Code or run `/reload-plugins`. That moves the plugin; your project has not changed. Then run `/tk:upgrade` in every project on the plugin; the session notice asks for it in each project that is behind. It checks more than your own commands, skills, agents, rules and `CLAUDE.md`: it also checks `.claude/settings.local.json`, and since 7.1.0 it compares that file's rows with the seed and reads `.gitignore`, `.gitattributes`, `artifacts/README.md`, and a migration record git still tracks, and the rules-file check (C-7) runs on every upgrade. It opens the cycle's issue, reads the [conventions](docs/CONVENTIONS.md) that changed since the version the project was last audited against, and turns every file of yours that is behind one into a finding with a receipt: a command that still dispatches the old generic finder, a prompt that pastes review criteria, an agent with edit tools in a reviewer role, a path into `.claude/skills/shared/` that no longer exists in the project. The findings go through the same M2 audit and auto-fix loop a review uses, stopping once to ask, with every prompt file listed, before the first edit, then one sample `/tk:review` proves the loop on the new version and `/tk:document` records the cycle. A project with nothing behind is told so in one line.
+From a terminal, the same two steps are:
+
+```bash
+claude plugin marketplace update llm-peer-review
+claude plugin update tk@llm-peer-review
+```
+
+Keep the first step: `claude plugin update` on its own does not fetch the marketplace's catalog, so it would not see a new release. For a plugin installed for one project only, run the second step as `claude plugin update tk@llm-peer-review --scope project` from that project. Restart Claude Code or run `/reload-plugins`. That moves the plugin; your project has not changed. Then run `/tk:upgrade` in every project on the plugin; the session notice asks for it in each project that is behind. It checks more than your own commands, skills, agents, rules and `CLAUDE.md`: it also checks `.claude/settings.local.json`, and since 7.1.0 it compares that file's rows with the seed and reads `.gitignore`, `.gitattributes`, `artifacts/README.md`, and a migration record git still tracks, and the rules-file check (C-7) runs on every upgrade. It opens the cycle's issue, reads the [conventions](docs/CONVENTIONS.md) that changed since the version the project was last audited against, and turns every file of yours that is behind one into a finding with a receipt: a command that still dispatches the old generic finder, a prompt that pastes review criteria, an agent with edit tools in a reviewer role, a path into `.claude/skills/shared/` that no longer exists in the project. The findings go through the same M2 audit and auto-fix loop a review uses, stopping once to ask, with every prompt file listed, before the first edit, then one sample `/tk:review` proves the loop on the new version and `/tk:document` records the cycle. A project with nothing behind is told so in one line.
 
 Your own files are never overwritten by an update, because the update touches only the plugin cache. The two files the toolkit does write into a project, the short rules seed and the state file `.claude/.toolkit-state.json`, are the ones `/tk:upgrade` stamps.
 
@@ -471,9 +489,36 @@ Updates reach you from tagged releases, not from every commit on main. Each proj
 - **The plugin is older than the project** (a collaborator upgraded the project first, for example). The pre-push check the toolkit runs before its own pushes (and any git hook your project wires to it) blocks the push until you update the marketplace and then the plugin, as above (`/plugin marketplace update llm-peer-review`, then `/plugin update tk@llm-peer-review`), and restart Claude Code, because an older plugin checks outgoing commits with older rules than the project was set up with. A push you type by hand in a project with no such hook is not checked.
 - **The old copy-install still sits beside the plugin.** Run `/tk:setup` to migrate it, so you stop running the stale unprefixed commands by accident.
 
+### Automatic updates
+
+Off unless you turn them on: Claude Code leaves automatic updates off for third-party marketplaces such as this one, and setup never changes that. To turn them on, run `/plugin`, open **Marketplaces**, choose `llm-peer-review`, and select **Enable auto-update**. Claude Code then checks for a new release in the background after a session starts, and the new version loads after `/reload-plugins` or at the next launch; run `/tk:upgrade` in each project once it has. Setting the `DISABLE_AUTOUPDATER` environment variable turns every automatic update off. Turn automatic updates off before going back to an earlier release, so nothing moves you forward again unasked.
+
+### Going back to an earlier release
+
+1. In each project that uses the toolkit, while the newer release is still installed, lower the version the project records to the release you are going back to (here 7.1.0), then commit `.claude/.toolkit-state.json`:
+
+   ```bash
+   node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --rollback-to 7.1.0
+   ```
+
+   An older release's pre-push check blocks every push from a project that records a newer version, and this command is the one way to lower the record. It prints each value it changed.
+2. Replace the plugin with the older release, with the marketplace pinned to that release's tag:
+
+   ```bash
+   claude plugin uninstall tk@llm-peer-review --keep-data
+   claude plugin marketplace remove llm-peer-review
+   claude plugin marketplace add mayankmankhand/llm-peer-review@v7.1.0
+   claude plugin install tk@llm-peer-review
+   ```
+
+   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project.
+3. If you reinstalled before step 1, the older release's push check blocks and names both versions. In each project, open `.claude/.toolkit-state.json`, set each of `version`, `previousVersion` and `auditedVersion` that is above the older release to that release (`7.1.0`), and commit the file.
+
+To return to the newest release, run step 2 with `claude plugin marketplace add mayankmankhand/llm-peer-review` (no tag) in its third line, restart Claude Code, and run `/tk:upgrade` in each project.
+
 ### Moving a copy-install (v6.x or earlier) to the plugin
 
-Install the plugin, then run `/tk:setup` in the project. It detects the copy-install, classifies every managed file against the installer's manifest, and stops to ask about any file you edited locally (each one is backed up and becomes an `/tk:upgrade` finding under C-6 whose receipt is the migration record's line for the file plus two hashes, the one the old manifest recorded and the backup copy's; the base to diff your edit against is the same file at the toolkit tag for the version the backup came from, not the current plugin copy). An install old enough to have no manifest is recognized too, by `VERSION` beside `.claude/commands/review.md` or by an early stamp in its rules file; every file it finds is of unknown provenance, so the run stops until you rerun with `--force`. Helper scripts an early installer copied into your root `scripts/` folder are removed with the rest (backed up first), while every other file there is left alone, and a `VERSION` file of your project's own is kept. On a clean or approved run it backs up and removes the toolkit's files, keeps every custom file, seeds the short rules file, merges the marketplace pointer and permissions, records the migration, and hands off to `/tk:upgrade`, which audits your custom files against every convention since the version you came from. The report ends with a one-line `Undo:` built from what that run actually did. Follow it left to right: `git checkout --` the tracked files it names, then delete the files it created (and its new folders, if empty), then copy the listed files back from the backup folder it names (or restore by hand the few it says git holds no copy of), then remove that backup folder. Use that line rather than a generic checkout, which would leave the new files in place and skip what only the backup holds. The first push after the migration stops to ask about the settings change, which is the tripwire doing its job. Your API keys need no move: the plugin's scripts read the project's own `.env.local` (after a real environment variable, before `~/.claude/plugins/.env.local`), so the file the copy-install used keeps working (see [API-KEYS.md](API-KEYS.md)).
+Install the plugin, then run `/tk:setup` in the project. It detects the copy-install, classifies every managed file against the installer's manifest, and stops to ask about any file you edited locally (each one is backed up and becomes an `/tk:upgrade` finding under C-6 whose receipt is the migration record's line for the file plus two hashes, the one the old manifest recorded and the backup copy's; the base to diff your edit against is the same file at the toolkit tag for the version the backup came from, not the current plugin copy). An install old enough to have no manifest is recognized too, by `VERSION` beside `.claude/commands/review.md` or by an early stamp in its rules file; every file it finds is of unknown provenance, so the run stops until you rerun with `--force`. Helper scripts an early installer copied into your root `scripts/` folder are removed with the rest (backed up first), while every other file there is left alone, and a `VERSION` file of your project's own is kept. On a clean or approved run it backs up and removes the toolkit's files, keeps every custom file, seeds the short rules file, merges the marketplace pointer and permissions (backing up both settings files first and naming every row it adds or removes), records the migration, and hands off to `/tk:upgrade`, which audits your custom files against every convention since the version you came from. The report ends with a one-line `Undo:` built from what that run actually did. Follow it left to right: `git checkout --` the tracked files it names, then delete the files it created (and its new folders, if empty), then copy the listed files back from the backup folder it names (or restore by hand the few it says git holds no copy of), then remove that backup folder. Use that line rather than a generic checkout, which would leave the new files in place and skip what only the backup holds. The first push after the migration stops to ask about the settings change, which is the tripwire doing its job. Your API keys need no move: the plugin's scripts read the project's own `.env.local` (after a real environment variable, before `~/.claude/plugins/.env.local`), so the file the copy-install used keeps working (see [API-KEYS.md](API-KEYS.md)).
 
 ### Copy-install updates (other editors)
 
@@ -644,7 +689,8 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 - **"Unknown command: /tk:explore" right after installing or updating the plugin** - Run `/reload-plugins` or restart Claude Code. The same fix applies when a dispatch says an agent type such as `tk:review-code-finder` is not found: a plugin's agents register when the session loads them.
 - **`/tk:ask-gpt` says the key was not found** - The message lists the three places it looked, in order: the environment, the project's `.env.local` (from the folder the command runs in up to the git root), and `~/.claude/plugins/.env.local`. Check that the key sits in one of them, that its line is spelled exactly (`OPENAI_API_KEY=...`), and that its value is not blank. A worktree is its own git root, so it needs its own copy of the project file (`/tk:worktree` makes one). See [API-KEYS.md](API-KEYS.md).
 - **A "Toolkit version notice" at the start of a session** - See [Version notices](#version-notices) under Update an Existing Project.
-- **`/tk:setup` stopped with exit code 3** - It found something that needs your decision (a dirty git tree, a migration in a folder that is not a git repository, locally modified toolkit files, or a copy-install of unknown provenance) and touched nothing. Read its list; rerun with `--force` only after you have decided.
+- **`/tk:setup` stopped with exit code 3** - It found something that needs your decision (a dirty git tree, a migration in a folder that is not a git repository, locally modified toolkit files, a copy-install of unknown provenance, or a settings file it cannot read, such as one with a trailing comma) and touched nothing. Read its list; rerun with `--force` only after you have decided. `--force` never replaces a settings file it cannot read: it leaves that file exactly as it is and sets up everything else.
+- **A toolkit command stops to ask before one of its own steps, in default permission mode** - A plugin command's permission for its own scripts lasts only until you send your next message, so a script it runs after you answer one of its questions asks for approval; a later release is to lift this. Saving a review receipt's output to a file also asks in default mode. Approve the prompt when it comes.
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
 - **`/ask-gpt` or `/ask-gemini` fails** - Check that `npm install --prefix .claude/scripts` was run and `.env.local` has valid API keys.
 - **`/ask-gpt` or `/ask-gemini` prints a "deprecated model" warning** - v4.5.0 auto-overrides outdated `GPT_MODEL` or `GEMINI_MODEL` env values with the current default. Edit `.env.local` to remove or update the stale value if you want to silence the warning. See [API-KEYS.md](API-KEYS.md#changing-the-model).
