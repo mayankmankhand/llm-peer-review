@@ -511,7 +511,7 @@ Off unless you turn them on: Claude Code leaves automatic updates off for third-
    claude plugin install tk@llm-peer-review
    ```
 
-   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project.
+   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. Run these lines from a folder that is not a project, such as your home folder: run inside a project, the uninstall and the marketplace removal also delete the toolkit's marketplace and plugin entries from that project's `.claude/settings.json`. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project, then put its settings back with `git checkout -- .claude/settings.json`.
 3. If you reinstalled before step 1, the older release's push check blocks and names both versions. In each project, open `.claude/.toolkit-state.json`, set each of `version`, `previousVersion` and `auditedVersion` that is above the older release to that release (`7.1.0`), and commit the file.
 
 To return to the newest release, run step 2 with `claude plugin marketplace add mayankmankhand/llm-peer-review` (no tag) in its third line, restart Claude Code, and run `/tk:upgrade` in each project.
