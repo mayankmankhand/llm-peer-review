@@ -138,19 +138,19 @@ Record any trimming in the map header (e.g., add `<!-- Trimmed: tree-to-depth-3,
 
 **Atomic write** (this is critical for not corrupting user state on partial failure):
 
-1. Write the content to `CODEBASE_MAP.md.tmp` in the project root.
-2. Validate the temp file:
-   - It exists and is non-empty (> 200 bytes)
-   - The first line is the `<!-- Generated: -->` header comment
-   - It contains a `# Codebase Map` heading
-   - It contains a `## Module Guide` section
-3. If validation passes: rename `CODEBASE_MAP.md.tmp` to `CODEBASE_MAP.md` (this is the atomic step - `mv` is atomic on POSIX filesystems).
-4. If validation fails: delete the temp file and stop with an error. Do NOT touch the existing `CODEBASE_MAP.md` or `INDEX.md`.
+1. Write the content to `CODEBASE_MAP.md.tmp` in the project root with the file-writing tool.
+2. From the project root, finish the write with one call:
+
+   ```bash
+   node .claude/scripts/generate-index.js --finalize
+   ```
+
+   It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), renames it over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object. These checks, the rename and the delete used to be a shell compound, which default permission mode stops to ask about (#181).
+3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 7's size and `indexRemoved` for its legacy-file line.
+4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`.
 
 ### Step 6: One-time INDEX.md migration (only after successful write)
-**Only run this step after Step 5 succeeded.** If `INDEX.md` exists in the project root, delete it. It's been replaced by `CODEBASE_MAP.md`. (This handles the upgrade case for projects that had the old flat-tree index.)
-
-If Step 5 failed, skip this step entirely - the user's old `INDEX.md` is still useful as a fallback.
+Step 5's `--finalize` call handles it: it removes `INDEX.md` (the old flat-tree index that `CODEBASE_MAP.md` replaced) only after the new map is in place, so when Step 5 fails the user's old `INDEX.md` stays as a fallback. Nothing to run here.
 
 ### Step 7: Report to the user
 Tell the user:
@@ -166,7 +166,7 @@ Tell the user:
 
 <conditions>
 
-- **Empty repo (0 tracked files):** The scanner emits an empty file list. Skip Steps 2-3. In Step 4, write a minimal `CODEBASE_MAP.md` with just the header and a note: "No tracked files yet. Commit some files and run `/index` to regenerate."
+- **Empty repo (0 tracked files):** The scanner emits an empty file list. Skip Steps 2-3. In Step 4, write a minimal map: the full Step 4 header (its `<!-- Files: 0, ... -->` line is how `--finalize` recognizes a minimal map), the `# Codebase Map` heading, the two `>` lines under it, and a note: "No tracked files yet. Commit some files and run `/index` to regenerate." Then write it through Step 5 as usual; a shorter minimal map falls under the 200-byte floor and is refused.
 - **Single tiny project:** Manifest has 1 chunk. Spawn 1 subagent. The flow works identically.
 - **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
 - **Not a git repo:** Scanner errors out. Tell the user to `git init` first.
