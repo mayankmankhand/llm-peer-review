@@ -45,6 +45,15 @@ const path = require('path');
 
 const TRIPWIRE = path.resolve(__dirname, '..', '.claude', 'scripts', 'pre-push-check.js');
 
+// Hermetic git (issue #178). Every child git and tripwire run inherits these, so
+// no global or system config reaches a fixture, and every repo this suite
+// creates sets core.excludesFile=/dev/null, because git without a global config
+// still reads its default ignore file (~/.config/git/ignore). On a machine whose
+// ignore file lists .claude/, `git add` failed and the version-guard group
+// stopped before most of its checks ran.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
+
 let passed = 0;
 const failures = [];
 
@@ -103,6 +112,7 @@ function makeRepo(label) {
   g(['config', 'user.email', 'test@example.com']);
   g(['config', 'user.name', 'Test']);
   g(['config', 'commit.gpgsign', 'false']);
+  g(['config', 'core.excludesFile', '/dev/null']);
   return { root: root, repo: repo, g: g };
 }
 
@@ -665,12 +675,147 @@ function helperIdentityTests() {
   check('the setup-project.js copy is identical to the session-start.js copy', first !== null && blocks[2] === first);
 }
 
+// --- 12. whole-value placeholders do not block (issue #178) ---------------------
+// secret-assignment matched a key name, = or :, and ANY quoted run of 8 or more
+// characters, so a quoted placeholder blocked a push on its length alone. Every
+// silent fixture is first checked against the v7.1.0 pattern, kept below as
+// OLD_SECRET_ASSIGNMENT, so none of them could pass without the fix (the #168
+// lesson: a false-positive test needs a fixture the old pattern matched).
+//
+// assign() joins a key, its operator and a quoted value at runtime, so no line
+// of this file holds all three together: the header note's rule, split before
+// the = or :, applies to placeholders and hostile values alike.
+const OLD_SECRET_ASSIGNMENT = new RegExp('(password|passwd|pwd|secret|token|api[_-]?key)["\']?\\s*[:=]\\s*["\'][^"\']{8,}["\']', 'i');
+const DQ = '"';
+const SQ = "'";
+function assign(key, op, quote, value) { return key + op + quote + value + quote; }
+
+const PLACEHOLDER_FILES = [
+  { label: 'a .js file (the ROOT_TOKEN line from the issue)', file: 'scripts/build.js', before: ['// build helpers'], after: [],
+    fixtures: [assign('const ROOT_TOKEN', ' = ', SQ, '${CLAUDE_PLUGIN_ROOT}') + ';', assign('const apiKey', ' = ', DQ, 'your-api-key-here') + ';'] },
+  { label: 'a compose file', file: 'docker-compose.yml', before: ['services:', '  db:', '    environment:'], after: [],
+    fixtures: ['      ' + assign('POSTGRES_PASSWORD', ': ', DQ, '${DB_PASSWORD}'), '      ' + assign('password', ': ', DQ, '${DB_PASSWORD}')] },
+  { label: 'a GitHub workflow', file: '.github/workflows/release.yml', before: ['jobs:', '  publish:', '    steps:', '      - uses: actions/setup-node@v4', '        with:'], after: [],
+    fixtures: ['          ' + assign('token', ': ', DQ, '${{ secrets.NPM_TOKEN }}'), '          ' + assign('NODE_AUTH_TOKEN', ': ', SQ, '${{secrets.NPM_TOKEN}}')] },
+  { label: 'a .md file (the API-KEYS.md lines)', file: 'docs/keys.md', before: ['# Keys', '', '```bash'], after: ['```'],
+    fixtures: [assign('export OPENAI_API_KEY', '=', DQ, 'sk-proj-your-key-here'), assign('export GEMINI_API_KEY', '=', DQ, 'AIzaSy-your-key-here')] },
+  { label: 'a .sh file', file: 'deploy/run.sh', before: ['#!/bin/sh'], after: [],
+    fixtures: [assign('export GITHUB_TOKEN', '=', DQ, '${GITHUB_TOKEN}'), assign('API_KEY', '=', SQ, 'YOUR_API_KEY_HERE')] },
+];
+
+// Shapes that are NOT a whole placeholder, each still a hit. Every value is 8
+// characters or more, so the v7.1.0 pattern matched each line too: these guard
+// the exemption from growing, and pass before and after the fix.
+const HOSTILE = [
+  ['a default value', assign('DB_PASSWORD', '=', DQ, '${DB_PASSWORD:-hunter22}')],
+  ['a literal after the variable', assign('API_TOKEN', '=', DQ, '${API_TOKEN}hunter22')],
+  ['a literal before the variable', assign('API_TOKEN', '=', DQ, 'hunter22${API_TOKEN}')],
+  ['a literal after the expression', assign('token', ': ', DQ, '${{ secrets.NPM_TOKEN }}hunter22')],
+  ['a literal inside the expression', assign('token', ': ', DQ, "${{ secrets.NPM_TOKEN || 'hunter22' }}")],
+  ['angle brackets holding a digit', assign('api_key', ' = ', DQ, '<your-key-here-9>')],
+  ['a your- shape holding a digit', assign('api_key', ' = ', DQ, 'your-key-here-2')],
+  ['"your" that is not a whole segment', assign('api_key', ' = ', DQ, 'yourkeyhere')],
+  ['a variable name starting with a digit', assign('api_key', ' = ', DQ, '${1PASSWORD}')],
+  ['a placeholder closed by the other quote', assign('api_key', ' = ', DQ, '${API_TOKEN}').slice(0, -1) + SQ + ' + rest'],
+  ['a placeholder, then a real assignment on the same line', assign('token', ' = ', DQ, '${NPM_TOKEN}') + '; ' + assign('password', ' = ', DQ, 'hunter2hunter2')],
+];
+
+// Token patterns still read inside a value secret-assignment refused.
+const TOKEN_INSIDE = [
+  ['openai-key', 'a your- shape whose body is an sk- key', assign('OPENAI_API_KEY', '=', DQ, 'sk-your-' + 'abcdefghijklmnopqrstuv')],
+  ['github-token', 'a ${NAME} whose name is a GitHub token', assign('GH_TOKEN', '=', DQ, '${' + 'gh' + 'p_' + 'A1b2C3d4E5f6G7h8J9k0L1m2' + '}')],
+];
+
+function hitOn(stdout, pattern, file, lineNo) {
+  return new RegExp('\\[' + pattern + '\\] ' + file.replace(/[.]/g, '\\.') + ' @ [0-9a-f]{7} line ' + lineNo + ':').test(stdout);
+}
+
+function placeholderTests() {
+  console.log('\n12. whole-value placeholders do not block; everything else still does (issue #178)');
+  for (const f of PLACEHOLDER_FILES) {
+    const missed = f.fixtures.filter((l) => !OLD_SECRET_ASSIGNMENT.test(l));
+    check('fixture: every placeholder line in ' + f.label + ' matched the v7.1.0 pattern', missed.length === 0, missed.join(' | '));
+    const sb = makeRepo('placeholder');
+    try {
+      commitFile(sb, 'README.md', 'seed\n', 'init');
+      commitFile(sb, f.file, f.before.concat(f.fixtures, f.after, ['']).join('\n'), 'add ' + f.file);
+      const r = run(sb.repo);
+      check('placeholders in ' + f.label + ' do not block the push', r.status === 0 && r.stdout === '', 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    } catch (e) {
+      check(f.label + ' placeholder test set up a repo', false, e.message);
+    }
+    cleanup(sb);
+  }
+
+  const hb = makeRepo('hostile');
+  try {
+    commitFile(hb, 'README.md', 'seed\n', 'init');
+    commitFile(hb, 'config/hostile.env', HOSTILE.map((h) => h[1]).concat(['']).join('\n'), 'add values that are not placeholders');
+    const r = run(hb.repo);
+    check('lines that are not whole placeholders block the push', r.status === 1, 'exit ' + r.status);
+    HOSTILE.forEach(function (h, i) {
+      check('fixture: ' + h[0] + ' matched the v7.1.0 pattern', OLD_SECRET_ASSIGNMENT.test(h[1]));
+      check('still a hit: ' + h[0], hitOn(r.stdout, 'secret-assignment', 'config/hostile.env', i + 1), r.stdout.slice(0, 600));
+    });
+    check('the real value after a placeholder is masked', r.stdout.indexOf('hunter2hunter2') === -1 && r.stdout.indexOf(assign('password', ' = ', DQ, '****')) !== -1, r.stdout.slice(0, 600));
+    check('the placeholder before it stays readable in the report', r.stdout.indexOf(assign('token', ' = ', DQ, '${NPM_TOKEN}') + '; ') !== -1, r.stdout.slice(0, 600));
+  } catch (e) {
+    check('hostile-value test set up a repo', false, e.message);
+  }
+  cleanup(hb);
+
+  const tb = makeRepo('token-inside');
+  try {
+    commitFile(tb, 'README.md', 'seed\n', 'init');
+    commitFile(tb, 'config/inside.env', TOKEN_INSIDE.map((t) => t[2]).concat(['']).join('\n'), 'add tokens inside placeholder shapes');
+    const r = run(tb.repo);
+    check('a token inside a refused placeholder still blocks the push', r.status === 1, 'exit ' + r.status + ' :: ' + r.stdout.slice(0, 300));
+    TOKEN_INSIDE.forEach(function (t, i) {
+      check('fixture: ' + t[1] + ' matched the v7.1.0 pattern', OLD_SECRET_ASSIGNMENT.test(t[2]));
+      check('[' + t[0] + '] still fires on ' + t[1], hitOn(r.stdout, t[0], 'config/inside.env', i + 1), r.stdout.slice(0, 600));
+      check('secret-assignment itself stays silent on ' + t[1], !hitOn(r.stdout, 'secret-assignment', 'config/inside.env', i + 1), r.stdout.slice(0, 600));
+    });
+  } catch (e) {
+    check('token-inside test set up a repo', false, e.message);
+  }
+  cleanup(tb);
+}
+
+// --- 12b. a secret-assignment value is masked to its own closing quote (#178) ----
+// The old value class stopped at the first quote of either kind, so a value
+// holding an apostrophe matched only up to it and the report printed the rest.
+// The key and operator stay readable; the whole value is hidden.
+function secretMaskTests() {
+  console.log('\n12b. a secret-assignment value is masked whole, key kept (issue #178)');
+  const APOSTROPHE_TAIL = 's-horse-battery-staple';
+  const ESCAPED_TAIL = 'ijklmnopqrst';
+  const lines = [
+    assign('const password', ' = ', DQ, 'Tr0ub4dor' + SQ + APOSTROPHE_TAIL) + ';',
+    assign('password', ' = ', DQ, 'abcdefgh' + '\\' + DQ + ESCAPED_TAIL),
+  ];
+  const sb = makeRepo('mask-value');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'src/login.js', lines.concat(['']).join('\n'), 'add two passwords');
+    const r = run(sb.repo);
+    check('both values are hits', r.status === 1 && hitOn(r.stdout, 'secret-assignment', 'src/login.js', 1) && hitOn(r.stdout, 'secret-assignment', 'src/login.js', 2), r.stdout.slice(0, 600));
+    check('a value holding an apostrophe is masked to its closing quote (no tail in the report)', r.stdout.indexOf(APOSTROPHE_TAIL) === -1, r.stdout.slice(0, 600));
+    check('a value holding an escaped quote is masked past it', r.stdout.indexOf(ESCAPED_TAIL) === -1, r.stdout.slice(0, 600));
+    check('the key, operator and quotes stay readable around the mask', r.stdout.indexOf(assign('const password', ' = ', DQ, '****') + ';') !== -1, r.stdout.slice(0, 600));
+  } catch (e) {
+    check('value-mask test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
 mailtoTests();
 versionGuardTests();
 helperIdentityTests();
+placeholderTests();
+secretMaskTests();
 
 console.log('');
 if (failures.length === 0) {

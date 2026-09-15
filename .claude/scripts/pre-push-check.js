@@ -231,18 +231,53 @@ const PATTERNS = [
   // it only hides text on a published page, where masking a mailto link costs
   // nothing.
   { name: "url-with-credentials", re: /\b[a-z][a-z0-9+.-]*:\/\/(?!(?:mailto|tel):)[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/i },
+  // A key name, then = or :, then a quoted value of 8 characters or more.
+  //
+  // A placeholder is not a value (issue #178). The pattern never looked at the
+  // value, so `const ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'` blocked a push while
+  // the 7-character '${NAME}' passed: length alone decided. The negative
+  // lookahead right after the opening quote refuses the match when the WHOLE
+  // value, up to the quote that opened it, is exactly one of three shapes:
+  //   ${IDENT}           a shell or compose variable; IDENT is a letter or _
+  //                      followed by letters, digits and _
+  //   ${{ a.b }}         a GitHub Actions expression over a dotted path of such
+  //                      identifiers, inner spaces optional
+  //   your-key-here      letter segments joined by - or _, no digit, one whole
+  //                      segment being "your" (sk-proj-your-key-here included)
+  // Anything more is treated as a value: a default (${X:-lit}), a literal before
+  // or after (lit${X}, ${X}lit, ${{ a.b }}lit), an expression holding a literal
+  // (${{ a || 'lit' }}), angle brackets, a digit. A refused position does not
+  // end the search - the regex is tried at every later position, so a real
+  // assignment after a placeholder on the same line still hits - and the token
+  // patterns above still scan inside placeholder text, so a real sk- body under
+  // a "your" name is still caught.
+  //
+  // What is detected is otherwise unchanged: the (?=[^"']{8,}["']) lookahead is
+  // the old rule, under which the first quote of either kind ends the value. The
+  // rest of the match, to the SAME quote that opened the value (a backslash
+  // escapes one character), only decides what mask() hides: the old match
+  // stopped at an apostrophe inside "Tr0ub4dor's...", and the report printed
+  // the rest of the secret. A value with the other quote inside its first 8
+  // characters is still not detected; widening that is a separate change.
   {
     name: "secret-assignment",
-    re: /(password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*["'][^"']{8,}["']/i,
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["'])(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/i,
+    // What mask() hides of a match: the value only. Group 1 is the key through
+    // the opening quote and group 3 the closing quote (empty when the line ends
+    // first), so the key, the operator and both quotes stay readable.
+    hide: (m) => [m.index + m[1].length, m.index + m[0].length - m[3].length],
   },
 ];
 
 // Global twins of the patterns above, DERIVED from PATTERNS with .map(), so a new
 // pattern is masked automatically and there is no second list to keep in sync.
-// Used only for masking: replace() with a
-// non-global regex rewrites one occurrence, which would leave a second secret
-// on the same line readable in the report.
-const MASK_PATTERNS = PATTERNS.map((p) => new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"));
+// Used only for masking: a non-global regex finds one occurrence, which would
+// leave a second secret on the same line readable in the report. Each twin
+// carries its pattern's hide rule, if it has one.
+const MASK_PATTERNS = PATTERNS.map((p) => ({
+  re: new RegExp(p.re.source, p.re.flags.includes("g") ? p.re.flags : p.re.flags + "g"),
+  hide: p.hide,
+}));
 
 // Run git with an argument ARRAY (never a shell string). core.quotePath=false
 // keeps non-ASCII paths unescaped; paths containing a quote, backslash, or
@@ -338,9 +373,26 @@ function existsInBase(path, base) {
 // Mask EVERY secret on the line, not just the match that triggered the report:
 // one line can carry two credentials, and a separate report line is emitted per
 // matching pattern - so masking only the trigger republishes its neighbour.
+//
+// Every pattern reads the ORIGINAL line, the text the scan read, and marks the
+// characters it hides; each marked run is then printed as **** (issue #178). A
+// match keeps its first 4 characters unless its pattern has a hide rule
+// (secret-assignment hides its whole value and nothing else). Rewriting the
+// line one pattern at a time instead would let one rewrite change what the
+// next pattern sees, so the mask could stop following the scan's own rule.
 function mask(line) {
-  let out = line;
-  for (const re of MASK_PATTERNS) out = out.replace(re, (m) => m.slice(0, 4) + "****");
+  const hidden = new Array(line.length).fill(false);
+  for (const p of MASK_PATTERNS) {
+    for (const m of line.matchAll(p.re)) {
+      const [from, to] = p.hide ? p.hide(m) : [m.index + 4, m.index + m[0].length];
+      for (let i = from; i < to; i++) hidden[i] = true;
+    }
+  }
+  let out = "";
+  for (let i = 0; i < line.length; i++) {
+    if (!hidden[i]) out += line[i];
+    else if (i === 0 || !hidden[i - 1]) out += "****";
+  }
   return out.trim().slice(0, 200);
 }
 
