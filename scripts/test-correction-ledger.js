@@ -595,6 +595,18 @@ function strayBesideMap(sb) {
   try { blankMap = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { blankMap = {}; }
   check('a map file holding only whitespace counts as empty, with nothing in it to lose',
     blank.status === 0 && blankMap['third code'] === 'category C', 'exit ' + blank.status + ' ' + blank.stderr);
+
+  // An editor that saves with a byte-order mark leaves a map that still parses once
+  // the mark is dropped, so its entries are merged, not refused and not lost.
+  fs.writeFileSync(axialMapFile(sb), String.fromCharCode(0xFEFF) + JSON.stringify({ 'marked code': 'category M' }) + '\n', 'utf-8');
+  const fMarked = path.join(sb.root, 'axial-marked.json');
+  fs.writeFileSync(fMarked, JSON.stringify({ 'third code': 'category C' }), 'utf-8');
+  const marked = runRaw(sb, ['--set-axial', '--data', fMarked]);
+  let markedMap = {};
+  try { markedMap = JSON.parse(fs.readFileSync(axialMapFile(sb), 'utf-8')); } catch (e) { markedMap = {}; }
+  check('a map file that starts with a byte-order mark keeps its entries',
+    marked.status === 0 && markedMap['marked code'] === 'category M' && markedMap['third code'] === 'category C',
+    'exit ' + marked.status + ' ' + marked.stderr);
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 

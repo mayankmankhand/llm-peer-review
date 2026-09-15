@@ -643,7 +643,7 @@ function readAxialMapFile() {
     if (e.code === 'ENOENT') return { map: {} };
     return { error: 'could not read the axial map ' + AXIAL_MAP_PATH + ': ' + e.message };
   }
-  raw = raw.replace(/^﻿/, ''); // an editor's byte-order mark is not a broken map
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1); // an editor's byte-order mark is not a broken map
   if (raw.trim() === '') return { map: {} };
   let parsed;
   try { parsed = JSON.parse(raw); }
