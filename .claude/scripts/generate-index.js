@@ -3,8 +3,12 @@
 // generate-index.js - Scans the codebase and emits a JSON manifest to stdout.
 // The /index command consumes this manifest to orchestrate parallel subagent
 // analysis and synthesize CODEBASE_MAP.md. No LLM tokens spent here.
+//
+//   node generate-index.js              the scan: one JSON manifest
+//   node generate-index.js --finalize   check CODEBASE_MAP.md.tmp and move it
+//                                       into place: one JSON result (issue #181)
 
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -101,20 +105,131 @@ function emitError(code, message) {
   process.exit(1);
 }
 
-// Get all tracked files via git (respects .gitignore automatically)
+// --finalize (issue #181). /index writes the synthesized map to
+// CODEBASE_MAP.md.tmp and then makes this one call. The steps it replaces were
+// prose that Claude turned into a shell compound (two command substitutions,
+// grep, mv and rm), and default permission mode stops to ask about every part
+// of that; this call runs under the scanner's own allowed-tools row. It checks
+// the temp file the way /index step 5 always described, renames it over
+// CODEBASE_MAP.md (a rename is atomic, so no reader sees a half-written map),
+// removes the legacy INDEX.md as step 6 did, and prints one JSON object:
+//
+//   {"finalized":true,"map":"CODEBASE_MAP.md","bytes":<n>,"tokens":<n>,
+//    "minimal":<bool>,"replaced":<bool>,"indexRemoved":<bool>}        exit 0
+//   {"finalized":false,"error":"<code>","reason":"<one sentence>"}    exit 1
+//
+// Any failure deletes the temp file and leaves CODEBASE_MAP.md and INDEX.md as
+// they were.
+const MAP_FILE = "CODEBASE_MAP.md";
+const MAP_TMP_FILE = MAP_FILE + ".tmp";
+const LEGACY_INDEX_FILE = "INDEX.md";
+const MAP_MIN_BYTES = 200; // a map must be larger than this
+
+function finalizeMap() {
+  const tmpPath = path.join(cwd, MAP_TMP_FILE);
+  const mapPath = path.join(cwd, MAP_FILE);
+
+  function fail(code, reason) {
+    // unlink removes a file or a symlink, never a folder; a temp file that is
+    // already gone is the state a failure should leave anyway.
+    try { fs.unlinkSync(tmpPath); } catch { /* nothing to remove */ }
+    process.stdout.write(JSON.stringify({ finalized: false, error: code, reason }) + "\n");
+    process.exit(1);
+  }
+
+  let stat;
+  try {
+    stat = fs.lstatSync(tmpPath);
+  } catch {
+    fail("no_temp_map", `${MAP_TMP_FILE} was not found in ${cwd}. Write the map there first.`);
+  }
+  // A symlink or a folder in its place is refused, never moved over the map.
+  if (!stat.isFile()) fail("not_a_file", `${MAP_TMP_FILE} is not a regular file.`);
+
+  let buf;
+  try {
+    buf = fs.readFileSync(tmpPath);
+  } catch (e) {
+    fail("unreadable", `${MAP_TMP_FILE} could not be read: ${e.message}`);
+  }
+  if (buf.length <= MAP_MIN_BYTES) {
+    fail("too_small", `${MAP_TMP_FILE} is ${buf.length} bytes; a map must be over ${MAP_MIN_BYTES}.`);
+  }
+  const lines = buf.toString("utf8").split(/\r?\n/);
+  if (!lines[0].startsWith("<!-- Generated:")) {
+    fail("no_generated_header", `The first line of ${MAP_TMP_FILE} is not the <!-- Generated: ... --> header.`);
+  }
+  const titleAt = lines.findIndex((l) => l.trimEnd() === "# Codebase Map");
+  if (titleAt === -1) fail("no_title", `${MAP_TMP_FILE} has no "# Codebase Map" heading.`);
+  // The empty-repo minimal map (/index, "Empty repo") has no Module Guide,
+  // because the scan kept no file to describe, and its header says so with a
+  // "<!-- Files: 0, ..." line. Only the header above the title counts, so a map
+  // that merely quotes such a line in its body still needs its Module Guide.
+  const minimal = lines.slice(0, titleAt).some((l) => l.startsWith("<!-- Files: 0,"));
+  if (!minimal && !lines.some((l) => l.startsWith("## Module Guide"))) {
+    fail("no_module_guide", `${MAP_TMP_FILE} has no "## Module Guide" section.`);
+  }
+
+  const replaced = fs.existsSync(mapPath);
+  try {
+    fs.renameSync(tmpPath, mapPath);
+  } catch (e) {
+    fail("rename_failed", `${MAP_TMP_FILE} could not be renamed over ${MAP_FILE}: ${e.message}`);
+  }
+
+  // Step 6's migration: the flat-tree INDEX.md that CODEBASE_MAP.md replaced
+  // goes only after the new map is in place. The name must match exactly: on a
+  // case-insensitive filesystem (macOS, Windows) a lookup of INDEX.md also finds
+  // a project's own index.md, which is not the toolkit's to delete.
+  let indexRemoved = false;
+  const legacyPath = path.join(cwd, LEGACY_INDEX_FILE);
+  try {
+    if (fs.readdirSync(cwd).includes(LEGACY_INDEX_FILE) && fs.lstatSync(legacyPath).isFile()) {
+      fs.unlinkSync(legacyPath);
+      indexRemoved = true;
+    }
+  } catch (e) {
+    process.stderr.write(`generate-index: ${LEGACY_INDEX_FILE} was not removed: ${e.message}\n`);
+  }
+
+  process.stdout.write(JSON.stringify({
+    finalized: true,
+    map: MAP_FILE,
+    bytes: buf.length,
+    tokens: Math.ceil(buf.length / 4),
+    minimal,
+    replaced,
+    indexRemoved,
+  }) + "\n");
+  process.exit(0);
+}
+
+// Arguments: none for the scan, or --finalize alone. Anything else is refused
+// rather than ignored, so a mistyped flag never prints a manifest in place of
+// the result the caller is waiting for.
+const args = process.argv.slice(2);
+if (args.length === 1 && args[0] === "--finalize") finalizeMap();
+if (args.length > 0) {
+  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan, or with --finalize alone.`);
+}
+
+// Get all tracked files via git (respects .gitignore automatically). -z prints
+// each name verbatim and ends it with NUL (issue #183): without it git C-quotes
+// any name holding a non-ASCII byte ("docs/caf\303\251.md"), no file by that
+// name exists, and the file was counted as missing and left out of the map.
 let raw;
 try {
-  raw = execSync("git ls-files", { cwd, encoding: "utf8" });
+  raw = execFileSync("git", ["ls-files", "-z"], { cwd, encoding: "utf8" });
 } catch {
   emitError("git_failed", "git ls-files failed - not a git repository?");
 }
 
-const allFiles = raw.split("\n").map((f) => f.trim()).filter(Boolean);
+const allFiles = raw.split("\0").filter(Boolean);
 
 // Capture HEAD commit for staleness tracking in the map header
 let commit = "(no commits yet)";
 try {
-  commit = execSync("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
+  commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
 } catch {
   // Empty repos have no HEAD - keep the placeholder
 }
@@ -125,7 +240,7 @@ try {
 let dirtyFileCount = 0;
 let isDirty = false;
 try {
-  const status = execSync("git status --porcelain", { cwd, encoding: "utf8" });
+  const status = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   dirtyFileCount = status.split("\n").filter((l) => l.trim().length > 0).length;
   isDirty = dirtyFileCount > 0;
 } catch {
