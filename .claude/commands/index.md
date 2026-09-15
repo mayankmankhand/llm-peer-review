@@ -168,7 +168,7 @@ Tell the user:
 
 - **Empty repo (0 tracked files):** The scanner emits an empty file list. Skip Steps 2-3. In Step 4, write a minimal map: the full Step 4 header (its `<!-- Files: 0, ... -->` line is how `--finalize` recognizes a minimal map), the `# Codebase Map` heading, the two `>` lines under it, and a note: "No tracked files yet. Commit some files and run `/index` to regenerate." Then write it through Step 5 as usual; a shorter minimal map falls under the 200-byte floor and is refused.
 - **Single tiny project:** Manifest has 1 chunk. Spawn 1 subagent. The flow works identically.
-- **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
+- **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
 - **Not a git repo:** Scanner errors out. Tell the user to `git init` first.
 - **All subagents fail:** Do NOT write a partial/empty map. Report the failure and leave any existing `CODEBASE_MAP.md` and `INDEX.md` untouched.
 - **Per-chunk overflow detected:** Step 2's confirm prompt covers this. If the user proceeds anyway, the oversized subagent may truncate or fail - report the gap in Step 7.
