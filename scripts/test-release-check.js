@@ -12,9 +12,11 @@
 // .claude-plugin/marketplace.json, and stub suites passed with --suites, so a
 // run never reads or writes this repo's history. The hook is tested with its
 // two scripts swapped for stubs (TK_PRE_PUSH_CHECK, TK_RELEASE_CHECK) that log
-// that they ran and what arguments the gate received; a final few `git push`
-// runs keep the real gate, to prove the pushed commit and tag reach it. The
-// hook's seam notices (TK_* set) are asserted too. release-check.js runs this
+// that they ran, what arguments each received, and the ref lines the tripwire
+// was handed on stdin (issue #178); a final few `git push` runs keep the real
+// gate, to prove the pushed commit and tag reach it, and one block keeps the
+// real tripwire, to prove a push of HEAD to another branch is scanned against
+// that branch. The hook's seam notices (TK_* set) are asserted too. release-check.js runs this
 // file as part of its default suite set; that cannot recurse, because every
 // gate run below targets a scratch repo whose suites are stubs, never this
 // repository (asserted at the end).
@@ -416,12 +418,16 @@ function releaseRepo(version, tag, opt) {
 
 // --- hook routing ------------------------------------------------------------------
 const stubDir = tmp('release-hook-stubs-');
-write(stubDir, 'tripwire.js', "require('fs').appendFileSync(process.env.HOOK_LOG, 'tripwire\\n');\nprocess.exit(Number(process.env.TRIPWIRE_EXIT || 0));\n");
+// The tripwire stub records its arguments and the stdin it received, one JSON
+// object per run, so the ref lines the hook hands it can be checked (issue #178).
+const TRIPWIRE_STUB = "const fs = require('fs');\nfs.appendFileSync(process.env.HOOK_LOG, 'tripwire\\n');\n"
+  + "fs.appendFileSync(process.env.HOOK_LOG + '.tripwire', JSON.stringify({ args: process.argv.slice(2), stdin: fs.readFileSync(0, 'utf8') }) + '\\n');\n";
+write(stubDir, 'tripwire.js', TRIPWIRE_STUB + "process.exit(Number(process.env.TRIPWIRE_EXIT || 0));\n");
 // The release stub also records the arguments the hook passed, one run per line.
 write(stubDir, 'release.js', "const fs = require('fs');\nfs.appendFileSync(process.env.HOOK_LOG, 'release\\n');\nfs.appendFileSync(process.env.HOOK_LOG + '.args', process.argv.slice(2).join(' ') + '\\n');\nprocess.exit(Number(process.env.RELEASE_EXIT || 0));\n");
 // The hook's default tripwire path is relative to its cwd; this stand-in lets a
 // run with TK_PRE_PUSH_CHECK unset still work, to prove no notice is printed.
-write(stubDir, '.claude/scripts/pre-push-check.js', "require('fs').appendFileSync(process.env.HOOK_LOG, 'tripwire\\n');\nprocess.exit(0);\n");
+write(stubDir, '.claude/scripts/pre-push-check.js', TRIPWIRE_STUB + "process.exit(0);\n");
 // The hook refuses any pushed ref that is not the checked-out commit (R11), so
 // the stub folder is a git repo and the routing cases push its HEAD. A second
 // commit gives a real object that is not HEAD.
@@ -435,11 +441,13 @@ function hookEnv(log, extra) {
   }, extra || {});
 }
 const readLog = (log) => fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).join(',') : '';
+// The last tripwire run's { args, stdin }, or null when it never ran.
+const readTripwire = (log) => fs.existsSync(log + '.tripwire') ? JSON.parse(fs.readFileSync(log + '.tripwire', 'utf8').trim().split('\n').pop()) : null;
 function runHook(stdin, extra) {
   const log = path.join(tmp('release-hook-log-'), 'log');
   const r = spawnSync('sh', [HOOK, 'origin', 'git@example.com:toolkit.git'], { cwd: stubDir, input: stdin, encoding: 'utf8', env: hookEnv(log, extra) });
   const args = fs.existsSync(log + '.args') ? fs.readFileSync(log + '.args', 'utf8').trim() : '';
-  return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), ran: readLog(log), args };
+  return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), ran: readLog(log), args, tw: readTripwire(log) };
 }
 {
   const SHA = git(stubDir, ['rev-parse', 'HEAD']);
@@ -498,6 +506,33 @@ function runHook(stdin, extra) {
     h.status === 0 && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v2.0.0:' + TAG_SHA, JSON.stringify(h));
   h = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
   check('hook: a tag-only push names no remote (the tag push is what publishes the tag)', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+
+  // Issue #178: the tripwire is told the remote and handed every ref line, so it
+  // scans what each destination lacks rather than HEAD's upstream. Deletions
+  // reach it too (it skips them itself); the gate routing is unchanged.
+  const twIs = (hr, stdin) => hr.tw !== null && hr.tw.args.join(' ') === '--remote origin' && hr.tw.stdin === stdin;
+  const NEW_REF = 'refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\n';
+  h = runHook(NEW_REF);
+  check('hook: a new branch reaches the tripwire as --remote origin with its ref line on stdin', h.status === 0 && h.ran === 'tripwire' && twIs(h, NEW_REF), JSON.stringify(h));
+  const EXISTING_REF = 'refs/heads/feature ' + SHA + ' refs/heads/feature ' + STUB_OLD + '\n';
+  h = runHook(EXISTING_REF);
+  check('hook: an existing branch hands the tripwire its remote sha', h.status === 0 && h.ran === 'tripwire' && twIs(h, EXISTING_REF), JSON.stringify(h));
+  const DELETED_REF = '(delete) ' + ZERO + ' refs/heads/old-topic ' + SHA + '\n';
+  h = runHook(DELETED_REF);
+  check('hook: a deletion still reaches the tripwire, and never the gate', h.status === 0 && h.ran === 'tripwire' && h.args === '' && twIs(h, DELETED_REF), JSON.stringify(h));
+  const TAG_REF = 'refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n';
+  h = runHook(TAG_REF);
+  check('hook: a release tag reaches the tripwire with its line, then the gate with --pushing-tag', h.status === 0 && h.ran === 'tripwire,release' && twIs(h, TAG_REF) && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+  const MAIN_REF = 'refs/heads/main ' + SHA + ' refs/heads/main ' + STUB_OLD + '\n';
+  h = runHook(NEW_REF + MAIN_REF + DELETED_REF + TAG_REF);
+  check('hook: a multi-ref push hands the tripwire every line in order, and the gate main and the tag',
+    h.status === 0 && h.ran === 'tripwire,release' && twIs(h, NEW_REF + MAIN_REF + DELETED_REF + TAG_REF) && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+  h = runHook('');
+  check('hook: empty stdin gives the tripwire --remote origin and no lines', h.status === 0 && twIs(h, ''), JSON.stringify(h));
+  // The lines are data: shell syntax in a ref name is passed through, never run.
+  const ODD_REF = 'refs/heads/feature ' + SHA + ' refs/heads/$(touch pwned)\\c ' + ZERO + '\n';
+  h = runHook(ODD_REF);
+  check('hook: shell syntax in a ref line reaches the tripwire byte for byte and is never run', h.status === 0 && twIs(h, ODD_REF) && !fs.existsSync(path.join(stubDir, 'pwned')), JSON.stringify(h));
 
   // R11: the tripwire scans HEAD and its upstream, so a pushed ref that is not
   // the checked-out commit is refused before anything runs.
@@ -572,7 +607,7 @@ function runHook(stdin, extra) {
     const log = path.join(tmp('release-hook-log-'), 'log');
     const p = spawnSync('git', ['push', '-q', remote, ...args], { cwd: repo, encoding: 'utf8', env: hookEnv(log, extra) });
     const gateArgs = fs.existsSync(log + '.args') ? fs.readFileSync(log + '.args', 'utf8').trim() : '';
-    return { status: p.status, out: (p.stdout || '') + (p.stderr || ''), ran: readLog(log), args: gateArgs };
+    return { status: p.status, out: (p.stdout || '') + (p.stderr || ''), ran: readLog(log), args: gateArgs, tw: readTripwire(log) };
   };
   git(repo, ['checkout', '-q', '-b', 'feature']);
   let p = push(['feature']);
@@ -647,6 +682,75 @@ function runHook(stdin, extra) {
   p = push(['rel:main', 'refs/tags/v1.1.0'], real);
   check('real gate: main pushed with a moved release tag the remote holds at another commit is blocked, main not moved',
     p.status !== 0 && /FAIL release tag - .*on remote .* points at [0-9a-f]{12}, not [0-9a-f]{12} like the local tag/.test(p.out) && git(remote, ['rev-parse', 'main']) === relSha && git(remote, ['rev-parse', 'v1.1.0^{commit}']) === relSha, JSON.stringify(p));
+
+  // Issue #178 end to end: git's own ref lines reach the tripwire (a stub here)
+  // with the remote, for a new branch, an existing one, a tag, two refs at once
+  // and a deletion. The block after this one runs the real tripwire.
+  git(repo, ['checkout', '-q', '-b', 'probe']);
+  const probe1 = git(repo, ['rev-parse', 'HEAD']);
+  p = push(['probe']);
+  check('git push of a new branch: the tripwire gets --remote <remote> and git\'s line with an all-zero remote sha',
+    p.status === 0 && p.tw !== null && p.tw.args.join(' ') === '--remote ' + remote && p.tw.stdin === 'refs/heads/probe ' + probe1 + ' refs/heads/probe ' + ZERO + '\n', JSON.stringify(p));
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'probe 2']);
+  const probe2 = git(repo, ['rev-parse', 'HEAD']);
+  p = push(['probe']);
+  check('git push of an existing branch: the line carries the sha the remote holds', p.status === 0 && p.tw !== null && p.tw.stdin === 'refs/heads/probe ' + probe2 + ' refs/heads/probe ' + probe1 + '\n', JSON.stringify(p));
+  git(repo, ['tag', 'probe-tag']);
+  p = push(['refs/tags/probe-tag']);
+  check('git push of a tag: the tripwire gets its refs/tags/ line, and a non-release tag never reaches the gate',
+    p.status === 0 && p.ran === 'tripwire' && p.tw !== null && p.tw.stdin === 'refs/tags/probe-tag ' + probe2 + ' refs/tags/probe-tag ' + ZERO + '\n', JSON.stringify(p));
+  p = push(['HEAD:refs/heads/multi-a', 'HEAD:refs/heads/multi-b']);
+  check('git push of two refs at once: the tripwire gets both lines', p.status === 0 && p.tw !== null && p.tw.stdin.split('\n').filter(Boolean).length === 2
+    && p.tw.stdin.indexOf(probe2 + ' refs/heads/multi-a ' + ZERO + '\n') !== -1 && p.tw.stdin.indexOf(probe2 + ' refs/heads/multi-b ' + ZERO + '\n') !== -1, JSON.stringify(p));
+  p = push([':refs/heads/multi-a']);
+  check('git push deleting a branch: the tripwire gets git\'s (delete) line', p.status === 0 && p.tw !== null && p.tw.stdin === '(delete) ' + ZERO + ' refs/heads/multi-a ' + probe2 + '\n', JSON.stringify(p));
+}
+
+// --- the real tripwire behind the hook (issue #178) --------------------------------
+// The issue's first reproduction end to end: git feeds the hook, and the hook
+// hands the ref lines to the real pre-push-check.js (TK_PRE_PUSH_CHECK=''). The
+// topic branch tracks origin/topic, which already holds a flagged commit pushed
+// with --no-verify. Before the fix the check scanned only what origin/topic
+// lacked, so HEAD pushed to develop published the flagged commit.
+{
+  const repo = tmp('release-real-tripwire-');
+  initRepo(repo);
+  git(repo, ['config', 'core.excludesFile', '/dev/null']);
+  git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  write(repo, 'scripts/git-hooks/pre-push', fs.readFileSync(HOOK, 'utf8'));
+  fs.chmodSync(path.join(repo, 'scripts/git-hooks/pre-push'), 0o755);
+  write(repo, '.claude/scripts/pre-push-check.js', fs.readFileSync(path.join(ROOT, '.claude', 'scripts', 'pre-push-check.js'), 'utf8'));
+  write(repo, 'README.md', '# scratch\n');
+  commitAll(repo, 'seed');
+  git(repo, ['config', 'core.hooksPath', 'scripts/git-hooks']);
+  const remote = tmp('release-real-remote-');
+  git(remote, ['init', '-q', '--bare']);
+  git(repo, ['remote', 'add', 'origin', remote]);
+  const env = Object.assign({}, process.env, { TK_PRE_PUSH_CHECK: '', TK_RELEASE_CHECK: '' });
+  const push = (args) => {
+    const p = spawnSync('git', ['push', ...args], { cwd: repo, encoding: 'utf8', env });
+    return { status: p.status, out: (p.stdout || '') + (p.stderr || '') };
+  };
+  const onRemote = (ref) => spawnSync('git', ['rev-parse', '--verify', '-q', ref], { cwd: remote, encoding: 'utf8' }).stdout.trim();
+  // main goes up without the hook: this scratch repo has no release gate to run.
+  let p = push(['-q', '--no-verify', 'origin', 'main']);
+  p = push(['-q', 'origin', 'main:develop']);
+  check('real tripwire: a clean new branch pushed through the hook passes', p.status === 0 && onRemote('refs/heads/develop') === git(repo, ['rev-parse', 'main']), JSON.stringify(p));
+  git(repo, ['checkout', '-q', '-b', 'topic']);
+  const FAKE_PAT = 'gl' + 'pat-' + 'A1b2C3d4E5f6G7h8J9k0';
+  write(repo, 'ci/runner.env', 'RUNNER' + '=' + FAKE_PAT + '\n');
+  commitAll(repo, 'flagged commit');
+  p = push(['-q', '--no-verify', '-u', 'origin', 'topic']);
+  write(repo, 'src/a.js', 'console.log(1);\n');
+  commitAll(repo, 'clean commit');
+  p = push(['origin', 'HEAD:develop']);
+  check('real tripwire: HEAD pushed to develop blocks on the flagged commit already on origin/topic, and develop does not move',
+    p.status !== 0 && p.out.indexOf('[gitlab-pat] ci/runner.env') !== -1 && /pre-push-check: scanned 2 commits for origin refs\/heads\/develop \(base [0-9a-f]{7}\)/.test(p.out)
+    && onRemote('refs/heads/develop') === git(repo, ['rev-parse', 'main']), JSON.stringify(p));
+  check('real tripwire: the report the push printed names the token but masks it', p.out.indexOf('[gitlab-pat]') !== -1 && p.out.indexOf(FAKE_PAT) === -1, JSON.stringify(p));
+  p = push(['origin', 'HEAD:topic']);
+  check('real tripwire: the same HEAD pushed to its upstream passes (only the clean commit is new there)',
+    p.status === 0 && onRemote('refs/heads/topic') === git(repo, ['rev-parse', 'HEAD']) && /pre-push-check: scanned 1 commit for origin refs\/heads\/topic/.test(p.out), JSON.stringify(p));
 }
 
 // The gate's default suite set includes this file, so a gate run aimed at this
