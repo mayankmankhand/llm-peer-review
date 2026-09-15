@@ -12,11 +12,13 @@
  * The one shared piece is the .env.local lookup, in env-local.js beside this file.
  *
  * Commands:
+ *   session  - Print a new debate session id (needs no key, no network)
  *   review   - Get initial review from ChatGPT
  *   respond  - Get ChatGPT's response to Claude's feedback
  *   summary  - Generate final debate summary
  *
  * Usage:
+ *   node .claude/scripts/ask-gpt.js session
  *   node .claude/scripts/ask-gpt.js review --context-file <path> [--review-type <type>]
  *   node .claude/scripts/ask-gpt.js respond --context-file <path> --debate-file <path>
  *   node .claude/scripts/ask-gpt.js summary --context-file <path> --debate-file <path>
@@ -40,7 +42,17 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { loadEnvLocal, describeLookup } = require('./env-local.js');
+
+/**
+ * `session` is handled here, ahead of everything below (issue #181): it prints a
+ * new debate session id and exits, so it reads no .env.local, loads no SDK and
+ * makes no network call. See printSessionId().
+ */
+if (process.argv[2] === 'session') {
+  printSessionId(process.argv.slice(3));
+}
 
 /**
  * Load environment variables from .env.local, before anything below reads them.
@@ -108,7 +120,7 @@ const ERR = {
   FILE_TOO_LARGE: (f, sizeMB) =>
     `File is too large (${sizeMB} MB). Maximum size is 500KB. Try a smaller file or use /tk:package-review to select specific files.`,
   API_ERROR: (msg) => `OpenAI API error: ${msg}`,
-  UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use review, respond, or summary.`,
+  UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use session, review, respond, or summary.`,
 };
 
 /**
@@ -279,6 +291,35 @@ function nextArgValue(args, index, flag) {
 }
 
 /**
+ * Command: session (issue #181). Print a new debate session id and exit 0.
+ *
+ * The slash command used to mint the id itself with `echo "$(date +%s)-$RANDOM"`.
+ * In default permission mode a command substitution asks for approval even
+ * where `echo` is allowed, so every debate stopped once before it began. This
+ * subcommand runs under the script's own allowed-tools row instead, and needs
+ * no key: the check at the top of the file calls it before the .env.local
+ * lookup, and it never reaches the SDK or the network.
+ *
+ * The id keeps the old shape, `<unix seconds>-<random 1 to 32767>` (for example
+ * 1747700000-29481), which warnIfSessionMismatch() reads back out of the temp
+ * file names. Only function declarations and the requires above the check may
+ * be used here: every other top-level const is not initialized yet.
+ */
+function printSessionId(extraArgs) {
+  if (extraArgs.includes('--help')) {
+    printHelp();
+    process.exit(0);
+  }
+  if (extraArgs.length > 0) {
+    console.error(`\n❌ Error: Unknown argument: ${extraArgs[0]}. The session command takes no options.`);
+    process.exit(1);
+  }
+  const seconds = Math.floor(Date.now() / 1000);
+  console.log(`${seconds}-${crypto.randomInt(1, 32768)}`);
+  process.exit(0);
+}
+
+/**
  * Parse command line arguments.
  */
 function parseArgs() {
@@ -322,12 +363,14 @@ function printHelp() {
 Ask GPT - Automated AI Peer Review
 
 Commands:
+  session   Print a new debate session id (<unix seconds>-<random>); needs no key
   review    Get initial review from ChatGPT
   respond   Get ChatGPT's response to Claude's feedback
   summary   Generate final debate summary
 
 Usage (<scripts> is the toolkit's scripts folder: \${CLAUDE_PLUGIN_ROOT}/scripts
 under the tk plugin, .claude/scripts in a copy-install):
+  node <scripts>/ask-gpt.js session
   node <scripts>/ask-gpt.js review --context-file <path> [--review-type <type>]
   node <scripts>/ask-gpt.js respond --context-file <path> --debate-file <path>
   node <scripts>/ask-gpt.js summary --context-file <path> --debate-file <path>

@@ -112,7 +112,7 @@ Code-only visuals (gradients, shapes, basic patterns) are the strongest giveaway
 
 **The ask.** Once per surface, when an image or clip would add personality the code cannot: page per M1 (exempt from the cap, M15) in plain English: "This surface would gain from <an image of X | a looping clip of Y>. Generating it costs about <estimate> on your <provider> key. Generate it? [yes]".
 
-**The call.** Write the prompt to a file first, never inline as `--prompt "<prompt>"`: inside double quotes the shell expands `$`, and a `$49` in a prompt once reached the paid API as `9`. Run `mktemp -d /tmp/media-prompt.XXXXXX` (it prints a new, empty folder no other run shares), write the prompt to `prompt.txt` inside it, and pass that path as `<prompt file>`. Then Claude runs, through the Bash tool with its maximum timeout:
+**The call.** Write the prompt to a file first, never inline as `--prompt "<prompt>"`: inside double quotes the shell expands `$`, and a `$49` in a prompt once reached the paid API as `9`. Write the prompt as `prompt.txt` in a fresh folder from `mktemp -d /tmp/media-prompt.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`, and pass that file path as `<prompt file>`. Then Claude runs, through the Bash tool with its maximum timeout:
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js --kind image --prompt-file <prompt file> --out <asset dir>/<surface>-<name>.png

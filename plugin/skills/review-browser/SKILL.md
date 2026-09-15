@@ -18,6 +18,8 @@ allowed-tools:
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(npm install --prefix \"${CLAUDE_PLUGIN_ROOT}\")"
+  - "Bash(npx --prefix \"${CLAUDE_PLUGIN_ROOT}\" playwright-core install chromium)"
 ---
 
 # Browser QA Review

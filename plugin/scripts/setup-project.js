@@ -25,7 +25,12 @@
 //                    installers managed, the helper scripts early ones copied
 //                    to the project's root scripts/ folder included; every
 //                    present one is provenance unknown, so the run pages
-//                    before touching anything, and --force proceeds. With no
+//                    before touching anything, and --force proceeds. A root
+//                    helper script is swept only when its content (carriage
+//                    returns ignored) matches a copy the toolkit shipped, as
+//                    listed in managed-paths.json's historicalHelperHashes;
+//                    any other file of that name is the project's own, kept
+//                    with its permission rows and named (issue #180). With no
 //                    VERSION of the toolkit's the old version is the stamp's,
 //                    and a stamp that names no usable version is recorded as
 //                    `unknown`, so /tk:upgrade audits every convention instead
@@ -94,6 +99,33 @@
 // gitignored settings.local.json and hold this machine's paths, and the backup
 // folder's copy of that file already keeps them. The seed gitignores the record.
 //
+// Settings files (issue #180). .claude/settings.local.json is gitignored, so git
+// holds no copy of it, and .claude/settings.json can carry uncommitted edits:
+// every run that changes either one first copies it into a backup folder (the
+// migration's .toolkit-backup-<stamp>-plugin name, made unique per run), so the
+// undo line copies it back instead of saying "restore by hand". Outside a
+// migration that folder holds only those files, is made only when an existing
+// one changes, and no migration record is written. A settings file that is not
+// valid JSON, or whose shape the merge cannot keep (permissions.allow not a
+// list, say), is never replaced: the run pages with nothing written, in every
+// mode, and --force skips that file byte for byte. A rewritten file keeps its
+// own indentation, line endings and byte order mark. The report names the
+// permission rows it adds and removes (JSON-escaped, at most ten, then a count).
+//
+// Offered rows (issue #180). A toolkit row the owner deleted stays deleted: the
+// offered-rows record in the working copy's git directory (see its block below)
+// lists every seed row this working copy was offered, and a listed row is not
+// added again. A row counts as present in either spelling (`:*` or ` *`, for
+// Bash and PowerShell rules) and in any permissions list: allow, ask or deny.
+// With no record yet, missing rows are added one last time and named. When
+// settings.local.json itself is missing the record does not filter: a missing
+// file holds no decision of the owner's (a `git clean -x` removes it too), so
+// every seed row is offered again. Outside a git repository nothing is
+// recorded, and a missing row is added and named on every run. The record is
+// not part of the undo line, which restores the working tree: after undoing a
+// run that added rows to an existing file, the next run names those rows as
+// offered before and says how to be offered them again.
+//
 // The undo line: every run that created, changed or deleted something prints an
 // `Undo:` line built per path from what the run actually did, the same way on a
 // migration and on a fresh or plugin-mode run, and ordered so that following it
@@ -109,12 +141,14 @@
 // shell-quoted.
 //
 // Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
-// needed: locally modified files, provenance unknown, or a dirty tree).
+// needed: locally modified files, provenance unknown, a dirty tree, or a
+// settings file setup cannot merge without replacing it).
 // --dry-run prints the same report and exit code and writes nothing.
 //
 // Dependency-free, like every script under .claude/scripts/. Run directly it
 // sets up the project; required, it only exports the undo-line, copy-install
-// marker, VERSION-owner and dead-permission helpers for scripts/test-setup-project.js.
+// marker, VERSION-owner, dead-permission, offered-rows, settings-format and
+// backup-folder helpers for scripts/test-setup-project.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -140,8 +174,9 @@ const KEEP_ON_MIGRATION = ['.gitattributes', 'artifacts/README.md'];
 // has, its own custom tool included, is live and kept. The first version treated
 // every .claude/scripts/ row as dead and deleted a kept custom script's row on
 // every run (review of the v7.0.0 release, R2). The script name stops before a
-// colon that ends it: Claude Code writes "don't ask again" rows as
-// `Bash(node .claude/scripts/our-report.js:*)`, and reading that name as
+// colon that ends it: Claude Code's "don't ask again" dialog wrote rows as
+// `Bash(node .claude/scripts/our-report.js:*)` (it now writes the ` *` form,
+// the same rule; see permissionRowKey), and reading that name as
 // `our-report.js:` deleted a kept script's row on every run the same way.
 // upgrade-audit.js carries the same regex; its test fails when the copies drift.
 //
@@ -156,12 +191,88 @@ const LEGACY_DEAD_PERMISSION = [
 ];
 const ROOT_SCRIPT_ROW = /(?:^|[\s(])(?:\.\/)?scripts\/([^\s)'"*\/]+?):?(?=[\s)'"*]|$)/;
 function deadPermission(row, willExist, rootScripts) {
-  if (LEGACY_DEAD_PERMISSION.some(re => re.test(row))) return true;
+  // The legacy shapes are written in the ` *` spelling, so a row is compared by
+  // its permissionRowKey: the `:*` twin of the browse.js pipe is dead too (#180).
+  if (LEGACY_DEAD_PERMISSION.some(re => re.test(permissionRowKey(row)))) return true;
   const m = /(?:^|[\s(])\.claude\/scripts\/([^\s)'"*]+?):?(?=[\s)'"*]|$)/.exec(row);
   if (m !== null) return !willExist('.claude/scripts/' + m[1]);
   const r = ROOT_SCRIPT_ROW.exec(row);
   return r !== null && !!rootScripts && rootScripts.has('scripts/' + r[1]) && !willExist('scripts/' + r[1]);
 }
+// >>> offered permission rows (issue #180) >>>
+// Byte-identical in setup-project.js and upgrade-audit.js, from this marker to
+// the closing one. Each script runs on its own (there is no shared module), so
+// the block is copied; scripts/test-upgrade-audit.js fails when the copies drift.
+//
+// One rule, two spellings. Claude Code matches `Bash(ls:*)` exactly as it
+// matches `Bash(ls *)`, so a Bash or PowerShell rule ending in `:*)` is the
+// same rule as the one ending in ` *)`, and rows compare by permissionRowKey,
+// which writes the ` *)` form. Only those two tools: in `Skill(tk:explore:*)` or
+// `WebFetch(domain:github.com)` the colon belongs to the rule, so every other
+// row compares exactly as written.
+//
+// The offered-rows record lists every toolkit seed permission row this working
+// copy has been offered (found in its .claude/settings.local.json, or added
+// there by /tk:setup), so a row the owner deleted afterwards is not offered
+// again: /tk:setup does not add it back, and /tk:upgrade (C-9) does not report
+// it missing. It lives in the working copy's git directory, at the path
+// `git rev-parse --git-path tk-offered-rows.json` prints from the project, so
+// git never commits it, no ignore line is needed, and a clone or another
+// worktree starts with no record and is offered the rows again. Outside a git
+// repository there is no record and nothing is remembered.
+//
+// Shape (version 1): { "version": 1, "offered": ["Bash(git add *)", ...] },
+// where `offered` holds permissionRowKey values, sorted, each once. A missing
+// file reads as status 'absent'. A file that cannot be read, is not valid JSON,
+// or has any other shape reads as 'unreadable', which a caller treats as no
+// record: the rows are offered once more and a new record is written.
+const OFFERED_ROWS_FILE = 'tk-offered-rows.json';
+const OFFERED_ROWS_VERSION = 1;
+// The comparison key of a permission row: the row as written, except that a
+// Bash or PowerShell rule ending in `:*)` gets the ` *)` ending. Null for a
+// value that is not a string (no row).
+function permissionRowKey(row) {
+  if (typeof row !== 'string') return null;
+  const m = /^(Bash|PowerShell)\(([\s\S]*):\*\)$/.exec(row);
+  return m === null ? row : m[1] + '(' + m[2] + ' *)';
+}
+// The record's absolute path for the working copy at `dir`, or null outside a
+// git repository (or when git cannot be run).
+function offeredRowsPath(dir) {
+  let out;
+  try { out = execFileSync('git', ['rev-parse', '--git-path', OFFERED_ROWS_FILE], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+  catch (e) { return null; }
+  const printed = out.replace(/\r?\n$/, '');
+  return printed === '' ? null : path.resolve(dir, printed);
+}
+// { status: 'absent' | 'unreadable' | 'ok', keys }: `keys` is a Set of the
+// recorded keys, empty unless the status is 'ok'.
+function readOfferedRows(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (e) { return { status: e && e.code === 'ENOENT' ? 'absent' : 'unreadable', keys: new Set() }; }
+  let data = null;
+  try { data = JSON.parse(text); } catch (e) { data = null; }
+  const ok = data !== null && typeof data === 'object' && !Array.isArray(data) && data.version === OFFERED_ROWS_VERSION
+    && Array.isArray(data.offered) && data.offered.every(k => typeof k === 'string');
+  return ok ? { status: 'ok', keys: new Set(data.offered.map(permissionRowKey)) } : { status: 'unreadable', keys: new Set() };
+}
+// Writes the record listing `keys` (any iterable of keys, sorted and each kept
+// once here) through a temporary file renamed over the record, so a reader
+// never sees half a file. True when written, false when it could not be.
+function writeOfferedRows(file, keys) {
+  const offered = [...new Set(keys)].filter(k => typeof k === 'string').sort();
+  const tmp = file + '.' + process.pid + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ version: OFFERED_ROWS_VERSION, offered }, null, 2) + '\n');
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* nothing left to clean */ }
+    return false;
+  }
+}
+// <<< offered permission rows <<<
 
 function parseArgs(argv) {
   const o = { dryRun: false, force: false, project: '', pluginRoot: '' };
@@ -261,6 +372,18 @@ function referenceVersion(state) {
   }
   return null;
 }
+// The one plugin update instruction (issue #183), used by the version notice in
+// session-start.js, the version block in pre-push-check.js and the stamp report
+// in setup-project.js, and quoted word for word by the docs. The marketplace
+// update comes first: measured on Claude Code 2.1.270, `claude plugin update`
+// alone does not fetch a GitHub marketplace's cached catalog, so a new release
+// tag is not seen until `claude plugin marketplace update` has run. A plugin
+// installed for one project only takes the same update with --scope project.
+// It reads as the middle of a sentence: each caller adds the words before it
+// and the punctuation after it.
+const PLUGIN_UPDATE_STEPS = 'run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`'
+  + ' (for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`),'
+  + ' then restart Claude Code';
 // <<< version helpers <<<
 // >>> copy-install markers (7.1.0) >>>
 // Byte-identical in setup-project.js and session-start.js, from this marker to
@@ -383,6 +506,91 @@ function shownVersion(v, prefix) {
 function readJson(abs, fallback) {
   try { return JSON.parse(fs.readFileSync(abs, 'utf8')); } catch (e) { return fallback; }
 }
+// How a JSON file is laid out, so a rewrite keeps it (issue #180): the
+// indentation of its least indented line (two spaces when no line is indented,
+// which covers a new file), CRLF line endings when it has any, and a leading
+// byte order mark when it has one.
+function jsonFormat(text) {
+  let indent = null;
+  for (const m of text.matchAll(/^([ \t]+)\S/gm)) if (indent === null || m[1].length < indent.length) indent = m[1];
+  return { indent: indent === null ? '  ' : indent, eol: text.includes('\r\n') ? '\r\n' : '\n', bom: text.charCodeAt(0) === 0xFEFF ? String.fromCharCode(0xFEFF) : '' };
+}
+// JSON text for `value` in `format` (jsonFormat), ending in a line break.
+// JSON.stringify puts a line break only between tokens, never inside a string,
+// so every one of them can take the file's own line ending.
+function formatJson(value, format) {
+  return format.bom + JSON.stringify(value, null, format.indent).split('\n').join(format.eol) + format.eol;
+}
+const isJsonObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+// What the settings.local.json merge needs (issue #180): an object whose
+// `permissions`, when present, is an object, whose `allow` and
+// `additionalDirectories`, when present, are lists. A non-list `allow` threw a
+// TypeError in the merge before this check.
+function localSettingsProblem(data) {
+  if (!isJsonObject(data)) return 'is not a JSON object';
+  if (data.permissions === undefined) return null;
+  if (!isJsonObject(data.permissions)) return 'has a "permissions" value that is not an object';
+  for (const key of ['allow', 'additionalDirectories']) {
+    if (data.permissions[key] !== undefined && !Array.isArray(data.permissions[key])) return 'has a "permissions.' + key + '" value that is not a list';
+  }
+  return null;
+}
+// What the settings.json key merge needs: an object whose two plugin keys,
+// when present, are objects (a string there made the merge throw, and a list
+// silently never gained the plugin keys).
+function sharedSettingsProblem(data) {
+  if (!isJsonObject(data)) return 'is not a JSON object';
+  for (const key of ['extraKnownMarketplaces', 'enabledPlugins']) {
+    if (data[key] !== undefined && !isJsonObject(data[key])) return 'has an "' + key + '" value that is not an object';
+  }
+  return null;
+}
+// A settings file this run may merge into, read so that nothing in it is lost
+// (issue #180; readJson's silent fallback let a file with one trailing comma
+// be replaced by the seed). Returns { exists, data, problem, format }: `data`
+// is the parsed object, null when the file is absent or has a problem;
+// `problem` is null or fixed text saying why the file cannot be merged (it
+// cannot be read, is not valid JSON, or `shapeProblem` refuses it), never a
+// quote of the file, which a cloned repository controls for settings.json and
+// this report reaches Claude; `format` is how the file is written back.
+function readSettings(abs, shapeProblem) {
+  if (!fs.existsSync(abs)) return { exists: false, data: null, problem: null, format: jsonFormat('') };
+  let text;
+  try { text = fs.readFileSync(abs, 'utf8'); } catch (e) { return { exists: true, data: null, problem: 'cannot be read', format: jsonFormat('') }; }
+  const format = jsonFormat(text);
+  let data;
+  try { data = JSON.parse(format.bom ? text.slice(1) : text); } catch (e) { return { exists: true, data: null, problem: 'is not valid JSON', format }; }
+  const problem = shapeProblem(data);
+  return { exists: true, data: problem === null ? data : null, problem, format };
+}
+// Permission rows as report text (issue #180): each JSON-escaped, so no row can
+// carry a line break into the report, at most ROWS_NAMED of them, then a count.
+const ROWS_NAMED = 10;
+function namedRows(rows) {
+  const shown = rows.slice(0, ROWS_NAMED).map(r => JSON.stringify(r)).join(', ');
+  return rows.length > ROWS_NAMED ? shown + ' and ' + (rows.length - ROWS_NAMED) + ' more' : shown;
+}
+// The CR-stripped sha256 values of every copy of the root helper script `rel`
+// the toolkit ever shipped, from the shipped managed-paths.json field
+// `historicalHelperHashes` ({ "scripts/browse.js": ["<sha256>", ...], ... }).
+// A missing or malformed field or entry lists none, so the file is kept.
+function helperHashes(field, rel) {
+  const list = isJsonObject(field) && Object.prototype.hasOwnProperty.call(field, rel) ? field[rel] : null;
+  return new Set(Array.isArray(list) ? list.filter(h => typeof h === 'string' && /^[0-9a-f]{64}$/.test(h)) : []);
+}
+// Makes the backup folder at the project root and returns its path:
+// .toolkit-backup-<UTC yyyymmdd-hhmmss>-plugin, or -2-plugin, -3-plugin and so
+// on when that name is taken (issue #180). The folder is made without
+// `recursive`, which fails when it already exists, so two runs in the same
+// second never share a folder and no run writes into an older backup.
+function createBackupDir(project, now) {
+  const stamp = (now || new Date()).toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+  for (let n = 1; n <= 1000; n++) {
+    const dir = path.join(project, '.toolkit-backup-' + stamp + (n === 1 ? '' : '-' + n) + '-plugin');
+    try { fs.mkdirSync(dir); return dir; } catch (e) { if (!e || e.code !== 'EEXIST') throw e; }
+  }
+  throw new Error('no free backup folder name for ' + stamp);
+}
 function walkFiles(dir, rel, out) {
   if (!fs.existsSync(dir)) return out;
   for (const name of fs.readdirSync(dir).sort()) {
@@ -449,7 +657,8 @@ function main() {
   const seedDir = path.join(pluginRoot, 'seed');
   const pluginMeta = readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {});
   const version = pluginMeta.version || '0.0.0';
-  const managedShipped = readJson(path.join(pluginRoot, 'managed-paths.json'), { paths: [] }).paths;
+  const managedPaths = readJson(path.join(pluginRoot, 'managed-paths.json'), { paths: [] });
+  const managedShipped = managedPaths.paths;
   // The root scripts/ files early installers copied, exactly as the shipped list names them.
   const ROOT_SCRIPTS = new Set(managedShipped.filter(rel => /^scripts\/[^/]+$/.test(rel)));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
@@ -495,7 +704,6 @@ function main() {
   // the range), 0 level, 1 a newer plugin seeded it, which the version guard
   // blocks pushes on until this plugin is updated, so the report says so.
   const priorStampCmp = priorPluginStamp !== null ? compareVersions(priorPluginStamp, version) : null;
-  const PLUGIN_UPDATE = '`claude plugin update ' + PLUGIN + '@' + MARKETPLACE + '`';
 
   say('LLM Peer Review toolkit - project setup (plugin ' + PLUGIN + '@' + MARKETPLACE + ' v' + version + ')');
   say('  Project: ' + project);
@@ -513,8 +721,8 @@ function main() {
     say('  No .claude/.toolkit-state.json, but .claude/rules/toolkit.md already carries the plugin\'s stamp ' + priorPluginStamp
       + ': this project was set up on the plugin before (a clone whose git ignores the state file looks like this). previousVersion '
       + priorPluginStamp + (priorStampCmp === 1 ? ' and version ' + priorPluginStamp + ' (never lower than the stamp) are' : ' is') + ' recorded and no audited version, '
-      + (priorStampCmp === 1 ? 'but this plugin (v' + version + ') is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated (run '
-          + PLUGIN_UPDATE + ', then restart Claude Code).'
+      + (priorStampCmp === 1 ? 'but this plugin (v' + version + ') is older than that stamp: pushes from this project will be blocked by the pre-push check until the plugin is updated. To update it, '
+          + PLUGIN_UPDATE_STEPS + '.'
         : priorStampCmp === 0 ? 'which is this plugin\'s own version, so /tk:upgrade has no conventions to audit.'
         : 'so /tk:upgrade audits from ' + priorPluginStamp + '.'));
   }
@@ -524,6 +732,7 @@ function main() {
   const removed = [];       // rels to delete (backed up first)
   const modified = [];      // locally modified managed files (rel)
   const custom = [];        // files kept in managed dirs
+  const rootKept = [];      // root helper-script names whose content is the project's own (#180)
   let paged = false;
   const migrating = mode === 'migrate-manifest' || mode === 'migrate-unknown';
   if (migrating) {
@@ -539,6 +748,14 @@ function main() {
       if (KEEP_ON_MIGRATION.includes(rel)) continue;
       // The shipped list names VERSION, but only the toolkit's own is swept.
       if (rel === 'VERSION' && !toolkitVersionFile) continue;
+      // A root helper script is the toolkit's only when its content matches a
+      // copy the toolkit shipped (issue #180): projects commonly own a
+      // scripts/browse.js, and the name alone once swept it. Anything else
+      // stays, and so does its permission row, since the file will still exist.
+      if (mode === 'migrate-unknown' && ROOT_SCRIPTS.has(rel) && !helperHashes(managedPaths.historicalHelperHashes, rel).has(sha256NoCR(P(rel)))) {
+        rootKept.push(rel);
+        continue;
+      }
       if (mode === 'migrate-manifest') {
         if (sha256NoCR(P(rel)) !== manifest.files[rel]) modified.push(rel);
       }
@@ -552,7 +769,12 @@ function main() {
 
     say('  Managed toolkit files to remove: ' + removed.length + (mode === 'migrate-unknown' ? ' (from the shipped managed-paths list; none can be verified against a manifest)' : ''));
     const rootRemoved = removed.filter(rel => ROOT_SCRIPTS.has(rel));
-    if (rootRemoved.length) say('  Among them, helper scripts an early installer copied to the root scripts/ folder (every other file there is yours, untouched): ' + rootRemoved.join(', '));
+    if (rootRemoved.length) say('  Among them, helper scripts an early installer copied to the root scripts/ folder, each matching a copy the toolkit shipped (every other file there is yours, untouched): ' + rootRemoved.join(', '));
+    if (rootKept.length) {
+      const one = rootKept.length === 1;
+      say('  Kept as your own: ' + rootKept.join(', ') + ' in the root scripts/ folder ' + (one ? 'carries the name of a helper script' : 'carry the names of helper scripts') + ' an early installer copied there, but '
+        + (one ? 'its' : 'their') + ' content matches no copy the toolkit shipped, so ' + (one ? 'it stays untouched, and so do its' : 'they stay untouched, and so do their') + ' permission rows.');
+    }
     // Named either way, so the owner can object before a project's own VERSION goes.
     if (removed.includes('VERSION')) {
       say('  Among them, VERSION at the project root, as the toolkit\'s because ' + VERSION_OWNER_REASON[versionOwner]
@@ -630,34 +852,75 @@ function main() {
     ? seedAttrsText.split(/\r?\n/).filter(l => l.trim() !== '' && !l.trim().startsWith('#') && !curAttrKeys.has(attrKey(l)))
     : [];
 
-  // .claude/settings.json key merge (the plugin registration for collaborators)
-  const settings = readJson(P('.claude/settings.json'), {});
-  const settingsBefore = JSON.stringify(settings);
-  settings.extraKnownMarketplaces = settings.extraKnownMarketplaces || {};
-  settings.extraKnownMarketplaces[MARKETPLACE] = settings.extraKnownMarketplaces[MARKETPLACE] || { source: { source: 'github', repo: MARKETPLACE_REPO } };
-  settings.enabledPlugins = settings.enabledPlugins || {};
-  settings.enabledPlugins[PLUGIN + '@' + MARKETPLACE] = true;
-  const settingsChanged = JSON.stringify(settings) !== settingsBefore;
+  // .claude/settings.json key merge (the plugin registration for collaborators).
+  // A settings file the merge cannot keep whole is never replaced (issue #180):
+  // the run pages, and with --force the file is skipped, byte for byte.
+  const sharedRead = readSettings(P('.claude/settings.json'), sharedSettingsProblem);
+  const settings = sharedRead.problem === null ? (sharedRead.data || {}) : null;
+  let settingsChanged = false;
+  if (settings !== null) {
+    const settingsBefore = JSON.stringify(settings);
+    settings.extraKnownMarketplaces = settings.extraKnownMarketplaces || {};
+    settings.extraKnownMarketplaces[MARKETPLACE] = settings.extraKnownMarketplaces[MARKETPLACE] || { source: { source: 'github', repo: MARKETPLACE_REPO } };
+    settings.enabledPlugins = settings.enabledPlugins || {};
+    settings.enabledPlugins[PLUGIN + '@' + MARKETPLACE] = true;
+    settingsChanged = JSON.stringify(settings) !== settingsBefore;
+  }
 
   // settings.local.json: baseline merge minus the script entries, dead entries out
   const seedLocal = readJson(path.join(seedDir, 'settings.local.json'), { permissions: { allow: [] } });
   const willExist = (rel) => fs.existsSync(P(rel)) && !willRemove.has(rel);
-  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => !deadPermission(p, willExist, ROOT_SCRIPTS));
-  const local = readJson(P('.claude/settings.local.json'), null);
-  const localBefore = local ? JSON.stringify(local) : null;
-  const localNext = local || { permissions: { allow: [] } };
-  localNext.permissions = localNext.permissions || {};
-  localNext.permissions.allow = localNext.permissions.allow || [];
-  const deadPerms = localNext.permissions.allow.filter(p => deadPermission(p, willExist, ROOT_SCRIPTS));
-  localNext.permissions.allow = localNext.permissions.allow.filter(p => !deadPerms.includes(p));
-  const addedPerms = seedAllow.filter(p => !localNext.permissions.allow.includes(p));
-  localNext.permissions.allow.push(...addedPerms);
-  if (seedLocal.defaultMode && !localNext.defaultMode) localNext.defaultMode = seedLocal.defaultMode;
-  if (seedLocal.permissions && seedLocal.permissions.additionalDirectories) {
-    localNext.permissions.additionalDirectories = localNext.permissions.additionalDirectories || [];
-    for (const d of seedLocal.permissions.additionalDirectories) if (!localNext.permissions.additionalDirectories.includes(d)) localNext.permissions.additionalDirectories.push(d);
+  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => typeof p === 'string' && !deadPermission(p, willExist, ROOT_SCRIPTS));
+  const localRead = readSettings(P('.claude/settings.local.json'), localSettingsProblem);
+  const localSkip = localRead.problem !== null;
+  const local = localSkip ? null : localRead.data;
+  if ((sharedRead.problem !== null || localSkip) && !opts.force) paged = true;
+  // The offered-rows record (issue #180; see its block above): null outside a
+  // git repository, where nothing is recorded.
+  const recordFile = top !== null ? offeredRowsPath(project) : null;
+  const record = recordFile !== null ? readOfferedRows(recordFile) : { status: 'absent', keys: new Set() };
+  const recordShown = recordFile === null ? null
+    : (() => { const rel = path.relative(project, recordFile); return rel.startsWith('..') || path.isAbsolute(rel) ? recordFile : rel.split(path.sep).join('/'); })();
+  const deadPerms = [];
+  const addedPerms = [];
+  const heldBack = [];      // seed rows left out: this working copy was offered them before
+  let localNext = null;
+  let localChanged = false;
+  let offeredNext = null;   // the keys the record lists after this run, or null when it is not written
+  if (!localSkip) {
+    const localBefore = local ? JSON.stringify(local) : null;
+    localNext = local || { permissions: { allow: [] } };
+    localNext.permissions = localNext.permissions || {};
+    localNext.permissions.allow = localNext.permissions.allow || [];
+    deadPerms.push(...localNext.permissions.allow.filter(p => deadPermission(p, willExist, ROOT_SCRIPTS)));
+    localNext.permissions.allow = localNext.permissions.allow.filter(p => !deadPerms.includes(p));
+    // A seed row is present when any permissions list holds it in either
+    // spelling: `Bash(git status:*)` is `Bash(git status *)` (issue #179), and a
+    // row the owner moved to ask or deny is their decision too.
+    const present = new Set(['allow', 'ask', 'deny'].flatMap(k => (Array.isArray(localNext.permissions[k]) ? localNext.permissions[k] : [])).map(permissionRowKey));
+    // The record filters only rows missing from a file that exists: a missing
+    // file holds no decision of the owner's, so every seed row is offered again.
+    const offeredBefore = record.status === 'ok' && local !== null ? record.keys : new Set();
+    const seedKeys = new Set();
+    for (const p of seedAllow) {
+      const k = permissionRowKey(p);
+      if (seedKeys.has(k)) continue;
+      seedKeys.add(k);
+      if (present.has(k)) continue;
+      if (offeredBefore.has(k)) heldBack.push(p); else addedPerms.push(p);
+    }
+    localNext.permissions.allow.push(...addedPerms);
+    if (seedLocal.defaultMode && !localNext.defaultMode) localNext.defaultMode = seedLocal.defaultMode;
+    if (seedLocal.permissions && seedLocal.permissions.additionalDirectories) {
+      localNext.permissions.additionalDirectories = localNext.permissions.additionalDirectories || [];
+      for (const d of seedLocal.permissions.additionalDirectories) if (!localNext.permissions.additionalDirectories.includes(d)) localNext.permissions.additionalDirectories.push(d);
+    }
+    localChanged = JSON.stringify(localNext) !== localBefore;
+    // Every seed row was present, added, or offered before, so after this run
+    // each one counts as offered, beside every row an earlier run recorded.
+    if (recordFile !== null) offeredNext = new Set([...(record.status === 'ok' ? record.keys : []), ...seedKeys]);
   }
-  const localChanged = JSON.stringify(localNext) !== localBefore;
+  const recordChanged = offeredNext !== null && (record.status !== 'ok' || offeredNext.size !== record.keys.size);
 
   say('  Seed files to write: ' + (seedWrite.length ? seedWrite.map(s => s[0]).join(', ') : '(none)'));
   if (seedSkip.length) say('  Seed files already present (yours, untouched): ' + seedSkip.join(', '));
@@ -682,8 +945,28 @@ function main() {
       + (stateUnknownStart ? ' (previousVersion recorded as unknown, so /tk:upgrade still audits every convention)' : '')
       : shownVersion(state.version, 'version ') + ' kept' + (stateCmp === -1 ? ' (this plugin is older; a recorded version is never lowered)' : '')));
   }
-  say('  .claude/settings.json: ' + (settingsChanged ? 'register marketplace ' + MARKETPLACE + ' and enable ' + PLUGIN + ' (the first push will page on this change: that is the tripwire doing its job)' : 'already registers the plugin'));
-  say('  .claude/settings.local.json: ' + (local ? 'merge' : 'create') + ' (' + addedPerms.length + ' entries added, ' + deadPerms.length + ' dead script entries removed)');
+  // A settings file setup cannot merge (issue #180): named with a fixed reason, never quoted.
+  const cannotMerge = (read, what) => (opts.force
+    ? 'skipped (--force): the file ' + read.problem + ', so it is left exactly as it is and ' + what
+    : 'cannot be merged: the file ' + read.problem + ', and setup never replaces a settings file it cannot merge, so it pages instead (see below)');
+  say('  .claude/settings.json: ' + (sharedRead.problem !== null ? cannotMerge(sharedRead, 'the plugin is not registered in it')
+    : settingsChanged ? 'register marketplace ' + MARKETPLACE + ' and enable ' + PLUGIN + ' (the first push will page on this change: that is the tripwire doing its job)' : 'already registers the plugin'));
+  if (localSkip) say('  .claude/settings.local.json: ' + cannotMerge(localRead, 'no permission row is added or removed'));
+  else {
+    say('  .claude/settings.local.json: ' + (local ? 'merge' : 'create') + ' (' + addedPerms.length + ' entries added, ' + deadPerms.length + ' dead script entries removed)');
+    // The rows by name (issue #180): the counts alone left a removed row named nowhere.
+    if (addedPerms.length) say('    added: ' + namedRows(addedPerms));
+    if (deadPerms.length) say('    removed: ' + namedRows(deadPerms));
+    if (heldBack.length) {
+      say('    not added again (' + heldBack.length + '), because this working copy was offered ' + (heldBack.length === 1 ? 'it' : 'them') + ' before and the file no longer has '
+        + (heldBack.length === 1 ? 'it' : 'them') + ' (add a row back by hand to have it, or delete ' + recordShown + ' to be offered every missing row again): ' + namedRows(heldBack));
+    }
+    if (recordFile === null && addedPerms.length) say('    Not a git repository, so nothing records which toolkit rows were offered: a row you delete is added again, and named here, on every run.');
+    if (recordFile !== null && record.status !== 'ok') {
+      say('  Offered-rows record: ' + (record.status === 'absent' ? 'none yet' : recordShown + ' is unreadable and counts as none') + ', so every missing toolkit row is added this once. '
+        + 'The record (' + recordShown + ', inside the git directory, never committed) then lists every toolkit row offered here, and a row you delete afterwards stays deleted in this working copy.');
+    }
+  }
 
   // --- 4. Page or proceed --------------------------------------------------------
   if (paged) {
@@ -691,6 +974,11 @@ function main() {
     say('PAGED - nothing was written. Decide, then re-run:');
     if (modified.length) say('  - keep going and let the backup hold your edits: add --force');
     if (mode === 'migrate-unknown') say('  - no manifest to verify against: add --force to sweep the listed paths, or run the v6 installer once first to get a manifest');
+    for (const [rel, read] of [['.claude/settings.json', sharedRead], ['.claude/settings.local.json', localRead]]) {
+      if (read.problem === null) continue;
+      say('  - ' + rel + ' ' + read.problem + ': fix it by hand' + (read.problem === 'is not valid JSON' ? ' (a trailing comma or a missing quote is the usual cause)' : '')
+        + ' and re-run, or add --force to leave that file exactly as it is and set up everything else');
+    }
     if (migrating && (top === null || dirtyTree(project))) say('  - commit or stash your changes first (or add --force)');
     process.stdout.write(out.join('\n') + '\n');
     process.exit(3);
@@ -724,16 +1012,23 @@ function main() {
   }
 
   let backupDir = null;
+  const backup = (rel) => {
+    if (!fs.existsSync(P(rel))) return;
+    const dest = path.join(backupDir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(P(rel), dest);
+  };
+  // Outside a migration the backup holds only the settings files this run
+  // changes, and exists only when one of them already existed (issue #180): a
+  // plugin-mode re-run rewrote a gitignored settings.local.json with no copy.
+  const settingsBackedUp = migrating ? [] : [['.claude/settings.local.json', localChanged], ['.claude/settings.json', settingsChanged]]
+    .filter(([rel, changes]) => changes && fs.existsSync(P(rel))).map(([rel]) => rel);
+  if (settingsBackedUp.length) {
+    backupDir = createBackupDir(project);
+    for (const rel of settingsBackedUp) backup(rel);
+  }
   if (migrating && (removed.length || localChanged || settingsChanged || ignoreAdd.length || attrsAdd.length)) {
-    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
-    backupDir = P('.toolkit-backup-' + stamp + '-plugin');
-    fs.mkdirSync(backupDir, { recursive: true });
-    const backup = (rel) => {
-      if (!fs.existsSync(P(rel))) return;
-      const dest = path.join(backupDir, rel);
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.copyFileSync(P(rel), dest);
-    };
+    backupDir = createBackupDir(project);
     for (const rel of removed) backup(rel);
     for (const rel of ['.claude/settings.local.json', '.claude/settings.json', '.gitignore', '.gitattributes']) backup(rel);
     for (const rel of removed) {
@@ -762,8 +1057,13 @@ function main() {
     const prefix = curAttrs.length && curAttrs[curAttrs.length - 1] !== '' ? '\n' : '';
     fs.appendFileSync(P('.gitattributes'), prefix + '\n# Added by the LLM Peer Review toolkit (/tk:setup)\n' + attrsAdd.join('\n') + '\n');
   }
-  if (settingsChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.json'), JSON.stringify(settings, null, 2) + '\n'); }
-  if (localChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.local.json'), JSON.stringify(localNext, null, 2) + '\n'); }
+  // Written back in each file's own layout (issue #180): its indentation, line
+  // endings and byte order mark, two spaces for a new file.
+  if (settingsChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.json'), formatJson(settings, sharedRead.format)); }
+  if (localChanged) { fs.mkdirSync(P('.claude'), { recursive: true }); fs.writeFileSync(P('.claude/settings.local.json'), formatJson(localNext, localRead.format)); }
+  // The offered-rows record, after the settings file it describes. A git
+  // directory that refuses the write costs only the memory of these offers.
+  const recordWritten = recordChanged ? writeOfferedRows(recordFile, offeredNext) : null;
   // The version a new state file records: the running plugin's, except over a
   // plugin-era stamp newer than it, which is recorded instead so nothing this
   // project carries is lowered and a --stamp on the older plugin refuses (R1).
@@ -806,7 +1106,11 @@ function main() {
   // --- 6. Report ------------------------------------------------------------------
   say('');
   say('Done.');
-  if (backupDir) say('  Backup: ' + path.relative(project, backupDir) + ' (every removed file, plus the settings, .gitignore and .gitattributes as they were)');
+  if (backupDir) {
+    say('  Backup: ' + path.relative(project, backupDir) + (migrating ? ' (every removed file, plus the settings, .gitignore and .gitattributes as they were)'
+      : ' (' + settingsBackedUp.join(' and ') + ' as ' + (settingsBackedUp.length === 1 ? 'it was' : 'they were') + ' before this run)'));
+  }
+  if (recordWritten === false) say('  Offered-rows record: ' + recordShown + ' could not be written, so a toolkit row you delete can be added again on the next run.');
   // One undo line for every mode, compared by bytes after the writes, so only
   // what this run really created, changed or deleted is named; a folder counts
   // when it did not exist before. The state and migration files a migration
@@ -833,7 +1137,7 @@ function main() {
   } else {
     say(mode !== 'fresh' ? '  Nothing to migrate; seed checked.'
       : priorStampCmp === -1 ? '  Next: run /tk:upgrade to audit this project\'s own files from ' + priorPluginStamp + ' against the ' + version + ' conventions.'
-      : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later (' + PLUGIN_UPDATE + '), then restart Claude Code. Pushes stay blocked until then.'
+      : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later: ' + PLUGIN_UPDATE_STEPS + '. Pushes stay blocked until then.'
       : '  Next: /tk:explore. The codebase map generates on first use.');
     if (undo) say('  ' + undo);
   }
@@ -864,4 +1168,7 @@ function classifyUndo(entries) {
 
 if (require.main === module) main();
 
-module.exports = { shellQuote, undoLine, classifyUndo, copyInstallMarkers, versionFileOwner, deadPermission };
+module.exports = {
+  shellQuote, undoLine, classifyUndo, copyInstallMarkers, versionFileOwner, deadPermission,
+  permissionRowKey, offeredRowsPath, readOfferedRows, writeOfferedRows, jsonFormat, formatJson, namedRows, createBackupDir,
+};

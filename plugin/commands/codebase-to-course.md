@@ -1,5 +1,7 @@
 ---
 description: "Codebase to Course"
+allowed-tools:
+  - "Bash(mktemp -d /tmp/*)"
 ---
 # Codebase to Course
 
@@ -28,7 +30,7 @@ A single self-contained HTML file that teaches a codebase through interactive mo
    - Module pages with code + explanation side by side
    - Simple embedded diagrams (using inline SVG or ASCII)
    - Interactive quiz questions with reveal-answer toggles
-5. Save to `/tmp/codebase-course-{timestamp}.html`
+5. Save it as `course.html` in a fresh folder from `mktemp -d /tmp/codebase-course.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
 6. Tell the user the file path so they can open it in a browser
 
 </procedure>

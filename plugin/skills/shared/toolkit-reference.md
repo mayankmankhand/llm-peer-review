@@ -77,7 +77,7 @@ The lessons captured at `/tk:document` are read back at the start of the next `/
 | `/tk:worktree` | Create an isolated parallel session in a new worktree |
 | `/tk:index` | (Re)generate `CODEBASE_MAP.md` - a semantic map of module purposes, conventions, and gotchas. Read by `/tk:explore`, `/tk:create-plan`, `/tk:pair-debug`. |
 | `/tk:setup` | Seed a project for the plugin: the short rules file, gitignore lines, folders, `LESSONS.md`, `DESIGN-PROFILE.md`, the marketplace pointer and permissions; on a copy-install it migrates (managed files removed after backup, custom files kept) |
-| `/tk:upgrade` | After `/plugin update`: audit the project's own commands, skills, agents, rules, and `CLAUDE.md` against the conventions that changed between the installed and current versions, through the normal M2 audit and auto-fix loop |
+| `/tk:upgrade` | After `/plugin update`: audit the project's own commands, skills, agents, rules, `CLAUDE.md` and the other files its sessions read against the conventions that changed since the last audit, plus the checks that run on every upgrade (rules text, permission rows, seeded lines, `tk:` names), through the normal M2 audit and auto-fix loop. A row written `Bash(x:*)` counts as the same row as `Bash(x *)`, and a row this working copy was offered before is never offered again |
 
 ### Plans
 
@@ -203,7 +203,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 - After commits you want to keep (backup)
 - When you're done for the day
 - Before asking for feedback
-- In the auto loop, pushes happen automatically after the pre-push tripwire (M11): `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js` scans every outgoing commit for secrets, never-push files, and settings changes. A hit blocks the push and pages you; if the script is absent, M11's prose fallback runs instead.
+- In the auto loop, pushes happen automatically after the pre-push tripwire (M11): `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js <remote> <branch-or-tag>` scans every commit that destination does not have yet for secrets, never-push files, and settings changes, and the push then goes to exactly that destination. A hit blocks the push and pages you; if the script is absent, M11's prose fallback runs instead. A push you type yourself in a terminal is not checked.
 
 ### Commit Messages
 - Start with a verb: "Add", "Fix", "Update", "Remove", "Refactor"
@@ -240,7 +240,7 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 ### Do it yourself
 - **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
 - **Tests and builds** - run `npm test`, `npm run build`, or the project's equivalent to verify your work. Report pass/fail.
-- **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it.
+- **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it. It asks for approval once: the baseline allows only a plain `npm install` and the worktree install, because installing a new package can run that package's own install scripts.
 - **Service status** - before asking "is the server running?", check yourself with `curl`, `lsof`, or similar tools.
 - **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
 
@@ -265,9 +265,58 @@ Ask yourself: "Can I run this command and interpret the result?" If yes, just do
 **The version guard.** Setup and `/tk:upgrade` record in `.claude/.toolkit-state.json` the toolkit version the project was last set up or audited at. At the start of every session the plugin compares that version with its own, and when they differ Claude relays a notice in plain words:
 
 - **The plugin is newer than the project.** Run `/tk:upgrade`, so the project's own files are checked against the newer conventions. Nothing is blocked in the meantime.
-- **The plugin is older than the project** (for example, a collaborator already upgraded it). Every push from this project is blocked by the pre-push check until the plugin is updated: run `claude plugin update tk@llm-peer-review`, then restart Claude Code. The block exists because an older plugin scans outgoing commits with older checks than the project was set up or audited with.
+- **The plugin is older than the project** (for example, a collaborator already upgraded it). Every push from this project is blocked by the pre-push check until the plugin is updated with the steps under "Updating the plugin" below. The block exists because an older plugin scans outgoing commits with older checks than the project was set up or audited with.
 
 A separate notice says when the old copy-install still sits beside the plugin: every command then exists twice, with and without the `tk:` prefix, and it is easy to run the stale copy. `/tk:setup` migrates it.
+
+### Updating the plugin
+
+From a terminal:
+
+```bash
+claude plugin marketplace update llm-peer-review
+claude plugin update tk@llm-peer-review
+```
+
+Then restart Claude Code and run `/tk:upgrade` in each project. The first line fetches the marketplace's catalog, which names the newest release: `claude plugin update` on its own does not fetch a GitHub marketplace, so it would not see a new release. For a plugin installed for one project only, run the second line as `claude plugin update tk@llm-peer-review --scope project` from that project. Inside a session, `/plugin marketplace update llm-peer-review` and then `/plugin update tk@llm-peer-review` do the same.
+
+### Automatic updates
+
+Off unless you turn them on: Claude Code leaves automatic updates off for third-party marketplaces such as this one, and setup never changes that. To turn them on, run `/plugin`, open **Marketplaces**, choose `llm-peer-review`, and select **Enable auto-update**. Claude Code then checks for a new release in the background after a session starts, and the new version loads after `/reload-plugins` or at the next launch; run `/tk:upgrade` in each project once it has. Setting the `DISABLE_AUTOUPDATER` environment variable turns every automatic update off. Turn automatic updates off before going back to an earlier release, so nothing moves you forward again unasked.
+
+### Going back to an earlier release
+
+1. In each project that uses the toolkit, while the newer release is still installed, lower the version the project records to the release you are going back to (here 7.1.0), then commit `.claude/.toolkit-state.json`:
+
+   ```bash
+   node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --rollback-to 7.1.0
+   ```
+
+   An older release's pre-push check blocks every push from a project that records a newer version, and this command is the one way to lower the record. It prints each value it changed.
+2. Replace the plugin with the older release, with the marketplace pinned to that release's tag:
+
+   ```bash
+   claude plugin uninstall tk@llm-peer-review --keep-data
+   claude plugin marketplace remove llm-peer-review
+   claude plugin marketplace add mayankmankhand/llm-peer-review@v7.1.0
+   claude plugin install tk@llm-peer-review
+   ```
+
+   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project.
+3. If you reinstalled before step 1, the older release's push check blocks and names both versions. In each project, open `.claude/.toolkit-state.json`, set each of `version`, `previousVersion` and `auditedVersion` that is above the older release to that release (`7.1.0`), and commit the file.
+
+To return to the newest release, run step 2 with `claude plugin marketplace add mayankmankhand/llm-peer-review` (no tag) in its third line, restart Claude Code, and run `/tk:upgrade` in each project.
+
+### Cloning a project that uses the toolkit
+
+A clone carries the project's `.claude/settings.json`, which names the toolkit's marketplace and switches the plugin on, but not the plugin itself and not your local permissions. On a machine that has not installed the toolkit:
+
+```bash
+claude plugin marketplace add mayankmankhand/llm-peer-review
+claude plugin install tk@llm-peer-review
+```
+
+Then restart Claude Code, open the project, and run `/tk:setup`: it writes the permission rows, which live in `.claude/settings.local.json` and are never committed. Opening the project in Claude Code and trusting the folder adds the marketplace from the project's settings too, and Claude Code then shows the same install command.
 
 </reference>
 
@@ -277,13 +326,15 @@ A separate notice says when the old copy-install still sits beside the plugin: e
 
 <reference>
 
-`/tk:setup` merges a fixed baseline into the project's `.claude/settings.local.json`: every allow row in the table below, exactly as written there, plus `additionalDirectories: ["/tmp"]`. It adds a row only when it is missing, sets no `defaultMode`, and writes no row for a toolkit script: since v7.0.0 each plugin command carries an `allowed-tools` list for the scripts it runs, so the `node .claude/scripts/...` rows a copy-install needed are dead under the plugin, and setup removes the ones whose script the project no longer has.
+`/tk:setup` merges a fixed baseline into the project's `.claude/settings.local.json`: every allow row in the table below, exactly as written there, plus `additionalDirectories: ["/tmp"]`. It adds a row only when no permissions list in the file holds it (allow, ask or deny, with `Bash(x:*)` and `Bash(x *)` counting as one row) and it has not offered that row in this working copy before, sets no `defaultMode`, and writes no row for a toolkit script: since v7.0.0 each plugin command carries an `allowed-tools` list for the scripts it runs, so the `node .claude/scripts/...` rows a copy-install needed are dead under the plugin, and setup removes the ones whose script the project no longer has, plus a few old toolkit rows.
+
+**What setup and `/tk:upgrade` change.** Setup backs up `settings.local.json` and `settings.json` before it changes either (its report names the backup folder and the command that undoes the run), names every row it adds and removes, and stops without writing anything when a settings file does not parse. The rows it has offered are listed in the working copy's git directory (`git rev-parse --git-path tk-offered-rows.json`), where git never commits them: a row you delete is not added back in this working copy, and a fresh clone is offered every row again, as is a project whose `settings.local.json` is missing. `/tk:upgrade` removes, through its audit, the retired toolkit rows the plugin lists, among them the broad `git config` and `npm install` rows that 7.2.0 narrowed, and reports baseline rows the file lacks unless the offered-rows list names them.
 
 A project has two settings files. `.claude/settings.json` is committed and shared: setup merges in only the marketplace pointer and the enabled plugin, which is what makes a collaborator's Claude Code offer the install. `.claude/settings.local.json` is yours and never pushed: your real permissions live there, and setup only adds the missing baseline rows.
 
-The baseline has no `glab` rows: a GitHub-hosted project never needs them. On a GitLab repo, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, `Bash(glab issue reopen *)`, `Bash(glab mr create *)`, `Bash(glab mr view *)`, and `Bash(glab mr list *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md`.
+The baseline carries the four `glab` rows the toolkit's own host commands run, the GitLab twins of its `gh issue create`, `gh issue view`, `gh pr create` and `gh pr list` rows, so a GitLab repo needs no extra row for them and a GitHub-hosted project simply never runs them. For other GitLab work, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, `Bash(glab issue reopen *)`, and `Bash(glab mr view *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md`.
 
-Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, already covered by the `git config` row. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
+Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, which the baseline allows as that exact command and nothing broader. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
 
 | Permission | Why it's here |
 |---|---|
@@ -291,7 +342,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories |
 | `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git stash *)` | Branch management and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
-| `Bash(git config *)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Git setup (e.g. safe.directory, remote URLs). `git config --get remote.origin.url` is also how commands detect whether this repo is on GitHub or GitLab |
+| `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |
 | `Bash(git check-ignore *)` | Verifying .gitignore rules before committing |
 | `Bash(git worktree *)` | Creating, listing, and removing worktrees for parallel sessions |
 | `Bash(git rev-parse *)`, `Bash(git rev-list *)` | Worktree detection, repo path queries, commit-range checks |
@@ -301,14 +352,14 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(gh label list *)`, `Bash(gh label create *)` | Managing GitHub labels |
 | `Bash(gh pr create *)`, `Bash(gh pr view *)`, `Bash(gh pr diff *)`, `Bash(gh pr list *)` | Pull request workflows (GitHub). `/tk:document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
 | `Bash(gh api *)`, `Bash(gh release list *)` | GitHub API calls and release checks. `/tk:review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
-| `Bash(npm install *)`, `Bash(npm uninstall *)` | Managing dependencies |
+| `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab mr create *)`, `Bash(glab mr list *)` | The same host commands on a GitLab repo: `/tk:create-issue` and the cycle issue `/tk:upgrade` opens, reading an issue, and `/tk:document`'s merge request and its link |
+| `Bash(npm install)`, `Bash(npm install --prefix .claude/worktrees/*)`, `Bash(npm uninstall *)` | A plain `npm install` of the project's own dependencies, the install `/tk:worktree` runs inside a new worktree, and removing a package. Installing any other package is not pre-approved and asks once, because an install can run that package's own install scripts |
 | `Bash(npm audit *)`, `Bash(npm outdated *)` | Dependency security and freshness checks (used by `/tk:review-deps`) |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | The built-in file tools setup allows. These are real allow rows: `Edit` and `Write` approve file edits inside the project without a prompt |
 | `WebFetch(domain:github.com)`, `WebFetch(domain:raw.githubusercontent.com)`, `WebSearch` | Fetching GitHub content and web search |
 | `Bash(cp *)` | Copying files (e.g. `.env.local` and `CODEBASE_MAP.md` into worktrees) |
 | `Bash(ls *)`, `Bash(diff *)`, `Bash(echo *)`, `Bash(mkdir *)`, `Bash(cat *)` | Reading directories, comparing files, writing output, creating folders |
-| `Bash(mktemp -d /tmp/*)` | Per-run temp folders under `/tmp` (render payloads, browser actions, media prompts, the GitHub issue and PR body file), so two sessions never share a file. Each plugin command or skill that calls it also carries this rule in its own `allowed-tools`, so it works before `/tk:setup` has run |
-| `Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)`, `Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)` | The two exact heading checks `/tk:index` runs on its temp map before it replaces `CODEBASE_MAP.md`. Exact form, no wildcard |
+| `Bash(mktemp -d /tmp/*)` | Per-run temp folders under `/tmp` (render payloads, browser actions, media prompts, playground pages, and the issue and PR body file on both hosts), so two sessions never share a file. Each plugin command or skill that calls it also carries this rule in its own `allowed-tools`, so it works before `/tk:setup` has run |
 | `Skill(tk:explore)`, `Skill(tk:explore:*)`, `Skill(tk:create-plan)`, `Skill(tk:create-plan:*)`, `Skill(tk:execute)`, `Skill(tk:execute:*)`, `Skill(tk:review)`, `Skill(tk:review:*)`, `Skill(tk:document)`, `Skill(tk:document:*)` | The workflow stages, which hand off to each other through the Skill tool (M14) without a prompt |
 | `Skill(tk:index)`, `Skill(tk:index:*)`, `Skill(tk:upgrade)`, `Skill(tk:upgrade:*)` | Stages invoked by another stage: `/tk:explore` generates a missing map with `/tk:index`, and `/tk:setup` chains into `/tk:upgrade` after a migration |
 | `Skill(tk:project-context)`, `Skill(tk:project-context:*)`, `Skill(tk:design-rules)`, `Skill(tk:design-rules:*)` | Skills loaded by name mid-run: project context for review dispatches, and the design rules when `/tk:explore` or `/tk:execute` runs its design step |
@@ -317,6 +368,8 @@ Host detection itself needs no new permission: it reads `git config --get remote
 **Not in the baseline: `cd`.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access.
 
 **`additionalDirectories: ["/tmp"]`** sits under `permissions` beside the `allow` list, not as an allow row: it lets Claude read and write `/tmp`, where the debate transcripts and the per-run temp folders live.
+
+**Default permission mode has limits.** A plugin command's `allowed-tools` grant lasts only until you send your next message, so a toolkit script the command runs after you answer one of its questions stops for approval; a later release is to lift this. Saving a review receipt's output to a file uses a redirect, which default mode always asks about, and so do a few of the checks `/tk:upgrade`'s receipts run (`node -e`, `awk`, `find`). Approve those prompts when they come.
 
 **API keys are never a permission row.** `/tk:ask-gpt`, `/tk:ask-gemini`, and `gen-media.js` look up each key in this order, first value wins: a real environment variable, then the project's own `.env.local` (searched from the working folder up to the git root), then `~/.claude/plugins/.env.local`, one file for every project on the machine. Only the toolkit's own key and model variables are read from those files, and Claude never reads them; `API-KEYS.md` in the toolkit repository has the details.
 
@@ -329,7 +382,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 <rules>
 
 - I'm learning - explain what you do
-- The loop runs auto by default; say "report only" on any run you start to get report-first behavior for that run (M10); for the review that chains from `/tk:execute`, say "no chaining" at plan approval and type `/tk:review report only` yourself
+- The loop runs auto by default; say "report only" on any run you start to get report-first behavior for that run (M10); for the review that chains from `/tk:execute`, say "no chaining" at plan approval and type `/tk:review <start>..HEAD report only` yourself, with the plan's `Start commit`
 - Stages chain automatically (M14); say "no chaining" on any run to stop after that stage. Different knob from "report only": one governs whether the next stage fires, the other whether findings are auto-fixed
 - Ask if unsure
 - After non-trivial corrections, update the learning log: a one-liner in `LESSONS.md` plus the full write-up in `LESSONS-detail.md`. Capture a lesson when Claude makes the same mistake a second time, when a review catches something Claude should have known, or when you type the same correction you typed before.

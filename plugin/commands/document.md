@@ -3,6 +3,8 @@ description: "Update Documentation Task"
 allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
+  - "Bash(gh pr create *)"
+  - "Bash(glab mr create *)"
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js)"
@@ -191,7 +193,7 @@ step, and it needs more rows than one cycle produces.
 ## 7. Commit and Push
 
 - **Commit** the documentation updates automatically: one checkpoint commit per logical unit, per M4. Follow the commit message conventions in toolkit.md.
-- **Push** behind the M11 tripwire: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js` and follow M11's exit-code consequences (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`).
+- **Push** behind the M11 tripwire: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js <remote> <branch>` for the branch being pushed (usually `origin` and the current branch name), follow M11's exit-code consequences (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), and on a clean check push that same destination with `git push -u <remote> HEAD:<branch>`.
 
 This covers every push in this command, including the branch push in Section 8.
 
@@ -210,9 +212,9 @@ Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-
 Run the steps below automatically, attaching a receipt to each per M8 (what ran, plus the evidence: command output, count delta, diff stat). The receipts land in the end-of-run digest. Three steps are deliberate exceptions that still ask the user: step 1 (uncommitted changes - their intent is a fact only the user holds, M1), step 3 (branch naming), and step 6 (removing a worktree folder sits next to the M9 data-deletion gate). In step 4, showing the PR draft is an announcement, not a wait.
 
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
-2. Push the branch to the remote.
+2. Push the branch to the remote, behind the tripwire exactly as Section 7 says.
 3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" Follow the worktree naming convention in toolkit.md if they say yes.
-4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on GitHub or single-quoted inline on GitLab, and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
+4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on both hosts (inline on GitLab only through the table's `Unknown flag` fallback), and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
 5. Show the user the PR URL.
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
@@ -247,7 +249,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-Write the JSON to a per-run temp file: run `mktemp -d /tmp/document-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it. Then run the helper from the project root with that path as `<render-dir>`. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
+Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/document-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Then run the helper from the project root with that folder as `<render-dir>`. The cycle summary is a **standing page** (issue #163): `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
 Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
 

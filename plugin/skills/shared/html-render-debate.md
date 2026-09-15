@@ -29,7 +29,7 @@ Steps:
    - `rounds`: `[{n, claude, model}]` - one per debate round; `claude` and `model` are the two positions (trusted inline HTML allowed).
    - `synthesis`: `{agreed:[], disagreed:[], actions:[...]}`. Each action: `{id, severity, file:{relPath, absPath, line}, what, context, fix, fields:[{label, value}]}`, mirroring the review finding shape: `what` is sentence one, `context` the optional sentence two (omit the key when there is none), `fix` the fix line, and `fields` attachments only, never prose. Rows carrying the retired labels (Why it matters / Example / Suggested fix) are refused by the helper and dropped with a stderr note. `severity` is `"block" | "warn" | "suggest"`. `what`, `context`, `fix`, and field `value`s may contain trusted inline HTML.
 
-2. **Write the JSON to a per-run temp file.** Run `mktemp -d /tmp/debate-render.XXXXXX`; it prints a new, empty folder, so two projects rendering at once never share a payload. Write the JSON to `data.json` inside it; that folder is `<render-dir>` below.
+2. **Write the JSON to a per-run temp file.** Write it as `data.json` in a fresh folder from `mktemp -d /tmp/debate-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`; that folder is `<render-dir>` below.
 
 3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
    Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.

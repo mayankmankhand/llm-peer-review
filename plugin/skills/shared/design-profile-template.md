@@ -1,12 +1,14 @@
 <!--
-  design-profile-template.md - the seed for DESIGN-PROFILE.md (issue #160).
+  design-profile-template.md - the template for a project's DESIGN-PROFILE.md
+  (issue #160).
 
-  Both installers copy this file to <project>/DESIGN-PROFILE.md ONCE, on a fresh
-  install, and never overwrite it afterwards: the seeded copy is user-owned, like
-  CLAUDE.md and LESSONS.md. /tk:explore reads it before any design work and offers to
-  create it from this template when it is missing. /tk:explore and /tk:document write it;
-  /tk:execute only reads it. The rules that use these sections live in
-  ${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md.
+  A project gets its DESIGN-PROFILE.md ONCE and never has it overwritten: the copy
+  is user-owned, like CLAUDE.md and LESSONS.md. On the plugin, setup writes it from
+  the plugin's seed/DESIGN-PROFILE.md (these same sections under a project header);
+  on a copy-install, the installer copies this file on a fresh install. /tk:explore
+  reads the profile before any design work and offers to create it when it is
+  missing. /tk:explore and /tk:document write it; /tk:execute only reads it. The rules that
+  use these sections live in ${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md.
 
   This template ships through the shared-fragment glob, so it is present in every
   install. It is a template, not this repository's own profile: keep every value

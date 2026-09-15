@@ -2,17 +2,13 @@
 
 ## Invoking the Script
 
-Write your action sequence as JSON to a per-run temp file and pipe it to the script. Run `mktemp -d /tmp/browse-run.XXXXXX`; it prints a new, empty folder, so two sessions driving a browser at once never read each other's actions. Write the JSON to `actions.json` inside it, then pipe that file (`<run-dir>` is the folder `mktemp` printed):
+Write your action sequence as `actions.json` in a fresh folder from `mktemp -d /tmp/browse-run.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (two sessions driving a browser at once never read each other's actions), then pipe that file to the script (`<run-dir>` is the folder `mktemp` printed):
 
 ```bash
 cat <run-dir>/actions.json | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js
 ```
 
-Or inline:
-
-```bash
-echo '{"baseUrl":"http://localhost:3000","actions":[...]}' | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js
-```
+Always go through the file, even for a single action: JSON typed inline into `echo '...'` breaks at the first apostrophe inside it.
 
 ## Input Format
 
