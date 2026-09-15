@@ -15,7 +15,11 @@
 // older plugin cannot lower the record and lift that block), and a
 // re-run over an unreadable state version still audits every convention, each
 // run end to end through setup, upgrade-audit.js read-only and the SessionStart
-// hook, with one mutation check each proving the checks bite).
+// hook, with one mutation check each proving the checks bite; and issue #180:
+// settings files backed up on every run that changes them, a settings file setup
+// cannot merge paged and never replaced, rows named, indentation kept, a deleted
+// toolkit row kept deleted by the offered-rows record in the git directory, and
+// root helper scripts swept only when their content matches a shipped copy).
 // Builds a fixture plugin root and fixture projects in
 // temp dirs; never touches a real project. Dependency-free; exits non-zero on
 // any failure.
@@ -51,6 +55,8 @@ function write(root, rel, content) {
 const read = (root, rel) => fs.readFileSync(path.join(root, rel), 'utf8');
 const exists = (root, rel) => fs.existsSync(path.join(root, rel));
 const sha = (root, rel) => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, rel)).toString('latin1').replace(/\r/g, ''), 'latin1').digest('hex');
+// The same CR-stripped sha256, of a text rather than a file.
+const shaText = (text) => crypto.createHash('sha256').update(Buffer.from(text, 'utf8').toString('latin1').replace(/\r/g, ''), 'latin1').digest('hex');
 function git(repo, args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
 function initRepo(repo) {
   git(repo, ['init', '-q']); git(repo, ['config', 'user.email', 't@t']); git(repo, ['config', 'user.name', 't']); git(repo, ['config', 'commit.gpgsign', 'false']);
@@ -221,7 +227,14 @@ const MANAGED = ['.claude/commands/review.md', '.claude/commands/explore.md', '.
 // The helper scripts early installers copied to the project's root scripts/
 // folder, listed like the real historical-managed-paths.txt lists them.
 const ROOT_TOOLKIT_SCRIPTS = ['scripts/ask-gpt.js', 'scripts/ask-gemini.js', 'scripts/browse.js'];
-write(pluginRoot, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED.concat(ROOT_TOOLKIT_SCRIPTS) }));
+// The content of the fixture's "shipped" copy of each root helper script. Since
+// issue #180 a root helper is swept only when its CR-stripped sha256 is one the
+// shipped managed-paths.json lists under historicalHelperHashes, so the fixture
+// plugin lists two per script (an older copy's and this one's), the way the
+// build lists every copy from git history.
+const HELPER_TEXT = (rel) => '// toolkit helper ' + rel + '\n';
+write(pluginRoot, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED.concat(ROOT_TOOLKIT_SCRIPTS),
+  historicalHelperHashes: Object.fromEntries(ROOT_TOOLKIT_SCRIPTS.map(rel => [rel, [shaText('// an older copy of ' + rel + '\n'), shaText(HELPER_TEXT(rel))]])) }));
 
 const LFS_LINE = '*.psd filter=lfs diff=lfs merge=lfs -text';
 const ARTIFACTS_NOTES = '# Our artifacts notes\n\nKept by hand.\n';
@@ -384,7 +397,9 @@ function makeEarlyInstall(rules) {
   initRepo(repo0);
   for (const rel of ['.claude/commands/review.md', '.claude/commands/explore.md', '.env.local.example']) write(repo0, rel, 'toolkit content of ' + rel + '\n');
   write(repo0, '.claude/rules/toolkit.md', rules === undefined ? stampedRules('4.1.0') : rules);
-  for (const rel of ROOT_TOOLKIT_SCRIPTS) write(repo0, rel, '// toolkit helper ' + rel + '\n');
+  // Each one byte for byte the fixture plugin's shipped copy (HELPER_TEXT), so
+  // its hash is listed and the sweep may take it (issue #180).
+  for (const rel of ROOT_TOOLKIT_SCRIPTS) write(repo0, rel, HELPER_TEXT(rel));
   write(repo0, 'scripts/build.js', 'console.log("ours");\n');
   write(repo0, '.claude/commands/myteam-deploy.md', '# Deploy\n\nOurs.\n');
   write(repo0, '.gitignore', 'mine/\n');
@@ -397,7 +412,9 @@ let early = fullSnapshot(repo);
 r = run(repo, pluginRoot);
 check('an early install with no VERSION is a migration from an unknown provenance, not a fresh project', r.status === 3 && /migration from copy-install v4\.1\.0 \(NO manifest: provenance unknown\)/.test(r.out) && !/fresh install/.test(r.out), r.out);
 check('its page reads right with no VERSION file and names the sweep decision', /No VERSION file: recognized by the toolkit stamp/.test(r.out) && /version is read from that stamp/.test(r.out) && /PAGED - nothing was written/.test(r.out) && /add --force to sweep/.test(r.out), r.out);
-check('the report lists the root toolkit scripts it would remove, and only those', /helper scripts an early installer copied to the root scripts\/ folder[^\n]*scripts\/ask-gpt\.js, scripts\/ask-gemini\.js, scripts\/browse\.js\n/.test(r.out) && !/scripts\/build\.js/.test(r.out), r.out);
+// Since issue #180 the line says each one matches a shipped copy, and names no file kept as the project's own.
+check('the report lists the root toolkit scripts it would remove, each matching a shipped copy, and only those', /helper scripts an early installer copied to the root scripts\/ folder, each matching a copy the toolkit shipped \(every other file there is yours, untouched\): scripts\/ask-gpt\.js, scripts\/ask-gemini\.js, scripts\/browse\.js\n/.test(r.out)
+  && !/scripts\/build\.js/.test(r.out) && !/Kept as your own/.test(r.out), r.out);
 check('the paged run wrote nothing', snapshotDiff(early, fullSnapshot(repo)) === '');
 r = run(repo, pluginRoot, ['--force']);
 check('--force sweeps it', r.status === 0 && /Done\./.test(r.out), r.out);
@@ -614,6 +631,9 @@ for (const [label, rules, versionFile] of [['no rules file', null], ['its own ru
   const gone = () => false;
   check('deadPermission: a row for a root toolkit script that will not exist is dead, plain or colon-star', h.deadPermission('Bash(node scripts/ask-gpt.js *)', gone, roots) && h.deadPermission('Bash(node scripts/ask-gemini.js:*)', gone, roots) && h.deadPermission('Bash(cat * | node scripts/browse.js *)', gone, roots));
   check('deadPermission: a row for any other root script, or a root toolkit script that stays, is live', !h.deadPermission('Bash(node scripts/build.js *)', gone, roots) && !h.deadPermission('Bash(node scripts/ask-gpt.js *)', () => true, roots) && !h.deadPermission('Bash(node tools/scripts/ask-gpt.js *)', gone, roots));
+  check('#180 deadPermission: the legacy absolute browse.js pipe is dead in either spelling, and a live row in either spelling stays', h.deadPermission('Bash(echo * | node /abs/proj/.claude/scripts/browse.js *)', () => true, roots)
+    && h.deadPermission('Bash(echo * | node /abs/proj/.claude/scripts/browse.js:*)', () => true, roots) && h.deadPermission('Skill(review-commands:*)', () => true, roots)
+    && !h.deadPermission('Bash(git status:*)', () => true, roots) && !h.deadPermission('Bash(node .claude/scripts/our-report.js:*)', () => true, roots));
   const B = (s) => Buffer.from(s);
   const cls = h.classifyUndo([
     { rel: 'clean-changed', before: B('a'), after: B('b'), tracked: true, unstaged: false, backupHolds: true },
@@ -748,7 +768,9 @@ check('its delete list is exactly the files the run created', undo !== null && s
 check('its folder list is exactly the folders the run created, deepest first', undo !== null && sameSet(undo.dirs, dirSnapshot(repo).filter(d => !dirsBefore.includes(d))) && undo.dirs.indexOf('.claude/rules/') < undo.dirs.indexOf('.claude/'), r.out);
 check('a fresh setup changed no existing file, so nothing to checkout or restore by hand', undo !== null && undo.checkout.length === 0 && undo.byHand.length === 0 && !undo.noGit, r.out);
 if (undo) { const copy = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-undo-')); fs.cpSync(repo, copy, { recursive: true }); applyUndo(copy, undo); check('carrying out the fresh undo line restores the tree and its folders exactly', treeSnapshot(copy) === treeBefore && sameSet(dirSnapshot(copy), dirsBefore)); fs.rmSync(copy, { recursive: true, force: true }); }
-check('a fresh install seeds and registers without a backup', r.status === 0 && /fresh install/.test(r.out) && !fs.readdirSync(repo).some(n => n.startsWith('.toolkit-backup-')), r.out);
+// Since issue #180 any run that changes an existing settings file backs it up;
+// this project has none of its own, so nothing that existed changed and no folder is made.
+check('a fresh install with no settings file of its own seeds and registers without a backup folder', r.status === 0 && /fresh install/.test(r.out) && !fs.readdirSync(repo).some(n => n.startsWith('.toolkit-backup-')) && !/ {2}Backup: /.test(r.out), r.out);
 check('the full seed lands, including the lessons detail file', ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', '.env.local.example', '.gitattributes', 'artifacts/README.md', '.claude/rules/toolkit.md', '.gitignore', '.claude/settings.json', '.claude/settings.local.json', '.claude/.toolkit-state.json'].every(f => exists(repo, f)));
 const freshState = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
 check('fresh state path is plugin', freshState.path === 'plugin');
@@ -779,7 +801,8 @@ fs.rmSync(repo, { recursive: true, force: true });
 
 // A file that existed but git cannot give back as it was: an untracked
 // .gitignore, and a tracked settings.json with an uncommitted edit (a checkout
-// would discard that edit too). Both are restored by hand.
+// would discard that edit too). The .gitignore is restored by hand; the
+// settings.json, since issue #180, is copied back from the backup the run made.
 console.log('\n4-undo. files git cannot restore');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-fresh-byhand-'));
 initRepo(repo);
@@ -792,7 +815,8 @@ snapBefore = fullSnapshot(repo);
 r = run(repo, pluginRoot);
 undo = undoOf(r.out);
 undoRestores('fresh setup over an untracked .gitignore and a dirty tracked settings.json', repo, snapBefore, r.out);
-check('an untracked .gitignore and a dirty tracked settings.json are restored by hand, never checked out', r.status === 0 && undo !== null && sameSet(undo.byHand, ['.gitignore', '.claude/settings.json']) && undo.checkout.length === 0 && !undo.del.includes('.gitignore'), r.out);
+check('an untracked .gitignore is restored by hand and a dirty tracked settings.json is copied back from this run\'s backup (issue #180), neither checked out', r.status === 0 && undo !== null && sameSet(undo.byHand, ['.gitignore'])
+  && sameSet(undo.restore, ['.claude/settings.json']) && undo.backupFrom !== null && undo.removeBackup === undo.backupFrom && undo.checkout.length === 0 && !undo.del.includes('.gitignore'), r.out);
 filesBefore = fileList(repo);
 r = run(repo, pluginRoot);
 check('a plugin-mode re-run that changes nothing prints no undo line', r.status === 0 && /Nothing to migrate/.test(r.out) && !/Undo:/.test(r.out) && sameSet(fileList(repo), filesBefore), r.out);
@@ -1288,6 +1312,348 @@ console.log('\n4e. state stamping: a lost state file, an unreadable version (rev
     fs.rmSync(forMutant, { recursive: true, force: true });
   }
   fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+// Issue #180. Every run that changes a settings file backs it up first; a
+// settings file setup cannot merge pages instead of being replaced (--force
+// skips it); the rows added and removed are named; a file keeps its own layout;
+// the offered-rows record in the git directory keeps a deleted toolkit row
+// deleted, per working copy; and the manifest-less sweep takes a root helper
+// script only when its content matches a copy the toolkit shipped. Each case
+// reads files defensively, so the section runs to its end (and counts its
+// failures) against a setup-project.js without these fixes.
+console.log('\n4f. settings backups, broken settings files, named rows, the offered-rows record, root helper content (issue #180)');
+{
+  const tmp80 = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-180-'));
+  const root80 = path.join(tmp80, 'plugin');
+  fs.cpSync(pluginRoot, root80, { recursive: true });
+  const SEED80 = ['Bash(git add *)', 'Bash(git status *)', 'Bash(gh auth status *)', 'Bash(npm install)', 'Skill(tk:explore:*)'];
+  write(root80, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: SEED80, additionalDirectories: ['/tmp'] } }, null, 2) + '\n');
+  const LOCAL = '.claude/settings.local.json';
+  const SHARED = '.claude/settings.json';
+  let count80 = 0;
+  const project80 = (files, noGit) => {
+    const dir = path.join(tmp80, 'project-' + (++count80));
+    fs.mkdirSync(dir);
+    if (!noGit) initRepo(dir);
+    write(dir, 'README.md', '# app\n');
+    for (const [rel, content] of Object.entries(files || {})) write(dir, rel, content);
+    if (!noGit) commitAll(dir, 'init');
+    return dir;
+  };
+  const textAt = (dir, rel) => { try { return read(dir, rel); } catch (e) { return null; } };
+  const jsonAt = (dir, rel) => { try { return JSON.parse(read(dir, rel)); } catch (e) { return null; } };
+  const allowAt = (dir) => { const j = jsonAt(dir, LOCAL); return j && j.permissions && Array.isArray(j.permissions.allow) ? j.permissions.allow : []; };
+  const writeAllow = (dir, allow, indent) => write(dir, LOCAL, JSON.stringify({ permissions: { allow, additionalDirectories: ['/tmp'] } }, null, indent || 2) + '\n');
+  const bytesAt = (dir, rel) => { try { return fs.readFileSync(path.join(dir, rel)); } catch (e) { return Buffer.from('(no such file)'); } };
+  const backupsIn = (dir) => fs.readdirSync(dir).filter(n => n.startsWith('.toolkit-backup-'));
+  // Where git keeps this working copy's record, and the rows it lists (null when there is none).
+  const recordAt = (dir) => { try { return path.resolve(dir, git(dir, ['rev-parse', '--git-path', 'tk-offered-rows.json'])); } catch (e) { return null; } };
+  const recordRows = (dir) => { try { const j = JSON.parse(fs.readFileSync(recordAt(dir), 'utf8')); return j && j.version === 1 && Array.isArray(j.offered) ? j.offered : null; } catch (e) { return null; } };
+  const quiet = (dir, before) => snapshotDiff(before, fullSnapshot(dir)) === '';
+
+  // A plugin-mode re-run that changes settings.local.json: backed up byte for
+  // byte first, its 4-space indentation kept, the removed row named, no
+  // migration record, and an undo line that copies the file back.
+  repo = project80();
+  r = run(repo, root80);
+  check('#180 fixture: a fresh setup writes the #180 seed rows', r.status === 0 && sameSet(allowAt(repo), SEED80), r.out);
+  commitAll(repo, 'seeded');
+  const GONE_ROW = 'Bash(node .claude/scripts/gone-tool.js *)';
+  writeAllow(repo, SEED80.concat([GONE_ROW, 'Bash(make ours *)']), 4);
+  const preRun = bytesAt(repo, LOCAL);
+  snapBefore = fullSnapshot(repo);
+  r = run(repo, root80);
+  let bk = backupsIn(repo);
+  check('#180 a plugin-mode re-run that changes settings.local.json first copies it into one backup folder, byte for byte as it was', r.status === 0 && /already on the plugin/.test(r.out)
+    && bk.length === 1 && /^\.toolkit-backup-\d{8}-\d{6}(-\d+)?-plugin$/.test(bk[0]) && bytesAt(repo, bk[0] + '/' + LOCAL).equals(preRun), r.out + JSON.stringify(bk));
+  check('#180 that backup holds only the settings file, and the report names it', bk.length === 1 && sameSet(fileList(path.join(repo, bk[0])), [LOCAL])
+    && r.out.includes('  Backup: ' + bk[0] + ' (.claude/settings.local.json as it was before this run)'), r.out);
+  check('#180 the report names the removed row, JSON-escaped, beside the count', /1 dead script entries removed/.test(r.out) && r.out.includes('    removed: ' + JSON.stringify(GONE_ROW) + '\n'), r.out);
+  check('#180 the rewritten settings.local.json keeps its 4-space indentation and the owner\'s own row', String(textAt(repo, LOCAL)).startsWith('{\n    "permissions": {\n        "allow": [\n')
+    && allowAt(repo).includes('Bash(make ours *)') && !allowAt(repo).includes(GONE_ROW), String(textAt(repo, LOCAL)));
+  check('#180 a run that is no migration writes no migration record', r.status === 0 && !exists(repo, '.claude/.toolkit-migration.json'));
+  undo = undoRestores('#180 plugin-mode re-run with a settings backup', repo, snapBefore, r.out);
+  check('#180 its undo line copies settings.local.json back from that backup, then removes the backup; nothing is left to restore by hand', undo !== null && bk.length === 1
+    && sameSet(undo.restore, [LOCAL]) && undo.byHand.length === 0 && undo.backupFrom === bk[0] + '/' && undo.removeBackup === bk[0] + '/', r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // Both settings files change on one re-run (a newer seed row, and a tracked
+  // settings.json whose plugin keys the owner removed): both backed up, the
+  // added row named, and both copied back by the undo line.
+  const root80more = path.join(tmp80, 'plugin-more');
+  fs.cpSync(root80, root80more, { recursive: true });
+  const NEW_ROW = 'Bash(glab mr list *)';
+  write(root80more, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: SEED80.concat([NEW_ROW]), additionalDirectories: ['/tmp'] } }, null, 2) + '\n');
+  repo = project80();
+  run(repo, root80);
+  commitAll(repo, 'seeded');
+  const SHARED_EDITED = JSON.stringify({ env: { X: '1' } }, null, 2) + '\n';
+  write(repo, SHARED, SHARED_EDITED);
+  const localPre = bytesAt(repo, LOCAL);
+  snapBefore = fullSnapshot(repo);
+  r = run(repo, root80more);
+  bk = backupsIn(repo);
+  check('#180 a re-run that changes both settings files backs up both, each byte for byte as it was', r.status === 0 && bk.length === 1 && bytesAt(repo, bk[0] + '/' + SHARED).equals(Buffer.from(SHARED_EDITED))
+    && bytesAt(repo, bk[0] + '/' + LOCAL).equals(localPre) && r.out.includes('(.claude/settings.local.json and .claude/settings.json as they were before this run)'), r.out);
+  check('#180 the report names the added row, JSON-escaped, beside the count', /1 entries added, 0 dead script entries removed/.test(r.out) && r.out.includes('    added: ' + JSON.stringify(NEW_ROW) + '\n'), r.out);
+  undo = undoRestores('#180 re-run changing both settings files', repo, snapBefore, r.out);
+  check('#180 its undo line copies both settings files back from the backup', undo !== null && sameSet(undo.restore, [LOCAL, SHARED]) && undo.byHand.length === 0 && undo.checkout.length === 0, r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // Two runs in the same second: the backup folder is never shared.
+  {
+    const h = require(SCRIPT);
+    const d = fs.mkdtempSync(path.join(tmp80, 'names-'));
+    let names = null;
+    if (typeof h.createBackupDir === 'function') {
+      const at = new Date('2026-09-14T12:00:00.000Z');
+      names = [h.createBackupDir(d, at), h.createBackupDir(d, at), h.createBackupDir(d, new Date('2026-09-14T12:00:00.900Z'))].map(p => path.basename(p));
+    }
+    check('#180 createBackupDir: backups made in the same second get separate folders, -plugin, then -2-plugin and -3-plugin', names !== null
+      && JSON.stringify(names) === JSON.stringify(['.toolkit-backup-20260914-120000-plugin', '.toolkit-backup-20260914-120000-2-plugin', '.toolkit-backup-20260914-120000-3-plugin'])
+      && names.every(n => fs.statSync(path.join(d, n)).isDirectory()), JSON.stringify(names));
+  }
+  repo = project80();
+  run(repo, root80);
+  writeAllow(repo, SEED80.concat([GONE_ROW]));
+  const taken = [];
+  for (let s = -2; s <= 30; s++) {
+    const name = '.toolkit-backup-' + new Date(Date.now() + s * 1000).toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-') + '-plugin';
+    write(repo, name + '/older-run.txt', 'an older backup\n');
+    taken.push(name);
+  }
+  r = run(repo, root80);
+  const madeNow = backupsIn(repo).filter(n => !taken.includes(n));
+  check('#180 when this second\'s backup folder already exists, the run makes a -2-plugin folder and writes nothing into the older one', r.status === 0 && madeNow.length === 1 && /-2-plugin$/.test(madeNow[0])
+    && exists(repo, madeNow[0] + '/' + LOCAL) && taken.every(n => sameSet(fileList(path.join(repo, n)), ['older-run.txt'])), r.out + JSON.stringify(madeNow));
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // A settings file with one trailing comma, on a fresh run, a plugin-mode
+  // re-run and a migration: exit 3 and nothing written, a dry run included;
+  // with --force the file stays byte for byte and everything else is set up.
+  const COMMA_LOCAL = '{\n  "permissions": {\n    "allow": [\n      "Bash(make ours *)",\n    ]\n  }\n}\n';
+  const COMMA_SHARED = '{\n  "env": { "X": "1" },\n}\n';
+  const PAGE_LOCAL = '  - .claude/settings.local.json is not valid JSON: fix it by hand (a trailing comma or a missing quote is the usual cause) and re-run, or add --force';
+  const PAGE_SHARED = '  - .claude/settings.json is not valid JSON: fix it by hand (a trailing comma or a missing quote is the usual cause) and re-run, or add --force';
+  for (const [rel, text, pageLine] of [[LOCAL, COMMA_LOCAL, PAGE_LOCAL], [SHARED, COMMA_SHARED, PAGE_SHARED]]) {
+    repo = project80({ [rel]: text });
+    snapBefore = fullSnapshot(repo);
+    r = run(repo, root80, ['--dry-run']);
+    check('#180 fresh run, trailing comma in ' + rel + ': a dry run pages with exit 3 and writes nothing', r.status === 3 && /PAGED - nothing was written/.test(r.out) && r.out.includes(pageLine) && quiet(repo, snapBefore), r.out);
+    r = run(repo, root80);
+    check('#180 fresh run, trailing comma in ' + rel + ': the run pages with exit 3, names the file, and writes nothing (the file byte for byte, no record)', r.status === 3 && /PAGED - nothing was written/.test(r.out)
+      && r.out.includes(pageLine) && quiet(repo, snapBefore) && textAt(repo, rel) === text && recordRows(repo) === null, r.out);
+    r = run(repo, root80, ['--force']);
+    check('#180 fresh run, trailing comma in ' + rel + ', with --force: that file is skipped byte for byte, said so, and the rest is set up', r.status === 0 && textAt(repo, rel) === text
+      && r.out.includes(rel + ': skipped (--force): the file is not valid JSON, so it is left exactly as it is') && exists(repo, '.claude/rules/toolkit.md')
+      && (rel === LOCAL ? jsonAt(repo, SHARED) !== null && recordRows(repo) === null : sameSet(allowAt(repo), SEED80)), r.out);
+    fs.rmSync(repo, { recursive: true, force: true });
+    repo = project80();
+    run(repo, root80);
+    commitAll(repo, 'seeded');
+    write(repo, rel, text);
+    snapBefore = fullSnapshot(repo);
+    r = run(repo, root80);
+    check('#180 plugin-mode re-run, trailing comma in ' + rel + ': pages with exit 3 and writes nothing', r.status === 3 && /already on the plugin/.test(r.out) && r.out.includes(pageLine) && quiet(repo, snapBefore), r.out);
+    r = run(repo, root80, ['--force']);
+    check('#180 plugin-mode re-run, trailing comma in ' + rel + ', with --force: the file stays byte for byte and no backup is made for it', r.status === 0 && textAt(repo, rel) === text && backupsIn(repo).length === 0, r.out);
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+  repo = cleanManifestInstall();
+  write(repo, LOCAL, COMMA_LOCAL);
+  commitAll(repo, 'a local settings file with a trailing comma');
+  snapBefore = fullSnapshot(repo);
+  r = run(repo, pluginRoot);
+  check('#180 a manifest migration that nothing else would page pages on a settings.local.json with a trailing comma, and writes nothing', r.status === 3 && /migration from copy-install/.test(r.out) && r.out.includes(PAGE_LOCAL) && quiet(repo, snapBefore), r.out);
+  r = run(repo, pluginRoot, ['--force']);
+  check('#180 with --force that migration completes and leaves the file byte for byte', r.status === 0 && /Done\./.test(r.out) && String(textAt(repo, LOCAL)) === COMMA_LOCAL && !exists(repo, 'VERSION'), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // A settings file of the wrong shape: permissions.allow that is not a list
+  // (a TypeError before the fix), and a settings.json that is not an object.
+  for (const [rel, text, reason] of [[LOCAL, JSON.stringify({ permissions: { allow: 'Bash(git add *)' } }, null, 2) + '\n', 'has a "permissions.allow" value that is not a list'],
+    [SHARED, '[]\n', 'is not a JSON object']]) {
+    repo = project80({ [rel]: text });
+    snapBefore = fullSnapshot(repo);
+    r = run(repo, root80);
+    check('#180 ' + rel + ' that ' + reason + ': pages with exit 3, says why, and writes nothing', r.status === 3 && r.out.includes('  - ' + rel + ' ' + reason + ': fix it by hand and re-run, or add --force') && quiet(repo, snapBefore), r.out);
+    r = run(repo, root80, ['--force']);
+    check('#180 ' + rel + ' that ' + reason + ', with --force: skipped byte for byte', r.status === 0 && textAt(repo, rel) === text && r.out.includes(rel + ': skipped (--force): the file ' + reason), r.out);
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+
+  // A settings.local.json saved with a byte order mark and CRLF line endings is
+  // valid JSON to its editor: merged, never paged or replaced, its layout kept.
+  // The byte order mark, built from its code so no invisible character sits in this file.
+  const BOM = String.fromCharCode(0xFEFF);
+  const BOM_CRLF = BOM + '{\r\n    "permissions": {\r\n        "allow": [\r\n            "Bash(make ours *)"\r\n        ]\r\n    }\r\n}\r\n';
+  repo = project80({ [LOCAL]: BOM_CRLF });
+  r = run(repo, root80);
+  {
+    const text = String(textAt(repo, LOCAL));
+    let rows = [];
+    try { rows = JSON.parse(text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text).permissions.allow; } catch (e) { rows = []; }
+    check('#180 a settings.local.json with a byte order mark and CRLF endings is merged: the owner row stays, the seed rows join it, and the mark, CRLF and 4 spaces are kept', r.status === 0
+      && text.charCodeAt(0) === 0xFEFF && !/[^\r]\n/.test(text) && text.startsWith(BOM + '{\r\n    "permissions": {\r\n        "allow": [\r\n') && rows.includes('Bash(make ours *)') && SEED80.every(x => rows.includes(x)), r.out + JSON.stringify(text.slice(0, 90)));
+    const h = require(SCRIPT);
+    const tabbed = BOM + '{\r\n\t"permissions": {\r\n\t\t"allow": []\r\n\t}\r\n}\r\n';
+    check('#180 jsonFormat and formatJson: tabs, CRLF and a byte order mark round-trip, and a file with no indented line (or a new one) gets two spaces', typeof h.jsonFormat === 'function' && typeof h.formatJson === 'function'
+      && h.formatJson(JSON.parse(tabbed.slice(1)), h.jsonFormat(tabbed)) === tabbed && JSON.stringify(h.jsonFormat('{"a":1}')) === JSON.stringify({ indent: '  ', eol: '\n', bom: '' }) && JSON.stringify(h.jsonFormat('')) === JSON.stringify({ indent: '  ', eol: '\n', bom: '' }));
+  }
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // The offered-rows record: created in the git directory on the first run,
+  // never in git status, and a seed row the owner deletes stays deleted across
+  // re-runs; a clone has no record, so it is offered the row again.
+  repo = project80();
+  r = run(repo, root80);
+  const rec = recordAt(repo);
+  check('#180 a fresh setup in a git repository writes the offered-rows record inside the git directory, listing every seed row, and says why', r.status === 0 && rec !== null && rec.startsWith(path.join(repo, '.git') + path.sep)
+    && sameSet(recordRows(repo) || [], SEED80) && r.out.includes('  Offered-rows record: none yet, so every missing toolkit row is added this once. The record (.git/tk-offered-rows.json, inside the git directory, never committed)'), r.out + rec);
+  check('#180 the first run names every row it adds', r.out.includes('    added: ' + SEED80.map(x => JSON.stringify(x)).join(', ') + '\n'), r.out);
+  commitAll(repo, 'seeded');
+  {
+    const st = execFileSync('git', ['status', '--porcelain', '--ignored', '--untracked-files=all'], { cwd: repo, encoding: 'utf8' });
+    check('#180 the record never shows in git status --porcelain --ignored, and is no file of the working tree', st.indexOf('tk-offered-rows') === -1 && !fileList(repo).some(f => f.includes('tk-offered-rows')) && exists(repo, '.git/tk-offered-rows.json'), st);
+  }
+  const DELETED = 'Bash(npm install)';
+  writeAllow(repo, SEED80.filter(x => x !== DELETED));
+  git(repo, ['add', '-f', LOCAL]);
+  commitAll(repo, 'the owner deletes a toolkit row and commits the settings file');
+  for (const round of [1, 2]) {
+    const snap0 = fullSnapshot(repo);
+    r = run(repo, root80);
+    check('#180 re-run ' + round + ': the seed row the owner deleted is not added back, nothing changes, and the report names it as not added again', r.status === 0 && !allowAt(repo).includes(DELETED) && quiet(repo, snap0)
+      && /0 entries added/.test(r.out) && r.out.includes('    not added again (1), because this working copy was offered it before') && r.out.includes(': ' + JSON.stringify(DELETED) + '\n') && !/Undo:/.test(r.out), r.out);
+  }
+  {
+    const clone = path.join(tmp80, 'clone-of-' + path.basename(repo));
+    git(tmp80, ['clone', '-q', repo, clone]);
+    check('#180 clone fixture: the clone carries the settings file without the deleted row, and no offered-rows record', exists(clone, LOCAL) && !allowAt(clone).includes(DELETED) && recordRows(clone) === null && exists(clone, '.claude/.toolkit-state.json'));
+    r = run(clone, root80);
+    check('#180 in a fresh clone setup offers the deleted row again, names it, and writes the clone\'s own record', r.status === 0 && /already on the plugin/.test(r.out) && allowAt(clone).includes(DELETED)
+      && r.out.includes('    added: ' + JSON.stringify(DELETED) + '\n') && r.out.includes('Offered-rows record: none yet') && sameSet(recordRows(clone) || [], SEED80), r.out);
+    fs.rmSync(clone, { recursive: true, force: true });
+  }
+  r = run(repo, root80);
+  check('#180 after the clone, the original working copy still leaves the row out', r.status === 0 && !allowAt(repo).includes(DELETED), r.out);
+  // A missing settings.local.json holds no decision of the owner's: setup
+  // writes it again with every seed row, the recorded ones included.
+  fs.rmSync(path.join(repo, LOCAL));
+  r = run(repo, root80);
+  check('#180 a deleted settings.local.json is written again with every seed row, although the record lists them all', r.status === 0 && sameSet(allowAt(repo), SEED80) && /settings\.local\.json: create \(5 entries added/.test(r.out), r.out);
+  // An unreadable record counts as none: the deleted row is offered once more and the record written whole.
+  writeAllow(repo, SEED80.filter(x => x !== DELETED));
+  if (rec !== null) fs.writeFileSync(rec, '{ "version": 1, "offered": [\n');
+  r = run(repo, root80);
+  check('#180 an unreadable record counts as none: the missing row is added once more and named, and the record is written again whole', r.status === 0 && allowAt(repo).includes(DELETED)
+    && r.out.includes('Offered-rows record: .git/tk-offered-rows.json is unreadable and counts as none') && sameSet(recordRows(repo) || [], SEED80), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // One rule, two spellings: Bash(git status:*) in the file is Bash(git status *).
+  // A seed row the owner put in deny is present too.
+  repo = project80({ [LOCAL]: JSON.stringify({ permissions: { allow: ['Bash(git status:*)', 'Bash(git add *)'], deny: ['Bash(gh auth status *)'] } }, null, 2) + '\n' });
+  r = run(repo, root80);
+  {
+    const rows = allowAt(repo);
+    check('#180 with Bash(git status:*) in the file, Bash(git status *) is not added', r.status === 0 && rows.includes('Bash(git status:*)') && !rows.includes('Bash(git status *)'), r.out + JSON.stringify(rows));
+    check('#180 a seed row the owner put in deny is not added to allow', r.status === 0 && !rows.includes('Bash(gh auth status *)'), JSON.stringify(rows));
+    check('#180 only the rows really missing are added, and exactly those are named', r.out.includes('    added: ' + ['Bash(npm install)', 'Skill(tk:explore:*)'].map(x => JSON.stringify(x)).join(', ') + '\n') && /2 entries added/.test(r.out), r.out);
+    check('#180 the record lists the present rows in the space spelling', ['Bash(git status *)', 'Bash(gh auth status *)', 'Bash(git add *)'].every(x => (recordRows(repo) || []).includes(x)), JSON.stringify(recordRows(repo)));
+  }
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // Outside a git repository nothing is recorded: a deleted seed row comes back,
+  // named, on every run, and the report says why.
+  repo = project80({}, true);
+  run(repo, root80);
+  for (const round of [1, 2]) {
+    writeAllow(repo, SEED80.filter(x => x !== DELETED));
+    r = run(repo, root80);
+    check('#180 outside git, run ' + round + ': the deleted row is added again and named, with the reason, and no record exists', r.status === 0 && allowAt(repo).includes(DELETED) && r.out.includes('    added: ' + JSON.stringify(DELETED) + '\n')
+      && r.out.includes('Not a git repository, so nothing records which toolkit rows were offered') && !exists(repo, '.git'), r.out);
+  }
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // A dry run writes no record.
+  repo = project80();
+  r = run(repo, root80, ['--dry-run']);
+  check('#180 a dry run writes no offered-rows record', r.status === 0 && recordRows(repo) === null && recordAt(repo) !== null && !fs.existsSync(recordAt(repo)), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // The record helpers directly (the block Step 7 copies into upgrade-audit.js).
+  {
+    const h = require(SCRIPT);
+    const has = ['permissionRowKey', 'offeredRowsPath', 'readOfferedRows', 'writeOfferedRows'].every(k => typeof h[k] === 'function');
+    check('#180 the offered-rows block exports permissionRowKey, offeredRowsPath, readOfferedRows and writeOfferedRows', has);
+    const twelve = Array.from({ length: 12 }, (_, i) => 'Bash(tool' + i + ' *)');
+    check('#180 namedRows: each row JSON-escaped (a quote or a line break stays inside its string), at most ten, then "and N more"', typeof h.namedRows === 'function'
+      && h.namedRows(['Bash(echo "a\nb")']) === '"Bash(echo \\"a\\nb\\")"' && h.namedRows(twelve) === twelve.slice(0, 10).map(x => JSON.stringify(x)).join(', ') + ' and 2 more' && h.namedRows(twelve.slice(0, 10)).indexOf('more') === -1);
+    if (has) {
+      check('#180 permissionRowKey: a Bash or PowerShell rule ending in :* takes the space spelling; every other row compares as written', h.permissionRowKey('Bash(git status:*)') === 'Bash(git status *)'
+        && h.permissionRowKey('Bash(git status *)') === 'Bash(git status *)' && h.permissionRowKey('PowerShell(Get-ChildItem:*)') === 'PowerShell(Get-ChildItem *)'
+        && h.permissionRowKey('Skill(tk:explore:*)') === 'Skill(tk:explore:*)' && h.permissionRowKey('WebFetch(domain:github.com)') === 'WebFetch(domain:github.com)'
+        && h.permissionRowKey('Bash(ls:*) ') === 'Bash(ls:*) ' && h.permissionRowKey('bash(ls:*)') === 'bash(ls:*)' && h.permissionRowKey('Bash(ls :*)') === 'Bash(ls  *)' && h.permissionRowKey(7) === null);
+      const d = fs.mkdtempSync(path.join(tmp80, 'record-'));
+      const f = path.join(d, 'tk-offered-rows.json');
+      const absent = h.readOfferedRows(f);
+      const wrote = h.writeOfferedRows(f, ['Skill(tk:review)', 'Bash(git add *)', 'Bash(git add *)']);
+      check('#180 readOfferedRows reads a missing record as absent; writeOfferedRows writes version 1 with the keys sorted, each once, leaving no temporary file', absent.status === 'absent' && absent.keys.size === 0 && wrote === true
+        && read(d, 'tk-offered-rows.json') === JSON.stringify({ version: 1, offered: ['Bash(git add *)', 'Skill(tk:review)'] }, null, 2) + '\n' && sameSet(fs.readdirSync(d), ['tk-offered-rows.json']));
+      fs.writeFileSync(f, JSON.stringify({ version: 1, offered: ['Bash(git status:*)', 'Skill(tk:review)'] }));
+      const ok = h.readOfferedRows(f);
+      check('#180 readOfferedRows returns the keys, a colon-star row in the space spelling', ok.status === 'ok' && sameSet([...ok.keys], ['Bash(git status *)', 'Skill(tk:review)']), JSON.stringify([...ok.keys]));
+      const bad = [['not JSON', '{'], ['a list', '[]'], ['another version', '{"version":2,"offered":[]}'], ['a row that is not a string', '{"version":1,"offered":[1]}'], ['no offered list', '{"version":1}']]
+        .filter(([, text]) => { fs.writeFileSync(f, text); const x = h.readOfferedRows(f); return x.status !== 'unreadable' || x.keys.size !== 0; }).map(([label]) => label);
+      fs.rmSync(f);
+      fs.mkdirSync(f);
+      const dirRead = h.readOfferedRows(f);
+      check('#180 readOfferedRows reads every other shape, and a record it cannot read, as unreadable with no keys', bad.length === 0 && dirRead.status === 'unreadable', bad.join(', ') + ' ' + dirRead.status);
+      check('#180 writeOfferedRows returns false when the record cannot be written', h.writeOfferedRows(path.join(d, 'no-such-folder', 'tk-offered-rows.json'), ['Bash(git add *)']) === false);
+      const nogit = fs.mkdtempSync(path.join(tmp80, 'nogit-'));
+      const g = fs.mkdtempSync(path.join(tmp80, 'git-'));
+      initRepo(g);
+      check('#180 offeredRowsPath: in a repository, the path git names inside its git directory; outside one, null', h.offeredRowsPath(g) === path.join(g, '.git', 'tk-offered-rows.json') && h.offeredRowsPath(nogit) === null, String(h.offeredRowsPath(g)));
+    }
+  }
+
+  // The manifest-less sweep of root helper scripts goes by content: a
+  // scripts/browse.js of the project's own is kept, named, with its two rows,
+  // while a toolkit copy saved with CRLF endings is still swept.
+  repo = makeEarlyInstall();
+  const OWN_BROWSE = '// our own browser driver\nmodule.exports = {};\n';
+  write(repo, 'scripts/browse.js', OWN_BROWSE);
+  write(repo, 'scripts/ask-gemini.js', HELPER_TEXT('scripts/ask-gemini.js').replace(/\n/g, '\r\n'));
+  commitAll(repo, 'our own browse.js; a CRLF copy of the toolkit ask-gemini.js');
+  snapBefore = fullSnapshot(repo);
+  const KEPT_LINE = '  Kept as your own: scripts/browse.js in the root scripts/ folder carries the name of a helper script an early installer copied there, but its content matches no copy the toolkit shipped, so it stays untouched, and so do its permission rows.';
+  r = run(repo, pluginRoot);
+  check('#180 the page lists only the root helpers whose content matches a shipped copy for removal, and names scripts/browse.js as the project\'s own', r.status === 3
+    && /each matching a copy the toolkit shipped \(every other file there is yours, untouched\): scripts\/ask-gpt\.js, scripts\/ask-gemini\.js\n/.test(r.out) && r.out.includes(KEPT_LINE + '\n') && quiet(repo, snapBefore), r.out);
+  r = run(repo, pluginRoot, ['--force']);
+  {
+    const mig = jsonAt(repo, '.claude/.toolkit-migration.json') || { removed: [] };
+    const rows = allowAt(repo);
+    check('#180 --force keeps that scripts/browse.js byte for byte, off the record\'s removed list, and sweeps the CRLF copy whose CR-stripped hash is listed', r.status === 0 && textAt(repo, 'scripts/browse.js') === OWN_BROWSE
+      && !exists(repo, 'scripts/ask-gemini.js') && !exists(repo, 'scripts/ask-gpt.js') && Array.isArray(mig.removed) && !mig.removed.includes('scripts/browse.js') && mig.removed.includes('scripts/ask-gemini.js') && r.out.includes(KEPT_LINE + '\n'), r.out);
+    check('#180 the kept script\'s permission rows stay; the swept helpers\' rows go', rows.includes('Bash(node scripts/browse.js *)') && rows.includes('Bash(echo * | node scripts/browse.js *)')
+      && !rows.includes('Bash(node scripts/ask-gpt.js *)') && !rows.includes('Bash(node scripts/ask-gemini.js:*)'), JSON.stringify(rows));
+  }
+  undoRestores('#180 early install beside a scripts/browse.js of its own', repo, snapBefore, r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+  // With no historicalHelperHashes shipped, no root helper can be proved the
+  // toolkit's, so none is swept.
+  const rootNoHashes = path.join(tmp80, 'plugin-no-hashes');
+  fs.cpSync(pluginRoot, rootNoHashes, { recursive: true });
+  write(rootNoHashes, 'managed-paths.json', JSON.stringify({ version: '7.0.0', paths: MANAGED.concat(ROOT_TOOLKIT_SCRIPTS) }));
+  repo = makeEarlyInstall();
+  r = run(repo, rootNoHashes, ['--force']);
+  check('#180 a managed-paths.json without historicalHelperHashes sweeps no root helper script: each stays, named as the project\'s own', r.status === 0 && ROOT_TOOLKIT_SCRIPTS.every(rel => exists(repo, rel))
+    && r.out.includes('  Kept as your own: scripts/ask-gpt.js, scripts/ask-gemini.js, scripts/browse.js in the root scripts/ folder carry the names of helper scripts an early installer copied there, but their content matches no copy the toolkit shipped'), r.out);
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  fs.rmSync(tmp80, { recursive: true, force: true });
 }
 
 console.log('\n5. a project that is not a git repository');
