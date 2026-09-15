@@ -65,7 +65,7 @@ Read the open codes from each bucket's `open_codes` array in the rollup (everyth
 
 Group them by **what went wrong**, not by which file or feature was involved. Two corrections about different files are the same category when the underlying gap is the same; two corrections about the same file are different categories when they are not.
 
-Write your assignments to a temp file as a flat object of open code to category name, then hand it to the helper:
+Write your assignments as `axial-map.json` in a fresh folder from `mktemp -d /tmp/axial-map.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`, as a flat object of open code to category name, then hand that file to the helper:
 
 ```json
 {
@@ -75,10 +75,10 @@ Write your assignments to a temp file as a flat object of open code to category 
 ```
 
 ```bash
-node .claude/scripts/correction-ledger.js --set-axial --data /tmp/axial-map-<run>.json
+node .claude/scripts/correction-ledger.js --set-axial --data <folder>/axial-map.json
 ```
 
-Use a name unique to this run (a timestamp is enough): the script deletes the file after merging, and two sessions sharing one name would merge or lose each other's assignments.
+`<folder>` is the path `mktemp` printed. The script deletes the file after merging, and the fresh folder keeps two sessions from merging or losing each other's assignments.
 
 **Write only the assignments you are making now. Do not restate the existing ones.** The helper merges into the stored map and reports how many existed, how many arrived, and the new total. Two reasons it goes through the helper rather than a direct file write: merging in code means a run that covers only the newest open codes cannot silently drop every earlier assignment, and the stored map lives outside the project where a direct write would be refused on a default install.
 

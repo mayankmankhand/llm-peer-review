@@ -7,6 +7,31 @@ You are the Lead Reviewer. Your job is to get a second opinion from Gemini on th
 
 <procedure>
 
+## Step 0: Initialize Session
+
+Before asking anything, generate this run's session ID and remember it for the rest of this command. Run the script's own subcommand, as a call of its own (never inside `$(...)`):
+
+```bash
+node .claude/scripts/ask-gemini.js session
+```
+
+It prints one line (e.g., `1747700000-29481`) and reads no key file and makes no network call. It runs before Step 1's question because a plugin command's script permission lasts only until the user's next message, so in default permission mode a call made after their answer stops to ask (#181).
+
+Record the output. Echo it back to the user so it's anchored in the conversation transcript:
+
+> Session ID for this debate: `1747700000-29481`. All temp files for this run will use this suffix.
+
+**You will use this exact session ID in every `/tmp/ask-gemini-*-<session-id>.md` path throughout this entire command** - Step 2's context file, Step 3's debate file, every Step 4 round, AND Step 5's summary call. Do NOT regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
+
+**Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
+
+1. Run `ls -t /tmp/ask-gemini-debate-*.md` to list debate files (newest first).
+2. If only one file exists, read its first line - it contains `<!-- Session: <session-id> -->` and gives you the ID.
+3. If multiple files exist (another parallel `/ask-gemini` tab is running), do NOT just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
+4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gemini-context-<session-id>.md` and `/tmp/ask-gemini-debate-<session-id>.md`. Reconstruct both paths and continue.
+
+**Why this matters:** two parallel Cursor or Claude Code tabs running `/ask-gemini` would otherwise clobber each other's `/tmp/ask-gemini-context.md` and `/tmp/ask-gemini-debate.md`. The session ID gives each run its own isolated pair of files.
+
 ## Step 1: Ask What to Review
 
 Ask the user:
@@ -20,29 +45,6 @@ Ask the user:
 > 5. **Other** - Describe what you want reviewed
 
 Wait for their response before proceeding.
-
-## Step 1.5: Initialize Session
-
-Before gathering any content, generate a session ID and remember it for the rest of this command. Run:
-
-```bash
-echo "$(date +%s)-$RANDOM"
-```
-
-Record the output (e.g., `1747700000-29481`). Echo it back to the user so it's anchored in the conversation transcript:
-
-> Session ID for this debate: `1747700000-29481`. All temp files for this run will use this suffix.
-
-**You will use this exact session ID in every `/tmp/ask-gemini-*-<session-id>.md` path throughout this entire command** - Step 2's context file, Step 3's debate file, every Step 4 round, AND Step 5's summary call. Do NOT regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
-
-**Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
-
-1. Run `ls -t /tmp/ask-gemini-debate-*.md` to list debate files (newest first).
-2. If only one file exists, read its first line - it contains `<!-- Session: <session-id> -->` and gives you the ID.
-3. If multiple files exist (another parallel `/ask-gemini` tab is running), do NOT just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 1.5, or read the first line of each candidate to find the match.
-4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gemini-context-<session-id>.md` and `/tmp/ask-gemini-debate-<session-id>.md`. Reconstruct both paths and continue.
-
-**Why this matters:** two parallel Cursor or Claude Code tabs running `/ask-gemini` would otherwise clobber each other's `/tmp/ask-gemini-context.md` and `/tmp/ask-gemini-debate.md`. The session ID gives each run its own isolated pair of files.
 
 ## Step 2: Gather Context
 

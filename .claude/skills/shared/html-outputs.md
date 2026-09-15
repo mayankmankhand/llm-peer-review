@@ -48,7 +48,7 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 
 ## Playground Export-Loop Rule
 
-The `/playground` skill produces throwaway interactive HTML at `/tmp/playground-{timestamp}.html`. Hard rules:
+The `/playground` skill produces throwaway interactive HTML in a fresh folder under `/tmp` (prefix `playground`, per "Temporary folders" below). Hard rules:
 
 1. **HTML never reads back into the toolkit.** Output is text the user pastes manually into chat. No file modifications to any prompt file, skill file, or rules file.
 2. Every playground HTML ends with a **"copy as markdown"** or **"copy as prompt"** button that emits text the user can paste back as a new chat message.
@@ -61,7 +61,7 @@ The `/explore` design step dispatches the playground's rendered-prototypes varia
 
 | Where HTML lands | When |
 |---|---|
-| `/tmp/playground-*.html` | Playground throwaways (interactive, disposable) |
+| `/tmp/playground.*/` | Playground throwaways (interactive, disposable), one fresh folder per page |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
 | `artifacts/html/` | Cycle-bound artifacts (debate views, explore option comparisons, audit reports) - timestamped. Also the three `--stable` views, not timestamped: the standing review page `review.html`, the standing cycle summary `cycle.html`, and `/audit-html` static views. Gitignored. |
 | `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. It is the record; each published local file also carries its URL on line 1 as `<!-- hosted: <url> -->`, a derived copy that `--index-sync` regenerates from the newest record per file. Gitignored with the rest of `artifacts/html/`. |
@@ -81,6 +81,14 @@ By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-
 The four identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run (issue #129): plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run; issue #161), the standing cycle summary (`--shell document --name cycle --stable` -> `artifacts/html/cycle.html`, replaced on every `/document` run; issue #163 - note the shell and the name differ here, and the name is the index key), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
 
 **Exception** (still hand-rendered, NOT via the helper): `/playground` throwaways (`/tmp/`, interactive).
+
+## Temporary folders
+
+Every toolkit step that needs a scratch file (a render payload, a browser action list, an issue or PR body, a media prompt, a playground page) makes a fresh folder for it the same way, in three separate moves, so a session in default permission mode never stops to ask (issue #181). Call sites name only their folder prefix and point here.
+
+1. **Make the folder with a call of its own.** Run `mktemp -d /tmp/<prefix>.XXXXXX` as one Bash call: never inside `$(...)`, never joined to another command with `&&`, `;` or `|`. It prints the path of a new, empty folder that no other run shares, so two projects or sessions working at once never overwrite each other's files. The prefix says what the folder is for (`plan-render`, `review-render`, `host-text`).
+2. **Write files with the file-writing tool.** Put each file into that folder with the Write tool, never `echo`, a heredoc, or a `>` redirect: default permission mode asks before any command that redirects output, even into `/tmp`.
+3. **Pass the printed path as literal words.** Type the folder path `mktemp` printed into each later command in full (`--data /tmp/plan-render.Ab12Cd/data.json`). A shell variable does not survive from one Bash call to the next, and a command substitution asks for approval even when the command inside it is allowed.
 
 ## Viewing the Artifact
 
@@ -118,7 +126,7 @@ Use the toolkit's opener script, which tries each platform launcher in order wit
 bash .claude/scripts/open-artifact.sh "<file>"
 ```
 
-Pass the absolute path `render-html.js` printed (the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (PowerShell `Start-Process`, located on PATH or by full path, then `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve; on WSL the headless message also prints the Windows-side (UNC) path so it can be pasted into a Windows browser.
+Pass the absolute path `render-html.js` printed, typed out as literal words (see "Temporary folders"; the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (PowerShell `Start-Process`, located on PATH or by full path, then `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve; on WSL the headless message also prints the Windows-side (UNC) path so it can be pasted into a Windows browser.
 
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.

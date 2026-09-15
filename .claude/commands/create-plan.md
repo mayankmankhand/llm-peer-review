@@ -203,7 +203,7 @@ Produce a JSON payload matching the schema documented in the header comment of `
 - Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
 - Each step takes an optional `status` of `todo` | `doing` | `done`. At creation every step is `todo`, so it may be omitted entirely; `/execute` fills it in as it re-renders. Markdown stays the source of truth.
 
-Write the payload to a per-run temp file: run `mktemp -d /tmp/plan-render.XXXXXX`, which prints a new, empty folder (so two projects rendering at once never share a payload), and write the JSON to `data.json` inside it. That folder is `<render-dir>` below.
+Write the payload as `data.json` in a fresh folder from `mktemp -d /tmp/plan-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md` (two projects rendering at once never share a payload). That folder is `<render-dir>` below.
 
 ### Run the Helper
 
