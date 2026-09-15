@@ -206,6 +206,10 @@ const SITE_OVERRIDES = {
     // Plugin package files sit at the plugin root, not in scripts/ (npm audit there fails with ENOLOCK).
     { phrase: '`--prefix .claude/scripts`', replace: '`--prefix "${CLAUDE_PLUGIN_ROOT}"`' },
   ],
+  'commands/explore.md': [
+    // The profile template: on the plugin, the file setup seeds a project with, with the /tk: names (#183).
+    { phrase: '`.claude/skills/shared/design-profile-template.md` (the template a copy-install ships)', replace: '`${CLAUDE_PLUGIN_ROOT}/seed/DESIGN-PROFILE.md` (the same file setup writes into a project)' },
+  ],
   'skills/setup/SKILL.md': [
     // How setup recognizes a copy-install with no manifest: the project's old review.md beside VERSION (#180).
     { phrase: '`VERSION` beside `.claude/commands/review.md`', keep: true },

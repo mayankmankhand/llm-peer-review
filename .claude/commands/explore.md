@@ -131,7 +131,7 @@ Once the user's answers start pointing toward a direction (usually round 2, some
 
 Same trigger as before: the feature involves a user interface (a page, dashboard, form, component, screen, anything a human looks at). Announce the step by name and its load level in one line, so it never folds into the other questions: "Design exploration: <new | improve | none>." Every mechanic lives in the `design-rules` skill: load it through the Skill tool (`Skill(design-rules)`) when this step fires and cite its sections rather than restating them.
 
-1. **Read `DESIGN-PROFILE.md`.** Absent means the design system is unknown; offer to create the file from `.claude/skills/shared/design-profile-template.md` (the installer's own seed). While the profile says unknown, run the detection signals, confirm once, and record the answer in the profile (the three-state rule).
+1. **Read `DESIGN-PROFILE.md`.** Absent means the design system is unknown; offer to create the file from `.claude/skills/shared/design-profile-template.md` (the template a copy-install ships). While the profile says unknown, run the detection signals, confirm once, and record the answer in the profile (the three-state rule).
 2. **Set the load level** with the countable test in the load dial, confirm it in one line, and honor "treat as new". Load level none ends the step here, silently.
 3. **Improve:** name the surface (file or route) and go to step 7.
 4. **New:** run the idea list and capture the user's reactions in the profile's Taste notes (Technique 2), then generate three seeded directions, one `node .claude/scripts/gen-media.js --kind seed` call each (Technique 1). Accept any format the user offers; when they say "you decide", propose one direction and get a soft confirmation.

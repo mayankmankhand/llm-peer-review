@@ -552,6 +552,21 @@ check('live: every command or skill that runs a host-cli.md create row carries b
 check('live: every host row is a seed row too, so the seed and the commands grant the same create calls', Object.keys(lib.HOST_ROWS || {}).length > 0 && Object.values(lib.HOST_ROWS).flat().every(row => seedAllowRows.includes(row)), JSON.stringify(lib.HOST_ROWS));
 // The review scope (#182): review.md runs `session-init.js --scope`, so it must allow the call.
 check('live: commands/review.md allows node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *', fm(read(live, 'commands/review.md')).includes('  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"'), fm(read(live, 'commands/review.md')));
+// The update steps (#183): the shipped index.md and toolkit-reference.md name every
+// command of the update message the built scripts print, so the prose and the notice agree.
+const liveSteps = require(path.join(live, 'scripts', 'session-start.js')).PLUGIN_UPDATE_STEPS;
+// index.md's edge case names the user-scope pair; the reference also names the project-scope form.
+const stepCommands = [...String(liveSteps).matchAll(/`(claude [^`]+)`/g)].map(m => m[1]);
+for (const [rel, wanted] of [['commands/index.md', stepCommands.filter(c => !c.includes('--scope'))], ['skills/shared/toolkit-reference.md', stepCommands]]) {
+  const missingSteps = wanted.filter(c => !read(live, rel).includes(c));
+  check('live: ' + rel + ' carries the update commands the scripts print', stepCommands.length === 3 && wanted.length > 1 && missingSteps.length === 0, stepCommands.length + ' commands; missing: ' + missingSteps.join('; '));
+}
+// Default-mode grants (#181): the debate commands allow their session call, and /index allows --finalize.
+for (const [rel, script] of [['commands/ask-gpt.md', 'ask-gpt.js'], ['commands/ask-gemini.md', 'ask-gemini.js'], ['commands/index.md', 'generate-index.js']]) {
+  const row = '  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/' + script + ' *)"';
+  const call = 'scripts/' + script + (rel === 'commands/index.md' ? ' --finalize' : ' session');
+  check('live: ' + rel + ' runs ' + call + ' and allows it', fm(read(live, rel)).includes(row) && read(live, rel).includes(call), fm(read(live, rel)));
+}
 // Stamps (#183): a scratch build made with --version is stamped with it in exactly the
 // three stamped files, and no emitted file keeps a stamp naming another version.
 const liveStamped = tmpDir('build-plugin-stamped-');
