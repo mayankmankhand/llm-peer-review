@@ -253,3 +253,11 @@
 - **Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.**
 - **A plugin CLI command run inside a project also edits that project's settings file.**
 - **A rewrite keyed on names must be tested on file names that contain those names.**
+
+## Issue 184 (7.3.0, the regression audit)
+
+- **A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.**
+- **Prove a harness with the thing it will be used for, not with a trivial prompt.**
+- **Generate a long report from parts with one script; never append into a file that is also its own source.**
+- **A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.**
+- **Read the skeptic's split lines: a refuted row often carries the real defect in a narrower claim.**
