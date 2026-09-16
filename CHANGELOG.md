@@ -22,6 +22,11 @@ If you last installed v4.3.3, twenty-four releases have shipped on top of it. v4
 
 ### Fixed
 
+- **A 6.x copy-install re-running setup no longer keeps the old HTML rules file** (#184, audit row R8). `.claude/rules/html-outputs.md` moved to `.claude/skills/shared/` at 7.0.0, but neither installer treated the old path as a rename, so the stale copy stayed, still auto-loaded and listed as custom. Both installers now back it up and remove it like any other renamed file; the installer suite plants one and checks.
+- **The installers' merge-failure message names the right file** (#184, R7). When the permissions merge fails, the message sent you to a table in `.claude/rules/toolkit.md`, which has held no table since 7.0.0; it now names `.claude/skills/shared/toolkit-reference.md`.
+- **Shared scripts stopped naming plugin-only commands** (#184, R5). `ask-gpt.js`, `ask-gemini.js`, `browse.js` and `correction-ledger.js` ship in both the plugin and the copy-install, and their messages named `/tk:package-review`, `/tk:review-browser` and `/tk:document`, commands a copy-install does not have. The messages now describe the step without a command form.
+- **Docs caught up with the 7.0.0 layout** (#184, R9, R10, R11, R21, R22). README no longer lists `.claude/rules/html-outputs.md` as copied or updated; `docs/CONVENTIONS.md` says that C-9, C-10 and C-11 run on every upgrade alongside C-7; the Upgrading steps in README and AGENT-SETUP say the `current` link moves only when a session starts on the new release; AGENT-SETUP's troubleshooting points at Step 1c; CONTRIBUTING's shared-files list names every injected fragment.
+
 ### Added
 
 - **`scripts/setup/headless-session.sh`** (maintainer-only): runs a headless session against a plugin build under a scratch home, so a product-level test never touches the real `~/.claude`; `--baseline` and `--verify` prove it.
