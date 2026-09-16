@@ -225,6 +225,8 @@ const SITE_OVERRIDES = {
   'seed/rules-toolkit.md': [
     // Setup removes a project's rows naming its old copy-install scripts; the seeded rules file never carries ${CLAUDE_PLUGIN_ROOT}.
     { phrase: 'rows that point at a `.claude/scripts/` file the project no longer has', keep: true },
+    // The seed names the copy-install's manual location (#184 R6); a project path, kept as written.
+    { phrase: "the project's own copy under `.claude/skills/shared/`", keep: true },
   ],
 };
 
