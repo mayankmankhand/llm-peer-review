@@ -118,7 +118,7 @@ A session that cannot publish renders normally and keeps its editor links, which
 
 ### Opening it locally (the fallback)
 
-Handing the file to the browser is not an outward-facing send: the file stays on this machine, and the browser is simply a different application opening it. This branch never asks the user for permission. If Claude Code itself asks permission to run `open-artifact.sh`, that is a `settings.local.json` allow-list matter (setup seeds the entry), not something this rule can grant or withhold.
+Handing the file to the browser is not an outward-facing send: the file stays on this machine, and the browser is simply a different application opening it. This branch never asks the user for permission. If Claude Code itself asks permission to run `open-artifact.sh`, that is a permission matter, not something this rule can grant or withhold: on a copy-install, setup seeds the row into `settings.local.json`; on the plugin, each command that opens an artifact carries the grant in its `allowed-tools`, which lasts until the user's next message, so a prompt after an answered question is expected and one approval clears it.
 
 Use the toolkit's opener script, which tries each platform launcher in order with real fallback and only fails when the environment is genuinely headless:
 

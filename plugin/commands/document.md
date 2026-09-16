@@ -163,13 +163,13 @@ Keep this short. A list they can scan and correct, not a report.
 
 ### Append what they accepted
 
-Write the accepted rows to a temp JSON array under a name unique to this session, then append them. Two parallel sessions must never share the file: the script deletes it after a successful `--add`, so a shared name lets one session eat the other's rows (holistic review, R21).
+Write the accepted rows as `rows.json` in a fresh folder from `mktemp -d /tmp/correction-rows.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), then append them. Two parallel sessions must never share the file: the script deletes it after a successful `--add`, so a shared name lets one session eat the other's rows (holistic review, R21).
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --add --data /tmp/correction-rows-<session>.json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --add --data <folder>/rows.json
 ```
 
-`<session>` is the `session` value the `--candidates` output carried for this cycle; any token unique to this session works.
+`<folder>` is the path `mktemp` printed, typed as literal words.
 
 The script derives `repo`, `repo_path`, and `kind` itself, so those cannot be got wrong
 from here, and it hard-truncates the private fields. It accepts the `at` you pass, but

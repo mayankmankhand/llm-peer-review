@@ -2,7 +2,7 @@
 
 <!-- Toolkit version: 7.2.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
-The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, versions and updates, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here.
+The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, versions and updates, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here. The copy the plugin ships writes every toolkit path as `${CLAUDE_PLUGIN_ROOT}/...`: that variable is the plugin's own folder, the one the stable path above links to, so a plugin command resolves it and a reader replaces it with that path; a copy-install's manual names the project's own files instead.
 
 ## How We Work Together
 
@@ -203,7 +203,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 - After commits you want to keep (backup)
 - When you're done for the day
 - Before asking for feedback
-- In the auto loop, pushes happen automatically after the pre-push tripwire (M11): `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js <remote> <branch-or-tag>` scans every commit that destination does not have yet for secrets, never-push files, and settings changes, and the push then goes to exactly that destination. A hit blocks the push and pages you; if the script is absent, M11's prose fallback runs instead. A push you type yourself in a terminal is not checked.
+- In the auto loop, pushes happen automatically after the pre-push tripwire (M11): `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js <remote> <branch-or-tag>` scans every commit that destination does not have yet for secrets, never-push files, and settings changes, and the push then goes to exactly that destination. A hit blocks the push and pages you; if the script is absent, M11's prose fallback runs instead. A push you type yourself in a terminal is not checked. One pattern has a known limit: the netrc-record check skips markdown files, where sign-in documentation lives, so a real record pasted into a `.md` file is not caught (a file named `.netrc` or `_netrc` still is).
 
 ### Commit Messages
 - Start with a verb: "Add", "Fix", "Update", "Remove", "Refactor"

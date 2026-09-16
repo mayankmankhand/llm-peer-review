@@ -37,7 +37,7 @@ Also flag, as a smell that needs context (not a hard claim): **missing authoriza
 
 A real finding traces untrusted input from where it **enters** (the source) to where it **does damage** (the sink), with no safe transformation in between (parameterization, encoding, allowlist validation, canonicalization). A pattern match is not a finding.
 
-**Every security finding needs an exploit sentence:** a concrete, one-line "an attacker could ..." that walks input from source to sink. If you cannot write that sentence - because the input is a hardcoded constant, an internal value, or already sanitized upstream - the finding is not real. Drop it. This is the single biggest false-positive killer, and it pairs with the receipt rule in the output template (point at the line; prove the path).
+**Every security finding needs an exploit sentence:** a concrete, one-line "an attacker could ..." that walks input from source to sink. If you cannot write that sentence - because the input is a hardcoded constant, an internal value, or already sanitized upstream - the finding is not real. Drop it. This is the single biggest false-positive killer, and it pairs with the receipt rule in `finding-contract.md` (point at the line; prove the path).
 
 Recognize when something is already safe: a parameterized query, framework auto-escaping (Django, Rails, React outside `dangerouslySetInnerHTML`), or a documented internal sanitizer means do not re-flag it.
 
