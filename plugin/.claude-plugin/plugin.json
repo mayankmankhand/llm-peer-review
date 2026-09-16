@@ -1,7 +1,7 @@
 {
   "name": "tk",
   "description": "LLM Peer Review toolkit: explore, plan, execute, review, document, with the review skills and their finder agents. Generated from the toolkit repository by scripts/build-plugin.js; never edit these files by hand.",
-  "version": "7.1.0",
+  "version": "7.2.0",
   "author": {
     "name": "Mayank Mankhand"
   }
