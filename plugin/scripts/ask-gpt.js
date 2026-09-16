@@ -118,7 +118,7 @@ const ERR = {
   MISSING_ARG: (arg) => `Missing required argument: ${arg}`,
   FILE_NOT_FOUND: (f) => `File not found: ${f}`,
   FILE_TOO_LARGE: (f, sizeMB) =>
-    `File is too large (${sizeMB} MB). Maximum size is 500KB. Try a smaller file or use /tk:package-review to select specific files.`,
+    `File is too large (${sizeMB} MB). Maximum size is 500KB. Try a smaller file, or use the package-review command to select specific files.`,
   API_ERROR: (msg) => `OpenAI API error: ${msg}`,
   UNKNOWN_CMD: (cmd) => `Unknown command: ${cmd}. Use session, review, respond, or summary.`,
 };

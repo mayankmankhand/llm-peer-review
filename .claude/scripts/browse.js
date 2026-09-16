@@ -889,7 +889,7 @@ function printHelp() {
 Browse - Headless Browser QA Script
 
 Launches a headless browser, runs a sequence of actions, and returns
-structured JSON results. Designed for Claude to use during /tk:review-browser.
+structured JSON results. Designed for Claude to use during the toolkit's browser review.
 
 Usage (<scripts> is the toolkit's scripts folder: \${CLAUDE_PLUGIN_ROOT}/scripts
 under the tk plugin, .claude/scripts in a copy-install):

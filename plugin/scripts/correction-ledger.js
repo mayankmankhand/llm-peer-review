@@ -747,7 +747,7 @@ function emptyStatus(rollup) {
     return {
       empty: true,
       reason: 'never-captured',
-      message: 'Capture has never run on this machine. It fires at the document stage (/tk:document), so ' +
+      message: 'Capture has never run on this machine. It fires at the document stage, so ' +
                'either that stage has not run here since capture shipped, or cycles were closed through an ' +
                'older document command without the capture stage (a customized document.md kept from a ' +
                'copy-install, or a global ~/.claude/commands/document.md typed as /document).'
