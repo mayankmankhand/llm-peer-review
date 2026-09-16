@@ -10,7 +10,7 @@
         "source": "git-subdir",
         "url": "mayankmankhand/llm-peer-review",
         "path": "plugin",
-        "ref": "v7.2.0"
+        "ref": "v7.3.0"
       },
       "description": "The LLM Peer Review toolkit: /tk:explore, /tk:create-plan, /tk:execute, /tk:review, /tk:document and the review skills, as a Claude Code plugin generated from this repository's .claude/ source."
     }
