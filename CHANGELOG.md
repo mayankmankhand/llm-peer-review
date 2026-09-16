@@ -12,6 +12,20 @@ If you last installed v4.3.3, twenty-four releases have shipped on top of it. v4
 
 ---
 
+## Unreleased (issue #184)
+
+**On top of v7.2.0, which stays additive on v7.0.0 and v6.0.0.** A top-down audit of everything that changed from v6.3.3 to v7.2.0, with every regression it found fixed here, and a review you type with no range now covering the plan's own commits.
+
+### Changed
+
+### Fixed
+
+### Added
+
+- **`scripts/setup/headless-session.sh`** (maintainer-only): runs a headless session against a plugin build under a scratch home, so a product-level test never touches the real `~/.claude`; `--baseline` and `--verify` prove it.
+
+---
+
 ## v7.2.0 - The Review Sees the Work (2026-09-16)
 
 **A minor release on top of v7.1.0, which stays additive on v7.0.0 and v6.0.0 (#178, #179, #180, #181, #182, #183).** The loop runs as before. What changes: the review that `/execute` chains into sees the work again, and setup, `/tk:upgrade` and the push check stop surprising the projects that use them.
