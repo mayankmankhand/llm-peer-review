@@ -487,11 +487,11 @@ write(live, 'toolkit-reference.mutated.md', refText.replace(firstDataLine, mutat
 const mutatedDrift = rowDrift(permissionTableRows(read(live, 'toolkit-reference.mutated.md')), seedAllowRows);
 check('mutation: dropping one table row trips the drift assertion', droppedRow !== '' && mutatedLine !== firstDataLine && mutatedDrift.missing.length === 1 && mutatedDrift.missing[0] === droppedRow && mutatedDrift.extra.length === 0, JSON.stringify({ droppedRow, mutatedDrift }));
 // The seed rows grant only what the toolkit runs (issue #180): `git config` is
-// the host-detection read alone, `npm install` is the plain install and the
-// worktree install, the /index grep rows are gone, and every gh or glab host
+// the host-detection read alone, `npm install` is the plain install alone (a
+// worktree row with a wildcard would also allow added package names), the /index grep rows are gone, and every gh or glab host
 // command host-cli.md tells Claude to run has its row, on both hosts.
 const liveRetired = read(live, 'seed/retired-permission-rows.txt').split(/\r?\n/).filter(l => l && !l.startsWith('#'));
-const NARROWED_ROWS = ['Bash(git config --get remote.origin.url)', 'Bash(npm install)', 'Bash(npm install --prefix .claude/worktrees/*)'];
+const NARROWED_ROWS = ['Bash(git config --get remote.origin.url)', 'Bash(npm install)'];
 const DROPPED_ROWS = ['Bash(git config *)', 'Bash(npm install *)', 'Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)', 'Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)'];
 check('live: the seed carries the narrowed git config and npm install rows', NARROWED_ROWS.every(x => seedAllowRows.includes(x)), NARROWED_ROWS.filter(x => !seedAllowRows.includes(x)).join(', '));
 const broadSeedRows = seedAllowRows.filter(x => /^Bash\(git config(:\*| \*)\)$/.test(x) || /^Bash\(npm (install|i|ci)(:\*| \*)\)$/.test(x) || x.includes('CODEBASE_MAP.md.tmp'));

@@ -45,7 +45,6 @@
       "Bash(glab mr create *)",
       "Bash(glab mr list *)",
       "Bash(npm install)",
-      "Bash(npm install --prefix .claude/worktrees/*)",
       "Bash(npm uninstall *)",
       "Bash(npm audit *)",
       "Bash(npm outdated *)",

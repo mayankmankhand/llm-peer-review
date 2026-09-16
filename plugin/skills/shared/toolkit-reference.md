@@ -240,7 +240,7 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 ### Do it yourself
 - **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
 - **Tests and builds** - run `npm test`, `npm run build`, or the project's equivalent to verify your work. Report pass/fail.
-- **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it. It asks for approval once: the baseline allows only a plain `npm install` and the worktree install, because installing a new package can run that package's own install scripts.
+- **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it. It asks for approval once: the baseline allows only a plain `npm install`, because installing a new package can run that package's own install scripts.
 - **Service status** - before asking "is the server running?", check yourself with `curl`, `lsof`, or similar tools.
 - **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
 
@@ -293,7 +293,7 @@ Off unless you turn them on: Claude Code leaves automatic updates off for third-
    ```
 
    An older release's pre-push check blocks every push from a project that records a newer version, and this command is the one way to lower the record. It prints each value it changed.
-2. Replace the plugin with the older release, with the marketplace pinned to that release's tag:
+2. Replace the plugin with the older release, with the marketplace pinned to that release's tag. Run these lines from a folder that is not a project, such as your home folder: run inside a project, the uninstall and the marketplace removal also delete the toolkit's marketplace and plugin entries from that project's `.claude/settings.json`.
 
    ```bash
    claude plugin uninstall tk@llm-peer-review --keep-data
@@ -302,7 +302,7 @@ Off unless you turn them on: Claude Code leaves automatic updates off for third-
    claude plugin install tk@llm-peer-review
    ```
 
-   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. Run these lines from a folder that is not a project, such as your home folder: run inside a project, the uninstall and the marketplace removal also delete the toolkit's marketplace and plugin entries from that project's `.claude/settings.json`. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project, then put its settings back with `git checkout -- .claude/settings.json`.
+   Then restart Claude Code. Uninstall with `--keep-data` first: removing the marketplace while the plugin is still installed also deletes the plugin's data folder. For a plugin installed for one project only, add `--scope project` to the uninstall and install lines and run them from that project, then put its settings back with `git checkout -- .claude/settings.json`.
 3. If you reinstalled before step 1, the older release's push check blocks and names both versions. In each project, open `.claude/.toolkit-state.json`, set each of `version`, `previousVersion` and `auditedVersion` that is above the older release to that release (`7.1.0`), and commit the file.
 
 To return to the newest release, run step 2 with `claude plugin marketplace add mayankmankhand/llm-peer-review` (no tag) in its third line, restart Claude Code, and run `/tk:upgrade` in each project.
@@ -353,7 +353,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(gh pr create *)`, `Bash(gh pr view *)`, `Bash(gh pr diff *)`, `Bash(gh pr list *)` | Pull request workflows (GitHub). `/tk:document` calls `gh pr list` for the cycle window and the PR link, so it needs its own entry |
 | `Bash(gh api *)`, `Bash(gh release list *)` | GitHub API calls and release checks. `/tk:review-deps` uses `gh api` on every host by design: it queries the GitHub repos of npm dependencies, not this project's host |
 | `Bash(glab issue create *)`, `Bash(glab issue view *)`, `Bash(glab mr create *)`, `Bash(glab mr list *)` | The same host commands on a GitLab repo: `/tk:create-issue` and the cycle issue `/tk:upgrade` opens, reading an issue, and `/tk:document`'s merge request and its link |
-| `Bash(npm install)`, `Bash(npm install --prefix .claude/worktrees/*)`, `Bash(npm uninstall *)` | A plain `npm install` of the project's own dependencies, the install `/tk:worktree` runs inside a new worktree, and removing a package. Installing any other package is not pre-approved and asks once, because an install can run that package's own install scripts |
+| `Bash(npm install)`, `Bash(npm uninstall *)` | A plain `npm install` of the project's own dependencies, and removing a package. Any other install, the one `/tk:worktree` runs inside a new worktree included, asks once, because an install can run a package's own install scripts and a wildcard row would also allow added package names |
 | `Bash(npm audit *)`, `Bash(npm outdated *)` | Dependency security and freshness checks (used by `/tk:review-deps`) |
 | `Read`, `Edit`, `Write`, `Glob`, `Grep` | The built-in file tools setup allows. These are real allow rows: `Edit` and `Write` approve file edits inside the project without a prompt |
 | `WebFetch(domain:github.com)`, `WebFetch(domain:raw.githubusercontent.com)`, `WebSearch` | Fetching GitHub content and web search |
