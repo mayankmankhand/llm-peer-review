@@ -37,6 +37,12 @@
 #     (the first trial ran without it; set the variable if a session refuses to
 #     start with an onboarding or account error)
 #
+# --add-dir "$BUILD" is passed as well: every plugin command inlines fragments
+# with !`cat "${CLAUDE_PLUGIN_ROOT}/..."`, and Claude Code only concatenates files
+# from the session's allowed directories. A real install sits under the plugin
+# cache, which is allowed; a --plugin-dir elsewhere is not, and the first #184
+# scenario run ended at turn zero with "cat ... was blocked" until this was added.
+#
 # The binary: the `claude` on PATH here is a wrapper that looks under $HOME for
 # an editor's extension binary, so it cannot run with HOME moved. The script
 # resolves the native binary from the REAL home first (CLAUDE_BIN overrides).
@@ -126,5 +132,5 @@ fi
 echo "headless-session: home=$SCRATCH build=$BUILD project=$PROJECT mode=$MODE bin=$BIN" >&2
 cd "$PROJECT"
 HOME="$SCRATCH" TK_LEDGER_DIR="$SCRATCH/tk-ledger" \
-  "$BIN" -p --plugin-dir "$BUILD" --permission-mode "$MODE" \
+  "$BIN" -p --plugin-dir "$BUILD" --add-dir "$BUILD" --permission-mode "$MODE" \
   --settings '{"enabledPlugins":{"tk@llm-peer-review":false}}' "$@"

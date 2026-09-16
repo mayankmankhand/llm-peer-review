@@ -36,7 +36,7 @@ If you last installed v4.3.3, twenty-four releases have shipped on top of it. v4
 
 ### Added
 
-- **`scripts/setup/headless-session.sh`** (maintainer-only): runs a headless session against a plugin build under a scratch home, so a product-level test never touches the real `~/.claude`; `--baseline` and `--verify` prove it.
+- **`scripts/setup/headless-session.sh`** (maintainer-only): runs a headless session against a plugin build under a scratch home, so a product-level test never touches the real `~/.claude`; `--baseline` and `--verify` prove it. It passes the build folder as an allowed directory too: a plugin command inlines fragments from the plugin root, and a `--plugin-dir` outside the plugin cache is blocked from `cat` until the session is told about it (the first #184 scenario run ended at turn zero on exactly that).
 
 ---
 
