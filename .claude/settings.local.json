@@ -55,6 +55,9 @@
       "Bash(node .claude/scripts/pre-push-check.js *)",
       "Bash(node .claude/scripts/correction-ledger.js *)",
       "Bash(node .claude/scripts/gen-media.js *)",
+      "Bash(node .claude/scripts/setup-project.js *)",
+      "Bash(node .claude/scripts/upgrade-audit.js *)",
+      "Bash(mktemp -d /tmp/*)",
       "Read",
       "Edit",
       "Write",
@@ -106,6 +109,7 @@
       "Bash(grep \"\\\\.md$\")",
       "Bash(grep -v \".html$\")",
       "Bash(node .claude/scripts/session-init.js)",
+      "Bash(node .claude/scripts/session-init.js *)",
       "Bash(sed -n '/^\\\\*\\\\*Repeat this cycle up to 3 times total/,/^\\\\*\\\\*Convergence gate/p' .claude/commands/ask-gpt.md)",
       "Bash(sed -n '/^\\\\*\\\\*Repeat this cycle up to 3 times total/,/^\\\\*\\\\*Convergence gate/p' .claude/commands/ask-gemini.md)",
       "Bash(awk '{a+=$1; r+=$2} END {print \"added:\", a, \"removed:\", r, \"total:\", a+r}')"
