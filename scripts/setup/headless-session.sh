@@ -131,6 +131,18 @@ fi
 
 echo "headless-session: home=$SCRATCH build=$BUILD project=$PROJECT mode=$MODE bin=$BIN" >&2
 cd "$PROJECT"
-HOME="$SCRATCH" TK_LEDGER_DIR="$SCRATCH/tk-ledger" \
+if HOME="$SCRATCH" TK_LEDGER_DIR="$SCRATCH/tk-ledger" \
   "$BIN" -p --plugin-dir "$BUILD" --add-dir "$BUILD" --permission-mode "$MODE" \
-  --settings '{"enabledPlugins":{"tk@llm-peer-review":false}}' "$@"
+  --settings '{"enabledPlugins":{"tk@llm-peer-review":false}}' "$@"; then
+  rc=0
+else
+  rc=$?
+fi
+# The credentials link must survive the run (review of #184, R8): a token refresh
+# that replaced the symlink with a plain file would leave the fresh token in the
+# scratch home and the real login on the older one, and nothing else would notice.
+if [ ! -L "$SCRATCH/.claude/.credentials.json" ]; then
+  echo "headless-session: the credentials link was replaced during the run; the real ~/.claude/.credentials.json may hold a stale token (copy $SCRATCH/.claude/.credentials.json back over it, or sign in again)" >&2
+  [ "$rc" -eq 0 ] && rc=3
+fi
+exit "$rc"
