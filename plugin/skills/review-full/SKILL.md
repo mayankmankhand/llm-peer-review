@@ -44,16 +44,19 @@ Then pick one of two modes:
 
 **Small change** (1-2 files, minor update): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /tk:review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool, one per-kind finder each (the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`; each preloads its own criteria and the dispatch contract in `${CLAUDE_PLUGIN_ROOT}/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what the row declares plus that kind's criteria fragment pasted in), then combine their results:
+**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /tk:review is always single-pass - subagents cannot spawn sub-agents), run five focused sub-agents in parallel using the Agent tool, one per row below: four per-kind finders (the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`; each preloads its own criteria and the dispatch contract in `${CLAUDE_PLUGIN_ROOT}/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what the row declares plus that kind's criteria fragment pasted in) and one general worker for Operations, then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
 | **Code & Architecture** (`subagent_type=tk:review-code-finder`) | Security red flags, architectural soundness, obvious logic issues, performance risks |
-| **Design & Completeness** (`subagent_type=tk:review-plan-finder`) | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
+| **Design & Completeness** (`subagent_type=tk:review-plan-finder` only when a plan file exists; otherwise `general-purpose` carrying this row's charter minus plan alignment, and the summary says "plan alignment skipped (no plan file)") | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
 | **UX & Accessibility** (`subagent_type=tk:review-ux-finder`) | Usability quick-check, WCAG AA basics, error states, key user flows |
-| **Operations** (`subagent_type=tk:review-security-finder`) | Secrets in code, logging/monitoring, deployment readiness, rollback plan |
+| **Security** (`subagent_type=tk:review-security-finder`) | Secrets in code, injection, auth and unsafe sinks; quiet by rule when the change touches none of these |
+| **Operations** (`general-purpose`, this row's charter pasted in: no typed finder has covered it since 7.0.0) | Logging and monitoring, deployment readiness, rollback plan, config and migration safety |
 
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
+
+The Design & Completeness row is the one whose worker can need input: the plan criteria open by asking which plan to compare against, and a dispatched finder cannot ask, so with no plan file it returned nothing at all (issue #184). That is why the row switches workers when no plan exists, the same guard `/tk:review` applies with its `[plan] ⏭️ skipped (no plan file)` chip.
 
 Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
 
@@ -89,7 +92,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the four sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Operations) so the reader sees at a glance which domains were checked. Treat `/tk:review-full` as a multi-specialist run for chip purposes.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the five sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Security, Operations) so the reader sees at a glance which domains were checked. Treat `/tk:review-full` as a multi-specialist run for chip purposes.
 
 ### Staff Architect Check
 
