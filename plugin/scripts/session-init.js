@@ -37,15 +37,28 @@
 //     "generatedAt": "2026-09-14T12:00:00.000Z",
 //     "cwd": "/abs/folder/it/ran/in",
 //     "root": "/abs/working/copy/root",        every path below is relative to it
-//     "source": "argument" | "unpushed" | "none",
+//     "source": "argument" | "plan" | "unpushed" | "none",
 //     "reason": null | "<code>",                set only when source is "none"
-//     "message": null | "<one plain sentence>", set only when source is "none"
+//     "message": null | "<one plain sentence>", set when source is "none", and when
+//                                               the newest plan is shipped (it names
+//                                               the range to pass; "plan" below)
 //     "head": { "commit": "<sha>" | null, "branch": "main" | null,
 //               "detached": false, "unborn": false },
+//     "plan": null | {                          the newest plan, on a no-argument run
+//       "name": "PLAN-issue-184.md",            (null when no plans/PLAN-*.md exists,
+//                                               or when a range argument was given)
+//       "startCommit": "<sha>" | null,          the full sha of its Start commit line
+//       "commits": 12,                          commits after the start (when it resolves)
+//       "unpushed": 3,                          source "plan" only: how many of them are
+//                                               not on the remote (all, with no remote)
+//       "reason": "plan-no-start" | "plan-start-missing" | "plan-start-not-ancestor"
+//               | "plan-no-commits" | "plan-shipped"      only when the plan was NOT used
+//     },
 //     "range": null | {                         null when source is "none"
 //       "base": "<sha>", "end": "<sha>",        the review covers base..end
-//       "baseFrom": "argument" | "upstream" | "default-branch",
-//       "baseRef": "v7.1.0" | "refs/remotes/origin/main",   as typed, or the ref used
+//       "baseFrom": "argument" | "plan" | "upstream" | "default-branch",
+//       "baseRef": "v7.1.0" | "PLAN-issue-184.md" | "refs/remotes/origin/main",
+//                                               as typed, the plan file, or the ref used
 //       "endRef": "HEAD",                                    as typed, or HEAD
 //       "commitCount": 20,                      commits in base..end
 //       "commits": [ { "sha": "<sha>", "subject": "Add x" } ],   newest 20 at most, newest first
@@ -66,7 +79,16 @@
 //   source "argument": base and end are the argument's two sides resolved to full
 //     commit shas (an empty side means HEAD, as in git). base must be an ancestor of
 //     end. The whole range is reviewed; only the commit list stops at 20.
-//   source "unpushed" (no argument): base is the merge-base of HEAD with its upstream
+//   source "plan" (no argument, #184): the newest plans/PLAN-*.md by modification
+//     time carries a Start commit that exists, is an ancestor of HEAD, has commits
+//     after it, and at least one of those commits is not on the remote (with no
+//     remote, no upstream and no default branch, every commit counts as unpushed).
+//     base is that start, end is HEAD, never capped: a review covers its own plan's
+//     commits, however many. Only the newest plan is consulted; an older plan with a
+//     start line is never used. When the plan does not apply, "plan.reason" says why
+//     and the unpushed source runs; when every commit after the start is already on
+//     the remote ("plan-shipped"), "message" names the range to pass.
+//   source "unpushed" (no argument, when no plan applies): base is the merge-base of HEAD with its upstream
 //     (@{u}, trusted only when it resolves under refs/remotes/), else with the
 //     remote's default branch (the target of refs/remotes/origin/HEAD, else
 //     origin/main, else origin/master; a lone remote not named origin stands in for
@@ -209,9 +231,24 @@ function sessionStart() {
         };
 
   // --- Plans ----------------------------------------------------------------
-  // List plans/PLAN-*.md newest-first by mtime, each with its progress percentage,
-  // a coarse status derived from the "Overall Progress" line the plan carries, and
-  // the commit /execute started it from (#182).
+  const { plans, newestPlan } = readPlans();
+
+  return {
+    generatedAt: new Date().toISOString(),
+    cwd,
+    worktree,
+    map,
+    lessons,
+    plans,
+    newestPlan,
+  };
+}
+
+// List plans/PLAN-*.md newest-first by mtime, each with its progress percentage,
+// a coarse status derived from the "Overall Progress" line the plan carries, and
+// the commit /execute started it from (#182). Shared by the session-start object
+// and by --scope, which consults the newest plan first (#184).
+function readPlans() {
   const PLANS_DIR = "plans";
   let plans = [];
   let newestPlan = null;
@@ -253,16 +290,7 @@ function sessionStart() {
     plans = [];
     newestPlan = null;
   }
-
-  return {
-    generatedAt: new Date().toISOString(),
-    cwd,
-    worktree,
-    map,
-    lessons,
-    plans,
-    newestPlan,
-  };
+  return { plans, newestPlan };
 }
 
 // ==========================================================================
@@ -559,6 +587,15 @@ function scopeUnpushed(head, root) {
   if (head.detached) {
     return none("detached-head", "HEAD is detached (not on a branch), so there is no upstream to compare it with. Pass a range, for example <base>..HEAD.");
   }
+  const base = unpushedBase(root);
+  if (base.error || base.none) return base;
+  return capUnpushed(head, root, base);
+}
+
+// Where "pushed" is measured from: the merge-base of HEAD with its upstream, else
+// with the remote's default branch. Shared by the unpushed source and the plan
+// source (#184). Returns { fullBase, baseFrom, baseRef }, { none }, or { error }.
+function unpushedBase(root) {
   let fullBase = null;
   let baseFrom = null;
   let baseRef = null;
@@ -608,11 +645,14 @@ function scopeUnpushed(head, root) {
       return none("no-base", "No upstream branch and no default branch on the remote to compare with (" + tried + "). Pass a range, for example <base>..HEAD.");
     }
   }
+  return { fullBase, baseFrom, baseRef };
+}
 
-  // 3. The cap. More than 20 unpushed commits: review the newest 20 along the
-  //    branch's own line (first parents), starting at HEAD~20, but only when the
-  //    real base is an ancestor of it, so the shorter range never reaches commits
-  //    that are already pushed. Otherwise the whole range stays.
+// The cap. More than 20 unpushed commits: review the newest 20 along the branch's
+// own line (first parents), starting at HEAD~20, but only when the real base is an
+// ancestor of it, so the shorter range never reaches commits that are already
+// pushed. Otherwise the whole range stays.
+function capUnpushed(head, root, { fullBase, baseFrom, baseRef }) {
   const end = head.commit;
   const totalText = gitText(["rev-list", "--count", fullBase + ".." + end], root);
   if (totalText === null || !/^\d+$/.test(totalText)) return { error: "git rev-list failed while counting unpushed commits" };
@@ -627,6 +667,63 @@ function scopeUnpushed(head, root) {
     }
   }
   return { range: { source: "unpushed", base, end, fullBase, baseFrom, baseRef, endRef: "HEAD", capped, total } };
+}
+
+// The plan source (#184). A review typed with no range used to take the newest
+// unpushed commits and never look at the plan, so on a pushed branch it found
+// nothing and after a long cycle it dropped the oldest commits. The newest plan's
+// start commit now comes first, while some commit after it is still unpushed; once
+// every commit after the start is on the remote the plan counts as shipped and the
+// unpushed fallback runs, with a message naming the plan's range to pass.
+//
+// Returns { plan, range } when the plan applies; { plan } carrying plan.reason when
+// it does not (the caller falls through to the unpushed source); { plan: null }
+// when there is no plan at all; { error } when git failed.
+function scopePlan(head, root) {
+  const { plans } = readPlans();
+  if (plans.length === 0) return { plan: null };
+  const newest = plans[0];
+  const plan = { name: newest.name, startCommit: newest.startCommit };
+  const skip = (reason) => ({ plan: Object.assign(plan, { reason }) });
+  if (newest.startCommit === null) return skip("plan-no-start");
+  const start = resolveCommit(newest.startCommit, root);
+  if (start === null) return skip("plan-start-missing");
+  plan.startCommit = start;
+  if (head.unborn) return skip("plan-start-not-ancestor");
+  if (start === head.commit) return skip("plan-no-commits");
+  const ancestor = isAncestor(start, head.commit, root);
+  if (ancestor === null) return { error: "git rev-list failed while checking the plan's start commit" };
+  if (!ancestor) return skip("plan-start-not-ancestor");
+
+  const totalText = gitText(["rev-list", "--count", start + ".." + head.commit], root);
+  if (totalText === null || !/^\d+$/.test(totalText)) return { error: "git rev-list failed while counting the plan's commits" };
+  plan.commits = Number(totalText);
+
+  // How many commits after the start are not on the remote: reachable from HEAD but
+  // from neither the start nor the pushed base. With no remote, no upstream and no
+  // default branch, nothing is known to be pushed, so all of them count.
+  const base = unpushedBase(root);
+  if (base.error) return { error: base.error };
+  let unpushed = plan.commits;
+  if (!base.none) {
+    const count = gitText(["rev-list", "--count", head.commit, "^" + start, "^" + base.fullBase], root);
+    if (count === null || !/^\d+$/.test(count)) return { error: "git rev-list failed while counting the plan's unpushed commits" };
+    unpushed = Number(count);
+  }
+  if (unpushed === 0) return skip("plan-shipped");
+  plan.unpushed = unpushed;
+  return {
+    plan,
+    range: { source: "plan", base: start, end: head.commit, fullBase: start, baseFrom: "plan", baseRef: newest.name, endRef: "HEAD", capped: false },
+  };
+}
+
+// The one plain sentence a shipped plan leaves behind: the range to pass by hand.
+function shippedMessage(plan) {
+  const short = plan.startCommit.slice(0, 7);
+  const n = plan.commits;
+  return "The newest plan " + plan.name + " starts at " + short + " and all of its " + n + " commit" + (n === 1 ? "" : "s") +
+    " are already on the remote; /review " + short + "..HEAD reviews them.";
 }
 
 // The range's commits, files and line counts.
@@ -703,11 +800,12 @@ function scope(args) {
     reason: null,
     message: null,
     head: null,
+    plan: null,
     range: null,
     uncommitted: null,
     totals: null,
   };
-  const fail = (error) => Object.assign(out, { source: "none", reason: "error", message: error, range: null, uncommitted: null, totals: null, error });
+  const fail = (error) => Object.assign(out, { source: "none", reason: "error", message: error, plan: null, range: null, uncommitted: null, totals: null, error });
 
   if (args.length > 1) return fail("--scope takes at most one argument, a <base>..<end> range");
   const given = args.length === 1 ? args[0].trim() : "";
@@ -740,7 +838,17 @@ function scope(args) {
     unborn: commit === null,
   };
 
-  const found = given ? scopeFromArgument(given, out.head, root) : scopeUnpushed(out.head, root);
+  // A typed range always wins. With none, the newest plan comes first (#184), then
+  // the unpushed commits.
+  let found;
+  if (given) {
+    found = scopeFromArgument(given, out.head, root);
+  } else {
+    const viaPlan = scopePlan(out.head, root);
+    if (viaPlan.error) return fail(viaPlan.error);
+    out.plan = viaPlan.plan;
+    found = viaPlan.range ? { range: viaPlan.range } : scopeUnpushed(out.head, root);
+  }
   if (found.error) return fail(found.error);
   if (found.none) {
     out.reason = found.none.reason;
@@ -750,6 +858,7 @@ function scope(args) {
     if (range.error) return fail(range.error);
     out.source = found.range.source;
     out.range = range;
+    if (out.plan !== null && out.plan.reason === "plan-shipped") out.message = shippedMessage(out.plan);
   }
 
   const uncommitted = uncommittedWork(root, rootBytes, out.head);

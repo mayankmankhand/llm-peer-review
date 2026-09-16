@@ -51,7 +51,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/explore` | Understand the problem, ask clarifying questions before implementation |
 | `/create-plan` | Create a step-by-step implementation plan with status tracking |
 | `/execute` | Build the feature, updating the plan as you go |
-| `/review` | Run the right reviews automatically, combine findings into one report |
+| `/review` | Run the right reviews automatically, combine findings into one report. Typed with no range, it starts from the newest plan's start commit while any commit after it is unpushed, else from your newest unpushed commits, and its first line says which and why |
 | `/review-code` | Review code - the specialist reports findings into the auto loop (skill - also invoked by /review) |
 | `/review-security` | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (skill - also invoked by /review on every code change) |
 | `/review-commands` | Review slash command prompts for quality and consistency (skill - also invoked by /review) |

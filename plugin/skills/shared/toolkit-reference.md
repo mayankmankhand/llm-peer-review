@@ -51,7 +51,7 @@ The lessons captured at `/tk:document` are read back at the start of the next `/
 | `/tk:explore` | Understand the problem, ask clarifying questions before implementation |
 | `/tk:create-plan` | Create a step-by-step implementation plan with status tracking |
 | `/tk:execute` | Build the feature, updating the plan as you go |
-| `/tk:review` | Run the right reviews automatically, combine findings into one report |
+| `/tk:review` | Run the right reviews automatically, combine findings into one report. Typed with no range, it starts from the newest plan's start commit while any commit after it is unpushed, else from your newest unpushed commits, and its first line says which and why |
 | `/tk:review-code` | Review code - the specialist reports findings into the auto loop (skill - also invoked by /tk:review) |
 | `/tk:review-security` | Application security review of a code change - injection, secrets, XSS, path traversal, SSRF, weak crypto (skill - also invoked by /tk:review on every code change) |
 | `/tk:review-commands` | Review slash command prompts for quality and consistency (skill - also invoked by /tk:review) |

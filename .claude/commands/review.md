@@ -48,16 +48,16 @@ If focus arguments are provided, skip the detection phase and dispatch only the 
 It prints one JSON object (the full shape is in the script's header comment). Read:
 
 - **`range.end` is the pinned end.** The review covers `range.base..range.end` plus the uncommitted work, and nothing after it. This run's own fix commits land after the report, so everything after the pinned end (`<range.end>..HEAD`, plus what is uncommitted once the report is out) is the diff of the fixes M3 verifies and where M5's follow-up generation looks.
-- **`source`** says where the range came from: `argument` (the range you were given), `unpushed` (no argument: the newest unpushed commits, counted from the merge-base with the upstream, else with the remote's default branch), or `none` (no range; `message` says why in one plain sentence).
-- **`range.commits`** lists up to 20 commits, newest first. `range.capped` is true when older unpushed commits were left out, `range.omitted` counts them, and `range.fullBase` is where they start.
+- **`source`** says where the range came from: `argument` (the range you were given), `plan` (no argument: the newest plan's `**Start commit:**` up to HEAD, used while at least one commit after it is unpushed; `plan.name`, `plan.commits` and `plan.unpushed` carry the file and the counts), `unpushed` (no argument and no plan applies: the newest unpushed commits, counted from the merge-base with the upstream, else with the remote's default branch; when a plan was passed over, `plan.reason` says why: `plan-no-start`, `plan-shipped`, `plan-start-missing`, `plan-start-not-ancestor` or `plan-no-commits`), or `none` (no range; `message` says why in one plain sentence).
+- **`range.commitCount`** is the whole count; **`range.commits`** lists up to 20 of them, newest first. Only the unpushed source is ever capped: `range.capped` is true when older unpushed commits were left out, `range.omitted` counts them, and `range.fullBase` is where they start. The plan source is never capped, whatever its size (#184).
 - **The changed files** are `range.files` plus the `files` lists under `uncommitted.staged`, `uncommitted.unstaged` and `uncommitted.untracked`; `totals.lines` sums their added and deleted lines. From here on, "the diff" and "the changed files" mean this scope.
 
 Name the scope in one line before anything is dispatched, and open the report with the same line:
 
-- **Commits in range:** "Reviewing N commits (`<base>..<end>`, short shas) plus uncommitted work." Drop "plus uncommitted work" when there is none. When `range.capped` is true, add: "M older unpushed commits were left out; `/review <range.fullBase>..HEAD` includes them."
+- **Commits in range:** "Reviewing N commits (`<base>..<end>`, short shas), <why>, plus uncommitted work." N is `range.commitCount`. The why-clause names the source in plain words: for `argument`, "the range passed in"; for `plan`, "from `<plan.name>`'s start commit, M of them unpushed" with M from `plan.unpushed`; for `unpushed`, "your unpushed commits; no plan names a start commit", or, when `plan.reason` is set, "your unpushed commits; `<plan.name>` was passed over because <reason>", where the reason reads: it has no start commit yet (`plan-no-start`), every commit since its start is already pushed (`plan-shipped`), its start commit is not in this repository (`plan-start-missing`), its start commit is not on this branch (`plan-start-not-ancestor`), or nothing has been committed since its start (`plan-no-commits`). Drop "plus uncommitted work" when there is none. When `range.capped` is true, add: "M older unpushed commits were left out; `/review <range.fullBase>..HEAD` includes them."
 - **A range argument that `source` reports as `none`:** stop. Say "That range cannot be reviewed: <message>" and ask for one whose base is an ancestor of its end.
 - **No commits in range, uncommitted work present:** "Reviewing uncommitted work only; no commits in range." Add the `message` when there is one.
-- **No commits in range and nothing uncommitted:** on the auto-detect path, stop with "Nothing to review: no commits in range and no uncommitted changes (<message, when there is one>). Pass a range: `/review <base>..HEAD`." A focus call continues as it always has.
+- **No commits in range and nothing uncommitted:** on the auto-detect path, stop with "Nothing to review: no commits in range and no uncommitted changes (<message, when there is one>). Pass a range: `/review <base>..HEAD`." When `message` names a plan's range (a shipped plan), suggest that range in place of the generic one. A focus call continues as it always has.
 
 **Fallback:** if the script is missing (an older install) or its output carries an `error` field, review the uncommitted work only (`git diff --name-only`, `git diff --name-only --cached`, and `git status --short` for untracked files; `git diff --numstat` for the size gate) and say in the scope line that no commit range was checked.
 
@@ -213,7 +213,7 @@ The inlined template defines the **Overall Verdict** line, the **readability bac
 Rendered exactly as the template's "Audited out" section defines it - placement, verdict labels, the `Audited out: none` line, the empty-run rule, and the never-omit rule. The orchestrator's only addition is the `[specialist]` tag on each ID, as everywhere else: `- **R7** [code] \`RECEIPT FAILED\` - [What] (check output did not show the claim)`.
 
 ### Summary (orchestrator-specific)
-- Scope: `<base>..<end>` (N commits) plus uncommitted work, as Phase 0 named it
+- Scope: `<base>..<end>` (N commits, <why>) plus uncommitted work, as Phase 0 named it
 - Specialists run: X of Y
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X (audit survivors)

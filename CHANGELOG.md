@@ -18,6 +18,8 @@ If you last installed v4.3.3, twenty-four releases have shipped on top of it. v4
 
 ### Changed
 
+- **A review typed with no range starts from the plan** (#184). `/review` with no range used to take your newest 20 unpushed commits and never look at the plan, so on a pushed branch it found nothing and after a long cycle it dropped the oldest commits. `session-init.js --scope` now consults the newest plan's `**Start commit:**` first and uses it while at least one commit after it is unpushed, with no cap however long the span (a range argument narrows it); a plan whose commits are all pushed counts as shipped, and the review stops and names the range to pass. The first line always says which source it used and why. The 20-commit fallback stays for a project with no plan that applies.
+
 ### Fixed
 
 ### Added
