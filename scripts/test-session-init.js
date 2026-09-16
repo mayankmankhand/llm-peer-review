@@ -568,6 +568,130 @@ section('11. --scope never writes, and fails soft', function () {
     e.status === 0 && e.parsed && typeof e.json.error === 'string' && e.json.source === 'none', brief(e));
 });
 
+// --- 12. the newest plan's start commit comes first (#184) ---------------------
+// A review typed with no range used to take the newest unpushed commits and never
+// look at the plan. Now the newest plan's start commit wins while some commit
+// after it is unpushed; once every one of them is on the remote the plan counts as
+// shipped and the unpushed fallback runs, naming the plan's range to pass.
+section('12. no argument: the newest plan\'s start commit (#184)', function () {
+  const remote = bareRemote('plan remote');
+  const repo = newRepo('plan-source');
+  write(repo, 'base.txt', 'base\n');
+  // plans/ is gitignored in a real project, so the plan file is never a commit
+  // of its own and never blocks a checkout.
+  write(repo, '.gitignore', 'plans/\n');
+  const b = commitAll(repo, 'base');
+  git(repo, ['remote', 'add', 'origin', remote]);
+  git(repo, ['push', '-q', '-u', 'origin', 'main']);
+  const planFile = 'plans/PLAN-issue-9.md';
+  function withStart(sha) {
+    return '# Plan\n\n**Overall Progress:** `50%`\n**Start commit:** ' + sha + '\n\n## Tasks\n';
+  }
+  write(repo, planFile, withStart(b));
+  write(repo, 'one.txt', lines(2));
+  const u1 = commitAll(repo, 'one');
+  write(repo, 'two.txt', lines(3));
+  const u2 = commitAll(repo, 'two');
+
+  const used = scope(repo);
+  check('unpushed commits after the plan\'s start: source "plan", from the start to HEAD, never capped',
+    used.status === 0 && used.json.source === 'plan' && dig(used.json, 'range.base') === b && dig(used.json, 'range.end') === u2 &&
+    dig(used.json, 'range.commitCount') === 2 && dig(used.json, 'range.baseFrom') === 'plan' && dig(used.json, 'range.baseRef') === 'PLAN-issue-9.md' &&
+    dig(used.json, 'range.endRef') === 'HEAD' && dig(used.json, 'range.capped') === false && dig(used.json, 'range.omitted') === 0,
+    brief(used) + ' ' + JSON.stringify(used.json.range));
+  check('the plan object names the file, the full start sha, its commits and the unpushed count',
+    dig(used.json, 'plan.name') === 'PLAN-issue-9.md' && dig(used.json, 'plan.startCommit') === b && dig(used.json, 'plan.commits') === 2 &&
+    dig(used.json, 'plan.unpushed') === 2 && dig(used.json, 'plan.reason') === undefined && used.json.message === null,
+    JSON.stringify(used.json.plan));
+  check('the plan\'s commits are named newest first and its files listed',
+    sameList((list(used, 'range.commits') || []).map(function (c) { return c.sha; }), [u2, u1]) &&
+    sameList(paths(list(used, 'range.files')), ['one.txt', 'two.txt']) && dig(used.json, 'totals.lines') === 5,
+    JSON.stringify(used.json.range));
+  const arg = scope(repo, u1 + '..HEAD');
+  check('an argument range wins over the plan, and reports no plan',
+    arg.json.source === 'argument' && dig(arg.json, 'range.commitCount') === 1 && arg.json.plan === null, brief(arg));
+
+  git(repo, ['push', '-q', 'origin', 'main']);
+  const shipped = scope(repo);
+  check('every commit after the start pushed: source "unpushed" with no commits and plan.reason "plan-shipped"',
+    shipped.json.source === 'unpushed' && dig(shipped.json, 'range.commitCount') === 0 && dig(shipped.json, 'plan.reason') === 'plan-shipped' &&
+    dig(shipped.json, 'plan.commits') === 2 && dig(shipped.json, 'plan.startCommit') === b,
+    brief(shipped) + ' ' + JSON.stringify(shipped.json.plan));
+  check('the shipped plan\'s message names the range to pass and how many commits it holds',
+    typeof shipped.json.message === 'string' && shipped.json.message.indexOf('/review ' + b.slice(0, 7) + '..HEAD') !== -1 &&
+    /\b2 commits\b/.test(shipped.json.message) && shipped.json.message.indexOf('PLAN-issue-9.md') !== -1,
+    String(shipped.json.message));
+
+  write(repo, 'three.txt', 'three\n');
+  const u3 = commitAll(repo, 'three');
+  write(repo, planFile, withStart('0123456789abcdef0123456789abcdef01234567'));
+  const missing = scope(repo);
+  check('a start sha that names no commit falls through to unpushed with "plan-start-missing"',
+    missing.json.source === 'unpushed' && dig(missing.json, 'range.commitCount') === 1 && dig(missing.json, 'plan.reason') === 'plan-start-missing' &&
+    missing.json.message === null, brief(missing) + ' ' + JSON.stringify(missing.json.plan));
+
+  git(repo, ['checkout', '-q', '-b', 'side', b]);
+  write(repo, 'side.txt', 'side\n');
+  const s1 = commitAll(repo, 'side');
+  git(repo, ['checkout', '-q', 'main']);
+  write(repo, planFile, withStart(s1));
+  const notAncestor = scope(repo);
+  check('a start that is not an ancestor of HEAD falls through with "plan-start-not-ancestor"',
+    notAncestor.json.source === 'unpushed' && dig(notAncestor.json, 'plan.reason') === 'plan-start-not-ancestor' &&
+    dig(notAncestor.json, 'range.commitCount') === 1, brief(notAncestor) + ' ' + JSON.stringify(notAncestor.json.plan));
+
+  write(repo, planFile, withStart(u3));
+  const atHead = scope(repo);
+  check('a start equal to HEAD falls through with "plan-no-commits"',
+    atHead.json.source === 'unpushed' && dig(atHead.json, 'plan.reason') === 'plan-no-commits' && dig(atHead.json, 'range.commitCount') === 1,
+    brief(atHead) + ' ' + JSON.stringify(atHead.json.plan));
+
+  // The newest plan by modification time has no start line; the older one does
+  // and is not consulted.
+  write(repo, planFile, withStart(b));
+  const hourAgo = new Date(Date.now() - 3600 * 1000);
+  fs.utimesSync(path.join(repo, planFile), hourAgo, hourAgo);
+  write(repo, 'plans/PLAN-issue-10.md', '# Plan\n\n**Overall Progress:** `0%`\n\n## Tasks\n');
+  const noStart = scope(repo);
+  check('the newest plan without a start line falls through with "plan-no-start"; the older plan is not used',
+    noStart.json.source === 'unpushed' && dig(noStart.json, 'plan.name') === 'PLAN-issue-10.md' && dig(noStart.json, 'plan.reason') === 'plan-no-start' &&
+    dig(noStart.json, 'plan.startCommit') === null && dig(noStart.json, 'range.commitCount') === 1,
+    brief(noStart) + ' ' + JSON.stringify(noStart.json.plan));
+  fs.rmSync(path.join(repo, 'plans/PLAN-issue-10.md'));
+
+  // A start before the remote's merge-base with one unpushed commit after it: the
+  // whole span, uncapped, by decision (the unpushed source would have capped at 20).
+  for (let i = 4; i <= 22; i++) {
+    write(repo, 'n' + i + '.txt', i + '\n');
+    commitAll(repo, 'n' + i);
+  }
+  git(repo, ['push', '-q', 'origin', 'main']);
+  write(repo, 'last.txt', 'last\n');
+  const last = commitAll(repo, 'last');
+  const span = scope(repo);
+  check('a start before the merge-base with one unpushed commit after it: the whole span, uncapped',
+    span.json.source === 'plan' && dig(span.json, 'range.base') === b && dig(span.json, 'range.end') === last &&
+    dig(span.json, 'range.commitCount') === 23 && dig(span.json, 'range.capped') === false && dig(span.json, 'range.omitted') === 0 &&
+    dig(span.json, 'plan.commits') === 23 && dig(span.json, 'plan.unpushed') === 1,
+    brief(span) + ' ' + JSON.stringify(span.json.plan));
+  check('the span still lists only the newest 20 commits, like an argument range',
+    (list(span, 'range.commits') || []).length === 20 && (list(span, 'range.commits') || [])[0].sha === last,
+    String((list(span, 'range.commits') || []).length));
+
+  git(repo, ['remote', 'remove', 'origin']);
+  const noRemote = scope(repo);
+  check('with no remote every commit after the start counts as unpushed: source "plan"',
+    noRemote.json.source === 'plan' && dig(noRemote.json, 'range.commitCount') === 23 && dig(noRemote.json, 'plan.unpushed') === 23,
+    brief(noRemote) + ' ' + JSON.stringify(noRemote.json.plan));
+
+  const bare = newRepo('no-plans');
+  write(bare, 'a.txt', 'a\n');
+  commitAll(bare, 'one');
+  const np = scope(bare);
+  check('no plans folder: plan is null and the unpushed rules apply as before',
+    np.json.plan === null && np.json.source === 'none' && np.json.reason === 'no-remote', brief(np));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
