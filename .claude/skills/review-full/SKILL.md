@@ -37,7 +37,7 @@ Then pick one of two modes:
 
 **Small change** (1-2 files, minor update): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run five focused sub-agents in parallel using the Agent tool, one per row below: four per-kind finders (the roster in `.claude/skills/shared/model-routing.md`; each preloads its own criteria and the dispatch contract in `.claude/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what the row declares plus that kind's criteria fragment pasted in) and one general worker for Operations, then combine their results:
+**Bigger change** (3+ files or significant feature): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run five focused sub-agents in parallel using the Agent tool, one per row below: four per-kind finders (the roster in `.claude/skills/shared/model-routing.md`; each preloads its own criteria and the dispatch contract in `.claude/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what the row declares plus that kind's criteria fragment pasted in) and one general worker for Operations (a general worker's prompt pastes the dispatch contract, `.claude/skills/dispatch-contract/SKILL.md` with `.claude/skills/shared/dispatch-format.md`, and the finding contract, `.claude/skills/shared/finding-contract.md`, after its charter, so it returns the same JSONL with receipts the typed finders do; a charter alone yields prose without receipts, which the audit drops), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
@@ -51,7 +51,7 @@ Each sub-agent should stay broad. If a sub-agent finds something that needs deep
 
 The Design & Completeness row is the one whose worker can need input: the plan criteria open by asking which plan to compare against, and a dispatched finder cannot ask, so with no plan file it returned nothing at all (issue #184). That is why the row switches workers when no plan exists, the same guard `/review` applies with its `[plan] ⏭️ skipped (no plan file)` chip.
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent uses the severity scale below; the runner assigns Finding IDs after dedup. A sub-agent with no findings returns the literal `NO FINDINGS`, the dispatch contract's form, and the report still lists that lens as run so the user knows it ran.
 
 </procedure>
 
