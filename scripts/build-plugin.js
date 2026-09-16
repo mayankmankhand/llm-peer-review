@@ -431,9 +431,11 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
     const re = new RegExp('Skill\\((' + slashNames.map(escapeRe).join('|') + ')(?=[):])', 'g');
     text = text.replace(re, (m0, name) => 'Skill(' + PLUGIN_NAME + ':' + name);
     // 4. Slash references: /name not preceded by a path character and not
-    //    followed by a name character or hyphen (so file paths survive, a
-    //    longer name is never cut short, and /review-* is left to step 5).
-    const re2 = new RegExp('(^|[^\\w./:\\-])/(' + slashNames.map(escapeRe).join('|') + ')(?![\\w-])', 'g');
+    //    followed by a name character, a hyphen, or a dot starting a file
+    //    extension (so file paths survive, `<folder>/playground.html` stays a
+    //    file name, a longer name is never cut short, and /review-* is left to
+    //    step 5).
+    const re2 = new RegExp('(^|[^\\w./:\\-])/(' + slashNames.map(escapeRe).join('|') + ')(?![\\w-]|\\.\\w)', 'g');
     text = text.replace(re2, (m0, pre, name) => pre + '/' + PLUGIN_NAME + ':' + name);
     // 5. Family mentions: `/review-*`, `/ask-*`. Same path guard as step 4, and
     //    only a prefix that starts a real name (so `/tmp/playground-*` and any

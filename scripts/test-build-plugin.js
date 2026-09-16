@@ -303,6 +303,11 @@ check('scriptRules: a longer or shorter command (another package, another npx ca
 console.log('\n2b. inline command quoting and the unquoted-root guard');
 const rw = (line) => lib.rewriteText(line + '\n', fxInv, fx.src, [], 'commands/probe.md');
 const HITL = '${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md';
+// A file named like a command (review of the v7.2.0 release, R2): `<folder>/review.html` is a file,
+// while `/review.` ending a sentence is still the command.
+
+const fileLike = rw('link `file://<folder>/review.html`, then run /review.');
+check('a file named like a command keeps its name, and a command ending a sentence is still scoped', fileLike === 'link `file://<folder>/review.html`, then run /tk:review.\n', fileLike);
 let got = rw('!`cat .claude/skills/shared/hitl-loop.md 2>/dev/null`');
 check('an inline cat with an extra argument gets its path quoted', got === '!`cat "' + HITL + '" 2>/dev/null`\n', got);
 got = rw('!`cat  .claude/skills/shared/hitl-loop.md`');
