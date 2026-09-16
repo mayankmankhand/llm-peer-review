@@ -280,18 +280,23 @@ LEGACY_COMMANDS=(review-code.md review-ux.md review-plan.md review-commands.md r
 
 # Issue #80: upstream renames, old -> new. Parallel indexed arrays map
 # old -> new (associative arrays need Bash 4, setup.sh targets Bash 3.2+).
-# Paths are relative to $TARGET.
+# Paths are relative to $TARGET. The last pair is issue #184 (R8): the HTML
+# output rules moved from .claude/rules/ to .claude/skills/shared/ at 7.0.0
+# (#167), and without this row a 6.x copy-install kept the old copy, still
+# auto-loaded as a rules file and listed as custom by the pre-flight.
 RENAMED_OLD=(
   .claude/commands/dev-lead-gpt.md
   .claude/commands/dev-lead-gemini.md
   scripts/dev-lead-gpt.js
   scripts/dev-lead-gemini.js
+  .claude/rules/html-outputs.md
 )
 RENAMED_NEW=(
   .claude/commands/ask-gpt.md
   .claude/commands/ask-gemini.md
   .claude/scripts/ask-gpt.js
   .claude/scripts/ask-gemini.js
+  .claude/skills/shared/html-outputs.md
 )
 
 # Issue #91 (v4.2 -> v4.3): runtime scripts that moved from scripts/ to
@@ -1140,7 +1145,7 @@ rm -f "$TARGET/.claude/rules/toolkit.md.bak"
 # this is the same stamp pattern as toolkit.md. Source ships pre-stamped
 # via bump-version.sh, so the sed is a no-op on stamped files and harmless
 # on re-runs. A pre-7.0.0 target still carrying .claude/rules/html-outputs.md
-# keeps it; it is listed as managed and the plugin migration removes it.
+# has it backed up and removed by the renamed-files cleanup above (#184 R8).
 for stamped_frag in html-outputs.md toolkit-reference.md; do
   echo "  Stamping .claude/skills/shared/$stamped_frag ..."
   sed -i.bak "s/<!-- This file is managed by the LLM Peer Review toolkit\./<!-- Toolkit version: $VERSION | Managed by LLM Peer Review./" "$TARGET/.claude/skills/shared/$stamped_frag"
@@ -1368,7 +1373,7 @@ if [ -f "$TARGET/.claude/settings.local.json" ] && command -v node > /dev/null 2
     [ -n "$PERMS_ERR_LINE" ] || PERMS_ERR_LINE="node exited $PERMS_RC"
     echo "  Warning: could not merge permissions into .claude/settings.local.json ($PERMS_ERR_LINE)."
     echo "    Your file was left unchanged; add new entries by hand from the permissions"
-    echo "    table in .claude/rules/toolkit.md."
+    echo "    table in .claude/skills/shared/toolkit-reference.md."
   elif [ -f "$SETTINGS_TMP" ]; then
     if [ "$SETTINGS_PREEXISTED" = true ]; then
       backup_file "$TARGET/.claude/settings.local.json"

@@ -200,6 +200,11 @@ done
 # a custom file, and must be backed up + removed by the upgrade.
 printf 'old legacy command\n' > "$SCRATCH/.claude/commands/review-code.md"
 
+# A 6.x-era HTML rules file at its old path (moved to .claude/skills/shared/ at
+# 7.0.0): must be reported as a renamed-file migration, NOT as a custom file,
+# and must be backed up + removed by the upgrade (#184 R8).
+printf 'old html rules\n' > "$SCRATCH/.claude/rules/html-outputs.md"
+
 # Locally edit a managed file (first toolkit command file, picked
 # dynamically so a rename upstream does not break the test).
 EDITED_CMD="$(basename "$(ls "$TOOLKIT_ROOT/.claude/commands/"*.md | head -1)")"
@@ -207,7 +212,7 @@ printf '\nLOCAL EDIT MARKER\n' >> "$SCRATCH/.claude/commands/$EDITED_CMD"
 
 # Simulate an older install so the version gap line has something to say.
 printf '4.0.0\n' > "$SCRATCH/VERSION"
-ok "planted ${#CUSTOM_FILES[@]} custom files, 1 legacy file, 1 local edit"
+ok "planted ${#CUSTOM_FILES[@]} custom files, 1 legacy file, 1 renamed file, 1 local edit"
 
 # ─── [4] --dry-run on the populated project ──────────────────
 echo "[4] --dry-run on the populated project"
@@ -220,6 +225,7 @@ else
 fi
 assert_grep "upgrade (v4.0.0 -> v" "$LOG/dryrun.log" "reports the version gap"
 assert_grep "Legacy command cleanup" "$LOG/dryrun.log" "announces the legacy migration"
+assert_grep "Renamed-file cleanup" "$LOG/dryrun.log" "announces the renamed-file migration (#184 R8)"
 assert_grep ".claude/commands/$EDITED_CMD" "$LOG/dryrun.log" "lists the locally edited managed file"
 assert_grep "LOCALLY MODIFIED" "$LOG/dryrun.log" "shows the locally modified classification"
 for rel in "${CUSTOM_FILES[@]}"; do
@@ -287,6 +293,12 @@ if [ ! -f "$SCRATCH/.claude/commands/review-code.md" ] && [ -f "$BACKUP_ROOT/.cl
   ok "legacy command removed and backed up"
 else
   fail "legacy command not migrated correctly"
+fi
+
+if [ ! -f "$SCRATCH/.claude/rules/html-outputs.md" ] && [ -f "$BACKUP_ROOT/.claude/rules/html-outputs.md" ]; then
+  ok "old rules/html-outputs.md removed and backed up (#184 R8)"
+else
+  fail "old rules/html-outputs.md not migrated: present=$([ -f "$SCRATCH/.claude/rules/html-outputs.md" ] && echo yes || echo no) backup=$([ -f "$BACKUP_ROOT/.claude/rules/html-outputs.md" ] && echo yes || echo no)"
 fi
 
 if cmp -s "$SCRATCH/VERSION" "$TOOLKIT_ROOT/VERSION"; then
@@ -683,6 +695,7 @@ assert_grep "Warning: could not merge permissions into .claude/settings.local.js
 # too (the stack trace printed as "+ SyntaxError ..." lines).
 assert_grep "could not merge permissions into .claude/settings.local.json (SyntaxError" "$LOG/bad-settings.log" "warning names the error"
 assert_grep "add new entries by hand from the permissions" "$LOG/bad-settings.log" "warning points at the permissions table"
+assert_grep "table in .claude/skills/shared/toolkit-reference.md" "$LOG/bad-settings.log" "warning names the file that holds the table (#184 R7)"
 if grep -E '^[[:space:]]+\+ ' "$LOG/bad-settings.log" | grep -qE 'Error|^[[:space:]]+\+ +at '; then
   fail "error text printed as a + permission line"
 else

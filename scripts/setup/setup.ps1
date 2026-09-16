@@ -227,7 +227,9 @@ $RenamedFiles = @(
   @{ Old = ".claude\commands\dev-lead-gpt.md";    New = ".claude\commands\ask-gpt.md" },
   @{ Old = ".claude\commands\dev-lead-gemini.md"; New = ".claude\commands\ask-gemini.md" },
   @{ Old = "scripts\dev-lead-gpt.js";             New = ".claude\scripts\ask-gpt.js" },
-  @{ Old = "scripts\dev-lead-gemini.js";          New = ".claude\scripts\ask-gemini.js" }
+  @{ Old = "scripts\dev-lead-gemini.js";          New = ".claude\scripts\ask-gemini.js" },
+  # Issue #184 (R8): the HTML output rules moved to .claude\skills\shared\ at 7.0.0 (#167).
+  @{ Old = ".claude\rules\html-outputs.md";       New = ".claude\skills\shared\html-outputs.md" }
 )
 
 # Issue #91 (v4.2 -> v4.3): runtime scripts that moved from scripts\ to
@@ -1517,7 +1519,7 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
     if (-not $permsErrLine) { $permsErrLine = "node exited $($permsRun.ExitCode)" }
     Write-Host "  Warning: could not merge permissions into .claude\settings.local.json ($permsErrLine)."
     Write-Host "    Your file was left unchanged; add new entries by hand from the permissions"
-    Write-Host "    table in .claude\rules\toolkit.md."
+    Write-Host "    table in .claude\skills\shared\toolkit-reference.md."
   } elseif (Test-Path -LiteralPath $settingsTmp -PathType Leaf) {
     if ($SettingsPreexisted) {
       Backup-File -Original $settingsDest
