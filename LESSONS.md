@@ -245,3 +245,11 @@
 - **Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.**
 - **Test an undo instruction by executing it, not by matching its text.**
 - **A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.**
+
+## Issues 178-183 (v7.2.0, the review sees the work)
+
+- **Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.**
+- **Isolate a headless test session's whole home, not only its plugin: a scratch `HOME` is the complete fix.**
+- **Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.**
+- **A plugin CLI command run inside a project also edits that project's settings file.**
+- **A rewrite keyed on names must be tested on file names that contain those names.**
