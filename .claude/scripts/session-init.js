@@ -231,7 +231,7 @@ function sessionStart() {
         };
 
   // --- Plans ----------------------------------------------------------------
-  const { plans, newestPlan } = readPlans();
+  const { plans, newestPlan } = readPlans(cwd);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -247,17 +247,19 @@ function sessionStart() {
 // List plans/PLAN-*.md newest-first by mtime, each with its progress percentage,
 // a coarse status derived from the "Overall Progress" line the plan carries, and
 // the commit /execute started it from (#182). Shared by the session-start object
-// and by --scope, which consults the newest plan first (#184).
-function readPlans() {
+// (reads under the launch folder, as it always has) and by --scope, which consults
+// the newest plan first (#184) and reads under the git root, so a run from a
+// subfolder finds the same plan (review of #184, R7).
+function readPlans(base) {
   const PLANS_DIR = "plans";
   let plans = [];
   let newestPlan = null;
   try {
     const withMeta = fs
-      .readdirSync(path.join(cwd, PLANS_DIR))
+      .readdirSync(path.join(base, PLANS_DIR))
       .filter((f) => /^PLAN-.*\.md$/.test(f))
       .map((name) => {
-        const full = path.join(cwd, PLANS_DIR, name);
+        const full = path.join(base, PLANS_DIR, name);
         let progress = null;
         let startCommit = null;
         let mtime = 0;
@@ -680,7 +682,7 @@ function capUnpushed(head, root, { fullBase, baseFrom, baseRef }) {
 // it does not (the caller falls through to the unpushed source); { plan: null }
 // when there is no plan at all; { error } when git failed.
 function scopePlan(head, root) {
-  const { plans } = readPlans();
+  const { plans } = readPlans(root);
   if (plans.length === 0) return { plan: null };
   const newest = plans[0];
   const plan = { name: newest.name, startCommit: newest.startCommit };
@@ -723,7 +725,7 @@ function shippedMessage(plan) {
   const short = plan.startCommit.slice(0, 7);
   const n = plan.commits;
   return "The newest plan " + plan.name + " starts at " + short + " and all of its " + n + " commit" + (n === 1 ? "" : "s") +
-    " are already on the remote; /review " + short + "..HEAD reviews them.";
+    " are already on the remote; pass " + short + "..HEAD as the review's range to cover them.";
 }
 
 // The range's commits, files and line counts.

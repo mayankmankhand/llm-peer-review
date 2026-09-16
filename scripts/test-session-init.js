@@ -618,7 +618,7 @@ section('12. no argument: the newest plan\'s start commit (#184)', function () {
     dig(shipped.json, 'plan.commits') === 2 && dig(shipped.json, 'plan.startCommit') === b,
     brief(shipped) + ' ' + JSON.stringify(shipped.json.plan));
   check('the shipped plan\'s message names the range to pass and how many commits it holds',
-    typeof shipped.json.message === 'string' && shipped.json.message.indexOf('/review ' + b.slice(0, 7) + '..HEAD') !== -1 &&
+    typeof shipped.json.message === 'string' && shipped.json.message.indexOf(b.slice(0, 7) + '..HEAD') !== -1 && shipped.json.message.indexOf('/review') === -1 &&
     /\b2 commits\b/.test(shipped.json.message) && shipped.json.message.indexOf('PLAN-issue-9.md') !== -1,
     String(shipped.json.message));
 
@@ -683,6 +683,11 @@ section('12. no argument: the newest plan\'s start commit (#184)', function () {
   check('with no remote every commit after the start counts as unpushed: source "plan"',
     noRemote.json.source === 'plan' && dig(noRemote.json, 'range.commitCount') === 23 && dig(noRemote.json, 'plan.unpushed') === 23,
     brief(noRemote) + ' ' + JSON.stringify(noRemote.json.plan));
+
+  fs.mkdirSync(path.join(repo, 'sub'), { recursive: true });
+  const fromSub = scope(repo, undefined, { cwd: path.join(repo, 'sub') });
+  check('a run from a subfolder still finds the plan (review of #184, R7)',
+    fromSub.json.source === 'plan' && dig(fromSub.json, 'plan.name') === noRemote.json.plan.name, brief(fromSub));
 
   const bare = newRepo('no-plans');
   write(bare, 'a.txt', 'a\n');
