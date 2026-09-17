@@ -504,12 +504,13 @@ check('mutation: dropping one table row trips the drift assertion', droppedRow !
 // command host-cli.md tells Claude to run has its row, on both hosts.
 const liveRetired = read(live, 'seed/retired-permission-rows.txt').split(/\r?\n/).filter(l => l && !l.startsWith('#'));
 const NARROWED_ROWS = ['Bash(git config --get remote.origin.url)', 'Bash(npm install)'];
-const DROPPED_ROWS = ['Bash(git config *)', 'Bash(npm install *)', 'Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)', 'Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)'];
+const DROPPED_ROWS = ['Bash(git config *)', 'Bash(grep -q "^# Codebase Map$" CODEBASE_MAP.md.tmp)', 'Bash(grep -q "^## Module Guide$" CODEBASE_MAP.md.tmp)'];
 check('live: the seed carries the narrowed git config and npm install rows', NARROWED_ROWS.every(x => seedAllowRows.includes(x)), NARROWED_ROWS.filter(x => !seedAllowRows.includes(x)).join(', '));
 const broadSeedRows = seedAllowRows.filter(x => /^Bash\(git config(:\*| \*)\)$/.test(x) || /^Bash\(npm (install|i|ci)(:\*| \*)\)$/.test(x) || x.includes('CODEBASE_MAP.md.tmp'));
 check('live: the seed carries no broad git config or npm install row and no /index grep row', broadSeedRows.length === 0, broadSeedRows.join(', '));
 check('live: every row the seed dropped is on the retired list, and no seed row is', DROPPED_ROWS.every(x => liveRetired.includes(x)) && !seedAllowRows.some(x => liveRetired.includes(x)),
   DROPPED_ROWS.filter(x => !liveRetired.includes(x)).concat(seedAllowRows.filter(x => liveRetired.includes(x))).join(', '));
+check('live: Bash(npm install *) is not on the retired list, so upgrade never removes it from a project that adds packages (issue #198)', !liveRetired.includes('Bash(npm install *)'));
 const hostCommands = [...new Set([...read(REPO, '.claude/skills/shared/host-cli.md').matchAll(/`((?:gh|glab) (?:issue|pr|mr) [a-z]+)[^`]*`/g)].map(m => m[1]))];
 check('live: every gh and glab issue, PR and MR command in host-cli.md has its seed row', hostCommands.includes('glab mr list') && hostCommands.includes('gh issue create') && hostCommands.every(c => seedAllowRows.includes('Bash(' + c + ' *)')),
   hostCommands.filter(c => !seedAllowRows.includes('Bash(' + c + ' *)')).join(', ') + ' of ' + hostCommands.join(', '));

@@ -863,29 +863,6 @@ function readRetiredKeys(pluginRoot) {
   const lines = readLines(path.join(pluginRoot, 'seed', 'retired-permission-rows.txt'));
   return lines === null ? null : new Set(lines.filter(l => l !== '' && !l.startsWith('#')).map(permissionRowKey));
 }
-// Why a retired row was retired, as the group C-9 reports it in (issue #186).
-// One finding per group, so an owner who still needs one row (a project that adds
-// packages with `npm install <name>`) declines that group alone and the rest are
-// still removed. The groups follow the header of retired-permission-rows.txt; a
-// row a later release retires for a reason not listed here lands in 'toolkit-repo'.
-const RETIRED_GROUPS = [
-  { id: 'npm-install', test: (k) => k === 'Bash(npm install *)',
-    why: 'the broad npm install row, narrowed to plain `npm install` because `npm install <name>` can add any package (keep it if this project adds packages that way)' },
-  { id: 'git-config', test: (k) => k === 'Bash(git config *)',
-    why: 'the broad git config row, narrowed to the one read the toolkit runs (`git config --get remote.origin.url`)' },
-  { id: 'unscoped-skills', test: (k) => /^Skill\(/.test(k),
-    why: 'Skill rows without the tk: scope, which never match a plugin skill (the tk: rows replace them)' },
-  { id: 'copy-install-scripts', test: (k) => /\.claude\/scripts\//.test(k),
-    why: 'rows naming a script in the old copy-install .claude/scripts/ folder (plugin commands carry their own script permissions)' },
-  { id: 'browser-launchers', test: (k) => /^Bash\((?:open|xdg-open|explorer\.exe|powershell\.exe|wslpath|command -v pwsh)\b/.test(k),
-    why: 'browser launcher rows Claude never runs directly (the artifact opener script runs them itself)' },
-  { id: 'toolkit-repo', test: () => true,
-    why: 'grants only the toolkit\'s own repository used, and old checks no command runs any more' },
-];
-function retiredGroup(row) {
-  const k = permissionRowKey(row);
-  return RETIRED_GROUPS.find(g => g.test(k));
-}
 // The rows of the project's own a migration removed although their script
 // stayed (C-9, issue #179). Only a record's `deadPermissions` list names the
 // rows a migration removed: 7.0.0 and 7.0.1 wrote one (7.0.0 listed every
@@ -1163,17 +1140,14 @@ function main() {
         const owned = new Set(piecesUnder(P('.claude')));
         const ownRow = (p) => { const m = /^Skill\(([a-z0-9-]+)(:\*)?\)$/.exec(p); return m !== null && owned.has(m[1]); };
         const still = lists.allow.filter(p => retiredKeys.has(permissionRowKey(p)) && !ownRow(p));
-        // One finding per retire reason (issue #186): a single all-rows finding
-        // died whole when the owner needed one row, and every stale row stayed.
-        for (const g of RETIRED_GROUPS) {
-          const rows = still.filter(p => retiredGroup(p) === g);
-          if (!rows.length) continue;
-          emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':retired-rows:' + g.id).key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
-            what: 'Should fix. ' + LOCAL_SETTINGS + ' still carries ' + rows.length + ' permission row' + (rows.length === 1 ? '' : 's') + ' the toolkit seed retired: ' + g.why + '.',
-            fix: 'remove the listed rows from ' + LOCAL_SETTINGS + ', unless the project still needs one of them for work of its own (then keep this group and say why); the current seed does not carry them', since: c.since,
-            fields: [{ label: 'Retired rows', value: rows.join(' ; ') }],
-            receipt: { check: allowRowsCheck('retired', rows.map(p => [p, ''])), expect: rows.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
-        }
+        // One finding for every retired row (issue #198 undid #186's per-reason
+        // groups). `Bash(npm install *)`, the one row a project might still need,
+        // is not on the retired list at all, so nothing here asks to remove it.
+        if (still.length) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':retired-rows').key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
+          what: 'Should fix. ' + LOCAL_SETTINGS + ' still carries ' + still.length + ' permission row' + (still.length === 1 ? '' : 's') + ' the toolkit seed retired: grants for the toolkit\'s own repository or rows that no longer match anything.',
+          fix: 'remove the listed rows from ' + LOCAL_SETTINGS + '; the current seed does not carry them and the plugin commands carry their own permissions', since: c.since,
+          fields: [{ label: 'Retired rows', value: still.join(' ; ') }],
+          receipt: { check: allowRowsCheck('retired', still.map(p => [p, ''])), expect: still.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
       }
       // (c) acceptEdits: a question, never an auto-fix, worded for where the key
       //     sits. The 7.0.x seed wrote it at the top level, where Claude Code

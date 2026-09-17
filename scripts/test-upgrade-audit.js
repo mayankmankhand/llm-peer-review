@@ -455,19 +455,15 @@ check('the range is 7.0.0 -> 7.1.0 with C-7, C-9, C-10 and C-11 each in it', /7\
 check('C-7 reports the 7.0.0 rules stamp', by('C-7').length === 1 && /stamped 7\.0\.0/.test(by('C-7')[0].what));
 const c9Missing = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Missing rows'));
 const c9RetiredAll = by('C-9').filter(f => (f.fields || []).some(x => x.label === 'Retired rows'));
-// The grouped findings read as one, for the checks on which rows are reported at all.
-const c9Retired = c9RetiredAll.length ? { fields: [{ label: 'Retired rows', value: c9RetiredAll.map(f => f.fields.find(x => x.label === 'Retired rows').value).join(' ; ') }],
-  fix: c9RetiredAll.every(f => /remove/.test(f.fix)) ? c9RetiredAll[0].fix : '' } : null;
+const c9Retired = c9RetiredAll.length === 1 ? c9RetiredAll[0] : null;
 const c9Mode = by('C-9').find(f => /defaultMode/.test(f.what));
 check('C-9 reports the missing toolkit row, fixed by re-running /tk:setup', !!c9Missing && c9Missing.fields[0].value === MISSING_ROW && /\/tk:setup/.test(c9Missing.fix));
 check('C-9 reports exactly the retired rows the project still has', !!c9Retired && c9Retired.fields[0].value.split(' ; ').sort().join('\n') === RETIRED_KEPT.slice().sort().join('\n') && /remove/.test(c9Retired.fix), c9Retired && c9Retired.fields[0].value);
 check('C-9 leaves the retired Skill(playground) rows alone (the project owns a playground skill) and still reports the unowned Skill(review)', !!c9Retired && !/playground/.test(c9Retired.fields[0].value) && c9Retired.fields[0].value.split(' ; ').includes('Skill(review)') && !r.findings.some(f => f.id !== 'C-9' && (f.fields || []).some(x => /playground/.test(x.value))), c9Retired && c9Retired.fields[0].value);
-check('C-9 reports the retired rows one finding per retire reason (issue #186): Skill(review) alone under unscoped-skills, the three maintainer rows under toolkit-repo',
-  JSON.stringify(c9RetiredAll.map(f => f.key.replace(/^.*:retired-rows:/, '') + '=' + f.fields[0].value.split(' ; ').length).sort()) === JSON.stringify(['toolkit-repo=3', 'unscoped-skills=1'])
-  && c9RetiredAll.find(f => /:unscoped-skills$/.test(f.key)).fields[0].value === 'Skill(review)', JSON.stringify(c9RetiredAll.map(f => [f.key, f.fields[0].value])));
+check('C-9 reports every retired row in one finding (issue #198)', c9RetiredAll.length === 1 && /:retired-rows$/.test(c9RetiredAll[0].key), JSON.stringify(c9RetiredAll.map(f => f.key)));
 check('C-9 reports the seed ask rows the 7.0.0 project lacks as their own Should fix finding (issue #192)', SEED_ASK.length > 0 && JSON.stringify((by('C-9').find(f => /:missing-ask-rows$/.test(f.key)) || { fields: [{ value: '' }] }).fields[0].value.split(' ; ')) === JSON.stringify(SEED_ASK)
   && by('C-9').find(f => /:missing-ask-rows$/.test(f.key)).severity === 'warn', JSON.stringify(by('C-9').map(f => f.key)));
-check('C-9 reports acceptEdits as its own finding, a question and never an auto-fix', !!c9Mode && !c9RetiredAll.includes(c9Mode) && c9Mode !== c9Missing && /question for the user/.test(c9Mode.fix) && /never an auto-fix/.test(c9Mode.fix) && by('C-9').length === 5, JSON.stringify(by('C-9').map(f => f.key)));
+check('C-9 reports acceptEdits as its own finding, a question and never an auto-fix', !!c9Mode && !c9RetiredAll.includes(c9Mode) && c9Mode !== c9Missing && /question for the user/.test(c9Mode.fix) && /never an auto-fix/.test(c9Mode.fix) && by('C-9').length === 4, JSON.stringify(by('C-9').map(f => f.key)));
 {
   const expectLine = read(path.join(STALE, '.claude/settings.local.json')).split('\n').findIndex(l => /"defaultMode"/.test(l)) + 1;
   check('the top-level acceptEdits is worded as a leftover that may have no effect, to delete or move under permissions', !!c9Mode && /top-level/.test(c9Mode.what) && /leftover key an older toolkit seed wrote/.test(c9Mode.what) && /may have no effect/.test(c9Mode.what) && /delete the leftover key/.test(c9Mode.fix) && /move it under "permissions"/.test(c9Mode.fix) && c9Mode.file.line === expectLine, c9Mode && (c9Mode.what + ' / ' + c9Mode.fix + ' / ' + c9Mode.file.line));
@@ -1360,7 +1356,7 @@ const editJson = (dir, rel, fn) => { const abs = path.join(dir, rel); const j = 
   dir = path.join(TMP, 'contrast-retired-deny');
   write(dir, '.claude/.toolkit-state.json', STATE_701);
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(xdg-open *)']) } }, null, 2) + '\n');
-  contrast('C-9 a retired row, moved to deny', dir, f => /:retired-rows:browser-launchers$/.test(f.key),
+  contrast('C-9 a retired row, moved to deny', dir, f => /:retired-rows$/.test(f.key),
     () => 'grep -n -F -e ' + shq(JSON.stringify('Bash(xdg-open *)')) + ' -- .claude/settings.local.json',
     () => editJson(dir, '.claude/settings.local.json', j => { j.permissions.allow = j.permissions.allow.filter(x => x !== 'Bash(xdg-open *)'); j.permissions.deny = ['Bash(xdg-open *)']; }));
 
@@ -1470,30 +1466,28 @@ const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7,
   check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
 }
 
-// --- 4m. retired rows by reason, ask rows, history lines (issues #186, #187, #192) ----
-console.log('\n4m. retired rows by reason, seed ask rows, history lines (issues #186, #187, #192)');
+// --- 4m. npm install kept, ask rows, history lines (issues #198, #187, #192) ----
+console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, #187, #192)');
 {
-  // #186: a project that adds packages with `npm install <name>` keeps that row
-  // and still has its other retired rows removed in the same run.
-  const dir = path.join(TMP, 'retired-by-reason');
+  // #198: retired rows are one finding and are simply removed; `Bash(npm install *)`
+  // is not on the retired list, so a project that adds packages keeps it.
+  const dir = path.join(TMP, 'retired-one-finding');
   const OTHER = ['Bash(xdg-open *)', 'Bash(git config *)', 'Skill(review)'];
-  check('fixture: Bash(npm install *) and the other rows are in the shipped retired list', ['Bash(npm install *)'].concat(OTHER).every(x => RETIRED.includes(x)));
+  check('fixture: the other rows are in the shipped retired list and Bash(npm install *) is not', OTHER.every(x => RETIRED.includes(x)) && !RETIRED.includes('Bash(npm install *)'));
   write(dir, '.claude/.toolkit-state.json', STATE_701);
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(npm install *)'], OTHER), ask: SEED_ASK } }, null, 2) + '\n');
   const res = audit(dir);
-  const retired = res.findings.filter(f => /:retired-rows:/.test(f.key));
-  const npm = retired.find(f => /:retired-rows:npm-install$/.test(f.key));
-  check('#186 Bash(npm install *) is a finding of its own, apart from the other retired rows', !!npm && npm.fields[0].value === 'Bash(npm install *)' && retired.length === 4
-    && retired.filter(f => f !== npm).every(f => !f.fields[0].value.includes('npm install')), JSON.stringify(retired.map(f => [f.key, f.fields[0].value])));
-  check('#186 the npm group says why it was retired and when to keep it', !!npm && /keep it if this project adds packages/.test(npm.what) && /unless the project still needs one of them/.test(npm.fix), npm && npm.what);
-  const fixed = applyFixes(dir, res.findings.filter(f => f !== npm));
+  const retired = res.findings.filter(f => /:retired-rows/.test(f.key));
+  check('#198 every retired row is in one finding, and Bash(npm install *) is not in it', retired.length === 1 && /:retired-rows$/.test(retired[0].key)
+    && retired[0].fields[0].value.split(' ; ').sort().join('|') === OTHER.slice().sort().join('|'), JSON.stringify(retired.map(f => [f.key, f.fields[0].value])));
+  check('#198 no finding names Bash(npm install *)', !res.findings.some(f => JSON.stringify(f).includes('npm install *')), JSON.stringify(res.findings.map(f => f.key)));
+  const fixed = applyFixes(dir, res.findings);
   const after = audit(dir);
-  check('#186 with the npm group declined and every other finding fixed, one run removes the other retired rows and only the npm finding is left',
-    fixed.length === retired.length - 1 && after.findings.length === 1 && after.findings[0].key === npm.key
-    && JSON.parse(read(path.join(dir, '.claude', 'settings.local.json'))).permissions.allow.includes('Bash(npm install *)')
-    && OTHER.every(x => !JSON.parse(read(path.join(dir, '.claude', 'settings.local.json'))).permissions.allow.includes(x)), JSON.stringify(after.findings.map(f => f.key)));
+  const allowAfter = JSON.parse(read(path.join(dir, '.claude', 'settings.local.json'))).permissions.allow;
+  check('#198 one fix run removes every retired row, keeps Bash(npm install *), and leaves nothing to report',
+    fixed.length === res.findings.length && after.findings.length === 0 && allowAfter.includes('Bash(npm install *)') && OTHER.every(x => !allowAfter.includes(x)), JSON.stringify(after.findings.map(f => f.key)));
   const disagree = receiptsAgree(dir, res, after);
-  check('#186   every receipt agrees with that rerun', disagree.length === 0, disagree.join(' | '));
+  check('#198   every receipt agrees with that rerun', disagree.length === 0, disagree.join(' | '));
 }
 {
   // #192: seed ask rows the project lacks, reported and fixed into the ask list;
