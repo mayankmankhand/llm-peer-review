@@ -1,6 +1,6 @@
 # Toolkit Reference
 
-<!-- Toolkit version: 7.3.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
+<!-- Toolkit version: 7.3.1 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->
 
 The long manual: workflow, command table, plans, map, lessons, ledger, design, HTML outputs, command-specific rules, subagent strategy, git and worktree conventions, self-service, versions and updates, permissions. Since v7.0.0 (issue #167) it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`, rather than sitting in every session's context; the short always-on rules are the seeded `.claude/rules/toolkit.md`, which points here. The copy the plugin ships writes every toolkit path as `${CLAUDE_PLUGIN_ROOT}/...`: that variable is the plugin's own folder, the one the stable path above links to, so a plugin command resolves it and a reader replaces it with that path; a copy-install's manual names the project's own files instead.
 
