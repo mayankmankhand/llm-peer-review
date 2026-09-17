@@ -265,16 +265,18 @@ const PATTERNS = [
   // patterns above still scan inside placeholder text, so a real sk- body under
   // a "your" name is still caught.
   //
-  // What is detected is otherwise unchanged: the (?=[^"']{8,}["']) lookahead is
-  // the old rule, under which the first quote of either kind ends the value. The
-  // rest of the match, to the SAME quote that opened the value (a backslash
-  // escapes one character), only decides what mask() hides: the old match
-  // stopped at an apostrophe inside "Tr0ub4dor's...", and the report printed
-  // the rest of the secret. A value with the other quote inside its first 8
-  // characters is still not detected; widening that is a separate change.
+  // What is detected: 8 or more characters, then a closing quote, read two ways
+  // and either one is enough. The old rule, (?=[^"']{8,}["']), lets a quote of
+  // either kind end the value, so it missed "it's-a-long-real-secret" (issue
+  // #191). The added rule runs the value to the SAME quote that opened it (a
+  // backslash escapes one character), which catches that shape. The old rule is
+  // kept beside it rather than replaced, so every line it flagged is still a hit,
+  // among them a value closed by the other quote with no matching quote after.
+  // The rest of the match, to the same quote, only decides what mask() hides:
+  // the tail after an apostrophe is never printed (#178).
   {
     name: "secret-assignment",
-    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["'])(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/i,
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["']|(?:\\[\s\S]|(?!\2)[^\\]){8,}\2)(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/i,
     // What mask() hides of a match: the value only. Group 1 is the key through
     // the opening quote and group 3 the closing quote (empty when the line ends
     // first), so the key, the operator and both quotes stay readable.
@@ -798,6 +800,12 @@ const { commits, destinations, summary } = outgoingCommits(process.argv.slice(2)
 // (issue #178): a range is only trustworthy when a reader can see it.
 function reportScanned() {
   process.stderr.write("pre-push-check: scanned " + commits.length + " commit" + (commits.length === 1 ? "" : "s") + " for " + summary + "\n");
+  // --remote with no ref lines still passes (issue #190): git sends none for a
+  // push that updates nothing. A caller that sent nothing by mistake passes the
+  // same way, so the run says plainly that nothing was checked.
+  if (destinations.length === 0 && summary.endsWith("(no refs pushed)")) {
+    process.stderr.write("pre-push-check: warning: no ref lines arrived on stdin, so nothing was scanned. Git sends none when a push updates nothing; any other caller must pipe git's pre-push lines in.\n");
+  }
 }
 if (commits.length === 0) {
   reportScanned();

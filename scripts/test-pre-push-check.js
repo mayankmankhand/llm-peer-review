@@ -829,6 +829,33 @@ function secretMaskTests() {
   cleanup(sb);
 }
 
+// --- 12c. a value holding the other quote character is detected (issue #191) ----
+// The v7.1.0 lookahead needed 8 characters that are not a quote of EITHER kind,
+// so a value with the other quote inside its first 8 characters was never a hit.
+// Every fixture below is first checked to be one that pattern missed, so none of
+// them could pass without the fix; both quote styles are covered.
+function otherQuoteTests() {
+  console.log('\n12c. a value holding the other quote character is detected (issue #191)');
+  const lines = [
+    assign('password', ' = ', DQ, 'it' + SQ + 's-a-long-real-secret'),
+    assign('api_key', ': ', SQ, 'ab' + DQ + 'cdefghijklmnop'),
+  ];
+  const missed = lines.filter((l) => OLD_SECRET_ASSIGNMENT.test(l));
+  check('fixture: the v7.1.0 pattern missed every line here', missed.length === 0, missed.join(' | '));
+  const sb = makeRepo('other-quote');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'src/config.js', lines.concat(['']).join('\n'), 'add two secrets holding the other quote');
+    const r = run(sb.repo);
+    check('a double-quoted value holding an apostrophe is a hit', r.status === 1 && hitOn(r.stdout, 'secret-assignment', 'src/config.js', 1), r.stdout.slice(0, 600));
+    check('a single-quoted value holding a double quote is a hit', r.status === 1 && hitOn(r.stdout, 'secret-assignment', 'src/config.js', 2), r.stdout.slice(0, 600));
+    check('neither value is printed in the report', r.stdout.indexOf('s-a-long-real-secret') === -1 && r.stdout.indexOf('cdefghijklmnop') === -1, r.stdout.slice(0, 600));
+  } catch (e) {
+    check('other-quote test set up a repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
 // --- 13. the scan covers what the destination lacks (issue #178) -----------------
 // The script used to read no arguments and scan @{u}..HEAD, so a push of HEAD
 // anywhere but its upstream published commits nobody scanned. Each case below
@@ -898,6 +925,7 @@ function rangeTopicTests() {
 
     r = runWith(sb.repo, ['--remote', 'origin'], 'refs/heads/topic ' + head + ' refs/heads/topic ' + topic + '\n');
     check('ref line to the upstream itself: only the clean commit is new there, exit 0', r.status === 0 && r.stdout === '' && /scanned 1 commit for origin refs\/heads\/topic/.test(r.stderr), show(r));
+    check('a real ref line prints no empty-input warning (issue #190)', r.stderr.indexOf('no ref lines arrived') === -1, show(r));
 
     r = runWith(sb.repo, ['--remote', 'origin'], '(delete) ' + ZERO + ' refs/heads/develop ' + develop + '\n');
     check('a deletion alone publishes nothing: exit 0, stderr says it was skipped',
@@ -907,6 +935,7 @@ function rangeTopicTests() {
 
     r = runWith(sb.repo, ['--remote', 'origin'], '');
     check('no ref lines at all: nothing is pushed, exit 0, stderr says so', r.status === 0 && r.stdout === '' && r.stderr.indexOf('scanned 0 commits for origin (no refs pushed)') !== -1, show(r));
+    check('no ref lines at all: stderr warns that nothing was scanned, still exit 0 (issue #190)', r.status === 0 && r.stderr.indexOf('pre-push-check: warning: no ref lines arrived on stdin, so nothing was scanned.') !== -1, show(r));
 
     r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/develop ' + 'e'.repeat(40) + '\n');
     check('a remote sha this clone lacks: exit 2 with "fetch first", never scanned as a new ref', r.status === 2 && r.stdout === '' && /Fetch first/.test(r.stderr), show(r));
@@ -1076,6 +1105,7 @@ versionGuardTests();
 helperIdentityTests();
 placeholderTests();
 secretMaskTests();
+otherQuoteTests();
 rangeTopicTests();
 rangeLocalUpstreamTests();
 rangeSecondRemoteTests();
