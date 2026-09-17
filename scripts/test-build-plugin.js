@@ -471,9 +471,9 @@ const liveSeedAllow = new Set(JSON.parse(read(live, 'seed/settings.local.json'))
 const liveScriptRules = [...new Set(walkFiles(live).filter(f => f.endsWith('.md'))
   .flatMap(f => fs.readFileSync(f, 'utf8').match(/"Bash\((?:(?:echo|cat) \* \| )?(?:node|bash) \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[a-z0-9-]+\.(?:js|sh)(?: \*)?\)"/g) || [])
   .map(x => JSON.parse(x)))];
-const liveSeedGaps = liveScriptRules.flatMap(r => ['*/.claude/plugins/cache/llm-peer-review/tk/*', '~/.claude/plugins/data/tk-llm-peer-review/current']
+const liveSeedGaps = liveScriptRules.flatMap(r => ['<tk-plugin-cache>/*', '~/.claude/plugins/data/tk-llm-peer-review/current']
   .map(root => r.split('${CLAUDE_PLUGIN_ROOT}').join(root)).filter(row => !liveSeedAllow.has(row)));
-check('live: the seed allows every script rule a command or skill grants, in the cache and the stable path spelling (#185, #188)', liveScriptRules.length >= 20 && liveSeedGaps.length === 0, liveSeedGaps.join('; '));
+check('live: the seed allows every script rule a command or skill grants, in the cache-placeholder and the stable path spelling (#185, #188)', liveScriptRules.length >= 20 && liveSeedGaps.length === 0, liveSeedGaps.join('; '));
 const liveHook = JSON.parse(read(live, 'hooks/hooks.json')).hooks.SessionStart[0].hooks[0].command;
 check('live: the hook runs node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', liveHook === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', liveHook);
 check('live: scripts/session-start.js and scripts/env-local.js are emitted', exists(live, 'scripts/session-start.js') && exists(live, 'scripts/env-local.js'));

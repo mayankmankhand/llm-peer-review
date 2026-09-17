@@ -1722,6 +1722,37 @@ console.log('\n4g. seed ask rows merge into the ask list (issue #192)');
   fs.rmSync(tmp92, { recursive: true, force: true });
 }
 
+// --- 4h. plugin cache rows get this machine's folder (7.3.1 review, R1) ------------
+// A leading wildcard (`node */.claude/plugins/cache/...`) also matched inline code
+// placed before a fake path, so the seed names the cache folder with a placeholder
+// and setup fills in the real one. Outside the cache the rows are left out.
+console.log('\n4h. plugin cache rows are written with this machine\'s cache folder (7.3.1 review, R1)');
+{
+  const tmpR1 = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-r1-'));
+  const cacheRoot = path.join(tmpR1, 'home', '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '7.3.1');
+  fs.cpSync(pluginRoot, cacheRoot, { recursive: true });
+  // The fixture plugin's seed is a stand-in; these checks need the real seed's rows.
+  const realSeed = fs.readFileSync(path.join(__dirname, '..', 'seed', 'settings.local.json'), 'utf8');
+  write(cacheRoot, 'seed/settings.local.json', realSeed);
+  const outsideRoot = path.join(tmpR1, 'plugin-outside');
+  fs.cpSync(cacheRoot, outsideRoot, { recursive: true });
+  const seedRows = JSON.parse(realSeed).permissions.allow;
+  const tokenRows = seedRows.filter(r => r.includes('<tk-plugin-cache>'));
+  const folder = path.dirname(cacheRoot).split(path.sep).join('/');
+  const projR1 = (name) => { const d = path.join(tmpR1, name); fs.mkdirSync(d); initRepo(d); write(d, 'README.md', '# app\n'); commitAll(d, 'init'); return d; };
+  repo = projR1('in-cache');
+  r = run(repo, cacheRoot);
+  let allow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+  check('R1 fixture: the seed carries the placeholder rows', tokenRows.length >= 20);
+  check('R1 from the cache, every placeholder row is written with this machine\'s cache folder in front', r.status === 0 && tokenRows.every(t => allow.includes(t.split('<tk-plugin-cache>').join(folder))), r.out.slice(0, 400));
+  check('R1 no written row keeps the placeholder or starts node or bash with a wildcard', !allow.some(x => x.includes('<tk-plugin-cache>') || /^Bash\((?:(?:echo|cat) \* \| )?(?:node|bash) \*/.test(x)), JSON.stringify(allow.filter(x => x.includes('plugins/cache'))).slice(0, 300));
+  repo = projR1('outside-cache');
+  r = run(repo, outsideRoot);
+  allow = JSON.parse(read(repo, '.claude/settings.local.json')).permissions.allow;
+  check('R1 from a plugin root outside the cache, no cache row is written', r.status === 0 && !allow.some(x => x.includes('plugins/cache') || x.includes('<tk-plugin-cache>')) && allow.some(x => x.includes('/plugins/data/tk-llm-peer-review/current/')), r.out.slice(0, 400));
+  fs.rmSync(tmpR1, { recursive: true, force: true });
+}
+
 console.log('\n5. a project that is not a git repository');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-'));
 write(repo, 'README.md', '# app\n');

@@ -131,7 +131,9 @@ const TOOLKIT_REPO_URL = 'https://github.com/mayankmankhand/llm-peer-review';
 // as `Bash(node .claude/scripts/our-report.js:*)`, and reading that name as
 // `our-report.js:` made a kept script's row look dead.
 const LEGACY_DEAD_PERMISSION = [
-  /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
+  // An old copy-install's absolute browse.js pipe row. Not a plugin cache row
+  // (7.3.1 review, R1): those carry this machine's cache folder and are live.
+  /^Bash\((echo|cat) \* \| node \/(?![^)]*\/plugins\/cache\/[^/)]+\/tk\/\*\/scripts\/browse\.js \*\)$)[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
 function deadPermission(row, exists) {
@@ -214,6 +216,30 @@ function writeOfferedRows(file, keys) {
     try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* nothing left to clean */ }
     return false;
   }
+}
+// The plugin's own script rows (issues #185, #188, and the 7.3.1 review, R1).
+// A plugin command types its scripts at the path ${CLAUDE_PLUGIN_ROOT} expands
+// to, the versioned cache folder, so the seed names that folder with the
+// placeholder <tk-plugin-cache>, which stands for the folder that holds every
+// installed tk version. It is filled in with this machine's own folder, never a
+// leading wildcard: a row starting `node */...` also matched
+// `node -e "<code>" /.../scripts/x.js`, so inline code ran unasked (measured).
+// With the full folder in front, only a command that runs a file inside it
+// matches. Returns the rows with the placeholder filled in, and drops those rows
+// when the plugin does not run from the cache (a --plugin-dir build), where no
+// folder can be named safely.
+const PLUGIN_CACHE_MARK = '<tk-plugin-cache>';
+function pluginCacheFolder(pluginRoot) {
+  const root = typeof pluginRoot === 'string' ? pluginRoot.replace(/[\\/]+$/, '') : '';
+  const m = /^(.*[\\/]plugins[\\/]cache[\\/][^\\/]+[\\/]tk)[\\/][^\\/]+$/.exec(root);
+  return m === null ? null : m[1].split('\\').join('/');
+}
+function fillPluginCache(rows, pluginRoot) {
+  const folder = pluginCacheFolder(pluginRoot);
+  return rows.filter(r => typeof r === 'string').flatMap(r => {
+    if (!r.includes(PLUGIN_CACHE_MARK)) return [r];
+    return folder === null ? [] : [r.split(PLUGIN_CACHE_MARK).join(folder)];
+  });
 }
 // <<< offered permission rows <<<
 // The project script a permission row runs, as a plain project-relative path
@@ -1099,7 +1125,7 @@ function main() {
       const seed = readJson(path.join(pluginRoot, 'seed', 'settings.local.json'), null);
       if (seed === null) notes.push(c.id + ': no shipped seed settings under the plugin root, missing rows not checked');
       else {
-        const seedAllow = (seed.permissions && Array.isArray(seed.permissions.allow) ? seed.permissions.allow : [])
+        const seedAllow = fillPluginCache(seed.permissions && Array.isArray(seed.permissions.allow) ? seed.permissions.allow : [], pluginRoot)
           .filter(p => typeof p === 'string' && !deadPermission(p, exists));
         const seedKeys = new Set();
         // A seed row is reported only when no list holds it and it was never offered here.

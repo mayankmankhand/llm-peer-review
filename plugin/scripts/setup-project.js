@@ -186,7 +186,9 @@ const KEEP_ON_MIGRATION = ['.gitattributes', 'artifacts/README.md'];
 // names (`rootScripts`): projects commonly own a scripts/ folder, and a row for
 // any other script there is the project's own and never touched.
 const LEGACY_DEAD_PERMISSION = [
-  /^Bash\((echo|cat) \* \| node \/[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
+  // An old copy-install's absolute browse.js pipe row. Not a plugin cache row
+  // (7.3.1 review, R1): those carry this machine's cache folder and are live.
+  /^Bash\((echo|cat) \* \| node \/(?![^)]*\/plugins\/cache\/[^/)]+\/tk\/\*\/scripts\/browse\.js \*\)$)[^)]*\/(\.claude\/)?scripts\/browse\.js \*\)$/,
   /^Skill\(review-commands(:\*)?\)$/,
 ];
 const ROOT_SCRIPT_ROW = /(?:^|[\s(])(?:\.\/)?scripts\/([^\s)'"*\/]+?):?(?=[\s)'"*]|$)/;
@@ -271,6 +273,30 @@ function writeOfferedRows(file, keys) {
     try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* nothing left to clean */ }
     return false;
   }
+}
+// The plugin's own script rows (issues #185, #188, and the 7.3.1 review, R1).
+// A plugin command types its scripts at the path ${CLAUDE_PLUGIN_ROOT} expands
+// to, the versioned cache folder, so the seed names that folder with the
+// placeholder <tk-plugin-cache>, which stands for the folder that holds every
+// installed tk version. It is filled in with this machine's own folder, never a
+// leading wildcard: a row starting `node */...` also matched
+// `node -e "<code>" /.../scripts/x.js`, so inline code ran unasked (measured).
+// With the full folder in front, only a command that runs a file inside it
+// matches. Returns the rows with the placeholder filled in, and drops those rows
+// when the plugin does not run from the cache (a --plugin-dir build), where no
+// folder can be named safely.
+const PLUGIN_CACHE_MARK = '<tk-plugin-cache>';
+function pluginCacheFolder(pluginRoot) {
+  const root = typeof pluginRoot === 'string' ? pluginRoot.replace(/[\\/]+$/, '') : '';
+  const m = /^(.*[\\/]plugins[\\/]cache[\\/][^\\/]+[\\/]tk)[\\/][^\\/]+$/.exec(root);
+  return m === null ? null : m[1].split('\\').join('/');
+}
+function fillPluginCache(rows, pluginRoot) {
+  const folder = pluginCacheFolder(pluginRoot);
+  return rows.filter(r => typeof r === 'string').flatMap(r => {
+    if (!r.includes(PLUGIN_CACHE_MARK)) return [r];
+    return folder === null ? [] : [r.split(PLUGIN_CACHE_MARK).join(folder)];
+  });
 }
 // <<< offered permission rows <<<
 
@@ -870,7 +896,7 @@ function main() {
   // settings.local.json: baseline merge minus the script entries, dead entries out
   const seedLocal = readJson(path.join(seedDir, 'settings.local.json'), { permissions: { allow: [] } });
   const willExist = (rel) => fs.existsSync(P(rel)) && !willRemove.has(rel);
-  const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => typeof p === 'string' && !deadPermission(p, willExist, ROOT_SCRIPTS));
+  const seedAllow = fillPluginCache((seedLocal.permissions && seedLocal.permissions.allow) || [], pluginRoot).filter(p => typeof p === 'string' && !deadPermission(p, willExist, ROOT_SCRIPTS));
   // Seed ask rows (issue #192): Claude Code asks before these even when an allow
   // row matches, so the broad `Bash(git push *)` never lets a force push through
   // unasked. They merge exactly like allow rows, into the project's ask list.

@@ -1174,7 +1174,7 @@ const recordedQuiet = (res) => res.status === 0 && missingOf(res) === null && JS
   dir = offeredCase('no-settings', { noSettings: true, record: SEED_ALLOW.concat([REPORT_ROW, LINT_ROW]) });
   res = audit(dir);
   const noFile = res.findings.find(f => f.id === 'C-9' && /has no \.claude\/settings\.local\.json/.test(f.what));
-  check('with no settings.local.json the record filters nothing: every seed row is counted as not granted, re-running /tk:setup is the fix, and both lost rows are reported', !!noFile && noFile.what.includes('none of the toolkit\'s ' + SEED_ALLOW.length + ' permission rows are granted') && /re-run \/tk:setup/.test(noFile.fix) && JSON.stringify(lostOf(res)) === JSON.stringify([REPORT_ROW, LINT_ROW]), JSON.stringify(res.findings.filter(f => f.id === 'C-9').map(f => f.what)));
+  check('with no settings.local.json the record filters nothing: every seed row is counted as not granted, re-running /tk:setup is the fix, and both lost rows are reported', !!noFile && noFile.what.includes('none of the toolkit\'s ' + SEED_ALLOW.filter(x => !x.includes('<tk-plugin-cache>')).length + ' permission rows are granted') && /re-run \/tk:setup/.test(noFile.fix) && JSON.stringify(lostOf(res)) === JSON.stringify([REPORT_ROW, LINT_ROW]), JSON.stringify(res.findings.filter(f => f.id === 'C-9').map(f => f.what)));
   dir = offeredCase('no-git', { noGit: true });
   res = audit(dir);
   check('outside a git repository there is no record: every row is reported', JSON.stringify(missingOf(res)) === JSON.stringify([MISSING_ROW]) && JSON.stringify(lostOf(res)) === JSON.stringify([REPORT_ROW, LINT_ROW]) && !fs.existsSync(path.join(dir, '.git')));
@@ -1532,6 +1532,27 @@ console.log('\n4m. retired rows by reason, seed ask rows, history lines (issues 
     JSON.stringify(c11.map(x => x.file.relPath + ':' + x.file.line)) === JSON.stringify(['CLAUDE.md:8', 'CLAUDE.md:12']), JSON.stringify(c11.map(x => x.file.relPath + ':' + x.file.line)));
   bad = allReceiptsShow(dir, c11);
   check('#187   both receipts show their line', bad.length === 0, bad.join(' | '));
+}
+
+{
+  // 7.3.1 review, R1: the plugin cache rows are filled in with this machine's
+  // own cache folder. From a plugin root in the cache they are reported missing
+  // with that folder in front; from a root outside the cache they are left out.
+  const cacheRoot = path.join(TMP, 'home-r1', '.claude', 'plugins', 'cache', 'llm-peer-review', 'tk', '7.3.1');
+  fs.cpSync(PLUGIN, cacheRoot, { recursive: true });
+  const folder = path.dirname(cacheRoot).split(path.sep).join('/');
+  const dir = path.join(TMP, 'cache-rows');
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.filter(x => !x.includes('<tk-plugin-cache>')), ask: SEED_ASK } }, null, 2) + '\n');
+  const res = audit(dir, [], { pluginRoot: cacheRoot });
+  const missing = fieldOf(res, 'C-9', 'Missing rows') || [];
+  const tokenRows = SEED_ALLOW.filter(x => x.includes('<tk-plugin-cache>'));
+  check('R1 fixture: the seed carries plugin cache rows under the placeholder, and none with a leading wildcard', tokenRows.length >= 20 && !SEED_ALLOW.some(x => /^Bash\((?:(?:echo|cat) \* \| )?(?:node|bash) \*/.test(x)));
+  check('R1 from a plugin root in the cache, C-9 reports each cache row with this machine\'s folder in front', missing.length === tokenRows.length && tokenRows.every(t => missing.includes(t.split('<tk-plugin-cache>').join(folder))) && !missing.some(x => x.includes('<tk-plugin-cache>')), JSON.stringify(missing.slice(0, 3)));
+  bad = allReceiptsShow(dir, res.findings.filter(f => f.id === 'C-9'));
+  check('R1   its receipt runs and lists those rows', bad.length === 0, bad.join(' | '));
+  const outside = audit(dir);
+  check('R1 from a plugin root outside the cache, the cache rows are neither reported nor granted', fieldOf(outside, 'C-9', 'Missing rows') === null, JSON.stringify(fieldOf(outside, 'C-9', 'Missing rows')));
 }
 
 // --- 5. parser mechanics the real file does not exercise ----------------------------
