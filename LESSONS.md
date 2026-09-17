@@ -261,3 +261,9 @@
 - **Generate a long report from parts with one script; never append into a file that is also its own source.**
 - **A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.**
 - **Read the skeptic's split lines: a refuted row often carries the real defect in a narrower claim.**
+
+## Issues 185-194 (7.3.1, the follow-ups)
+
+- **A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.**
+- **A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.**
+- **Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.**
