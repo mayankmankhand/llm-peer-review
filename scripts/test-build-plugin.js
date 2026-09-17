@@ -462,6 +462,18 @@ const liveGuard = walkFiles(live).filter(f => f.endsWith('.md')).flatMap(f => li
 check('live: no emitted markdown holds an unquoted plugin root in any inline command', liveGuard.length === 0, liveGuard.join('; '));
 const liveBareFamily = liveMd.filter(f => BARE_FAMILY.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
 check('live: no emitted markdown names a bare /review-* or /ask-* family', liveBareFamily.length === 0, liveBareFamily.join(', '));
+// Issues #185 and #188: a command's allowed-tools grant ends at the user's next
+// message and a stage started through the Skill tool gets none, so the seed
+// carries every script rule the emitted commands and skills grant, in the two
+// spellings a session types: the versioned cache path ${CLAUDE_PLUGIN_ROOT}
+// expands to (any home, any version) and the stable data path.
+const liveSeedAllow = new Set(JSON.parse(read(live, 'seed/settings.local.json')).permissions.allow);
+const liveScriptRules = [...new Set(walkFiles(live).filter(f => f.endsWith('.md'))
+  .flatMap(f => fs.readFileSync(f, 'utf8').match(/"Bash\((?:(?:echo|cat) \* \| )?(?:node|bash) \$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[a-z0-9-]+\.(?:js|sh)(?: \*)?\)"/g) || [])
+  .map(x => JSON.parse(x)))];
+const liveSeedGaps = liveScriptRules.flatMap(r => ['*/.claude/plugins/cache/llm-peer-review/tk/*', '~/.claude/plugins/data/tk-llm-peer-review/current']
+  .map(root => r.split('${CLAUDE_PLUGIN_ROOT}').join(root)).filter(row => !liveSeedAllow.has(row)));
+check('live: the seed allows every script rule a command or skill grants, in the cache and the stable path spelling (#185, #188)', liveScriptRules.length >= 20 && liveSeedGaps.length === 0, liveSeedGaps.join('; '));
 const liveHook = JSON.parse(read(live, 'hooks/hooks.json')).hooks.SessionStart[0].hooks[0].command;
 check('live: the hook runs node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', liveHook === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', liveHook);
 check('live: scripts/session-start.js and scripts/env-local.js are emitted', exists(live, 'scripts/session-start.js') && exists(live, 'scripts/env-local.js'));

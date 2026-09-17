@@ -412,9 +412,10 @@ function rewriteText(text, inv, src, unresolved, fileRel) {
   // 1. Every `.claude/...` path token. A token runs until whitespace, a quote,
   //    a backtick, a closing paren/bracket, or a trailing sentence dot. A token
   //    that is the tail of a longer path (`~/.claude/plugins/...`,
-  //    `/home/x/.claude/...`) is a home-directory path, not a project path, and
-  //    is left alone: the lookbehind refuses a `~/` or `<word>/` prefix.
-  text = text.replace(/(?<![~\w]\/)\.claude\/[A-Za-z0-9_./*<>-]*[A-Za-z0-9_*>-]/g, (tok) => {
+  //    `/home/x/.claude/...`, the seed's `*/.claude/plugins/cache/...` rows for
+  //    any home folder) is a home-directory path, not a project path, and is
+  //    left alone: the lookbehind refuses a `~/`, `<word>/` or `*/` prefix.
+  text = text.replace(/(?<![~\w*]\/)\.claude\/[A-Za-z0-9_./*<>-]*[A-Za-z0-9_*>-]/g, (tok) => {
     const mapped = mapPath(tok, src);
     if (mapped === null) { unresolved.push(fileRel + ': ' + tok); return tok; }
     return mapped;
