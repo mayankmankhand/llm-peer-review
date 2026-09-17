@@ -1496,13 +1496,23 @@ if ((Test-Path -LiteralPath $settingsDest -PathType Leaf) -and $NodeAvailable) {
     ];
     const absNew = targetIsUnc ? [] : absPerms.filter(p => !tgtPerms.includes(p));
 
+    // Step 4: merge missing template ask rows (issue #192). Claude Code asks before
+    // these even when an allow row matches, so the broad git push row never lets a
+    // force push through unasked. A row already in any list is the user's choice.
+    // PARITY: mirrored in setup.sh and setup.ps1 (ask-row merge) - change both together
+    const srcAsk = (src.permissions && src.permissions.ask) || [];
+    const held = new Set([...tgtPerms, ...(tgt.permissions.ask || []), ...(tgt.permissions.deny || [])]);
+    const askNew = srcAsk.filter(p => typeof p === 'string' && !held.has(p));
+
     const allNew = [...missing, ...absNew];
-    if (allNew.length > 0 || stale.length > 0) {
+    if (allNew.length > 0 || stale.length > 0 || askNew.length > 0) {
       tgt.permissions.allow = [...tgtPerms, ...allNew];
+      if (askNew.length > 0) tgt.permissions.ask = [...(tgt.permissions.ask || []), ...askNew];
       // Written to the .tmp sibling; setup.ps1 backs up the live file and moves this into place.
       fs.writeFileSync(tgtPath + '.tmp', JSON.stringify(tgt, null, 2) + '\n');
       stale.forEach(p => console.log('removed: ' + p));
       allNew.forEach(p => console.log(p));
+      askNew.forEach(p => console.log(p + ' (ask)'));
     }
 '@
   $env:TOOLKIT_SRC = $ToolkitRoot

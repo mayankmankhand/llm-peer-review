@@ -1659,6 +1659,69 @@ console.log('\n4f. settings backups, broken settings files, named rows, the offe
   fs.rmSync(tmp80, { recursive: true, force: true });
 }
 
+// --- 4g. seed ask rows (issue #192) ---------------------------------------------
+// The seed's allow row Bash(git push *) also matched force pushes. Seed ask rows
+// make Claude Code ask first; setup merges them into the project's ask list the
+// same way it merges allow rows: never twice, never over a row the owner already
+// placed in any list, and never again once this working copy was offered them.
+console.log('\n4g. seed ask rows merge into the ask list (issue #192)');
+{
+  const tmp92 = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-192-'));
+  const root92 = path.join(tmp92, 'plugin');
+  fs.cpSync(pluginRoot, root92, { recursive: true });
+  const ALLOW92 = ['Bash(git push *)', 'Bash(git status *)'];
+  const ASK92 = ['Bash(git push *--force*)', 'Bash(git push -f*)'];
+  write(root92, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: ALLOW92, ask: ASK92, additionalDirectories: ['/tmp'] } }, null, 2) + '\n');
+  const LOCAL92 = '.claude/settings.local.json';
+  let count92 = 0;
+  const project92 = () => {
+    const dir = path.join(tmp92, 'project-' + (++count92));
+    fs.mkdirSync(dir);
+    initRepo(dir);
+    write(dir, 'README.md', '# app\n');
+    commitAll(dir, 'init');
+    return dir;
+  };
+  const lists92 = (dir) => { try { const j = JSON.parse(read(dir, LOCAL92)); return j.permissions; } catch (e) { return {}; } };
+
+  repo = project92();
+  r = run(repo, root92);
+  let perms = lists92(repo);
+  check('#192 a fresh setup writes the seed ask rows to the ask list, not to allow', r.status === 0 && sameSet(perms.ask || [], ASK92) && sameSet(perms.allow || [], ALLOW92), r.out + JSON.stringify(perms));
+  check('#192 the report names the rows that went to the ask list', r.out.includes('    of those, added to the ask list (Claude asks before these even when an allow row matches): ' + ASK92.map(x => JSON.stringify(x)).join(', ') + '\n'), r.out);
+  commitAll(repo, 'seeded');
+  r = run(repo, root92);
+  perms = lists92(repo);
+  check('#192 a re-run adds no ask row twice', r.status === 0 && (perms.ask || []).length === ASK92.length && /0 entries added/.test(r.out), r.out + JSON.stringify(perms));
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // The owner already holds one ask row under allow (their choice), and deleted the other after setup.
+  repo = project92();
+  write(repo, LOCAL92, JSON.stringify({ permissions: { allow: ['Bash(git push -f*)'] } }, null, 2) + '\n');
+  commitAll(repo, 'own settings');
+  r = run(repo, root92);
+  perms = lists92(repo);
+  check('#192 a seed ask row the owner already holds in allow is not added to ask', r.status === 0 && !(perms.ask || []).includes('Bash(git push -f*)') && perms.allow.filter(x => x === 'Bash(git push -f*)').length === 1
+    && (perms.ask || []).includes('Bash(git push *--force*)'), r.out + JSON.stringify(perms));
+  write(repo, LOCAL92, JSON.stringify({ permissions: Object.assign({}, perms, { ask: [] }) }, null, 2) + '\n');
+  r = run(repo, root92);
+  perms = lists92(repo);
+  check('#192 an ask row deleted after it was offered stays deleted (offered-rows record)', r.status === 0 && (perms.ask || []).length === 0 && r.out.includes('not added again'), r.out + JSON.stringify(perms));
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  // G2 (#184 R2): a project's own kept custom script row survives the same run.
+  repo = project92();
+  write(repo, '.claude/scripts/mine.js', '// the project\'s own script\n');
+  write(repo, LOCAL92, JSON.stringify({ permissions: { allow: ['Bash(node .claude/scripts/mine.js *)'] } }, null, 2) + '\n');
+  commitAll(repo, 'own script');
+  r = run(repo, root92);
+  perms = lists92(repo);
+  check('#192 (#184 R2 guard) the project\'s own script row is kept while ask rows are added', r.status === 0 && perms.allow.includes('Bash(node .claude/scripts/mine.js *)') && sameSet(perms.ask || [], ASK92), r.out + JSON.stringify(perms));
+  fs.rmSync(repo, { recursive: true, force: true });
+
+  fs.rmSync(tmp92, { recursive: true, force: true });
+}
+
 console.log('\n5. a project that is not a git repository');
 repo = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-nogit-'));
 write(repo, 'README.md', '# app\n');

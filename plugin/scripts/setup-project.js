@@ -871,6 +871,10 @@ function main() {
   const seedLocal = readJson(path.join(seedDir, 'settings.local.json'), { permissions: { allow: [] } });
   const willExist = (rel) => fs.existsSync(P(rel)) && !willRemove.has(rel);
   const seedAllow = ((seedLocal.permissions && seedLocal.permissions.allow) || []).filter(p => typeof p === 'string' && !deadPermission(p, willExist, ROOT_SCRIPTS));
+  // Seed ask rows (issue #192): Claude Code asks before these even when an allow
+  // row matches, so the broad `Bash(git push *)` never lets a force push through
+  // unasked. They merge exactly like allow rows, into the project's ask list.
+  const seedAsk = ((seedLocal.permissions && seedLocal.permissions.ask) || []).filter(p => typeof p === 'string');
   const localRead = readSettings(P('.claude/settings.local.json'), localSettingsProblem);
   const localSkip = localRead.problem !== null;
   const local = localSkip ? null : localRead.data;
@@ -883,6 +887,7 @@ function main() {
     : (() => { const rel = path.relative(project, recordFile); return rel.startsWith('..') || path.isAbsolute(rel) ? recordFile : rel.split(path.sep).join('/'); })();
   const deadPerms = [];
   const addedPerms = [];
+  const addedAsk = [];      // the added rows that go to the ask list, a subset of addedPerms
   const heldBack = [];      // seed rows left out: this working copy was offered them before
   let localNext = null;
   let localChanged = false;
@@ -902,14 +907,24 @@ function main() {
     // file holds no decision of the owner's, so every seed row is offered again.
     const offeredBefore = record.status === 'ok' && local !== null ? record.keys : new Set();
     const seedKeys = new Set();
-    for (const p of seedAllow) {
-      const k = permissionRowKey(p);
-      if (seedKeys.has(k)) continue;
-      seedKeys.add(k);
-      if (present.has(k)) continue;
-      if (offeredBefore.has(k)) heldBack.push(p); else addedPerms.push(p);
+    for (const [list, rows] of [['allow', seedAllow], ['ask', seedAsk]]) {
+      for (const p of rows) {
+        const k = permissionRowKey(p);
+        if (seedKeys.has(k)) continue;
+        seedKeys.add(k);
+        if (present.has(k)) continue;
+        if (offeredBefore.has(k)) heldBack.push(p);
+        else {
+          addedPerms.push(p);
+          if (list === 'ask') addedAsk.push(p);
+        }
+      }
     }
-    localNext.permissions.allow.push(...addedPerms);
+    localNext.permissions.allow.push(...addedPerms.filter(p => !addedAsk.includes(p)));
+    if (addedAsk.length) {
+      localNext.permissions.ask = Array.isArray(localNext.permissions.ask) ? localNext.permissions.ask : [];
+      localNext.permissions.ask.push(...addedAsk);
+    }
     if (seedLocal.defaultMode && !localNext.defaultMode) localNext.defaultMode = seedLocal.defaultMode;
     if (seedLocal.permissions && seedLocal.permissions.additionalDirectories) {
       localNext.permissions.additionalDirectories = localNext.permissions.additionalDirectories || [];
@@ -956,6 +971,7 @@ function main() {
     say('  .claude/settings.local.json: ' + (local ? 'merge' : 'create') + ' (' + addedPerms.length + ' entries added, ' + deadPerms.length + ' dead script entries removed)');
     // The rows by name (issue #180): the counts alone left a removed row named nowhere.
     if (addedPerms.length) say('    added: ' + namedRows(addedPerms));
+    if (addedAsk.length) say('    of those, added to the ask list (Claude asks before these even when an allow row matches): ' + namedRows(addedAsk));
     if (deadPerms.length) say('    removed: ' + namedRows(deadPerms));
     if (heldBack.length) {
       say('    not added again (' + heldBack.length + '), because this working copy was offered ' + (heldBack.length === 1 ? 'it' : 'them') + ' before and the file no longer has '

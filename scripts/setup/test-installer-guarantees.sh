@@ -618,6 +618,12 @@ if [ -z "$(tail -c 1 "$SCRATCH/.gitignore")" ]; then
   fail "test setup: .gitignore still ends in a newline, so the newline guard is not exercised"
 fi
 sed -i.bak '/"Bash(git worktree \*)",/d' "$SCRATCH/.claude/settings.local.json"; rm -f "$SCRATCH/.claude/settings.local.json.bak"
+# An ask row too (issue #192): the merge must restore it to the ask list, not allow.
+ASK_ENTRY="Bash(git push -f*)"
+sed -i.bak '/"Bash(git push -f\*)",/d' "$SCRATCH/.claude/settings.local.json"; rm -f "$SCRATCH/.claude/settings.local.json.bak"
+if grep -qF "$ASK_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
+  fail "test setup: could not remove the ask row $ASK_ENTRY"
+fi
 sed -i.bak 's/"toolkitVersion": "[^"]*"/"toolkitVersion": "0.0.0-test"/' "$MANIFEST"; rm -f "$MANIFEST.bak"
 if grep -qxF "$GI_LINE" "$SCRATCH/.gitignore" || grep -qF "$PERM_ENTRY" "$SCRATCH/.claude/settings.local.json" || ! grep -qF '0.0.0-test' "$MANIFEST"; then
   fail "test setup: could not remove the gitignore line / permission entry, or restamp the manifest"
@@ -659,6 +665,11 @@ if grep -qF "$PERM_ENTRY" "$SCRATCH/.claude/settings.local.json"; then
   ok "live settings.local.json has the restored entry"
 else
   fail "live settings.local.json missing the restored entry: $PERM_ENTRY"
+fi
+if node -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).permissions; process.exit(p.ask.includes(process.argv[2]) && !p.allow.includes(process.argv[2]) ? 0 : 1)' "$SCRATCH/.claude/settings.local.json" "$ASK_ENTRY"; then
+  ok "live settings.local.json has the restored ask row in the ask list (#192)"
+else
+  fail "live settings.local.json missing the restored ask row in the ask list: $ASK_ENTRY"
 fi
 if [ -n "$MB_BACKUP" ] && grep -qF '0.0.0-test' "$MB_BACKUP/.claude/.toolkit-manifest.json" 2>/dev/null; then
   ok "backed-up manifest is the pre-run copy"

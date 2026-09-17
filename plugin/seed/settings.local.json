@@ -90,6 +90,14 @@
       "Skill(tk:audit-html)",
       "Skill(tk:audit-html:*)"
     ],
+    "ask": [
+      "Bash(git push *--force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * -f*)",
+      "Bash(git push -uf*)",
+      "Bash(git push * -uf*)",
+      "Bash(git push * +*)"
+    ],
     "additionalDirectories": [
       "/tmp"
     ]
