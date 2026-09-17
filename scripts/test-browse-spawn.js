@@ -16,7 +16,8 @@
 //     machine cannot change the path the script takes;
 //   - records spawn, spawnSync and process.kill calls to a log file; the spawn
 //     is faked unless a case asks for the real one, and no kill is ever sent;
-//   - redirects the script's fixed /tmp/browse-server.pid into the sandbox.
+//   - redirects the script's /tmp/browse-server.pid into the sandbox, and logs
+//     where the PID file was written (issue #194).
 // Dependency-free; exits non-zero on any failure.
 //
 //   node scripts/test-browse-spawn.js
@@ -104,7 +105,10 @@ fs.writeFileSync(preload, [
   "const mapPid = (p) => (p === '/tmp/browse-server.pid' ? process.env.BROWSE_STUB_PID_FILE : p);",
   "for (const name of ['writeFileSync', 'existsSync', 'unlinkSync']) {",
   '  const real = fs[name];',
-  '  fs[name] = function (p, ...rest) { return real.call(this, mapPid(p), ...rest); };',
+  '  fs[name] = function (p, ...rest) {',
+  "    if (name === 'writeFileSync' && /browse-server\\.pid$/.test(String(p))) log({ call: 'pidWrite', path: String(p) });",
+  '    return real.call(this, mapPid(p), ...rest);',
+  '  };',
   '}',
   '',
 ].join('\n'));
@@ -122,6 +126,7 @@ function runBrowse(opts) {
     BROWSE_STUB_SPAWN: opts.spawn,
     TK_BROWSE_TEST_PLATFORM: opts.platform,
   });
+  if (opts.tmp !== undefined) { env.TMPDIR = opts.tmp; env.TMP = opts.tmp; env.TEMP = opts.tmp; }
   delete env.PLAYWRIGHT_BROWSERS_PATH;
   if (opts.path !== undefined) env.PATH = opts.path;
   const input = JSON.stringify({ autoStart: true, projectDir: project, actions: [{ type: 'goto', url: '/' }] });
@@ -177,6 +182,25 @@ console.log('\n3. a missing command');
   check('no unhandled error event and no stack trace on stderr', !/Unhandled 'error' event|throw er;|^\s+at /m.test(run.stderr), run.stderr.slice(0, 400));
   check('it fails at once rather than waiting out the 30s start timeout', run.ms < 15000, run.ms + 'ms');
   check('no PID file is left behind for a process that never started', !fs.existsSync(pidFile), fs.existsSync(pidFile) ? fs.readFileSync(pidFile, 'utf8') : '');
+}
+
+// --- 4. Temp folder: os.tmpdir() on native Windows only (issue #194) --------------
+// On native Windows '/tmp' is \tmp on the current drive, so the PID file and
+// screenshots use the user's temp folder there. Every other platform keeps /tmp
+// even when TMPDIR points elsewhere (macOS sets it under /var/folders), because
+// the toolkit grants read access to /tmp only.
+console.log('\n4. temp folder');
+{
+  const winTmp = path.join(sandbox, 'win-temp');
+  fs.mkdirSync(winTmp);
+  const win = runBrowse({ platform: 'win32', spawn: 'fake', tmp: winTmp });
+  const winWrites = win.calls.filter((c) => c.call === 'pidWrite');
+  check('win32: the PID file is written under os.tmpdir()', winWrites.length === 1 && winWrites[0].path === path.join(winTmp, 'browse-server.pid'), JSON.stringify(winWrites));
+  const lin = runBrowse({ platform: 'linux', spawn: 'fake', tmp: winTmp });
+  const linWrites = lin.calls.filter((c) => c.call === 'pidWrite');
+  check('linux: the PID file stays at /tmp even when TMPDIR is set elsewhere', linWrites.length === 1 && linWrites[0].path === '/tmp/browse-server.pid', JSON.stringify(linWrites));
+  const src = fs.readFileSync(SCRIPT, 'utf8');
+  check('screenshots use the same temp folder rule as the PID file', /screenshotDir: tempDir\(\),/.test(src) && /serverPidFile: path\.join\(tempDir\(\), 'browse-server\.pid'\),/.test(src), 'CONFIG in browse.js');
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });

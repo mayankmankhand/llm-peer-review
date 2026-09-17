@@ -52,21 +52,26 @@ const { chromium } = require('playwright-core');
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-// Native Windows limits that remain (issue #183): screenshotDir and
-// serverPidFile below are POSIX paths. On native Windows '/tmp' means \tmp on
-// the current drive, not the user's temp folder. That folder usually does not
-// exist, so the PID file write fails and an autoStart run stops with a JSON
-// error; screenshots still work, because Playwright creates the folder, but
-// they land in \tmp. The dev server spawn and stop further down do handle
-// win32; full native Windows support is not a goal (Linux, macOS and WSL are).
+// Where screenshots and the dev server PID file go (issue #194). On native
+// Windows '/tmp' means \tmp on the current drive, which usually does not exist,
+// so there the user's temp folder (os.tmpdir()) is used. Everywhere else it stays
+// /tmp on purpose: os.tmpdir() follows TMPDIR, which on macOS is a per-user
+// folder under /var/folders, and the toolkit grants Claude read access to /tmp
+// only, so reading a screenshot from anywhere else would stop for approval.
+// Native Windows support is still unverified (Linux, macOS and WSL are the
+// supported platforms).
+function tempDir() {
+  return hostPlatform() === 'win32' ? os.tmpdir() : '/tmp';
+}
+
 const CONFIG = {
   navigationTimeoutMs: 10000,
   actionTimeoutMs: 5000,
   maxTextLength: 50 * 1024, // 50KB
-  screenshotDir: '/tmp',
+  screenshotDir: tempDir(),
   screenshotPrefix: 'browse-screenshot',
   defaultBaseUrl: 'http://localhost:3000',
-  serverPidFile: '/tmp/browse-server.pid',
+  serverPidFile: path.join(tempDir(), 'browse-server.pid'),
   defaultPorts: [3000, 3001, 5173, 8080, 8888],
   serverStartTimeoutMs: 30000,
   serverPollIntervalMs: 500,
@@ -496,7 +501,7 @@ async function handleFill(page, action) {
 }
 
 /**
- * Take a full-page screenshot and save to /tmp.
+ * Take a full-page screenshot and save it to the temp folder (see tempDir).
  * Returns the file path so Claude can read it with the Read tool.
  */
 async function handleScreenshot(page, action) {
