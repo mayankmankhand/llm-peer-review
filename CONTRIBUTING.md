@@ -34,6 +34,18 @@ It points this clone's git hooks at `scripts/git-hooks/`. Every push then runs t
 
 **Before a release,** run one full cycle (`/explore` through `/document`) in a scratch project in default permission mode (`claude --permission-mode default`), with `TK_LEDGER_DIR` set to an absolute scratch folder so the run never writes into your real correction ledger. Every suite passed on the 7.1.0 changes that still shipped a review that saw nothing and commands that stopped for approval (#181, #182); only a real session in default mode shows those. `scripts/setup/headless-session.sh` runs that session for you under a scratch home (your credentials linked in, the stable plugin path linked to the build you name, `TK_LEDGER_DIR` set), and its `--baseline` and `--verify` modes prove the real `~/.claude` came through untouched.
 
+**Keep that session away from your real setup (#189).** Move the whole home, not only the plugin. With `--plugin-dir` and `--settings` alone, a 7.2.0 headless session recorded a project-scope install in the real `installed_plugins.json`, linked a data folder in the real home, and read the installed manual through the stable `~/.claude/plugins/data/tk-llm-peer-review/current` path, so it tested old text; the 7.1.0 sessions also wrote auto-memory under the real `~/.claude`. `headless-session.sh` points `HOME` at a scratch folder with your credentials linked in and the stable path linked to the build under test, which keeps every real file unchanged. A run looks like this:
+
+    bash scripts/setup/headless-session.sh --baseline /tmp/tk-baseline.txt
+    node scripts/build-plugin.js --out /tmp/tk-build/plugin --version 7.3.1
+    bash scripts/setup/headless-session.sh --build /tmp/tk-build/plugin --project /tmp/tk-project \
+        --home /tmp/tk-home --mode default -- --output-format json "/tk:explore add a footer"
+    bash scripts/setup/headless-session.sh --verify /tmp/tk-baseline.txt
+
+Pass `--resume <session-id>` (from the JSON) with the same `--home` to answer a question the session asked. Each turn's `permission_denials` lists the calls that would have stopped for approval.
+
+**Headless sessions cannot edit files under `.claude/` outside `bypassPermissions`.** A `-p` session cannot answer a prompt: default mode and `acceptEdits` both stop on a `.claude/` path, and project allow rows `Edit(.claude/**)` and `Write(.claude/**)` do not change that. `bypassPermissions` gets through, but it also stops checking shell commands, so it cannot show which steps would ask. When one scenario must both edit prompt files and count prompts, split it before the run: the edit steps in `bypassPermissions`, the prompt count from the default-mode sessions.
+
 **Release order:**
 
 1. Bump the version: `bash scripts/setup/bump-version.sh <new-version>`. The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`), then rebuilds `plugin/`.

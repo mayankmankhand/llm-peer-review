@@ -17,7 +17,7 @@ You can use this toolkit in **two ways** on Windows:
 
 Node.js (a runtime that lets your computer execute JavaScript outside a browser) runs the toolkit's helper scripts - HTML report rendering, the `/index` codebase map, session startup - plus the ask-gpt and ask-gemini debate scripts. The core commands need it even if you skip the debates.
 
-- Install from [nodejs.org](https://nodejs.org) (LTS is the stable long-term version, which is fine), then reopen your terminal
+- Install from [nodejs.org](https://nodejs.org) (LTS is the stable long-term version, which is fine), then reopen your terminal. Use Node.js 22 or newer: from 7.3.1 the debate scripts' OpenAI library needs it
 - Verify:
   ```powershell
   node -v
