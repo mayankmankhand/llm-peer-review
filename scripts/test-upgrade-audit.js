@@ -137,6 +137,7 @@ if (build.status !== 0) finish();
 check('the built root ships the seed and the managed paths the audit reads', ['seed/settings.local.json', 'seed/retired-permission-rows.txt', 'seed/gitignore', 'seed/gitattributes', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'managed-paths.json'].every(r => fs.existsSync(path.join(PLUGIN, r))));
 check('the built conventions file is the real one, byte for byte', read(path.join(PLUGIN, 'skills', 'shared', 'conventions.md')) === read(REAL_CONVENTIONS));
 const SEED_ALLOW = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.json'))).permissions.allow;
+const SEED_ASK = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.json'))).permissions.ask || [];
 const RETIRED = read(path.join(PLUGIN, 'seed', 'retired-permission-rows.txt')).split(/\r?\n/).filter(l => l && !l.startsWith('#'));
 const SEED_RULES_TEXT = read(path.join(PLUGIN, 'seed', 'rules-toolkit.md'));
 const SEED_GITIGNORE = read(path.join(PLUGIN, 'seed', 'gitignore')).split(/\r?\n/);
@@ -247,9 +248,10 @@ function applyFixes(dir, findings, o) {
     const rel = f.file.relPath;
     try {
       if (f.id === 'C-6') continue;
-      if (/:dead-rows$|:retired-rows$/.test(k)) { const rows = listed(f, /entries|rows/i); editSettings(j => { j.permissions.allow = j.permissions.allow.filter(r => !rows.includes(r)); }); }
+      if (/:dead-rows$|:retired-rows(:[a-z-]+)?$/.test(k)) { const rows = listed(f, /entries|rows/i); editSettings(j => { j.permissions.allow = j.permissions.allow.filter(r => !rows.includes(r)); }); }
       else if (/:bare-skill-rows$/.test(k)) { const rows = listed(f, /^Rows$/); editSettings(j => { j.permissions.allow = j.permissions.allow.map(r => (rows.includes(r) ? r.replace(/^Skill\(/, 'Skill(tk:') : r)); }); }
       else if (/:missing-rows$|:lost-rows$/.test(k)) { const rows = listed(f, /rows/i).map(opts.spelling || (r => r)); editSettings(j => { j.permissions.allow.push(...rows); }); }
+      else if (/:missing-ask-rows$/.test(k)) { const rows = listed(f, /rows/i).map(opts.spelling || (r => r)); editSettings(j => { j.permissions.ask = (j.permissions.ask || []).concat(rows); }); }
       else if (/:no-file$/.test(k)) fs.writeFileSync(settingsAbs, read(path.join(pluginRoot, 'seed', 'settings.local.json')));
       else if (/:default-mode-top$/.test(k)) editSettings(j => { j.permissions = j.permissions || {}; j.permissions.defaultMode = j.defaultMode; delete j.defaultMode; });
       else if (/:default-mode-permissions$/.test(k)) editSettings(j => { delete j.permissions.defaultMode; });
@@ -452,12 +454,20 @@ by = (id) => r.findings.filter(f => f.id === id);
 check('the range is 7.0.0 -> 7.1.0 with C-7, C-9, C-10 and C-11 each in it', /7\.0\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(r.summary), r.summary);
 check('C-7 reports the 7.0.0 rules stamp', by('C-7').length === 1 && /stamped 7\.0\.0/.test(by('C-7')[0].what));
 const c9Missing = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Missing rows'));
-const c9Retired = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Retired rows'));
+const c9RetiredAll = by('C-9').filter(f => (f.fields || []).some(x => x.label === 'Retired rows'));
+// The grouped findings read as one, for the checks on which rows are reported at all.
+const c9Retired = c9RetiredAll.length ? { fields: [{ label: 'Retired rows', value: c9RetiredAll.map(f => f.fields.find(x => x.label === 'Retired rows').value).join(' ; ') }],
+  fix: c9RetiredAll.every(f => /remove/.test(f.fix)) ? c9RetiredAll[0].fix : '' } : null;
 const c9Mode = by('C-9').find(f => /defaultMode/.test(f.what));
 check('C-9 reports the missing toolkit row, fixed by re-running /tk:setup', !!c9Missing && c9Missing.fields[0].value === MISSING_ROW && /\/tk:setup/.test(c9Missing.fix));
 check('C-9 reports exactly the retired rows the project still has', !!c9Retired && c9Retired.fields[0].value.split(' ; ').sort().join('\n') === RETIRED_KEPT.slice().sort().join('\n') && /remove/.test(c9Retired.fix), c9Retired && c9Retired.fields[0].value);
 check('C-9 leaves the retired Skill(playground) rows alone (the project owns a playground skill) and still reports the unowned Skill(review)', !!c9Retired && !/playground/.test(c9Retired.fields[0].value) && c9Retired.fields[0].value.split(' ; ').includes('Skill(review)') && !r.findings.some(f => f.id !== 'C-9' && (f.fields || []).some(x => /playground/.test(x.value))), c9Retired && c9Retired.fields[0].value);
-check('C-9 reports acceptEdits as its own finding, a question and never an auto-fix', !!c9Mode && c9Mode !== c9Retired && c9Mode !== c9Missing && /question for the user/.test(c9Mode.fix) && /never an auto-fix/.test(c9Mode.fix) && by('C-9').length === 3);
+check('C-9 reports the retired rows one finding per retire reason (issue #186): Skill(review) alone under unscoped-skills, the three maintainer rows under toolkit-repo',
+  JSON.stringify(c9RetiredAll.map(f => f.key.replace(/^.*:retired-rows:/, '') + '=' + f.fields[0].value.split(' ; ').length).sort()) === JSON.stringify(['toolkit-repo=3', 'unscoped-skills=1'])
+  && c9RetiredAll.find(f => /:unscoped-skills$/.test(f.key)).fields[0].value === 'Skill(review)', JSON.stringify(c9RetiredAll.map(f => [f.key, f.fields[0].value])));
+check('C-9 reports the seed ask rows the 7.0.0 project lacks as their own Should fix finding (issue #192)', SEED_ASK.length > 0 && JSON.stringify((by('C-9').find(f => /:missing-ask-rows$/.test(f.key)) || { fields: [{ value: '' }] }).fields[0].value.split(' ; ')) === JSON.stringify(SEED_ASK)
+  && by('C-9').find(f => /:missing-ask-rows$/.test(f.key)).severity === 'warn', JSON.stringify(by('C-9').map(f => f.key)));
+check('C-9 reports acceptEdits as its own finding, a question and never an auto-fix', !!c9Mode && !c9RetiredAll.includes(c9Mode) && c9Mode !== c9Missing && /question for the user/.test(c9Mode.fix) && /never an auto-fix/.test(c9Mode.fix) && by('C-9').length === 5, JSON.stringify(by('C-9').map(f => f.key)));
 {
   const expectLine = read(path.join(STALE, '.claude/settings.local.json')).split('\n').findIndex(l => /"defaultMode"/.test(l)) + 1;
   check('the top-level acceptEdits is worded as a leftover that may have no effect, to delete or move under permissions', !!c9Mode && /top-level/.test(c9Mode.what) && /leftover key an older toolkit seed wrote/.test(c9Mode.what) && /may have no effect/.test(c9Mode.what) && /delete the leftover key/.test(c9Mode.fix) && /move it under "permissions"/.test(c9Mode.fix) && c9Mode.file.line === expectLine, c9Mode && (c9Mode.what + ' / ' + c9Mode.fix + ' / ' + c9Mode.file.line));
@@ -1113,10 +1123,10 @@ const V633 = v633Project('lines');
   const res = audit(dir);
   const c11 = res.findings.filter(f => f.id === 'C-11');
   const on = (rel) => c11.filter(f => f.file.relPath === rel);
-  check('the 6.3.3 LESSONS.md gives C-11 at Suggest on line 8 (/learning-opportunity) and line 12 (/ask-gpt and /ask-gemini)', JSON.stringify(on('LESSONS.md').map(f => f.file.line)) === JSON.stringify([8, 12]) && on('LESSONS.md').every(f => f.severity === 'suggest' && /^Optional\. /.test(f.what)) && /\/ask-gpt, \/ask-gemini/.test((on('LESSONS.md')[1] || {}).what), JSON.stringify(on('LESSONS.md')));
+  check('the 6.3.3 LESSONS.md gives no C-11 finding: a lessons file records past work, so it is history (issue #187)', on('LESSONS.md').length === 0, JSON.stringify(on('LESSONS.md')));
   check('the 6.3.3 design profile seed gives C-11 at Suggest on its three comment lines naming /explore, /document and /execute', JSON.stringify(on('DESIGN-PROFILE.md').map(f => f.file.line)) === JSON.stringify([4, 5, 6]) && on('DESIGN-PROFILE.md').every(f => f.severity === 'suggest'), JSON.stringify(on('DESIGN-PROFILE.md')));
   check('.claude/CLAUDE.md and CLAUDE.local.md give C-11 at Warn', on('.claude/CLAUDE.md').length === 1 && on('CLAUDE.local.md').length === 1 && on('.claude/CLAUDE.md').concat(on('CLAUDE.local.md')).every(f => f.severity === 'warn' && /^Should fix\. /.test(f.what) && f.file.line === 3));
-  check('LESSONS-detail.md stays out of C-11', on('LESSONS-detail.md').length === 0 && c11.length === 7, JSON.stringify(c11.map(f => f.file.relPath + ':' + f.file.line)));
+  check('LESSONS-detail.md stays out of C-11', on('LESSONS-detail.md').length === 0 && c11.length === 5, JSON.stringify(c11.map(f => f.file.relPath + ':' + f.file.line)));
   bad = allReceiptsShow(dir, c11);
   check('  every C-11 receipt over those files runs and shows its line', bad.length === 0, bad.join(' | '));
 }
@@ -1350,7 +1360,7 @@ const editJson = (dir, rel, fn) => { const abs = path.join(dir, rel); const j = 
   dir = path.join(TMP, 'contrast-retired-deny');
   write(dir, '.claude/.toolkit-state.json', STATE_701);
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(xdg-open *)']) } }, null, 2) + '\n');
-  contrast('C-9 a retired row, moved to deny', dir, f => /:retired-rows$/.test(f.key),
+  contrast('C-9 a retired row, moved to deny', dir, f => /:retired-rows:browser-launchers$/.test(f.key),
     () => 'grep -n -F -e ' + shq(JSON.stringify('Bash(xdg-open *)')) + ' -- .claude/settings.local.json',
     () => editJson(dir, '.claude/settings.local.json', j => { j.permissions.allow = j.permissions.allow.filter(x => x !== 'Bash(xdg-open *)'); j.permissions.deny = ['Bash(xdg-open *)']; }));
 
@@ -1445,9 +1455,9 @@ const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7,
   const res = audit(dir, [], { pluginRoot: PLUGIN72 });
   const of = (id) => res.findings.filter(f => f.id === id);
   check('the range is 7.1.0 -> 7.2.0 with C-7, C-9, C-10 and C-11 in it, and each of C-9, C-10 and C-11 reports', audited710Ranges(res), res.summary);
-  check('C-9 reports the missing seed row and the retired Bash(git config *), and asks nothing about acceptEdits again', JSON.stringify(fieldOf(res, 'C-9', 'Missing rows')) === JSON.stringify([MISSING_ROW]) && JSON.stringify(fieldOf(res, 'C-9', 'Retired rows')) === JSON.stringify(['Bash(git config *)']) && !of('C-9').some(f => /defaultMode/.test(f.what)) && of('C-9').length === 2, JSON.stringify(of('C-9').map(f => f.key)));
+  check('C-9 reports the missing seed row and the retired Bash(git config *), and asks nothing about acceptEdits again', JSON.stringify(fieldOf(res, 'C-9', 'Missing rows')) === JSON.stringify([MISSING_ROW]) && JSON.stringify(fieldOf(res, 'C-9', 'Retired rows')) === JSON.stringify(['Bash(git config *)']) && JSON.stringify(fieldOf(res, 'C-9', 'Missing ask rows')) === JSON.stringify(SEED_ASK) && !of('C-9').some(f => /defaultMode/.test(f.what)) && of('C-9').length === 3, JSON.stringify(of('C-9').map(f => f.key)));
   check('C-10 reports the ledger comment line naming pre-push-check.js, with the comment lines above it', of('C-10').length === 1 && of('C-10')[0].file.line === flaggedLine && of('C-10')[0].what.includes('names .claude/scripts/pre-push-check.js') && of('C-10')[0].what.includes('Lines ' + (flaggedLine - 4) + ' to ' + (flaggedLine - 1) + ' directly above it'), JSON.stringify(of('C-10')));
-  check('C-11 reports /review in the command at Warn and /ask-gpt in LESSONS.md at Suggest', of('C-11').length === 2 && of('C-11').some(f => f.file.relPath === '.claude/commands/myteam-ship.md' && f.severity === 'warn') && of('C-11').some(f => f.file.relPath === 'LESSONS.md' && f.severity === 'suggest'), JSON.stringify(of('C-11').map(f => [f.file.relPath, f.severity])));
+  check('C-11 reports /review in the command at Warn and leaves the /ask-gpt lesson in LESSONS.md alone (history, issue #187)', of('C-11').length === 1 && of('C-11').some(f => f.file.relPath === '.claude/commands/myteam-ship.md' && f.severity === 'warn') && !of('C-11').some(f => f.file.relPath === 'LESSONS.md'), JSON.stringify(of('C-11').map(f => [f.file.relPath, f.severity])));
   check('  no C-7 finding: the rules text is the seed\'s', of('C-7').length === 0);
   bad = allReceiptsShow(dir, res.findings);
   check('  every receipt runs and shows its evidence (' + res.findings.length + ' findings)', res.findings.length === 5 && bad.length === 0, bad.join(' | '));
@@ -1458,6 +1468,70 @@ const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7,
   const st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN72, '--stamp'], { encoding: 'utf8' });
   const next = audit(dir, [], { pluginRoot: PLUGIN72 });
   check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
+}
+
+// --- 4m. retired rows by reason, ask rows, history lines (issues #186, #187, #192) ----
+console.log('\n4m. retired rows by reason, seed ask rows, history lines (issues #186, #187, #192)');
+{
+  // #186: a project that adds packages with `npm install <name>` keeps that row
+  // and still has its other retired rows removed in the same run.
+  const dir = path.join(TMP, 'retired-by-reason');
+  const OTHER = ['Bash(xdg-open *)', 'Bash(git config *)', 'Skill(review)'];
+  check('fixture: Bash(npm install *) and the other rows are in the shipped retired list', ['Bash(npm install *)'].concat(OTHER).every(x => RETIRED.includes(x)));
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(npm install *)'], OTHER), ask: SEED_ASK } }, null, 2) + '\n');
+  const res = audit(dir);
+  const retired = res.findings.filter(f => /:retired-rows:/.test(f.key));
+  const npm = retired.find(f => /:retired-rows:npm-install$/.test(f.key));
+  check('#186 Bash(npm install *) is a finding of its own, apart from the other retired rows', !!npm && npm.fields[0].value === 'Bash(npm install *)' && retired.length === 4
+    && retired.filter(f => f !== npm).every(f => !f.fields[0].value.includes('npm install')), JSON.stringify(retired.map(f => [f.key, f.fields[0].value])));
+  check('#186 the npm group says why it was retired and when to keep it', !!npm && /keep it if this project adds packages/.test(npm.what) && /unless the project still needs one of them/.test(npm.fix), npm && npm.what);
+  const fixed = applyFixes(dir, res.findings.filter(f => f !== npm));
+  const after = audit(dir);
+  check('#186 with the npm group declined and every other finding fixed, one run removes the other retired rows and only the npm finding is left',
+    fixed.length === retired.length - 1 && after.findings.length === 1 && after.findings[0].key === npm.key
+    && JSON.parse(read(path.join(dir, '.claude', 'settings.local.json'))).permissions.allow.includes('Bash(npm install *)')
+    && OTHER.every(x => !JSON.parse(read(path.join(dir, '.claude', 'settings.local.json'))).permissions.allow.includes(x)), JSON.stringify(after.findings.map(f => f.key)));
+  const disagree = receiptsAgree(dir, res, after);
+  check('#186   every receipt agrees with that rerun', disagree.length === 0, disagree.join(' | '));
+}
+{
+  // #192: seed ask rows the project lacks, reported and fixed into the ask list;
+  // one already held in allow (the owner's choice) is not reported.
+  const dir = path.join(TMP, 'missing-ask');
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat([SEED_ASK[0]]) } }, null, 2) + '\n');
+  const res = audit(dir);
+  const f = res.findings.find(x => /:missing-ask-rows$/.test(x.key));
+  check('#192 the missing seed ask rows are one Should fix finding that leaves out the row the owner holds in allow', !!f && f.severity === 'warn' && JSON.stringify(f.fields[0].value.split(' ; ')) === JSON.stringify(SEED_ASK.slice(1)) && /force push/.test(f.what) && /\/tk:setup/.test(f.fix), JSON.stringify(res.findings.map(x => [x.key, x.fields && x.fields[0].value])));
+  bad = allReceiptsShow(dir, [f].filter(Boolean));
+  check('#192   its receipt runs and lists each missing row', !!f && bad.length === 0, bad.join(' | '));
+  applyFixes(dir, [f].filter(Boolean));
+  const after = audit(dir);
+  check('#192   with the rows merged into permissions.ask the rerun has no ask-row finding, and the receipt agrees', !after.findings.some(x => /:missing-ask-rows$/.test(x.key)) && receiptsAgree(dir, res, after).length === 0, receiptsAgree(dir, res, after).join(' | '));
+}
+{
+  // #187: history lines are left alone; live instructions, even under a dated heading, are not.
+  const dir = path.join(TMP, 'history-lines');
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK } }, null, 2) + '\n');
+  write(dir, 'LESSONS.md', '# Lessons\n\n- **Run /review before a release.**\n');
+  write(dir, 'CLAUDE.md', [
+    '# Project', '',
+    '- 2026-09-12: ran /review on the release branch',
+    '- v7.2.0: ran /review and fixed three findings',
+    '* **2026-09-13** /document wrote the cycle page',
+    '1. v6.3.3 shipped after /review', '',
+    'Run /review after execute.', '',
+    '## Setup (2026-09-12)', '',
+    'Run /review before every push.', '',
+  ].join('\n'));
+  const res = audit(dir);
+  const c11 = res.findings.filter(x => x.id === 'C-11');
+  check('#187 lessons entries and dated or versioned list lines give no C-11 finding; the plain instruction and the one under a dated heading do',
+    JSON.stringify(c11.map(x => x.file.relPath + ':' + x.file.line)) === JSON.stringify(['CLAUDE.md:8', 'CLAUDE.md:12']), JSON.stringify(c11.map(x => x.file.relPath + ':' + x.file.line)));
+  bad = allReceiptsShow(dir, c11);
+  check('#187   both receipts show their line', bad.length === 0, bad.join(' | '));
 }
 
 // --- 5. parser mechanics the real file does not exercise ----------------------------
@@ -1855,7 +1929,7 @@ function mutant(name, from, to) {
   check('the spelling-normalizer mutation applies to the source', m.applied);
   check('without the normalizer, the "record listing a row in the :* spelling is not reported again" check fails', !recordedQuiet(audit(recordedCaseDir, [], { script: m.path })));
   check('restored (the real script), that check passes again', recordedQuiet(audit(recordedCaseDir)));
-  const f1 = mutant('no-offered-missing', 'return !present.has(k) && !offered.has(k);', 'return !present.has(k);');
+  const f1 = mutant('no-offered-missing', 'const notYet = (k) => !present.has(k) && !offered.has(k);', 'const notYet = (k) => !present.has(k);');
   check('the offered-rows filter mutation (missing rows) applies to the source', f1.applied);
   check('without the filter on missing rows, the "record listing the missing seed row is not reported again" check fails', !recordedQuiet(audit(recordedCaseDir, [], { script: f1.path })));
   const f2 = mutant('no-offered-lost', '.filter(x => !present.has(x.key) && !offered.has(x.key))', '.filter(x => !present.has(x.key))');

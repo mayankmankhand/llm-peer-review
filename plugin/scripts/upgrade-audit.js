@@ -494,6 +494,14 @@ function unscopedMatchers(names) {
       path: (text, m) => PATH_BEFORE_SLASH.test(text.slice(0, m.index + m[1].length)) },
   ];
 }
+// History, not instructions (C-11, issue #187): a line that records past work
+// names a command as it was typed then, and scoping it rewrites the record. A
+// lessons file is history as a whole; elsewhere a line is history when, after
+// any list marker and optional bold, it starts with an ISO date or a version.
+// A heading does not exempt the lines under it, so a live instruction under
+// "## Setup (2026-09-12)" is still flagged.
+const HISTORY_FILES = new Set(['LESSONS.md', 'LESSONS-detail.md']);
+const HISTORY_LINE = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__)?(?:\d{4}-\d{2}-\d{2}|v\d+\.\d+\.\d+)(?![\w.-])/;
 // Each hit as { grep, show }: the exact text on the line (the receipt's fixed
 // string) and the name as a reader would write it.
 function unscopedTokens(line, matchers) {
@@ -829,6 +837,29 @@ function readRetiredKeys(pluginRoot) {
   const lines = readLines(path.join(pluginRoot, 'seed', 'retired-permission-rows.txt'));
   return lines === null ? null : new Set(lines.filter(l => l !== '' && !l.startsWith('#')).map(permissionRowKey));
 }
+// Why a retired row was retired, as the group C-9 reports it in (issue #186).
+// One finding per group, so an owner who still needs one row (a project that adds
+// packages with `npm install <name>`) declines that group alone and the rest are
+// still removed. The groups follow the header of retired-permission-rows.txt; a
+// row a later release retires for a reason not listed here lands in 'toolkit-repo'.
+const RETIRED_GROUPS = [
+  { id: 'npm-install', test: (k) => k === 'Bash(npm install *)',
+    why: 'the broad npm install row, narrowed to plain `npm install` because `npm install <name>` can add any package (keep it if this project adds packages that way)' },
+  { id: 'git-config', test: (k) => k === 'Bash(git config *)',
+    why: 'the broad git config row, narrowed to the one read the toolkit runs (`git config --get remote.origin.url`)' },
+  { id: 'unscoped-skills', test: (k) => /^Skill\(/.test(k),
+    why: 'Skill rows without the tk: scope, which never match a plugin skill (the tk: rows replace them)' },
+  { id: 'copy-install-scripts', test: (k) => /\.claude\/scripts\//.test(k),
+    why: 'rows naming a script in the old copy-install .claude/scripts/ folder (plugin commands carry their own script permissions)' },
+  { id: 'browser-launchers', test: (k) => /^Bash\((?:open|xdg-open|explorer\.exe|powershell\.exe|wslpath|command -v pwsh)\b/.test(k),
+    why: 'browser launcher rows Claude never runs directly (the artifact opener script runs them itself)' },
+  { id: 'toolkit-repo', test: () => true,
+    why: 'grants only the toolkit\'s own repository used, and old checks no command runs any more' },
+];
+function retiredGroup(row) {
+  const k = permissionRowKey(row);
+  return RETIRED_GROUPS.find(g => g.test(k));
+}
 // The rows of the project's own a migration removed although their script
 // stayed (C-9, issue #179). Only a record's `deadPermissions` list names the
 // rows a migration removed: 7.0.0 and 7.0.1 wrote one (7.0.0 listed every
@@ -1071,7 +1102,9 @@ function main() {
         const seedAllow = (seed.permissions && Array.isArray(seed.permissions.allow) ? seed.permissions.allow : [])
           .filter(p => typeof p === 'string' && !deadPermission(p, exists));
         const seedKeys = new Set();
-        const missing = seedAllow.filter(p => { const k = permissionRowKey(p); if (seedKeys.has(k)) return false; seedKeys.add(k); return !present.has(k) && !offered.has(k); });
+        // A seed row is reported only when no list holds it and it was never offered here.
+        const notYet = (k) => !present.has(k) && !offered.has(k);
+        const missing = seedAllow.filter(p => { const k = permissionRowKey(p); if (seedKeys.has(k)) return false; seedKeys.add(k); return notYet(k); });
         if (!localExists) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':no-file').key, severity: 'suggest', convention: c.title, file: { relPath: LOCAL_SETTINGS },
           what: 'Optional. The project has no ' + LOCAL_SETTINGS + ', so none of the toolkit\'s ' + seedAllow.length + ' permission rows are granted.',
           fix: 're-run /tk:setup, which writes the file from the shipped seed', since: c.since,
@@ -1082,6 +1115,17 @@ function main() {
           fields: [{ label: 'Missing rows', value: missing.join(' ; ') }],
           receipt: { check: absentRowsCheck('missing', missing.map(p => [p, ''])),
             expect: missing.length + ' line(s) reading missing: <row>, one per toolkit row that no permissions list (allow, ask or deny) holds in either spelling' } });
+        // Seed ask rows the project lacks (issue #192): without them the broad
+        // `Bash(git push *)` allow row lets a force push run unasked, so this is
+        // its own Should fix finding, filtered like the allow rows above.
+        const seedAsk = (seed.permissions && Array.isArray(seed.permissions.ask) ? seed.permissions.ask : []).filter(p => typeof p === 'string');
+        const missingAsk = seedAsk.filter(p => { const k = permissionRowKey(p); if (seedKeys.has(k)) return false; seedKeys.add(k); return notYet(k); });
+        if (localExists && missingAsk.length) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':missing-ask-rows').key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
+          what: 'Should fix. ' + LOCAL_SETTINGS + ' lacks ' + missingAsk.length + ' ask row' + (missingAsk.length === 1 ? '' : 's') + ' the shipped toolkit seed carries, so a force push matches the allow row for git push and runs without asking.',
+          fix: 're-run /tk:setup, which merges the missing rows into "permissions.ask" in ' + LOCAL_SETTINGS + ' and keeps every row of yours', since: c.since,
+          fields: [{ label: 'Missing ask rows', value: missingAsk.join(' ; ') }],
+          receipt: { check: absentRowsCheck('missing', missingAsk.map(p => [p, ''])),
+            expect: missingAsk.length + ' line(s) reading missing: <row>, one per toolkit ask row that no permissions list (allow, ask or deny) holds in either spelling' } });
       }
       // (b) Rows the shipped retired list names, in either spelling:
       //     maintainer-only grants, old copy-install script rows and unscoped
@@ -1093,11 +1137,17 @@ function main() {
         const owned = new Set(piecesUnder(P('.claude')));
         const ownRow = (p) => { const m = /^Skill\(([a-z0-9-]+)(:\*)?\)$/.exec(p); return m !== null && owned.has(m[1]); };
         const still = lists.allow.filter(p => retiredKeys.has(permissionRowKey(p)) && !ownRow(p));
-        if (still.length) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':retired-rows').key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
-          what: 'Should fix. ' + LOCAL_SETTINGS + ' still carries ' + still.length + ' permission row' + (still.length === 1 ? '' : 's') + ' the toolkit seed retired: grants for the toolkit\'s own repository or rows that no longer match anything.',
-          fix: 'remove the listed rows from ' + LOCAL_SETTINGS + '; the current seed does not carry them and the plugin commands carry their own permissions', since: c.since,
-          fields: [{ label: 'Retired rows', value: still.join(' ; ') }],
-          receipt: { check: allowRowsCheck('retired', still.map(p => [p, ''])), expect: still.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
+        // One finding per retire reason (issue #186): a single all-rows finding
+        // died whole when the owner needed one row, and every stale row stayed.
+        for (const g of RETIRED_GROUPS) {
+          const rows = still.filter(p => retiredGroup(p) === g);
+          if (!rows.length) continue;
+          emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':retired-rows:' + g.id).key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
+            what: 'Should fix. ' + LOCAL_SETTINGS + ' still carries ' + rows.length + ' permission row' + (rows.length === 1 ? '' : 's') + ' the toolkit seed retired: ' + g.why + '.',
+            fix: 'remove the listed rows from ' + LOCAL_SETTINGS + ', unless the project still needs one of them for work of its own (then keep this group and say why); the current seed does not carry them', since: c.since,
+            fields: [{ label: 'Retired rows', value: rows.join(' ; ') }],
+            receipt: { check: allowRowsCheck('retired', rows.map(p => [p, ''])), expect: rows.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
+        }
       }
       // (c) acceptEdits: a question, never an auto-fix, worded for where the key
       //     sits. The 7.0.x seed wrote it at the top level, where Claude Code
@@ -1335,7 +1385,10 @@ function main() {
         // every prompt file is warn.
         const severity = sessionSeverity.get(rel) || 'warn';
         const lines = fs.readFileSync(P(rel), 'utf8').split(/\r?\n/);
+        // A lessons file records past work, so it is history as a whole (issue #187).
+        if (HISTORY_FILES.has(rel)) continue;
         lines.forEach((line, i) => {
+          if (HISTORY_LINE.test(line)) return;
           const tokens = unscopedTokens(line, matchers);
           if (!tokens.length) return;
           const { key, n } = claim(c.id + ':' + rel + ':' + digest(line));
