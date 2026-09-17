@@ -39,7 +39,7 @@
  *   - Designed for Linux/WSL environments
  *   - Expects simple .env.local format (KEY=value, no quotes needed)
  *   - Fail-fast philosophy with one transparent retry on transient errors
- *   - SDK version: @google/genai ^1.x (systemInstruction passed via config)
+ *   - SDK version: @google/genai ^2.x (systemInstruction passed via config)
  */
 
 const fs = require('fs');
