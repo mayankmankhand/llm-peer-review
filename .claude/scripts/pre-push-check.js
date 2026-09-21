@@ -59,10 +59,12 @@
 //     prefix alone. The parser tracks hunk line counts, so a line is only ever
 //     read as a header when it is genuinely outside a hunk.
 //   - Binary files. git prints one "Binary files ... differ" line and no
-//     hunks, so there are no added lines to scan. A binary whose name marks it
-//     as a secret container (see SECRET_CONTAINER_* below) is reported as
-//     unscannable; other binaries stay silent, with the line drawn there on
-//     purpose.
+//     hunks, so there are no added lines to scan. A binary is reported as
+//     unscannable when its name marks it as a secret container (see
+//     SECRET_CONTAINER_* below), or as a container of arbitrary bytes: an
+//     archive, a database, or a binary with no extension at all (see
+//     BYTE_CONTAINER_EXTENSIONS below, issue #200). Media binaries (icons,
+//     fonts, images) stay silent, with the line drawn there on purpose.
 //
 // Contract (mirrors session-init.js / generate-index.js):
 //   - stdout = the hit report, and ONLY on a hit. Clean runs print nothing.
@@ -132,22 +134,69 @@ const NEVER_PUSH_BASENAMES = [
 // and the human approves it by saying "push anyway".
 const SETTINGS_PATH = ".claude/settings.json";
 
-// Binary files whose NAME says they hold key material. The line scanner cannot
+// Binary files whose NAME says what they may hold. The line scanner cannot
 // read a binary at all: git emits a single "Binary files ... differ" line for
 // it and no hunks, and until the holistic review (R20) the parser had no branch
 // for that line, so a committed .pfx passed in silence - the opposite of the
 // fail-closed contract above. Reporting every binary would re-alarm on each
 // icon and font and train the "push anyway" reflex the tripwire exists to
 // prevent; reporting none is the silence being fixed. So the line is drawn at
-// the name: an added or modified binary matching one of these is reported as
-// unscannable (exit 1, check it by hand), any other binary stays silent. A
-// TEXT file under one of these names (a PEM .key, an armored .asc) never reaches
-// this list - it has hunks, and the private-key-block pattern is the better
-// check for it.
+// the name, and an added or modified binary on the reporting side of it is
+// reported as unscannable (exit 1, check it by hand).
+//
+// The line has two parts. Both apply ONLY on the binary branch:
+//
+//   1. Secret containers (R20): SECRET_CONTAINER_EXTENSIONS and
+//      SECRET_CONTAINER_BASENAMES. The name says key material.
+//
+//   2. Byte containers (issue #200): BYTE_CONTAINER_EXTENSIONS, plus any binary
+//      with no extension. R20 drew the line at names that SAY key material, and
+//      that left a gap: a name can also say "anything could be in here". A .zip
+//      or a .tar.gz carries whole files, a .sqlite carries whole tables, and
+//      either can hold a .env or a key with a name and a history this scanner
+//      never sees. A binary with no extension ("credentials", ".secrets", a
+//      core dump, a copied keyring) declares nothing about itself, so there is
+//      no ground for calling it inert. The question asked of a binary name is
+//      therefore not "does this look like a secret" but "does this name bound
+//      what the bytes can be". An archive, a database and a bare name do not.
+//
+// Why media still stays silent: a .png, .ico, .woff2 or .mp4 name does bound the
+// bytes - to pixels, glyphs, frames - and those are the binaries a normal repo
+// commits again and again. An alarm on each of them is an alarm nobody reads,
+// and the person who learns to say "push anyway" to an icon says it to a .pfx
+// too. So the byte-container list is kept NARROW on purpose: general-purpose
+// archives and general-purpose databases only. Formats that are technically
+// zip containers but whose name declares a document or a package (.docx,
+// .xlsx, .jar, .whl, .apk) are left out for the same reason media is - they are
+// committed routinely and the name does say what they are. That is an honest
+// limit, not a claim that they cannot hold a secret: this rule narrows the
+// silence, it does not end it. A secret renamed logo.png still passes; nothing
+// short of reading the bytes would catch that, and this script does not.
+//
+// Matching is on the FINAL extension, case-insensitive, so backup.tar.gz hits
+// through .gz and BACKUP.ZIP counts. "No extension" means the basename has no
+// dot after its first character: "credentials" and ".secrets" qualify,
+// "logo.png" does not. The one name exempt from the no-extension rule is
+// .DS_Store (exact spelling): macOS writes it into every folder Finder opens,
+// it is the one common inert binary with a bare name, and re-alarming on it
+// would train exactly the reflex described above. It should still be
+// gitignored; that is housekeeping, not this script's job.
+//
+// A TEXT file under any of these names (a PEM .key, an armored .asc, a LICENSE
+// or Makefile with no extension) never reaches these lists - it has hunks, its
+// added lines go through PATTERNS like any other text, and for key material
+// the private-key-block pattern is the better check.
 const SECRET_CONTAINER_EXTENSIONS = [
   ".pfx", ".p12", ".jks", ".keystore", ".kdbx", ".gpg", ".asc", ".der", ".key",
 ];
 const SECRET_CONTAINER_BASENAMES = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"];
+const BYTE_CONTAINER_EXTENSIONS = [
+  // general-purpose archives
+  ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+  // general-purpose databases
+  ".sqlite", ".sqlite3", ".db", ".mdb",
+];
+const NO_EXTENSION_EXEMPT_BASENAMES = [".DS_Store"];
 
 // Secret patterns scanned against ADDED lines only. Hand-picked common
 // formats, not exhaustive by design (decision: self-contained beats a
@@ -375,6 +424,24 @@ function isSecretContainer(repoPath) {
   if (SECRET_CONTAINER_BASENAMES.includes(basename)) return true;
   const dot = basename.lastIndexOf(".");
   return dot !== -1 && SECRET_CONTAINER_EXTENSIONS.includes(basename.slice(dot));
+}
+
+// Is this repo path named like a container of arbitrary bytes (issue #200)?
+// Returns the reason to print, or null when the name is on the silent side of
+// the line. Called only for a binary that isSecretContainer() did not claim, so
+// id_rsa keeps its own, more specific message. The exemption is checked against
+// the basename as spelled (an exemption should be as narrow as it can be); the
+// extension is compared lowercased, like the list above.
+function byteContainerReason(repoPath) {
+  const basename = repoPath.split("/").pop();
+  if (basename.indexOf(".", 1) === -1) {
+    // No dot after the first character: "credentials", ".secrets".
+    if (NO_EXTENSION_EXEMPT_BASENAMES.includes(basename)) return null;
+    return "binary with no extension; cannot be scanned";
+  }
+  const ext = basename.slice(basename.lastIndexOf(".")).toLowerCase();
+  if (BYTE_CONTAINER_EXTENSIONS.includes(ext)) return "binary archive or database; cannot be scanned";
+  return null;
 }
 
 // Does this path already exist at the range base? If so a push cannot leak it:
@@ -766,6 +833,12 @@ function scanCommit(sha, hits) {
         // Deleting a binary publishes nothing new. Adding or changing one that
         // is named like key material cannot be read here, so the human must.
         hits.unscannable.push(section.path + " @ " + short + " (binary secret container; cannot be scanned)");
+      } else if (!deleted) {
+        // Same reasoning, second part of the line (issue #200): an archive, a
+        // database, or a binary with no extension could hold anything. Media
+        // names return null here and stay silent.
+        const reason = byteContainerReason(section.path);
+        if (reason !== null) hits.unscannable.push(section.path + " @ " + short + " (" + reason + ")");
       }
       continue;
     }

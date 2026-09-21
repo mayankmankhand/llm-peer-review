@@ -1097,6 +1097,79 @@ function rangeInvalidTests() {
   cleanup(sb);
 }
 
+// --- 14. binary byte containers (issue #200) --------------------------------
+// git prints one "Binary files ... differ" line for a binary and no hunks, so
+// the line scanner reads nothing. Secret-container names (.pfx, id_rsa) were
+// already reported; archives, databases, and binaries with no extension passed
+// in silence. The fixture bytes are inert on purpose: a NUL is all git needs to
+// call a file binary, and the scanner has no allow-list, so a fixture must never
+// carry anything shaped like a real secret.
+const INERT_BYTES = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff, 0xfe, 0x00, 0x10, 0x20, 0x00]);
+
+// One scratch repo per case, so every verdict stands on its own range.
+function binaryCase(label, name, contents) {
+  const sb = makeRepo(label);
+  let r = null;
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, name, contents, 'add ' + name);
+    r = run(sb.repo);
+  } catch (e) {
+    check('byte-container case ' + name + ' set up a repo', false, e.message);
+  }
+  cleanup(sb);
+  return r;
+}
+
+function byteContainerTests() {
+  console.log('\n14. binary archives, databases, and no-extension binaries are reported (issue #200)');
+  const ARCHIVE = '(binary archive or database; cannot be scanned)';
+  const BARE = '(binary with no extension; cannot be scanned)';
+  const reported = [
+    ['zip', 'backups/site.zip', ARCHIVE, 'a .zip'],
+    ['targz', 'backups/backup.tar.gz', ARCHIVE, 'a .tar.gz, through its final extension .gz'],
+    ['sqlite', 'data/app.sqlite', ARCHIVE, 'a .sqlite'],
+    ['upper', 'backups/BACKUP.ZIP', ARCHIVE, 'an uppercase BACKUP.ZIP'],
+    ['bare', 'ops/credentials', BARE, 'a binary with no extension'],
+    ['dotbare', 'ops/.secrets', BARE, 'a dot-led binary with no extension (.secrets)'],
+  ];
+  reported.forEach(function (c) {
+    const r = binaryCase('bytes-' + c[0], c[1], INERT_BYTES);
+    if (r === null) return;
+    check('tripwire reports ' + c[3] + ' as unscannable, exit 1',
+      r.status === 1 && r.stdout.indexOf(c[1] + ' @ ') !== -1 && r.stdout.indexOf(c[2]) !== -1, show(r));
+  });
+
+  const silent = [
+    ['png', 'docs/images/logo.png', INERT_BYTES, 'a .png'],
+    ['font', 'assets/fonts/body.woff2', INERT_BYTES, 'a .woff2 font'],
+    ['dsstore', 'docs/.DS_Store', INERT_BYTES, 'a binary .DS_Store'],
+    ['license', 'LICENSE', 'Permission is hereby granted, free of charge.\n', 'a TEXT file with no extension (LICENSE)'],
+    ['makefile', 'Makefile', 'all:\n\techo ok\n', 'a TEXT file with no extension (Makefile)'],
+  ];
+  silent.forEach(function (c) {
+    const r = binaryCase('bytes-' + c[0], c[1], c[2]);
+    if (r === null) return;
+    check('tripwire stays silent on ' + c[3] + ': exit 0, empty stdout', r.status === 0 && r.stdout === '', show(r));
+  });
+
+  // Deleting a binary publishes nothing new, same as the secret-container path.
+  // The add is pushed without the check so only the deletion is outgoing.
+  const sb = remoteRepo('bytes-delete');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'backups/old.zip', INERT_BYTES, 'add an archive');
+    sb.g(['push', '-q', '--no-verify', '-u', 'origin', 'main']);
+    sb.g(['rm', '-q', 'backups/old.zip']);
+    sb.g(['commit', '-qm', 'remove the archive']);
+    const r = run(sb.repo);
+    check('deleting a binary archive stays silent: exit 0, empty stdout', r.status === 0 && r.stdout === '', show(r));
+  } catch (e) {
+    check('byte-container deletion test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
@@ -1111,6 +1184,7 @@ rangeLocalUpstreamTests();
 rangeSecondRemoteTests();
 rangeNeverPushTests();
 rangeInvalidTests();
+byteContainerTests();
 
 console.log('');
 if (failures.length === 0) {
