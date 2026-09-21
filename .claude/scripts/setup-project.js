@@ -828,6 +828,10 @@ function main() {
     // .gitattributes is not listed here: it is line-merged further down.
     'artifacts/README.md': 'artifacts-README.md',
     '.claude/rules/toolkit.md': 'rules-toolkit.md',
+    // The project's extension folder (issue #199): the plugin reads a project's
+    // own review kinds, gates, fix rules and severity anchors from it. Setup only
+    // explains it; the folder is never managed, so a migration never removes it.
+    '.claude/toolkit/README.md': 'toolkit-README.md',
   };
   const lessonsPreexisted = fs.existsSync(P('LESSONS.md'));
   const willRemove = new Set(removed);

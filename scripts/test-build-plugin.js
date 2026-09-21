@@ -67,7 +67,7 @@ function withoutKeptPhrases(emitted, text) {
   return text;
 }
 // The seed files that come straight from seed/ (every seed but the rules file).
-const RAW_SEEDS = ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', 'env.local.example', 'gitattributes', 'gitignore', 'artifacts-README.md', 'retired-permission-rows.txt', 'settings.local.json'];
+const RAW_SEEDS = ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', 'env.local.example', 'gitattributes', 'gitignore', 'artifacts-README.md', 'toolkit-README.md', 'retired-permission-rows.txt', 'settings.local.json'];
 const UNQUOTED_CAT = /!`cat \$\{CLAUDE_PLUGIN_ROOT\}/;
 const QUOTED_CAT = /!`cat "\$\{CLAUDE_PLUGIN_ROOT\}\/[^`"\s]+"`/g;
 const BARE_FAMILY = /(^|[^\w./:\-])\/(review|ask)-\*/;
@@ -151,6 +151,8 @@ function makeFixture() {
   write(root, 'seed/gitattributes', '*.sh text eol=lf\n');
   write(root, 'seed/gitignore', 'node_modules/\nplans/PLAN-*.md\n.claude/worktrees/\n.toolkit-backup-*/\n');
   write(root, 'seed/artifacts-README.md', '# artifacts\n');
+  // The project extension folder's README (issue #199): scoped names only, so seedProblems stays quiet.
+  write(root, 'seed/toolkit-README.md', '# Project extensions\n\nRead by `/tk:review` and `/tk:create-plan`.\n');
   write(root, 'seed/retired-permission-rows.txt', '# retired rows\nBash(node .claude/scripts/browse.js *)\nBash(bash -n scripts/setup/setup.sh)\nSkill(review)\n');
   write(root, 'seed/settings.local.json', '{ "permissions": { "allow": ["Bash(git add *)", "Skill(tk:review)"] } }\n');
   write(root, 'scripts/historical-managed-paths.txt', '# a comment line is ignored\n\n.claude/commands/review-code.md\n.claude/skills/shared/output-template.md\nscripts/ask-gpt.js\n');

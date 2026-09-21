@@ -217,6 +217,7 @@ write(pluginRoot, 'seed/gitattributes', '*.sh text eol=lf\n');
 // also guarantees that line on its own must not write it twice.
 write(pluginRoot, 'seed/gitignore', '# Dependencies\nnode_modules/\n.claude/settings.local.json\nplans/PLAN-*.md\nartifacts/html/\n');
 write(pluginRoot, 'seed/artifacts-README.md', '# artifacts (seed)\n');
+write(pluginRoot, 'seed/toolkit-README.md', '# toolkit (seed)\n');
 write(pluginRoot, 'seed/rules-toolkit.md', '# Toolkit Rules\n\n<!-- Toolkit version: 0.0.0 | Managed by LLM Peer Review. -->\n\nShort seed.\n');
 write(pluginRoot, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git add *)', 'Bash(gh auth status *)', 'Bash(node .claude/scripts/render-html.js *)'], additionalDirectories: ['/tmp'] }, defaultMode: 'acceptEdits' }));
 // One managed path holds a space, so every undo list is shell-quoted for real.
@@ -269,10 +270,14 @@ function makeCopyInstall(withManifest) {
   // and neither counts as a local edit that pages.
   fs.appendFileSync(path.join(repo, '.gitattributes'), LFS_LINE + '\n');
   write(repo, 'artifacts/README.md', ARTIFACTS_NOTES);
+  // The project's extension folder (issue #199): its own gate, written while the
+  // project was still on the copy-install. A migration must leave it alone.
+  write(repo, '.claude/toolkit/plan-gate.md', PROJECT_GATE);
   commitAll(repo, 'copy-install state');
   return repo;
 }
 
+const PROJECT_GATE = 'Every plan names its rollback step.\n';
 console.log('\n1. copy-install with a manifest');
 let repo = makeCopyInstall(true);
 let undo = null;
@@ -291,6 +296,7 @@ check('manifest and VERSION are gone', !exists(repo, '.claude/.toolkit-manifest.
 check('stale node_modules is gone', !exists(repo, '.claude/scripts/node_modules'));
 check('custom files survive byte for byte', read(repo, '.claude/commands/myteam-deploy.md') === '# Deploy\n\nOurs.\n' && read(repo, '.claude/agents/my-agent.md').includes('Ours') && read(repo, '.claude/skills/my-skill/SKILL.md').includes('Ours') && read(repo, '.claude/rules/bank-safety.md') === '# Bank safety\n' && read(repo, '.claude/scripts/my-tool.js').includes('ours'));
 check('the report lists the custom files as kept', /myteam-deploy\.md/.test(r.out) && /bank-safety\.md/.test(r.out));
+check('the project extension folder survives the migration byte for byte, is not listed as removed, and gains the seeded README (#199)', read(repo, '.claude/toolkit/plan-gate.md') === PROJECT_GATE && read(repo, '.claude/toolkit/README.md') === '# toolkit (seed)\n' && !/Removed[^\n]*\.claude\/toolkit\//.test(r.out) && !JSON.parse(read(repo, '.claude/.toolkit-migration.json')).removed.some(x => x.startsWith('.claude/toolkit/')), r.out);
 check('the four root seed files are present after the sweep', exists(repo, '.env.local.example') && exists(repo, '.gitattributes') && exists(repo, 'artifacts/README.md') && exists(repo, '.claude/rules/toolkit.md'));
 check('the seeded rules file is the short seed, stamped with the plugin version', read(repo, '.claude/rules/toolkit.md').includes('Short seed.') && read(repo, '.claude/rules/toolkit.md').includes('Toolkit version: 7.0.0 |'));
 check('existing LESSONS.md is untouched and no detail file is seeded beside it', read(repo, 'LESSONS.md') === '# Our lessons\n' && !exists(repo, 'LESSONS-detail.md'));
@@ -781,6 +787,13 @@ check('the report points at the first command', /Next: \/tk:explore/.test(r.out)
 const freshIgnore = read(repo, '.gitignore');
 check('a fresh .gitignore carries .claude/settings.local.json exactly once', freshIgnore.split('\n').filter(l => l === '.claude/settings.local.json').length === 1, freshIgnore);
 check('a fresh .gitignore carries no line twice', (() => { const ls = freshIgnore.split('\n').filter(l => l.trim() !== '' && !l.startsWith('#')); return new Set(ls).size === ls.length; })(), freshIgnore);
+// The project extension folder (issue #199): the README is seeded once, and a
+// rerun never rewrites it or anything the project put beside it.
+check('a fresh setup seeds the project extension README', read(repo, '.claude/toolkit/README.md') === '# toolkit (seed)\n');
+write(repo, '.claude/toolkit/README.md', '# ours now\n');
+write(repo, '.claude/toolkit/plan-gate.md', PROJECT_GATE);
+r = run(repo, pluginRoot);
+check('a rerun leaves the project extension folder byte for byte', r.status === 0 && read(repo, '.claude/toolkit/README.md') === '# ours now\n' && read(repo, '.claude/toolkit/plan-gate.md') === PROJECT_GATE, r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
 // An existing .gitignore whose lines differ only by surrounding whitespace: the

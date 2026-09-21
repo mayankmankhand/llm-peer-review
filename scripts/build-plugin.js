@@ -719,6 +719,8 @@ function build(src, version) {
     'seed/gitattributes': path.join(seedDir, 'gitattributes'),
     'seed/gitignore': path.join(seedDir, 'gitignore'),
     'seed/artifacts-README.md': path.join(seedDir, 'artifacts-README.md'),
+    // The README /tk:setup writes into the project's extension folder (issue #199).
+    'seed/toolkit-README.md': path.join(seedDir, 'toolkit-README.md'),
     'seed/retired-permission-rows.txt': path.join(seedDir, 'retired-permission-rows.txt'),
     'seed/rules-toolkit.md': path.join(src, 'rules', 'toolkit.md'),
     'seed/settings.local.json': path.join(seedDir, 'settings.local.json'),
