@@ -275,3 +275,12 @@
 - **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.**
 - **A check that defers to another check must ask whether that other check runs in this range.**
 - **In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.**
+
+## Issues 196, 200, 202 (the outside audit)
+
+- **A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".**
+- **Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.**
+- **A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.**
+- **"Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.**
+- **"Touches no file" is a claim to measure: `git stash create` takes the index lock.**
+- **An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.**

@@ -12,6 +12,36 @@ If you last installed v4.3.3, twenty-seven releases have shipped on top of it. v
 
 ---
 
+## Unreleased - on top of v7.4.0
+
+**Not tagged yet.** Committed on `main` after v7.4.0 and held for the next release, which also takes #195, #197 and #201. This section becomes that release's block; until then the plugin anyone installs is still v7.4.0.
+
+### Fixed
+
+- **A review that could not finish no longer ships anyway** (#202). Three gaps in the auto loop, found by an outside audit and confirmed against the prompts. A review specialist still failing after its one retry is now a hard stop: you are paged with three answers (retry, continue anyway, stop) and the hand-off to `/document` waits, where before it left a note and carried on to a push. A finding whose audit could not run is marked `unaudited` and is report-only, never auto-fixed. And the fixes a review makes are measured from a snapshot of the tree as the review found it, so uncommitted work you had in progress is never handed to the fix verifier as if it were a fix. A directly typed `/review-*` run takes the same snapshot before its first fix.
+- **The push scanner reports more of what it cannot read** (#200). A binary archive, database file, dump, backup, SQLite side file, or binary with no extension is now reported as unscannable instead of passing in silence; images, fonts, `.DS_Store` and `Thumbs.db` stay silent. A text file that `.gitattributes` marks `-diff` or `binary` used to print no lines at all, so no secret pattern ever read it; it is now recognised by its bytes and scanned as text.
+- **Pushes that delete always ask** (#196). Seven ask rows join the six force-push rows: `--mirror`, `--delete`, `-d` in either position, `--prune`, and the shortened spellings git accepts (`--m`, `--de`, `--pru` and longer). M9's force-push clause now names mirror pushes and remote branch deletes.
+- `/peer-review` shows a real description in the command picker; it was the one command with no title line, so the plugin build fell back to its file name. The contributing guide's issue link works outside GitHub. The scripts package description is true wherever the file lands.
+
+### Added
+
+- **`npm test`** runs every suite plus the plugin build check (`release-check.js --tests-only`); `npm run test:release` is the full gate. **GitHub Actions** runs `npm test` on every push and pull request. **Dependabot** watches the scripts' packages for security updates only.
+
+### Measured
+
+- The seven ask rows were measured in headless default-mode sessions on Claude Code 2.1.278 and git 2.43.0: 14 destructive spellings ask, and an ordinary push, `-u`, `--dry-run`, `--progress`, `--porcelain`, a tag, a path remote and a branch named `fix-d-flag` do not. Two limits hold: `git push origin :branch` has no row that works (a rule ending in `:*` is read as the older prefix spelling), and `git -C <dir> push` is not seen by any `git push` row. M9 covers both.
+- `git stash create`, which takes the snapshot, writes no ref, no stash entry and no working file, but does briefly lock git's index. When another git process holds that lock the snapshot fails; the review then measures from its pinned end and says so.
+
+### Why
+
+The loop's promise is that nothing is fixed or shipped on the strength of a review nobody checked. Each of the three gaps broke that promise quietly: missing coverage was disclosed but never stopped anything, an unaudited finding was labelled but still acted on, and a fix check could be handed work that was never a fix. None needed new machinery, only a brake where the rules already had a label. The push guards are the same idea one layer down: the scanner and the ask rows are the last things between the loop and a remote, so what they cannot see should stop the push rather than pass it.
+
+### For existing installs
+
+Nothing to do until this is released. After the release, `/tk:setup` adds the seven ask rows to a project that has not been offered them; a row you delete stays deleted.
+
+---
+
 ## v7.4.0 - A Folder the Project Owns (2026-09-21)
 
 **On top of v7.3.1, which stays additive on v7.0.0 and v6.0.0.** Project extension seams (#199). The loop is unchanged, and a project with no `.claude/toolkit/` folder sees no change.
