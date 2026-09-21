@@ -1130,6 +1130,18 @@ function byteContainerTests() {
     ['targz', 'backups/backup.tar.gz', ARCHIVE, 'a .tar.gz, through its final extension .gz'],
     ['sqlite', 'data/app.sqlite', ARCHIVE, 'a .sqlite'],
     ['upper', 'backups/BACKUP.ZIP', ARCHIVE, 'an uppercase BACKUP.ZIP'],
+    // One row per family added after the first review of #200 (R1).
+    ['tarzst', 'backups/site.tar.zst', ARCHIVE, 'a newer compressor (.tar.zst, through .zst)'],
+    ['txz', 'backups/site.txz', ARCHIVE, 'a short tar spelling (.txz)'],
+    ['iso', 'images/disk.iso', ARCHIVE, 'a disk image (.iso)'],
+    ['dump', 'data/prod.dump', ARCHIVE, 'a database dump (.dump)'],
+    ['zipbak', 'backups/site.zip.bak', ARCHIVE, 'a renamed copy (site.zip.bak, through .bak)'],
+    ['wal', 'data/app.sqlite-wal', ARCHIVE, 'a SQLite write-ahead log (app.sqlite-wal): the -wal suffix sits inside the final extension'],
+    ['journal', 'data/app.db-journal', ARCHIVE, 'a rollback journal (app.db-journal)'],
+    ['shm3', 'data/APP.SQLITE3-SHM', ARCHIVE, 'an uppercase sibling no list row spells out (APP.SQLITE3-SHM)'],
+    // Named exemptions are exact-case and exact-name (R8): these two stay reported.
+    ['thumbslower', 'photos/thumbs.db', ARCHIVE, 'a lowercase thumbs.db (the exemption is exact-case, like .DS_Store)'],
+    ['realdb', 'data/real.db', ARCHIVE, 'an ordinary .db beside the Thumbs.db exemption'],
     ['bare', 'ops/credentials', BARE, 'a binary with no extension'],
     ['dotbare', 'ops/.secrets', BARE, 'a dot-led binary with no extension (.secrets)'],
   ];
@@ -1144,6 +1156,8 @@ function byteContainerTests() {
     ['png', 'docs/images/logo.png', INERT_BYTES, 'a .png'],
     ['font', 'assets/fonts/body.woff2', INERT_BYTES, 'a .woff2 font'],
     ['dsstore', 'docs/.DS_Store', INERT_BYTES, 'a binary .DS_Store'],
+    ['thumbs', 'photos/Thumbs.db', INERT_BYTES, 'a binary Thumbs.db, exempt by exact name ahead of the .db rule'],
+    ['walmedia', 'docs/logo-wal.png', INERT_BYTES, 'a .png whose stem ends in -wal (the suffix is read only inside the final extension)'],
     ['license', 'LICENSE', 'Permission is hereby granted, free of charge.\n', 'a TEXT file with no extension (LICENSE)'],
     ['makefile', 'Makefile', 'all:\n\techo ok\n', 'a TEXT file with no extension (Makefile)'],
   ];
@@ -1170,6 +1184,93 @@ function byteContainerTests() {
   cleanup(sb);
 }
 
+// --- 15. text files that .gitattributes marks binary (R2) --------------------
+// "*.json -diff" or "x binary" makes git print the same "Binary files ... differ"
+// line for a plain TEXT file, with no hunks, so no pattern ever read it and its
+// name is on neither binary list: a config.json holding a key passed with exit 0.
+// The tripwire now asks the bytes (git's own NUL-in-the-first-8000 test) and
+// line-scans a forced-binary text file through a --text diff of that one path.
+// The secret is the runtime-assembled GITLAB_PAT, never a literal (header note).
+function attrRepo(label, attributes) {
+  const sb = makeRepo(label);
+  commitFile(sb, 'README.md', 'seed\n', 'init');
+  commitFile(sb, '.gitattributes', attributes, 'mark files binary');
+  return sb;
+}
+
+function forcedBinaryTests() {
+  console.log('\n15. a text file marked binary by .gitattributes is scanned, not skipped (R2)');
+  const SECRET_JSON = '{\n  "name": "app",\n  "ci": "' + GITLAB_PAT + '"\n}\n';
+  const CLEAN_LOCK = '{\n  "name": "app",\n  "lockfileVersion": 3,\n  "packages": {}\n}\n';
+
+  // Added file, "-diff" spelling.
+  let sb = attrRepo('attr-add', '*.json -diff\n');
+  try {
+    // Proof the fixture exercises the binary branch: git itself prints no hunks.
+    commitFile(sb, 'config.json', SECRET_JSON, 'add config');
+    const patch = sb.g(['diff-tree', '-r', '-p', '--root', 'HEAD']);
+    check('fixture: git prints a binary notice and no hunk for the -diff text file', /Binary files .* differ/.test(patch) && patch.indexOf('@@') === -1, patch.slice(0, 300));
+    const r = run(sb.repo);
+    check('a secret in an ADDED text file marked -diff is a secret hit with its line number, exit 1',
+      r.status === 1 && hitOn(r.stdout, 'gitlab-pat', 'config.json', 3), show(r));
+    check('the report masks the secret from the forced-text scan', r.stdout.indexOf(GITLAB_PAT) === -1, show(r));
+  } catch (e) {
+    check('forced-binary added-file test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // Modified file, "binary" macro spelling: only the changed line is outgoing.
+  sb = remoteRepo('attr-modify');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, '.gitattributes', 'config.json binary\n', 'mark config binary');
+    commitFile(sb, 'config.json', CLEAN_LOCK, 'add a clean config');
+    sb.g(['push', '-q', '--no-verify', '-u', 'origin', 'main']);
+    commitFile(sb, 'config.json', CLEAN_LOCK.replace('"packages": {}', '"ci": "' + GITLAB_PAT + '"'), 'put a token in config');
+    const r = run(sb.repo);
+    check('a secret in a MODIFIED text file marked binary is a secret hit, exit 1',
+      r.status === 1 && hitOn(r.stdout, 'gitlab-pat', 'config.json', 4), show(r));
+  } catch (e) {
+    check('forced-binary modified-file test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+
+  // A clean lockfile marked -diff is scanned and found clean: no alarm.
+  sb = attrRepo('attr-clean', 'package-lock.json -diff\n');
+  try {
+    commitFile(sb, 'package-lock.json', CLEAN_LOCK, 'add a lockfile');
+    const r = run(sb.repo);
+    check('a clean lockfile marked -diff stays silent: exit 0, empty stdout', r.status === 0 && r.stdout === '', show(r));
+  } catch (e) {
+    check('forced-binary clean-lockfile test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // A true binary under the same attribute is still media: silent.
+  sb = attrRepo('attr-png', '*.png binary\n');
+  try {
+    commitFile(sb, 'docs/logo.png', INERT_BYTES, 'add a logo');
+    const r = run(sb.repo);
+    check('a true binary .png marked binary stays silent: exit 0, empty stdout', r.status === 0 && r.stdout === '', show(r));
+  } catch (e) {
+    check('forced-binary png test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // A path holding glob characters is rescanned as itself, not as a pattern.
+  sb = attrRepo('attr-glob', '*.json -diff\n');
+  try {
+    commitFile(sb, 'data/[a]*.json', SECRET_JSON, 'add an oddly named config');
+    commitFile(sb, 'data/ab.json', CLEAN_LOCK, 'add a clean neighbour the glob would match');
+    const r = run(sb.repo);
+    check('a forced-binary path with glob characters is scanned under its literal name',
+      r.status === 1 && r.stdout.indexOf('[gitlab-pat] data/[a]*.json @ ') !== -1 && r.stdout.indexOf('ab.json') === -1, show(r));
+  } catch (e) {
+    check('forced-binary glob-path test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
@@ -1185,6 +1286,7 @@ rangeSecondRemoteTests();
 rangeNeverPushTests();
 rangeInvalidTests();
 byteContainerTests();
+forcedBinaryTests();
 
 console.log('');
 if (failures.length === 0) {
