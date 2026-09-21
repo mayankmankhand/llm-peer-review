@@ -792,7 +792,12 @@ check('a fresh .gitignore carries no line twice', (() => { const ls = freshIgnor
 check('a fresh setup seeds the project extension README', read(repo, '.claude/toolkit/README.md') === '# toolkit (seed)\n');
 write(repo, '.claude/toolkit/README.md', '# ours now\n');
 write(repo, '.claude/toolkit/plan-gate.md', PROJECT_GATE);
+// The rules file's project section (review of #199, R4): a rerun never rewrites
+// the file, so the project's own lines under the marker survive byte for byte.
+const RULES_WITH_PROJECT = read(repo, '.claude/rules/toolkit.md') + '\n<!-- Project section: the seed ends here. -->\n\n## Project\n\nOur own rule: every plan names its rollback step.\n';
+write(repo, '.claude/rules/toolkit.md', RULES_WITH_PROJECT);
 r = run(repo, pluginRoot);
+check('a rerun leaves a rules file with project text under the marker byte for byte', r.status === 0 && read(repo, '.claude/rules/toolkit.md') === RULES_WITH_PROJECT, r.out);
 check('a rerun leaves the project extension folder byte for byte', r.status === 0 && read(repo, '.claude/toolkit/README.md') === '# ours now\n' && read(repo, '.claude/toolkit/plan-gate.md') === PROJECT_GATE, r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 

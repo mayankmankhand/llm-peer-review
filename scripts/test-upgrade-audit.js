@@ -2098,6 +2098,10 @@ console.log('\n9b. project extensions: the rules-file marker (C-7) and review ki
   write(missing.d, '.claude/agents/design-fidelity.md', agent('design-fidelity', 'Read'));
   check('C-12: adding the agent clears the finding, and the old receipt no longer passes', c12(audit74(missing.d)).length === 0 && runReceipt(missing.d, missing.f).status !== 0);
   one('byname', { [KINDS]: table(GOOD_ROW), '.claude/agents/team/fidelity.md': agent('some-other-name', 'Read') }, f => /design-fidelity/.test(f.what), 'an agent file under another name does not satisfy the row');
+  one('declared-other', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('renamed-copy', 'Read') }, f => /no file under/.test(f.what), 'a file named like the row but declaring another name does not satisfy it (review of #199, R9)');
+  one('stray-line', { [KINDS]: table(GOOD_ROW), '.claude/agents/other.md': agent('other', 'Read') + '\nExample frontmatter for a new agent:\n\nname: design-fidelity\n' }, f => /no file under/.test(f.what), 'a name line outside any frontmatter is prose: the finding stands and so does its receipt (review of #199, R10)');
+  r = audit74(kindsCase('noname-ok', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': '---\ndescription: Checks the design files.\ntools: Read\n---\nReturn JSONL findings.\n' }));
+  check('C-12: a file that declares no name answers to its file name', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 300));
   r = audit74(kindsCase('byname-ok', { [KINDS]: table(GOOD_ROW), '.claude/agents/team/fidelity.md': agent('design-fidelity', 'Read') }));
   check('C-12: an agent found by its frontmatter name, in a subfolder, satisfies the row', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 300));
   const edit = one('edit', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read, Edit') }, (f, out) => /is granted Edit/.test(f.what) && /C-4/.test(f.what) && /Edit/.test(out.stdout), 'a row whose agent carries Edit is one finding, and its receipt shows the tools line');
