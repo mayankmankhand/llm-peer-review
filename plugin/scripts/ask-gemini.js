@@ -47,6 +47,19 @@ const path = require('path');
 const crypto = require('crypto');
 const { loadEnvLocal, describeLookup } = require('./env-local.js');
 
+// Node floor (issue #197). `@google/genai` 2.23.0 declares engines.node >=20.0.0
+// (lower than openai's 22, so each debate script enforces its own package's
+// floor rather than one shared number), and on an older Node the SDK fails later
+// with an error that never mentions Node. Say so plainly here, before `session`
+// and before the lazy SDK require. Mirrors the gen-media.js guard. stderr, never
+// stdout: stdout is the captured debate transcript.
+const NODE_FLOOR = 20;
+const nodeMajor = Number(process.version.replace(/^v/, '').split('.')[0]);
+if (nodeMajor < NODE_FLOOR) {
+  console.error(`ask-gemini.js needs Node.js ${NODE_FLOOR} or newer (the @google/genai package requires it); you have ${process.version}.`);
+  process.exit(1);
+}
+
 /**
  * `session` is handled here, ahead of everything below (issue #181): it prints a
  * new debate session id and exits, so it reads no .env.local, loads no SDK and

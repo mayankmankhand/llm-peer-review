@@ -45,6 +45,8 @@ This command supports optional focus arguments:
 
 If focus arguments are provided, skip the detection phase and dispatch only the specified specialists. The arguments map to skill names: `code` = review-code, `security` = review-security, `ux` = review-ux, `plan` = review-plan, `commands` = review-commands, `browser` = review-browser, `deps` = review-deps, `copy` = review-copy, `full` = review-full. An argument containing `..` is the range, never a focus name (no focus name contains `..`).
 
+A focus name that matches none of those may be one of this project's own review kinds. Compare it against the rows under **Project review kinds** in Phase 1: that table is in this prompt on every run, because the harness expands the inline read when the command loads, so skipping Phase 1 skips detection, not the text; read the rows there and run nothing. When a row's kind matches, print exactly one line, `<kind>` is a project review kind and runs on auto-detect only; run `/tk:review` with no argument to include it, and continue with the remaining focus names; when it was the only one, stop with "Nothing to run." (#201). A name that matches neither is handled as before.
+
 </reference>
 
 ## How It Works
@@ -100,7 +102,7 @@ Categorize the changes and pick relevant specialists:
 - **Security runs on every code change, alongside Code Quality.** The same files that select Code Quality also select Security (review-security). Code Quality asks "is this written well?"; Security asks "what can a malicious user make this do?" - different lenses, both run. Security has its own danger-spot gate, so it stays quiet on changes that touch no security-sensitive sink.
 - When copy and UX both run on the same artifact, copy focuses on meaning/orientation while UX focuses on usability/accessibility. Deduplicate overlapping findings in synthesis.
 - An empty scope never reaches this table: Phase 0 already stopped the run, or it is a focus call, which skips detection
-- A project review kind is selected by its own What changed cell, on this auto-detect path only: a focus argument names toolkit kinds
+- A project review kind is selected by its own What changed cell, on this auto-detect path only: a focus argument names toolkit kinds, and one that names a project kind says so (Focus Mode)
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
 
 ### Phase 1.5: Size gate (skip the fan-out for tiny diffs)

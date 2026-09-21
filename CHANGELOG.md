@@ -14,7 +14,7 @@ If you last installed v4.3.3, twenty-seven releases have shipped on top of it. v
 
 ## Unreleased - on top of v7.4.0
 
-**Not tagged yet.** Committed on `main` after v7.4.0 and held for the next release, which also takes #195, #197 and #201. This section becomes that release's block; until then the plugin anyone installs is still v7.4.0.
+**Not tagged yet.** Committed on `main` after v7.4.0 and held for the next release. This section becomes that release's block; until then the plugin anyone installs is still v7.4.0.
 
 ### Fixed
 
@@ -22,6 +22,9 @@ If you last installed v4.3.3, twenty-seven releases have shipped on top of it. v
 - **The push scanner reports more of what it cannot read** (#200). A binary archive, database file, dump, backup, SQLite side file, or binary with no extension is now reported as unscannable instead of passing in silence; images, fonts, `.DS_Store` and `Thumbs.db` stay silent. A text file that `.gitattributes` marks `-diff` or `binary` used to print no lines at all, so no secret pattern ever read it; it is now recognised by its bytes and scanned as text.
 - **Pushes that delete always ask** (#196). Seven ask rows join the six force-push rows: `--mirror`, `--delete`, `-d` in either position, `--prune`, and the shortened spellings git accepts (`--m`, `--de`, `--pru` and longer). M9's force-push clause now names mirror pushes and remote branch deletes.
 - `/peer-review` shows a real description in the command picker; it was the one command with no title line, so the plugin build fell back to its file name. The contributing guide's issue link works outside GitHub. The scripts package description is true wherever the file lands.
+- **`/document` no longer stops the chained loop on a fresh repository** (#195). With no cycle marker and no merged PR, the cycle-window fallback said "the last 20 commits" and named no command, so the model improvised one around a `$(...)` substitution, which default permission mode stops to ask about. The fallback now names its commands as literal single calls, and a repository shorter than the window is summarised against git's empty tree so a first cycle still gets a page.
+- **The debate scripts say when Node is too old** (#197). On Node 20 a GPT debate failed inside the `openai` package with an error that never mentioned Node. `ask-gpt.js` now exits with one plain line below Node 22 and `ask-gemini.js` below Node 20, each naming the package that sets its floor, before `session` and before any SDK loads. The floors differ on purpose: `@google/genai` 2.23.0 runs on Node 20, so a Gemini debate that works today keeps working.
+- **A focused review says when it skips a project kind** (#201). `/tk:review <kind>` with a kind the project declared in `.claude/toolkit/review-kinds.md` ran to completion and reported clean, having examined nothing from it. It now prints one line saying that kind runs on auto-detect only and how to include it, and `/tk:review-full` says in its charter that project kinds are not in its fan-out. The issue's fuller options, a focus argument that matches project kinds and a `review-full` that includes them, stay open.
 
 ### Added
 
