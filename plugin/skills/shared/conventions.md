@@ -12,8 +12,8 @@ A convention describes the toolkit's contract with a project's own files. It is 
 ### C-<n>: <title>
 - **Since:** <version the convention arrived in>
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
-- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits
-- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | manual
+- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits | review-kinds
+- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | manual
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
 ```

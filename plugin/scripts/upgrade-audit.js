@@ -839,6 +839,12 @@ function stateFileCheck(rel, line, n) { return 'L=' + shq(line) + ' N=' + n + ' 
 // frontmatter and exits 0 only while no tools line is in it (a missing or
 // unclosed frontmatter has none).
 const TOOLS_EDIT_AWK = String.raw`NR == 1 { if ($0 != "---" && $0 != "---\r") { exit } o = 1; next } o && NR > 2 && /^---/ { e = 1; exit } o { sub(/\r$/, ""); h[++k] = $0 } END { if (!e) { exit 1 } for (i = 1; i <= k; i++) { if (h[i] ~ /^tools:/) { t = i; break } } if (!t) { exit 1 } v = substr(h[t], 7); ln = t + 1; print ln ":" h[t]; for (j = t + 1; j <= k && h[j] ~ /^[ \t]+-[ \t]/; j++) { w = h[j]; ln = j + 1; print ln ":" w; sub(/^[ \t]+-[ \t]*/, "", w); v = v " " w } m = split(v, a, /[ \t,]+/); for (i = 1; i <= m; i++) { if (a[i] == "Edit" || a[i] == "Write" || a[i] == "NotebookEdit") { print "edit tool: " a[i]; z = 1 } } exit !z }`;
+// Does any agent file answer to the name W (C-12's missing-agent receipt)? Read as
+// the detector reads it (review of #199, R9 and R10): the name a file declares in
+// its frontmatter, and its file name only when it declares none. The frontmatter
+// is line 1 exactly `---` up to the first later line that starts with `---`; a
+// `name:` line anywhere else is prose. Exits 0 only while no file answers to W.
+const AGENT_NAMED_AWK = String.raw`function fin() { if (f != "" && (d != "" ? d : b) == ENVIRON["W"]) found = 1 } FNR == 1 { fin(); f = FILENAME; b = f; sub(/.*\//, "", b); sub(/\.md$/, "", b); d = ""; c = ""; o = ($0 == "---" || $0 == "---\r"); e = 0; next } o && !e && /^---/ { e = 1; d = c; next } o && !e && /^name:/ && c == "" { c = $0; sub(/^name:/, "", c); sub(/^[ \t]+/, "", c); sub(/[ \t\r]+$/, "", c) } END { fin(); exit found }`;
 const TOOLS_NONE_AWK = String.raw`{ x = $0; sub(/\r$/, "", x) } NR == 1 { print NR ": " x; if ($0 != "---" && $0 != "---\r") { exit } o = 1; next } o && NR > 2 && /^---/ { e = 1; print NR ": " x; exit } o { print NR ": " x; if (x ~ /^tools:/) { t = 1 } } END { exit (e && t) }`;
 // The seeded rules file's stamp (C-7), read as the seed-stamp detector reads it:
 // the first line carrying `<!-- Toolkit version: `, the version up to a blank or
@@ -1479,10 +1485,12 @@ function main() {
           if (!m) return row('agent-cell', 'names no agent in its third cell (expected `subagent_type=<name>`), so the kind is never dispatched.');
           const name = m[1];
           if (/:/.test(name)) return row('scoped', 'names `' + name + '`, a plugin agent: a project review kind names an agent of the project\'s own under .claude/agents/, and the toolkit\'s kinds are already in the table.');
-          const hit = agents.find(a => a.fm.name === name || path.basename(a.rel, '.md') === name);
+          // The name a file declares wins; its file name counts only when it
+          // declares none, which is how C-5 names an agent too.
+          const hit = agents.find(a => (a.fm.name || path.basename(a.rel, '.md')) === name);
           if (!hit) return row('missing', 'names the agent `' + name + '`, which no file under .claude/agents/ defines, so /tk:review skips the kind.',
-            '! grep -rqsE -e ' + shq('^name:[ \t]*' + name + '[ \t\r]*$') + ' .claude/agents && ! find .claude/agents -name ' + shq(name + '.md') + ' 2>/dev/null | grep -q .',
-            'the check exits 0 only while no agent file is named ' + name + '.md or declares name: ' + name);
+            '{ test ! -d .claude/agents || W=' + shq(name) + ' find .claude/agents -type f -name ' + shq('*.md') + ' -exec awk ' + shq(AGENT_NAMED_AWK) + ' {} + ; }',
+            'the check exits 0 only while no agent file declares name: ' + name + ' in its frontmatter, or is named ' + name + '.md while declaring no name');
           // An agent C-5 covers by its role is left to C-5, but only in a run
           // where C-5 is in range: C-5 ranges from 7.0.0, so on a later upgrade
           // nothing else would report an agent added since.
