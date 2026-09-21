@@ -1,0 +1,20 @@
+# Dependabot: security updates only, no routine version-bump pull requests.
+#
+# The toolkit's only real dependencies live in .claude/scripts (the debate and
+# browser scripts). CI installs them with `npm ci --no-audit`, so without this
+# file nothing watches them between deliberate /review-deps runs (review
+# finding R10, issue #202).
+#
+# open-pull-requests-limit: 0 switches routine version updates OFF for that
+# folder. Security updates are not counted against that limit: when GitHub
+# publishes an advisory for one of these packages, Dependabot may still open a
+# pull request for it. Those need "Dependabot alerts" and "Dependabot security
+# updates" turned on in the repository's settings (Settings, then Code
+# security); this file only tells Dependabot where the manifest is.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/.claude/scripts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
