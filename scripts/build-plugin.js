@@ -114,10 +114,14 @@ const MKTEMP_RULE = 'Bash(mktemp -d /tmp/*)';
 // project, settings never ship in a plugin, and a project's own
 // .claude/CLAUDE.md (project instructions Claude Code also reads from there,
 // which /tk:upgrade's C-11 audits, #179) has no plugin copy to point at.
+// .claude/toolkit is the project's extension folder (issue #199): the plugin
+// reads a project's own review kinds, gates, fix rules and severity anchors
+// from it with an inline cat, so the path must reach the project, never the
+// plugin root.
 const KEEP_PROJECT_PATHS = [
   '.claude/rules', '.claude/settings.json', '.claude/settings.local.json',
   '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
-  '.claude/worktrees', '.claude/.no-correction-log', '.claude/CLAUDE.md',
+  '.claude/worktrees', '.claude/.no-correction-log', '.claude/CLAUDE.md', '.claude/toolkit',
 ];
 // The session hook's script. The build reports it as unresolved when the source
 // has no such script, so the hook can never point at a missing file.

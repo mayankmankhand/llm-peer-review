@@ -369,6 +369,15 @@ check('managed-paths carries historicalHelperHashes beside version and paths: ea
   && JSON.stringify(managed.historicalHelperHashes) === JSON.stringify({ 'scripts/ask-gpt.js': [FIXTURE_HASH_A, FIXTURE_HASH_B].sort() }), JSON.stringify(managed.historicalHelperHashes));
 check('a project\'s own .claude/CLAUDE.md stays a project path: kept as written, never mapped to the plugin root (#179)', lib.mapPath('.claude/CLAUDE.md', fx.src) === '.claude/CLAUDE.md'
   && review.includes('instructions in `.claude/CLAUDE.md`.') && !review.includes('${CLAUDE_PLUGIN_ROOT}/CLAUDE.md'), String(lib.mapPath('.claude/CLAUDE.md', fx.src)));
+// The project extension folder (issue #199): a seam line reads the PROJECT's file,
+// so the build leaves the path as written and reports nothing unresolved.
+const SEAM_LINE = '!`cat .claude/toolkit/plan-gate.md 2>/dev/null || true`';
+const seamUnresolved = [];
+const seamOut = lib.rewriteText(SEAM_LINE + '\n', fxInv, fx.src, seamUnresolved, 'commands/probe.md');
+check('a .claude/toolkit/ seam line stays a project path: emitted unchanged, nothing unresolved, no plugin root (#199)',
+  lib.mapPath('.claude/toolkit/plan-gate.md', fx.src) === '.claude/toolkit/plan-gate.md' && seamOut === SEAM_LINE + '\n'
+  && seamUnresolved.length === 0 && lib.unquotedInlineRoots(seamOut).length === 0, seamOut + ' | ' + seamUnresolved.join('; '));
+check('a seam line adds no allowed-tools rule of its own', lib.scriptRules(SEAM_LINE + '\n', fxInv, fx.src).length === 0);
 // Stamps (#183): the build's version lands in every stamped file of the output and
 // nowhere in the source.
 check('a build at the VERSION file\'s version keeps each stamp at that version', STAMPED.every(rel => stampOf(read(out, rel)) === '9.9.9'), STAMPED.map(rel => rel + ': ' + stampOf(read(out, rel))).join(', '));
