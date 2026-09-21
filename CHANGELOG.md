@@ -12,6 +12,29 @@ If you last installed v4.3.3, twenty-six releases have shipped on top of it. v4.
 
 ---
 
+## Unreleased
+
+**On top of v7.3.1.** Project extension seams (#199). The loop is unchanged, and a project with no `.claude/toolkit/` folder sees no change.
+
+### Added
+
+- **A project can extend a stage without editing a plugin file** (#199). Five files in `.claude/toolkit/`, a folder the project owns, are read when present and ignored when absent: `review-kinds.md` (the project's own review kinds, as rows in `/tk:review`'s three columns, each naming an agent under `.claude/agents/`), `plan-gate.md` and `execute-gate.md` (read by `/tk:create-plan` and `/tk:execute` before their own requirements), `fix-rules.md` (extra preconditions and always-ask actions, additive only: a line that loosens M1 to M15 is void), and `severity-anchors.md` (weighting for the project's own kinds). Every file that inlines the loop rules or the severity anchors reads the project's file right after them, because an inline inside an inlined file does not expand.
+- **A project review kind goes through the same audit as a toolkit kind.** It is dispatched by the name in its row with the same per-run prompt, never takes the under-50-lines inline path, and a row whose agent is not found is skipped with a digest line instead of falling back to `general-purpose`. It runs on the auto-detect path only.
+- **A project section in the seeded rules file.** `.claude/rules/toolkit.md` ends with a marker line that starts `<!-- Project section:`. C-7 stops comparing there, `--stamp` leaves it byte for byte, and setup never rewrites it, so a project's own rules are no longer a finding on every upgrade. A file with no marker compares whole, as before, and its finding says where the project's lines belong.
+- **Setup seeds `.claude/toolkit/README.md`** when it is absent, explaining each file and the table format. The folder is never managed: a migration keeps every file in it.
+
+### Measured
+
+- The read is `cat .claude/toolkit/<file> 2>/dev/null || true`. In default permission mode on Claude Code 2.1.278 it ran with no approval stop on the plugin and on a copy-install with no settings file at all, from a command and from a skill preloaded into a finder subagent. An absent file shows as Claude Code's note that the command printed nothing, so every read carries a label saying that note means the project adds none.
+- A project agent can preload the plugin's skills by their scoped names (`skills:` listing `tk:review-code-criteria` and `tk:dispatch-contract`): both arrived in the subagent. A project's review agent can therefore be the toolkit's criteria plus its own additions.
+
+### Upgrading
+
+- **C-12: A project review kind names a live agent** (Since 7.4.0, runs on every upgrade). It reads `.claude/toolkit/review-kinds.md` when the project has one and reports a row that has other than three cells, names no `subagent_type`, names a `tk:` agent, names an agent no file defines, or names one that can edit. The fix is to add or correct the agent, fix the row, or remove it. The version in `Since` is confirmed when the release is cut.
+- The plugin build keeps `.claude/toolkit/` paths project-relative (`KEEP_PROJECT_PATHS`); before this it reported them as unresolved.
+
+---
+
 ## v7.3.1 - Fewer Stops, Safer Pushes (2026-09-17)
 
 **On top of v7.3.0, which stays additive on v7.0.0 and v6.0.0.** Follow-ups from the 7.2.0 and 7.3.0 cycles (#185 to #194, #198). The loop is unchanged.
