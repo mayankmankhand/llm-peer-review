@@ -144,7 +144,9 @@ const SEED_GITIGNORE = read(path.join(PLUGIN, 'seed', 'gitignore')).split(/\r?\n
 const SEED_README = read(path.join(PLUGIN, 'seed', 'artifacts-README.md')).split(/\r?\n/);
 const stampRules = (v) => SEED_RULES_TEXT.replace(/<!-- Toolkit version: [^|]+\|/, '<!-- Toolkit version: ' + v + ' |');
 // A rules file stamped v whose text an older seed wrote: one line the current seed lacks.
-const staleRules = (v) => stampRules(v) + '\nA line an older rules seed carried.\n';
+// It sits above the project marker (issue #199): from the marker down the text
+// is the project's own and is never compared.
+const staleRules = (v) => stampRules(v).replace(/^[ \t]*<!-- Project section:/m, (m) => 'A line an older rules seed carried.\n\n' + m);
 
 function audit(proj, args, opts) {
   const o = opts || {};
@@ -2007,6 +2009,114 @@ const offeredBlock = (text) => { const a = text.indexOf(OFFERED_OPEN); const b =
   check('the offered-rows block, markers included, is byte for byte the one in setup-project.js (issue #180)', auditBlock !== null && setupBlock !== null && auditBlock === setupBlock && /function permissionRowKey\(/.test(auditBlock) && /function readOfferedRows\(/.test(auditBlock), auditBlock === null ? 'no block in upgrade-audit.js' : setupBlock === null ? 'no block in setup-project.js' : 'the copies differ');
   const drift = mutant('block-drift', 'const OFFERED_ROWS_VERSION = 1;', 'const OFFERED_ROWS_VERSION = 1; ');
   check('  a copy with one byte added inside the block fails that comparison', drift.applied && offeredBlock(read(drift.path)) !== setupBlock);
+}
+
+// --- 9b. project extensions (issue #199) -------------------------------------------
+console.log('\n9b. project extensions: the rules-file marker (C-7) and review kinds (C-12)');
+{
+  // A clean, current project on the plugin: the seed's files, a 7.0.0 stamp on
+  // the rules file so C-7 compares the text, and whatever the case adds.
+  const extCase = (name, o) => {
+    const dir = path.join(TMP, 'ext-' + name);
+    commonFiles(dir);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }, null, 2));
+    write(dir, '.claude/rules/toolkit.md', o.rules !== undefined ? o.rules : stampRules('7.1.0'));
+    write(dir, '.claude/settings.local.json', read(path.join(PLUGIN, 'seed', 'settings.local.json')));
+    write(dir, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')));
+    write(dir, '.gitignore', read(path.join(PLUGIN, 'seed', 'gitignore')));
+    write(dir, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-README.md')));
+    for (const [rel, text] of Object.entries(o.files || {})) write(dir, rel, text);
+    return dir;
+  };
+  const MARKER = SEED_RULES_TEXT.split('\n').find(l => /^[ \t]*<!-- Project section:/.test(l));
+  check('the shipped rules seed ends with the project marker and an empty Project heading', !!MARKER && /<!-- Project section:[^\n]*-->\s*\n+## Project\s*$/.test(SEED_RULES_TEXT), SEED_RULES_TEXT.slice(-300));
+  const OURS = '\nOur own rule: every plan names its rollback step.\n';
+  const cut = SEED_RULES_TEXT.indexOf(MARKER);
+  const c7 = (res) => res.findings.filter(f => f.id === 'C-7');
+
+  // Project text under the marker is never a finding, and --stamp leaves it alone.
+  let dir = extCase('below', { rules: stampRules('7.0.0') + OURS });
+  r = audit(dir);
+  check('C-7: the project\'s own lines under the marker are no finding, even on an older stamp', r.status === 0 && c7(r).length === 0, r.stdout.slice(0, 400));
+  const belowBefore = read(path.join(dir, '.claude/rules/toolkit.md'));
+  const st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  const belowAfter = read(path.join(dir, '.claude/rules/toolkit.md'));
+  check('C-7: --stamp raises that file\'s stamp and leaves every byte from the marker down unchanged', st.status === 0 && /Toolkit version: 7\.1\.0 \|/.test(belowAfter) && belowAfter.slice(belowAfter.indexOf(MARKER)) === belowBefore.slice(belowBefore.indexOf(MARKER)) && belowAfter.endsWith(OURS), st.stdout + st.stderr);
+
+  // The seeded text above the marker is still compared.
+  dir = extCase('above', { rules: stampRules('7.0.0').replace(MARKER, 'A line the project added to the seeded text.\n\n' + MARKER) + OURS });
+  r = audit(dir);
+  check('C-7: a change above the marker is still a finding, its receipt shows the added line and none of the project section', c7(r).length === 1 && (() => { const out = runReceipt(dir, c7(r)[0]); return out.status === 0 && /A line the project added/.test(out.stdout) && !/rollback step/.test(out.stdout) && !/no project marker/.test(c7(r)[0].fix); })(), JSON.stringify(c7(r)).slice(0, 400));
+
+  // A file written before the marker existed: compared whole, as it always was.
+  const NO_MARKER = stampRules('7.0.0').slice(0, stampRules('7.0.0').indexOf(MARKER));
+  dir = extCase('nomarker-same', { rules: NO_MARKER });
+  r = audit(dir);
+  check('C-7: a file with no marker and the seed\'s text is no finding', c7(r).length === 0, r.stdout.slice(0, 400));
+  dir = extCase('nomarker-added', { rules: NO_MARKER + OURS });
+  r = audit(dir);
+  check('C-7: a file with no marker and a line of its own is a finding whose fix names the marker', c7(r).length === 1 && /no project marker/.test(c7(r)[0].fix) && /<!-- Project section:/.test(c7(r)[0].fix) && runReceipt(dir, c7(r)[0]).status === 0, JSON.stringify(c7(r)).slice(0, 400));
+
+  // The marker is matched by its prefix: CRLF, trailing blanks, an indent, a
+  // reworded tail, and blank lines left above it all compare equal to the seed.
+  const head = stampRules('7.0.0').slice(0, stampRules('7.0.0').indexOf(MARKER)).replace(/\n+$/, '\n');
+  const shapes = { CRLF: (head + '\n' + MARKER + OURS).replace(/\n/g, '\r\n'), 'trailing blanks': head + '\n' + MARKER + '   \t' + OURS, 'an indent and a reworded tail': head + '\n  <!-- Project section: ours from here. -->' + OURS, 'blank lines above it': head + '\n\n\n\n' + MARKER + OURS };
+  for (const [shape, rules] of Object.entries(shapes)) {
+    r = audit(extCase('shape-' + shape.replace(/\W+/g, '-'), { rules }));
+    check('C-7: the marker written with ' + shape + ' still ends the comparison', r.status === 0 && c7(r).length === 0, r.stdout.slice(0, 300));
+  }
+
+  // C-12 ranges from 7.4.0, so it needs a plugin root at that version.
+  const PLUGIN74 = path.join(TMP, 'plugin74');
+  const build74 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN74, '--version', '7.4.0'], { cwd: REPO, encoding: 'utf8' });
+  check('build-plugin.js builds a 7.4.0 plugin root', build74.status === 0, build74.stdout + build74.stderr);
+  const rules74 = read(path.join(PLUGIN74, 'seed', 'rules-toolkit.md'));
+  const c12 = (res) => res.findings.filter(f => f.id === 'C-12');
+  const audit74 = (d) => audit(d, [], { pluginRoot: PLUGIN74 });
+  const KINDS = '.claude/toolkit/review-kinds.md';
+  const table = (...rows) => ['# Our review kinds', '', '| What changed | Specialist | Finder agent |', '|---|---|---|', ...rows, ''].join('\n');
+  const agent = (name, tools, desc) => '---\nname: ' + name + '\ndescription: ' + (desc || 'Checks the design files against the brand sheet.') + '\n' + (tools === null ? '' : 'tools: ' + tools + '\n') + '---\nReturn JSONL findings or the literal NO FINDINGS.\n';
+  const GOOD_ROW = '| files under `designs/` | Design Fidelity | `subagent_type=design-fidelity` |';
+  const kindsCase = (name, files) => extCase('kinds-' + name, { rules: rules74, files });
+
+  r = audit74(kindsCase('none', {}));
+  check('C-12 is in range at 7.4.0 and a project with no review-kinds file has no finding', /C-12/.test(r.summary) && c12(r).length === 0, r.summary);
+  r = audit(kindsCase('dormant', { [KINDS]: table('| only | two |') }));
+  check('C-12 is out of range while the plugin is below 7.4.0: a broken row emits nothing', !/C-12/.test(r.summary) && c12(r).length === 0, r.summary);
+  r = audit74(kindsCase('clean', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read, Grep, Glob') }));
+  check('C-12: a three-cell row naming a present, read-only agent is no finding; the header and rule lines are never rows', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 400));
+
+  const one = (name, files, test, label) => {
+    const d = kindsCase(name, files);
+    const res = audit74(d);
+    const f = c12(res);
+    const out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+    check('C-12: ' + label, f.length === 1 && f[0].file.relPath === KINDS && f[0].file.line === 5 && out.status === 0 && /^5:/m.test(out.stdout) && test(f[0], out), JSON.stringify(f).slice(0, 500) + out.stdout);
+    return { d, f: f[0] };
+  };
+  const missing = one('missing', { [KINDS]: table(GOOD_ROW) }, f => /no file under \.claude\/agents\/ defines/.test(f.what), 'a row naming an agent no file defines is one finding, and its receipt stands');
+  write(missing.d, '.claude/agents/design-fidelity.md', agent('design-fidelity', 'Read'));
+  check('C-12: adding the agent clears the finding, and the old receipt no longer passes', c12(audit74(missing.d)).length === 0 && runReceipt(missing.d, missing.f).status !== 0);
+  one('byname', { [KINDS]: table(GOOD_ROW), '.claude/agents/team/fidelity.md': agent('some-other-name', 'Read') }, f => /design-fidelity/.test(f.what), 'an agent file under another name does not satisfy the row');
+  r = audit74(kindsCase('byname-ok', { [KINDS]: table(GOOD_ROW), '.claude/agents/team/fidelity.md': agent('design-fidelity', 'Read') }));
+  check('C-12: an agent found by its frontmatter name, in a subfolder, satisfies the row', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 300));
+  const edit = one('edit', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read, Edit') }, (f, out) => /is granted Edit/.test(f.what) && /C-4/.test(f.what) && /Edit/.test(out.stdout), 'a row whose agent carries Edit is one finding, and its receipt shows the tools line');
+  check('C-12 leaves that agent to it alone: its name and description carry no C-5 role, so C-5 is silent', !audit74(edit.d).findings.some(f => f.id === 'C-5'));
+  one('notools', { [KINDS]: table(GOOD_ROW), '.claude/agents/design-fidelity.md': agent('design-fidelity', null) }, f => /declares no tools list/.test(f.what), 'a row whose agent declares no tools list is one finding');
+  // An agent whose name carries a C-5 role. C-5 ranges from 7.0.0, so whether it
+  // runs depends on where the project was last audited; either way one finding.
+  const roleFiles = { [KINDS]: table(GOOD_ROW.replace('design-fidelity', 'design-finder')), '.claude/agents/design-finder.md': agent('design-finder', 'Read, Edit') };
+  r = audit74(kindsCase('role-c5-out', roleFiles));
+  check('an agent with a C-5 role, audited after 7.0.0 (C-5 out of range): C-12 reports it, once', c12(r).length === 1 && /is granted Edit/.test(c12(r)[0].what) && !r.findings.some(f => f.id === 'C-5'), JSON.stringify(r.findings.map(f => f.id)));
+  const roleIn = kindsCase('role-c5-in', roleFiles);
+  write(roleIn, '.claude/.toolkit-state.json', JSON.stringify({ version: '6.3.3', path: 'plugin', auditedVersion: '6.3.3' }, null, 2));
+  r = audit74(roleIn);
+  check('the same agent with C-5 in range: C-5 reports it and C-12 stays silent, never twice', c12(r).length === 0 && r.findings.filter(f => f.id === 'C-5' && /design-finder/.test(f.file.relPath)).length === 1, JSON.stringify(r.findings.map(f => f.id)));
+  one('cells', { [KINDS]: table('| files under designs | `subagent_type=design-fidelity` |'), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read') }, f => /has 2 cell\(s\)/.test(f.what), 'a two-cell row is one finding');
+  one('nocell', { [KINDS]: table('| files under designs | Design Fidelity | the design agent |') }, f => /names no agent in its third cell/.test(f.what), 'a third cell with no subagent_type is one finding');
+  one('scoped', { [KINDS]: table(GOOD_ROW.replace('design-fidelity', 'tk:review-code-finder')) }, f => /a plugin agent/.test(f.what), 'a row naming a tk: agent is one finding');
+  r = audit74(kindsCase('escaped', { [KINDS]: table('| `a\\|b` files | Design Fidelity | `subagent_type=design-fidelity` |'), '.claude/agents/design-fidelity.md': agent('design-fidelity', 'Read') }));
+  check('C-12: an escaped bar inside a cell does not split it', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 300));
 }
 
 console.log('\n10. errors and usage');

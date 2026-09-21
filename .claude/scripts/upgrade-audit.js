@@ -51,8 +51,8 @@
 //   ### C-12: Criteria reach a worker by preload, not by paste
 //   - **Since:** 7.0.0
 //   - **Runs:** every upgrade            (optional: skip the range filter)
-//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | manual)
+//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits | review-kinds)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | manual)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
 //   - **Fix:** dispatch the typed finder for the kind; move any pasted criteria into a skill it preloads
@@ -390,15 +390,23 @@ const RULES_SEED = path.join('seed', 'rules-toolkit.md');
 // and neither is the seed's own stamp, which can lag the plugin version. The
 // receipt reads both files with RULES_BODY_AWK, which does the same steps in
 // the same order, so the receipt's diff and this comparison always agree.
+// The project section (issue #199): the seed ends at the first line that starts,
+// after any blanks, with `<!-- Project section:`. That line and everything under
+// it is the project's own text, so it is left out of both files; a file with no
+// marker compares whole. The blank lines left above the marker are dropped by the
+// trailing-blank rule, in the JS and in the awk alike.
+const RULES_PROJECT_MARKER = /^[ \t]*<!-- Project section:/;
 function rulesBody(text) {
-  const lines = String(text).split('\n');
+  let lines = String(text).split('\n');
   const at = lines.findIndex(l => RULES_STAMP.test(l));
   if (at >= 0) lines.splice(at, 1);
+  const cut = lines.findIndex(l => RULES_PROJECT_MARKER.test(l));
+  if (cut >= 0) lines = lines.slice(0, cut);
   const out = lines.map(l => l.replace(/[ \t\r]+$/, ''));
   while (out.length && out[out.length - 1] === '') out.pop();
   return out.join('\n');
 }
-const RULES_BODY_AWK = '!s && /<!-- Toolkit version: [^ |]+/ { s = 1; next } { sub(/[ \\t\\r]+$/, "") } $0 == "" { b++; next } { for (; b > 0; b--) print ""; print }';
+const RULES_BODY_AWK = '!s && /<!-- Toolkit version: [^ |]+/ { s = 1; next } /^[ \\t]*<!-- Project section:/ { exit } { sub(/[ \\t\\r]+$/, "") } $0 == "" { b++; next } { for (; b > 0; b--) print ""; print }';
 function rulesMatchSeed(text, seedText) { return rulesBody(text) === rulesBody(seedText); }
 // The stamp half of --stamp for the rules file: when its text is the shipped
 // seed's and its stamp is older than the plugin, rewrite only the version in
@@ -801,6 +809,27 @@ function regexCheck(rel, line, n, pattern) { return lineCheck(rel, line, n) + " 
 // the last matching line wins, the folder level first). The suite runs this
 // program and the JS over the same files, so the two cannot drift unnoticed.
 const STATE_IGNORED_AWK = String.raw`function g(p,  r, i, c) { r = ""; for (i = 1; i <= length(p); i++) { c = substr(p, i, 1); if (c == "*" && substr(p, i + 1, 1) == "*") { if (substr(p, i + 2, 1) == "/") { r = r "(.*/)?"; i += 2 } else { r = r ".*"; i++ } } else if (c == "*") { r = r "[^/]*" } else if (c == "?") { r = r "[^/]" } else if (index(".+^$(){}|[]\\", c)) { r = r "\\" c } else { r = r c } } return "^" r "$" } BEGIN { l = ENVIRON["L"]; n = ENVIRON["N"] + 0 } { sub(/\r$/, "") } $0 == l { c++; print NR ":" $0 } { p = $0; sub(/[ \t\f\v]+$/, "", p); if (p == "" || substr(p, 1, 1) == "#") { next } x = substr(p, 1, 1) == "!"; if (x) { p = substr(p, 2) } if (p == "") { next } d = p ~ /\/$/; sub(/\/+$/, "", p); a = index(p, "/") > 0; sub(/^\//, "", p); r = g(p); if (".claude" ~ r) { s1 = x ? "n" : "i" } if (!d && (a ? ".claude/.toolkit-state.json" : ".toolkit-state.json") ~ r) { s2 = x ? "n" : "i" } } END { exit !(c >= n && (s1 == "i" || s2 == "i")) }`;
+// An agent file's frontmatter as C-5 and C-12 read it: its name, its description,
+// the index of the tools line among the frontmatter lines (-1 when absent), and
+// the edit tools that line and its list items grant.
+function agentFrontmatter(text) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  const head = fm ? fm[1].split(/\r?\n/) : [];
+  const field = (k) => { const m = head.find(l => new RegExp('^' + k + ':').test(l)); return m ? m.replace(new RegExp('^' + k + ':'), '').trim() : ''; };
+  const toolsIdx = head.findIndex(l => /^tools:/.test(l));
+  let tools = '';
+  if (toolsIdx >= 0) { tools = head[toolsIdx].replace(/^tools:/, '').trim(); for (let i = toolsIdx + 1; i < head.length && /^\s+-\s/.test(head[i]); i++) tools += ' ' + head[i].replace(/^\s+-\s*/, ''); }
+  return { name: field('name'), description: field('description'), toolsIdx, edits: tools.split(/[\s,]+/).filter(x => /^(Edit|Write|NotebookEdit)$/.test(x)) };
+}
+// The roles C-5 covers by name or description. C-12 covers an agent a review
+// kind names whatever it is called, and leaves these to C-5 so one agent is
+// never reported twice.
+const JUDGE_ROLE = /finder|review|critic|skeptic|verif|judge|audit/i;
+// The project's own review kinds (C-12, issue #199): table rows /tk:review
+// appends to its detection table, `| What changed | Specialist | Finder agent |`.
+const REVIEW_KINDS = '.claude/toolkit/review-kinds.md';
+// A table row's cells: split on a bar no backslash escapes, the outer bars dropped.
+function tableCells(line) { return line.trim().replace(/^\|/, '').replace(/\|[ \t\r]*$/, '').split(/(?<!\\)\|/).map(s => s.trim()); }
 function stateFileCheck(rel, line, n) { return 'L=' + shq(line) + ' N=' + n + ' awk ' + shq(STATE_IGNORED_AWK) + ' < ' + shq(rel); }
 // A finder or judge agent's frontmatter (C-5), read as agent-tools reads it:
 // line 1 exactly `---` (a CR allowed), line 2 always inside, then up to the
@@ -1057,7 +1086,9 @@ function main() {
           const at = text.split('\n').findIndex(l => RULES_STAMP.test(l)) + 1;
           if (!rulesMatchSeed(text, seedText)) emit({ id: c.id, key: claim(c.id + ':' + SEED_RULES + ':rules-text').key, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: at },
             what: 'Should fix. The seeded rules file\'s text differs from the rules seed this plugin (' + toVersion + ') ships: the seeded rules text changed since the project\'s copy (stamped ' + stamped + ') was written, or the project edited its copy. The comparison leaves the stamp line out of both files, so the seed file\'s own stamp plays no part.',
-            fix: c.fix || 'merge the shipped seed text into the rules file by hand and update its stamp, or delete the file and run /tk:setup for a fresh seed', since: c.since,
+            fix: (c.fix || 'merge the shipped seed text into the rules file by hand and update its stamp, or delete the file and run /tk:setup for a fresh seed')
+              + (seedText.split('\n').some(l => RULES_PROJECT_MARKER.test(l)) && !text.split('\n').some(l => RULES_PROJECT_MARKER.test(l))
+                ? '; this file has no project marker: copy the seed\'s `<!-- Project section:` line to the end of the seeded text and move your own lines under it, where they are never compared' : ''), since: c.since,
             // Both halves of the detector: the stamp is still below the plugin
             // version (issue #179), and the text still differs. diff exits 1 on
             // a difference, so the check turns that 1 into a 0. An unreadable
@@ -1067,7 +1098,7 @@ function main() {
             // receipt instead of confirming the finding.
             receipt: { check: 'if test -f ' + shq(seedAbs) + ' && test -r ' + shq(seedAbs) + ' && test -f ' + shq(SEED_RULES) + ' && test -r ' + shq(SEED_RULES)
                 + ' ; then ' + stampBehindCheck(toVersion) + ' && { diff <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(seedAbs) + ') <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(SEED_RULES) + ') ; test $? -eq 1 ; } ; else echo ' + shq('receipt: cannot read the shipped seed or the project rules file') + ' >&2 ; false ; fi',
-              expect: 'line ' + at + ' shows the stamp ' + stamped + ', below ' + toVersion + ' (the stamp check passes only while the stamp is below it); diff then prints the lines where the shipped seed (<) and the project copy (>) differ, with the stamp line left out of both, trailing blanks and CR ignored; the check exits 0 only when they differ, and exits non-zero when either file cannot be read' } });
+              expect: 'line ' + at + ' shows the stamp ' + stamped + ', below ' + toVersion + ' (the stamp check passes only while the stamp is below it); diff then prints the lines where the shipped seed (<) and the project copy (>) differ, with the stamp line and everything from the project marker down left out of both, trailing blanks and CR ignored; the check exits 0 only when they differ, and exits non-zero when either file cannot be read' } });
         } else if (behind) emit({ id: c.id, key: claim(c.id + ':' + SEED_RULES + ':stamp').key, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: 3 },
           what: 'Should fix. The seeded rules file is stamped ' + (stamped || 'with no usable version') + ' while the plugin is ' + toVersion + '.',
           fix: c.fix || 'delete the rules file and run /tk:setup for a fresh seed, or merge the new seed text by hand and update the stamp', since: c.since,
@@ -1411,18 +1442,9 @@ function main() {
         fields: [{ label: 'Rows', value: bare.join(' ; ') }],
         receipt: { check: allowRowsCheck('unscoped', bare.map(p => [p, ''])), expect: bare.length + ' line(s) reading unscoped: <row>, one per listed row still in "permissions.allow"' } });
     } else if (c.detector === 'agent-tools') {
-      const ROLE = /finder|review|critic|skeptic|verif|judge|audit/i;
       for (const rel of promptFiles.filter(r => r.startsWith('.claude/agents/'))) {
-        const text = fs.readFileSync(P(rel), 'utf8');
-        const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-        const head = fm ? fm[1].split(/\r?\n/) : [];
-        const field = (k) => { const m = head.find(l => new RegExp('^' + k + ':').test(l)); return m ? m.replace(new RegExp('^' + k + ':'), '').trim() : ''; };
-        const role = (field('name') || path.basename(rel, '.md')) + ' ' + field('description');
-        if (!ROLE.test(role)) continue;
-        const toolsIdx = head.findIndex(l => /^tools:/.test(l));
-        let tools = '';
-        if (toolsIdx >= 0) { tools = head[toolsIdx].replace(/^tools:/, '').trim(); for (let i = toolsIdx + 1; i < head.length && /^\s+-\s/.test(head[i]); i++) tools += ' ' + head[i].replace(/^\s+-\s*/, ''); }
-        const edits = tools.split(/[\s,]+/).filter(t => /^(Edit|Write|NotebookEdit)$/.test(t));
+        const { name, description, toolsIdx, edits } = agentFrontmatter(fs.readFileSync(P(rel), 'utf8'));
+        if (!JUDGE_ROLE.test((name || path.basename(rel, '.md')) + ' ' + description)) continue;
         if (toolsIdx >= 0 && !edits.length) continue;
         // The receipt reads the frontmatter as the detector does (issue #179): a
         // grep for any tools: line kept matching `tools: Read, Grep` after the
@@ -1433,6 +1455,43 @@ function main() {
           receipt: toolsIdx >= 0
             ? { check: 'awk ' + shq(TOOLS_EDIT_AWK) + ' < ' + shq(rel), expect: 'the frontmatter tools line and its list items, then an edit tool line naming Edit, Write or NotebookEdit; the check exits 0 only while an edit tool is in the list' }
             : { check: 'awk ' + shq(TOOLS_NONE_AWK) + ' < ' + shq(rel), expect: 'the frontmatter lines, none of them a tools: line; the check exits 0 only while the frontmatter has no tools line' } });
+      }
+    } else if (c.detector === 'review-kinds') {
+      // Absent means the project adds no review kind: nothing to check.
+      if (isFile(P(REVIEW_KINDS))) {
+        const lines = fs.readFileSync(P(REVIEW_KINDS), 'utf8').split(/\r?\n/);
+        const isRow = (l) => /^[ \t]*\|/.test(l);
+        const isRule = (l) => isRow(l) && tableCells(l).every(x => /^:?-+:?$/.test(x));
+        const agents = promptFiles.filter(r => r.startsWith('.claude/agents/')).map(rel => ({ rel, fm: agentFrontmatter(fs.readFileSync(P(rel), 'utf8')) }));
+        lines.forEach((line, i) => {
+          // The header is the row right above the rule line; both are skipped.
+          if (!isRow(line) || isRule(line) || (i + 1 < lines.length && isRule(lines[i + 1]))) return;
+          const at = { relPath: REVIEW_KINDS, line: i + 1 };
+          const row = (slug, what, check, expect) => {
+            const { key, n } = claim(c.id + ':' + REVIEW_KINDS + ':' + slug + ':' + digest(line));
+            emit({ id: c.id, key, severity: 'warn', convention: c.title, file: at, what: 'Should fix. ' + REVIEW_KINDS + ' line ' + (i + 1) + ' ' + what,
+              fix: c.fix || 'add the agent under .claude/agents/ with an output contract and no edit tools, fix the row\'s three cells, or remove the row', since: c.since,
+              receipt: { check: lineCheck(REVIEW_KINDS, line, n) + (check ? ' && ' + check : ''), expect: 'line ' + (i + 1) + ' as written: ' + line.trim().slice(0, 120) + (expect ? '; ' + expect : '') } });
+          };
+          const cells = tableCells(line);
+          if (cells.length !== 3) return row('cells', 'has ' + cells.length + ' cell(s), not the three /tk:review reads (What changed, Specialist, Finder agent), so the kind is never dispatched.');
+          const m = /subagent_type\s*[=:]\s*["'`]?([A-Za-z0-9:_-]+)/.exec(cells[2]);
+          if (!m) return row('agent-cell', 'names no agent in its third cell (expected `subagent_type=<name>`), so the kind is never dispatched.');
+          const name = m[1];
+          if (/:/.test(name)) return row('scoped', 'names `' + name + '`, a plugin agent: a project review kind names an agent of the project\'s own under .claude/agents/, and the toolkit\'s kinds are already in the table.');
+          const hit = agents.find(a => a.fm.name === name || path.basename(a.rel, '.md') === name);
+          if (!hit) return row('missing', 'names the agent `' + name + '`, which no file under .claude/agents/ defines, so /tk:review skips the kind.',
+            '! grep -rqsE -e ' + shq('^name:[ \t]*' + name + '[ \t\r]*$') + ' .claude/agents && ! find .claude/agents -name ' + shq(name + '.md') + ' 2>/dev/null | grep -q .',
+            'the check exits 0 only while no agent file is named ' + name + '.md or declares name: ' + name);
+          // An agent C-5 covers by its role is left to C-5, but only in a run
+          // where C-5 is in range: C-5 ranges from 7.0.0, so on a later upgrade
+          // nothing else would report an agent added since.
+          if (inRange.some(x => x.detector === 'agent-tools') && JUDGE_ROLE.test((hit.fm.name || path.basename(hit.rel, '.md')) + ' ' + hit.fm.description)) return;
+          if (hit.fm.toolsIdx >= 0 && !hit.fm.edits.length) return;
+          row('edit-access', 'dispatches `' + name + '` (' + hit.rel + ') as a finder, and that agent ' + (hit.fm.toolsIdx >= 0 ? 'is granted ' + hit.fm.edits.join(', ') : 'declares no tools list, so it gets every tool, Edit included') + ': it can change files before the audit judges its findings. Its output contract is C-4\'s to judge.',
+            'awk ' + shq(hit.fm.toolsIdx >= 0 ? TOOLS_EDIT_AWK : TOOLS_NONE_AWK) + ' < ' + shq(hit.rel),
+            hit.fm.toolsIdx >= 0 ? 'then the agent\'s tools line with an edit tool in it; the check exits 0 only while one is there' : 'then the agent\'s frontmatter with no tools: line; the check exits 0 only while it has none');
+        });
       }
     } else if (c.detector === 'local-edits') {
       // The evidence of a local edit is the copy-install's own record: the
