@@ -356,7 +356,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | Permission | Why it's here |
 |---|---|
 | `Bash(git init *)`, `Bash(git add *)`, `Bash(git rm *)`, `Bash(git commit *)` | Initializing repos, staging files, committing work |
-| `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories. A force push still asks: see the ask rows below the table |
+| `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories. A force push, a mirror push, and a delete push still ask: see the ask rows below the table |
 | `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git stash *)` | Branch management and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
 | `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |
@@ -385,6 +385,8 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Skill(tk:review-commands)`, `Skill(tk:review-commands:*)`, `Skill(tk:review-copy)`, `Skill(tk:review-copy:*)`, `Skill(tk:playground)`, `Skill(tk:playground:*)`, `Skill(tk:audit-html)`, `Skill(tk:audit-html:*)` | Skills Claude may invoke on its own judgment: two review lenses, the playground (`/tk:explore` dispatches it for prototypes and option comparisons), and the HTML audit |
 
 **Ask rows: `Bash(git push *--force*)`, `Bash(git push -f*)`, `Bash(git push * -f*)`, `Bash(git push -uf*)`, `Bash(git push * -uf*)`, `Bash(git push * +*)`.** They sit under `permissions.ask`, beside the allow list, and Claude Code asks before a matching command even though `Bash(git push *)` allows it, so every force push asks: `--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `-uf`, and a `+` refspec such as `origin +main`, before or after the other arguments (issue #192). A normal push, `-u`, `--follow-tags`, a tag, or a branch whose name holds `-f` or `+` does not ask. A `-f` inside another short-flag cluster (`-vf`, `-qf`) is not matched; M9 still asks before any force push.
+
+**Four more ask rows cover pushes that delete: `Bash(git push *--mirror*)`, `Bash(git push *--delete*)`, `Bash(git push -d*)`, `Bash(git push * -d*)`** (issue #196). A mirror push force-updates every remote ref and deletes the remote branches this clone lacks; `--delete` and `-d` remove a remote branch, in either argument position. Each row was measured in a default-mode session: those forms ask, while a normal push, `-u`, `--dry-run`, a tag, a path or URL remote, and a branch whose name holds `-d` (`fix-d-flag`) do not. Two known limits, both still covered by M9 and by nothing at the harness level: a deletion refspec (`git push origin :branch`) has no row, because a rule ending in `:*` is read as the older prefix spelling and never matches; and `git -C <dir> push ...` is not seen by any `git push` row, so it asks only while no allow row covers `git -C`.
 
 **Not in the baseline: `cd`.** If your workflow needs it, add `"Bash(cd *)"` to your project's `.claude/settings.local.json`. Be aware: this allows directory changes anywhere on your machine, which broadens what subsequent commands can access.
 

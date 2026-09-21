@@ -71,7 +71,9 @@
 //     "uncommitted": {                          always reported, whatever the source
 //       "staged":    { "files": [ ... ], "added": 60, "deleted": 0 },
 //       "unstaged":  { "files": [ ... ], "added": 0, "deleted": 0 },
-//       "untracked": { "files": [ ... ], "added": 80, "deleted": 0 }
+//       "untracked": { "files": [ ... ], "added": 80, "deleted": 0 },
+//       "baseline": "<sha>" | null,             the starting snapshot (#202), below
+//       "baselineError": "<one plain line>"     only when the snapshot could not be made
 //     },
 //     "totals": { "lines": 174, "added": 170, "deleted": 4, "fileCount": 3, "binaryCount": 1 }
 //   }
@@ -102,6 +104,21 @@
 //     copy. A binary (and anything unreadable) has null line counts. Untracked line
 //     counts come from reading the file: one per newline, plus an unterminated last
 //     line, as git counts a new file; a NUL in the first 8000 bytes means binary.
+//   uncommitted.baseline (#202) is the review's starting snapshot: the commit id
+//     `git stash create` prints, holding every tracked file as it stood (staged and
+//     unstaged) when the scope was read. Why: /review measures "the diff of the
+//     fixes" from it (`git diff <baseline>`), so uncommitted work that was already
+//     there before the review is not handed to the fix verifier as if it were a
+//     fix. Measured from the snapshot the diff is empty until a fix lands, and it
+//     stays right when a fix is committed. null on a tree with no staged or unstaged
+//     change (the pinned end is the starting point then, and no object is made).
+//     Untracked files are not in the snapshot: the untracked list above is their
+//     starting record. The snapshot is an unreferenced commit: no ref, no stash
+//     list entry, no working file touched, and git's own cleanup removes it.
+//   uncommitted.baselineError is present only when the tree had changes and the
+//     snapshot could not be made (unmerged paths, a branch with no commit yet,
+//     another git command holding the index lock): baseline is null, the field is
+//     one plain line, and the rest of the object is reported as usual; exit 0.
 //   totals.lines is added + deleted across range, staged, unstaged and untracked:
 //     the number the review's size gate reads. fileCount and binaryCount count
 //     distinct paths.
@@ -317,6 +334,7 @@ const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 // running at the same moment fail. So the diffs are plumbing (diff-tree,
 // diff-index, diff-files), which never refresh the index, and git status runs with
 // GIT_OPTIONAL_LOCKS=0, which is exactly what that variable exists to stop.
+// The one exception is startingSnapshot() below, which says why.
 function gitScope(args, where, input) {
   const r = spawnSync("git", ["-c", "core.quotePath=false", ...args], {
     cwd: where,
@@ -494,7 +512,35 @@ function sumLines(files) {
   return { files, added, deleted };
 }
 
-// Staged, unstaged and untracked work, whatever the range turned out to be.
+// The review's starting snapshot (#202): `git stash create` builds a commit holding
+// every tracked file as it stands now, prints its id, and stops there. No ref, no
+// stash list entry, no working file touched; the commit is unreferenced, so git's
+// own cleanup removes it. /review measures "the diff of the fixes" from this id, so
+// work that was already uncommitted when the review began is not shown to the fix
+// verifier as if it were a fix.
+//
+// The one exception to "read-only in practice" above, and why it is called only on
+// a tree with real changes: stash create takes .git/index.lock and rewrites
+// .git/index while it runs (seen on git 2.43, GIT_OPTIONAL_LOCKS=0 does not stop
+// it). So a commit running at that same moment can fail, and when something else
+// holds the lock, stash create itself exits 1 and prints nothing.
+//
+// Never fails the scope: a failure is { baseline: null, baselineError } and the
+// review falls back to measuring from the pinned end. It does fail on unmerged
+// paths ("needs merge") and on a branch with no commit yet. It needs no user.name
+// or user.email (git falls back to a made-up identity for a stash).
+function startingSnapshot(root) {
+  const r = gitScope(["stash", "create"], root);
+  if (!r.ok) return { baseline: null, baselineError: gitComplaint(r, "git stash create") };
+  const id = r.stdout.toString("utf8").trim();
+  // Nothing printed means git found nothing to snapshot: the same as a clean tree.
+  if (id === "") return { baseline: null };
+  if (!SHA.test(id)) return { baseline: null, baselineError: "git stash create printed something that is not a commit id" };
+  return { baseline: id };
+}
+
+// Staged, unstaged and untracked work, whatever the range turned out to be, plus
+// the starting snapshot of the tracked part of it.
 function uncommittedWork(root, rootBytes, head) {
   // Staged: the index against HEAD, or against the empty tree on a branch with no
   // commits yet (hashed, not written, so it is right for SHA-256 repositories too).
@@ -521,11 +567,18 @@ function uncommittedWork(root, rootBytes, head) {
   }
   const unstaged = worktreeFiles.filter((f) => status.unstaged.has(f.key));
   const untracked = status.untracked.map((relBuf) => untrackedEntry(rootBytes, relBuf));
-  return {
-    staged: sumLines(staged),
-    unstaged: sumLines(unstaged),
-    untracked: sumLines(untracked),
-  };
+  // Snapshot only a tree with tracked changes. `unstaged` is already filtered by git
+  // status, so a file that was only touched does not count, and a clean tree never
+  // reaches stash create (which would take the index lock for nothing).
+  const snapshot = staged.length > 0 || unstaged.length > 0 ? startingSnapshot(root) : { baseline: null };
+  return Object.assign(
+    {
+      staged: sumLines(staged),
+      unstaged: sumLines(unstaged),
+      untracked: sumLines(untracked),
+    },
+    snapshot
+  );
 }
 
 function none(reason, message) {
