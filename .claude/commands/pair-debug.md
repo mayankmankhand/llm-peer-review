@@ -14,6 +14,10 @@ Tone: collaborative. "Let's figure this out together."
 2. **Explain simply** - Use plain English, avoid jargon
 </rules>
 
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
+
 ## Step 0: Load Project Context
 
 **Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors (older installs), do the manual reads described here instead - behavior is identical.

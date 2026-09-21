@@ -181,7 +181,7 @@ A project adds its own rules to the toolkit through five files in `.claude/toolk
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. `/upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
 - When a file is absent, Claude Code shows the read as a note that the command printed nothing. Each read is labeled so that note reads as "this project adds none".
-- The seeded rules file ends with a marker line that starts `<!-- Project section:`. Everything under it is the project's: C-7 stops comparing there and nothing rewrites it.
+- The seeded rules file ends with a marker line that starts `<!-- Project section:`. Everything under it is the project's: C-7 stops comparing there and nothing rewrites it. A rules file seeded before this feature has no marker and nothing adds one, because a file that still matches the seed is current: the owner copies the seed's marker line to the end of the file.
 
 ### Subagent Strategy
 

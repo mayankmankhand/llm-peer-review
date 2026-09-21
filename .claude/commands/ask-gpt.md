@@ -204,6 +204,10 @@ Pass `--name debate-gpt` to the helper.
 
 After the summary is presented, the Recommended Actions enter the auto loop, and you are M2's **runner** for them: audit them per M2 before any fix. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15); follow them as written there.
 
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
+
 For each Recommended Action, in R-ID order:
 
 1. **Check it against the codebase.** External recommendations systematically over-engineer, which is why [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) routes them through the same loop as review findings. An action that fails its check is dropped to the log with its evidence, not applied.

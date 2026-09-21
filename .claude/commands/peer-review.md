@@ -66,6 +66,10 @@ Prioritized list of confirmed real problems, ordered by severity. This is the or
 
 The evaluation above is itself the audit step of the auto loop (M2's skeptical lens applied to external feedback); keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15). Once the verdicts are in:
 
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
+
 - **Dismissed** findings go to the log with their evidence. They are never fixed.
 - **Confirmed - opinion, not a bug** findings go to the digest as observations, not fixes.
 - **Confirmed - real problem** findings enter the auto loop: fix them (the M7 and M9 gates still apply), then re-verify per M3, M5, and M6. Each exits as page (only per M1), digest with receipts (M8), or log.
