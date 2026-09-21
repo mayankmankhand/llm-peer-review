@@ -65,6 +65,10 @@ You are the runner. Assign ids (`R1`, `R2`, ...) across the script's findings an
 
 !`cat .claude/skills/shared/hitl-loop.md`
 
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
+
 ### 5. Report
 
 Write the report per the format below, with `upgrade` as the `<who>` segment of the path and every surviving finding carrying its convention id in the summary line (`**R1** [C-1] ⚠️`). Killed findings go to the Audited out section with their verdict lines. This report is markdown only: the standing review page belongs to the sample cycle in step 8, not to this audit.

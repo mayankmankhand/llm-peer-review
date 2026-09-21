@@ -39,6 +39,10 @@ Be thorough but concise.
 
 !`cat .claude/skills/shared/severity-anchors.md`
 
+**Project severity anchors** (from `.claude/toolkit/severity-anchors.md`): this project's weighting for its own review kinds. The Universal Anchors above still win. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/severity-anchors.md 2>/dev/null || true`
+
 ## Finding IDs
 
 !`cat .claude/skills/shared/finding-id-system.md`
@@ -48,6 +52,10 @@ Be thorough but concise.
 On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
 !`cat .claude/skills/shared/hitl-loop.md`
+
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 
 ## Output Format
 

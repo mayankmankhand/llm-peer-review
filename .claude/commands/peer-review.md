@@ -31,6 +31,10 @@ Severity on every finding below follows the shared rubric, the same one the revi
 
 !`cat .claude/skills/shared/severity-anchors.md`
 
+**Project severity anchors** (from `.claude/toolkit/severity-anchors.md`): this project's weighting for its own review kinds. The Universal Anchors above still win. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/severity-anchors.md 2>/dev/null || true`
+
 ## Output Format
 
 <output_format>
