@@ -416,6 +416,41 @@ function releaseRepo(version, tag, opt) {
   check('build-plugin.js --check exits 1: build FAIL, run exits 1', r.status === 1 && isFail(r.out, 'build'), r.out);
 }
 
+// --- --tests-only: the everyday run (`npm test`, CI), checks 1 and 2 only ---------------
+{
+  // A repo the full gate refuses twice over: plugin/ changed since v1.0.0 with
+  // no bump, and the marketplace installs from the default branch. Neither is
+  // a test failure.
+  const repo = makeRepo('1.0.0', './plugin');
+  git(repo, ['tag', 'v1.0.0']);
+  write(repo, 'plugin/commands/explore.md', '# Explore v2\n');
+  commitAll(repo, 'plugin change, no bump');
+  let r = run(repo, ['--suites', 'stubs/pass.js']);
+  check('full gate on the unreleasable repo: fails on the release checks', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'version bump') && isFail(r.out, 'marketplace ref'), r.out);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('--tests-only on the same repo: exits 0 with suites and build ok', r.status === 0 && isOk(r.out, 'suites') && isOk(r.out, 'build') && /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+  check('--tests-only: one line says the release checks were skipped and why', isOk(r.out, 'release checks') && /skipped \(--tests-only\)/.test(line(r.out, 'release checks')) && /version bump/.test(line(r.out, 'release checks')), r.out);
+  check('--tests-only: no release check ran', !line(r.out, 'version bump') && !line(r.out, 'marketplace ref') && !line(r.out, 'release tag') && !line(r.out, 'tag version'), r.out);
+
+  // The suites keep their teeth: the verdict is still the exit code alone.
+  r = run(repo, ['--tests-only', '--suites', 'stubs/fail.js']);
+  check('--tests-only with a suite exiting 1 that prints "0 failed": run exits 1', r.status === 1 && isFail(r.out, 'suites') && /stubs\/fail\.js: exit 1/.test(r.out), r.out);
+  // So does the build check.
+  write(repo, 'scripts/build-plugin.js', "process.exit(process.argv.includes('--check') ? 1 : 0);\n");
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('--tests-only with a stale build: build FAIL, run exits 1', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'build'), r.out);
+  r = run(repo, ['--tests-only', '--skip-suites']);
+  check('--tests-only --skip-suites: only the build check decides', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'build'), r.out);
+
+  // The flags that name a push feed only the skipped checks: never a quiet bypass.
+  for (const extra of [['--commit', 'HEAD'], ['--pushing-tag', 'v1.0.0'], ['--remote', 'origin']]) {
+    r = run(repo, ['--tests-only', '--skip-suites', ...extra]);
+    check('--tests-only with ' + extra[0] + ': usage error exit 2', r.status === 2 && /--tests-only cannot be combined/.test(r.out), r.out);
+  }
+  r = run(repo, ['--help']);
+  check('--help names --tests-only', r.status === 0 && r.out.includes('[--tests-only]'), r.out);
+}
+
 // --- hook routing ------------------------------------------------------------------
 const stubDir = tmp('release-hook-stubs-');
 // The tripwire stub records its arguments and the stdin it received, one JSON

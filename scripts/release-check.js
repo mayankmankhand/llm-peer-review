@@ -4,7 +4,8 @@
 // (issue #175). Nothing here ships in plugin/.
 //
 //   node scripts/release-check.js [--repo <dir>] [--suites <list|glob>]
-//                                 [--skip-suites] [--commit <sha>]
+//                                 [--skip-suites] [--tests-only]
+//                                 [--commit <sha>]
 //                                 [--pushing-tag <tag>[:<sha>]]...
 //                                 [--remote <name|url>]
 //
@@ -67,6 +68,16 @@
 // state (`git show <sha>:<path>`). The suites and the build check always run on
 // the working tree. --repo points every check at another clone (tests).
 //
+// --tests-only is the everyday test run (`npm test`, and CI): checks 1 and 2
+// only. Checks T, 3, 4 and 5 judge a release (a bumped version, a marketplace
+// pin, a tag), which a commit in the middle of a cycle does not have yet and a
+// CI checkout, fetched without tags, cannot show. They are skipped with one
+// line saying so. The suites still go through the same exit-code-only runner.
+// It cannot be combined with --commit, --pushing-tag or --remote: those only
+// feed the skipped checks, so together they are a usage error, never a quiet
+// way to push without the release checks. `npm run test:release` is the full
+// gate.
+//
 // Dependency-free; git and node run through spawnSync with argument arrays
 // (no shell interpolation).
 //
@@ -78,7 +89,7 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
+const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
 // hook when the push comes from a linked worktree. Inherited by a suite, it
 // would point the suite's scratch `git init` and `git commit` at the real
@@ -101,7 +112,7 @@ const SUITE_TIMEOUT_MS = 10 * 60 * 1000;
 const REMOTE_TIMEOUT_MS = 2 * 60 * 1000;
 
 function parseArgs(argv) {
-  const o = { repo: process.cwd(), suites: null, skipSuites: false, commits: [], tags: [], remote: null };
+  const o = { repo: process.cwd(), suites: null, skipSuites: false, testsOnly: false, commits: [], tags: [], remote: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -112,6 +123,7 @@ function parseArgs(argv) {
     if (a === '--repo') o.repo = path.resolve(value());
     else if (a === '--suites') o.suites = value();
     else if (a === '--skip-suites') o.skipSuites = true;
+    else if (a === '--tests-only') o.testsOnly = true;
     else if (a === '--commit') o.commits.push(value());
     else if (a === '--remote') o.remote = value();
     else if (a === '--pushing-tag') {
@@ -126,6 +138,9 @@ function parseArgs(argv) {
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else usage('unknown argument ' + a);
   }
+  // Those three name what a push carries, for the very checks --tests-only
+  // skips. Accepting both would let a push run with no release checks.
+  if (o.testsOnly && (o.commits.length || o.tags.length || o.remote !== null)) usage('--tests-only cannot be combined with --commit, --pushing-tag or --remote (it skips the checks they feed)');
   return o;
 }
 
@@ -505,7 +520,8 @@ function checkCommits() {
 console.log('release-check: ' + REPO);
 checkSuites();
 checkBuild();
-checkCommits();
+if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref and release tag judge a release, not an everyday test run; run without the flag for the full gate');
+else checkCommits();
 const failedCount = results.filter(ok => !ok).length;
 console.log('release-check: ' + (results.length - failedCount) + ' passed, ' + failedCount + ' failed');
 process.exit(failedCount ? 1 : 0);

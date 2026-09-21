@@ -1,0 +1,43 @@
+# Runs the toolkit's test suites on every push and pull request.
+#
+# `npm test` is `node scripts/release-check.js --tests-only`: every
+# scripts/test-*.js, judged by exit code alone, plus the check that plugin/
+# matches its source. The release-only checks (version bump, marketplace pin,
+# tags) are skipped here on purpose; they run in the maintainer's pre-push hook.
+name: test
+
+on:
+  push:
+  pull_request:
+
+# Read-only: this workflow never writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history with tags, not the default one-commit checkout:
+      # test-upgrade-audit.js reads v7.1.0's scripts out of git history
+      # (`git show v7.1.0:...`) and fails when that tag is absent.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The suites themselves need no packages, no git name or email, and no API
+      # keys (each one builds its own scratch repos with a local identity). The
+      # one exception: four key-lookup checks in test-build-plugin.js load the
+      # real openai package and quietly skip themselves when it is missing.
+      # Installing the scripts' own dependencies makes them run. The root
+      # package.json has no dependencies, so there is nothing to install there.
+      - name: Install the scripts' dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: .claude/scripts
+
+      - name: Run the suites and the build check
+        run: npm test

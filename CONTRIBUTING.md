@@ -8,7 +8,7 @@ Fork the repo and adapt it to your project. The README has [setup instructions](
 
 ## How to Contribute
 
-- **Found a bug or have a suggestion?** Open an [issue](../../issues).
+- **Found a bug or have a suggestion?** Open an [issue](https://github.com/mayankmankhand/llm-peer-review/issues).
 - **Want to fix a bug?** Submit a PR.
 - **Bigger changes (new commands, architecture changes)?** Open an issue first so we can discuss the approach before you put in the work.
 
