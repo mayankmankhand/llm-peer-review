@@ -91,7 +91,7 @@ Every surviving finding carries one extra sub-bullet, last, after `Fix`:
 
 A finding the tier-3 vote downgraded (M2) renders at its new severity emoji, keeps its R-ID, and its Receipt row ends with the clause `downgraded from Block: <ballots>`, e.g. `downgraded from Block: 1 STANDS, 2 DOWNGRADE Warn`. That clause is why a Warn can carry an early ID.
 
-When an audit subagent failed twice and its tier could not run (M2), mark that finding `unaudited` next to this row rather than dropping the row.
+When an audit subagent failed twice and its tier could not run (M2), mark that finding `unaudited` next to this row rather than dropping the row. An `unaudited` finding is report-only (M2): it is never auto-fixed, and the digest lists it as needing the user.
 
 ### Audited out
 
