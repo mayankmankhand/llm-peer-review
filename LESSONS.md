@@ -267,3 +267,11 @@
 - **A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.**
 - **A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.**
 - **Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.**
+
+## Issue 199 (project extension seams)
+
+- **An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.**
+- **Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.**
+- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.**
+- **A check that defers to another check must ask whether that other check runs in this range.**
+- **In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.**
