@@ -1740,6 +1740,60 @@ console.log('\n4g. seed ask rows merge into the ask list (issue #192)');
   fs.rmSync(tmp92, { recursive: true, force: true });
 }
 
+// --- 4g2. destructive-push ask rows (issue #196) --------------------------------
+// `git push --mirror`, `--delete` and `-d` matched none of the six #192 rows. Four
+// more seed ask rows cover them (measured headless on 2026-09-21, default mode,
+// local bare remote). The deletion refspec (`git push origin :x`) has no row: a
+// rule ending in ` :*` never matched in that measurement (`:*` at the end of a
+// rule is Claude Code's older prefix spelling), so it stays a known gap under M9.
+console.log('\n4g2. destructive-push ask rows reach new and upgraded projects (issue #196)');
+{
+  const ASK_731 = ['Bash(git push *--force*)', 'Bash(git push -f*)', 'Bash(git push * -f*)', 'Bash(git push -uf*)', 'Bash(git push * -uf*)', 'Bash(git push * +*)'];
+  const ASK_196 = ['Bash(git push *--mirror*)', 'Bash(git push *--delete*)', 'Bash(git push -d*)', 'Bash(git push * -d*)'];
+  const realSeed = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'settings.local.json'), 'utf8'));
+  const realAsk = (realSeed.permissions && realSeed.permissions.ask) || [];
+  check('#196 the real seed asks before the six force-push forms and the four mirror and delete forms, and nothing else', sameSet(realAsk, ASK_731.concat(ASK_196)), JSON.stringify(realAsk));
+  check('#196 the real seed still allows a plain push, so the ask rows are what stop the destructive forms', realSeed.permissions.allow.includes('Bash(git push *)'));
+  check('#196 no seed ask row ends in ":*" (measured: such a row matches nothing, so it would be a false promise)', !realAsk.some(x => /:\*+\)$/.test(x)), JSON.stringify(realAsk));
+
+  const tmp196 = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-196-'));
+  const root196 = path.join(tmp196, 'plugin');
+  fs.cpSync(pluginRoot, root196, { recursive: true });
+  const ALLOW196 = ['Bash(git push *)', 'Bash(git status *)'];
+  const LOCAL196 = '.claude/settings.local.json';
+  const seed196 = (ask) => write(root196, 'seed/settings.local.json', JSON.stringify({ permissions: { allow: ALLOW196, ask, additionalDirectories: ['/tmp'] } }, null, 2) + '\n');
+  const lists196 = (dir) => { try { return JSON.parse(read(dir, LOCAL196)).permissions; } catch (e) { return {}; } };
+
+  // A project set up by 7.3.1: the seed of that release held only the six rows.
+  repo = path.join(tmp196, 'project');
+  fs.mkdirSync(repo);
+  initRepo(repo);
+  write(repo, 'README.md', '# app\n');
+  commitAll(repo, 'init');
+  seed196(ASK_731);
+  r = run(repo, root196);
+  let perms = lists196(repo);
+  check('#196 fixture: a 7.3.1 setup leaves exactly the six force-push ask rows', r.status === 0 && sameSet(perms.ask || [], ASK_731), r.out + JSON.stringify(perms));
+  commitAll(repo, 'set up by 7.3.1');
+
+  // The next setup run, with the real seed's ask list.
+  seed196(realAsk);
+  r = run(repo, root196);
+  perms = lists196(repo);
+  check('#196 an upgraded project gains the four new ask rows on its next setup run, in the ask list, beside the six it had', r.status === 0 && sameSet(perms.ask || [], ASK_731.concat(ASK_196))
+    && ASK_196.every(x => !perms.allow.includes(x)) && sameSet(perms.allow || [], ALLOW196), r.out + JSON.stringify(perms));
+  check('#196 the report names the four new rows as added to the ask list', r.out.includes('added to the ask list (Claude asks before these even when an allow row matches): ' + ASK_196.map(x => JSON.stringify(x)).join(', ') + '\n'), r.out);
+
+  // The owner deletes one new row after being offered it: it stays deleted, the rest stay.
+  const DROPPED = 'Bash(git push * -d*)';
+  write(repo, LOCAL196, JSON.stringify({ permissions: Object.assign({}, perms, { ask: perms.ask.filter(x => x !== DROPPED) }) }, null, 2) + '\n');
+  r = run(repo, root196);
+  perms = lists196(repo);
+  check('#196 a new ask row the owner deleted after it was offered stays deleted, and the other nine stay', r.status === 0 && !(perms.ask || []).includes(DROPPED)
+    && sameSet(perms.ask || [], ASK_731.concat(ASK_196).filter(x => x !== DROPPED)) && r.out.includes('not added again'), r.out + JSON.stringify(perms));
+  fs.rmSync(tmp196, { recursive: true, force: true });
+}
+
 // --- 4h. plugin cache rows get this machine's folder (7.3.1 review, R1) ------------
 // A leading wildcard (`node */.claude/plugins/cache/...`) also matched inline code
 // placed before a fake path, so the seed names the cache folder with a placeholder
