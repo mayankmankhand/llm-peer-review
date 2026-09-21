@@ -47,6 +47,8 @@ Then pick one of two modes:
 | **Security** (`subagent_type=review-security-finder`) | Secrets in code, injection, auth and unsafe sinks; quiet by rule when the change touches none of these |
 | **Operations** (`general-purpose`, this row's charter pasted in: no typed finder has covered it since 7.0.0) | Logging and monitoring, deployment readiness, rollback plan, config and migration safety |
 
+These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no argument runs them on its auto-detect path (#201).
+
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 
 The Design & Completeness row is the one whose worker can need input: the plan criteria open by asking which plan to compare against, and a dispatched finder cannot ask, so with no plan file it returned nothing at all (issue #184). That is why the row switches workers when no plan exists, the same guard `/review` applies with its `[plan] ⏭️ skipped (no plan file)` chip.
