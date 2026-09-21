@@ -45,6 +45,18 @@ const path = require('path');
 const crypto = require('crypto');
 const { loadEnvLocal, describeLookup } = require('./env-local.js');
 
+// Node floor (issue #197). `openai` 7.17.0 declares engines.node >=22.0.0, and on
+// an older Node the SDK fails later with an error that never mentions Node. Say
+// so plainly here, before `session` and before the lazy SDK require, so the first
+// line a user sees names the real cause. Mirrors the gen-media.js guard. stderr,
+// never stdout: stdout is the captured debate transcript.
+const NODE_FLOOR = 22;
+const nodeMajor = Number(process.version.replace(/^v/, '').split('.')[0]);
+if (nodeMajor < NODE_FLOOR) {
+  console.error(`ask-gpt.js needs Node.js ${NODE_FLOOR} or newer (the openai package requires it); you have ${process.version}.`);
+  process.exit(1);
+}
+
 /**
  * `session` is handled here, ahead of everything below (issue #181): it prints a
  * new debate session id and exits, so it reads no .env.local, loads no SDK and

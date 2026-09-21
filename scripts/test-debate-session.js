@@ -63,13 +63,20 @@ fs.writeFileSync(probe, [
   "  if (request === 'openai' || request === '@google/genai') note('sdk ' + request);",
   '  return realLoad.apply(this, arguments);',
   '};',
+  // The Node floor guard (issue #197) reads process.version. The property is
+  // read-only, so a plain assignment silently changes nothing and a test written
+  // that way would pass at the real version for the wrong reason; defineProperty
+  // is the one way to stub it.
+  'if (process.env.FAKE_NODE_VERSION) {',
+  "  Object.defineProperty(process, 'version', { value: process.env.FAKE_NODE_VERSION, configurable: true });",
+  '}',
   '',
 ].join('\n'));
 
 const TOOLKIT_VARS = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'GPT_MODEL', 'GPT_MAX_TOKENS', 'GEMINI_MODEL', 'GEMINI_MAX_TOKENS', 'GEMINI_USE_CONCAT_PROMPT'];
-function runScript(file, args) {
+function runScript(file, args, extraEnv) {
   fs.writeFileSync(probeLog, '');
-  const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, PROBE_LOG: probeLog });
+  const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, PROBE_LOG: probeLog }, extraEnv || {});
   for (const k of TOOLKIT_VARS) delete env[k];
   const r = spawnSync(process.execPath, ['--require', probe, path.join(SCRIPTS, file), ...args], {
     cwd: project, env, encoding: 'utf8', timeout: 20000,
@@ -99,6 +106,34 @@ for (const file of ['ask-gpt.js', 'ask-gemini.js']) {
   // have seen one. It stops at the missing key, before any request is built.
   const control = runScript(file, ['review', '--context-file', path.join(project, 'context.md')]);
   check(file + ': control: review looks up the planted .env.local, then stops at the missing key', control.status === 1 && /^envfile /m.test(control.probe) && /_API_KEY not found/.test(control.stderr) && !/^sdk /m.test(control.probe), control.stderr.slice(0, 300) + ' | ' + control.probe);
+}
+
+// Node floor guard (issue #197). Each script enforces its own package's floor:
+// openai 7.17.0 wants Node 22, @google/genai 2.23.0 wants Node 20. The guard sits
+// above `session`, so `session` drives it with no key and no SDK, and the message
+// is the first line on stderr with nothing on stdout.
+const FLOORS = { 'ask-gpt.js': { floor: 22, pkg: 'openai' }, 'ask-gemini.js': { floor: 20, pkg: '@google/genai' } };
+for (const file of Object.keys(FLOORS)) {
+  console.log('\n' + file + ' Node floor');
+  const { floor, pkg } = FLOORS[file];
+  const line = new RegExp('^' + file.replace('.', '\\.') + ' needs Node\\.js ' + floor + ' or newer \\(the ' + pkg + ' package requires it\\); you have v18\\.20\\.0\\.$', 'm');
+  const v18 = runScript(file, ['session'], { FAKE_NODE_VERSION: 'v18.20.0' });
+  check(file + ': Node 18 exits 1 with the one-line floor message on stderr', v18.status === 1 && line.test(v18.stderr), 'exit ' + v18.status + ': ' + v18.stderr.slice(0, 300));
+  check(file + ': Node 18 prints nothing on stdout and loads no SDK', v18.stdout === '' && !/^sdk /m.test(v18.probe), JSON.stringify(v18.stdout) + ' | ' + v18.probe);
+  const v20 = runScript(file, ['session'], { FAKE_NODE_VERSION: 'v20.19.0' });
+  if (floor > 20) {
+    check(file + ': Node 20 exits 1 naming ' + pkg, v20.status === 1 && v20.stdout === '' && new RegExp('needs Node\\.js ' + floor + ' .*' + pkg + '.*v20\\.19\\.0').test(v20.stderr), 'exit ' + v20.status + ': ' + v20.stderr.slice(0, 300));
+  } else {
+    check(file + ': Node 20 is at the floor, so session still exits 0 with a session id', v20.status === 0 && /^\d+-\d+\n$/.test(v20.stdout) && v20.stderr === '', 'exit ' + v20.status + ': ' + v20.stdout + v20.stderr.slice(0, 300));
+  }
+  const at = runScript(file, ['session'], { FAKE_NODE_VERSION: 'v' + floor + '.0.0' });
+  check(file + ': exactly the floor passes', at.status === 0 && at.stderr === '', 'exit ' + at.status + ': ' + at.stderr.slice(0, 300));
+  // The stub itself: a probe that failed to change process.version would make
+  // every check above pass at the real version for the wrong reason.
+  const echo = spawnSync(process.execPath, ['--require', probe, '-e', 'process.stdout.write(process.version)'], {
+    env: Object.assign({}, process.env, { PROBE_LOG: probeLog, FAKE_NODE_VERSION: 'v1.2.3' }), encoding: 'utf8',
+  });
+  check(file + ': the preload really replaces process.version', echo.stdout === 'v1.2.3', JSON.stringify(echo.stdout));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
