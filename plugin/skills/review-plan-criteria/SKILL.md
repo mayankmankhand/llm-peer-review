@@ -21,6 +21,10 @@ This is the expertise of `/tk:review-plan`, loaded into the finder that reviews 
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
+**Project severity anchors** (from `.claude/toolkit/severity-anchors.md`): this project's weighting for its own review kinds. The Universal Anchors above still win. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/severity-anchors.md 2>/dev/null || true`
+
 ## Finding IDs
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-id-system.md"`

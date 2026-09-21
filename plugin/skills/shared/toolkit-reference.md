@@ -166,6 +166,23 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 
 </reference>
 
+### Project Extensions
+
+A project adds its own rules to the toolkit through five files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again. On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
+
+| File | Read by | Carries |
+|---|---|---|
+| `review-kinds.md` | `/tk:review`, at detection | The project's own review kinds: rows in the detection table's three columns, the third naming an agent under `${CLAUDE_PLUGIN_ROOT}/agents/` |
+| `plan-gate.md` | `/tk:create-plan`, before its requirements | A gate every plan must pass |
+| `execute-gate.md` | `/tk:execute`, before its requirements | A gate every implementation step must pass |
+| `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M15 is void |
+| `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
+
+- A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. `/tk:upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
+- A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
+- When a file is absent, Claude Code shows the read as a note that the command printed nothing. Each read is labeled so that note reads as "this project adds none".
+- The seeded rules file ends with a marker line that starts `<!-- Project section:`. Everything under it is the project's: C-7 stops comparing there and nothing rewrites it.
+
 ### Subagent Strategy
 
 <guidelines>

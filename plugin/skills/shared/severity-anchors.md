@@ -104,6 +104,10 @@ Judge this from what is actually in front of you - a deploy config, an auth laye
 - Understanding is possible but delayed, jargon-heavy, or unnecessarily effortful = lean toward **Warn**
 - Wording or structure could be improved but core orientation is intact = lean toward **Suggest**
 
+### Project Review Kinds
+
+A project's own review kinds (rows in `.claude/toolkit/review-kinds.md`) bring their own weighting in `.claude/toolkit/severity-anchors.md`, which every consumer of this file inlines right after it. The Universal Anchors still win.
+
 ## Boundary Examples
 
 Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `finding-contract.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the template's own illustrative blocks use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.

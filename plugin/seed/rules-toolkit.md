@@ -37,3 +37,7 @@ If Claude can run it (tests, builds, dev servers, installs, status checks), Clau
 ## Your Files
 
 `CLAUDE.md`, `LESSONS.md`, `LESSONS-detail.md`, `DESIGN-PROFILE.md`, `plans/`, and `.claude/settings.local.json` are yours: the toolkit seeds them once and never overwrites them. The one exception is the permissions list in `settings.local.json`. Setup backs the file up before any change, adds the toolkit rows it has not offered in this working copy before (so a row you delete stays deleted), and removes rows that point at a `.claude/scripts/` file the project no longer has, plus a few old toolkit rows; `/tk:upgrade` removes the retired toolkit rows the plugin lists, through its audit. Your own commands, skills, agents, and rules under `.claude/` are yours too; `/tk:upgrade` audits them against the toolkit's conventions and fixes what drifted. Toolkit scripts are upstream-only: file an issue rather than patching a copy.
+
+<!-- Project section: the toolkit's seed ends here. Everything below this line is yours: /tk:upgrade never compares it and nothing rewrites it. -->
+
+## Project

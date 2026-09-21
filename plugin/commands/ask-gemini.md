@@ -164,6 +164,10 @@ Severity on each Recommended Action follows the shared rubric below, the same on
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/severity-anchors.md"`
 
+**Project severity anchors** (from `.claude/toolkit/severity-anchors.md`): this project's weighting for its own review kinds. The Universal Anchors above still win. A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/severity-anchors.md 2>/dev/null || true`
+
 <output_format>
 
 ---
