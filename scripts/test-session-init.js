@@ -697,6 +697,130 @@ section('12. no argument: the newest plan\'s start commit (#184)', function () {
     np.json.plan === null && np.json.source === 'none' && np.json.reason === 'no-remote', brief(np));
 });
 
+// --- 13. the review's starting snapshot (#202) ----------------------------------
+// /review used to measure "the diff of the fixes" from the pinned end, so work that
+// was already uncommitted when the review began reached the fix verifier as if it
+// were a fix. --scope now records uncommitted.baseline, the id `git stash create`
+// prints, and the fix diff is `git diff <baseline>`. These cases pin what that id
+// must do, and that making it changes nothing a person or a later command can see.
+section('13. uncommitted.baseline: the starting snapshot (#202)', function () {
+  function diffNames(repo, id) {
+    return git(repo, ['diff', '--name-only', id]).split('\n').filter(Boolean);
+  }
+  function visible(repo, files) {
+    return JSON.stringify({
+      status: git(repo, ['status', '--porcelain', '--untracked-files=all']),
+      stashes: git(repo, ['stash', 'list']),
+      refs: git(repo, ['for-each-ref']),
+      head: git(repo, ['rev-parse', 'HEAD']),
+      files: files.map(function (f) { return fs.readFileSync(path.join(repo, f), 'utf-8'); }),
+    });
+  }
+
+  // (a) a clean tree
+  const repo = newRepo('baseline');
+  write(repo, 'kept.txt', lines(3));
+  write(repo, 'staged.txt', lines(3));
+  write(repo, 'edited.txt', lines(3));
+  commitAll(repo, 'start');
+  const clean = scope(repo);
+  check('a clean tree: baseline is null and there is no baselineError',
+    clean.status === 0 && clean.parsed && dig(clean.json, 'uncommitted.baseline') === null &&
+    !('baselineError' in (clean.json.uncommitted || {})), JSON.stringify(clean.json.uncommitted));
+
+  // only an untracked file: still nothing tracked to snapshot
+  write(repo, 'notes.txt', lines(2, 'note'));
+  const onlyNew = scope(repo);
+  check('only an untracked file: baseline is null and there is no baselineError',
+    dig(onlyNew.json, 'uncommitted.baseline') === null && !('baselineError' in (onlyNew.json.uncommitted || {})),
+    JSON.stringify(onlyNew.json.uncommitted));
+
+  // (b) and (c) a dirty tree: one staged edit, one unstaged edit, one untracked file
+  write(repo, 'staged.txt', lines(3) + 'staged before the review\n');
+  git(repo, ['add', 'staged.txt']);
+  write(repo, 'edited.txt', lines(3) + 'edited before the review\n');
+  const watched = ['kept.txt', 'staged.txt', 'edited.txt', 'notes.txt'];
+  const before = visible(repo, watched);
+  const dirty = scope(repo);
+  const id = dig(dirty.json, 'uncommitted.baseline');
+  check('a dirty tree: baseline is a full commit id, with no baselineError',
+    dirty.status === 0 && typeof id === 'string' && /^[0-9a-f]{40}$/.test(id) &&
+    !('baselineError' in (dirty.json.uncommitted || {})), JSON.stringify(dirty.json.uncommitted));
+  if (typeof id !== 'string') throw new Error('no baseline id, so the cases that diff against it cannot run');
+
+  check('the call changes nothing visible: status, stash list, refs, HEAD and file contents are identical',
+    visible(repo, watched) === before, 'before ' + before + ' after ' + visible(repo, watched));
+  check('the id names a commit git can read', git(repo, ['cat-file', '-t', id]).trim() === 'commit');
+  check('git diff <baseline> is empty right after the call', sameList(diffNames(repo, id), []), diffNames(repo, id).join(','));
+  check('the snapshot holds the staged and the unstaged edit',
+    git(repo, ['show', id + ':staged.txt']).indexOf('staged before the review') !== -1 &&
+    git(repo, ['show', id + ':edited.txt']).indexOf('edited before the review') !== -1);
+
+  // (d) the untracked file is recorded by the list, not by the snapshot
+  check('an untracked file present at the start is still in the untracked list',
+    sameList(paths(list(dirty, 'uncommitted.untracked.files')), ['notes.txt']),
+    JSON.stringify(paths(list(dirty, 'uncommitted.untracked.files'))));
+  check('staged and unstaged lists are reported beside the baseline as before',
+    sameList(paths(list(dirty, 'uncommitted.staged.files')), ['staged.txt']) &&
+    sameList(paths(list(dirty, 'uncommitted.unstaged.files')), ['edited.txt']), JSON.stringify(dirty.json.uncommitted));
+
+  // (b) a later edit (the "fix") is all the diff shows, committed or not
+  write(repo, 'kept.txt', lines(3) + 'the fix\n');
+  check('after a later edit, git diff <baseline> shows only that file',
+    sameList(diffNames(repo, id), ['kept.txt']), diffNames(repo, id).join(','));
+  const fixDiff = git(repo, ['diff', id]);
+  check('and only that edit: the work from before the review is not in the diff',
+    fixDiff.indexOf('+the fix') !== -1 && fixDiff.indexOf('before the review') === -1, fixDiff);
+  git(repo, ['add', 'kept.txt']);
+  const when = clock + ' +0000';
+  clock += 60;
+  git(repo, ['commit', '-q', '-m', 'Fix it', '--', 'kept.txt'], { GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when });
+  check('once that edit is COMMITTED, git diff <baseline> still shows only that file',
+    sameList(diffNames(repo, id), ['kept.txt']), diffNames(repo, id).join(','));
+  const unrelated = git(repo, ['diff', 'HEAD']);
+  check('(while git diff HEAD, the old measure, now misses the fix and shows the earlier work)',
+    unrelated.indexOf('+the fix') === -1 && unrelated.indexOf('before the review') !== -1, unrelated);
+
+  // (e) unmerged paths: git stash create refuses, the scope still succeeds
+  const merge = newRepo('baseline-unmerged');
+  write(merge, 'f.txt', 'base\n');
+  commitAll(merge, 'base');
+  git(merge, ['checkout', '-q', '-b', 'other']);
+  write(merge, 'f.txt', 'theirs\n');
+  commitAll(merge, 'theirs');
+  git(merge, ['checkout', '-q', 'main']);
+  write(merge, 'f.txt', 'ours\n');
+  commitAll(merge, 'ours');
+  const m = spawnSync('git', ['merge', 'other'], { cwd: merge, env: ENV, encoding: 'utf-8' });
+  check('(fixture) the merge stopped on a conflict', m.status !== 0 && /^UU f\.txt/m.test(git(merge, ['status', '--porcelain'])),
+    'merge exit ' + m.status);
+  const conflicted = fs.readFileSync(path.join(merge, 'f.txt'), 'utf-8');
+  const u = scope(merge);
+  const err = dig(u.json, 'uncommitted.baselineError');
+  check('unmerged paths: exit 0, normal JSON, baseline null, and a one-line baselineError string',
+    u.status === 0 && u.parsed && !('error' in u.json) && dig(u.json, 'uncommitted.baseline') === null &&
+    typeof err === 'string' && err.length > 0 && err.indexOf('\n') === -1 && err.indexOf('git stash create') === 0,
+    brief(u) + ' ' + JSON.stringify(u.json.uncommitted));
+  check('unmerged paths: the rest of the scope is still reported',
+    Array.isArray(list(u, 'uncommitted.staged.files')) && u.json.totals !== null && typeof u.json.totals === 'object',
+    JSON.stringify(u.json.totals));
+  check('unmerged paths: the conflict is left exactly as it was',
+    fs.readFileSync(path.join(merge, 'f.txt'), 'utf-8') === conflicted && /^UU f\.txt/m.test(git(merge, ['status', '--porcelain'])));
+
+  // a held index lock: stash create exits 1 and prints nothing; the scope still succeeds
+  const locked = newRepo('baseline-locked');
+  write(locked, 'f.txt', 'one\n');
+  commitAll(locked, 'one');
+  write(locked, 'f.txt', 'two\n');
+  fs.writeFileSync(path.join(locked, '.git', 'index.lock'), '');
+  const l = scope(locked);
+  fs.rmSync(path.join(locked, '.git', 'index.lock'), { force: true });
+  check('another git command holding the index lock: exit 0, baseline null, a baselineError string',
+    l.status === 0 && l.parsed && dig(l.json, 'uncommitted.baseline') === null &&
+    typeof dig(l.json, 'uncommitted.baselineError') === 'string' && sameList(paths(list(l, 'uncommitted.unstaged.files')), ['f.txt']),
+    brief(l) + ' ' + JSON.stringify(l.json.uncommitted));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
