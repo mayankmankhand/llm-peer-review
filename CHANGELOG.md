@@ -31,6 +31,7 @@ If you last installed v4.3.3, twenty-six releases have shipped on top of it. v4.
 ### Upgrading
 
 - **C-12: A project review kind names a live agent** (Since 7.4.0, runs on every upgrade). It reads `.claude/toolkit/review-kinds.md` when the project has one and reports a row that has other than three cells, names no `subagent_type`, names a `tk:` agent, names an agent no file defines, or names one that can edit. The fix is to add or correct the agent, fix the row, or remove it. The version in `Since` is confirmed when the release is cut.
+- **Existing projects do not receive the rules-file marker automatically.** A rules file that still matches the seed above the marker is current, so no finding ever delivers the line. To keep your own rules in that file, copy the `<!-- Project section:` line from the plugin's `seed/rules-toolkit.md` to the end of `.claude/rules/toolkit.md` and write under it.
 - The plugin build keeps `.claude/toolkit/` paths project-relative (`KEEP_PROJECT_PATHS`); before this it reported them as unresolved.
 
 ---

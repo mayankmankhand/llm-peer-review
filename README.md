@@ -214,7 +214,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 `/tk:setup` writes a README into the folder that explains each file and the table format, and never touches the folder again. Your review agent goes through the same audit as the toolkit's, so it needs an output contract and no edit tools; `/tk:upgrade` tells you when a row names an agent that is missing or can edit (C-12). The agent can stay short: list the plugin's skills in its `skills:` line by their scoped names (`tk:dispatch-contract`, `tk:review-code-criteria`) and write only what is specific to your project.
 
-**Your own rules for Claude go under the marker.** The seeded `.claude/rules/toolkit.md` ends with a line that starts `<!-- Project section:`. Everything under it is yours: the upgrade check stops comparing there, so your lines are never reported as drift.
+**Your own rules for Claude go under the marker.** The seeded `.claude/rules/toolkit.md` ends with a line that starts `<!-- Project section:`. A project seeded before v7.4.0 does not have that line and nothing adds it for you: copy it from the plugin's seed (`~/.claude/plugins/data/tk-llm-peer-review/current/seed/rules-toolkit.md`) to the end of your file. Everything under it is yours: the upgrade check stops comparing there, so your lines are never reported as drift.
 
 ### If your command spawns subagents
 
