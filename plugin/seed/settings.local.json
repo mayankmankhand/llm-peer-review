@@ -152,7 +152,10 @@
       "Bash(git push *--mirror*)",
       "Bash(git push *--delete*)",
       "Bash(git push -d*)",
-      "Bash(git push * -d*)"
+      "Bash(git push * -d*)",
+      "Bash(git push *--m*)",
+      "Bash(git push *--de*)",
+      "Bash(git push *--pru*)"
     ],
     "additionalDirectories": [
       "/tmp"

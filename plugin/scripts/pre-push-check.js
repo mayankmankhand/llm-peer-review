@@ -165,27 +165,81 @@ const SETTINGS_PATH = ".claude/settings.json";
 // commits again and again. An alarm on each of them is an alarm nobody reads,
 // and the person who learns to say "push anyway" to an icon says it to a .pfx
 // too. So the byte-container list is kept NARROW on purpose: general-purpose
-// archives and general-purpose databases only. Formats that are technically
-// zip containers but whose name declares a document or a package (.docx,
-// .xlsx, .jar, .whl, .apk) are left out for the same reason media is - they are
-// committed routinely and the name does say what they are. That is an honest
-// limit, not a claim that they cannot hold a secret: this rule narrows the
-// silence, it does not end it. A secret renamed logo.png still passes; nothing
-// short of reading the bytes would catch that, and this script does not.
+// archives and general-purpose databases only. What it covers:
+//   - archives: zip, tar, the single-file compressors that wrap a tar (gz, bz2,
+//     xz, zst, lz4, lzma) with their short spellings (tgz, tbz, tbz2, txz), 7z,
+//     rar, and whole-disk images (iso, dmg), which are archives of a filesystem;
+//   - databases: sqlite, sqlite3, db, mdb, and the two names a copy of one
+//     usually travels under, .dump and .bak;
+//   - database SIBLINGS: SQLite keeps rows that are not yet in the main file in
+//     app.sqlite-wal (and app.db-journal, and a -shm index beside them), so the
+//     sibling holds the same tables the main file does. See the matching note
+//     below for how the -wal style suffix is read.
+// Formats that are technically zip containers but whose name declares a
+// document or a package are DELIBERATELY left out, for the same reason media
+// is - they are committed routinely and the name does say what they are:
+// office documents (.docx, .xlsx, .pptx, .odt), .jar, .whl, .apk. That is an
+// honest limit, not a claim that they cannot hold a secret: this rule narrows
+// the silence, it does not end it. A secret renamed logo.png still passes;
+// nothing short of reading the bytes would catch that, and this script does not.
 //
 // Matching is on the FINAL extension, case-insensitive, so backup.tar.gz hits
-// through .gz and BACKUP.ZIP counts. "No extension" means the basename has no
-// dot after its first character: "credentials" and ".secrets" qualify,
-// "logo.png" does not. The one name exempt from the no-extension rule is
-// .DS_Store (exact spelling): macOS writes it into every folder Finder opens,
-// it is the one common inert binary with a bare name, and re-alarming on it
-// would train exactly the reflex described above. It should still be
-// gitignored; that is housekeeping, not this script's job.
+// through .gz, site.tar.zst through .zst, site.zip.bak through .bak, and
+// BACKUP.ZIP counts. One suffix is read through: a final extension ending in
+// -wal, -shm or -journal is a database sibling, and that suffix sits INSIDE the
+// final extension (app.sqlite-wal ends in ".sqlite-wal", not ".sqlite"), so a
+// plain list lookup would never see it. The suffix is dropped before the
+// lookup, which makes app.sqlite-wal, app.sqlite3-shm and app.db-journal all
+// resolve to their database's entry rather than needing a row per pairing.
+// What final-extension matching still misses is a container renamed past its
+// own extension with a suffix the list does not know (site.zip.old,
+// app.sqlite.1): the name no longer says archive, and the list does not guess.
+//
+// "No extension" means the basename has no dot after its first character:
+// "credentials" and ".secrets" qualify, "logo.png" does not.
+//
+// Named exemptions (EXEMPT_BINARY_BASENAMES) are checked BEFORE both the
+// extension rule and the no-extension rule, and AFTER isSecretContainer(), which
+// always wins. They are the inert binaries an operating system writes into
+// folders on its own, where re-alarming would train exactly the reflex
+// described above:
+//   .DS_Store  macOS writes it into every folder Finder opens; without the
+//              exemption the no-extension rule would report it.
+//   Thumbs.db  the Windows thumbnail cache, the twin of .DS_Store; without the
+//              exemption the .db entry would report it as a database.
+// Both are matched on the EXACT spelling, case included. Windows file names
+// are case-insensitive, so a lowercase thumbs.db is possible there, but
+// Explorer itself always writes the capital T and git records the name as it
+// was created, so the cache arrives as "Thumbs.db". An exemption is a hole in
+// a fail-closed check and should be as narrow as it can be: a thumbs.db in any
+// other spelling is more likely a database somebody named than the cache, and
+// the cost of being wrong is one extra "check it by hand", against a database
+// passing in silence. Both files should still be gitignored; that is
+// housekeeping, not this script's job.
 //
 // A TEXT file under any of these names (a PEM .key, an armored .asc, a LICENSE
 // or Makefile with no extension) never reaches these lists - it has hunks, its
 // added lines go through PATTERNS like any other text, and for key material
 // the private-key-block pattern is the better check.
+//
+// The exception is a text file git was TOLD to call binary. A .gitattributes
+// line such as "*.json -diff" or "package-lock.json binary" (common for
+// lockfiles, generated files and data files) makes diff-tree print the same
+// "Binary files ... differ" line and no hunks, for a file that is plain text.
+// Its name is on neither list, so before this was handled nothing reported it
+// and no pattern ever read it: a config.json holding a key passed with exit 0.
+// So a binary the two lists leave silent gets one more question, asked of its
+// bytes rather than its name: is it really binary? Git's own test is used (a
+// NUL byte in the first 8000 bytes, see FIRST_BYTES_FOR_BINARY_TEST). A blob
+// that passes as text was forced binary by attributes, and it is scanned for
+// real: the diff for that one path is asked for again with --text, and its
+// added lines go through the same parser and the same PATTERNS as every other
+// text file - a lockfile marked -diff is scanned, not alarmed on. A true binary
+// (a .png has a NUL in its first bytes) stays silent as before. --text is never
+// passed to the main diff-tree call: it would turn every true binary into a
+// wall of garbage hunks and the binary branch above would never run. A name
+// that IS on one of the lists is reported without this question, forced or not:
+// that is the fail-closed side, and it costs one "check it by hand".
 const SECRET_CONTAINER_EXTENSIONS = [
   ".pfx", ".p12", ".jks", ".keystore", ".kdbx", ".gpg", ".asc", ".der", ".key",
 ];
@@ -193,10 +247,18 @@ const SECRET_CONTAINER_BASENAMES = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"
 const BYTE_CONTAINER_EXTENSIONS = [
   // general-purpose archives
   ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+  // newer compressors, their short tar spellings, and disk images
+  ".zst", ".lz4", ".lzma", ".txz", ".tbz2", ".tbz", ".iso", ".dmg",
   // general-purpose databases
   ".sqlite", ".sqlite3", ".db", ".mdb",
+  // what a copy of a database is usually called
+  ".dump", ".bak",
 ];
-const NO_EXTENSION_EXEMPT_BASENAMES = [".DS_Store"];
+// Dropped from the end of the final extension before the lookup above, so a
+// database's write-ahead log, shared-memory index and rollback journal resolve
+// to the database's own entry (.sqlite-wal -> .sqlite, .db-journal -> .db).
+const DATABASE_SIBLING_SUFFIX = /-(?:wal|shm|journal)$/;
+const EXEMPT_BINARY_BASENAMES = [".DS_Store", "Thumbs.db"];
 
 // Secret patterns scanned against ADDED lines only. Hand-picked common
 // formats, not exhaustive by design (decision: self-contained beats a
@@ -348,10 +410,13 @@ const MASK_PATTERNS = PATTERNS.map((p) => ({
 // control character are still C-quoted and are decoded by unquotePath below.
 // Returns stdout, or null on any failure - callers decide whether null is
 // benign or fatal.
-function git(args) {
+//
+// encoding is "utf8" unless the caller asks for "buffer": the one caller that
+// does reads a blob to look for a NUL byte, and must count bytes, not characters.
+function git(args, encoding) {
   try {
     return execFileSync("git", ["-c", "core.quotePath=false", ...args], {
-      encoding: "utf8",
+      encoding: encoding || "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -429,19 +494,51 @@ function isSecretContainer(repoPath) {
 // Is this repo path named like a container of arbitrary bytes (issue #200)?
 // Returns the reason to print, or null when the name is on the silent side of
 // the line. Called only for a binary that isSecretContainer() did not claim, so
-// id_rsa keeps its own, more specific message. The exemption is checked against
-// the basename as spelled (an exemption should be as narrow as it can be); the
-// extension is compared lowercased, like the list above.
+// id_rsa keeps its own, more specific message - and so that no exemption here
+// can ever silence a secret container. The named exemptions come first, ahead
+// of BOTH rules (Thumbs.db would otherwise hit .db, .DS_Store the no-extension
+// rule), and are checked against the basename as spelled (an exemption should
+// be as narrow as it can be); the extension is compared lowercased, like the
+// list above, with a database-sibling suffix dropped first.
 function byteContainerReason(repoPath) {
   const basename = repoPath.split("/").pop();
+  if (EXEMPT_BINARY_BASENAMES.includes(basename)) return null;
   if (basename.indexOf(".", 1) === -1) {
     // No dot after the first character: "credentials", ".secrets".
-    if (NO_EXTENSION_EXEMPT_BASENAMES.includes(basename)) return null;
     return "binary with no extension; cannot be scanned";
   }
-  const ext = basename.slice(basename.lastIndexOf(".")).toLowerCase();
+  const ext = basename.slice(basename.lastIndexOf(".")).toLowerCase().replace(DATABASE_SIBLING_SUFFIX, "");
   if (BYTE_CONTAINER_EXTENSIONS.includes(ext)) return "binary archive or database; cannot be scanned";
   return null;
+}
+
+// Git's own binary test (buffer_is_binary in xdiff-interface.c): a NUL byte in
+// the first 8000 bytes means binary. Reused rather than reinvented, so "really
+// binary" here means exactly what it means to git when no attribute interferes.
+// UTF-16 text is full of NULs and counts as binary under this test, as it does
+// for git itself; that limit is inherited, not introduced.
+const FIRST_BYTES_FOR_BINARY_TEST = 8000;
+
+// A binary notice for a name neither list claims: decide from the BYTES whether
+// the file is really binary, and if it is text that .gitattributes forced
+// binary, scan it (see the comment above SECRET_CONTAINER_EXTENSIONS). The blob
+// read is the added side, <sha>:<path>; the caller has already ruled out a
+// deletion, so it exists. Every failure reports the file rather than skipping
+// it. --literal-pathspecs stops a path holding * or [ from being read as a glob.
+function scanForcedText(sha, repoPath, hits) {
+  const short = sha.slice(0, 7);
+  const blob = git(["cat-file", "blob", sha + ":" + repoPath], "buffer");
+  if (blob === null) {
+    hits.unscannable.push(repoPath + " @ " + short + " (binary; its contents could not be read to tell a true binary from a text file marked binary)");
+    return;
+  }
+  if (blob.subarray(0, FIRST_BYTES_FOR_BINARY_TEST).includes(0)) return; // a true binary: stays silent
+  const patch = git(["--literal-pathspecs", "diff-tree", "-r", "-p", "--text", "--unified=0", "--no-color", "--root", "-m", sha, "--", repoPath]);
+  if (patch === null) {
+    hits.unscannable.push(repoPath + " @ " + short + " (text file marked binary by .gitattributes; cannot be line-scanned)");
+    return;
+  }
+  scanPatch(patch, sha, hits, null);
 }
 
 // Does this path already exist at the range base? If so a push cannot leak it:
@@ -757,6 +854,32 @@ function scanCommit(sha, hits) {
   const patch = git(["diff-tree", "-r", "-p", "--unified=0", "--no-color", "--root", "-m", sha]);
   if (patch === null) fail("git diff-tree failed on commit " + sha + ".");
   const short = sha.slice(0, 7);
+  scanPatch(patch, sha, hits, new Set());
+
+  // File-level checks ride on the same commit walk. -z keeps paths raw and
+  // NUL-separated, so nothing here needs unquoting.
+  const names = git(["diff-tree", "-r", "--name-only", "--no-commit-id", "--root", "-m", "-z", sha]);
+  if (names === null) fail("git diff-tree --name-only failed on commit " + sha + ".");
+  for (const f of new Set(names.split("\0").filter(Boolean))) {
+    const basename = f.split("/").pop();
+    if (NEVER_PUSH_PATHS.includes(f) || NEVER_PUSH_BASENAMES.includes(basename)) {
+      hits.neverPushRaw.push({ path: f, short: short });
+    }
+    if (f === SETTINGS_PATH) hits.settingsCommits.add(short);
+  }
+}
+
+// The patch parser, shared by two callers so there is ONE scanner: scanCommit
+// hands it the commit's whole patch, and scanForcedText hands it the --text
+// patch of a single file that .gitattributes had hidden behind a binary notice.
+// `rescanned` tells the two apart. From scanCommit it is a Set of the paths
+// already handed to scanForcedText for this commit (-m prints one section per
+// parent of a merge, and the --text diff covers every parent at once, so one
+// rescan per path is enough). From scanForcedText it is null: that patch was
+// made with --text, so a binary notice inside it should be impossible, and one
+// that appears anyway is reported instead of starting another rescan.
+function scanPatch(patch, sha, hits, rescanned) {
+  const short = sha.slice(0, 7);
 
   let file = null; // repo-relative path of the file the current hunk touches
   let newLine = 0; // line number in the NEW file, tracked from @@ headers
@@ -820,6 +943,10 @@ function scanCommit(sha, hits) {
       // shapes git prints are add, modify and delete. Anything else is a parse
       // failure and is reported, never skipped (holistic review, R20).
       const notice = line.slice(13);
+      if (rescanned === null) {
+        hits.unscannable.push(notice + " @ " + short + " (still binary under --text; cannot be line-scanned)");
+        continue;
+      }
       if (section === null) {
         hits.unscannable.push(notice + " @ " + short + " (binary; path could not be parsed)");
         continue;
@@ -838,7 +965,15 @@ function scanCommit(sha, hits) {
         // database, or a binary with no extension could hold anything. Media
         // names return null here and stay silent.
         const reason = byteContainerReason(section.path);
-        if (reason !== null) hits.unscannable.push(section.path + " @ " + short + " (" + reason + ")");
+        if (reason !== null) {
+          hits.unscannable.push(section.path + " @ " + short + " (" + reason + ")");
+        } else if (!rescanned.has(section.path)) {
+          // A name neither list claims. Usually media, which stays silent - but
+          // it may be a text file that .gitattributes marked -diff or binary,
+          // which no pattern has read yet. The bytes decide, not the name.
+          rescanned.add(section.path);
+          scanForcedText(sha, section.path, hits);
+        }
       }
       continue;
     }
@@ -847,18 +982,6 @@ function scanCommit(sha, hits) {
       newLine = parseInt(hunk[1], 10);
       pending = hunk[2] === undefined ? 1 : parseInt(hunk[2], 10);
     }
-  }
-
-  // File-level checks ride on the same commit walk. -z keeps paths raw and
-  // NUL-separated, so nothing here needs unquoting.
-  const names = git(["diff-tree", "-r", "--name-only", "--no-commit-id", "--root", "-m", "-z", sha]);
-  if (names === null) fail("git diff-tree --name-only failed on commit " + sha + ".");
-  for (const f of new Set(names.split("\0").filter(Boolean))) {
-    const basename = f.split("/").pop();
-    if (NEVER_PUSH_PATHS.includes(f) || NEVER_PUSH_BASENAMES.includes(basename)) {
-      hits.neverPushRaw.push({ path: f, short: short });
-    }
-    if (f === SETTINGS_PATH) hits.settingsCommits.add(short);
   }
 }
 
