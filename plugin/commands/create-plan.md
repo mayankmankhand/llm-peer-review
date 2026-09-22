@@ -204,7 +204,7 @@ The critic returns gaps, not a grade (issue #204): its old score out of 10 moved
 
 </procedure>
 
-The closing message states what the judge found in one line, counting each gap once, so the user sees it before they approve: "Plan critic: 7 gaps; 4 fixed, 1 left open on purpose (<why>), 2 carried to review." Fixed counts round-1 gaps fixed; left open counts gaps from either round that the conversation decided to leave open; carried counts the round-2 gaps written as `[plan]` lines. A round-2 gap that repeats a round-1 gap counts once, as carried, because the fix did not close it. A round that returned `No material gaps` says so ("Plan critic: no material gaps."). Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
+The closing message states what the judge found in one line, counting each gap once, so the user sees it before they approve: "Plan critic: 7 gaps; 4 fixed, 1 left open on purpose (<why>), 2 carried to review." Fixed counts round-1 gaps fixed; left open counts gaps from either round that the conversation decided to leave open; carried counts the round-2 gaps written as `[plan]` lines. A round-2 gap that repeats a fixed round-1 gap counts once, as carried, because the fix did not close it; one that repeats a gap left open on purpose counts once, as left open. A round that returned `No material gaps` says so ("Plan critic: no material gaps."). Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
 
 ## Render HTML View (default-on)
 
