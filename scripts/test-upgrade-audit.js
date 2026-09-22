@@ -518,6 +518,33 @@ check('#203 zero findings over an EQUAL range names the plugin update steps',
   curRun.status === 0 && curRun.findings.length === 0 && /in range 7\.1\.0 -> 7\.1\.0/.test(curRun.summary)
   && /nothing changed here/.test(curRun.summary) && /claude plugin marketplace update/.test(curRun.summary)
   && /claude plugin update tk@/.test(curRun.summary), curRun.summary);
+// The findings term of that gate needs a fixture where the VERSION term is
+// already true, or the check cannot tell the two apart: the run with findings
+// asserted above at "a run WITH findings" has a 6.3.3 -> 7.1.0 range, so it
+// stays quiet on the version term alone and would pass with the findings term
+// deleted. Same project as CURRENT, with the rules stamp wound back so C-7
+// fires over an otherwise empty range.
+const CURRENT_DIRTY = path.join(TMP, 'current-dirty');
+commonFiles(CURRENT_DIRTY);
+write(CURRENT_DIRTY, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.1.0', path: 'plugin', auditedVersion: '7.1.0' }, null, 2));
+write(CURRENT_DIRTY, '.claude/rules/toolkit.md', stampRules('7.1.0'));
+// One seed permission row removed, so C-9 reports it. C-9 runs on every
+// upgrade, which is what lets this fixture hold findings AND an equal range.
+const seedPerms = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.json')));
+seedPerms.permissions.allow = seedPerms.permissions.allow.slice(1);
+write(CURRENT_DIRTY, '.claude/settings.local.json', JSON.stringify(seedPerms, null, 2) + '\n');
+write(CURRENT_DIRTY, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')));
+write(CURRENT_DIRTY, '.gitignore', read(path.join(PLUGIN, 'seed', 'gitignore')));
+write(CURRENT_DIRTY, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-README.md')));
+const dirtyRun = audit(CURRENT_DIRTY);
+check('#203 findings over an EQUAL range stay quiet, so the findings term is load-bearing',
+  dirtyRun.status === 0 && dirtyRun.findings.length > 0 && /in range 7\.1\.0 -> 7\.1\.0/.test(dirtyRun.summary)
+  && !/nothing changed here/.test(dirtyRun.summary), dirtyRun.summary);
+// Versions are compared as versions, not as text: validVersion accepts `7.1`,
+// which is the same version as the 7.1.0 plugin and must not read as a range.
+const shortRun = audit(CURRENT, ['--from', '7.1']);
+check('#203 an equal range spelled 7.1 against 7.1.0 still names the update steps',
+  shortRun.status === 0 && shortRun.findings.length === 0 && /nothing changed here/.test(shortRun.summary), shortRun.summary);
 
 console.log('\n4b. C-11: closing tags and root-relative paths are not mentions; mentions beside them still are');
 {

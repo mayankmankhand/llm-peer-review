@@ -1009,6 +1009,12 @@ r = run(repo, newerRoot);
 let rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
 check('a newer plugin raises version and at', r.status === 0 && rerun.version === '7.1.0' && rerun.at !== '2026-01-01T00:00:00.000Z', JSON.stringify(rerun));
 check('a newer plugin leaves auditedVersion, auditedAt and previousVersion alone', rerun.auditedVersion === '7.0.0' && rerun.auditedAt === seeded.auditedAt && rerun.previousVersion === '6.3.3' && rerun.custom === 'kept' && rerun.path === 'plugin', JSON.stringify(rerun));
+// #203: this run DID change something, it raised the recorded version, so the
+// stale-plugin line must not fire. It is the worst case for that line: the run
+// straight after a plugin update, where "your plugin may be older than the
+// latest release" is both wrong and printed beside the run's own Undo line.
+// The first gate enumerated five of the writes and missed this one.
+check('#203 a re-run that raises the recorded version stays quiet about the plugin', !/Nothing changed here\./.test(r.out), r.out);
 snap = treeSnapshot(repo);
 r = run(repo, pluginRoot);
 rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));

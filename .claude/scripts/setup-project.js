@@ -1191,8 +1191,13 @@ function main() {
     // latest release (issue #203). The report was accurate and still left the
     // user believing they were up to date. Say it once, and only when the run
     // really changed nothing, so a run that did something stays quiet.
-    if (mode !== 'fresh' && !seedWrite.length && !addedPerms.length && !deadPerms.length
-        && !ignoreAdd.length && !attrsAdd.length) {
+    // `undo` is that test, and it is the run's own record rather than a list of
+    // signals kept in step by hand: undoLine returns null exactly when nothing
+    // was created, checked out, restored or backed up. Enumerating the writes
+    // instead missed three of them - the state file a newer plugin raises, and
+    // both settings files - so an ordinary re-run straight after a plugin
+    // update printed "your plugin may be older" beside its own Undo line.
+    if (mode !== 'fresh' && !undo) {
       say('  Nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
     }
     if (undo) say('  ' + undo);

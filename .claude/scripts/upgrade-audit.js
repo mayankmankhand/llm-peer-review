@@ -1588,7 +1588,12 @@ function main() {
   // against the INSTALLED plugin and never against the latest release (#203).
   // Gate on `fromVersion`, not on `start`, which falls back to a sentence when
   // no usable version was recorded and must never read as equal to toVersion.
-  if (findings.length === 0 && fromVersion && fromVersion === toVersion) {
+  // Compare as versions, not as text, the way every other check in this file
+  // does: validVersion accepts `7.1` and a `-rc` suffix, and string equality
+  // would call those different from `7.1.0` and so stay silent on exactly the
+  // empty range this line exists for. compareVersions returns null when either
+  // value is unusable, which is never 0, so it carries the old guard too.
+  if (findings.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
     console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
   }
 }
