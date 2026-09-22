@@ -113,9 +113,18 @@ for (const file of ['ask-gpt.js', 'ask-gemini.js']) {
 // above `session`, so `session` drives it with no key and no SDK, and the message
 // is the first line on stderr with nothing on stdout.
 const FLOORS = { 'ask-gpt.js': { floor: 22, pkg: 'openai' }, 'ask-gemini.js': { floor: 20, pkg: '@google/genai' } };
+// The floors are hand-copied from the lockfile, in the scripts and again here.
+// Both packages are caret-ranged, so a future `npm update` can raise an engines
+// floor and leave the guard stale (review of the #195/#197/#201 cycle, R6):
+// read what the lockfile declares and hold the script's number to it.
+const lock = JSON.parse(fs.readFileSync(path.join(SCRIPTS, 'package-lock.json'), 'utf8'));
 for (const file of Object.keys(FLOORS)) {
   console.log('\n' + file + ' Node floor');
   const { floor, pkg } = FLOORS[file];
+  const engines = ((lock.packages || {})['node_modules/' + pkg] || {}).engines || {};
+  const declared = /^>=(\d+)\./.exec(engines.node || '');
+  check(file + ': the lockfile declares a Node floor for ' + pkg, declared !== null, JSON.stringify(engines));
+  check(file + ': NODE_FLOOR in the script equals the lockfile floor for ' + pkg, declared !== null && Number(declared[1]) === floor && new RegExp('^const NODE_FLOOR = ' + floor + ';$', 'm').test(fs.readFileSync(path.join(SCRIPTS, file), 'utf8')), 'lockfile says ' + (declared && declared[1]) + ', test says ' + floor);
   const line = new RegExp('^' + file.replace('.', '\\.') + ' needs Node\\.js ' + floor + ' or newer \\(the ' + pkg + ' package requires it\\); you have v18\\.20\\.0\\.$', 'm');
   const v18 = runScript(file, ['session'], { FAKE_NODE_VERSION: 'v18.20.0' });
   check(file + ': Node 18 exits 1 with the one-line floor message on stderr', v18.status === 1 && line.test(v18.stderr), 'exit ' + v18.status + ': ' + v18.stderr.slice(0, 300));
