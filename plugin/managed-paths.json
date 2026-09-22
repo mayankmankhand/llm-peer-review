@@ -3,6 +3,7 @@
   "paths": [
     ".claude/agents/audit-skeptic.md",
     ".claude/agents/correction-extractor.md",
+    ".claude/agents/design-comparer.md",
     ".claude/agents/design-critic.md",
     ".claude/agents/fix-verifier.md",
     ".claude/agents/index-mapper.md",

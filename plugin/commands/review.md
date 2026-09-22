@@ -104,6 +104,7 @@ Categorize the changes and pick relevant specialists:
 - An empty scope never reaches this table: Phase 0 already stopped the run, or it is a focus call, which skips detection
 - A project review kind is selected by its own What changed cell, on this auto-detect path only: a focus argument names toolkit kinds, and one that names a project kind says so (Focus Mode)
 - For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
+- A `[behaviour]` line in the plan's `## Must-check for review` section (M14) selects Browser QA the same way a visual change does, because a design loop's still images could not see behaviour. With no server reachable, name that surface under "What I could not check" instead
 
 ### Phase 1.5: Size gate (skip the fan-out for tiny diffs)
 
@@ -137,7 +138,7 @@ Files to review (excerpts already read for you):
 [PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE IN THE SCOPE, committed in the range or uncommitted. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
 
 Run notes:
-[ONLY WHAT THIS RUN NEEDS, OR OMIT THE SECTION: the focus arguments; the plan file path for the plan finder; the dev server URL for the browser finder; which other specialists run alongside, so copy and UX split meaning from usability.]
+[ONLY WHAT THIS RUN NEEDS, OR OMIT THE SECTION: the focus arguments; the plan file path for the plan finder; the dev server URL for the browser finder; for the browser finder, each `[behaviour]` must-check line verbatim, with "exercise the stateful controls on this surface that the design loop's pass did not cover"; which other specialists run alongside, so copy and UX split meaning from usability.]
 ```
 
 The role, the criteria, the review lens, and the single-pass contract used to be pasted here; they now live in the agent and the two skills it preloads, so a `/tk:review` that compacts mid-run loses nothing and four dispatches no longer carry four copies of the manual. What the finder returns is fixed by the `dispatch-contract` skill; the orchestrator parses that format, so it is inlined here from the one file both share:
@@ -148,7 +149,19 @@ The role, the criteria, the review lens, and the single-pass contract used to be
 
 ### Phase 3: Synthesize
 
-Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none). Then:
+**Seed the must-check items** (issue #204). Read the `## Must-check for review` section (M14) of the plan the Plan Compliance row selects; a plan without the section seeds nothing. Each `[plan]`, `[design]` and `[interaction]` line becomes one finding, added before dedup so a finder that raised the same gap corroborates it rather than duplicating it:
+
+- `severity`: `warn`. The item already survived a fresh judge's read, and a Block needs a user harm the orchestrator cannot assert on that judge's behalf.
+- `specialist`: `plan-critic`, `design-critic`, or `interaction-pass`.
+- `file`: for a design or interaction line, the surface's source file as the plan's UI/UX Design section names it; for a plan line, the file it names; otherwise omitted.
+- `what`, `context`, `fix`: written from the line to the finding contract.
+- `fields`: a `Source` row carrying the line verbatim, the one attachment every seeded finding has; a design line adds its `Screenshot`.
+- `key`: per the dispatch format inlined in Phase 2.
+- `receipt`: written by the orchestrator against the work as delivered (the code, the tests, and the evidence the plan's Outcomes cite), never against the plan text the gap was raised on. A design line's check re-captures the surface with `browse.js` when a server is reachable, and the runner reads that capture: one screenshot per surface, not the failing-action re-run M2 rules out before the report. An interaction line's check re-runs its session. With no server, either one falls back to what the design loop saved (the screenshot, or the session's failing output) and the finding says it was not re-checked. A plan line's check is a grep, file read, or test run whose output shows the gap still holds.
+
+A gap that no longer holds fails its receipt and is logged `RECEIPT FAILED`: dismissed with proof, which is the point of carrying it. The `[behaviour]` line is not a finding; Phase 1 and the Run notes route it to the browser finder. The inline path (Phase 1.5) seeds the same way.
+
+Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none), together with the seeded ones. Then:
 
 1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). Keep every merged finding's `receipt`: tier 1 runs each of them, and the finding stands if at least one check passes - a corroborated finding never dies on a single badly-written check. **A merged finding takes the HIGHEST severity of its sources** (Blocks over Warns over Suggests): severity is what routes the audit in Phase 4, so a Block merged down to a Warn would face one skeptic where M2 requires three voters, and two specialists independently flagging the same spot is corroboration, which never lowers confidence. This is a free, mechanical pass over structured data - no re-judging.
 2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence across ALL deduped findings. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`. The audit runs next, so some IDs will exit to the Audited out log rather than the report; the sequence stays gap-free across report plus log, and audit verdict lines reference these IDs.
@@ -161,6 +174,7 @@ Two things are specific to this path:
 
 - **The bytes are JSONL.** A finding's `receipt.check` is its tier 1 command and `receipt.expect` is the line the output must satisfy. A merged finding carries every source receipt and stands if at least one check passes (Phase 3). What tiers 2 and 3 receive is the original JSONL lines plus each receipt's actual output.
 - **The inline path is not exempt.** When Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh `audit-skeptic` agents. M2's never-judge-your-own-findings rule applies here exactly as it does to dispatched specialists.
+- **Seeded items are audited like any finding.** The orchestrator wrote their receipts in Phase 3, as it does on the inline path, and tiers 2 and 3 judge them exactly as they judge a finder's. In the receipts folder their `<lens>` is the seeded specialist (`plan-critic`, `design-critic`, `interaction-pass`).
 - **The skeptics are typed.** Tier 2 shards and tier 3 voters are `subagent_type=tk:audit-skeptic` dispatches (no edit tools, `effort: high`, session model, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`); the prompt names the tier it is running and carries the verbatim bytes, nothing else. Fallback per that file: `/reload-plugins` once when the plugin was installed this session, then `general-purpose` with no model parameter and M2's instruction for that tier pasted in.
 - **Save each check's output as it runs**, with the form under "Where the report is written" in the shared template inlined below (the folder, the `<run-stamp>`, the `<lens>-<n>.txt` file name, and the redirect-then-cat command). It lives in the template so a directly typed skill follows the same form; do not restate it here. On this path `<lens>` is the specialist that authored the finding, or `inline` on the Phase 1.5 path. The v6.3.0 renderer had this slot and nothing wrote to it: on its first real run, every receipt that reached the page had been typed.
 
@@ -184,6 +198,8 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 ```
 
 A `❌ failed` chip is the specialist that still failed after its retry and was continued past on the human's answer (M2); it is also listed under "What I could not check" in the markdown report (`report-format.md`), so the archive names the gap and not only the page.
+
+When Phase 3 seeded must-check items, the line ends with one more chip, `[must-check] N seeded from <plan file>`, so the report shows the plan's open gaps were entered and not dropped.
 
 ### Base Structure
 

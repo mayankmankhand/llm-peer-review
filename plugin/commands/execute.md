@@ -85,9 +85,9 @@ When the plan's UI/UX Design section carries a load level of new or improve, the
 - **Read the profile first:** `DESIGN-PROFILE.md` (Design system, Allowed variance, Baseline images) before the first round.
 - **Divergence:** a critic-round change that would leave the allowed set raises the divergence page from the fragment; the answer lands in the plan's Divergence allowed row.
 - **Media:** run `node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js` through the Bash tool with the tool's maximum timeout; the exit codes and what each one means are in the fragment's Techniques 4 and 5.
-- **Records:** checkpoints per M15; the score of every round and the kept round land in the plan's Outcomes.
-- **Bounds:** the 3-attempt retry bound in When to Stop covers build failures; the critic rounds are M15's and never borrow from it.
-- **Registration:** the critic is the `design-critic` agent, dispatched by name. When the toolkit plugin was installed or updated this session and the type is not found, run `/reload-plugins` once before falling back per `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`.
+- **Records:** checkpoints per M15, round 0 being the build itself; each round's record and the kept round land in the plan's Outcomes, as the fragment's digest lists them. The loop's open gaps land in the plan's `## Must-check for review` section (M14), with the kept version's screenshot saved to `reports/design/<surface>-final.png` for the `[design]` lines to point at.
+- **Bounds:** the 3-attempt retry bound in When to Stop covers build failures; the design rounds are M15's and never borrow from it.
+- **Registration:** the critic is the `design-critic` agent and the side-by-side judge is the `design-comparer` agent, both dispatched by name. When the toolkit plugin was installed or updated this session and the type is not found, run `/reload-plugins` once before falling back per `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`.
 </conditions>
 
 ## When to Stop

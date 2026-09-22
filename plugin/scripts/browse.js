@@ -79,7 +79,7 @@ const CONFIG = {
 };
 
 // Supported action types
-const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'wait', 'a11y', 'responsive'];
+const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'value', 'wait', 'a11y', 'responsive'];
 
 // ── Error messages ─────────────────────────────────────────────────────────
 
@@ -95,6 +95,7 @@ const ERR = {
   UNSAFE_URL: (url) => `Blocked navigation to "${url}". Only http: and https: URLs are allowed. Use baseUrl for local dev servers.`,
   NAVIGATION_FAILED: (url, msg) => `Failed to navigate to ${url}: ${msg}`,
   SELECTOR_FAILED: (target, msg) => `Could not find element "${target}": ${msg}`,
+  VALUE_FAILED: (target, msg) => `Could not read a value from "${target}": ${msg}`,
   TIMEOUT: (action, ms, target) => target
     ? `${action} on "${target}" timed out after ${ms}ms. Element not found, or page not fully loaded.`
     : `${action} timed out after ${ms}ms. Is the page fully loaded?`,
@@ -557,6 +558,33 @@ async function handleText(page, action) {
 }
 
 /**
+ * Read the current value of a form field (an input, textarea, or select).
+ *
+ * `text` reads innerText, which is always empty for an input, so it cannot see
+ * what was typed into one. This reads the field's live value instead (issue
+ * #204): it is what lets a check tell a draft that survived a re-render from
+ * one the re-render threw away. An element that is not a form field fails with
+ * VALUE_FAILED rather than SELECTOR_FAILED, because the element was found.
+ */
+async function handleValue(page, action) {
+  const target = action.target;
+  if (!target) {
+    return { type: 'value', ok: false, error: ERR.MISSING_FIELD('value', 'target') };
+  }
+
+  try {
+    const locator = resolveLocator(page, target);
+    const value = await locator.inputValue({ timeout: CONFIG.actionTimeoutMs });
+    return { type: 'value', ok: true, target, value };
+  } catch (err) {
+    if (err.name === 'TimeoutError') {
+      return { type: 'value', ok: false, target, error: ERR.TIMEOUT('value', CONFIG.actionTimeoutMs, target) };
+    }
+    return { type: 'value', ok: false, target, error: ERR.VALUE_FAILED(target, err.message.split('\n').slice(0, 3).join(' | ')) };
+  }
+}
+
+/**
  * Wait for a specified time or for a selector to appear.
  * Supports: { "type": "wait", "ms": 2000 } or { "type": "wait", "selector": "css:.loaded" }
  */
@@ -844,6 +872,7 @@ async function runSession(data) {
     fill: (action) => handleFill(page, action),
     screenshot: (action) => handleScreenshot(page, action),
     text: (action) => handleText(page, action),
+    value: (action) => handleValue(page, action),
     wait: (action) => handleWait(page, action),
     a11y: () => handleA11y(page),
     responsive: () => handleResponsive(page),
@@ -913,6 +942,7 @@ Input format (JSON via stdin):
       { "type": "screenshot" },
       { "type": "text" },
       { "type": "text", "target": "css:.main-content" },
+      { "type": "value", "target": "css:input[name=email]" },
       { "type": "wait", "ms": 2000 },
       { "type": "wait", "selector": "css:.loaded" },
       { "type": "a11y" },
@@ -930,6 +960,9 @@ Action types:
   screenshot  Take a full-page screenshot (saved to /tmp)
   text        Extract visible text from page or element
               Fields: target (optional, scoped extraction)
+  value       Read the current value of a form field
+              Fields: target (selector with prefix)
+              Use it after fill: text reads an input as empty, whatever was typed
   wait        Wait for time or element
               Fields: ms (milliseconds) or selector
   a11y        Run accessibility analysis using axe-core

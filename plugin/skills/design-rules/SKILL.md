@@ -1,6 +1,6 @@
 ---
 name: design-rules
-description: The design workflow rules (three-state rule, load dial, six techniques, the critic loop procedure, the design-critic contract), loaded by name when /tk:explore's design step or /tk:execute's design step fires. Not a command.
+description: The design workflow rules (three-state rule, load dial, six techniques, the design-critic contract, the side-by-side judge, the loop procedure), loaded by name when /tk:explore's design step or /tk:execute's design step fires. Not a command.
 user-invocable: false
 allowed-tools:
   - "Bash(mktemp -d /tmp/*)"

@@ -35,6 +35,7 @@ Always go through the file, even for a single action: JSON typed inline into `ec
 | `fill` | `target` (selector), `value` | Type text into an input field |
 | `screenshot` | none | Take a full-page screenshot (saved to /tmp) |
 | `text` | `target` (optional selector) | Extract visible text from page or element |
+| `value` | `target` (selector) | Read the current value of a form field (input, textarea, select). Use it after `fill`: `text` reads an input as empty, whatever was typed into it |
 | `wait` | `ms` or `selector` (note: uses `selector`, not `target`) | Wait for time or for an element to appear |
 | `a11y` | none | Run accessibility audit on the current page using axe-core. Returns violations grouped by impact level (critical, serious, moderate, minor). |
 | `responsive` | none | Capture screenshots at 3 fixed viewports: mobile (375x812), tablet (768x1024), desktop (1280x720). Returns paths to all screenshots. |
