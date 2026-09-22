@@ -471,9 +471,31 @@ check('no plugin.json: exit 0, no output on either stream, no link', r.status ==
 r = spawnSync(process.execPath, [SOURCE], { input: JSON.stringify({ source: 'startup' }), cwd: sandbox, encoding: 'utf8', env: Object.assign({}, process.env, { CLAUDE_PLUGIN_DATA: fresh('data') }) });
 check('the repository source copy exits 0 silently', r.status === 0 && r.stdout === '' && r.stderr === '', JSON.stringify({ status: r.status, stdout: r.stdout, stderr: r.stderr }));
 
+// PLUGIN_UPDATE_STEPS is deliberately duplicated: every script under
+// .claude/scripts/ is self-contained so it can ship and run on its own, so the
+// wording lives in four copies rather than one cross-require (#203). That is a
+// sound trade only while the copies stay the same sentence, so pin them here.
+// SOURCE FILES ONLY - plugin/ is build output from scripts/build-plugin.js and
+// is verified by the build check, not by reading its copies as if authored.
+console.log('\n7. the PLUGIN_UPDATE_STEPS copies do not drift');
+const STEPS_OWNERS = ['setup-project.js', 'upgrade-audit.js', 'pre-push-check.js', 'session-start.js'];
+// Captures the whole declaration: the opening line through the `;` that ends
+// the concatenation, so a drift in any continuation line is caught too.
+const stepsDecl = (file) => {
+  const text = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'scripts', file), 'utf8');
+  const m = text.match(/^const PLUGIN_UPDATE_STEPS = [\s\S]*?;$/m);
+  return m === null ? null : m[0];
+};
+const stepsFound = STEPS_OWNERS.map(f => [f, stepsDecl(f)]);
+const stepsMissing = stepsFound.filter(([, d]) => d === null).map(([f]) => f);
+check('all four source files declare PLUGIN_UPDATE_STEPS', stepsMissing.length === 0, 'missing in: ' + stepsMissing.join(', '));
+const stepsDistinct = [...new Set(stepsFound.filter(([, d]) => d !== null).map(([, d]) => d))];
+check('the four copies are byte-identical', stepsFound.length === 4 && stepsMissing.length === 0 && stepsDistinct.length === 1,
+  stepsDistinct.length + ' distinct form(s): ' + JSON.stringify(stepsDistinct.map(d => d.slice(0, 80))));
+
 // A stdin that is never closed must not hang a session start: the safety
 // timeout ends the read and the hook still reports.
-console.log('\n7. a stdin that never closes');
+console.log('\n8. a stdin that never closes');
 const started = Date.now();
 const env = Object.assign({}, process.env);
 delete env.CLAUDE_PLUGIN_DATA; delete env.CLAUDE_PROJECT_DIR;

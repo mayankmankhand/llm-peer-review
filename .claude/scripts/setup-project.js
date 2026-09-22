@@ -1185,6 +1185,16 @@ function main() {
       : priorStampCmp === -1 ? '  Next: run /tk:upgrade to audit this project\'s own files from ' + priorPluginStamp + ' against the ' + version + ' conventions.'
       : priorStampCmp === 1 ? '  Next: update the plugin to ' + priorPluginStamp + ' or later: ' + PLUGIN_UPDATE_STEPS + '. Pushes stay blocked until then.'
       : '  Next: /tk:explore. The codebase map generates on first use.');
+    // A seed check that wrote nothing reads the same whether the plugin is
+    // current or years behind: every version check here compares this PROJECT
+    // with the INSTALLED plugin, and nothing compares that plugin with the
+    // latest release (issue #203). The report was accurate and still left the
+    // user believing they were up to date. Say it once, and only when the run
+    // really changed nothing, so a run that did something stays quiet.
+    if (mode !== 'fresh' && !seedWrite.length && !addedPerms.length && !deadPerms.length
+        && !ignoreAdd.length && !attrsAdd.length) {
+      say('  Nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
+    }
     if (undo) say('  ' + undo);
   }
   process.stdout.write(out.join('\n') + '\n');
