@@ -284,3 +284,9 @@
 - **"Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.**
 - **"Touches no file" is a claim to measure: `git stash create` takes the index lock.**
 - **An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.**
+
+## Issues 195, 197, 201 (wave 2: things that fail in a confusing way)
+
+- **Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.**
+- **When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.**
+- **A live check on the friendliest fixture proves the friendly case; write the check against the row the rules actually allow.**
