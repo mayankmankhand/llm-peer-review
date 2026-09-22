@@ -18,6 +18,9 @@
 //     is faked unless a case asks for the real one, and no kill is ever sent;
 //   - redirects the script's /tmp/browse-server.pid into the sandbox, and logs
 //     where the PID file was written (issue #194).
+// Section 5 swaps the failing browser for a fake one (BROWSE_STUB_BROWSER=fake)
+// to drive the `value` action (issue #204): the fake page remembers what `fill`
+// typed, and reports an input's innerText as empty, exactly as a real browser does.
 // Dependency-free; exits non-zero on any failure.
 //
 //   node scripts/test-browse-spawn.js
@@ -59,13 +62,31 @@ fs.writeFileSync(preload, [
   "const log = (entry) => fs.appendFileSync(LOG, JSON.stringify(entry) + '\\n');",
   '',
   '// playwright-core: the browser never launches, so the run ends right after startup.',
+  '// With BROWSE_STUB_BROWSER=fake it launches the fake browser below instead.',
   'const realLoad = Module._load;',
   'Module._load = function (request) {',
   "  if (request === 'playwright-core') {",
+  "    if (process.env.BROWSE_STUB_BROWSER === 'fake') return { chromium: { launch: async () => fakeBrowser() } };",
   "    return { chromium: { launch: async () => { throw new Error('stub browser: not launched in this test'); } } };",
   '  }',
   '  return realLoad.apply(this, arguments);',
   '};',
+  '',
+  '// The fake browser: a field holds what fill typed; its innerText is empty, as in a',
+  '// real browser; a selector named #missing never appears, so reading it times out.',
+  'function fakeBrowser() {',
+  '  const values = {};',
+  '  const locator = (sel) => ({',
+  '    fill: async (v) => { values[sel] = v; },',
+  "    innerText: async () => '',",
+  '    inputValue: async () => {',
+  "      if (sel === '#missing') { const e = new Error('stub: locator.inputValue: Timeout exceeded'); e.name = 'TimeoutError'; throw e; }",
+  "      return values[sel] === undefined ? '' : values[sel];",
+  '    },',
+  '  });',
+  "  const page = { on: () => {}, goto: async () => ({ status: () => 200 }), waitForTimeout: async () => {}, title: async () => 'stub page', locator };",
+  '  return { newContext: async () => ({ newPage: async () => page }), close: async () => {} };',
+  '}',
   '',
   '// Port probes: refused until the fake dev server starts, then port 3000 answers.',
   'let serverUp = false;',
@@ -201,6 +222,43 @@ console.log('\n4. temp folder');
   check('linux: the PID file stays at /tmp even when TMPDIR is set elsewhere', linWrites.length === 1 && linWrites[0].path === '/tmp/browse-server.pid', JSON.stringify(linWrites));
   const src = fs.readFileSync(SCRIPT, 'utf8');
   check('screenshots use the same temp folder rule as the PID file', /screenshotDir: tempDir\(\),/.test(src) && /serverPidFile: path\.join\(tempDir\(\), 'browse-server\.pid'\),/.test(src), 'CONFIG in browse.js');
+}
+
+// --- 5. value: read what was typed into a field (issue #204) -----------------------
+// `text` reads innerText, which is always empty for an input, so a draft that a
+// re-render threw away looked the same as one that survived. `value` reads the
+// field's live value, which is what the design loop's interaction pass checks.
+console.log('\n5. value');
+function runActions(actions, extraArgs) {
+  const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, BROWSE_STUB_BROWSER: 'fake', BROWSE_STUB_LOG: path.join(sandbox, 'actions.jsonl'), BROWSE_STUB_PID_FILE: pidFile });
+  const input = JSON.stringify({ baseUrl: 'http://127.0.0.1:9', actions });
+  const r = spawnSync(process.execPath, ['--require', preload, SCRIPT].concat(extraArgs || []), { cwd: project, env, input, encoding: 'utf8', timeout: 25000 });
+  let json = null;
+  try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json };
+}
+{
+  const run = runActions([
+    { type: 'goto', url: '/' },
+    { type: 'fill', target: 'css:#f', value: 'probe draft' },
+    { type: 'text', target: 'css:#f' },
+    { type: 'value', target: 'css:#f' },
+  ]);
+  const acts = (run.json && run.json.actions) || [];
+  check('value: a session that uses it is accepted and runs to the end', run.json !== null && run.json.ok === true && acts.length === 4, run.stdout.slice(0, 400) + run.stderr.slice(0, 200));
+  check('value: text reads the filled input as empty, which is why value exists', acts[2] && acts[2].type === 'text' && acts[2].text === '', JSON.stringify(acts[2]));
+  check('value: it returns what was typed, with its target', acts[3] && sameJson(acts[3], { type: 'value', ok: true, target: 'css:#f', value: 'probe draft' }), JSON.stringify(acts[3]));
+
+  const noTarget = runActions([{ type: 'goto', url: '/' }, { type: 'value' }]);
+  const nt = ((noTarget.json && noTarget.json.actions) || [])[1] || {};
+  check('value: a missing target is the script\'s field error, not a crash', noTarget.json !== null && noTarget.json.ok === false && nt.error === 'Action "value" requires a "target" field.', noTarget.stdout.slice(0, 400));
+
+  const missing = runActions([{ type: 'goto', url: '/' }, { type: 'value', target: 'css:#missing' }]);
+  const mi = ((missing.json && missing.json.actions) || [])[1] || {};
+  check('value: a field that never appears times out with the script\'s message', missing.json !== null && mi.ok === false && /^value on "css:#missing" timed out after \d+ms/.test(mi.error || ''), JSON.stringify(mi));
+
+  const help = runActions([], ['--help']);
+  check('value: --help lists the action and its field', /\n  value +Read the current value of a form field\n +Fields: target/.test(help.stdout), help.stdout.slice(0, 200));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
