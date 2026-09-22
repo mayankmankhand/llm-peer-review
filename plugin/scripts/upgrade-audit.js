@@ -105,6 +105,14 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
+// Kept byte-identical to the copies in setup-project.js, pre-push-check.js and
+// session-start.js, and pinned there by scripts/test-session-start.js. Each
+// script under .claude/scripts/ is self-contained so it can ship and run on its
+// own, so this is a fourth copy rather than the first cross-require (#203).
+const PLUGIN_UPDATE_STEPS = 'run `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`'
+  + ' (for a plugin installed for this project only, the same update with `--scope project`: `claude plugin update tk@llm-peer-review --scope project`),'
+  + ' then restart Claude Code';
+
 const PROJECT_PROMPT_DIRS = ['.claude/commands', '.claude/agents', '.claude/skills', '.claude/rules'];
 const SEED_RULES = '.claude/rules/toolkit.md';
 const STATE_REL = '.claude/.toolkit-state.json';
@@ -1575,6 +1583,14 @@ function main() {
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
   for (const n of notes) console.error('upgrade-audit: ' + n);
   console.error('upgrade-audit: ' + findings.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s)');
+  // Zero findings over an empty range is the run that reads the same whether
+  // the plugin is current or five releases behind: the range is measured
+  // against the INSTALLED plugin and never against the latest release (#203).
+  // Gate on `fromVersion`, not on `start`, which falls back to a sentence when
+  // no usable version was recorded and must never read as equal to toVersion.
+  if (findings.length === 0 && fromVersion && fromVersion === toVersion) {
+    console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
+  }
 }
 
 main();

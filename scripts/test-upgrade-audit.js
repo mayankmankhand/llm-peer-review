@@ -329,6 +329,9 @@ let r = audit(MIG);
 let by = (id) => r.findings.filter(f => f.id === id);
 check('exit 0 with JSONL findings on stdout and a summary on stderr', r.status === 0 && r.parsed && r.findings.length > 0 && /candidate finding/.test(r.summary), r.summary);
 check('the range runs from the copy-install version and names C-1 to C-11', /6\.3\.3 -> 7\.1\.0 \[C-1, C-2, C-3, C-4, C-5, C-6, C-7, C-8, C-9, C-10, C-11\]/.test(r.summary), r.summary);
+// #203, the third case: findings present. The run did its job and found real
+// work, so the stale-plugin line must not fire however the range reads.
+check('#203 a run WITH findings stays quiet about the plugin', !/nothing changed here/.test(r.summary), r.summary);
 check('the default conventions path (the plugin copy) gives the same findings', audit(MIG, [], { defaultConventions: true }).stdout === r.stdout);
 check('C-1 flags a shared fragment read by path', by('C-1').some(f => f.file.relPath === '.claude/commands/myteam-presend.md' && f.file.line === 7));
 check('C-1 flags a script called by path', by('C-1').some(f => /browse\.js/.test(f.receipt.expect)));
@@ -496,6 +499,25 @@ write(CLEAN, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-RE
 write(CLEAN, '.claude/commands/myteam-ship.md', '# Ship\n\nRun Skill(tk:review-code), dispatch `subagent_type=tk:audit-skeptic`, then run /tk:review.\n');
 r = audit(CLEAN);
 check('the clean twin reports none of C-7, C-9, C-10, C-11', r.status === 0 && r.findings.length === 0 && /0 candidate finding/.test(r.summary), r.stdout.slice(0, 400) + r.summary);
+// #203: zero findings over an EMPTY range is the run that reads the same
+// whether the plugin is current or five releases behind, because the range is
+// measured against the INSTALLED plugin and never against the latest release.
+// That run has to name the update steps. The clean twin above has a real
+// 7.0.0 -> 7.1.0 range, so it did audit something and must stay quiet.
+check('#203 zero findings over a REAL range stays quiet about the plugin', !/nothing changed here/.test(r.summary), r.summary);
+const CURRENT = path.join(TMP, 'clean-current');
+commonFiles(CURRENT);
+write(CURRENT, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.1.0', path: 'plugin', auditedVersion: '7.1.0' }, null, 2));
+write(CURRENT, '.claude/rules/toolkit.md', stampRules('7.1.0'));
+write(CURRENT, '.claude/settings.local.json', read(path.join(PLUGIN, 'seed', 'settings.local.json')));
+write(CURRENT, '.gitattributes', read(path.join(PLUGIN, 'seed', 'gitattributes')));
+write(CURRENT, '.gitignore', read(path.join(PLUGIN, 'seed', 'gitignore')));
+write(CURRENT, 'artifacts/README.md', read(path.join(PLUGIN, 'seed', 'artifacts-README.md')));
+const curRun = audit(CURRENT);
+check('#203 zero findings over an EQUAL range names the plugin update steps',
+  curRun.status === 0 && curRun.findings.length === 0 && /in range 7\.1\.0 -> 7\.1\.0/.test(curRun.summary)
+  && /nothing changed here/.test(curRun.summary) && /claude plugin marketplace update/.test(curRun.summary)
+  && /claude plugin update tk@/.test(curRun.summary), curRun.summary);
 
 console.log('\n4b. C-11: closing tags and root-relative paths are not mentions; mentions beside them still are');
 {

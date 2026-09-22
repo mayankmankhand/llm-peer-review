@@ -838,6 +838,13 @@ check('an untracked .gitignore is restored by hand and a dirty tracked settings.
 filesBefore = fileList(repo);
 r = run(repo, pluginRoot);
 check('a plugin-mode re-run that changes nothing prints no undo line', r.status === 0 && /Nothing to migrate/.test(r.out) && !/Undo:/.test(r.out) && sameSet(fileList(repo), filesBefore), r.out);
+// #203: a seed check that wrote nothing reads the same whether the plugin is
+// current or five releases behind, because every version check here compares
+// the PROJECT with the INSTALLED plugin and nothing compares that plugin with
+// the latest release. The run that changed nothing is the one that has to say
+// so; a run that DID change something was useful and stays quiet.
+check('#203 a plugin-mode re-run that changed nothing names the plugin update steps',
+  r.status === 0 && /Nothing changed here\./.test(r.out) && /claude plugin marketplace update/.test(r.out) && /claude plugin update tk@/.test(r.out), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
 // The real seed/gitignore (7.1.0): the migration
@@ -1391,6 +1398,11 @@ console.log('\n4f. settings backups, broken settings files, named rows, the offe
   check('#180 that backup holds only the settings file, and the report names it', bk.length === 1 && sameSet(fileList(path.join(repo, bk[0])), [LOCAL])
     && r.out.includes('  Backup: ' + bk[0] + ' (.claude/settings.local.json as it was before this run)'), r.out);
   check('#180 the report names the removed row, JSON-escaped, beside the count', /1 dead script entries removed/.test(r.out) && r.out.includes('    removed: ' + JSON.stringify(GONE_ROW) + '\n'), r.out);
+  // #203, the other half: this run DID change something (it removed a dead
+  // row), so it was useful and the stale-plugin line must not fire. Without
+  // this the gate could be "plugin mode" rather than "changed nothing" and
+  // every re-run would carry the advice.
+  check('#203 a plugin-mode re-run that DID change something stays quiet about the plugin', !/Nothing changed here\./.test(r.out), r.out);
   check('#180 the rewritten settings.local.json keeps its 4-space indentation and the owner\'s own row', String(textAt(repo, LOCAL)).startsWith('{\n    "permissions": {\n        "allow": [\n')
     && allowAt(repo).includes('Bash(make ours *)') && !allowAt(repo).includes(GONE_ROW), String(textAt(repo, LOCAL)));
   check('#180 a run that is no migration writes no migration record', r.status === 0 && !exists(repo, '.claude/.toolkit-migration.json'));
