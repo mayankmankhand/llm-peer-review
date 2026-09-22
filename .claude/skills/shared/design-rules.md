@@ -78,9 +78,9 @@ Accept any format the user offers: code, a text description, a design guide, a r
 
 ## Technique 3: the design critic
 
-The implementing agent cannot judge its own design: it reviews its own code, decisions, and rationale. A critic in a fresh context, given only a screenshot, judges whether the design hits the bar.
+The implementing agent cannot judge its own design: it reviews its own code, decisions, and rationale. A critic in a fresh context, given only a screenshot, names the biggest gaps between the design and the bar.
 
-**The contract.** The dispatcher pastes the prompt below verbatim plus one image path, and nothing else: no code, no plan, no earlier critiques, no round number, no target score. The same prompt every round. Profile "Baseline images", when present, are passed as extra image paths with the sentence "These are a moodboard for the quality bar, not a target to copy."
+**The contract.** The dispatcher pastes the prompt below verbatim plus one image path, under the neutral name Technique 3b sets, and nothing else: no code, no plan, no earlier critiques, no round number, no target score. The same prompt every round. Profile "Baseline images", when present, are passed as extra image paths with the sentence "These are a moodboard for the quality bar, not a target to copy."
 
 > You are a design critic at a top design studio. Look at this screenshot of a product design. Reason through these steps silently, without writing them out: name the aesthetic the design is going for; imagine how the best studio in the world would execute that exact aesthetic; find the biggest gaps between that and what you see, at two levels, overall structure and composition, and the fine details. Watch for patterns that feel overdone, excessive, or obviously AI-generated (gradient hero blocks, glows, decorative cards that hold nothing, text on the left and a graphic on the right, over-explaining) and penalise them. Be tight and specific, never vague. Be bold and opinionated; do not reward what is safe or easy. Then score how close this design is to that studio-level bar, out of 10.
 >
@@ -90,21 +90,49 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 > 2. Detail: <next gap, one line>
 > (up to 6 gaps, each prefixed Structure: or Detail:)
 
-**The judge.** The critic is the `design-critic` agent (`subagent_type=design-critic`), Read only, no model pin: a scoring critic whose verdict is final is a judge, and judges inherit the session model (`model-routing.md`). Fallback per that file: `/reload-plugins` once when the plugin was installed this session, then `general-purpose` with no model parameter and this fixed prompt pasted, when the agent type is unavailable.
+**What a still image cannot carry.** This note is for the dispatcher and the maintainer, never for the critic, whose prompt stays as it is. One screenshot shows one render. Anything that exists only across two renders, across a rebuild, across a focus change, or between two clicks is invisible to it: a typed draft a re-render throws away, the armed first step of a two-step button, a panel that snaps shut, a field that loses focus mid-word. A page that empties and rebuilds itself looks identical before and after the rebuild (issue #204: three such defects reached review after a critic loop, because no still image could show them). The interaction pass in the loop procedure and the `[behaviour]` must-check line exist for this gap; the critic's score says nothing about it.
 
-**The return.** `Score: N/10` on the first line, then a numbered gaps list. A return without a parseable score is redispatched once (routing guardrail 2); still malformed, the round counts with no score and the loop stops with a digest note.
+**The judge.** The critic is the `design-critic` agent (`subagent_type=design-critic`), Read only, no model pin: a critic whose gaps decide what the loop fixes is a judge, and judges inherit the session model (`model-routing.md`). Fallback per that file: `/reload-plugins` once when the plugin was installed this session, then `general-purpose` with no model parameter and this fixed prompt pasted, when the agent type is unavailable.
 
-**The bar.** The loop is done when the critic independently scores 9/10 or higher. That target is never given to the critic, so its scoring stays objective. The bound on rounds, the converging check, and what happens when the bound runs out are M15.
+**The return.** `Score: N/10` on the first line, then a numbered gaps list. The gaps are the critique; the score is recorded in the digest as a label and decides nothing. A return with no parseable gap line is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a digest note.
+
+**Why the score decides nothing.** Five fresh critics on one unchanged screenshot scored it 4, 4, 4, 5 and 4 (issue #204). The score is steady, but its one-point wobble is the same size as the step a score-based stop rule has to read, and no recorded loop ever reached the old 9/10 bar. The gaps caught every real defect those loops found. So the prompt keeps its score line, and the decisions it used to feed go to the side-by-side judge in Technique 3b. The bound on rounds and what happens when a loop stops are M15.
+
+## Technique 3b: the side-by-side judge
+
+The toolkit's own addition (issue #204), not one of the article's techniques. A critic in a fresh context has nothing to compare against, so two critics' scores cannot say whether a fix pass made the surface better. A judge shown both versions can. After every fix pass, a fresh judge sees the version before the pass and the version after it, without being told which is which.
+
+**The contract.** The dispatcher pastes the prompt below verbatim plus two image paths, labeled A and B, and nothing else: no code, no plan, no critiques, no round number, and nothing that says which image is newer. Profile "Baseline images", when present, follow A and B with the moodboard sentence from Technique 3.
+
+> You are a design critic at a top design studio. You are shown two screenshots, A and B, of the same product surface. Reason through these steps silently, without writing them out: name the aesthetic the design is going for; imagine how the best studio in the world would execute that exact aesthetic; compare A and B against that bar, at two levels, overall structure and composition, and the fine details, including anything broken, overlapping, or cut off. Watch for patterns that feel overdone, excessive, or obviously AI-generated, and penalise them. Do not reward an image for being first or second, and do not reward a difference for being a difference. If neither is clearly closer to the bar, say so.
+>
+> Return exactly this shape and nothing else, no preamble and no closing remarks:
+> Closer: <A, B, or neither>
+> Why: <the one difference that decided it, one line>
+
+**Neutral file names, for every judge.** Before any judge dispatch, the critic's included, copy the images into a fresh folder from `mktemp -d /tmp/design-judge.XXXXXX`, made per "Temporary folders" in `.claude/skills/shared/html-outputs.md`: `A.png` and `B.png` for the comparer, `screen.png` for the critic. A path such as `round-3.png`, `broken.png`, or a `browse.js` timestamp tells the judge which image is newer, and dispatching both orders cannot undo that. The mapping from A and B back to commits goes into the digest, never into the prompt.
+
+**Both orders.** Every comparison is two dispatches in parallel, one with the older version as A and one with it as B. The newer version wins only when both dispatches pick it, and the older version wins only when both pick it. Anything else, a `neither` from either dispatch included, is a split. A judge that favours whichever image comes first therefore cannot decide a round. What each outcome does to the loop is M15.
+
+**The judge.** The `design-comparer` agent (`subagent_type=design-comparer`), Read only, no model pin, for the same reason as the critic. Fallback per `model-routing.md`: `/reload-plugins` once when the plugin was installed this session, then `general-purpose` with no model parameter and the agent's body plus this prompt pasted. That fallback carries tools the agent does not have, Bash among them; the prompt still asks it to judge only what it sees.
+
+**The return.** `Closer: A`, `Closer: B`, or `Closer: neither` on the first line, then one `Why:` line. A return without a parseable `Closer:` line is redispatched once; still malformed, that dispatch counts as `neither`, which makes the comparison a split.
+
+**The prompt was validated as written** (issue #204), against a bar set before the run: a page with a known rendering defect against the same page without it, a page with one of the critic's recurring gaps fixed against the page as it was, and two captures of an unchanged page, each dispatched in both orders, twice. Change its wording only with that check run again and its tally written down.
 
 ## The loop procedure
 
-One round is one screenshot, one critic dispatch, and one fix pass; the polish checklist (Technique 6) is part of every fix pass, so each polished state is what the next critic scores and no round has to know it is the last. `/execute` runs it in the main loop under M15:
+One round is one interaction pass, one critic dispatch, one fix pass with the polish checklist (Technique 6) inside it, one commit, and one side-by-side comparison of the version the round started from with the version it committed. Polish runs in every fix pass, so the comparison always judges the polished state and no round has to know it is the last. `/execute` runs it in the main loop under M15:
 
-1. **Serve the surface.** `browse.js` navigates `http(s)` only. Start the dev server per the Self-Service rule and probe the common ports the way `/review` does. A surface that cannot be served skips the critic with a digest note; the loop never blocks on it.
-2. **Screenshot** with `browse.js` (`goto`, then `screenshot`); the returned path is the critic's whole input.
-3. **Dispatch the critic** per Technique 3 and read the score and gaps.
-4. **Fix** the gaps that matter most, run the polish checklist (Technique 6), checkpoint (M4), and go to 1, or stop per M15.
-5. **Media**, once per surface, when the design would gain from an image or a clip: Techniques 4 and 5. A declined ask means continue without the asset.
+0. **Start clean.** Before round 1, commit the built surface as round 0 (M4). Any other uncommitted work is committed first, or the step pauses, so a later revert can only ever take one fix pass with it.
+1. **Serve the surface.** `browse.js` navigates `http(s)` only. Start the dev server per the Self-Service rule and probe the common ports the way `/review` does. A surface that cannot be served skips the loop with a digest note and a `[behaviour]` must-check line saying nothing on it was checked in a browser; the loop never blocks on it.
+2. **Screenshot** the current version with `browse.js` (`goto`, then `screenshot`). A version the previous round's comparison already captured reuses that capture.
+3. **Interaction pass.** List the controls on the surface that hold state: fields, two-step buttons, toggles, panels, anything with a pending or armed state. For each one, write a short `browse.js` session (3 to 6 actions) and the result it must show, before running it. Type into a field, wait past a render (1 second, or one full cycle of the page's animation), and read it back with `value`: the typed text is still there. Click the first half of a two-step control, wait the same way, and read its text: the armed state still shows. A result that differs from what was written down is a defect for this round's fix pass, and re-running the same session is its verdict (M3's mechanical path). Keep each session's actions file under `reports/design/` as `<surface>-<name>.json`, and the output of any run that failed beside it as `<surface>-<name>-output.json`, so a must-check line can point at both.
+4. **Dispatch the critic** per Technique 3 and read the gaps; record the score as a label.
+5. **Fix** the gaps that matter most and every interaction defect, run the polish checklist (Technique 6), and commit the result as this round's checkpoint (M4).
+6. **Compare** per Technique 3b: screenshot the committed version and dispatch the side-by-side judge in both orders against the version this round started from. M15 says what each outcome does: continue, revert and stop, or stop.
+7. **Close the loop** on the version M15 kept. Run the interaction pass once more, and critique it twice; a critique it already received in the loop counts as one of the two. Save its screenshot as `reports/design/<surface>-final.png`. Then write the plan's `## Must-check for review` lines, in the shapes M14 (`hitl-loop.md`) gives: a `[design]` line for each gap both critiques raise, an `[interaction]` line for each session that fails on the kept version, and one `[behaviour]` line naming the surface, its URL, and what the pass covered. Two gaps match when they name the same element and the same problem. When unsure, count them as matching: a wrong match costs one skeptic's time, while a missed match ships an open gap nobody checks. Both critiques go into the digest verbatim, so the matching can be audited (M8).
+8. **Media**, once per surface, when the design would gain from an image or a clip: Techniques 4 and 5. A declined ask means continue without the asset.
 
 ## Techniques 4 and 5: image and video
 
@@ -145,8 +173,9 @@ A design run records, in the plan's Outcomes and the run digest:
 
 - load level and the surface
 - every direction's name and seed (three for new work) with the picked one's brief; unpicked ones marked dropped at pick
-- which briefs failed: a brief failed when it was dropped at the pick, or when its loop stopped under 9/10
-- the score of every round and which round was kept
-- the gaps left open at the stop
+- which briefs failed: a brief failed when it was dropped at the pick, or when no round of its loop won the side-by-side (its fix passes never beat the first build)
+- per round: its commit, the critic's gaps and score label, the interaction sessions and their results, and both comparison returns with the A and B mapping
+- which round was kept, why the loop stopped (a loss, a split, or the round limit), and any revert
+- the kept version's two critiques verbatim, and the must-check lines written from them
 - media assets by path, or the handoff prompts the user was given
 - divergence approved, and how far

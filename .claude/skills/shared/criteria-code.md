@@ -17,4 +17,12 @@ Read the changed files. Then pick one of two modes:
 
 Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
 
+**Rebuilt render paths** (issue #204; the Logic pass owns it in a fan-out). When the diff adds or changes code that empties and rebuilds part of the page (an `innerHTML` reassignment, a children replace, a list re-rendered from scratch, a render scheduled on every animation frame, timer, or state change), work it as a count, not an impression:
+
+1. Find each rebuild and the subtree it empties.
+2. List every piece of state held on an element inside that subtree: a typed draft in a field, focus or a text selection, the armed first step of a two-step control, an open or collapsed panel, a scroll position.
+3. Each one is a finding unless the code keeps that state outside the DOM and restores it after the rebuild, or skips the rebuild while that state exists.
+
+A rebuild that runs on a timer or every frame when nothing it displays has changed is a finding too, for the work it throws away. None of this shows in a screenshot, so a design critic cannot catch it; this pass is where it gets caught.
+
 </procedure>

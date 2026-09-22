@@ -156,6 +156,10 @@ Key architectural/implementation choices made during exploration:
   - [ ] 🟥 Run existing tests for [module], confirm behavior unchanged
   - [ ] 🟥 Add tests for [new logic]: assert [input] produces [expected output]
 
+## Must-check for review (optional - only when a judge left gaps open)
+<!-- One line per item, in the shapes M14 in .claude/skills/shared/hitl-loop.md gives. /create-plan writes [plan] lines from the plan critic's round 2; /execute design steps add [design], [interaction] and [behaviour] lines. /review enters each into its audit. Omit the section when nothing is carried. -->
+- [plan] [Category]: [the gap, verbatim]
+
 ## Outcomes
 <!-- Fill in after execution: decision-relevant deltas only. What changed vs. planned? Key decisions made? Assumptions invalidated? -->
 ```
@@ -178,16 +182,18 @@ Again, it's still not time to build yet. Just write the clear plan document. No 
 
 A plan is judged before it is presented, by a context that did not write it (issue #167). The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
 
+The critic returns gaps, not a grade (issue #204): its old score out of 10 moved by a point on an unchanged plan, and the gaps were always what the loop acted on.
+
 <procedure>
 
-1. Dispatch `subagent_type=plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number, never earlier critiques, never the score you are aiming for.
-2. Parse the return: `Score: N/10` on the first line, then up to six gap lines. A return without a parseable score is redispatched once (routing guardrail 2); still malformed, the round counts with no score and the loop stops with a note in the closing message.
-3. A score of 9 or higher ends the loop. Below that, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
-4. Round 2's result stands, whatever the score.
+1. Dispatch `subagent_type=plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
+2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
+3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
+4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one the conversation did not deliberately leave open becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `.claude/skills/shared/hitl-loop.md`), so `/review` checks it against the delivered work.
 
 </procedure>
 
-The closing message states the rounds and scores in one line ("Plan critic: 6/10, then 9/10 after two gaps were fixed."), so the user sees what the judge said before they approve. Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
+The closing message states what the judge found in one line, counting each gap once, so the user sees it before they approve: "Plan critic: 7 gaps; 4 fixed, 1 left open on purpose (<why>), 2 carried to review." Fixed counts round-1 gaps fixed; left open counts gaps from either round that the conversation decided to leave open; carried counts the round-2 gaps written as `[plan]` lines. A round-2 gap that repeats a round-1 gap counts once, as carried, because the fix did not close it. A round that returned `No material gaps` says so ("Plan critic: no material gaps."). Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
 
 ## Render HTML View (default-on)
 

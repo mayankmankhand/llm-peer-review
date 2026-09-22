@@ -30,6 +30,13 @@ Based on what you see, run focused sessions (3-6 actions each) to test the main 
 - Click through navigation, verify pages load
 - Test error states (submit empty forms, click disabled buttons)
 
+Then check that state survives the page redrawing itself (issue #204). A still screenshot cannot show any of these, so run them as sessions:
+- **A keystroke between two renders.** Type into a field, wait past a render (1 second, or one full cycle of the page's animation), and read the field back with `value`. The typed text must still be there.
+- **An armed two-step control across a re-render.** Click the first half of a two-step action (a delete that asks for a second click, a confirm), wait the same way, and read its text. The armed state must still show, and the second click must still complete the action.
+- **A re-render when nothing changed.** Set something (a draft, an armed step, an open panel), then leave the page idle for a few seconds and read it again. Anything that reverted while nothing else on screen changed means the page redraws itself without cause, and that is a finding.
+
+When the Run notes carry a `[behaviour]` line from the plan's must-check list, run these three checks on every stateful control of the surface it names that the design loop's pass did not cover. The checks count toward the 8-session cap; when the controls outnumber it, cover one control of each kind (field, two-step control, panel) and name the rest under "What I could not check".
+
 Each session should have a clear purpose. After each session, read the screenshots and check the JSON output for console errors, failed network requests, and page errors.
 
 **When actions fail:** If a session stops on a failed action, run a new session with just a screenshot to see the current state. Adjust your selectors or action sequence. Don't retry the same failing action more than once.

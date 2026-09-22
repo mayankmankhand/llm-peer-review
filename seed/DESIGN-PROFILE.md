@@ -39,7 +39,7 @@ and never overwrites a design system you already have. Edit it freely.
 
 ## Directions tried
 
-<!-- One line per direction: name, seed, best critic score, kept or dropped. Written
+<!-- One line per direction: name, seed, rounds run and rounds won, kept or dropped. Written
      by /tk:document at the end of a cycle. -->
 
 ## Prompts to retry on newer models
@@ -49,5 +49,5 @@ and never overwrites a design system you already have. Edit it freely.
 
 ## Baseline images
 
-<!-- Optional paths to screenshots or concept art the design critic treats as a
+<!-- Optional paths to screenshots or concept art the design judges treat as a
      moodboard for the quality bar, never as a target to copy. -->
