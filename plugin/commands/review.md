@@ -180,8 +180,10 @@ Killed findings exit to the Audited out log (never fixed); survivors proceed to 
 
 ### Specialists Dispatched
 ```
-[code] ✅ | [ux] ✅ | [plan] ⏭️ skipped (no plan file) | [deps] ✅
+[code] ✅ | [ux] ✅ | [plan] ⏭️ skipped (no plan file) | [deps] ✅ | [security] ❌ failed (continued without it)
 ```
+
+A `❌ failed` chip is the specialist that still failed after its retry and was continued past on the human's answer (M2); it is also listed under "What I could not check" in the markdown report (`report-format.md`), so the archive names the gap and not only the page.
 
 ### Base Structure
 

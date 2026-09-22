@@ -337,7 +337,7 @@ Released 2026-09-16 on top of v7.2.0 (#184). Nothing about the loop changes; thi
 Released 2026-09-17 on top of v7.3.0 (#185 to #194, #198). The loop is unchanged; these are the follow-ups the last two releases left open.
 
 - **Fewer approval stops.** `/tk:setup` writes a permission row for every plugin script, anchored to this machine's plugin folder, so a script no longer stops for approval after you answer a question or in a stage the loop starts on its own. Measured on a full default-mode cycle: 0 toolkit-script prompts. Re-run `/tk:setup` after updating to get the rows; it keeps every row of yours.
-- **Force pushes and pushes that delete always ask.** Setup adds ask rows for `--force`, `-f` and `+refspec` pushes, and for `--mirror`, `--delete`, `-d` and `--prune`, including the shortened spellings git accepts (`--mir`, `--del`); a normal push still runs without asking. One form has no row that works, `git push origin :branch`, so only the loop's own always-ask rule covers it.
+- **Force pushes always ask.** Setup adds ask rows for `--force`, `-f` and `+refspec` pushes; a normal push still runs without asking. (Pushes that delete joined them in v7.4.1, below.)
 - **`/tk:upgrade` is gentler with permissions.** Retired toolkit rows are removed in one step, the broad `npm install *` row is left alone for projects that add packages with it, and dated or versioned lines in your lessons files are no longer flagged.
 - **The push check** catches one more secret shape and warns instead of passing silently when git hands it nothing to scan.
 - **Node.js 22 or newer** for `/tk:ask-gpt` and `/tk:ask-gemini`, which move to the current OpenAI and Gemini libraries. Browser QA writes to the Windows temp folder, though native Windows is still not supported for it.
@@ -351,6 +351,15 @@ Released 2026-09-21 on top of v7.3.1 (#199). The loop is unchanged, and a projec
 - **Additive only.** A gate or fix rule can add a requirement or an always-ask action. A line that loosens the loop's own rules is void, so a cloned repo cannot switch the safety off.
 - **Your rules survive upgrades.** The seeded rules file ends with a marker line; what you write under it is never compared or rewritten. A project seeded before v7.4.0 copies the marker line in first.
 - **`/tk:upgrade` checks your review kinds** (C-12): a row whose agent is missing, or can edit files, is reported on every upgrade. Re-run `/tk:setup` after updating to get the folder's README.
+
+### What v7.4.1 adds
+
+Released 2026-09-22 on top of v7.4.0 (#195, #196, #197, #200, #201, #202). A patch: the loop is unchanged, and every item is a fix for something that failed quietly or in a confusing way.
+
+- **A review that could not finish no longer ships anyway.** A specialist still failing after its retry pages you (retry, continue anyway, stop) and the hand-off to `/tk:document` waits; a finding whose audit could not run is report-only; and the fixes a review makes are measured from a snapshot of the tree as the review found it, so work you had in progress is never mistaken for a fix.
+- **Pushes that delete always ask.** Setup adds ask rows for `--mirror`, `--delete`, `-d` and `--prune`, including the shortened spellings git accepts (`--mir`, `--del`), beside the force rows, and one for `git remote add --mirror`, which would otherwise turn every later plain push into a mirror push. Two forms have no row that works, `git push origin :branch` and `git -C <dir> push`, so only the loop's own always-ask rule covers them. Re-run `/tk:setup` to get the rows.
+- **The push check reports more of what it cannot read.** A binary archive, database file, dump or binary with no extension stops the push for a look by hand, and a text file that `.gitattributes` marks binary is scanned as text instead of skipped. Images, fonts and videos stay silent whatever their size.
+- **Three confusing failures say the true thing.** `/tk:document` no longer improvises a command that stops the chained loop on a fresh repository; `/tk:ask-gpt` and `/tk:ask-gemini` say plainly when Node is too old (22 and 20) instead of failing inside a library; `/tk:review <kind>` says when it skipped a review kind your project defined, and `/tk:review-full` says those kinds are not in its fan-out.
 
 Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
 

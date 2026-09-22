@@ -47,7 +47,7 @@ Then pick one of two modes:
 | **Security** (`subagent_type=review-security-finder`) | Secrets in code, injection, auth and unsafe sinks; quiet by rule when the change touches none of these |
 | **Operations** (`general-purpose`, this row's charter pasted in: no typed finder has covered it since 7.0.0) | Logging and monitoring, deployment readiness, rollback plan, config and migration safety |
 
-These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no argument runs them on its auto-detect path (#201).
+These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no focus name runs them on its auto-detect path, with or without a range (#201).
 
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 

@@ -83,7 +83,7 @@
 //     via execFileSync with argument arrays (LESSONS: never interpolate
 //     variables into inline shell strings).
 
-const { execFileSync } = require("child_process");
+const { execFileSync, spawnSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -409,14 +409,12 @@ const MASK_PATTERNS = PATTERNS.map((p) => ({
 // keeps non-ASCII paths unescaped; paths containing a quote, backslash, or
 // control character are still C-quoted and are decoded by unquotePath below.
 // Returns stdout, or null on any failure - callers decide whether null is
-// benign or fatal.
-//
-// encoding is "utf8" unless the caller asks for "buffer": the one caller that
-// does reads a blob to look for a NUL byte, and must count bytes, not characters.
-function git(args, encoding) {
+// benign or fatal. A blob's raw bytes are read by readBlobHead below, which
+// caps the read; this helper reads text in full.
+function git(args) {
   try {
     return execFileSync("git", ["-c", "core.quotePath=false", ...args], {
-      encoding: encoding || "utf8",
+      encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -519,6 +517,27 @@ function byteContainerReason(repoPath) {
 // for git itself; that limit is inherited, not introduced.
 const FIRST_BYTES_FOR_BINARY_TEST = 8000;
 
+// Read only the head of a blob, as raw bytes. The binary test above needs the
+// first 8000 bytes and nothing more, and a media file can be far larger than
+// git()'s 64 MB buffer (GitHub takes files up to 100 MB), so reading it in full
+// turned every large image or video into an unscannable hit that blocked the
+// push (v7.4.1 review, R2). maxBuffer is the cap: when the blob is longer, Node
+// stops git and hands back the bytes read so far with error code ENOBUFS, and
+// that truncated head is exactly what the test wants. Any other failure (a
+// missing object, a killed git) returns null, which the caller reports rather
+// than skips.
+function readBlobHead(sha, repoPath) {
+  const r = spawnSync("git", ["-c", "core.quotePath=false", "cat-file", "blob", sha + ":" + repoPath], {
+    encoding: "buffer",
+    stdio: ["ignore", "pipe", "ignore"],
+    maxBuffer: FIRST_BYTES_FOR_BINARY_TEST,
+  });
+  const head = r.stdout ? r.stdout.subarray(0, FIRST_BYTES_FOR_BINARY_TEST) : null;
+  if (r.error && r.error.code === "ENOBUFS" && head && head.length === FIRST_BYTES_FOR_BINARY_TEST) return head;
+  if (r.error || r.status !== 0) return null;
+  return head;
+}
+
 // A binary notice for a name neither list claims: decide from the BYTES whether
 // the file is really binary, and if it is text that .gitattributes forced
 // binary, scan it (see the comment above SECRET_CONTAINER_EXTENSIONS). The blob
@@ -527,12 +546,12 @@ const FIRST_BYTES_FOR_BINARY_TEST = 8000;
 // it. --literal-pathspecs stops a path holding * or [ from being read as a glob.
 function scanForcedText(sha, repoPath, hits) {
   const short = sha.slice(0, 7);
-  const blob = git(["cat-file", "blob", sha + ":" + repoPath], "buffer");
+  const blob = readBlobHead(sha, repoPath);
   if (blob === null) {
     hits.unscannable.push(repoPath + " @ " + short + " (binary; its contents could not be read to tell a true binary from a text file marked binary)");
     return;
   }
-  if (blob.subarray(0, FIRST_BYTES_FOR_BINARY_TEST).includes(0)) return; // a true binary: stays silent
+  if (blob.includes(0)) return; // a true binary: stays silent
   const patch = git(["--literal-pathspecs", "diff-tree", "-r", "-p", "--text", "--unified=0", "--no-color", "--root", "-m", sha, "--", repoPath]);
   if (patch === null) {
     hits.unscannable.push(repoPath + " @ " + short + " (text file marked binary by .gitattributes; cannot be line-scanned)");

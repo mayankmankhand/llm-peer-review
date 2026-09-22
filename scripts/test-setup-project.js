@@ -1753,15 +1753,29 @@ console.log('\n4g. seed ask rows merge into the ask list (issue #192)');
 // way on 2026-09-21: 17 hostile forms asked, 8 benign forms (`--dry-run`,
 // `--progress`, `--porcelain`, a tag, `fix-d-flag`, a path remote) did not. The four
 // #196 rows stay in the seed: setup never removes a row a project already holds.
+// v7.4.1 review R1: `git remote add --mirror=push` (allowed by `git remote add *`)
+// sets `remote.<name>.mirror`, after which a PLAIN `git push <name>` is a mirror
+// push with no `--mirror` token for the rows above to catch. One more row asks on
+// that: `--mi` is the shortest prefix git accepts (`--m` is ambiguous with
+// `--master`), and `git remote set-url` cannot set the mirror flag.
 console.log('\n4g2. destructive-push ask rows reach new and upgraded projects (issue #196)');
 {
   const ASK_731 = ['Bash(git push *--force*)', 'Bash(git push -f*)', 'Bash(git push * -f*)', 'Bash(git push -uf*)', 'Bash(git push * -uf*)', 'Bash(git push * +*)'];
   const ASK_196 = ['Bash(git push *--mirror*)', 'Bash(git push *--delete*)', 'Bash(git push -d*)', 'Bash(git push * -d*)'];
   const ASK_R3 = ['Bash(git push *--m*)', 'Bash(git push *--de*)', 'Bash(git push *--pru*)'];
-  const ASK_ALL = ASK_731.concat(ASK_196, ASK_R3);
+  const ASK_REMOTE = ['Bash(git remote add *--mi*)'];
+  const ASK_ALL = ASK_731.concat(ASK_196, ASK_R3, ASK_REMOTE);
   const realSeed = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'seed', 'settings.local.json'), 'utf8'));
   const realAsk = (realSeed.permissions && realSeed.permissions.ask) || [];
-  check('#196 the real seed asks before the six force-push forms, the four mirror and delete forms and the three option-prefix and prune forms, and nothing else', sameSet(realAsk, ASK_ALL) && realAsk.length === ASK_ALL.length, JSON.stringify(realAsk));
+  check('#196 the real seed asks before the six force-push forms, the four mirror and delete forms, the three option-prefix and prune forms and the mirror remote-add, and nothing else', sameSet(realAsk, ASK_ALL) && realAsk.length === ASK_ALL.length, JSON.stringify(realAsk));
+  // Glob check of the remote-add row: every prefix git 2.43.0 accepts asks, an ordinary remote add does not.
+  const globRemote = (row) => new RegExp('^' + row.slice('Bash('.length, -1).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+  const hitsRemote = (cmd) => ASK_REMOTE.some(row => globRemote(row).test(cmd));
+  const HOSTILE_REMOTE = ['--mi', '--mir', '--mirr', '--mirro', '--mirror', '--mirror=push', '--mirror=fetch'];
+  const BENIGN_REMOTE = ['git remote add origin git@github.com:o/r.git', 'git remote add upstream https://github.com/o/r.git', 'git remote add -f origin /tmp/r.git', 'git remote add -t main origin /tmp/r.git', 'git remote add --tags origin /tmp/r.git', 'git remote add origin /tmp/mirror-of-r.git'];
+  check('R1 every accepted prefix of --mirror on git remote add matches the new row, before or after the name', HOSTILE_REMOTE.every(o => hitsRemote('git remote add ' + o + ' x /tmp/r.git') && hitsRemote('git remote add x ' + o + ' /tmp/r.git')), HOSTILE_REMOTE.filter(o => !hitsRemote('git remote add ' + o + ' x /tmp/r.git')).join(' '));
+  check('R1 the remote-add row leaves an ordinary remote add alone (name, URL, -f, -t, --tags, a path holding "mirror")', BENIGN_REMOTE.every(c => !hitsRemote(c)), BENIGN_REMOTE.filter(hitsRemote).join(' | '));
+  check('R1 the real seed still allows a plain remote add, so the ask row is what stops the mirror form', realSeed.permissions.allow.includes('Bash(git remote add *)'));
   // Glob check of the R3 rows against the option prefixes git 2.43.0 accepts, and the benign options they must leave alone.
   const globR3 = (row) => new RegExp('^' + row.slice('Bash('.length, -1).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
   const hitsR3 = (cmd) => ASK_R3.some(row => globR3(row).test(cmd));
@@ -1797,16 +1811,16 @@ console.log('\n4g2. destructive-push ask rows reach new and upgraded projects (i
   seed196(realAsk);
   r = run(repo, root196);
   perms = lists196(repo);
-  check('#196 an upgraded project gains the seven new ask rows on its next setup run, in the ask list, beside the six it had', r.status === 0 && sameSet(perms.ask || [], ASK_ALL)
-    && ASK_196.concat(ASK_R3).every(x => !perms.allow.includes(x)) && sameSet(perms.allow || [], ALLOW196), r.out + JSON.stringify(perms));
-  check('#196 the report names the seven new rows as added to the ask list', r.out.includes('added to the ask list (Claude asks before these even when an allow row matches): ' + ASK_196.concat(ASK_R3).map(x => JSON.stringify(x)).join(', ') + '\n'), r.out);
+  check('#196 an upgraded project gains the eight new ask rows on its next setup run, in the ask list, beside the six it had', r.status === 0 && sameSet(perms.ask || [], ASK_ALL)
+    && ASK_196.concat(ASK_R3, ASK_REMOTE).every(x => !perms.allow.includes(x)) && sameSet(perms.allow || [], ALLOW196), r.out + JSON.stringify(perms));
+  check('#196 the report names the eight new rows as added to the ask list', r.out.includes('added to the ask list (Claude asks before these even when an allow row matches): ' + ASK_196.concat(ASK_R3, ASK_REMOTE).map(x => JSON.stringify(x)).join(', ') + '\n'), r.out);
 
   // The owner deletes one new row after being offered it: it stays deleted, the rest stay.
   const DROPPED = 'Bash(git push * -d*)';
   write(repo, LOCAL196, JSON.stringify({ permissions: Object.assign({}, perms, { ask: perms.ask.filter(x => x !== DROPPED) }) }, null, 2) + '\n');
   r = run(repo, root196);
   perms = lists196(repo);
-  check('#196 a new ask row the owner deleted after it was offered stays deleted, and the other twelve stay', r.status === 0 && !(perms.ask || []).includes(DROPPED)
+  check('#196 a new ask row the owner deleted after it was offered stays deleted, and the other thirteen stay', r.status === 0 && !(perms.ask || []).includes(DROPPED)
     && sameSet(perms.ask || [], ASK_ALL.filter(x => x !== DROPPED)) && r.out.includes('not added again'), r.out + JSON.stringify(perms));
   fs.rmSync(repo, { recursive: true, force: true });
 
@@ -1824,13 +1838,13 @@ console.log('\n4g2. destructive-push ask rows reach new and upgraded projects (i
   seed196(realAsk);
   r = run(repo, root196);
   perms = lists196(repo);
-  check('R3 a project holding the previous ten rows gains exactly the three new ones, the narrower --mirror and --delete rows are kept', r.status === 0 && sameSet(perms.ask || [], ASK_ALL)
-    && r.out.includes('added to the ask list (Claude asks before these even when an allow row matches): ' + ASK_R3.map(x => JSON.stringify(x)).join(', ') + '\n'), r.out + JSON.stringify(perms));
+  check('R3 a project holding the previous ten rows gains exactly the four new ones, the narrower --mirror and --delete rows are kept', r.status === 0 && sameSet(perms.ask || [], ASK_ALL)
+    && r.out.includes('added to the ask list (Claude asks before these even when an allow row matches): ' + ASK_R3.concat(ASK_REMOTE).map(x => JSON.stringify(x)).join(', ') + '\n'), r.out + JSON.stringify(perms));
   const DROPPED_R3 = 'Bash(git push *--pru*)';
   write(repo, LOCAL196, JSON.stringify({ permissions: Object.assign({}, perms, { ask: perms.ask.filter(x => x !== DROPPED_R3) }) }, null, 2) + '\n');
   r = run(repo, root196);
   perms = lists196(repo);
-  check('R3 a new row the owner deleted after it was offered stays deleted, and the other twelve stay', r.status === 0 && sameSet(perms.ask || [], ASK_ALL.filter(x => x !== DROPPED_R3)) && r.out.includes('not added again'), r.out + JSON.stringify(perms));
+  check('R3 a new row the owner deleted after it was offered stays deleted, and the other thirteen stay', r.status === 0 && sameSet(perms.ask || [], ASK_ALL.filter(x => x !== DROPPED_R3)) && r.out.includes('not added again'), r.out + JSON.stringify(perms));
   fs.rmSync(tmp196, { recursive: true, force: true });
 }
 

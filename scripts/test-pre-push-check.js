@@ -1257,6 +1257,40 @@ function forcedBinaryTests() {
   }
   cleanup(sb);
 
+  // A media file larger than the 64 MB buffer the text helper reads with. The
+  // byte test needs only the first 8000 bytes; reading the whole blob threw
+  // ENOBUFS, and the failure was reported as an unscannable hit, so a 70 MB
+  // video blocked the push (v7.4.1 review, R2). The fixture is 65 MB of a NUL-led
+  // pattern: over the old cap, under GitHub's 100 MB limit, cheap for git to store.
+  const OVER_CAP = 65 * 1024 * 1024;
+  const bigMedia = Buffer.alloc(OVER_CAP, INERT_BYTES);
+  sb = makeRepo('big-media');
+  try {
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, 'assets/intro.mp4', bigMedia, 'add a large video');
+    const r = run(sb.repo);
+    check('a media file over the old 64 MB read cap stays silent: exit 0, empty stdout', r.status === 0 && r.stdout === '', show(r));
+  } catch (e) {
+    check('large media test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // The same size as TEXT marked -diff: the head has no NUL, so the file is
+  // still handed to the line scan, whose own 64 MB read then fails and is
+  // reported, never skipped. The verdict stays exit 1 either way; what this
+  // proves is that the capped head read did not turn a huge text file silent.
+  const bigText = Buffer.alloc(OVER_CAP, 'x'.repeat(63) + '\n');
+  sb = attrRepo('attr-big-text', '*.log -diff\n');
+  try {
+    commitFile(sb, 'data/trace.log', bigText, 'add a huge forced-binary log');
+    const r = run(sb.repo);
+    check('a text file over the read cap and marked -diff is reported as unscannable, exit 1',
+      r.status === 1 && r.stdout.indexOf('data/trace.log @ ') !== -1 && r.stdout.indexOf('cannot be line-scanned') !== -1, show(r));
+  } catch (e) {
+    check('large forced-text test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
   // A path holding glob characters is rescanned as itself, not as a pattern.
   sb = attrRepo('attr-glob', '*.json -diff\n');
   try {
