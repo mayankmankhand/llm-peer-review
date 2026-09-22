@@ -12,6 +12,22 @@ If you last installed v4.3.3, twenty-seven releases have shipped on top of it. v
 
 ---
 
+## Unreleased
+
+Work on `main` that no release carries yet. It moves into a version section when the next release is cut; nothing here changes the rollup above, which describes shipped versions only.
+
+### Fixed
+
+- **A stale plugin is no longer invisible** (#203). `/tk:setup` and `/tk:upgrade` reported "nothing to do" when the installed plugin was itself behind the latest release, and said nothing about the plugin, so an upgrade could silently accomplish nothing. Both now name the plugin update steps when a run changed nothing, and stay quiet when it did something. The message is the one the toolkit already had; no new wording was invented.
+
+  There is deliberately no network call and no upstream version check. A local one cannot see this: when the bug was hit, the installed plugin was 7.3.0 and the local marketplace clone's pinned tag was also `v7.3.0`, so the two agreed and the staleness was upstream in a clone five commits behind. The line is unconditional advice, not a detection, which is why it fires only on a run that changed nothing. The same notice is **not** in `session-start.js`: that hook never calls git and never writes anything, and giving it a per-project frequency limit would have made a read-only hook stateful, so the equal-version branch there is still silent by choice.
+
+### Notes
+
+- `upgrade-audit.js` carries a fourth byte-identical copy of `PLUGIN_UPDATE_STEPS` rather than the first cross-require between these scripts, because each script under `.claude/scripts/` is self-contained so it can ship and run standalone. `scripts/test-session-start.js` now pins all four source copies together, mutation-tested.
+
+---
+
 ## v7.4.1 - Say the True Thing at the Moment It Matters (2026-09-22)
 
 **A patch on top of v7.4.0, which stays additive on v7.0.0 and v6.0.0.** Nothing here changes how the loop runs. Two cycles held on `main` after v7.4.0 ship together: the outside-audit batch (#196, #200, #202) and three fixes for things that failed in a confusing way (#195, #197, #201), plus what the release's own whole-range review found.

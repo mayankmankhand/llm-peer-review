@@ -290,3 +290,10 @@
 - **Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.**
 - **When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.**
 - **A live check on the friendliest fixture proves the friendly case; write the check against the row the rules actually allow.**
+
+## Issue 203 (the silent middle)
+
+- **`plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.**
+- **A gate that lists the signals it cares about is another silent middle; read the record the code already computes.**
+- **An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.**
+- **A fixture that already satisfies one term of a compound gate cannot tell that term from the others; build the fixture from the gate, not from what is nearby.**
