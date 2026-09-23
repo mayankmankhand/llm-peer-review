@@ -121,6 +121,7 @@ Short summary of what we're building and why.
 <!-- Include this section when the feature has a user interface. Copy the Design direction line /explore produced; the mechanics are in .claude/skills/shared/design-rules.md. -->
 - **Source:** User-provided / AI-proposed, user-approved
 - **Load level:** new / improve (none means this section is omitted)
+- **Surface:** [name] - source file `[path]` (one line per surface; new work names the file its build step creates)
 - **Design system:** none / exists at [where] - allowed variance: [what may vary]
 - **Direction:** [name] - [the brief] - seed `[the seed string]`
 - **Directions tried:** [name] - seed `[seed]` - dropped at pick; [name] - seed `[seed]` - dropped at pick (new work only)
@@ -189,11 +190,11 @@ The critic returns gaps, not a grade (issue #204): its old score out of 10 moved
 1. Dispatch `subagent_type=plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
 2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
 3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
-4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one the conversation did not deliberately leave open becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `.claude/skills/shared/hitl-loop.md`), so `/review` checks it against the delivered work.
+4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `.claude/skills/shared/hitl-loop.md`), so `/review` checks it against the delivered work.
 
 </procedure>
 
-The closing message states what the judge found in one line, counting each gap once, so the user sees it before they approve: "Plan critic: 7 gaps; 4 fixed, 1 left open on purpose (<why>), 2 carried to review." Fixed counts round-1 gaps fixed; left open counts gaps from either round that the conversation decided to leave open; carried counts the round-2 gaps written as `[plan]` lines. A round-2 gap that repeats a fixed round-1 gap counts once, as carried, because the fix did not close it; one that repeats a gap left open on purpose counts once, as left open. A round that returned `No material gaps` says so ("Plan critic: no material gaps."). Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
+The closing message states what the judge found in one line, counting each gap once, so the user sees it before they approve: "Plan critic: 7 gaps; 4 fixed, 1 left open on purpose (<why>), 2 carried to review." Fixed counts round-1 gaps fixed; left open counts gaps from either round that the plan is right to leave open (step 3); carried counts the round-2 gaps written as `[plan]` lines. A round-2 gap that repeats a fixed round-1 gap counts once, as carried, because the fix did not close it; one that repeats a gap left open on purpose counts once, as left open. A round that returned `No material gaps` says so ("Plan critic: no material gaps."). Editing the plan here is not a page: the plan is not a prompt file, and nothing has been executed yet.
 
 ## Render HTML View (default-on)
 
