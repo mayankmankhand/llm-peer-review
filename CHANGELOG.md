@@ -12,6 +12,37 @@ If you last installed v4.3.3, twenty-seven releases have shipped on top of it. v
 
 ---
 
+## Unreleased
+
+Work on `main` that no release carries yet. It moves into a version section when the next release is cut; nothing here changes the rollup above, which describes shipped versions only.
+
+### Changed
+
+- **Judges return gaps, not grades** (#204). The design critic's score out of 10 is now a label that decides nothing, and the plan critic returns no score at all: its biggest gaps, or the literal `No material gaps`, which ends its loop. `/tk:create-plan` closes with one line that counts them ("Plan critic: 7 gaps; 4 fixed, 1 left open on purpose, 2 carried to review").
+- **A blind side-by-side judge decides each design round** (#204). After each round, a new `design-comparer` agent sees the version before the round's design changes and the version after, as `A.png` and `B.png` in both orders, never told which is newer. The new version wins both times: the loop continues. The old one wins both times: that round's design checkpoint is reverted (`git revert`, never a reset) and the loop stops. Anything else stops the loop and keeps the new version. The built surface is committed as round 0 first; new work gets up to 5 rounds, improve gets 2.
+- **Each design round checks behaviour, not just looks** (#204). An interaction pass writes a short `browse.js` session for every control that holds state (a field, a two-step button, a panel) and the result it must show, before running it: type, wait past a re-render, read it back. Its fixes are committed on their own before the design changes, so a lost comparison cannot undo them.
+- **Open gaps travel to the review instead of being lost** (#204). A plan can carry a `## Must-check for review` section: the plan critic's second-round gaps, the design gaps two final critiques agree on, and interaction sessions that still fail. The orchestrated `/tk:review` enters each line into its audit as a finding, so it is confirmed or dismissed with proof, and a `[behaviour]` line always selects Browser QA, even on a small diff.
+- **A browser decides browser-shaped fixes** (#204). When a judgment finding's truth depends on what a page renders or does and the page can be served, its fix is verified by a `browse.js` check written before the fix, instead of by a verifier reading the diff.
+
+### Added
+
+- **`browse.js` reads a form field's value** (#204). The new `value` action returns what is in an input, textarea or select; `text` reads `innerText`, which is always empty for an input. It is how a check tells a draft that survived a re-render from one that was thrown away.
+- **Review criteria for state a re-render throws away** (#204). The code and browser criteria now name the defect class: code that empties and rebuilds part of a page loses any typed draft, focus, armed two-step control, open panel or scroll position inside it, and none of that shows in a screenshot.
+- **The plan template names each design surface's source file**, so a design gap carried to the review points at the file it is about.
+
+### Measured
+
+- Five fresh design critics on one unchanged screenshot scored 4, 4, 4, 5, 4; five plan critics on one unchanged plan scored 8, 7, 8, 7, 7. The one-point wobble is the same size as the step the old stop rule read, and no recorded loop ever reached its 9/10 bar.
+- The side-by-side judge matched a bar written in advance on all twelve validation verdicts (a known rendering defect, a fixed gap and an unchanged page, each in both orders, twice). The shipped look-only agent then matched it 6 of 6, including `neither` on the unchanged pair.
+- In a loop drill the critic scored 5 on every version, including the one the judge preferred in both orders. Two fixes that a diff reading would have passed were measured NOT FIXED in a browser.
+- The review of this work seeded the plan's six must-check gaps and dismissed each with proof, then fixed all 12 findings that survived its audit.
+
+### Why
+
+A score out of 10 looked like a measurement and behaved like noise: it moved by a point on identical input, the same size as the step the stop rule read, and the kept "best score" once described a state no commit held. The gaps, not the number, caught every real defect the loops found. So the judges now return what can be acted on, a blind comparison makes the one decision the loop needs, and whatever the judges leave open is handed to the review, where it is audited instead of forgotten. The design loop had also only ever looked at screenshots, which cannot show a draft wiped by a re-render: in the downstream cycle that raised #204, 26 review findings followed a design loop whose critic could not have raised one of them. The interaction pass and the `value` action close that gap.
+
+---
+
 ## v7.4.2 - The Silent Middle (2026-09-22)
 
 **A patch on top of v7.4.1, which stays additive on v7.0.0 and v6.0.0.** One fix, and nothing here changes how the loop runs. It is released on its own because the bug it closes is the one that hides every later update: a project on a stale plugin was told it was current.

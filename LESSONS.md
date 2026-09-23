@@ -297,3 +297,12 @@
 - **A gate that lists the signals it cares about is another silent middle; read the record the code already computes.**
 - **An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.**
 - **A fixture that already satisfies one term of a compound gate cannot tell that term from the others; build the fixture from the gate, not from what is nearby.**
+
+## Issue 204 (judges return gaps, not grades)
+
+- **A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.**
+- **A fixture that fails on both pages tells them apart no better than one that passes on both; every-frame redraws made the good page's Delete unclickable too.**
+- **Give a finder a neutral copy of what it judges: a fixture's name and comments state the answer, and a finder with Grep will read the plan.**
+- **Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.**
+- **When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.**
+- **A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.**
