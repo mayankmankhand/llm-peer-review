@@ -73,7 +73,8 @@ fs.writeFileSync(preload, [
   '};',
   '',
   '// The fake browser: a field holds what fill typed; its innerText is empty, as in a',
-  '// real browser; a selector named #missing never appears, so reading it times out.',
+  '// real browser; a selector named #missing never appears, so reading it times out;',
+  '// one named #not-a-field is found but is not a form field, so reading it fails at once.',
   'function fakeBrowser() {',
   '  const values = {};',
   '  const locator = (sel) => ({',
@@ -81,6 +82,7 @@ fs.writeFileSync(preload, [
   "    innerText: async () => '',",
   '    inputValue: async () => {',
   "      if (sel === '#missing') { const e = new Error('stub: locator.inputValue: Timeout exceeded'); e.name = 'TimeoutError'; throw e; }",
+  "      if (sel === '#not-a-field') throw new Error('stub: locator.inputValue: Node is not an <input>, <textarea> or <select> element');",
   "      return values[sel] === undefined ? '' : values[sel];",
   '    },',
   '  });',
@@ -256,6 +258,10 @@ function runActions(actions, extraArgs) {
   const missing = runActions([{ type: 'goto', url: '/' }, { type: 'value', target: 'css:#missing' }]);
   const mi = ((missing.json && missing.json.actions) || [])[1] || {};
   check('value: a field that never appears times out with the script\'s message', missing.json !== null && mi.ok === false && /^value on "css:#missing" timed out after \d+ms/.test(mi.error || ''), JSON.stringify(mi));
+
+  const notField = runActions([{ type: 'goto', url: '/' }, { type: 'value', target: 'css:#not-a-field' }]);
+  const nf = ((notField.json && notField.json.actions) || [])[1] || {};
+  check('value: an element that is not a form field fails at once with the underlying reason, not as a timeout', notField.json !== null && nf.ok === false && /^Could not read a value from "css:#not-a-field": stub: locator\.inputValue: Node is not an <input>/.test(nf.error || ''), JSON.stringify(nf));
 
   const help = runActions([], ['--help']);
   check('value: --help lists the action and its field', /\n  value +Read the current value of a form field\n +Fields: target/.test(help.stdout), help.stdout.slice(0, 200));
