@@ -26,6 +26,8 @@ Did we build what we said we'd build? Compares implementation against plan/spec.
 
 </rules>
 
+**Model mode.** When this skill runs directly and fans out (the bigger-change path below), first run `node .claude/scripts/session-init.js --models`, adding `--mode <m>` when the arguments carry a `mode:<m>` word, and say "Models: <models.mode>" in one line; `models.perRole` gives each finder its model.
+
 !`cat .claude/skills/shared/criteria-plan.md`
 
 ## Reading Budget

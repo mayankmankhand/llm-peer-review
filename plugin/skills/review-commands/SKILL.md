@@ -33,6 +33,8 @@ allowed-tools:
 
 </rules>
 
+**Model mode.** When this skill runs directly and fans out (the bigger-change path below), first run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models`, adding `--mode <m>` when the arguments carry a `mode:<m>` word, and say "Models: <models.mode>" in one line; `models.perRole` gives each finder its model.
+
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-commands.md"`
 
 ## Reading Budget
