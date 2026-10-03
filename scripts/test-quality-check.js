@@ -457,6 +457,7 @@ section('model modes', () => {
   const source = QC.modeLineCheck(['Models: cheap, the default'], { mode: 'cheap', from: 'PLAN-fixture' });
   check('mode line: the right mode from the wrong place fails', !source.ok && /came from/.test(source.detail), source.detail);
   check('mode line: no line at all fails', !QC.modeLineCheck(['Review done.'], { mode: 'fit' }).ok);
+  check('mode line: markup around the source does not hide it', QC.modeLineCheck(['Reviewing 1 commit. Models: cheap, from the `mode:` word.'], { mode: 'cheap', from: 'mode:? ?word|argument' }).ok);
 
   // Finders checked against the mode's families, judges against the session.
   const cheapExpect = { main: 'opus', finders: 'sonnet', finderModels: Object.fromEntries(QC.FINDER_KINDS.map(k => [k, 'sonnet'])) };

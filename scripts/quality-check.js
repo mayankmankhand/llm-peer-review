@@ -210,7 +210,9 @@ function modeLineCheck(texts, want) {
     if (!line) continue;
     const got = MODE_RE.exec(line)[1].toLowerCase();
     const from = want.from ? new RegExp(want.from, 'i') : null;
-    const fromOk = !from || from.test(line) || from.test(texts[i]);
+    // Markup is not wording: "from the `mode:` word" says where the mode came from.
+    const plain = t => t.replace(/[`*_]/g, '');
+    const fromOk = !from || from.test(plain(line)) || from.test(plain(texts[i]));
     let detail = line.trim().slice(0, 200);
     if (got !== want.mode) detail += ' (want ' + want.mode + ')';
     else if (!fromOk) detail += ' (does not say where the mode came from: ' + want.from + ')';
