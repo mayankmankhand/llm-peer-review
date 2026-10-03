@@ -7,12 +7,15 @@
 // .claude/agents/ declares a model (an agent with no model line follows
 // CLAUDE_CODE_SUBAGENT_MODEL when a user sets it, which can move a judge below
 // the session model) and the effort its row names; every roster agent has a
-// file; and /index Step 2's cost message names the mapper row's model. A second
-// group checks that no line dispatching a judge (the M2 skeptic, the M3
-// verifier, the plan critic, the design critic and the comparer) names a
-// model: a per-call model overrides the agent file, so one stray word there
-// silently downgrades a judge. Reads the source tree only; the mutation checks
-// run on in-memory copies. Dependency-free; exits non-zero on any failure.
+// file; and /index Step 2's cost message names the mapper's model through the
+// mode ({mapperModel}, which Step 1 fills from models.perRole). A second group
+// checks that no line dispatching a judge (the M2 skeptic, the M3 verifier, the
+// plan critic, the design critic and the comparer) names a model: a per-call
+// model overrides the agent file, so one stray word there silently downgrades a
+// judge. A third group checks that every line dispatching a finder or the mapper
+// copies the mode's model with the one clause model-routing.md defines, word for
+// word, so the call sites cannot drift apart. Reads the source tree only; the
+// mutation checks run on in-memory copies. Dependency-free; exits non-zero on any failure.
 //
 //   node scripts/test-model-roster.js [--repo <dir>]
 
@@ -76,10 +79,30 @@ function rosterProblems(agents, roster) {
   return out;
 }
 
-// The model word in /index Step 2's cost message, e.g. "(Sonnet via the index-mapper agent)".
+// What /index Step 2's cost message names as the mapper's model: the mode's
+// model, through the {mapperModel} placeholder that Step 1 fills.
 function costMessageModel(text) {
-  const m = /\((\w+) via the index-mapper agent\)/.exec(text);
-  return m ? m[1].toLowerCase() : null;
+  const m = /\(([{}\w]+) via the index-mapper agent\)/.exec(text);
+  return m ? m[1] : null;
+}
+const MAPPER_FROM_MODE = /`models\.perRole\["index-mapper"\]`[^\n]*`\{mapperModel\}`/;
+
+// A line that tells a dispatcher to spawn a finder or the mapper. Table rows only
+// name the agents, so they are skipped; the dispatch sentence is the line that must
+// carry the clause model-routing.md defines.
+const DISPATCH_LINE = /subagent_type=(?:tk:)?(?:review-(?:code|security|ux|plan|commands|deps|browser|copy)-finder|index-mapper)\b|the Finder column|four per-kind finders/;
+const MODE_CLAUSE = 'with `model` set to its `models.perRole` value, where `session` means your own model family\'s alias';
+function dispatchProblems(files) {
+  const out = [];
+  let lines = 0;
+  for (const [file, text] of files) {
+    text.split(/\r?\n/).forEach((line, i) => {
+      if (/^\s*\|/.test(line) || !DISPATCH_LINE.test(line)) return;
+      lines++;
+      if (!line.includes(MODE_CLAUSE)) out.push(file + ':' + (i + 1));
+    });
+  }
+  return { lines, problems: out };
 }
 
 // A line that dispatches a judge, and the model it names, if any. "No model
@@ -128,15 +151,21 @@ const roster = parseRoster(fs.readFileSync(ROUTING, 'utf8'));
 check('the roster table parses into rows', roster.size >= agents.size && roster.size > 10, roster.size + ' agents');
 const live = rosterProblems(agents, roster);
 check('every agent file declares the model and effort its roster row names', live.length === 0, live.join('; '));
-const mapperRow = roster.get('index-mapper');
-const costModel = costMessageModel(fs.readFileSync(INDEX, 'utf8'));
-check('/index Step 2\'s cost message names the mapper row\'s model',
-  !!mapperRow && costModel === mapperRow.model.toLowerCase(), 'message: ' + costModel + ', row: ' + (mapperRow && mapperRow.model));
+const indexText = fs.readFileSync(INDEX, 'utf8');
+const costModel = costMessageModel(indexText);
+check('/index Step 2\'s cost message names the mode\'s mapper model, which Step 1 reads from models.perRole',
+  costModel === '{mapperModel}' && MAPPER_FROM_MODE.test(indexText), 'message: ' + costModel);
 
 console.log('Judge dispatch lines');
 const scan = judgeCallProblems(promptFiles());
 check('the judge scan finds the dispatch lines (at least 8)', scan.lines >= 8, scan.lines + ' lines');
 check('no judge dispatch line names a model', scan.problems.length === 0, scan.problems.join('; '));
+
+console.log('Finder and mapper dispatch lines');
+const commandsAndSkills = new Map([...promptFiles()].filter(([f]) => !f.startsWith(path.join('.claude', 'agents'))));
+const dispatch = dispatchProblems(commandsAndSkills);
+check('the dispatch scan finds the finder and mapper dispatch lines (at least 8)', dispatch.lines >= 8, dispatch.lines + ' lines');
+check('every finder and mapper dispatch line copies the mode\'s model, word for word', dispatch.problems.length === 0, dispatch.problems.join('; '));
 
 // ---- Mutations: each check must go red on the defect it guards ----------------
 console.log('Mutations');
@@ -161,8 +190,17 @@ const gone = clone(agents);
 gone.delete('design-comparer');
 check('mutation: a roster row with no agent file is caught',
   rosterProblems(gone, roster).some(p => p === 'design-comparer: roster row with no agent file'));
-check('mutation: a cost message naming another model is caught',
-  costMessageModel('spawn 3 parallel subagents (Haiku via the index-mapper agent).') !== (mapperRow && mapperRow.model.toLowerCase()));
+check('mutation: a cost message naming a fixed model is caught',
+  costMessageModel('spawn 3 parallel subagents (Sonnet via the index-mapper agent).') !== '{mapperModel}');
+const routed = dispatchProblems(new Map([
+  ['e.md', 'run four sub-agents (`subagent_type=review-code-finder` with `model` set to its `models.perRole` value, where `session` means your own model family\'s alias; ...)'],
+  ['f.md', 'spawn an Agent with `subagent_type=index-mapper` - the mapper agent, whose model comes from its frontmatter.'],
+  ['g.md', '| Code | `subagent_type=review-code-finder` |'],
+  ['h.md', 'using the exact `subagent_type=` value in the Finder column, with `model` from the plan.'],
+]));
+check('mutation: a mapper or finder dispatch without the clause is caught, by name or through the Finder column',
+  routed.problems.includes('f.md:1') && routed.problems.includes('h.md:1') && !routed.problems.includes('e.md:1'), routed.problems.join('; '));
+check('a table row naming a finder is not a dispatch line', routed.lines === 3 && !routed.problems.includes('g.md:1'), routed.lines + ' lines');
 const planted = new Map([
   ['a.md', '1. Dispatch `subagent_type=plan-critic` with `model: "sonnet"` and the plan path.'],
   ['b.md', 'Dispatch `subagent_type=tk:audit-skeptic` on Opus.'],
