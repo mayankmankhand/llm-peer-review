@@ -53,7 +53,9 @@ Then run the **"Create issue" row** for the detected host, from the project dire
 [What should happen - 1-2 sentences]
 ```
 
-## Available Labels
+## Labels
+
+Use labels the repository already has: a label it lacks makes the create command fail, so drop any the host refuses and say which. The toolkit's usual set:
 
 - `bug`, `feature`, `improvement`
 - `priority-high`, `priority-medium`, `priority-low`

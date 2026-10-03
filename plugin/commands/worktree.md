@@ -3,7 +3,7 @@ description: "Create a Parallel Worktree"
 ---
 # Create a Parallel Worktree
 
-Set up an isolated worktree so you can work on a feature in a separate Cursor window without affecting your main working copy.
+Set up an isolated worktree so you can work on a feature in a separate editor window or terminal without affecting your main working copy.
 
 **Use this when:** You want to work on multiple features in parallel, or isolate experimental work from your main branch.
 **Don't use this when:** You're doing a quick fix or documentation update on main.
@@ -92,7 +92,7 @@ Worktree ready!
   Map:          copied (or: skipped - not found / already exists)
 
 Next steps:
-  1. Open that path in a new Cursor window
+  1. Open that path in a new editor window, or start Claude Code there
   2. Use /tk:explore to start working on your issue
      (/tk:explore will rename the branch once an issue is identified)
   3. When done, run /tk:document to create a PR and clean up
