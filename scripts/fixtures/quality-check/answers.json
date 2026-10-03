@@ -285,7 +285,7 @@
           "cve|vulnerab|advisor|prototype[- ]pollution|command injection|template[- ]injection|redos|audit|insecure|security|unpatched|4\\.17\\.(15|19|20|21)"
         ],
         [
-          "(pinned|old|outdated|2019) (library|release|version|dependency)",
+          "\\b(pin|pins|pinned|old|older|outdated|2019)\\b[^.]{0,40}\\b(library|release|version|dependency|package)",
           "advisor|vulnerab|cve|security|high[- ]severity"
         ]
       ]

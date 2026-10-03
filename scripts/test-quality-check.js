@@ -220,6 +220,12 @@ section('finder output and matching', () => {
   // losing notes "cannot be undone", which alone matched the clear-all key.
   const r13 = { severity: 'warn', file: { relPath: 'public/app.js', line: 15 }, what: 'Should fix. A search with no results shows \'No notes yet\', which misleads people into thinking their notes are gone.', context: 'It fires on any typo in the search box, in an app where losing notes cannot be undone.', fix: 'One branch: show a separate no-matches message when a search is active.' };
   check('live: a finding that only says losing notes cannot be undone is not the clear-all bug', !QC.bugMatches(BUG['ux-clear-all-no-confirm'], QC.rawToMatchable(r13)));
+  // Step 7's fit review (2026-10-03): the lodash finding said "version pin ... library",
+  // which the key's "pinned library" wording missed; the size finding beside it is not the bug.
+  const r18 = { severity: 'warn', file: { relPath: 'package-lock.json', line: 16 }, what: 'Should fix. The exact version pin locks in a library with known high-severity injection and prototype-pollution flaws.' };
+  const size = { severity: 'warn', file: { relPath: 'package.json', line: 13 }, what: 'Should fix. A whole runtime library for one de-duplicate call skips the project\'s zero-dependency design and lands on server installs.' };
+  check('live: a version pin on a library with high-severity flaws is the lodash bug', QC.bugMatches(BUG['deps-lodash-cve'], QC.rawToMatchable(r18)));
+  check('live: a library pulled in for one call is not the lodash bug', !QC.bugMatches(BUG['deps-lodash-cve'], QC.rawToMatchable(size)));
   check('live: the clear-all catch still matches with the clearing action required', QC.bugMatches(BUG['ux-clear-all-no-confirm'], { file: 'public/app.js', line: 41, text: 'Should fix. Once the crash is fixed, one tap on Clear all deletes every note with no way back.' }));
 });
 
