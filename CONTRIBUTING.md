@@ -20,6 +20,16 @@ Shared reference files (`browse-api.md`, `conventions.md`, the eight `criteria-*
 
 If you are arriving with your own commands or an existing workflow rather than adapting the toolkit's, see [Already Have Your Own Workflow?](README.md#already-have-your-own-workflow) in the README. It covers adding the auto loop to a workflow you already have, and which filenames the installer reclaims on upgrade.
 
+## Checking `/audit-html` (Maintainer)
+
+After changing `/audit-html` or the "Your Own Files" section of `.claude/skills/shared/html-outputs.md`, run the skill against this repository:
+
+- It should flag long human-read files like `LESSONS.md` and `CHANGELOG.md` against its signals, then **veto them both** (LESSONS is Claude-read; CHANGELOG is host-native, rendered by GitHub and GitLab alike).
+- It should veto `CLAUDE.md`, `CODEBASE_MAP.md`, anything in `.claude/`, and `PLAN-*.md`.
+- For a downstream project, it should flag a status-board file in the project root and pass it through when no veto applies.
+
+If it does not, the signals or vetoes are misaligned with `html-outputs.md`: fix that file, the single source of truth, not the skill.
+
 ## Releasing (Maintainer)
 
 Users receive the plugin from a release tag, not from main: from 7.1.0 the `tk` entry in `.claude-plugin/marketplace.json` pins the tag `v<version>`, so nothing merged to main reaches anyone until a release tags it.

@@ -151,16 +151,6 @@ When the user says "yes, generate the view" after seeing the report:
 
 The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them in v1.
 
-## Verify
-
-After implementing or invoking the skill, sanity-check it against this very repo:
-
-- It should flag long human-read files like `LESSONS.md`, `CHANGELOG.md` against signals but then **veto them both** (LESSONS is Claude-read; CHANGELOG is host-native, rendered by GitHub and GitLab alike).
-- It should veto `CLAUDE.md`, `CODEBASE_MAP.md`, anything in `.claude/`, `PLAN-*.md`.
-- For a downstream project, it should flag a status-board file in the project root and pass it through if no veto applies.
-
-If the audit's behavior on this repo does not match the above, the signals or vetoes are misaligned with `html-outputs.md` - fix that file (the single source of truth), not the skill.
-
 <rules>
 
 ## REMEMBER: Report only. Generate views only on explicit request. Never modify the source markdown.
