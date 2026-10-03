@@ -252,7 +252,7 @@ When running multiple Claude Code sessions in parallel (via Cursor windows or Re
 
 <guidelines>
 
-If Claude can do it, Claude should do it. Do not ask the user to run commands that you are capable of running yourself. Act first, report what you did. (This covers running commands and checks; file edits follow the auto loop in Critical Rule #1, with the always-ask actions per M9 as the exception.)
+If Claude can do it, Claude should do it. Do not ask the user to run commands that you are capable of running yourself. Act first, report what you did. (This covers running commands and checks; file edits follow the auto loop in rule 1 above (Auto by default), with the always-ask actions per M9 as the exception.)
 
 ### Do it yourself
 - **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
