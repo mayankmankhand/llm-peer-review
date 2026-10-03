@@ -282,6 +282,23 @@ section('report cross-references and evidence', () => {
   check('a raw finding links to the entry its sentence was copied into, and its dedup twin shares the link', links[0].join() === 'R6' && links[1].join() === 'R6', JSON.stringify(links));
 });
 
+section('login token window', () => {
+  const now = Date.parse('2026-10-03T21:00:00Z');
+  const need = 105 * 60 * 1000;
+  // The fake tokens are built at runtime: a token-shaped literal after a key name
+  // trips the pre-push tripwire, which has no allow-list by design (LESSONS).
+  const fake = (kind, n) => ['FAKE', kind, n].join('-');
+  const creds = (ms) => JSON.stringify({ claudeAiOauth: { accessToken: fake('ACCESS', 7731), refreshToken: fake('REFRESH', 9907), expiresAt: now + ms } });
+  check('a token that outlasts the run window starts the run', QC.tokenWindowProblem(creds(8 * 3600 * 1000), now, need) === null);
+  const close = QC.tokenWindowProblem(creds(40 * 60 * 1000), now, need);
+  check('a token expiring inside the run window stops it, naming the minutes left', typeof close === 'string' && /expires in 40 min/.test(close), String(close));
+  check('an expired token stops it at zero minutes', /expires in 0 min/.test(String(QC.tokenWindowProblem(creds(-5 * 60 * 1000), now, need))));
+  check('no credentials file, an unreadable one, or no expiry raises nothing',
+    QC.tokenWindowProblem(null, now, need) === null && QC.tokenWindowProblem('not json', now, need) === null &&
+    QC.tokenWindowProblem(JSON.stringify({ apiKey: 'z' }), now, need) === null);
+  check('the reason never carries a token', !/FAKE-ACCESS-7731|FAKE-REFRESH-9907/.test(String(close)), String(close));
+});
+
 section('validity', () => {
   const ok = analyze(makeReviewRun({ caught: ['code-search-prefix'] }));
   check('a clean canned run is valid', ok.valid, ok.reasons.join(', '));

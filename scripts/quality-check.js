@@ -98,7 +98,8 @@
 //
 // Exit codes: 0 done (a valid run, or a score); 2 usage error; 3 the run was
 // invalid; 4 the budget refused the run; 5 a probe failed; 6 the owner's real
-// config changed during the run (checked before and after every session).
+// config changed during the run (checked before and after every session); 7 the
+// owner's login token could expire during the run (tokenWindowProblem, below).
 
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
@@ -982,6 +983,26 @@ function ledger() {
   return fs.existsSync(LEDGER) ? readJsonl(LEDGER) : [];
 }
 
+// The scratch home links the owner's credentials file. A session that refreshes
+// its login token writes the new one by replacing that link with a file, so the
+// new token stays in the scratch home, which is removed, while the owner's file
+// keeps the token the refresh retired (seen on the second post-#207 run: the run
+// was voided and the owner may have to sign in again). A run that ends before
+// the owner's token expires never refreshes, so a run starts only when the token
+// outlasts the session timeout plus a margin. No credentials file, or one with no
+// expiry (an API key login), raises nothing. Returns a reason, or null.
+function tokenWindowProblem(credentialsText, nowMs, needMs) {
+  if (credentialsText === null) return null;
+  let expiresAt;
+  try { expiresAt = (JSON.parse(credentialsText).claudeAiOauth || {}).expiresAt; } catch (e) { return null; }
+  if (typeof expiresAt !== 'number') return null;
+  const left = expiresAt - nowMs;
+  if (left >= needMs) return null;
+  return 'the login token expires in ' + Math.max(0, Math.round(left / 60000)) + ' min, under the ' + Math.round(needMs / 60000) +
+    ' min a run may take; a scratch session would refresh it and leave the real file stale. Let a normal Claude Code session refresh it, then run again.';
+}
+const TOKEN_MARGIN_MS = 15 * 60 * 1000;
+
 function budgetCheck(role) {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
@@ -1031,6 +1052,10 @@ async function commandRun(o) {
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
   const budget = budgetCheck(role === 'probe' ? 'probe' : role);
   if (!budget.ok) { console.log(budget.page); process.exit(4); }
+  let credentials = null;
+  try { credentials = fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8'); } catch (e) { credentials = null; }
+  const tokenProblem = tokenWindowProblem(credentials, Date.now(), SESSION_TIMEOUT_MS + TOKEN_MARGIN_MS);
+  if (tokenProblem) { console.log('STOP: ' + tokenProblem); process.exit(7); }
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-run.'));
   const home = path.join(tmp, 'home');
@@ -1352,7 +1377,7 @@ async function probeLocal(o) {
 module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
-  scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS,
+  scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
 };
 
 if (require.main === module) {
