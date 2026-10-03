@@ -33,7 +33,7 @@ You are updating documentation after code changes. Run the steps automatically, 
 - **CHANGELOG.md** - User-facing changes: new features, breaking changes (update if it exists)
 - **`.claude/rules/toolkit.md`** - Toolkit workflow rules (the toolkit's seed; **this command never edits it**). On the plugin, setup writes it once and a plugin update never overwrites it; a copy-install update replaces it. A stale copy is `/tk:upgrade`'s job, not this command's: `/tk:upgrade` flags it, and the fix is to delete the file and run `/tk:setup` (which writes a fresh copy only when the file is missing) or to merge the new seed text by hand and update its stamp.
 
-Keep README.md and CLAUDE.md consistent with each other. Never edit `toolkit.md`.
+Keep README.md and CLAUDE.md consistent with each other.
 
 ## 1. Identify Changes
 - Check git diff or recent commits for modified files
@@ -65,8 +65,6 @@ For each changed file:
 ✅ **Accurate** - Code verified, not assumed
 ✅ **Current** - Matches actual implementation
 ✅ **Right file** - Put info where it belongs (see Section 3)
-
-❌ Don't edit `toolkit.md` - it's auto-managed
 
 ## 5. Ask if Uncertain
 
