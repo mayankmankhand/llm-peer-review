@@ -1,6 +1,6 @@
 ---
 name: upgrade
-description: After /plugin update (or right after a /tk:setup migration), audit this project's own commands, skills, agents, rules, CLAUDE.md, and the other files its sessions read against the toolkit conventions that changed between the last audited version and the installed one, plus C-7 and C-9 to C-12, which run on every upgrade, through the normal M2 audit and auto-fix loop. Opens the cycle's issue, fixes what drifted (the audit rerun decides FIXED, by each finding's key), runs one sample cycle, stamps the state file, and chains into /tk:document.
+description: After a plugin update (or right after a /tk:setup migration), audit this project's own commands, skills, agents, rules, CLAUDE.md and the other files its sessions read against the toolkit conventions that changed since the last audited version, plus the ones checked on every upgrade, and fix what drifted through the normal audit and auto-fix loop.
 allowed-tools:
   - Bash
   - Read
