@@ -17,6 +17,6 @@ Read the plan file, then read the implementation files. Compare them. Pick one o
 | **Scope Management** | Unplanned additions? Cuts justified and documented? Scope creep? |
 | **Quality Gates** | Success criteria met? Tests written (when the plan warranted them)? Docs updated? |
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 </procedure>

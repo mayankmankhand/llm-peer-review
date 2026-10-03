@@ -21,6 +21,6 @@ Do not "fix" this by granting `WebSearch` to `review-ux-finder`. That agent runs
 
 The Research sub-agent should keep findings lightweight and evidence-linked. Clearly separate research-backed findings from heuristic findings. If the searches came back weak, say so and move on - research should not block the review.
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 </procedure>

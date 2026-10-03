@@ -15,7 +15,7 @@ Read the changed files. Then pick one of two modes:
 | **Logic** | Edge cases, off-by-ones, missing error handling, wrong assumptions |
 | **Performance & Maintainability** | O(n) issues, memory usage, tech debt, maintainability concerns |
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 **Rebuilt render paths** (issue #204; the Logic pass owns it in a fan-out). When the diff adds or changes code that empties and rebuilds part of the page (an `innerHTML` reassignment, a children replace, a list re-rendered from scratch, a render scheduled on every animation frame, timer, or state change), work it as a count, not an impression:
 

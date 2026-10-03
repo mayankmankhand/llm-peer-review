@@ -15,6 +15,6 @@ Read the command files being reviewed. Then pick one of two modes:
 | **Workflow Completeness** | Missing steps, dead ends, assumption gaps, output usability, failure modes |
 | **Workflow Ergonomics** | Cognitive load, progress visibility, mistake recovery, workflow clarity for users without specialized knowledge |
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 </procedure>

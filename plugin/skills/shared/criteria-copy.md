@@ -54,6 +54,6 @@ Read the content files (pages, markdown, HTML, templates, copy). Then pick one o
 | **Flow** | Do the headings tell a logical story? Is information sequenced well (what is this -> why it matters -> what to do)? Are next steps clear? |
 | **Clarity** | Is the language plain and jargon-free for the intended audience? Are sentences and paragraphs easy to scan? Is cognitive load reasonable? |
 
-Each sub-agent should use the severity scale and Finding ID format below. If a sub-agent has no findings, it should report "No issues found" so the user knows it ran.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 </procedure>
