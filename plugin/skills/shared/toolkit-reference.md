@@ -189,7 +189,6 @@ A project adds its own rules to the toolkit through five files in `.claude/toolk
 
 - **Use subagents for research and exploration** freely - no need to ask
 - **One focused task per subagent** - don't bundle unrelated work
-- **Don't duplicate work** - if a subagent is researching something, don't also do it yourself
 - **Parallelize independent plan steps** - announce what each parallel task will do, then proceed without waiting (matches the auto verdict for /tk:execute)
 
 </guidelines>
