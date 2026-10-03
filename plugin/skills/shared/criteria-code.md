@@ -17,7 +17,7 @@ Read the changed files. Then pick one of two modes:
 
 Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
-**Rebuilt render paths** (issue #204; the Logic pass owns it in a fan-out). When the diff adds or changes code that empties and rebuilds part of the page (an `innerHTML` reassignment, a children replace, a list re-rendered from scratch, a render scheduled on every animation frame, timer, or state change), work it as a count, not an impression:
+**Rebuilt render paths** (the Logic pass owns it in a fan-out). When the diff adds or changes code that empties and rebuilds part of the page (an `innerHTML` reassignment, a children replace, a list re-rendered from scratch, a render scheduled on every animation frame, timer, or state change), work it as a count, not an impression:
 
 1. Find each rebuild and the subtree it empties.
 2. List every piece of state held on an element inside that subtree: a typed draft in a field, focus or a text selection, the armed first step of a two-step control, an open or collapsed panel, a scroll position.
