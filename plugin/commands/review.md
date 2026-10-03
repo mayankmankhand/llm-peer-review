@@ -74,7 +74,7 @@ Name the scope in one line before anything is dispatched, and open the report wi
 - **No commits in range, uncommitted work present:** "Reviewing uncommitted work only; no commits in range." Add the `message` when there is one.
 - **No commits in range and nothing uncommitted:** on the auto-detect path, stop with "Nothing to review: no commits in range and no uncommitted changes (<message, when there is one>). Pass a range: `/tk:review <base>..HEAD`." When `message` names a plan's range (a shipped plan), suggest that range in place of the generic one. A focus call does not stop here: it runs the specialists it names.
 
-**Fallback:** if the script is missing (an older install) or its output carries an `error` field, review the uncommitted work only (`git diff --name-only`, `git diff --name-only --cached`, and `git status --short` for untracked files; `git diff --numstat` for the size gate) and say in the scope line that no commit range was checked.
+**Fallback:** if the script is missing or its output carries an `error` field, review the uncommitted work only (`git diff --name-only`, `git diff --name-only --cached`, and `git status --short` for untracked files; `git diff --numstat` for the size gate) and say in the scope line that no commit range was checked.
 
 ### Phase 1: Detect (skip if focus arguments provided)
 

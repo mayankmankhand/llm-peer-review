@@ -20,17 +20,17 @@ Tone: collaborative. "Let's figure this out together."
 
 ## Step 0: Load Project Context
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors (older installs), do the manual reads described here instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors, do the manual reads described here instead - behavior is identical.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
 **If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug. When `map.stale` is true (10 or more commits behind), run `/index` automatically per M12 (`.claude/skills/shared/hitl-loop.md`), then read the fresh map.
 
-**If it does not exist (first run after upgrade or fresh setup):** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute." Then invoke `/index`. After it completes, read the new map and proceed.
+**If it does not exist:** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute." Then invoke `/index`. After it completes, read the new map and proceed.
 
 **If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 
-After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
 
 ## Step 1: Check the Logs (always start here)
 

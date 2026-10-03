@@ -154,7 +154,7 @@ Briefly explain *why* you're asking when it adds value. Example: "I'm asking abo
 <phase name="worktree-setup">
 Before starting codebase analysis, check if this session is running in a Git worktree. A worktree is a separate working folder linked to the same repo - it lets you work on a feature without touching your main code.
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors (older installs), do the manual reads described in this section and Phase 2 instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
 
 ### How to detect a worktree
 Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, fall back to comparing the output of these two commands:
@@ -216,7 +216,7 @@ Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root
 **If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
 ### Read past lessons
-After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` is the older flat format - its content is already the whole file.
+After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
 
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?
