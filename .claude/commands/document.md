@@ -45,7 +45,7 @@ For each changed file:
 
 ## 4. Documentation Style Rules
 
-✅ **Concise** - Sacrifice grammar for brevity
+✅ **Concise** - Short, plain sentences
 ✅ **Practical** - Examples over theory
 ✅ **Accurate** - Code verified, not assumed
 ✅ **Current** - Matches actual implementation
