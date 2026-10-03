@@ -57,7 +57,18 @@ Every cycle has an issue, and this is one. Announce it in one line ("Opening the
 
 ### 3. Judge the manual conventions
 
-For each convention in range whose detector is `manual` (C-4 today), read every file in its scope yourself and judge it against the `Looks behind` prose. Emit a finding for each miss in the same JSON shape, with the file, the line the judgment rests on, and a receipt whose `check` is a read of that file (`sed -n '<start>,<end>p' <file>`) and whose `expect` says what the bytes show. A judgment with no receipt fails tier 1 by definition.
+For each convention in range whose detector is `manual` (C-4 today; C-13 has its own step, 3b), read every file in its scope yourself and judge it against the `Looks behind` prose. Emit a finding for each miss in the same JSON shape, with the file, the line the judgment rests on, and a receipt whose `check` is a read of that file (`sed -n '<start>,<end>p' <file>`) and whose `expect` says what the bytes show. A judgment with no receipt fails tier 1 by definition.
+
+### 3b. Run the prompt audit (C-13)
+
+When C-13 is in range, judge it here rather than by reading files. The other conventions follow what changed in the toolkit; none can say which of this project's own instructions newer models no longer need, and Claude Code ships an audit for that. Invoke the `claude-api` skill through the Skill tool, once, with the arguments `prompt-audit CLAUDE.md and .claude/ (this project's own Claude Code configuration only; leave out enabled plugins; report only, edit nothing)`.
+
+Turn each finding that names a file and line into a C-13 finding in step 1's shape: `what` is the audit's reason, `fix` is its proposed edit, and the receipt's `check` prints the flagged line (`sed -n '<line>p' <file>`) with the flagged text as its `expect`. Two kinds never become findings:
+
+- **A plugin file.** The toolkit owns it, and the next plugin update replaces it.
+- **`.claude/rules/toolkit.md` above its `<!-- Project section:` line.** That part is the toolkit's seed, which C-7 keeps in step with each release, so an edit there comes back as drift. List each one in the digest as open, marked "toolkit text", so the user can report it to the toolkit.
+
+The rest go through step 4's audit and step 6's one batch page like every other finding, so no prompt edit is applied without that approval (M9). They are `manual` findings, so step 6 re-verifies them through the fix-verifier, never by running the audit again. When the call is unavailable (no `claude-api` skill in this session, or the call fails), say so in one line, suggest `/claude-api prompt-audit` by hand once this run is done, and go on to step 4. Either way the audit runs once per project, on the upgrade that brings C-13, with no retry.
 
 ### 4. Audit (M2)
 

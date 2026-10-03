@@ -137,6 +137,15 @@ Why: under the plugin every toolkit command, skill, and agent is registered as `
 
 Why: `.claude/toolkit/review-kinds.md` is how a project adds review kinds of its own: `/tk:review` appends its rows to the detection table and dispatches the agent each row names, with the same per-run prompt and through the same M2 audit as a toolkit finder. A row the review cannot use fails quietly, as a kind that never runs, so the detector reads the file when it is there and reports each row that has other than three cells, names no `subagent_type`, names a `tk:` agent (the toolkit's kinds are already in the table), or names an agent no file under `.claude/agents/` defines, by file name or by its frontmatter `name`. It also reports a named agent that carries Edit, Write or NotebookEdit, or declares no tools list, unless C-5 is in this run's range and already covers that agent by its role, so one agent is never reported twice and never missed (C-5 ranges from 7.0.0, so on a later upgrade it would not see an agent added since); the agent's output contract stays C-4's to judge. The header row and the rule line under it are never rows, and an escaped bar inside a cell does not split it. A project with no such file has no finding, and the folder itself is outside every other convention's scope: it holds the project's own text, not toolkit references. The file can change on any day, so this entry runs on every upgrade.
 
+### C-13: Instructions newer models no longer need
+- **Since:** 7.5.0
+- **Scope:** prompt-files+session-files
+- **Detector:** manual
+- **Looks behind:** `what Claude Code's bundled prompt audit flags in the project's own instruction files: verification rituals, emphasis boosters, mandatory procedures, stale examples, contradictory rules, dated config`
+- **Fix:** the edit the audit proposes, applied only after the batch page approves it; `/tk:upgrade` step 3b runs the audit that judges this entry
+
+Why: the other conventions follow what changed in the toolkit, and none can say which of the project's own instructions a newer model reads too literally. Claude Code ships an audit for that. This entry runs it once, on the upgrade that brings it, rather than on every upgrade: the audit takes minutes, and a finding the user declines would come back each time. `/claude-api prompt-audit` runs it again by hand.
+
 ## How a release adds a convention
 
 1. Append an entry with the next id; ids are never renumbered or reused, so a downstream project can cite one across releases.
