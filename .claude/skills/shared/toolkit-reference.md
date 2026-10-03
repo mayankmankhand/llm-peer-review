@@ -70,7 +70,7 @@ The lessons captured at `/document` are read back at the start of the next `/exp
 | `/ask-gemini` | AI peer review with Gemini debate (up to 3 rounds) |
 | `/pair-debug` | Focused debugging partner - investigate before fixing |
 | `/package-review` | Bundle code into one markdown file to paste into an outside AI for review |
-| `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
+| `/learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - runs when you ask) |
 | `/codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /explore vision mode) |
 | `/audit-html` | Scan your project's own markdown for files that would benefit from an HTML view. Report-only by default; opt-in static view generation (skill). |

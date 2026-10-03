@@ -1,6 +1,6 @@
 ---
 name: learning-opportunity
-description: Pause development to learn a concept at 3 levels of depth. Triggers when unfamiliar patterns, new frameworks, or complex concepts appear during development.
+description: Pause development to learn a concept at 3 levels of depth, when the user asks to understand a pattern, framework or concept better.
 allowed-tools:
   - Read
   - Grep
@@ -13,7 +13,7 @@ allowed-tools:
 **Use this when:** You hit an unfamiliar pattern, framework, or concept and want to pause development to understand it at three levels of depth.
 **Don't use this when:** You are debugging a specific bug (use `/pair-debug`) or reviewing code quality (use `/review-code`).
 
-Pause development mode. I want to understand something better.
+Pause development mode: the user wants to understand something better.
 
 ## Teaching Approach
 
