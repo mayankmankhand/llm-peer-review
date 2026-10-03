@@ -22,7 +22,7 @@ allowed-tools:
 
 <rules>
 
-1. **REPORT ONLY by default.** Do NOT generate any HTML view, edit the source markdown, or modify any file unless the user explicitly asks for it after seeing the report.
+1. **Report only, by default.** Generate no HTML view, edit no source markdown and change no file unless the user asks for it after seeing the report.
 2. **HTML is additive, never a migration.** The source markdown stays canonical. Any view generated reads from the markdown; it does not replace it.
 3. **Every project qualifies; not every project has a high-value candidate.** "Nothing here benefits from an HTML view" is a valid result. Do not invent candidates to fill the report.
 4. **Never rebuild what exists.** If the project already has HTML-generation infrastructure (a `package.json` dashboard script, a `.js` that reads markdown and emits/serves HTML), do not propose building a new view. Offer to align the existing output with toolkit visual tokens instead.
@@ -75,7 +75,7 @@ For every file not excluded by a hard veto, evaluate the signals from `html-own-
 - **File so long the human hunts instead of reads:** size over ~500 lines, OR the file has 10+ `##`/`###` sections (the human would Ctrl+F rather than scroll).
 - **Existing hand-built view:** if a `.html` file mirrors the markdown name, treat it as a strong signal that someone already values the view.
 
-Apply hard vetoes from `html-own-files.md` mercilessly. A vetoed file does not appear in the report, even if it would otherwise score high.
+Apply every hard veto from `html-own-files.md`. A vetoed file does not appear in the report, even if it would otherwise score high.
 
 ### 4. Write the report
 

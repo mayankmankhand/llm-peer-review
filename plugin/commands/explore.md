@@ -15,7 +15,7 @@ allowed-tools:
 **Don't use this when:** You already have a clear plan (use `/tk:create-plan`) or you are debugging a specific bug (use `/tk:pair-debug`).
 
 <rules>
-Your task is NOT to implement this yet, but to fully understand and prepare.
+Your task is to fully understand and prepare, not to implement yet.
 </rules>
 
 ## Mode Detection

@@ -49,7 +49,7 @@ The text below is this project's own gate, read from `.claude/toolkit/plan-gate.
   - 🟨 In Progress
   - 🟥 To Do
 - Include dynamic tracking of overall progress percentage (at top)
-- Do NOT add extra scope or unnecessary complexity beyond explicitly clarified details
+- Add no scope or complexity beyond the details the conversation settled
 - Steps should be modular, elegant, minimal, and integrate seamlessly within the existing codebase
 
 </rules>
