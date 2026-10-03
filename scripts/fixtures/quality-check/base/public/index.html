@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notebook</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main>
+    <h1>Notebook</h1>
+    <p class="intro">Write short notes and find them again later.</p>
+    <form id="note-form">
+      <label for="note-text">New note</label>
+      <textarea id="note-text" name="text" rows="3" maxlength="500" required></textarea>
+      <button type="submit">Add</button>
+      <p id="status" role="status"></p>
+    </form>
+    <ul id="notes" aria-label="Your notes"></ul>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "notebook",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small web app for writing short notes",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}
