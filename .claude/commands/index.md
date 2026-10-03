@@ -75,7 +75,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 **Rules:**
 - Be evidence-based. If you cannot point to specific code or comments as evidence for a convention or gotcha, do NOT include it.
 - Group tightly related small files (e.g., a 5-file utility folder) into one module block. Single large files get their own block.
-- Keep each block under ~200 tokens. Your full response should be under ~2000 tokens.
+- Keep each block under ~200 tokens and the whole response under ~2000: every chunk's blocks are merged into one map that must stay under ~10k tokens.
 - Do not output anything besides the module blocks - no preamble, no summary, no commentary.
 
 </template>
