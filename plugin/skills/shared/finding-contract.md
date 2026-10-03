@@ -4,7 +4,7 @@
 
 ### Findings
 
-**The two-sentence contract.** A finding is one sentence, sometimes two, plus a fix line and the check's own output. It is not a record with fields. The four-field structure this replaces (What / Why it matters / Example / Suggested fix) mandated four fields whether or not there were four things to say, and its skip rule told you to drop anything not worth four fields - so the only way to report a small true thing was to inflate it. Measured result: half of every review page was "Why it matters" and "Example", and "Why it matters" opened on a file path rather than a consequence in 42% of cases.
+**The two-sentence contract.** A finding is one sentence, sometimes two, plus a fix line and the check's own output. It is not a record with fields: fixed fields demand something in every slot, so a small true thing gets inflated to fill them, and the consequence ends up buried under restatement.
 
 | Part | Cap | Rule |
 |---|---|---|
@@ -30,7 +30,7 @@ Open prose per finding is capped at **40 words** before the fix line. A reader w
 
 Eleven hedges are banned outright, because an uncalibrated hedge reads as anywhere from 20:80 to 80:20 and so carries no information: *it appears, it is possible that, could potentially, consider whether, it may be worth, you might want to, arguably, in a sense, it is worth noting, somewhat, in certain scenarios*.
 
-**Skip rule, inverted.** The old rule said a finding not worth four fields should not be reported, which taught exactly one behavior: bulk it up. The new rule is the opposite test. **A finding must survive being compressed to one sentence with an honest harm verb in it.** A finding that only exists at 134 words was never a finding. Report the small true thing in eleven words; drop the thing that needs a paragraph to sound important.
+**Skip rule, inverted.** **A finding must survive being compressed to one sentence with an honest harm verb in it.** A finding that only exists at 134 words was never a finding. Report the small true thing in eleven words; drop the thing that needs a paragraph to sound important.
 
 **No identifiers in open prose.** Zero rule IDs, commit hashes, command flags, function names, code spans, or file paths in the two sentences or the fix line. One file path is permitted in the fix line and nowhere else; the location belongs in the finding's own `file:line` slot, which every finding already carries. The reader is not always an engineer, and every identifier is a stop sign: they either halt to decode it or skip the sentence, and they cannot tell from the outside whether what is behind it is trivial or catastrophic. Grep-checkable: `\bM\d{1,2}\b`, `\b[0-9a-f]{7,}\b`, `--[a-z-]+`, `[A-Za-z_]\w*\(\)` and backticked spans must all return zero outside the fix line and the attachments.
 
@@ -47,21 +47,14 @@ Whether you write the finding directly (a direct `/tk:review-*` call) or the orc
 - **R2** ⚠️ `file:line` - Should fix. [Sentence one.]
   - **Fix:** [Cost and choice.]
 
-A worked pair, so the target is unambiguous. Before, at 321 words across four labelled fields with no machine output:
-
-> **R1** ⚠️ `scripts/test-gen-media.js:31` - The test fixture constructs API key literals that match the pre-push tripwire's detection patterns.
->   - **Why it matters:** [134 words opening on a file path, restating the tripwire's design intent and the absence of an allow-list.]
->   - **Example:** [53 words of invented hypothetical beginning "a future contributor could".]
->   - **Suggested fix:** [75 words including function arguments, despite this template forbidding code.]
-
-After, at 46 words plus the check's real output:
+A worked example, so the target is unambiguous - 46 words plus the check's real output:
 
 > **R2** ⚠️ `scripts/test-gen-media.js:31` - Should fix. Your own secret scanner will block your next push.
 >   - The new test file's fake keys are shaped like real ones, so the scanner counts three and refuses.
 >   - **Fix:** One line in that file: build the fake keys from pieces so they stop matching. Ten minutes.
 >   - **Receipt:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js` - tripwire hit, three keys flagged at lines 31 to 33, exit 1.
 
-Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Seventeen in the fix line, carrying a cost. An 86% cut, with evidence added rather than removed.
+Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Seventeen in the fix line, carrying a cost.
 
 ## Illustrative Examples
 
@@ -95,7 +88,7 @@ This example is deliberately on the boundary between "skip-worthy" and "valid Su
 
 - **R4** 💡 `dashboard/utils.ts:120` - Optional. A second copy of the date formatter may silence a future format change.
   - **Fix:** One import, deleting the local copy. Ten minutes, or accept two places to update.
-  - *Boundary note (for the reviewer):* A Suggest, not a skip, because the duplication has real maintainability cost across the codebase. It would be a skip if it were a one-line helper used only inside a single isolated module. Test it the new way: this survives compression to one honest sentence with `may silence` in it, so it is reportable. A finding that needed a paragraph to sound important would not.
+  - *Boundary note (for the reviewer):* A Suggest, not a skip, because the duplication has real maintainability cost across the codebase. It would be a skip if it were a one-line helper used only inside a single isolated module. Test it: this survives compression to one honest sentence with `may silence` in it, so it is reportable. A finding that needed a paragraph to sound important would not.
 
 Note this one has no second sentence. It had nothing to say about who is hit or when it fires, so the line is omitted rather than padded.
 
