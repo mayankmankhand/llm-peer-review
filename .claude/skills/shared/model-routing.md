@@ -38,16 +38,32 @@ Everything else inherits: `/execute` implementers, `/security-audit` area agents
 
 Models are named by alias (`sonnet`, `haiku`), never by dated model IDs, so the roster tracks each current generation without edits.
 
+## Model modes
+
+Each cycle runs in one of three modes. A mode moves only the helpers whose work a stronger judge audits afterward: the eight review finders and `index-mapper`.
+
+| Mode | Finders and `index-mapper` | Judges and `correction-extractor` | Code-writing |
+|---|---|---|---|
+| `best` | the session model | the session model | the main session |
+| `fit` (the default) | the model each agent file names (the roster above) | the session model | the main session |
+| `cheap` | `sonnet` | the session model | the main session |
+
+Cheap runs the finders on Sonnet, which missed a planted bug that every Opus run caught ("Tested and revoked"): it trades catches for cost.
+
+`node .claude/scripts/session-init.js` resolves the mode into the `models` object each of its outputs carries (`--models` prints only that object): a `mode:<m>` word in the command's arguments, passed on as `--mode <m>`, wins; else the newest plan's `**Models:** <m>` line while that plan is unfinished (not yet built, or a commit after its start not yet pushed); else `fit`. Effort is not part of a mode: each agent file keeps one effort for every mode. `models.buildModel` names the model a plan is built on: `opus` for fit and cheap, which `/create-plan` hands to a fresh Opus session, and the session model for best.
+
+**A dispatch copies the value.** Every finder and `index-mapper` dispatch passes `model` set to its `models.perRole` value, where `session` means your own model family's alias (the Agent tool's `model` takes only `sonnet`, `opus`, `haiku` and `fable`). A dispatch that leaves the model out runs the agent file's model, which is fit, never cheap. **A judge dispatch never carries a model:** a per-call model overrides the agent file (measured), so one stray value would move a judge below the work it judges. `scripts/test-model-roster.js` fails on a judge dispatch line that names a model and on a finder or mapper dispatch line that does not copy `models.perRole`.
+
 ## Guardrails
 
 1. **Structured output contracts.** Every worker in the roster returns a checkable format (JSONL findings, fixed module blocks), so weak or malformed output is visible rather than silent. This holds whether or not the worker is pinned: a malformed return is the cheapest signal either way, and the A/B that revoked the review pin caught one.
-2. **Bounded re-dispatch.** When a roster worker's output is weak or malformed, re-dispatch that one worker once - one tier up when it was pinned, same tier when it inherits (there is nothing above the session model to escalate to). Bounded worst case: one extra spawn.
+2. **Bounded re-dispatch.** When a roster worker's output is weak or malformed, re-dispatch that one worker once - on the session model when it ran on a cheaper one (a pin, or its mode's `sonnet`), on the same model when it already ran on the session model (there is nothing above it to escalate to). Bounded worst case: one extra spawn.
 3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
 4. **Rollback is one line.** Delete the `model:` line from the agent file (or dispatch `general-purpose` with no model parameter); everything reverts to inherit.
 
 ## Fallback
 
-If a named agent type from the roster is unavailable, first check registration: an agent added by a plugin install or update, or a file written to `.claude/agents/` mid-session, is not dispatchable until the session reloads it (verified 2026-09-12: two probes ninety seconds apart could not find a freshly written agent file; a fresh process saw it at once). Run `/reload-plugins` once and retry. Still unavailable (an older copy-install that predates `.claude/agents/`, or a downstream project running the toolkit from before the agent existed): dispatch `subagent_type=general-purpose` carrying exactly what that agent's row declares - its model when the row names one, no model parameter at all when the row reads inherit - plus whatever the agent would have preloaded, pasted into the prompt: a finder's `review-<kind>-criteria` and `dispatch-contract` skills (paste the fragments each one includes, listed in the orchestrator's Phase 2, never the SKILL.md file itself: an include line does not expand when pasted), a skeptic's or verifier's M2 or M3 instruction, a critic's or the comparer's fixed prompt. Mirroring the roster is what keeps behavior identical on old and new installs. A tier invented at the call site drifts from the roster the way prose pins did: the roster, not the call site, decides.
+If a named agent type from the roster is unavailable, first check registration: an agent added by a plugin install or update, or a file written to `.claude/agents/` mid-session, is not dispatchable until the session reloads it (verified 2026-09-12: two probes ninety seconds apart could not find a freshly written agent file; a fresh process saw it at once). Run `/reload-plugins` once and retry. Still unavailable (an older copy-install that predates `.claude/agents/`, or a downstream project running the toolkit from before the agent existed): dispatch `subagent_type=general-purpose` carrying exactly the model a dispatch of that agent would carry - for a finder or `index-mapper` its `models.perRole` value, for a judge or the extractor no model parameter at all - plus whatever the agent would have preloaded, pasted into the prompt: a finder's `review-<kind>-criteria` and `dispatch-contract` skills (paste the fragments each one includes, listed in the orchestrator's Phase 2, never the SKILL.md file itself: an include line does not expand when pasted), a skeptic's or verifier's M2 or M3 instruction, a critic's or the comparer's fixed prompt. Mirroring the roster is what keeps behavior identical on old and new installs. A tier invented at the call site drifts from the roster the way prose pins did: the roster, not the call site, decides.
 
 ## Tested and revoked
 
