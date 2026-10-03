@@ -54,6 +54,11 @@
 //                    marketplace pins that tag, so main without it installs
 //                    nothing (R2). A remote that cannot be reached fails.
 //
+// After check 2 it also prints one `info prompt load` line: how many words each
+// prompt file loads against scripts/prompt-load-baseline.json (issue #206). It is
+// information, not a check: never counted, never a failure, skipped silently in a
+// repo without scripts/prompt-load.js.
+//
 // Which commit checks 3, 4 and 5 read: HEAD by default (a manual run). The hook
 // names what is actually being pushed instead, because the pushed commit need
 // not be HEAD (`git push origin other-branch:main`):
@@ -268,6 +273,28 @@ function checkBuild() {
   const out = (r.stdout || '') + (r.stderr || '');
   if (out.trim()) console.log(tail(out, 15));
   report('build', false, 'build-plugin.js --check exited ' + r.status + '; plugin/ is stale, run node scripts/build-plugin.js and commit');
+}
+
+// --- info: prompt load (issue #206) --------------------------------------------------------
+// Not a check: it never passes or fails and is not counted. It prints how many
+// words each prompt file loads against scripts/prompt-load-baseline.json, so
+// growth shows up in every `npm test`; the owner chose warn over fail for #206.
+// test-prompt-load.js guards the counting, so a broken report fails the suites,
+// not this line. A repo without the script (the tests' scratch repos) prints
+// nothing here.
+function infoPromptLoad() {
+  const script = path.join(REPO, 'scripts', 'prompt-load.js');
+  if (!fs.existsSync(script)) return;
+  const r = spawnSync('node', [script, '--warnings-only'], { cwd: REPO, env: CHILD_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  const out = ((r.stdout || '') + (r.stderr || '')).replace(/\s+$/, '');
+  if (r.status !== 0) {
+    console.log('  info prompt load - report unavailable: prompt-load.js exited ' + r.status);
+    if (out) console.log(tail(out, 15));
+    return;
+  }
+  const lines = out.split('\n');
+  console.log('  info prompt load - ' + (lines[0] || 'no output'));
+  for (const l of lines.slice(1)) console.log('       ' + l);
 }
 
 // The commit a revision names (peeling an annotated tag), or null.
@@ -520,6 +547,7 @@ function checkCommits() {
 console.log('release-check: ' + REPO);
 checkSuites();
 checkBuild();
+infoPromptLoad();
 if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref and release tag judge a release, not an everyday test run; run without the flag for the full gate');
 else checkCommits();
 const failedCount = results.filter(ok => !ok).length;

@@ -451,6 +451,23 @@ function releaseRepo(version, tag, opt) {
   check('--help names --tests-only', r.status === 0 && r.out.includes('[--tests-only]'), r.out);
 }
 
+// --- info: the prompt-load report (#206) prints, is never counted, never fails ----------
+{
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  let r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('no scripts/prompt-load.js: no prompt-load line at all', r.status === 0 && !/prompt load/.test(r.out), r.out);
+  write(repo, 'scripts/prompt-load.js', "console.log('baseline scripts/prompt-load-baseline.json: 1 grew, 0 new, 0 removed, 0 shrank');\n"
+    + "console.log('  grew     commands/a.md 1 -> 2 (+1)');\n");
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt-load report: printed as an info line with its warnings',
+    r.status === 0 && /^ {2}info prompt load - baseline scripts\/prompt-load-baseline\.json: 1 grew/m.test(r.out) && /grew {5}commands\/a\.md 1 -> 2 \(\+1\)/.test(r.out), r.out);
+  check('prompt-load report: not counted as a check', /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+  write(repo, 'scripts/prompt-load.js', "console.error('boom');\nprocess.exit(1);\n");
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt-load report that fails: says so, and the run still exits 0',
+    r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+}
+
 // --- hook routing ------------------------------------------------------------------
 const stubDir = tmp('release-hook-stubs-');
 // The tripwire stub records its arguments and the stdin it received, one JSON
