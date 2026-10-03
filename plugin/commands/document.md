@@ -41,7 +41,7 @@ Keep README.md and CLAUDE.md consistent with each other. Never edit `toolkit.md`
 - Note any new files, deleted files, or renamed files
 
 ## 2. Verify Current Implementation
-**CRITICAL**: DO NOT trust existing documentation. Read the actual code.
+Existing documentation may describe old behavior, so read the actual code rather than trusting the docs.
 
 For each changed file:
 - Read the current implementation
