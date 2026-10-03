@@ -85,7 +85,9 @@ function reportLine(n, bugId) {
 // o.raised: bug ids a finder raised (default: o.caught plus o.killed); o.killed:
 // raised, then audited out; o.finderOut: per-kind raw output overrides;
 // o.models: { main, finder, judge }; o.result: result.json overrides;
-// o.mainTools: extra tool uses in the main transcript; o.meta: run.json overrides.
+// o.mainTools: extra tool uses in the main transcript; o.meta: run.json overrides;
+// o.mainTexts: the session's own text, written before its dispatches;
+// o.plans: { name: text } left in the scratch project's plans/ folder.
 function makeReviewRun(o) {
   const dir = tmp('qc-test-run-');
   const home = '/tmp/qc-run.TEST/home';
@@ -114,6 +116,7 @@ function makeReviewRun(o) {
   // One skeptic, the judge whose model is checked.
   write(path.join(slugDir, sid, 'subagents', 'agent-s1.jsonl'), JSON.stringify({ type: 'assistant', message: { model: models.judge, role: 'assistant', content: [{ type: 'text', text: 'R1: STANDS' }] } }) + '\n');
   write(path.join(slugDir, sid, 'subagents', 'agent-s1.meta.json'), JSON.stringify({ agentType: 'tk:audit-skeptic', toolUseId: 'toolu_skeptic' }));
+  for (const t of o.mainTexts || []) mainRecords.push({ type: 'assistant', message: { model: models.main, role: 'assistant', content: [{ type: 'text', text: t }] } });
   mainRecords.push({ type: 'assistant', message: { model: models.main, role: 'assistant', content: toolUses.concat(o.mainTools || []) } });
   mainRecords.push({ type: 'user', message: { role: 'user', content: o.mainToolResults || [] } });
   if (o.synthetic) mainRecords.push({ type: 'assistant', message: { model: '<synthetic>', role: 'assistant', content: [{ type: 'text', text: o.synthetic }] } });
@@ -127,6 +130,7 @@ function makeReviewRun(o) {
   if (killed.length === 0) lines.push('Audited out: none - all findings survived the audit.');
   lines.push('', '### Summary', '- Specialists run: 8 of 8');
   if (!o.noReport) write(path.join(dir, 'project-reports', 'review-orchestrator-2026-10-03-120000.md'), (o.report || lines.join('\n')) + '\n');
+  for (const [name, text] of Object.entries(o.plans || {})) write(path.join(dir, 'project-plans', name), text);
   const meta = { version: 1, role: 'review', arm: 'a', exitCode: 0, wallMs: 600000, lenses: kinds, paths: { tmp: '/tmp/qc-run.TEST', home, project, buildDir: home + '/.claude/plugins/cache/llm-peer-review/tk/7.4.3' }, expect: { main: 'opus', finders: 'opus', mapper: 'opus' }, ...(o.meta || {}) };
   write(path.join(dir, 'run.json'), JSON.stringify(meta));
   const result = { type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: o.cost !== undefined ? o.cost : 5, duration_ms: 600000, num_turns: 40, permission_denials: [], result: 'Review done.', ...(o.result || {}) };
@@ -425,6 +429,82 @@ section('fixture', () => {
   // Neutral: no file the finders read says what was planted (LESSONS, #204).
   const telling = stored.filter(p => /^(base|change)\//.test(p)).filter(p => /\b(planted|answer key|deliberate(ly)? (bug|broken)|known[- ]answer|quality[- ]check|test fixture)\b/i.test(fs.readFileSync(path.join(FIXTURE, p), 'utf8')));
   check('no fixture file names what was planted', telling.length === 0, telling.join(', '));
+});
+
+section('model modes', () => {
+  const file = model => '---\nname: x\ntools: Read\n' + (model ? 'model: ' + model + '\n' : '') + 'effort: high\n---\nbody\n';
+  check('modeFamily: best is the session family whatever the file says', QC.modeFamily('best', file('sonnet'), 'opus') === 'opus');
+  check('modeFamily: cheap is Sonnet whatever the file says', QC.modeFamily('cheap', file('opus'), 'opus') === 'sonnet');
+  check('modeFamily: fit is the file\'s own model', QC.modeFamily('fit', file('sonnet'), 'opus') === 'sonnet' && QC.modeFamily('fit', file('opus'), 'sonnet') === 'opus');
+  check('modeFamily: fit reads inherit, no line and a non-alias as the session family',
+    QC.modeFamily('fit', file('inherit'), 'opus') === 'opus' && QC.modeFamily('fit', file(null), 'sonnet') === 'sonnet' && QC.modeFamily('fit', file('claude-sonnet-5-5'), 'opus') === 'opus');
+
+  // The ship arm patches nothing and needs no --effort.
+  const build = tmp('qc-test-ship-');
+  QC.FINDER_KINDS.forEach((k, i) => write(path.join(build, 'agents', 'review-' + k + '-finder.md'), file(i === 0 ? 'sonnet' : 'inherit')));
+  const ship = QC.armSettings('review', 'ship', { dir: build }, null);
+  check('arm ship: every finder as shipped, marked so nothing is written', ship.length === 8 && ship.every(s => s.shipped) && ship[0].model === 'sonnet' && ship[1].model === 'inherit' && ship[1].effort === 'high');
+  const fm = QC.finderModels('fit', build, 'opus');
+  check('finderModels: fit gives each finder its own file\'s family', fm.code === 'sonnet' && fm.security === 'opus' && Object.keys(fm).length === 8, JSON.stringify(fm));
+  check('finderModels: cheap moves every finder to Sonnet', Object.values(QC.finderModels('cheap', build, 'opus')).every(f => f === 'sonnet'));
+
+  // The mode line.
+  const plan = QC.modeLineCheck(['Resolving the scope first.', 'Scope: 1 commit (abc1234..HEAD), 10 files. Models: cheap, from PLAN-fixture.md'], { mode: 'cheap', from: 'PLAN-fixture' });
+  check('mode line: found in a later text, with where it came from', plan.ok && plan.first === false, JSON.stringify(plan));
+  check('mode line: bold markup still reads', QC.modeLineCheck(['**Models:** best (from the mode: word)'], { mode: 'best', from: 'mode:? ?word|argument' }).ok);
+  const wrong = QC.modeLineCheck(['Models: fit, the default'], { mode: 'cheap' });
+  check('mode line: the wrong mode fails and says what it wanted', !wrong.ok && /want cheap/.test(wrong.detail), wrong.detail);
+  const source = QC.modeLineCheck(['Models: cheap, the default'], { mode: 'cheap', from: 'PLAN-fixture' });
+  check('mode line: the right mode from the wrong place fails', !source.ok && /came from/.test(source.detail), source.detail);
+  check('mode line: no line at all fails', !QC.modeLineCheck(['Review done.'], { mode: 'fit' }).ok);
+
+  // Finders checked against the mode's families, judges against the session.
+  const cheapExpect = { main: 'opus', finders: 'sonnet', finderModels: Object.fromEntries(QC.FINDER_KINDS.map(k => [k, 'sonnet'])) };
+  const onSonnet = analyze(makeReviewRun({ caught: IDS, models: { finder: SONNET }, meta: { expect: cheapExpect } }));
+  check('a cheap run with every finder on Sonnet and the judge on Opus is valid', onSonnet.valid, onSonnet.reasons.join(', '));
+  const perKind = { ...cheapExpect.finderModels, code: 'opus' };
+  const mixed = analyze(makeReviewRun({ caught: IDS, models: { finder: SONNET }, meta: { expect: { main: 'opus', finders: null, finderModels: perKind } } }));
+  check('finderModels wins per kind: a code finder on Sonnet where its file says Opus is invalid',
+    !mixed.valid && mixed.reasons.some(r => /^model:tk:review-code-finder=sonnet \(want opus\)$/.test(r)) && !mixed.reasons.some(r => /security/.test(r)), mixed.reasons.join(', '));
+
+  // The checks a ship run carries: kept apart from validity.
+  const line = 'Scope: 1 commit (abc1234..HEAD), 10 files. Models: cheap, from PLAN-fixture.md';
+  const shipRun = analyze(makeReviewRun({ caught: IDS, models: { finder: SONNET }, mainTexts: [line], meta: { expect: { ...cheapExpect, modeLine: { mode: 'cheap', from: 'PLAN-fixture' } } } }));
+  check('a ship run: the mode check passes, the run is valid, and the first-text rule holds', shipRun.valid && shipRun.checks.length === 1 && shipRun.checks[0].ok && !shipRun.warnings.includes('mode-line-not-first'), JSON.stringify(shipRun.checks));
+  check('a ship run: a report that does not open with the mode line is a warning, not a failure', shipRun.warnings.includes('report-opens-without-mode-line') && shipRun.valid);
+  const noLine = analyze(makeReviewRun({ caught: IDS, models: { finder: SONNET }, meta: { expect: { ...cheapExpect, modeLine: { mode: 'cheap' } } } }));
+  check('a ship run with no mode line: the check fails, the catches still count', noLine.valid && noLine.checks[0].ok === false);
+  const old = analyze(makeReviewRun({ caught: IDS }));
+  check('an older run with no mode expectations carries no checks', Array.isArray(old.checks) && old.checks.length === 0);
+
+  // Text, close and plan checks (the execute and create-plan probes).
+  const exec = analyze(makeReviewRun({ caught: IDS, mainTexts: ['This plan\'s Models line is fit, which builds on Opus; this session runs Sonnet 5.5. To match it, start a new session, run `/model opus`, then `/execute`.'],
+    meta: { expect: { main: 'opus', texts: ['builds on\\W{0,4}Opus', '/model opus'] } } }));
+  check('texts: both patterns found in the session\'s text', exec.checks.length === 2 && exec.checks.every(c => c.ok), JSON.stringify(exec.checks));
+  const header = '# Word Count Plan\n\n**Overall Progress:** `0%`\n**Models:** cheap\n\n## TLDR\nCount words.\n';
+  const cp = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-fixture.md': '# Old\n', 'PLAN-word-count.md': header },
+    result: { result: 'The plan is ready. Start a new session, run `/model opus`, then `/execute`.' },
+    meta: { expect: { main: 'opus', lastText: ['/model opus'], planLine: { mode: 'cheap', skip: ['PLAN-fixture.md'] } } } }));
+  check('planLine and lastText: a new plan with the Models line and the fresh-session close pass', cp.checks.length === 2 && cp.checks.every(c => c.ok), JSON.stringify(cp.checks));
+  const late = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-word-count.md': '# P\n\n**Overall Progress:** `0%`\n\n## Notes\n**Models:** cheap\n' },
+    result: { result: 'Say "go" to run /execute.' }, meta: { expect: { main: 'opus', lastText: ['/model opus'], planLine: { mode: 'cheap', skip: [] } } } }));
+  check('planLine: a Models line outside the header does not count; lastText: a "go" close fails', late.checks.every(c => !c.ok), JSON.stringify(late.checks));
+  const none = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-fixture.md': header }, meta: { expect: { main: 'opus', planLine: { mode: 'cheap', skip: ['PLAN-fixture.md'] } } } }));
+  check('planLine: the plans that were already there are skipped', !none.checks[0].ok && /no new plan/.test(none.checks[0].detail), none.checks[0].detail);
+
+  // A probe's verdict: dispatches first, then the checks.
+  const pv = QC.probeVerdict({ valid: true, models: { byType: { 'tk:index-mapper': ['claude-sonnet-5-5'] } }, checks: [{ name: 'mode line', ok: true, detail: 'Models: cheap' }] }, { probe: 'index-mode', expect: { byType: { 'tk:index-mapper': 'sonnet' } } });
+  check('probeVerdict: the mapper on Sonnet with the mode line passes', pv.ok, pv.why);
+  const pf = QC.probeVerdict({ valid: true, models: { byType: { 'tk:index-mapper': ['claude-sonnet-5-5'] } }, checks: [{ name: 'mode line', ok: false, detail: 'no line' }] }, { probe: 'index-mode', expect: { byType: { 'tk:index-mapper': 'sonnet' } } });
+  check('probeVerdict: a failed check fails the probe', !pf.ok && /mode line/.test(pf.why), pf.why);
+  const pn = QC.probeVerdict({ valid: true, models: { byType: {} }, checks: [] }, { probe: 'review-code-mode', expect: { byType: { 'tk:review-code-finder': 'sonnet' } } });
+  check('probeVerdict: no fan-out fails the probe', !pn.ok && /not dispatched/.test(pn.why), pn.why);
+
+  // Flags that would start a session refuse before anything runs.
+  const badArm = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'z', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('an unknown arm is a usage error that names ship', badArm.status === 2 && /a, b, c or ship/.test(badArm.stderr), badArm.stderr);
+  const badMode = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'ship', '--build', 'HEAD', '--mode-word', 'fast'], { encoding: 'utf8' });
+  check('an unknown mode is a usage error', badMode.status === 2 && /best, fit or cheap/.test(badMode.stderr), badMode.stderr);
 });
 
 section('score command end to end', () => {

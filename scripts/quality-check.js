@@ -29,10 +29,22 @@
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
 //
-//   a  the session model (Opus) at the role's current effort; the mapper at
-//      medium, because its shipped low is the setting under suspicion
-//   b  the session model one effort level lower (the mapper at low)
-//   c  Sonnet at the decided effort, given with --effort
+//   a     the session model (Opus) at the role's current effort; the mapper at
+//         medium, because its shipped low is the setting under suspicion
+//   b     the session model one effort level lower (the mapper at low)
+//   c     Sonnet at the decided effort, given with --effort
+//   ship  no patch: the agent files as the build ships them (plan Step 7)
+//
+// Model modes (#205, plan Step 7). A build with the per-cycle switch resolves a
+// mode for every review: its mode: word (--mode-word), else the Models line of
+// the scratch copy of plans/PLAN-fixture.md (--plan-models), else fit. A run
+// expects each finder on the model its mode names, read from the build's agent
+// files as they stand after the arm's patch, the way session-init.js reads them:
+// best is the session model, cheap is Sonnet, fit is the file's own model (inherit,
+// or no line, is the session model). A ship run, or one given either flag, also
+// expects the session to say "Models: <mode>" and, on a review, where the mode
+// came from. A build without the switch passes no model, so each finder answers
+// on its file's model, which is fit's expectation: the older arms are unchanged.
 //
 // Session settings, the same for every run: --model opus, --effort high (the
 // orchestrator's effort is pinned, so only the arm's agents vary), the
@@ -45,15 +57,25 @@
 // (--max-usd), and the whole measurement has one approved budget (see Budget).
 //
 // Usage:
-//   node scripts/quality-check.js --role review --arm <a|b|c> --build <git-ref|tree>
+//   node scripts/quality-check.js --role review --arm <a|b|c|ship> --build <git-ref|tree>
 //        [--effort <level>] [--max-usd <n>] [--label <text>] [--mode-word <best|fit|cheap>]
 //        [--plan-models <best|fit|cheap>] [--keep]
-//   node scripts/quality-check.js --role mapper --arm <a|b|c> --build <git-ref|tree>
+//   node scripts/quality-check.js --role mapper --arm <a|b|c|ship> --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
 //   node scripts/quality-check.js --probe <browser|audit|models|review> --build <git-ref|tree>
+//   node scripts/quality-check.js --probe <mode-probe> --build <git-ref|tree> [--mode-word <m>]
+//        the model-mode checks of plan Step 7, one short session each, on the fixture:
+//        index-mode         /tk:index [mode:<m>]: the mapper answers on the mode's model
+//        review-code-mode   /tk:review-code [mode:<m>] on four changed files: its
+//                           fan-out finders answer on the mode's model
+//        execute-mismatch   /tk:execute on a Sonnet session of a one-step plan whose
+//                           Models line is fit: it prints the build-model note
+//        create-plan-cheap  /tk:create-plan from a fixed summary naming cheap: the
+//                           plan carries **Models:** cheap and the close gives the
+//                           fresh-session steps (/model opus), not "go"
 //   node scripts/quality-check.js --budget                 the ledger against the approval
 //   node scripts/quality-check.js --approve <usd>          record the owner's approved total
 //
@@ -97,7 +119,7 @@
 // after the owner says yes.
 //
 // Exit codes: 0 done (a valid run, or a score); 2 usage error; 3 the run was
-// invalid; 4 the budget refused the run; 5 a probe failed; 6 the owner's real
+// invalid; 4 the budget refused the run; 5 a probe or a mode check failed; 6 the owner's real
 // config changed during the run (checked before and after every session); 7 the
 // owner's login token could expire during the run (tokenWindowProblem, below).
 
@@ -119,12 +141,16 @@ const REAL_HOME = os.homedir();
 const NODE_MODULES = path.join(REPO, '.claude', 'scripts', 'node_modules');
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const MODES = ['best', 'fit', 'cheap'];
 const FINDER_KINDS = ['code', 'security', 'ux', 'plan', 'commands', 'browser', 'deps', 'copy'];
 const SESSION_MODEL = 'opus';
 const SESSION_EFFORT = 'high';
 const PORT = 3000;
 const SESSION_TIMEOUT_MS = 90 * 60 * 1000;
 const DEFAULT_MAX_USD = { review: 25, mapper: 8, probe: 5 };
+// The two mode probes that run a whole command flow (a fan-out and its audit; an
+// /index, a plan and its critic) get a larger cap than a one-call probe.
+const PROBE_MAX_USD = { 'review-code-mode': 10, 'create-plan-cheap': 10 };
 
 // Added to every session's system prompt. The last sentence is the #206 lesson:
 // in an unattended run, one denied call made the model skip a later, different call.
@@ -159,6 +185,73 @@ function frontmatterValue(text, key) {
   if (!fm) return null;
   const m = new RegExp('^' + key + ':[ \\t]*(.*)$', 'm').exec(fm[1]);
   return m ? m[1].trim() : null;
+}
+
+// The family a helper the mode moves should answer on, from its agent file's text
+// as the build holds it (after any arm patch), resolved the way session-init.js
+// resolves it: best is the session family, cheap is Sonnet, fit is the file's own
+// model, where inherit, no model line or a value that is not an alias is the
+// session family.
+function modeFamily(mode, agentText, sessionFamily) {
+  if (mode === 'best') return sessionFamily;
+  if (mode === 'cheap') return 'sonnet';
+  const value = String(frontmatterValue(agentText, 'model') || '').toLowerCase();
+  return ['sonnet', 'opus', 'haiku', 'fable'].includes(value) ? value : sessionFamily;
+}
+
+// The first "Models: <mode>" a session wrote, checked against want: { mode, from },
+// where from, when set, is a pattern for where the mode came from (the plan's
+// name, the mode: word, or the default) that the same line, else the same text
+// block, must also carry. `first` says whether it was the session's first text.
+const MODE_RE = /\bModels\b\W{0,6}(best|fit|cheap)\b/i;
+function modeLineCheck(texts, want) {
+  for (let i = 0; i < texts.length; i++) {
+    const line = texts[i].split('\n').find(l => MODE_RE.test(l));
+    if (!line) continue;
+    const got = MODE_RE.exec(line)[1].toLowerCase();
+    const from = want.from ? new RegExp(want.from, 'i') : null;
+    const fromOk = !from || from.test(line) || from.test(texts[i]);
+    let detail = line.trim().slice(0, 200);
+    if (got !== want.mode) detail += ' (want ' + want.mode + ')';
+    else if (!fromOk) detail += ' (does not say where the mode came from: ' + want.from + ')';
+    return { name: 'mode line', ok: got === want.mode && fromOk, first: i === 0, detail };
+  }
+  return { name: 'mode line', ok: false, first: false, detail: 'no "Models: <mode>" line in the session\'s text' };
+}
+
+// session-init.js's Models line, which /create-plan writes under the progress line.
+const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
+
+// The checks a run's expect asks for beyond validity, each { name, ok, detail }:
+// the mode line (modeLine), text the session must write somewhere (texts) or in
+// its final answer (lastText), and the Models line in the header of a plan it
+// wrote (planLine: { mode, skip: plans that were there before }).
+function expectChecks(expect, main, run) {
+  const checks = [];
+  if (expect.modeLine) checks.push(modeLineCheck(main.texts, expect.modeLine));
+  for (const t of expect.texts || []) {
+    const re = new RegExp(t, 'i');
+    const hit = main.texts.find(x => re.test(x));
+    checks.push({ name: 'says /' + t + '/', ok: !!hit, detail: hit ? hit.split('\n').find(l => re.test(l)).trim().slice(0, 200) : 'not in the session\'s text' });
+  }
+  const final = run.result && typeof run.result.result === 'string' ? run.result.result : main.lastText;
+  for (const t of expect.lastText || []) {
+    const ok = new RegExp(t, 'i').test(final || '');
+    checks.push({ name: 'closes with /' + t + '/', ok, detail: ok ? 'in the final answer' : 'not in the final answer: ' + String(final || '').slice(-200) });
+  }
+  if (expect.planLine) {
+    const want = expect.planLine;
+    const fresh = Object.entries(run.plans || {}).filter(([name]) => !(want.skip || []).includes(name));
+    const named = fresh.map(([name, text]) => {
+      const header = text.split(/\n## /)[0];
+      const m = MODELS_LINE.exec(header);
+      return { name, mode: m ? m[1].toLowerCase() : null };
+    });
+    const hit = named.find(p => p.mode === want.mode);
+    checks.push({ name: 'plan Models line', ok: !!hit,
+      detail: hit ? hit.name + ': **Models:** ' + hit.mode : fresh.length === 0 ? 'no new plan was written' : named.map(p => p.name + (p.mode ? ' names ' + p.mode : ' has no Models line in its header')).join('; ') });
+  }
+  return checks;
 }
 
 // Sets `model:` and `effort:` in an agent file's frontmatter: a line that exists
@@ -490,8 +583,9 @@ function analyzeRun(run, answers) {
     const fams = [...new Set(s.d.models.filter(m => m !== '<synthetic>').map(familyOf))];
     a.models.byType[type] = [...new Set([...(a.models.byType[type] || []), ...s.d.models.filter(m => m !== '<synthetic>')])];
     let want = expect.main;
+    const kind = /review-([a-z]+)-finder$/.exec(type);
     if (expect.byType && expect.byType[type]) want = expect.byType[type];
-    else if (/review-[a-z]+-finder$/.test(type) && !/review-finder$/.test(type)) want = expect.finders || expect.main;
+    else if (kind) want = (expect.finderModels && expect.finderModels[kind[1]]) || expect.finders || expect.main;
     else if (/index-mapper$/.test(type)) want = expect.mapper || expect.main;
     else if (!/^(tk:)?(audit-skeptic|fix-verifier|plan-critic|design-critic|design-comparer|correction-extractor|review-[a-z]+-finder|index-mapper|review-finder)$/.test(type)) warnings.push('other-agent:' + type);
     if (fams.length > 0 && fams.some(f => f !== want)) reasons.push('model:' + type + '=' + fams.join('+') + ' (want ' + want + ')');
@@ -520,6 +614,14 @@ function analyzeRun(run, answers) {
   if (meta.role === 'probe') a.probe = meta.probe || null;
   if (meta.role === 'review' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
   else if (meta.role === 'mapper') analyzeMapper(a, run, main, subs, reasons);
+
+  // The model-mode checks (plan Step 7): failures do not void the run's catches,
+  // so they are kept apart from validity and decide the exit code on their own.
+  a.checks = expectChecks(expect, main, run);
+  const modeCheck = a.checks.find(c => c.name === 'mode line');
+  if (modeCheck && modeCheck.ok && !modeCheck.first) warnings.push('mode-line-not-first');
+  // /review also opens its report with the scope line that carries the mode.
+  if (expect.modeLine && run.report && !MODE_RE.test(run.report.split('\n').slice(0, 12).join('\n'))) warnings.push('report-opens-without-mode-line');
 
   a.valid = reasons.length === 0;
   return a;
@@ -727,6 +829,9 @@ function loadRun(dir) {
   const reports = walk(path.join(dir, 'project-reports')).filter(f => /\/review-orchestrator-[^/]+\.md$/.test(f)).sort();
   const reportFile = reports.length ? reports[reports.length - 1] : null;
   const gitFile = path.join(dir, 'project-git.json');
+  // The scratch project's plans as the session left them, by file name.
+  const plans = {};
+  for (const f of walk(path.join(dir, 'project-plans')).filter(f => /\.md$/.test(f))) plans[path.basename(f)] = fs.readFileSync(f, 'utf8');
   return {
     dir, meta, result,
     main: mainFile ? readJsonl(mainFile) : [],
@@ -734,6 +839,7 @@ function loadRun(dir) {
     report: reportFile ? fs.readFileSync(reportFile, 'utf8') : null,
     reportFile,
     projectGit: readJson(gitFile),
+    plans,
   };
 }
 
@@ -849,6 +955,11 @@ function armSettings(role, arm, build, effortFlag) {
     const current = frontmatterValue(text, 'effort') || 'high';
     let model;
     let effort;
+    if (arm === 'ship') {
+      // As shipped: nothing is patched, so --effort does not apply.
+      out.push({ file, name, before: { model: frontmatterValue(text, 'model'), effort: current }, model: frontmatterValue(text, 'model'), effort: current, shipped: true });
+      continue;
+    }
     if (arm === 'a') { model = SESSION_MODEL; effort = role === 'mapper' ? 'medium' : current; }
     else if (arm === 'b') { model = SESSION_MODEL; effort = lowerEffort(role === 'mapper' ? 'medium' : current); }
     else if (arm === 'c') { model = 'sonnet'; effort = effortFlag; }
@@ -862,7 +973,17 @@ function armSettings(role, arm, build, effortFlag) {
 }
 
 function applyArm(settings) {
-  for (const s of settings) fs.writeFileSync(s.file, patchAgent(fs.readFileSync(s.file, 'utf8'), { model: s.model, effort: s.effort }));
+  for (const s of settings) if (!s.shipped) fs.writeFileSync(s.file, patchAgent(fs.readFileSync(s.file, 'utf8'), { model: s.model, effort: s.effort }));
+}
+
+// The family each helper a mode moves should answer on, read from the build's
+// agent files as they stand now (after the arm's patch).
+function finderModels(mode, buildDir, sessionFamily) {
+  const read = name => fs.readFileSync(path.join(buildDir, 'agents', name + '.md'), 'utf8');
+  return Object.fromEntries(FINDER_KINDS.map(k => [k, modeFamily(mode, read('review-' + k + '-finder'), sessionFamily)]));
+}
+function mapperModel(mode, buildDir, sessionFamily) {
+  return modeFamily(mode, fs.readFileSync(path.join(buildDir, 'agents', 'index-mapper.md'), 'utf8'), sessionFamily);
 }
 
 // Windows browser launchers that do nothing, first on PATH, so a review's
@@ -937,7 +1058,7 @@ function claudeVersion() {
 // One headless session through scripts/setup/headless-session.sh.
 function runSession(o) {
   const args = [HARNESS, '--build', o.build, '--project', o.project, '--home', o.home, '--mode', 'bypassPermissions', '--',
-    '--model', SESSION_MODEL, '--effort', SESSION_EFFORT, '--output-format', 'json', '--max-budget-usd', String(o.maxUsd),
+    '--model', o.sessionModel || SESSION_MODEL, '--effort', SESSION_EFFORT, '--output-format', 'json', '--max-budget-usd', String(o.maxUsd),
     '--strict-mcp-config', '--disallowedTools', 'Artifact,ArtifactComments,ArtifactData',
     '--append-system-prompt', SYSTEM_NOTE, o.prompt];
   const started = Date.now();
@@ -1044,12 +1165,40 @@ function fillMapperTemplate(template, files) {
   return template.replace(line, files.map(f => '- ' + f).join('\n'));
 }
 
+// The execute-mismatch probe's plan: one small step, Models line fit.
+const MISMATCH_PLAN = '# README Note Plan\n\n**Overall Progress:** `0%`\n**Models:** fit\n\n## TLDR\n'
+  + 'One sentence in the README about note length.\n\n## Tasks\n'
+  + '- [ ] 🟥 **Step 1: README note** - add the sentence "Notes have no length limit." as the last line of README.md\n\n## Outcomes\n';
+
+// Commits MISMATCH_PLAN on top of the fixture as the newest plan (session-init.js
+// picks the newest plan by file time), and gives the scratch repo an identity for
+// the session's own checkpoint commit: the scratch home has no git config.
+function addMismatchPlan(project) {
+  const old = new Date('2026-09-30T12:00:00Z');
+  fs.utimesSync(path.join(project, 'plans', 'PLAN-fixture.md'), old, old);
+  fs.writeFileSync(path.join(project, 'plans', 'PLAN-readme-note.md'), MISMATCH_PLAN);
+  const who = ['-c', 'user.name=Notebook Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false'];
+  git(['add', '-A'], project);
+  git([...who, 'commit', '-q', '-m', 'Plan a README note'], project, { GIT_AUTHOR_DATE: '2026-10-02T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-02T12:00:00Z' });
+  git(['config', 'user.name', 'Notebook Dev'], project);
+  git(['config', 'user.email', 'dev@example.com'], project);
+  git(['config', 'commit.gpgsign', 'false'], project);
+}
+
+// The create-plan probe's input: an exploration's closing summary, fixed, naming cheap.
+const PLAN_SUMMARY = 'Exploration summary, approved by the owner; write the plan now. '
+  + 'Direction: show a word count under each note on the page. '
+  + 'Scope: public/app.js only, counted in the browser when a note renders; no server change. '
+  + 'Decisions: a word is a run of characters between spaces; an empty note shows "0 words" and a one-word note "1 word". '
+  + 'Models: cheap. Open questions: none.';
+
 async function commandRun(o) {
   const role = o.role;
   if (!['review', 'mapper', 'probe'].includes(role)) usage('--role must be review or mapper');
-  if (role !== 'probe' && !['a', 'b', 'c'].includes(o.arm)) usage('--arm must be a, b or c');
+  if (role !== 'probe' && !['a', 'b', 'c', 'ship'].includes(o.arm)) usage('--arm must be a, b, c or ship');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
+  for (const m of [o.modeWord, o.planModels]) if (m !== undefined && !MODES.includes(m)) usage('a mode is best, fit or cheap');
   const budget = budgetCheck(role === 'probe' ? 'probe' : role);
   if (!budget.ok) { console.log(budget.page); process.exit(4); }
   let credentials = null;
@@ -1065,15 +1214,21 @@ async function commandRun(o) {
   try { build = prepareBuild(o.build, home, tmp); }
   catch (e) { fs.rmSync(tmp, { recursive: true, force: true }); throw e; }
   const buildLabel = build.sha ? build.sha.slice(0, 7) : 'tree';
-  const kind = role === 'probe' ? 'probe-' + o.probe : role + '-' + o.arm;
+  // The mode a review run resolves, named in its folder when it was chosen.
+  const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
+  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role + '-' + o.arm + modeTag;
   const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
   fs.mkdirSync(out, { recursive: true });
+  // Opus, except the probe that checks /execute's note on a session running on
+  // another model than the plan's build model.
+  const sessionModel = o.probe === 'execute-mismatch' ? 'sonnet' : SESSION_MODEL;
+  const sessionFamily = familyOf(sessionModel);
   const meta = {
     version: 1, role, arm: o.arm || null, label: o.label || '', probe: o.probe || null,
     build: { spec: o.build, sha: build.sha, version: build.version },
-    session: { model: SESSION_MODEL, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
+    session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
-    expect: { main: 'opus', finders: 'opus', mapper: 'opus' },
+    expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
     fixture: fixtureHash(), startedAt: new Date().toISOString(),
   };
   let serverPid = null;
@@ -1082,8 +1237,16 @@ async function commandRun(o) {
     if (role === 'review' || (role === 'probe' && o.probe === 'review')) {
       const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort) : armSettings('review', 'a', build, null);
       applyArm(settings);
-      meta.patch = settings.map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      meta.expect.finders = settings[0].model;
+      meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
+      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // Where each finder should answer: the mode the review resolves (see Model modes).
+      const mode = o.modeWord || o.planModels || 'fit';
+      meta.expect.finderModels = finderModels(mode, build.dir, sessionFamily);
+      const fams = [...new Set(Object.values(meta.expect.finderModels))];
+      meta.expect.finders = fams.length === 1 ? fams[0] : null;
+      if (o.arm === 'ship' || o.modeWord || o.planModels) {
+        meta.expect.modeLine = { mode, from: o.modeWord ? 'mode:? ?word|argument' : o.planModels ? 'PLAN-fixture' : 'default' };
+      }
       const commits = buildReviewProject(project, o.planModels || null);
       meta.commits = commits;
       meta.lenses = role === 'review' ? FINDER_KINDS : ['code'];
@@ -1096,8 +1259,10 @@ async function commandRun(o) {
       meta.chunk = { file: path.relative(REPO, path.resolve(o.chunk)), sourceRef: chunk.sourceRef, files: chunk.files };
       const settings = armSettings('mapper', o.arm, build, o.effort);
       applyArm(settings);
-      meta.patch = settings.map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      meta.expect.mapper = settings[0].model;
+      meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
+      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // The dispatch below passes no model, so the mapper answers on its file's.
+      meta.expect.mapper = mapperModel('fit', build.dir, sessionFamily);
       fs.mkdirSync(project, { recursive: true });
       const tar = path.join(tmp, 'source.tar');
       git(['archive', '-o', tar, chunk.sourceRef], REPO);
@@ -1128,6 +1293,42 @@ async function commandRun(o) {
       meta.prompt = 'Harness check, no other work. Make exactly two Agent tool calls, one after the other, and pass no model on either: '
         + 'first subagent_type "tk:plan-critic", then subagent_type "tk:design-critic"; description "Harness check"; the prompt for both: '
         + '"This is a harness check, not a review. Reply with the single word OK and nothing else." Then reply with both answers and nothing else.';
+    } else if (o.probe === 'index-mode') {
+      // /tk:index on the fixture: one chunk, so one mapper, on the mode's model.
+      const mode = o.modeWord || 'fit';
+      meta.commits = buildReviewProject(project, null);
+      meta.expect.mapper = mapperModel(mode, build.dir, sessionFamily);
+      meta.expect.byType = { 'tk:index-mapper': meta.expect.mapper };
+      meta.expect.modeLine = { mode };
+      meta.prompt = '/tk:index' + (o.modeWord ? ' mode:' + o.modeWord : '');
+    } else if (o.probe === 'review-code-mode') {
+      // A direct /tk:review-code on four changed files takes the bigger-change path
+      // and fans out to review-code-finder calls, each on the mode's model.
+      const mode = o.modeWord || 'fit';
+      const commits = buildReviewProject(project, null);
+      meta.commits = commits;
+      meta.expect.finderModels = finderModels(mode, build.dir, sessionFamily);
+      meta.expect.byType = { 'tk:review-code-finder': meta.expect.finderModels.code };
+      meta.expect.modeLine = { mode };
+      meta.prompt = '/tk:review-code' + (o.modeWord ? ' mode:' + o.modeWord : '') + ' the changes in ' + commits.base
+        + '..HEAD to server.js, public/app.js, scripts/import-notes.js and scripts/rotate-backups.sh; report only, no chaining';
+    } else if (o.probe === 'execute-mismatch') {
+      // A Sonnet session builds a plan whose Models line is fit: /tk:execute notes in
+      // one line that the plan builds on Opus, gives the fresh-session steps, and carries on.
+      meta.commits = buildReviewProject(project, null);
+      addMismatchPlan(project);
+      meta.expect.texts = ['builds on\\W{0,4}Opus', '/model opus'];
+      meta.prompt = '/tk:execute no chaining';
+    } else if (o.probe === 'create-plan-cheap') {
+      // /tk:create-plan from a summary naming cheap: the plan's Models line, the
+      // critic on the session model, and the fresh-session close. With no map yet,
+      // it runs /index mode:cheap first, so a mapper may answer too, on Sonnet.
+      meta.commits = buildReviewProject(project, null);
+      meta.expect.byType = { 'tk:plan-critic': sessionFamily };
+      meta.expect.mapper = mapperModel('cheap', build.dir, sessionFamily);
+      meta.expect.planLine = { mode: 'cheap', skip: ['PLAN-fixture.md'] };
+      meta.expect.lastText = ['/model opus'];
+      meta.prompt = '/tk:create-plan ' + PLAN_SUMMARY;
     } else {
       usage('unknown probe ' + o.probe);
     }
@@ -1136,7 +1337,7 @@ async function commandRun(o) {
     console.log('quality-check: ' + budget.note);
     const env = sessionEnv(tmp, envExtra);
     const configBefore = realConfigSnapshot();
-    const r = runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env });
+    const r = runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env, sessionModel });
     meta.exitCode = r.status;
     meta.wallMs = r.wallMs;
     meta.realConfig = compareSnapshots(configBefore, realConfigSnapshot());
@@ -1150,6 +1351,7 @@ async function commandRun(o) {
     stopServer(serverPid);
     copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'));
     copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'));
+    copyDir(path.join(project, 'plans'), path.join(out, 'project-plans'));
     if (fs.existsSync(path.join(project, 'artifacts', 'html', 'review.html'))) fs.copyFileSync(path.join(project, 'artifacts', 'html', 'review.html'), path.join(out, 'review.html'));
     if (fs.existsSync(path.join(project, '.git'))) {
       const st = sh('git', ['status', '--porcelain'], { cwd: project, env: GIT_ENV });
@@ -1179,6 +1381,12 @@ async function commandRun(o) {
       : 'INVALID: rerun once. A second invalid run pages the owner (M1).');
     process.exit(3);
   }
+  // A valid review whose mode check failed: the catches stand, the routing does not.
+  const failed = (analysis.checks || []).filter(c => !c.ok);
+  if (failed.length) {
+    console.log('MODE CHECK FAILED: ' + failed.map(c => c.name + ': ' + c.detail).join('; '));
+    process.exit(5);
+  }
 }
 
 function probeVerdict(a, meta) {
@@ -1192,7 +1400,9 @@ function probeVerdict(a, meta) {
     if (got.length === 0) return { ok: false, why: type + ' was not dispatched' };
     if (got.some(f => f !== want)) return { ok: false, why: type + ' answered on ' + got.join('+') + ', want ' + want };
   }
-  return { ok: true, why: Object.entries(meta.expect.byType || {}).map(([t, w]) => t + ' on ' + w).join(', ') };
+  const failed = (a.checks || []).filter(c => !c.ok);
+  if (failed.length) return { ok: false, why: failed.map(c => c.name + ': ' + c.detail).join('; ') };
+  return { ok: true, why: [...Object.entries(meta.expect.byType || {}).map(([t, w]) => t + ' on ' + w), ...(a.checks || []).map(c => c.name + ': ' + c.detail)].join(', ') };
 }
 
 function money(x) { return typeof x === 'number' ? '$' + x.toFixed(2) : 'n/a'; }
@@ -1204,6 +1414,7 @@ function printRunSummary(a, verbose) {
   console.log('  valid: ' + (a.valid ? 'yes' : 'NO (' + a.reasons.join(', ') + ')') + (a.warnings.length ? '; warnings: ' + a.warnings.join(', ') : ''));
   console.log('  cost: ' + money(a.costUsd) + ', time: ' + mins(a.wallMs) + ', turns: ' + (a.turns || 'n/a'));
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
+  for (const c of a.checks || []) console.log('  check ' + c.name + ': ' + (c.ok ? 'ok' : 'FAILED') + ' - ' + c.detail);
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
@@ -1327,7 +1538,7 @@ async function main() {
       return;
     }
     o.role = 'probe';
-    o.maxUsd = o.maxUsd || DEFAULT_MAX_USD.probe;
+    o.maxUsd = o.maxUsd || PROBE_MAX_USD[o.probe] || DEFAULT_MAX_USD.probe;
     return commandRun(o);
   }
   if (!o.maxUsd) o.maxUsd = DEFAULT_MAX_USD[o.role] || DEFAULT_MAX_USD.review;
@@ -1378,6 +1589,7 @@ module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
+  modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict,
 };
 
 if (require.main === module) {
