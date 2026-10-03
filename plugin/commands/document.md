@@ -164,7 +164,7 @@ Keep this short. A list they can scan and correct, not a report.
 
 ### Append what they accepted
 
-Write the accepted rows as `rows.json` in a fresh folder from `mktemp -d /tmp/correction-rows.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), then append them. Two parallel sessions must never share the file: the script deletes it after a successful `--add`, so a shared name lets one session eat the other's rows (holistic review, R21).
+Write the accepted rows as `rows.json` in a fresh folder from `mktemp -d /tmp/correction-rows.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), then append them. Two parallel sessions must never share the file: the script deletes it after a successful `--add`, so a shared name lets one session eat the other's rows.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --add --data <folder>/rows.json
