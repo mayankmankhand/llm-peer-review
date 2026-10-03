@@ -115,19 +115,24 @@
       "lineMatch": false,
       "match": [
         [
-          "(no|without|missing|lacks?|skips?)( a| any)? confirm"
+          "(no|without|missing|lacks?|skips?)( a| any)? confirm",
+          "clear|delet|wip(e|es|ed|ing)\\b|eras|remov"
         ],
         [
-          "confirm(ation)? (step|dialog|prompt)"
+          "confirm(ation)? (step|dialog|prompt)",
+          "clear|delet|wip(e|es|ed|ing)\\b|eras|remov"
         ],
         [
-          "undo"
+          "undo",
+          "clear|delet|wip(e|es|ed|ing)\\b|eras|remov"
         ],
         [
-          "irreversib|permanent|no way back|cannot be (undone|recovered)"
+          "irreversib|permanent|no way back|cannot be (undone|recovered)",
+          "clear|delet|wip(e|es|ed|ing)\\b|eras|remov"
         ],
         [
-          "(one|single|accidental|mis)[- ]?(click|tap)"
+          "(one|single|accidental|mis)[- ]?(click|tap)",
+          "clear|delet|wip(e|es|ed|ing)\\b|eras|remov"
         ]
       ]
     },

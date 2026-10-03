@@ -212,6 +212,11 @@ section('finder output and matching', () => {
   check('live: a vague sentence is not a catch, whatever its receipt names', !QC.bugMatches(BUG[KNOWN], QC.rawToMatchable({ ...nullMatch, what: 'Should fix. The first backup breaks.' })));
   const r5 = { what: 'Should fix. Clear all deletes every note in one click, with no confirmation and no undo.', context: 'It sits beside Export with the same styling.', fields: [{ label: 'Actual', value: 'The server sets notes to [] and overwrites data/notes.json (server.js:86-89).' }] };
   check('live: an attachment naming Export and notes.json does not make a finding the export bug', !QC.bugMatches(BUG['plan-export-json'], { ...QC.rawToMatchable(r5), file: 'server.js' }));
+  // From the second e22d24d run: a finding about the empty-search message says
+  // losing notes "cannot be undone", which alone matched the clear-all key.
+  const r13 = { severity: 'warn', file: { relPath: 'public/app.js', line: 15 }, what: 'Should fix. A search with no results shows \'No notes yet\', which misleads people into thinking their notes are gone.', context: 'It fires on any typo in the search box, in an app where losing notes cannot be undone.', fix: 'One branch: show a separate no-matches message when a search is active.' };
+  check('live: a finding that only says losing notes cannot be undone is not the clear-all bug', !QC.bugMatches(BUG['ux-clear-all-no-confirm'], QC.rawToMatchable(r13)));
+  check('live: the clear-all catch still matches with the clearing action required', QC.bugMatches(BUG['ux-clear-all-no-confirm'], { file: 'public/app.js', line: 41, text: 'Should fix. Once the crash is fixed, one tap on Clear all deletes every note with no way back.' }));
 });
 
 section('report parsing', () => {
