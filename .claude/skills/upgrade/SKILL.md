@@ -68,7 +68,7 @@ Turn each finding that names a file and line into a C-13 finding in step 1's sha
 - **A plugin file.** The toolkit owns it, and the next plugin update replaces it.
 - **`.claude/rules/toolkit.md` above its `<!-- Project section:` line.** That part is the toolkit's seed, which C-7 keeps in step with each release, so an edit there comes back as drift. List each one in the digest as open, marked "toolkit text", so the user can report it to the toolkit.
 
-The rest go through step 4's audit and step 6's one batch page like every other finding, so no prompt edit is applied without that approval (M9). They are `manual` findings, so step 6 re-verifies them through the fix-verifier, never by running the audit again. When the call is unavailable (no `claude-api` skill in this session, or the call fails), say so in one line, suggest `/claude-api prompt-audit` by hand once this run is done, and go on to step 4. Either way the audit runs once per project, on the upgrade that brings C-13, with no retry.
+The rest go through step 4's audit and step 6's one batch page like every other finding, so no prompt edit is applied without that approval (M9). They are `manual` findings, so step 6 re-verifies them through the fix-verifier, never by running the audit again. When the call is unavailable, say so in one line and go on to step 4: with no `claude-api` skill in this session, suggest updating Claude Code, which ships the skill, and then running `/claude-api prompt-audit`; when the call fails, suggest `/claude-api prompt-audit` by hand once this run is done. Either way the audit runs once per project, on the upgrade that brings C-13, with no retry.
 
 ### 4. Audit (M2)
 
