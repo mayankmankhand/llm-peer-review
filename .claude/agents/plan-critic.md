@@ -21,4 +21,4 @@ Reason silently, then write out only the result, in exactly this shape so the lo
 
 Gap categories are one of `Decision`, `Step`, `Dependency`, `Verification`, `Risk`. Up to six gap lines, most important first. No preamble, no praise, no closing remarks, and no score: the first gap line comes first. A plan with no material gaps returns exactly the one line `No material gaps` and nothing else.
 
-This agent declares no model and runs at high effort: a critic whose gaps decide what the plan fixes is a judge, and a judge never runs below the tier of the work it judges (`.claude/skills/shared/model-routing.md`).
+This agent declares `model: inherit` and runs at high effort: a critic whose gaps decide what the plan fixes is a judge, and a judge never runs below the tier of the work it judges (`.claude/skills/shared/model-routing.md`).

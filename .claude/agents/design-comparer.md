@@ -19,4 +19,4 @@ Why: <the one difference that decided it, one line>
 
 `Closer: neither` is the answer when neither image is clearly closer to the bar, two images that look the same included. No preamble and no closing remarks: the `Closer:` line comes first.
 
-This agent declares no model, so it runs on the session model: a judge whose verdict decides whether a round is kept or reverted never runs below the tier of the work it judges (`.claude/skills/shared/model-routing.md`).
+This agent declares `model: inherit`, so it runs on the session model: a judge whose verdict decides whether a round is kept or reverted never runs below the tier of the work it judges (`.claude/skills/shared/model-routing.md`).

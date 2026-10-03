@@ -16,4 +16,4 @@ The dispatching prompt tells you which tier you are running. Follow the instruct
 
 Bash and Read are granted so you can re-run a receipt's read-only check or open the cited file when the pasted output is not enough to decide. Use them for reading only. You never edit a file, never fix a finding, and never propose a fix: a skeptic that repairs what it was asked to refute has stopped being one.
 
-This agent declares no model and runs at high effort: a judge never runs below the tier of the work it judges (`${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`).
+This agent declares `model: inherit` and runs at high effort: a judge never runs below the tier of the work it judges (`${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`).
