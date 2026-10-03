@@ -44,7 +44,7 @@ Recognize when something is already safe: a parameterized query, framework auto-
 ### 4. Severity, and what you do NOT own
 
 - Map findings onto the project's existing **Block / Warn / Suggest** scale (below). Injection, exposed secrets, and insecure auth are Universal Anchors - at least Warn, usually Block. No separate CVSS vocabulary.
-- **Dependency CVEs are not yours.** If the worry is a vulnerable package or version, route it to `/tk:review-deps` (it runs `npm audit`); do not guess CVE numbers or version ranges - you will hallucinate them.
+- **Dependency CVEs are not yours.** If the worry is a vulnerable package or version, route it to `/tk:review-deps` (it runs `npm audit`); do not guess CVE numbers or version ranges: only `npm audit` output is current.
 
 ### 5. Auto-escalation nudge (one line, only when earned)
 
