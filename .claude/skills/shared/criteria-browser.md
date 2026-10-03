@@ -4,7 +4,7 @@
 
 ### Step 1: Take an initial screenshot and read the page
 
-Run the initial session below. If the `goto` action fails with a connection error, tell the user: "I can't reach the server. Check that your dev server is running (e.g. `npm run dev`) and confirm the port number." Then stop the review.
+Run the initial session below. If the `goto` action fails with a connection error, start the server once: add `autoStart` to the session (see Auto-Start in the browse API) or run the project's dev command. If it still does not answer, tell the user: "I can't reach the server. Check that your dev server is running (e.g. `npm run dev`) and confirm the port number." Then stop the review; do not retry.
 
 Run a quick browser session to see what's on screen:
 
