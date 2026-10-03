@@ -12,8 +12,6 @@ allowed-tools:
 
 # Copy Review
 
-Be thorough but concise.
-
 **Use this when:** Reviewing reader-facing content for clarity and orientation - web pages, blog posts, landing pages, quick-start guides, research reports, outreach copy, prototypes.
 **Don't use this when:** Reviewing code quality (/review-code), testing a running web app (/review-browser), checking usability and accessibility (/review-ux), reviewing command prompts (/review-commands), checking plan completion (/review-plan), or doing a pre-release check (/review-full).
 

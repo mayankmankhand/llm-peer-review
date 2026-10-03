@@ -11,7 +11,7 @@ allowed-tools:
 
 # Security Review
 
-Be thorough but concise. Read the change like an attacker, not like an author.
+Read the change like an attacker, not like an author.
 
 **Use this when:** Reviewing a code change for application-level security flaws - the kind a diff can actually reveal. Runs automatically inside `/review` whenever code changes, and can be called directly as `/review-security`.
 **Don't use this when:** Auditing dependency versions or CVEs (use `/review-deps`), doing a deep whole-repo security pass (use `/security-audit`), or reviewing non-security code quality (use `/review-code`).

@@ -12,8 +12,6 @@ allowed-tools:
 
 # UX Review
 
-Be thorough but concise.
-
 **Use this when:** Evaluating user experience quality - usability, accessibility, user flows, and how the UI feels to use.
 **Don't use this when:** Testing a running web application in a browser (/review-browser). Reviewing code quality (/review-code), reviewing command prompts (/review-commands), checking plan completion (/review-plan), or doing a pre-release check (/review-full).
 

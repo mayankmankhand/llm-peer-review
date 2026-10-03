@@ -11,8 +11,6 @@ allowed-tools:
 
 # Browser QA Review
 
-Be thorough but concise.
-
 **Use this when:** Verifying a running web application works correctly - visual layout, interactive flows, error states, and runtime behavior.
 **Don't use this when:** Reviewing static code or markup without a running server (use /review-ux). Reviewing code quality (/review-code), command prompts (/review-commands), plan completion (/review-plan), or doing a pre-release check (/review-full).
 

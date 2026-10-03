@@ -20,7 +20,7 @@ allowed-tools:
 
 # Security Review
 
-Be thorough but concise. Read the change like an attacker, not like an author.
+Read the change like an attacker, not like an author.
 
 **Use this when:** Reviewing a code change for application-level security flaws - the kind a diff can actually reveal. Runs automatically inside `/tk:review` whenever code changes, and can be called directly as `/tk:review-security`.
 **Don't use this when:** Auditing dependency versions or CVEs (use `/tk:review-deps`), doing a deep whole-repo security pass (use `/tk:security-audit`), or reviewing non-security code quality (use `/tk:review-code`).

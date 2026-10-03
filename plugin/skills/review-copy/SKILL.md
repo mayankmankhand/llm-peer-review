@@ -21,8 +21,6 @@ allowed-tools:
 
 # Copy Review
 
-Be thorough but concise.
-
 **Use this when:** Reviewing reader-facing content for clarity and orientation - web pages, blog posts, landing pages, quick-start guides, research reports, outreach copy, prototypes.
 **Don't use this when:** Reviewing code quality (/tk:review-code), testing a running web app (/tk:review-browser), checking usability and accessibility (/tk:review-ux), reviewing command prompts (/tk:review-commands), checking plan completion (/tk:review-plan), or doing a pre-release check (/tk:review-full).
 

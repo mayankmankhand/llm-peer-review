@@ -26,8 +26,6 @@ allowed-tools:
 
 # Browser QA Review
 
-Be thorough but concise.
-
 **Use this when:** Verifying a running web application works correctly - visual layout, interactive flows, error states, and runtime behavior.
 **Don't use this when:** Reviewing static code or markup without a running server (use /tk:review-ux). Reviewing code quality (/tk:review-code), command prompts (/tk:review-commands), plan completion (/tk:review-plan), or doing a pre-release check (/tk:review-full).
 

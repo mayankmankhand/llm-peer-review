@@ -11,8 +11,6 @@ allowed-tools:
 
 # Dependency Review
 
-Be thorough but concise.
-
 **Use this when:** Auditing project dependencies for security vulnerabilities, outdated packages, supply chain risks, or license compliance.
 **Don't use this when:** Reviewing code logic (/review-code), testing a running app (/review-browser), or doing a pre-release check (/review-full).
 

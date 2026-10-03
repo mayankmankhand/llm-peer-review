@@ -20,8 +20,6 @@ allowed-tools:
 
 # Slash Command Review
 
-Be thorough but concise.
-
 **Use this when:** Reviewing slash command prompts (.claude/commands/*.md or .claude/skills/*/SKILL.md) - prompt quality, workflow completeness, cross-command consistency.
 **Don't use this when:** Reviewing application code (/tk:review-code), testing a running web app (/tk:review-browser), checking plan completion (/tk:review-plan), evaluating end-user UX (/tk:review-ux), or doing a pre-release check (/tk:review-full).
 

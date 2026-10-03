@@ -11,8 +11,6 @@ allowed-tools:
 
 # Code Review
 
-Be thorough but concise.
-
 **Use this when:** Reviewing code changes - bug fixes, new features, refactors, scripts.
 **Don't use this when:** Testing a running web app (/review-browser), reviewing slash command prompts (/review-commands), checking plan completion (/review-plan), evaluating UX (/review-ux), or doing a pre-release check (/review-full).
 
