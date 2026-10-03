@@ -1,6 +1,6 @@
 # Do-Not-Report List
 
-A living list of finding categories that are **not worth flagging** in this project. It is the noise-control companion to the receipt rule in the output template: the receipt rule keeps unprovable findings out, this list keeps known-noisy *classes* out.
+A living list of finding categories that are **not worth flagging** in this project. It is the noise-control companion to the receipt rule in `finding-contract.md`: the receipt rule keeps unprovable findings out, this list keeps known-noisy *classes* out.
 
 **This list ships nearly empty on purpose.** It is grown from real false alarms, never pre-filled with guesses. When a review surfaces a finding you decide was noise, add its category here so future reviews skip it. Think of it as a `LESSONS.md` scoped to review noise.
 
