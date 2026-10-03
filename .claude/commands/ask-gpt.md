@@ -30,7 +30,7 @@ Record the output. Echo it back to the user so it's anchored in the conversation
 3. If multiple files exist (another parallel `/ask-gpt` tab is running), do NOT just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
 4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gpt-context-<session-id>.md` and `/tmp/ask-gpt-debate-<session-id>.md`. Reconstruct both paths and continue.
 
-**Why this matters:** two parallel Cursor or Claude Code tabs running `/ask-gpt` would otherwise clobber each other's `/tmp/ask-gpt-context.md` and `/tmp/ask-gpt-debate.md`. The session ID gives each run its own isolated pair of files.
+**Why this matters:** two parallel Cursor or Claude Code tabs running `/ask-gpt` would otherwise overwrite each other's context and debate files. The session ID gives each run its own isolated pair.
 
 ## Step 1: Ask What to Review
 
@@ -215,7 +215,7 @@ For each Recommended Action, in R-ID order:
 3. **Apply and re-verify** the survivors per M3, M5, and M6.
 4. **Exit.** Each action takes exactly one exit: page (only per M1), digest with receipts (M8), or log.
 
-Saying **"report only"** on this run keeps the old present-and-wait behavior for that run (M10).
+Saying **"report only"** on this run presents the summary and applies nothing (M10).
 
 </rules>
 
