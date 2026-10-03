@@ -98,7 +98,7 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 <procedure>
 Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for `PLAN-*.md` files.
 
-**Record where the run starts.** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that has a finished step but no start line was begun before this rule: write none, and the handoff below covers that case.
+**Record where the run starts.** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that already has a finished step but no start line gets none: the handoff below covers that case.
 
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task
@@ -124,7 +124,7 @@ A stable URL whose content has gone stale is worse than no page.
 
 ## Chain Into /review (M14)
 
-On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool with the argument `<start>..HEAD`, where `<start>` is the sha on the plan's `**Start commit:**` line. The range is what the review covers: this run committed every step, and a review of uncommitted work alone reported "No changes detected" after exactly such a run. When the plan has no start line (a run begun before that rule), invoke `/review` with no argument, and it covers the newest unpushed commits instead.
+On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool with the argument `<start>..HEAD`, where `<start>` is the sha on the plan's `**Start commit:**` line. The range is what the review covers: this run committed every step, so uncommitted work alone would show the review nothing. When the plan has no start line, invoke `/review` with no argument, and it covers the newest unpushed commits instead.
 
 **Do not chain** when either brake is engaged:
 
