@@ -31,7 +31,7 @@ Read the change like an attacker, not like an author.
 
 <rules>
 
-1. **THE REVIEW PHASE REPORTS ONLY** - Reviewing never edits files; findings with exploit receipts are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
+1. **Report first, then fix** - Reviewing never edits files; findings with exploit receipts are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
 2. **Audit, then auto-fix, with pages** - Security findings are audited before the report per M2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They do not then wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Stay silent when there is nothing to find** - a security reviewer that cries wolf gets muted. See the gate below.
