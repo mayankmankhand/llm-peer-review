@@ -6,7 +6,7 @@ This project runs the LLM Peer Review toolkit. On the plugin its commands are ty
 
 ## How We Work Together
 
-### CRITICAL RULES
+### Rules
 
 <rules>
 

@@ -19,7 +19,7 @@ allowed-tools:
 
 The split exists because a category invented at n=1 is a guess. You cannot see a pattern in the first instance of it, so naming patterns is deliberately deferred until there are instances to look at.
 
-## CRITICAL RULES
+## Rules
 
 <rules>
 

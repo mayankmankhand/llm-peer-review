@@ -6,7 +6,7 @@ The long manual: workflow, command table, plans, map, lessons, ledger, design, H
 
 ## How We Work Together
 
-### CRITICAL RULES
+### Rules
 
 <rules>
 
