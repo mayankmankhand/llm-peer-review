@@ -97,7 +97,8 @@
 // after the owner says yes.
 //
 // Exit codes: 0 done (a valid run, or a score); 2 usage error; 3 the run was
-// invalid; 4 the budget refused the run; 5 a probe failed.
+// invalid; 4 the budget refused the run; 5 a probe failed; 6 the owner's real
+// config changed during the run (checked before and after every session).
 
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
@@ -202,14 +203,13 @@ function parseFinderOutput(text) {
   return { empty: false, noFindings: false, findings, broken };
 }
 
-// The text a JSONL finding is matched on. The receipt is included: the finding's
-// sentences carry no code names (finding-contract.md), so the mechanism a bug is
-// recognized by often appears only in the check or its expected output.
+// A JSONL finding's sentences: what, context, fix and the key built from them.
+// They carry no code names (finding-contract.md), so a bug is recognized in them
+// by its consequence in plain words. The receipt and the attachments are never
+// matched: a receipt that prints a block of code quotes whatever sits nearby, so
+// even a precise pattern turns up in a neighbouring finding's evidence.
 function findingText(f) {
-  const parts = [f.what, f.context, f.fix, f.key];
-  if (Array.isArray(f.fields)) for (const row of f.fields) if (row && row.value) parts.push(row.label + ' ' + row.value);
-  if (f.receipt && typeof f.receipt === 'object') parts.push(f.receipt.check, f.receipt.expect);
-  return parts.filter(p => typeof p === 'string').join(' \n ');
+  return [f.what, f.context, f.fix, f.key].filter(p => typeof p === 'string').join(' \n ');
 }
 
 function normPath(p) {
@@ -244,76 +244,107 @@ function rawToMatchable(f) {
 }
 
 // The review's markdown report, split into the findings that survived the audit
-// and the ones it killed (the "Audited out" section). Each finding is keyed by its
-// R-number; every mention outside the killed section (its full entry, its compact
-// line, its Top Issues mention) adds text and file references to it.
+// and the ones it killed (the "Audited out" section). Only three kinds of line
+// speak for a finding: its own entry line (`- **R3** ...`, or a compact `R3 ⚠️ ...`
+// line), the sub-bullets under that entry, and its segment of a Top Issues line
+// (`🚫 2 Blocks: R1 [code] (...), R2 (...)`). Everything else that names an
+// R-number is a cross-reference and adds nothing: a refuted finding's reason
+// ("while R1 stands"), the Staff Check prose, the Verdict and the Digest. The
+// Receipt row and the attachments (Expected, Actual, Screenshot, Evidence) are kept
+// apart as the entry's evidence, and a skeptic's split line as its split: they
+// quote code and output that name other findings' subjects, and are never matched.
 function parseReport(md) {
   const lines = String(md || '').split(/\r?\n/);
-  let killedFrom = -1;
-  let killedTo = lines.length;
-  let killedLevel = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const h = /^(#{1,6})\s*Audited out\b/i.exec(lines[i]);
-    if (h) { killedFrom = i; killedLevel = h[1].length; break; }
-  }
-  if (killedFrom !== -1) {
-    for (let i = killedFrom + 1; i < lines.length; i++) {
-      const h = /^(#{1,6})\s/.exec(lines[i]);
-      if (h && h[1].length <= killedLevel) { killedTo = i; break; }
-    }
-  }
   const survivors = new Map();
   const killed = new Map();
+  const refRe = /`?([A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)(?::(\d+))?`?/g;
+  const entryOf = (map, id) => {
+    if (!map.has(id)) map.set(id, { id, refs: [], text: '', evidence: '', split: '' });
+    return map.get(id);
+  };
   const add = (map, id, text) => {
-    if (!map.has(id)) map.set(id, { id, refs: [], text: '' });
-    const e = map.get(id);
+    const e = entryOf(map, id);
     e.text += ' \n ' + text;
-    const refRe = /`?([A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)(?::(\d+))?`?/g;
     let m;
+    refRe.lastIndex = 0;
     while ((m = refRe.exec(text)) !== null) {
       if (/^\d+(\.\d+)*$/.test(m[1])) continue;
       e.refs.push({ file: normPath(m[1]), line: m[2] ? Number(m[2]) : null });
     }
   };
+  const entryRe = /^(\s*)[-*]\s+\*\*R(\d+)\*\*/;
+  const compactRe = /^(\s*)(?:[-*]\s+)?R(\d+)\s+(?:🚫|⚠️|💡|\[)/u;
+  const topRe = /^\s*(?:```)?\s*\S{0,4}\s*\d+\s+(?:Blocks?|Warns?|Suggests?)\s*:/i;
+  let section = '';
   let current = null;
-  let currentIndent = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const inKilled = killedFrom !== -1 && i > killedFrom && i < killedTo;
-    const map = inKilled ? killed : survivors;
-    const entry = /^(\s*)(?:[-*]\s+)?\*{0,2}R(\d+)\*{0,2}\b/.exec(line);
-    if (entry && !/^#/.test(line.trim())) {
-      current = { map, id: 'R' + entry[2] };
-      currentIndent = entry[1].length;
-      // A line naming several findings (Top Issues) is split at each R-number.
-      const parts = line.split(/(?=\bR\d+\b)/);
-      for (const part of parts) {
-        const idm = /^R(\d+)\b/.exec(part);
-        if (idm) add(map, 'R' + idm[1], part);
-      }
+  let sawAuditedOut = false;
+  for (const line of lines) {
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    if (h) {
+      section = h[1].trim().toLowerCase();
+      if (/^audited out/.test(section)) sawAuditedOut = true;
+      current = null;
       continue;
     }
-    if (/\bR\d+\b/.test(line) && !/^\s*-\s/.test(line) && !/^#/.test(line.trim())) {
-      // A summary line such as "🚫 2 Blocks: R1 [code] (server.js:61 - ...), R3 (...)".
-      const parts = line.split(/(?=\bR\d+\b)/);
-      for (const part of parts) {
+    if (/^audited out\s*:/i.test(line.trim())) sawAuditedOut = true;
+    const inKilled = /^audited out/.test(section);
+    if (/^(looks good|what i could not check|staff check|summary|digest|specialists dispatched)/.test(section)) { current = null; continue; }
+    const m = entryRe.exec(line) || compactRe.exec(line);
+    if (m) {
+      const map = inKilled ? killed : survivors;
+      current = { map, id: 'R' + m[2], indent: m[1].length };
+      add(map, current.id, line);
+      continue;
+    }
+    if (!inKilled && topRe.test(line)) {
+      for (const part of line.split(/(?=\bR\d+\b)/)) {
         const idm = /^R(\d+)\b/.exec(part);
-        if (idm) add(map, 'R' + idm[1], part);
+        if (idm) add(survivors, 'R' + idm[1], part);
       }
       current = null;
       continue;
     }
-    if (current && line.trim() !== '' && /^\s+/.test(line) && line.search(/\S/) > currentIndent && !/^#/.test(line.trim())) {
+    if (current && /^\s+\S/.test(line) && line.search(/\S/) > current.indent) {
+      const t = line.trim();
+      if (/^[-*]\s+\*\*(Receipt|Expected|Actual|Screenshot|Evidence):\*\*/i.test(t)) { entryOf(current.map, current.id).evidence += t + '\n'; continue; }
+      if (/^[-*]\s+split:/i.test(t)) { entryOf(current.map, current.id).split += t + '\n'; continue; }
       add(current.map, current.id, line);
       continue;
     }
-    if (line.trim() === '' || /^#/.test(line.trim())) current = null;
+    current = null;
   }
   for (const id of killed.keys()) survivors.delete(id);
-  return { survivors: [...survivors.values()], killed: [...killed.values()], hasAuditedOut: killedFrom !== -1 };
+  return { survivors: [...survivors.values()], killed: [...killed.values()], hasAuditedOut: sawAuditedOut };
 }
 
-// True when a report entry ({refs, text}) catches `bug`.
+// Lowercase words, markdown and punctuation dropped, for comparing a finding's
+// sentence with the report line it was formatted into.
+function normWords(s) {
+  return String(s || '').toLowerCase().replace(/[`*_]/g, '').replace(/[^a-z0-9%.\/-]+/g, ' ').trim();
+}
+
+// The report entries a raw finding was formatted into. The orchestrator copies a
+// finding's `what` into its entry line unchanged (review.md, Phase 5), so the
+// sentence is looked up inside each entry's text; findings that share a dedup
+// `key` were merged into one entry, so a link found for one is a link for all.
+function linkRaw(raws, entries) {
+  const links = raws.map(() => []);
+  raws.forEach((r, i) => {
+    const what = normWords(r.what);
+    if (what.length < 20) return;
+    for (const e of entries) if (normWords(e.text).includes(what)) links[i].push(e.id);
+  });
+  const byKey = new Map();
+  raws.forEach((r, i) => { if (r.key) byKey.set(r.key, [...(byKey.get(r.key) || []), i]); });
+  for (const group of byKey.values()) {
+    const ids = [...new Set(group.flatMap(i => links[i]))];
+    for (const i of group) links[i] = ids;
+  }
+  return links;
+}
+
+// True when a report entry ({refs, text}) catches `bug`. Its file references
+// and words come from its own lines, never from its evidence.
 function entryMatches(bug, entry) {
   const refs = entry.refs.length > 0 ? entry.refs : [{ file: '', line: null }];
   return refs.some(r => bugMatches(bug, { file: r.file, line: r.line, text: entry.text }));
@@ -496,7 +527,13 @@ function analyzeRun(run, answers) {
 function analyzeReview(a, run, subs, answers, reasons, warnings) {
   const bugs = answers.bugs;
   a.finders = {};
+  // A contract break is what the review itself treats as one (review.md, Phase 2):
+  // output it cannot use (neither JSONL nor NO FINDINGS), or a finder it had to
+  // dispatch again. Prose wrapped around usable JSONL lines is counted apart, as a
+  // format note: the review reads the lines and moves on, and Opus finders on the
+  // shipped prompts did it in 2 of 8 lenses on the first measured run.
   a.contractBreaks = 0;
+  a.wrapped = 0;
   a.raised = {};
   a.survived = {};
   a.killedRaised = {};
@@ -506,25 +543,28 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
   for (const b of bugs) { a.raised[b.id] = []; a.survived[b.id] = []; }
   const kinds = (run.meta && run.meta.lenses) || FINDER_KINDS;
   for (const k of kinds) a.finders[k] = [];
+  const raws = [];
   for (const s of subs) {
     const type = (s.meta && s.meta.agentType) || '';
     const km = /review-([a-z]+)-finder$/.exec(type);
     if (!km || !a.finders[km[1]]) continue;
     const out = s.d.handback !== null ? s.d.handback : s.d.lastText;
     const parsed = parseFinderOutput(out);
-    a.finders[km[1]].push({ agentId: s.agentId, empty: parsed.empty, noFindings: parsed.noFindings, count: parsed.findings.length, broken: parsed.broken });
-    if (parsed.broken.length > 0) a.contractBreaks++;
+    const unusable = !parsed.empty && !parsed.noFindings && parsed.findings.length === 0;
+    a.finders[km[1]].push({ agentId: s.agentId, empty: parsed.empty, noFindings: parsed.noFindings, count: parsed.findings.length, unusable, broken: parsed.broken });
+    if (parsed.findings.length > 0 && parsed.broken.length > 0) a.wrapped++;
     for (const f of parsed.findings) {
       const mf = rawToMatchable(f);
-      let any = false;
-      for (const b of bugs) if (bugMatches(b, mf)) { a.raised[b.id].push({ kind: km[1], severity: f.severity, what: String(f.what).slice(0, 160) }); any = true; }
-      if (!any) a.unmatchedRaw.push({ kind: km[1], file: mf.file + (mf.line ? ':' + mf.line : ''), what: String(f.what).slice(0, 160) });
+      const hits = bugs.filter(b => bugMatches(b, mf)).map(b => b.id);
+      raws.push({ kind: km[1], what: String(f.what), key: typeof f.key === 'string' ? f.key : '', file: mf.file + (mf.line ? ':' + mf.line : ''), hits });
+      for (const id of hits) a.raised[id].push({ kind: km[1], severity: f.severity, what: String(f.what).slice(0, 160) });
     }
   }
   for (const k of kinds) {
     const attempts = a.finders[k];
     if (attempts.length === 0) reasons.push('missing-lens:' + k);
     else if (attempts[attempts.length - 1].empty) reasons.push('empty-finder:' + k);
+    if (attempts.length > 1 || attempts.some(x => x.unusable)) a.contractBreaks++;
   }
   if (!run.report) { reasons.push('no-report'); return; }
   const rep = parseReport(run.report);
@@ -532,13 +572,26 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
   a.survivorCount = rep.survivors.length;
   a.killedCount = rep.killed.length;
   if (!rep.hasAuditedOut) warnings.push('no-audited-out-section');
+  // A bug survived when a report entry that is still standing carries it: an
+  // entry a matching raw finding was formatted into, or one whose own words
+  // match. A raised bug whose entries all sit in Audited out was killed.
+  const toSurvivor = linkRaw(raws, rep.survivors);
+  const toKilled = linkRaw(raws, rep.killed);
+  const short = e => e.text.replace(/\s+/g, ' ').trim().slice(0, 200);
+  a.killedVia = {};
   for (const b of bugs) {
-    for (const e of rep.survivors) if (entryMatches(b, e)) a.survived[b.id].push({ id: e.id, text: e.text.replace(/\s+/g, ' ').trim().slice(0, 200) });
+    const ids = new Set();
+    raws.forEach((r, i) => { if (r.hits.includes(b.id)) toSurvivor[i].forEach(id => ids.add(id)); });
+    for (const e of rep.survivors) if (entryMatches(b, e)) ids.add(e.id);
+    a.survived[b.id] = rep.survivors.filter(e => ids.has(e.id)).map(e => ({ id: e.id, text: short(e) }));
+    const killedIds = new Set();
+    raws.forEach((r, i) => { if (r.hits.includes(b.id)) toKilled[i].forEach(id => killedIds.add(id)); });
+    a.killedVia[b.id] = [...killedIds];
     a.killedRaised[b.id] = a.raised[b.id].length > 0 && a.survived[b.id].length === 0;
   }
-  for (const e of rep.survivors) {
-    if (!bugs.some(b => entryMatches(b, e))) a.unmatchedSurvivors.push({ id: e.id, text: e.text.replace(/\s+/g, ' ').trim().slice(0, 200) });
-  }
+  const counted = new Set(Object.values(a.survived).flat().map(e => e.id));
+  for (const e of rep.survivors) if (!counted.has(e.id)) a.unmatchedSurvivors.push({ id: e.id, text: short(e) });
+  for (const r of raws) if (r.hits.length === 0) a.unmatchedRaw.push({ kind: r.kind, file: r.file, what: r.what.slice(0, 160) });
   if (run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
 }
 
@@ -835,6 +888,43 @@ function sessionEnv(tmp, extra) {
   return { ...env, ...(extra || {}) };
 }
 
+// The owner's real config, hashed the way headless-session.sh --baseline lists it,
+// except that a marketplace's lastUpdated stamp is left out: Claude Code's own
+// sessions bump it when they check for updates (2026-10-03, during the first
+// measured run, with the marketplace content unchanged since that morning), and a
+// check must judge what a run can change, not what the owner's sessions also write
+// (LESSONS, issues 172-177).
+const REAL_CONFIG_FILES = ['.claude/settings.json', '.claude/settings.local.json', '.claude/plugins/installed_plugins.json',
+  '.claude/plugins/known_marketplaces.json', '.claude/plugins/blocklist.json', '.claude/correction-ledger.jsonl',
+  '.claude/correction-heartbeat.jsonl', '.claude/correction-rollup.json'];
+function realConfigSnapshot() {
+  const snap = {};
+  for (const rel of REAL_CONFIG_FILES) {
+    const abs = path.join(REAL_HOME, rel);
+    if (!fs.existsSync(abs)) { snap[rel] = { raw: 'missing', norm: 'missing' }; continue; }
+    const text = fs.readFileSync(abs, 'utf8');
+    let norm = text;
+    if (rel.endsWith('known_marketplaces.json')) {
+      try { const j = JSON.parse(text); for (const v of Object.values(j)) if (v && typeof v === 'object') delete v.lastUpdated; norm = JSON.stringify(j); } catch (e) { norm = text; }
+    }
+    const h = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
+    snap[rel] = { raw: h(text), norm: h(norm) };
+  }
+  let link = 'none';
+  try { link = fs.readlinkSync(path.join(REAL_HOME, '.claude', 'plugins', 'data', 'tk-llm-peer-review', 'current')); } catch (e) { link = 'none'; }
+  snap['current-link'] = { raw: link, norm: link };
+  return snap;
+}
+function compareSnapshots(before, after) {
+  const changed = [];
+  const stampOnly = [];
+  for (const k of Object.keys(before)) {
+    if (before[k].norm !== (after[k] || {}).norm) changed.push(k);
+    else if (before[k].raw !== (after[k] || {}).raw) stampOnly.push(k);
+  }
+  return { unchanged: changed.length === 0, changed, stampOnly };
+}
+
 function claudeVersion() {
   const r = sh('bash', ['-c', 'ls -d "$HOME"/.cursor-server/extensions/anthropic.claude-code-*/resources/native-binary/claude "$HOME"/.vscode-server/extensions/anthropic.claude-code-*/resources/native-binary/claude 2>/dev/null | sort -V | tail -1']);
   const bin = process.env.CLAUDE_BIN || r.stdout.trim();
@@ -1020,9 +1110,11 @@ async function commandRun(o) {
     console.log('quality-check: ' + kind + ' on ' + o.build + ' (' + build.version + ') -> ' + path.relative(REPO, out));
     console.log('quality-check: ' + budget.note);
     const env = sessionEnv(tmp, envExtra);
+    const configBefore = realConfigSnapshot();
     const r = runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env });
     meta.exitCode = r.status;
     meta.wallMs = r.wallMs;
+    meta.realConfig = compareSnapshots(configBefore, realConfigSnapshot());
     meta.endedAt = new Date().toISOString();
     fs.writeFileSync(path.join(out, 'stdout.txt'), r.stdout);
     fs.writeFileSync(path.join(out, 'stderr.txt'), r.stderr);
@@ -1046,6 +1138,11 @@ async function commandRun(o) {
   fs.writeFileSync(path.join(out, 'analysis.json'), JSON.stringify(analysis, null, 2) + '\n');
   appendLedger({ at: meta.endedAt, role, arm: meta.arm, probe: meta.probe, build: o.build, sha: build.sha, costUsd: analysis.costUsd, valid: analysis.valid, dir: path.relative(REPO, out) });
   printRunSummary(analysis);
+  if (meta.realConfig) {
+    const c = meta.realConfig;
+    console.log('  real config: ' + (c.unchanged ? 'unchanged' : 'CHANGED: ' + c.changed.join(', ')) + (c.stampOnly.length ? ' (only an update-check stamp moved in ' + c.stampOnly.join(', ') + ')' : ''));
+    if (!c.unchanged) { console.log('STOP: the real config changed during this run. Page the owner (M1) before any further run.'); process.exit(6); }
+  }
   if (role === 'probe') {
     const ok = probeVerdict(analysis, meta);
     console.log('probe ' + o.probe + ': ' + (ok.ok ? 'PASS' : 'FAIL') + (ok.why ? ' - ' + ok.why : ''));
@@ -1084,7 +1181,7 @@ function printRunSummary(a, verbose) {
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
   if (a.survived) {
-    console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks);
+    console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
     for (const id of Object.keys(a.survived)) {
       console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no'));
       if (verbose) {
@@ -1254,7 +1351,7 @@ async function probeLocal(o) {
 
 module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
-  parseReport, entryMatches, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
+  parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS,
 };
 

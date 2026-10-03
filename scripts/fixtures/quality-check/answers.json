@@ -3,12 +3,14 @@
     "Answer key for the quality check (scripts/quality-check.js). Never copied into the scratch project.",
     "Paths are as they appear in the scratch project, after the runner's renames (dot-claude -> .claude, *.fixture -> *).",
     "A finding catches a bug when its file is one of `files` (or it names no file, or a URL, and `fileless` is true) and its",
-    "text satisfies `match`: a list of alternatives, each a list of case-insensitive regexes that must ALL match. The text is",
-    "the finding's what, context, fix, key, attachments and receipt (raw JSONL), or its report lines with the Receipt row",
-    "(survivors). Findings are written in plain words with no code names (finding-contract.md), so each alternative names",
-    "the consequence as a reader would say it; mechanism words usually appear only in the receipt.",
+    "sentences satisfy `match`: a list of alternatives, each a list of case-insensitive regexes that must ALL match.",
+    "Sentences are the finding's what, context, fix and key (raw JSONL), or its report entry line, plain sub-bullets and",
+    "Top Issues summary. They carry no code names (finding-contract.md), so `match` names the consequence in plain words.",
+    "Evidence (the receipt and the attachments: Expected, Actual, Screenshot, Evidence) is never matched: a receipt that",
+    "prints a block of code quotes whatever sits nearby, so even a precise pattern turns up in a neighbouring finding's",
+    "evidence. The first full run showed both shapes (a receipt quoting the planted title, an attachment naming Export).",
     "`lines` documents where each bug sits (the tests check it still does). With `lineMatch` true a finding inside a window",
-    "(widened by 1 line) also counts; every bug here leaves it false, because the first live run showed a different finding",
+    "(widened by 1 line) also counts; every bug here leaves it false, because the first live run showed different findings",
     "on the same lines (a crash on a malformed URL, stale search results) being credited by line alone."
   ],
   "bugs": [
@@ -35,13 +37,13 @@
           "first (word|letter|character|char|position)"
         ],
         [
-          "indexof"
-        ],
-        [
           "(position|index|offset) (0|zero)"
         ],
         [
           "at the (start|beginning)"
+        ],
+        [
+          "indexof"
         ]
       ]
     },
@@ -68,10 +70,10 @@
           "\\.\\.(/|%2f)"
         ],
         [
-          "encoded[- ]slash"
+          "encoded[- ](slash|dot)"
         ],
         [
-          "dot[- ]segment"
+          "dot[- ](dot|segment)"
         ],
         [
           "outside (of )?(the )?public"
@@ -80,16 +82,13 @@
           "escape[sd]? (the )?public"
         ],
         [
-          "(any|arbitrary|every) (server |other )?files?"
+          "(any|arbitrary|every) (server |other |repo )?files?"
         ],
         [
           "containment"
         ],
         [
-          "/etc/passwd"
-        ],
-        [
-          "(read|serve|return|leak|expose)s? (the )?(server source|source code|notes file|system files)"
+          "(read|serve|return|leak|expose)s? (the )?(server source|source code|notes file|system files|repo files)"
         ]
       ]
     },
@@ -176,7 +175,7 @@
         ],
         [
           "search (box|input|field)",
-          "not on the page|does not exist|doesn't exist|missing|wrong id|never (found|bound|attach|wired)"
+          "not on the page|does(n't| not) (exist|have)|missing|wrong (id|name)|lacks|never (found|bound|attach|wired)"
         ],
         [
           "(notes?|list) never (load|render|show|appear)"
@@ -212,8 +211,7 @@
           "csv"
         ],
         [
-          "export",
-          "json"
+          "export.{0,60}json|json.{0,60}export"
         ],
         [
           "spreadsheet"
@@ -280,6 +278,10 @@
         [
           "lodash",
           "cve|vulnerab|advisor|prototype[- ]pollution|command injection|template[- ]injection|redos|audit|insecure|security|unpatched|4\\.17\\.(15|19|20|21)"
+        ],
+        [
+          "(pinned|old|outdated|2019) (library|release|version|dependency)",
+          "advisor|vulnerab|cve|security|high[- ]severity"
         ]
       ]
     },
@@ -300,10 +302,14 @@
       "lineMatch": false,
       "match": [
         [
-          "title|head(line|ing)|opening|intro(duction)?|first (line|paragraph|sentence)|top of"
+          "title|head(line|ing)|name|opening|intro(duction)?|first (line|paragraph|sentence)|top of",
+          "unclear|jargon|shorthand|cryptic|renam|what (this|the|it)( (app|project|tool))? (is|does)|does(n't| not) say|tells? (nothing|no one)"
         ],
         [
           "jargon"
+        ],
+        [
+          "shorthand"
         ],
         [
           "nb-srv"
@@ -312,7 +318,11 @@
           "egress|fts|flat-file"
         ],
         [
-          "what (this|the (app|project|tool)) (is|does)"
+          "what (this|the|it)( (app|project|tool))? (is|does)",
+          "readme|newcomer|reader"
+        ],
+        [
+          "renam(es|ed|ing) the (app|project)"
         ]
       ]
     },
@@ -345,6 +355,10 @@
         ],
         [
           "empty[- ](backups?|folder|director)"
+        ],
+        [
+          "null[- ]match",
+          "overrid|fail|abort|break"
         ]
       ]
     }

@@ -70,7 +70,7 @@ const FINDS = {
   'plan-export-json': () => finding('plan', 'server.js', 93, 'Should fix. Export skips the plan: it sends JSON where the plan decided CSV.'),
   'commands-contradiction': () => finding('commands', '.claude/commands/reset-notes.md', 17, 'Blocks. Step two deletes the notes file the rules say never to delete.'),
   'deps-lodash-cve': () => finding('deps', 'package.json', 13, 'Blocks. The new lodash version leaks prototype pollution from a known advisory.'),
-  'copy-unclear-headline': () => finding('copy', 'README.md', 1, 'Should fix. The new title misses what this app is for a newcomer.'),
+  'copy-unclear-headline': () => finding('copy', 'README.md', 1, 'Should fix. The new title swaps plain words for shorthand, so newcomers miss what this app is.'),
   'known-shell-glob': () => finding('code', 'scripts/rotate-backups.sh', 13, 'Blocks. failglob still aborts the loop on an empty folder; nullglob does not stop it.'),
 };
 const KIND_OF = Object.fromEntries(ANSWERS.bugs.map(b => [b.id, b.id === 'known-shell-glob' ? 'code' : b.lens]));
@@ -172,7 +172,7 @@ section('finder output and matching', () => {
   const fenced = QC.parseFinderOutput('```jsonl\n' + FINDS['code-search-prefix']() + '\n```');
   check('one surrounding code fence is tolerated', fenced.findings.length === 1 && fenced.broken.length === 0);
   const prose = QC.parseFinderOutput('Here are my findings:\n' + FINDS['code-search-prefix']());
-  check('a prose line is a contract break', prose.broken.length === 1 && prose.findings.length === 1);
+  check('a prose line beside JSONL is kept apart from the findings', prose.broken.length === 1 && prose.findings.length === 1);
   for (const b of ANSWERS.bugs) {
     check('the canned finding for ' + b.id + ' matches it', QC.bugMatches(b, QC.rawToMatchable(JSON.parse(FINDS[b.id]()))));
   }
@@ -201,7 +201,17 @@ section('finder output and matching', () => {
   check('live: a malformed-URL crash on the traversal bug\'s lines is not the traversal', !QC.bugMatches(BUG['security-path-traversal'], QC.rawToMatchable(live.crash)));
   check('live: the known answer in plain words, with no option names, is a catch', QC.bugMatches(BUG[KNOWN], QC.rawToMatchable(live.glob)));
   check('a browser finding that names the page URL counts as naming no file', QC.bugMatches(BUG['browser-search-id'], { file: 'http://localhost:3000/', line: null, text: 'Blocks. The page throws a TypeError at load and no notes appear.' }));
-  check('the receipt is part of the matched text', QC.findingText({ what: 'x', receipt: { check: 'grep failglob', expect: 'y' } }).includes('failglob'));
+  check('the receipt is never part of the matched text', !QC.findingText({ what: 'x', receipt: { check: 'grep failglob', expect: 'y' } }).includes('failglob'));
+  // From the first full run: a different copy finding whose receipt quotes the
+  // planted title as context, and a known-answer catch whose sentences say
+  // "null-match option" while only the receipt names the option.
+  const r23 = { severity: 'suggest', file: { relPath: 'README.md', line: 11 }, what: 'Optional. The README misses the new Search, Export and Clear all features, so readers never learn what they do.', fix: 'One short section on finding, downloading and deleting notes.', receipt: { check: "grep -niE 'search|export|clear' README.md", expect: 'the only hit is the developer-shorthand intro on line 3' } };
+  check('live: evidence that quotes the planted title as context does not make a different finding the copy bug', !QC.bugMatches(BUG['copy-unclear-headline'], QC.rawToMatchable(r23)));
+  const nullMatch = { severity: 'warn', file: { relPath: 'scripts/rotate-backups.sh', line: 13 }, what: 'Should fix. Turning on the null-match option probably does not override the failing one, so the first backup breaks.', receipt: { check: "bash -c 'shopt -s failglob nullglob; for f in /x/*.json; do :; done'", expect: 'no match: /x/*.json, exit 1' } };
+  check('live: the known answer phrased as a null-match option is a catch on its sentences alone', QC.bugMatches(BUG[KNOWN], QC.rawToMatchable(nullMatch)));
+  check('live: a vague sentence is not a catch, whatever its receipt names', !QC.bugMatches(BUG[KNOWN], QC.rawToMatchable({ ...nullMatch, what: 'Should fix. The first backup breaks.' })));
+  const r5 = { what: 'Should fix. Clear all deletes every note in one click, with no confirmation and no undo.', context: 'It sits beside Export with the same styling.', fields: [{ label: 'Actual', value: 'The server sets notes to [] and overwrites data/notes.json (server.js:86-89).' }] };
+  check('live: an attachment naming Export and notes.json does not make a finding the export bug', !QC.bugMatches(BUG['plan-export-json'], { ...QC.rawToMatchable(r5), file: 'server.js' }));
 });
 
 section('report parsing', () => {
@@ -228,6 +238,43 @@ section('report parsing', () => {
   const r2 = r.survivors.find(s => s.id === 'R2');
   check('a finding named only in Top Issues still catches its bug', QC.entryMatches(BUG[KNOWN], r2), JSON.stringify(r2));
   check('a sub-bullet adds to its entry', r.survivors.find(s => s.id === 'R1').text.includes('Anyone on the network'));
+});
+
+section('report cross-references and evidence', () => {
+  // The first full run's report: two refuted findings give "while R1 stands" as
+  // their reason, and the Staff Check prose cites R1 to R3 beside "CSV export".
+  const md = [
+    '### Top Issues',
+    '🚫 2 Blocks: R1 [code, browser] (public/app.js:7 - the page script crashes on load, so notes never appear), R3 [code] (server.js:103 - one malformed URL stops the server)',
+    '## Findings',
+    '- **R1** [code, browser] 🚫 `public/app.js:7` - Blocks. The page script crashes on load, so saved notes never appear.',
+    '  - **Receipt:** `grep -n search-box public/app.js` - line 7, exit 0.',
+    '- **R3** [code] 🚫 `server.js:103` - Blocks. A badly encoded address throws an error nothing catches.',
+    '  - **Receipt:** `sed -n 90,110p server.js` - shows the export route with application/json and notes-export.json, exit 0.',
+    '- **R5** [ux] ⚠️ `public/app.js:41` - Should fix. Clear all deletes every note with no confirmation.',
+    '  - **Actual:** the server overwrites data/notes.json; the button sits next to Export.',
+    '### Audited out',
+    '- **R19** [code] `REFUTED` - Optional. Saving reloads the full list. (skeptic: search never filters while R1 stands)',
+    '  - split: The submit handler reloads without the query.',
+    '### Staff Check',
+    'The commit breaks the page (R1), widens serving (R2, R3), and misses the CSV export decision.',
+  ].join('\n');
+  const r = QC.parseReport(md);
+  check('a refuted finding\'s "while R1 stands" does not kill R1', r.survivors.some(e => e.id === 'R1') && r.killed.map(k => k.id).join() === 'R19', JSON.stringify(r.killed.map(k => k.id)));
+  const r3 = r.survivors.find(e => e.id === 'R3');
+  check('Staff Check prose adds nothing to a finding', !/csv/i.test(r3.text), r3.text);
+  check('a Receipt row is evidence, not the entry\'s sentences', !/notes-export/.test(r3.text) && /notes-export/.test(r3.evidence));
+  check('so the crash entry is not the export bug, though its receipt shows the export route', !QC.entryMatches(BUG['plan-export-json'], r3));
+  check('and not the traversal either, though both sit on the same lines', !QC.entryMatches(BUG['security-path-traversal'], r3));
+  const r5 = r.survivors.find(e => e.id === 'R5');
+  check('an attachment row is evidence too', /Actual/.test(r5.evidence) && !/notes\.json/.test(r5.text));
+  check('the browser entry still matches on its own words', QC.entryMatches(BUG['browser-search-id'], r.survivors.find(e => e.id === 'R1')));
+  check('a split line is kept apart', /submit handler/.test(r.killed[0].split) && !/submit handler/.test(r.killed[0].text));
+  // Linking: the entry's sentences say only "the first backup breaks", and the
+  // raw finding's receipt names the option; the link carries the catch over.
+  const entries = QC.parseReport('- **R6** [code] ⚠️ `scripts/rotate-backups.sh:13` - Should fix. Turning on the null-match option probably does not override the failing one, so the first backup breaks.').survivors;
+  const links = QC.linkRaw([{ what: 'Should fix. Turning on the null-match option probably does not override the failing one, so the first backup breaks.', key: 'k1' }, { what: 'something else entirely, long enough', key: 'k1' }], entries);
+  check('a raw finding links to the entry its sentence was copied into, and its dedup twin shares the link', links[0].join() === 'R6' && links[1].join() === 'R6', JSON.stringify(links));
 });
 
 section('validity', () => {
@@ -276,7 +323,9 @@ section('validity', () => {
   const noReport = analyze(makeReviewRun({ noReport: true }));
   check('no report makes the run invalid', !noReport.valid && noReport.reasons.includes('no-report'));
   const broken = analyze(makeReviewRun({ finderOut: { copy: 'I reviewed the README and it looks fine.' } }));
-  check('a contract break is counted, and alone does not invalidate', broken.valid && broken.contractBreaks === 1, broken.reasons.join(', '));
+  check('unusable output (no JSONL, no NO FINDINGS) is a contract break, and alone does not invalidate', broken.valid && broken.contractBreaks === 1, broken.reasons.join(', '));
+  const wrapped = analyze(makeReviewRun({ caught: ['copy-unclear-headline'], finderOut: { copy: 'I found one problem:\n' + FINDS['copy-unclear-headline']() + '\nFiles cited: README.md' } }));
+  check('prose wrapped around usable JSONL is a format note, not a break', wrapped.valid && wrapped.contractBreaks === 0 && wrapped.wrapped === 1, JSON.stringify({ b: wrapped.contractBreaks, w: wrapped.wrapped }));
   const killed = analyze(makeReviewRun({ killed: ['security-path-traversal'] }));
   check('a raw catch the audit killed: raised, not survived, marked', killed.raised['security-path-traversal'].length === 1 && killed.survived['security-path-traversal'].length === 0 && killed.killedRaised['security-path-traversal'] === true);
 });
