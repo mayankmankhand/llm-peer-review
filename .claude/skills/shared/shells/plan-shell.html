@@ -18,7 +18,7 @@
   an HTML comment whose text reads "hosted: <url>". It is described in prose
   here, NOT written out literally: an HTML comment cannot nest, so a literal
   closing marker on this line would end THIS header comment early and dump
-  everything below it onto the rendered page as visible text (issue #159).
+  everything below it onto the rendered page as visible text.
   render-html.js refuses to render a shell whose comments do not open once and
   close once (a nested opener, a stray closer, or an unclosed comment), and
   scripts/test-render-html.js renders every shell through that guard.

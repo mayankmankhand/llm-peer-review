@@ -25,7 +25,7 @@
   All fields optional unless noted; a section is skipped when its data is
   missing or empty. Severity is the string "block" | "warn" | "suggest".
 
-  THE FINDING CONTRACT (issue #161). A finding is prose in three keys - "what",
+  THE FINDING CONTRACT. A finding is prose in three keys - "what",
   "context", "fix" - plus non-prose attachments. render-html.js counts the words
   in those three, ranks the findings by locus, and demotes the lowest-ranked to
   one-line rows once the page budget is spent. It also refuses the retired
@@ -51,7 +51,7 @@
     // Omit/empty the array to hide the chip row (e.g. single-specialist run).
     "chips": [ {"name":"code","on":true}, {"name":"ux","on":false} ],
 
-    // The first screen (issue #161): two or three sentences in fixed slots -
+    // The first screen: two or three sentences in fixed slots -
     // is it safe to ship, the one other thing that matters, what happens next.
     // The first renders in display type (the only element on the page that
     // does), the rest one step down. Inline HTML allowed in each.
