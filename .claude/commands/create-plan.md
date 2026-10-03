@@ -27,7 +27,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 
 1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir` - they differ when you're in a worktree).
 2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern.
-3. If both are true AND an issue is referenced in the conversation, rename the branch following the worktree naming convention in toolkit.md.
+3. If both are true AND an issue is referenced in the conversation, rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."
 5. If not in a worktree, or the branch is already renamed, skip silently.
 

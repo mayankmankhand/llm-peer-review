@@ -217,7 +217,7 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote, behind the tripwire exactly as Section 7 says.
-3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" Follow the worktree naming convention in toolkit.md if they say yes.
+3. If the branch name does not match `worktree-<number>-<label>`, ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" If they say yes, rename it to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
 4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on both hosts (inline on GitLab only through the table's `Unknown flag` fallback), and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
 5. Show the user the PR URL.
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
