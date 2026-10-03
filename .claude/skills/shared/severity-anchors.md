@@ -110,7 +110,7 @@ A project's own review kinds (rows in `.claude/toolkit/review-kinds.md`) bring t
 
 ## Boundary Examples
 
-Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `finding-contract.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the template's own illustrative blocks use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
+Three lines decide most disagreements, and each is taught by one worked example rather than a list of rules. The **skip-vs-Suggest** line is taught in `finding-contract.md` by finding R4; the two below cover the rest, numbered R10 and R11 - above every ID the examples in `finding-contract.md` use - so nothing collides when both fragments load into the same context. Read the boundary note, not just the finding: the note is the lesson, and it names what would have to change for the finding to move across the line.
 
 ### Block vs Warn
 
