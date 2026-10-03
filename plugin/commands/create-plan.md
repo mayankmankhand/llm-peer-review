@@ -190,7 +190,7 @@ Create the `plans/` directory if it doesn't exist.
 
 ## Plan Critic (before the stop)
 
-A plan is judged before it is presented, by a context that did not write it (issue #167). The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
+A plan is judged before it is presented, by a context that did not write it. The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
 
 The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
@@ -211,7 +211,7 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 <rules>
 
-- HTML is generated at plan creation and **re-rendered by `/tk:execute`** as steps complete (issue #161). Markdown remains canonical for `/tk:execute` and `/tk:review-plan`; the page mirrors it.
+- HTML is generated at plan creation and **re-rendered by `/tk:execute`** as steps complete. Markdown remains canonical for `/tk:execute` and `/tk:review-plan`; the page mirrors it.
 - `--stable` means the page keeps one URL for the life of the plan, so a re-render updates the published page rather than creating a second one.
 - This is default-on per `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. No judgement call needed.
 - Do NOT hand-write the HTML. Emit a compact JSON payload and run the shared helper, which injects it plus the shared `tokens.css` into the prebuilt plan shell.

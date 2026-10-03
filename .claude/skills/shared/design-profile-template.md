@@ -1,6 +1,5 @@
 <!--
-  design-profile-template.md - the template for a project's DESIGN-PROFILE.md
-  (issue #160).
+  design-profile-template.md - the template for a project's DESIGN-PROFILE.md.
 
   A project gets its DESIGN-PROFILE.md ONCE and never has it overwritten: the copy
   is user-owned, like CLAUDE.md and LESSONS.md. On the plugin, setup writes it from

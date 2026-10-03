@@ -1,6 +1,6 @@
 # Design Rules
 
-Shared reference for design work in the toolkit loop (issue #160). Read on demand, never inlined: `/explore` reads it when its Design exploration step fires, `/create-plan` when it fills the UI/UX Design section, `/execute` when a plan step carries a load level, `/document` at its profile capture step, and the `playground` skill when `/explore` dispatches the rendered-prototypes variant. A run with no design work never reads it. Every mechanic lives here once; call sites cite a section by name rather than restating it (the #147 and M14 drift lessons). The loop bound is M15 in `hitl-loop.md`.
+Shared reference for design work in the toolkit loop. Read on demand, never inlined: `/explore` reads it when its Design exploration step fires, `/create-plan` when it fills the UI/UX Design section, `/execute` when a plan step carries a load level, `/document` at its profile capture step, and the `playground` skill when `/explore` dispatches the rendered-prototypes variant. A run with no design work never reads it. Every mechanic lives here once; call sites cite a section by name rather than restating it (the #147 and M14 drift lessons). The loop bound is M15 in `hitl-loop.md`.
 
 Adapted from Anshu Chimala's "How to turn your AI into a world-class designer" (Lenny's Newsletter, 2026), Techniques 1 to 6. The premise: a model picks the most predictable design choice at every step, so variety and taste have to be injected from outside it. Technique 7 onward is not adopted yet.
 
@@ -57,7 +57,7 @@ The countable test: search the repo for the surface the feature names (a route, 
 
 A model cannot act randomly, so variety has to come from outside it. For each of the three directions a new surface gets:
 
-1. Run `node .claude/scripts/gen-media.js --kind seed` and take the `seed` field. On the plugin, the commands that run a design step carry their own permission for the script, so the first call should not prompt; when one does after the user has answered a question, the usual cause is a project whose `settings.local.json` lacks the plugin script rows setup seeds to keep that permission past the user's next message (issue #185), so approve it once, go on, and suggest re-running setup. Only when the command or the agent type itself is missing has the session not loaded the current plugin, and `/reload-plugins` is the fix for that. On a copy-install, setup seeds the row into `.claude/settings.local.json`, and an install that predates that seeding gets it by re-running setup. Either way the user can also add the row by hand, since Claude cannot edit that file. Do not reach for a shell one-liner.
+1. Run `node .claude/scripts/gen-media.js --kind seed` and take the `seed` field. On the plugin, the commands that run a design step carry their own permission for the script, so the first call should not prompt; when one does after the user has answered a question, the usual cause is a project whose `settings.local.json` lacks the plugin script rows setup seeds to keep that permission past the user's next message, so approve it once, go on, and suggest re-running setup. Only when the command or the agent type itself is missing has the session not loaded the current plugin, and `/reload-plugins` is the fix for that. On a copy-install, setup seeds the row into `.claude/settings.local.json`, and an install that predates that seeding gets it by re-running setup. Either way the user can also add the row by hand, since Claude cannot edit that file. Do not reach for a shell one-liner.
 2. Define the creative direction from the string: color scheme, layout, typography, motion. Look past the surface for sub-patterns, repeated characters, special numbers, anything that inspires a choice. Three seeds give three genuinely different directions.
 3. Bring the direction to life with judgment, so it looks great and not merely different.
 
@@ -96,11 +96,11 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 
 **The return.** `Score: N/10` on the first line, then a numbered gaps list. The gaps are the critique; the score is recorded in the digest as a label and decides nothing. A return with no parseable gap line is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a digest note.
 
-**Why the score decides nothing.** Five fresh critics on one unchanged screenshot scored it 4, 4, 4, 5 and 4 (issue #204). The score is steady, but its one-point wobble is the same size as the step a score-based stop rule has to read, and no recorded loop reached 9/10. The gaps caught every real defect those loops found. So the score line stays as a label, and keep-or-revert decisions belong to the side-by-side judge in Technique 3b. The bound on rounds and what happens when a loop stops are M15.
+**Why the score decides nothing.** Five fresh critics on one unchanged screenshot scored it 4, 4, 4, 5 and 4. The score is steady, but its one-point wobble is the same size as the step a score-based stop rule has to read, and no recorded loop reached 9/10. The gaps caught every real defect those loops found. So the score line stays as a label, and keep-or-revert decisions belong to the side-by-side judge in Technique 3b. The bound on rounds and what happens when a loop stops are M15.
 
 ## Technique 3b: the side-by-side judge
 
-The toolkit's own addition (issue #204), not one of the article's techniques. A critic in a fresh context has nothing to compare against, so two critics' scores cannot say whether a fix pass made the surface better. A judge shown both versions can. After every fix pass, a fresh judge sees the version before the pass's design changes and the version after them, without being told which is which.
+The toolkit's own addition, not one of the article's techniques. A critic in a fresh context has nothing to compare against, so two critics' scores cannot say whether a fix pass made the surface better. A judge shown both versions can. After every fix pass, a fresh judge sees the version before the pass's design changes and the version after them, without being told which is which.
 
 **The contract.** The dispatcher pastes the prompt below verbatim plus two image paths, labeled A and B, and nothing else: no code, no plan, no critiques, no round number, and nothing that says which image is newer. Profile "Baseline images", when present, follow A and B with the moodboard sentence from Technique 3.
 
@@ -118,7 +118,7 @@ The toolkit's own addition (issue #204), not one of the article's techniques. A 
 
 **The return.** `Closer: A`, `Closer: B`, or `Closer: neither` on the first line, then one `Why:` line. A return without a parseable `Closer:` line is redispatched once; still malformed, that dispatch counts as `neither`, which makes the comparison a split.
 
-**The prompt was validated as written** (issue #204), against a bar set before the run: a page with a known rendering defect against the same page without it, a page with one of the critic's recurring gaps fixed against the page as it was, and two captures of an unchanged page, each dispatched in both orders, twice. Change its wording only with that check run again and its tally written down.
+**The prompt was validated as written**, against a bar set before the run: a page with a known rendering defect against the same page without it, a page with one of the critic's recurring gaps fixed against the page as it was, and two captures of an unchanged page, each dispatched in both orders, twice. Change its wording only with that check run again and its tally written down.
 
 ## The loop procedure
 

@@ -15,7 +15,7 @@ Before asking anything, generate this run's session ID and remember it for the r
 node .claude/scripts/ask-gemini.js session
 ```
 
-It prints one line (e.g., `1747700000-29481`) and reads no key file and makes no network call. It runs before Step 1's question because a plugin command's script permission lasts only until the user's next message, so in default permission mode a call made after their answer stops to ask (#181).
+It prints one line (e.g., `1747700000-29481`) and reads no key file and makes no network call. It runs before Step 1's question because a plugin command's script permission lasts only until the user's next message, so in default permission mode a call made after their answer stops to ask.
 
 Record the output. Echo it back to the user so it's anchored in the conversation transcript:
 

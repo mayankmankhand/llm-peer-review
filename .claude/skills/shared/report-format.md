@@ -1,6 +1,6 @@
 # Review Report Format
 
-<!-- Split out of output-template.md in v7.0.0 (issue #167): this half is the report a RUNNER writes (verdict, sections, where it is written, the audit-aware rows). What a finding contains is finding-contract.md, which a finder agent preloads and a direct-run skill inlines beside this file. -->
+<!-- Split out of output-template.md in v7.0.0: this half is the report a RUNNER writes (verdict, sections, where it is written, the audit-aware rows). What a finding contains is finding-contract.md, which a finder agent preloads and a direct-run skill inlines beside this file. -->
 
 ## Base Format
 

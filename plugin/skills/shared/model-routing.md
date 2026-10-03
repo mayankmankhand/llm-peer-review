@@ -17,15 +17,15 @@ The pin lives in agent frontmatter under `${CLAUDE_PLUGIN_ROOT}/agents/`, never 
 
 | Agent | Model | Effort | Tools | Used by |
 |---|---|---|---|---|
-| `review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-commands-finder` | inherit | high | Read, Grep, Glob | `/tk:review` Phase 2 dispatch; the direct-run fan-out of the matching `/review-<kind>` skill; `/tk:review-full` fans out to the code, plan, ux, and security finders (issue #167) |
+| `review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-commands-finder` | inherit | high | Read, Grep, Glob | `/tk:review` Phase 2 dispatch; the direct-run fan-out of the matching `/review-<kind>` skill; `/tk:review-full` fans out to the code, plan, ux, and security finders |
 | `review-browser-finder`, `review-deps-finder` | inherit | high | Read, Grep, Glob, Bash | The same, with Bash because Browser QA drives `browse.js` and Dependency Security runs `npm audit`, `npm outdated`, `gh api` |
-| `audit-skeptic` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M2 tier 2 shards and tier 3 voters, every runner (#167) |
-| `fix-verifier` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M3 judgment re-verification, every runner (#167) |
-| `plan-critic` | inherit | high | Read | `/tk:create-plan` critic loop before the approval stop (#167) |
+| `audit-skeptic` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M2 tier 2 shards and tier 3 voters, every runner |
+| `fix-verifier` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M3 judgment re-verification, every runner |
+| `plan-critic` | inherit | high | Read | `/tk:create-plan` critic loop before the approval stop |
 | `design-critic` | inherit | high | Read | `/tk:execute` design steps (M15, issue #160) |
 | `design-comparer` | inherit | high | Read | `/tk:execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15, issue #204) |
 | `index-mapper` | sonnet | low | Read, Grep, Glob | `/tk:index` Step 3 chunk analysis |
-| `correction-extractor` | inherit | low | Read | `/tk:document` capture stage (issue #157) |
+| `correction-extractor` | inherit | low | Read | `/tk:document` capture stage |
 | `review-finder` (deprecated in 7.0, removed in 8.0) | inherit | high | Read, Grep, Glob, Bash | Downstream commands that still dispatch the generic finder by name; the toolkit itself no longer does |
 
 Why these tiers: `index-mapper` runs the tier issue #131 chose for chunk analysis and has run live since, moved here from prose into frontmatter so the cost message is enforced rather than aspirational; low effort matches mechanical read-and-extract behind a strict output contract. The eight per-kind finders inherit because a Sonnet pin was tested on this exact job, on their predecessor `review-finder`, and failed its receipt - see "Tested and revoked" below; the per-kind split changed what they preload (each finder's `skills:` line loads its `review-<kind>-criteria` skill and the `dispatch-contract` skill, so nothing is pasted per dispatch), not the job, so the revocation carries over and a new pin needs a new A/B. `correction-extractor` inherits for the same reason: no A/B receipt has been run for it yet, and guardrail 3 decides. It is a strong pin candidate (mechanical read-and-extract behind a strict output contract, the same shape as `index-mapper`) and it has an unusually strong downstream judge, since the human accepts or rewrites every open code before a row is written. None of that substitutes for the receipt. Low effort matches the job shape. `audit-skeptic`, `fix-verifier`, `plan-critic`, `design-critic`, and `design-comparer` inherit by rule rather than by missing receipt: a judge whose verdict is final never runs below the tier of the work it judges. High effort matches a judgment call made from bytes it did not produce.

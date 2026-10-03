@@ -30,7 +30,7 @@ Based on what you see, run focused sessions (3-6 actions each) to test the main 
 - Click through navigation, verify pages load
 - Test error states (submit empty forms, click disabled buttons)
 
-Then check that state survives the page redrawing itself (issue #204). A still screenshot cannot show any of these, so run them as sessions:
+Then check that state survives the page redrawing itself. A still screenshot cannot show any of these, so run them as sessions:
 - **A keystroke between two renders.** Type into a field, wait past a render (1 second, or one full cycle of the page's animation), and read the field back with `value`. The typed text must still be there.
 - **An armed two-step control across a re-render.** Click the first half of a two-step action (a delete that asks for a second click, a confirm), wait the same way, and read its text. The armed state must still show, and the second click must still complete the action.
 - **A re-render when nothing changed.** Set something (a draft, an armed step, an open panel), then leave the page idle for a few seconds and read it again. Anything that reverted while nothing else on screen changed means the page redraws itself without cause, and that is a finding.

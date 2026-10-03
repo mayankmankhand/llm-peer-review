@@ -33,7 +33,7 @@ Flags **and** output field names differ between hosts. Use the whole row, not ju
 
 On both hosts the body travels as a file, not as an argument: write it as `body.md` in a fresh folder from `mktemp -d /tmp/host-text.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (two sessions creating issues at once never overwrite each other's text), then run the row with `<body-file>` replaced by that file's path and the title single-quoted as above.
 
-**GitLab fallback.** A `glab` release older than its `--description-file` flag stops with `Unknown flag` before creating anything. Only then, run the same row with `--description '<body>'` in place of `--description-file <body-file>`: the body single-quoted under the rule above, where line breaks inside single quotes are kept. It is the fallback, not the first choice, because a long quoted body in the command itself stops for approval in default permission mode (#181).
+**GitLab fallback.** A `glab` release older than its `--description-file` flag stops with `Unknown flag` before creating anything. Only then, run the same row with `--description '<body>'` in place of `--description-file <body-file>`: the body single-quoted under the rule above, where line breaks inside single quotes are kept. It is the fallback, not the first choice, because a long quoted body in the command itself stops for approval in default permission mode.
 
 The merged-PR lookup is the one call where a table cell would mangle the command, because a `|` inside a markdown cell has to be escaped and the escape would reach the shell. Run these exactly as written:
 

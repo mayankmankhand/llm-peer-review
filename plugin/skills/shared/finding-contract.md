@@ -1,6 +1,6 @@
 # What a Finding Contains
 
-<!-- Split out of output-template.md in v7.0.0 (issue #167): this half is what a finding IS, preloaded into every finder agent. The report structure lives in report-format.md; a direct-run skill inlines both. -->
+<!-- Split out of output-template.md in v7.0.0: this half is what a finding IS, preloaded into every finder agent. The report structure lives in report-format.md; a direct-run skill inlines both. -->
 
 ### Findings
 

@@ -20,7 +20,7 @@ Honor "skip HTML" if the user replies with that phrase. Continue with markdown o
 
 ## How to Render (data injection - do NOT hand-write HTML)
 
-The boilerplate (all CSS, the per-round two-column layout, and the synthesis cards) lives once in the prebuilt shell `.claude/skills/shared/shells/debate-shell.html`. You produce ONLY a compact JSON payload; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file (issues #120, #127). Do not hand-write the HTML.
+The boilerplate (all CSS, the per-round two-column layout, and the synthesis cards) lives once in the prebuilt shell `.claude/skills/shared/shells/debate-shell.html`. You produce ONLY a compact JSON payload; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file. Do not hand-write the HTML.
 
 Steps:
 
