@@ -103,7 +103,7 @@ Keep it short. The point of the ranking is to make one decision obvious, not to 
 
 Capture is forward-only by design: the first run in a repo scans only the newest session, and every later run scans from that repo's last heartbeat. The `--since <ISO timestamp>` flag on `--candidates` overrides that window and is the one supported way to look backwards. It exists for a single, deliberate, one-time pass and is never the default.
 
-Rules for a backfill, decided 2026-08-31:
+Rules for a backfill:
 
 - **Only when the user asks, and only for the repo they name.** Never sweep every project on the machine. Other projects' transcripts are private conversations; the per-repo opt-out marker (`.claude/.no-correction-log`) is honored at scan time exactly as it is for forward capture.
 - **Same gate as forward capture.** Candidates go through the same `correction-extractor` read and the same human-written open code; nothing is recorded that the user did not confirm. Expect the open codes to be rougher than live ones, because the context has faded.
