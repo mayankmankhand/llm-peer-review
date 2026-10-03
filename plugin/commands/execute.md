@@ -128,9 +128,9 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell plan --name PLAN-<base
 
 `--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
 
-The re-render rewrites the local file only, so republish it too: look the page up with `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/tk:create-plan` does under "Viewing the Artifact" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent (v6.3.0 review, R22). A session that cannot publish stops at the local re-render.
+The re-render rewrites the local file only, so republish it too: look the page up with `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/tk:create-plan` does under "Viewing the Artifact" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent. A session that cannot publish stops at the local re-render.
 
-This exists because the page used to be frozen at creation: a plan page sat beside a markdown file recording 62 completed checkboxes while showing every step as not started. A stable URL whose content is permanently false is worse than no page.
+A stable URL whose content has gone stale is worse than no page.
 </procedure>
 
 ---

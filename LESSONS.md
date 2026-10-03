@@ -204,6 +204,7 @@
 - **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
 - **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
 - **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.**
+- **A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.**
 
 ### The standing cycle page (issue #163)
 
