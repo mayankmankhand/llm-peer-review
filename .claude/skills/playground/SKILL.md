@@ -18,7 +18,7 @@ allowed-tools:
 
 1. **Never modify any toolkit file.** No edits to commands, skills, rules, settings, or any prompt file. The export-loop button is the only way state flows back to the conversation.
 2. **Static-default invocation.** Generate a static side-by-side comparison unless interactivity (drag, toggle, slider) genuinely changes the decision. If unsure, ask the user first.
-3. **Disposable.** Always write into a fresh folder from `mktemp -d /tmp/playground.XXXXXX`, made and used per "Temporary folders" in the HTML output rules inlined at the end of this skill. Never to the repo. The `/tmp/` location is reboot-wiped on Linux, macOS, and WSL by default.
+3. **Disposable.** Always write into a fresh folder from `mktemp -d /tmp/playground.XXXXXX`, made and used per "Temporary folders" in the HTML output rules inlined at the end of this skill. Never to the repo. Files there may be removed when the machine restarts, which suits a disposable page.
 4. **Self-contained.** One HTML file, inline CSS and JS, no CDN, no external assets. Must work offline. Must work in any browser without dev tools open.
 
 </rules>
@@ -180,8 +180,6 @@ If the user ever wants to clean up manually:
 ```bash
 rm -r /tmp/playground.*
 ```
-
-`/tmp/` is reboot-wiped on Linux, macOS, and WSL by default, so files self-clean on next restart.
 
 ## HTML Output Rules
 
