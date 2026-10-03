@@ -22,13 +22,13 @@ If you are arriving with your own commands or an existing workflow rather than a
 
 ## Checking `/audit-html` (Maintainer)
 
-After changing `/audit-html` or the "Your Own Files" section of `.claude/skills/shared/html-outputs.md`, run the skill against this repository:
+After changing `/audit-html` or `.claude/skills/shared/html-own-files.md`, run the skill against this repository:
 
 - It should flag long human-read files like `LESSONS.md` and `CHANGELOG.md` against its signals, then **veto them both** (LESSONS is Claude-read; CHANGELOG is host-native, rendered by GitHub and GitLab alike).
 - It should veto `CLAUDE.md`, `CODEBASE_MAP.md`, anything in `.claude/`, and `PLAN-*.md`.
 - For a downstream project, it should flag a status-board file in the project root and pass it through when no veto applies.
 
-If it does not, the signals or vetoes are misaligned with `html-outputs.md`: fix that file, the single source of truth, not the skill.
+If it does not, the signals or vetoes are misaligned with `html-own-files.md`: fix that file, the single source of truth, not the skill.
 
 ## Releasing (Maintainer)
 

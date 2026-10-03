@@ -190,7 +190,7 @@ const SITE_OVERRIDES = {
     // The same scope in the "Use this when" line.
     { phrase: 'Reviewing slash command prompts (.claude/commands/*.md or .claude/skills/*/SKILL.md)', keep: true },
   ],
-  'skills/shared/html-outputs.md': [
+  'skills/shared/html-own-files.md': [
     // Prompt files that stay markdown: a project's own commands and skills.
     { phrase: '- `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)', keep: true },
   ],

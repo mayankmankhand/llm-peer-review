@@ -106,6 +106,7 @@
     ".claude/skills/shared/host-cli.md",
     ".claude/skills/shared/html-look.md",
     ".claude/skills/shared/html-outputs.md",
+    ".claude/skills/shared/html-own-files.md",
     ".claude/skills/shared/html-render-debate.md",
     ".claude/skills/shared/html-render-review.md",
     ".claude/skills/shared/model-routing.md",

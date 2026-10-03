@@ -32,6 +32,8 @@ The two-layer principle, signals, and hard vetoes this skill applies are documen
 
 !`cat .claude/skills/shared/html-outputs.md`
 
+!`cat .claude/skills/shared/html-own-files.md`
+
 The "Your Own Files (downstream projects)" section above defines:
 - the two layers (toolkit outputs already HTML-render; your own markdown can get optional additive views)
 - the signals (read-every-session tracker, walls of text, hunt-not-read, existing hand-built view)
@@ -63,14 +65,14 @@ If any of these exist, **stop the audit short**. Report the existing setup, do n
 
 ### 3. Score each markdown file against signals and vetoes
 
-For every file not excluded by a hard veto, evaluate the signals from `html-outputs.md`:
+For every file not excluded by a hard veto, evaluate the signals from `html-own-files.md`:
 
 - **Read-every-session tracker:** look for files in the project root or `docs/` whose contents are dense status tables, progress markers (`✅`, `🟥`, `🟨`, `🟩`, `- [x]`), or repeated section headers indicating tracked items.
 - **Markdown degrading into walls of text:** file is over ~200 lines, contains 3+ nested tables, or has long sections (>50 lines) without subheadings.
 - **File so long the human hunts instead of reads:** size over ~500 lines, OR the file has 10+ `##`/`###` sections (the human would Ctrl+F rather than scroll).
 - **Existing hand-built view:** if a `.html` file mirrors the markdown name, treat it as a strong signal that someone already values the view.
 
-Apply hard vetoes from `html-outputs.md` mercilessly. A vetoed file does not appear in the report, even if it would otherwise score high.
+Apply hard vetoes from `html-own-files.md` mercilessly. A vetoed file does not appear in the report, even if it would otherwise score high.
 
 ### 4. Write the report
 
