@@ -1180,7 +1180,7 @@ function fillMapperTemplate(template, files) {
 // The execute-mismatch probe's plan: one small step, Models line fit.
 const MISMATCH_PLAN = '# README Note Plan\n\n**Overall Progress:** `0%`\n**Models:** fit\n\n## TLDR\n'
   + 'One sentence in the README about note length.\n\n## Tasks\n'
-  + '- [ ] 🟥 **Step 1: README note** - add the sentence "Notes have no length limit." as the last line of README.md\n\n## Outcomes\n';
+  + '- [ ] 🟥 **Step 1: README note** - add the sentence "Notes can be up to 500 characters." as the last line of README.md\n\n## Outcomes\n';
 
 // Commits MISMATCH_PLAN on top of the fixture as the newest plan (session-init.js
 // picks the newest plan by file time), and gives the scratch repo an identity for
