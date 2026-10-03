@@ -14,7 +14,7 @@ A single self-contained HTML file that teaches a codebase through interactive mo
 <procedure>
 
 1. Analyze the codebase structure (entry points, key files, architecture)
-2. Identify 4-6 learning modules based on the codebase's architecture
+2. Identify the learning modules from the codebase's architecture: one per major part, as many as the codebase has
 3. For each module, create:
    - Plain English explanation of what this part does and why
    - Code walkthrough with side-by-side English translations
