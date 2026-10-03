@@ -10,7 +10,7 @@ Read the command files being reviewed. Then pick one of two modes:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
-| **Prompt Engineering** | Clarity of instructions, ambiguities, conflicting directives, missing examples |
+| **Prompt Engineering** | Clarity of instructions, ambiguities, conflicting directives, missing examples, and the six prompt-debt patterns below |
 | **Cross-command Consistency** | Terminology alignment, structure, formatting, prerequisite references across commands |
 | **Workflow Completeness** | Missing steps, dead ends, assumption gaps, output usability, failure modes |
 | **Workflow Ergonomics** | Cognitive load, progress visibility, mistake recovery, workflow clarity for users without specialized knowledge |
@@ -18,3 +18,18 @@ Read the command files being reviewed. Then pick one of two modes:
 Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
 
 </procedure>
+
+## Prompt Debt: The Six Patterns
+
+Newer models follow a prompt more literally than the models most prompt files were first written for, so text that once made up for a weaker reader now costs tokens or steers the wrong way. Check every file under review for these six patterns; the last column says when a line is not a finding. For the first three, a stated reason is what counts: a check or a fixed order that says why it matters stays, and an emphasis line keeps its reason when it loses the shouting. A stale example, a contradiction, or a dated note is wrong in what it says, so no reason saves it.
+
+| Pattern | A finding | Not a finding |
+|---|---|---|
+| Verification rituals | A check that shows diligence and decides nothing: "double-check your work", "re-read the file before answering", a confirm step whose answer changes no next step | A check whose result decides the next step: a test run, a receipt a later stage reads |
+| Emphasis boosters | CRITICAL, MUST, IMPORTANT, all capitals, "Do not skip this", "Be thorough" | The same constraint stated plainly, with its reason |
+| Mandatory procedures | A fixed step-by-step template for work the model can judge, with no reason the order matters | A sequence whose order matters, with the reason stated: commit before push, gate before send |
+| Stale examples | An example that names a retired command, file, or flag, or that the rule beside it no longer matches | An example that still matches its rule |
+| Contradictory rules | Two instructions, in one file or across the files it loads, that cannot both be followed | A general rule beside a named exception to it |
+| Dated config | Issue and version numbers, dates, "used to" and "now" phrasing, the history of a past state | A version or date the reader acts on: a minimum version check, a release tag |
+
+Severity follows Command Review in the severity anchors: a contradiction a run will hit, or a stale example that points at something gone, misleads the AI; the other four patterns are wording polish.
