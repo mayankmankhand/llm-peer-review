@@ -259,7 +259,7 @@ After the HTML is written (or deliberately skipped), write the current `HEAD` SH
 
 **This must be the final action of `/document`.** The marker is a high-water mark meaning "every commit up to here is already summarized." Writing it last guarantees that an interrupted run re-summarizes the same window (a harmless duplicate) rather than skipping work permanently. Never write the marker before the summary exists.
 
-**The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree, and this step is unchanged by the standing-page move. Never read the window from the page, and never read the log from the marker.
+**The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree. Never read the window from the page, and never read the log from the marker.
 
 ## HTML Output Rules
 
