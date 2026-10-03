@@ -58,7 +58,7 @@ The text below is this project's own gate, read from `.claude/toolkit/plan-gate.
 
 <conditions>
 
-**Do not skip this.** For plans with 3 or more steps:
+Tag every step: `/execute` reads the tags to decide what can run in parallel. For plans with 3 or more steps:
 
 - Tag each step `[parallel]` or `[sequential]`
 - `[parallel]` steps: add `→ delivers: [what this step produces]`
