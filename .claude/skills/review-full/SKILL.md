@@ -14,7 +14,7 @@ allowed-tools:
 Mile wide, inch deep. Cross-domain release readiness, not a deep specialist review.
 
 **Use this when:** Pre-release gate, major milestone check, or when multiple domains changed significantly and you need a single go/no-go assessment.
-**Don't use this when:** You need deep review of one area - use /review-code, /review-commands, /review-plan, /review-ux, or /review-browser instead. This command will recommend which specialist review to run if it finds areas needing deeper attention.
+**Don't use this when:** You need deep review of one area - use /review-code, /review-security, /review-ux, /review-plan, /review-commands, /review-browser, /review-deps or /review-copy instead. This command will recommend which specialist review to run if it finds areas needing deeper attention.
 
 ## Critical Rules
 
@@ -31,7 +31,7 @@ Mile wide, inch deep. Cross-domain release readiness, not a deep specialist revi
 
 <procedure>
 
-Read the changed files and any relevant plan file. Auto-detect the most recently modified `PLAN-*.md` in `plans/` (also check the project root for legacy plan files). If no plan file exists, skip plan comparison and note it in the summary. If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user which plan to evaluate against.
+Read the changed files and any relevant plan file. Auto-detect the most recently modified `PLAN-*.md` in `plans/` (also check the project root for `PLAN-*.md` files). If no plan file exists, skip plan comparison and note it in the summary. If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user which plan to evaluate against.
 
 Then pick one of two modes:
 

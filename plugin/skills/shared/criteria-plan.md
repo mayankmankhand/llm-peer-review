@@ -2,7 +2,7 @@
 
 <procedure>
 
-First, find the plan file to review against. Auto-detect the most recently modified `PLAN-*.md` file in `plans/` (also check the project root for legacy plan files). If no plan file exists, pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /tk:review-code be more appropriate?" If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user: "Which plan file should I evaluate against?"
+First, find the plan file to review against. Auto-detect the most recently modified `PLAN-*.md` file in `plans/` (also check the project root for `PLAN-*.md` files). If no plan file exists, pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /tk:review-code be more appropriate?" If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user: "Which plan file should I evaluate against?"
 
 Read the plan file, then read the implementation files. Compare them. Pick one of two modes:
 

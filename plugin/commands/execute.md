@@ -109,7 +109,7 @@ If you hit a critical blocker, **stop executing**. Don't push through a broken p
 ## Status Updates
 
 <procedure>
-Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for legacy plan files.
+Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for `PLAN-*.md` files.
 
 **Record where the run starts.** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that has a finished step but no start line was begun before this rule: write none, and the handoff below covers that case.
 
