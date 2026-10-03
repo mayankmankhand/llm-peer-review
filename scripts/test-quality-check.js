@@ -187,6 +187,21 @@ section('finder output and matching', () => {
   check('a finding in another file never matches', !QC.bugMatches(BUG['code-search-prefix'], { file: 'public/app.js', line: 61, text: 'indexOf starts with' }));
   check('a fileless finding matches only a bug that allows it', QC.bugMatches(BUG['deps-lodash-cve'], { file: '', line: null, text: 'lodash 4.17.15 has a prototype pollution advisory' }) && !QC.bugMatches(BUG['code-search-prefix'], { file: '', line: null, text: 'indexOf' }));
   check('ux: "could not confirm" is not a missing confirmation', !QC.bugMatches(BUG['ux-clear-all-no-confirm'], { file: 'public/app.js', line: 20, text: 'Optional. I could not confirm the clear button works because the script crashed.' }));
+  // Real findings from the first live probe (e22d24d, code lens). The two
+  // unrelated ones sat on a planted bug's lines and were credited by line alone
+  // before the key stopped matching on lines; the plain-words catch was missed
+  // because the key only knew the option names, which the contract keeps out
+  // of a finding's sentences.
+  const live = {
+    stale: { severity: 'suggest', file: { relPath: 'public/app.js', line: 37 }, what: 'Optional. Per-keystroke searches may render stale results when an older response arrives after a newer one.', receipt: { check: "sed -n '31,45p;61p' public/app.js", expect: 'each input fires an unguarded fetch' } },
+    crash: { severity: 'block', file: { relPath: 'server.js', line: 103 }, what: 'Blocks. A single malformed percent sign in any page URL throws and stops the server for everyone.', receipt: { check: "grep -n 'decodeURIComponent\\|serveStatic(req, res, url)' server.js", expect: 'the decode is at line 103 and the unguarded call at line 121' } },
+    glob: { severity: 'warn', file: { relPath: 'scripts/rotate-backups.sh', line: 13 }, what: 'Should fix. The empty-folder guard probably breaks the first backup run, because the abort-on-no-match setting overrides it.', context: 'Bash checks the abort setting before the empty-match setting.' },
+  };
+  check('live: a stale-results finding on the browser bug\'s line is not the browser bug', !QC.bugMatches(BUG['browser-search-id'], QC.rawToMatchable(live.stale)));
+  check('live: a malformed-URL crash on the traversal bug\'s lines is not the traversal', !QC.bugMatches(BUG['security-path-traversal'], QC.rawToMatchable(live.crash)));
+  check('live: the known answer in plain words, with no option names, is a catch', QC.bugMatches(BUG[KNOWN], QC.rawToMatchable(live.glob)));
+  check('a browser finding that names the page URL counts as naming no file', QC.bugMatches(BUG['browser-search-id'], { file: 'http://localhost:3000/', line: null, text: 'Blocks. The page throws a TypeError at load and no notes appear.' }));
+  check('the receipt is part of the matched text', QC.findingText({ what: 'x', receipt: { check: 'grep failglob', expect: 'y' } }).includes('failglob'));
 });
 
 section('report parsing', () => {

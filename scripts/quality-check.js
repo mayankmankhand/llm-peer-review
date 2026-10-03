@@ -202,10 +202,13 @@ function parseFinderOutput(text) {
   return { empty: false, noFindings: false, findings, broken };
 }
 
-// The text a JSONL finding is matched on.
+// The text a JSONL finding is matched on. The receipt is included: the finding's
+// sentences carry no code names (finding-contract.md), so the mechanism a bug is
+// recognized by often appears only in the check or its expected output.
 function findingText(f) {
   const parts = [f.what, f.context, f.fix, f.key];
   if (Array.isArray(f.fields)) for (const row of f.fields) if (row && row.value) parts.push(row.label + ' ' + row.value);
+  if (f.receipt && typeof f.receipt === 'object') parts.push(f.receipt.check, f.receipt.expect);
   return parts.filter(p => typeof p === 'string').join(' \n ');
 }
 
@@ -215,7 +218,8 @@ function normPath(p) {
 
 // True when finding `f` ({file, line, text}) catches `bug` per the answer key's rule.
 function bugMatches(bug, f) {
-  const file = f.file ? normPath(f.file) : '';
+  // A browser finding may name the page's URL instead of a file: that is no file.
+  const file = f.file && !/^(https?:\/\/|localhost[:/])/i.test(String(f.file).trim()) ? normPath(f.file) : '';
   let fileOk;
   if (file === '') fileOk = bug.fileless === true;
   else fileOk = bug.files.some(b => file === b || file.endsWith('/' + b));
@@ -496,6 +500,9 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
   a.raised = {};
   a.survived = {};
   a.killedRaised = {};
+  // Findings that matched no planted bug, kept so the matcher can be checked by eye.
+  a.unmatchedRaw = [];
+  a.unmatchedSurvivors = [];
   for (const b of bugs) { a.raised[b.id] = []; a.survived[b.id] = []; }
   const kinds = (run.meta && run.meta.lenses) || FINDER_KINDS;
   for (const k of kinds) a.finders[k] = [];
@@ -509,7 +516,9 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
     if (parsed.broken.length > 0) a.contractBreaks++;
     for (const f of parsed.findings) {
       const mf = rawToMatchable(f);
-      for (const b of bugs) if (bugMatches(b, mf)) a.raised[b.id].push({ kind: km[1], severity: f.severity, what: String(f.what).slice(0, 160) });
+      let any = false;
+      for (const b of bugs) if (bugMatches(b, mf)) { a.raised[b.id].push({ kind: km[1], severity: f.severity, what: String(f.what).slice(0, 160) }); any = true; }
+      if (!any) a.unmatchedRaw.push({ kind: km[1], file: mf.file + (mf.line ? ':' + mf.line : ''), what: String(f.what).slice(0, 160) });
     }
   }
   for (const k of kinds) {
@@ -526,6 +535,9 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
   for (const b of bugs) {
     for (const e of rep.survivors) if (entryMatches(b, e)) a.survived[b.id].push({ id: e.id, text: e.text.replace(/\s+/g, ' ').trim().slice(0, 200) });
     a.killedRaised[b.id] = a.raised[b.id].length > 0 && a.survived[b.id].length === 0;
+  }
+  for (const e of rep.survivors) {
+    if (!bugs.some(b => entryMatches(b, e))) a.unmatchedSurvivors.push({ id: e.id, text: e.text.replace(/\s+/g, ' ').trim().slice(0, 200) });
   }
   if (run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
 }
@@ -1064,17 +1076,26 @@ function probeVerdict(a, meta) {
 function money(x) { return typeof x === 'number' ? '$' + x.toFixed(2) : 'n/a'; }
 function mins(ms) { return typeof ms === 'number' ? (ms / 60000).toFixed(1) + ' min' : 'n/a'; }
 
-function printRunSummary(a) {
+function printRunSummary(a, verbose) {
   console.log('');
   console.log('Run: ' + path.relative(REPO, a.dir));
   console.log('  valid: ' + (a.valid ? 'yes' : 'NO (' + a.reasons.join(', ') + ')') + (a.warnings.length ? '; warnings: ' + a.warnings.join(', ') : ''));
   console.log('  cost: ' + money(a.costUsd) + ', time: ' + mins(a.wallMs) + ', turns: ' + (a.turns || 'n/a'));
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
-  if (a.role === 'review' && a.survived) {
+  if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks);
     for (const id of Object.keys(a.survived)) {
       console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no'));
+      if (verbose) {
+        for (const r of a.raised[id]) console.log('        raised [' + r.kind + '] ' + r.what);
+        for (const e of a.survived[id]) console.log('        report ' + e.text);
+      }
+    }
+    if (verbose) {
+      console.log('  matched no planted bug (check by eye that none is a missed catch):');
+      for (const r of a.unmatchedRaw) console.log('    raw [' + r.kind + '] ' + r.file + ' ' + r.what);
+      for (const e of a.unmatchedSurvivors) console.log('    report ' + e.text);
     }
   }
   if (a.role === 'mapper' && a.mapper) console.log('  mapper: ' + JSON.stringify(a.mapper));
@@ -1166,7 +1187,7 @@ async function main() {
   if (o.check) {
     const a = analyzeRun(loadRun(path.resolve(o.check)), loadAnswers());
     fs.writeFileSync(path.join(path.resolve(o.check), 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
-    printRunSummary(a);
+    printRunSummary(a, true);
     process.exit(a.valid ? 0 : 3);
   }
   if (o.score.length) {

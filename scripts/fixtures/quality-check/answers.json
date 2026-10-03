@@ -2,95 +2,351 @@
   "_about": [
     "Answer key for the quality check (scripts/quality-check.js). Never copied into the scratch project.",
     "Paths are as they appear in the scratch project, after the runner's renames (dot-claude -> .claude, *.fixture -> *).",
-    "A finding catches a bug when its file is one of `files` (or it names no file and `fileless` is true) and either",
-    "its line falls inside one of the bug's `lines` windows (only when `lineMatch` is true, widened by 1 line each side)",
-    "or its text satisfies `match`: a list of alternatives, each a list of case-insensitive regexes that must ALL match.",
-    "The text is the finding's what, context, fix, key and attachment values (raw JSONL), or its report lines (survivors)."
+    "A finding catches a bug when its file is one of `files` (or it names no file, or a URL, and `fileless` is true) and its",
+    "text satisfies `match`: a list of alternatives, each a list of case-insensitive regexes that must ALL match. The text is",
+    "the finding's what, context, fix, key, attachments and receipt (raw JSONL), or its report lines with the Receipt row",
+    "(survivors). Findings are written in plain words with no code names (finding-contract.md), so each alternative names",
+    "the consequence as a reader would say it; mechanism words usually appear only in the receipt.",
+    "`lines` documents where each bug sits (the tests check it still does). With `lineMatch` true a finding inside a window",
+    "(widened by 1 line) also counts; every bug here leaves it false, because the first live run showed a different finding",
+    "on the same lines (a crash on a malformed URL, stale search results) being credited by line alone."
   ],
   "bugs": [
     {
       "id": "code-search-prefix",
       "lens": "code",
       "description": "Search keeps a note only when indexOf(query) > 0, so a note that starts with the search word never matches.",
-      "files": ["server.js"],
-      "lines": [["server.js", 60, 67]],
-      "lineMatch": true,
-      "match": [["indexOf"], ["(starts?|begins?) with"], ["first (char|word|letter|position)"], ["(position|index|offset) 0"], ["at the (start|beginning)"]]
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          60,
+          67
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "(begin|start)s?[- ]with"
+        ],
+        [
+          "first (word|letter|character|char|position)"
+        ],
+        [
+          "indexof"
+        ],
+        [
+          "(position|index|offset) (0|zero)"
+        ],
+        [
+          "at the (start|beginning)"
+        ]
+      ]
     },
     {
       "id": "security-path-traversal",
       "lens": "security",
       "description": "The static handler joins decodeURIComponent(pathname) onto public/ with no containment check, so /..%2fserver.js serves files outside public/.",
-      "files": ["server.js"],
-      "lines": [["server.js", 101, 105]],
-      "lineMatch": true,
-      "match": [["travers"], ["\\.\\.(/|%2f)"], ["outside (of )?(the )?public"], ["(any|arbitrary) file"], ["decodeuricomponent"], ["(read|serve)s? files? outside"]]
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          101,
+          105
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "travers"
+        ],
+        [
+          "\\.\\.(/|%2f)"
+        ],
+        [
+          "encoded[- ]slash"
+        ],
+        [
+          "dot[- ]segment"
+        ],
+        [
+          "outside (of )?(the )?public"
+        ],
+        [
+          "escape[sd]? (the )?public"
+        ],
+        [
+          "(any|arbitrary|every) (server |other )?files?"
+        ],
+        [
+          "containment"
+        ],
+        [
+          "/etc/passwd"
+        ],
+        [
+          "(read|serve|return|leak|expose)s? (the )?(server source|source code|notes file|system files)"
+        ]
+      ]
     },
     {
       "id": "ux-clear-all-no-confirm",
       "lens": "ux",
       "description": "Clear all deletes every note on one click, with no confirmation or undo, styled the same as Export beside it.",
-      "files": ["public/app.js", "public/index.html"],
-      "lines": [["public/app.js", 41, 44], ["public/index.html", 23, 23]],
+      "files": [
+        "public/app.js",
+        "public/index.html"
+      ],
+      "lines": [
+        [
+          "public/app.js",
+          41,
+          44
+        ],
+        [
+          "public/index.html",
+          23,
+          23
+        ]
+      ],
       "lineMatch": false,
-      "match": [["(no|without|missing|lacks?|skips?)( a| any)? confirm"], ["confirm(ation)? (step|dialog|prompt)"], ["undo"], ["irreversib|permanent|no way back|cannot be (undone|recovered)"], ["(one|single|accidental|mis)[- ]?(click|tap)"]]
+      "match": [
+        [
+          "(no|without|missing|lacks?|skips?)( a| any)? confirm"
+        ],
+        [
+          "confirm(ation)? (step|dialog|prompt)"
+        ],
+        [
+          "undo"
+        ],
+        [
+          "irreversib|permanent|no way back|cannot be (undone|recovered)"
+        ],
+        [
+          "(one|single|accidental|mis)[- ]?(click|tap)"
+        ]
+      ]
     },
     {
       "id": "browser-search-id",
       "lens": "browser",
       "description": "app.js looks up #search-box but the page has #search, so the script throws at load and the note list never renders.",
-      "files": ["public/app.js", "public/index.html"],
+      "files": [
+        "public/app.js",
+        "public/index.html"
+      ],
       "fileless": true,
-      "lines": [["public/app.js", 7, 7], ["public/app.js", 37, 37]],
-      "lineMatch": true,
-      "match": [["search-box"], ["typeerror"], ["addeventlistener"], ["cannot read propert"], ["page ?error|console error|uncaught|script (crash|error|stops|halts)"], ["null", "(search|element|\\bid\\b)"]]
+      "lines": [
+        [
+          "public/app.js",
+          7,
+          7
+        ],
+        [
+          "public/app.js",
+          37,
+          37
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "search-box"
+        ],
+        [
+          "typeerror"
+        ],
+        [
+          "addeventlistener"
+        ],
+        [
+          "cannot read propert"
+        ],
+        [
+          "page ?error|console error|uncaught"
+        ],
+        [
+          "(page|script|javascript|app)( script)? (crash|throw|stop|halt|fail|break|abort)",
+          "(load|start|open)"
+        ],
+        [
+          "search (box|input|field)",
+          "not on the page|does not exist|doesn't exist|missing|wrong id|never (found|bound|attach|wired)"
+        ],
+        [
+          "(notes?|list) never (load|render|show|appear)"
+        ],
+        [
+          "blank (page|list)"
+        ],
+        [
+          "null",
+          "(element|search|getelementbyid)"
+        ]
+      ]
     },
     {
       "id": "plan-export-json",
       "lens": "plan",
       "description": "The plan decides export is CSV with a header row; /api/export returns JSON.",
-      "files": ["server.js", "public/index.html", "plans/PLAN-fixture.md"],
-      "lines": [["server.js", 91, 96]],
-      "lineMatch": true,
-      "match": [["csv"], ["export", "json"]]
+      "files": [
+        "server.js",
+        "public/index.html",
+        "plans/PLAN-fixture.md"
+      ],
+      "lines": [
+        [
+          "server.js",
+          91,
+          96
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "csv"
+        ],
+        [
+          "export",
+          "json"
+        ],
+        [
+          "spreadsheet"
+        ]
+      ]
     },
     {
       "id": "commands-contradiction",
       "lens": "commands",
       "description": "reset-notes.md forbids deleting or overwriting data/notes.json, then its step 2 deletes it.",
-      "files": [".claude/commands/reset-notes.md"],
-      "lines": [[".claude/commands/reset-notes.md", 11, 17]],
+      "files": [
+        ".claude/commands/reset-notes.md"
+      ],
+      "lines": [
+        [
+          ".claude/commands/reset-notes.md",
+          11,
+          17
+        ]
+      ],
       "lineMatch": false,
-      "match": [["contradict"], ["conflict"], ["cannot both"], ["(never|forbid|rule).{0,80}(delet|overwrit)"], ["(delet|overwrit).{0,80}(never|forbid|rule)"]]
+      "match": [
+        [
+          "contradict"
+        ],
+        [
+          "conflict"
+        ],
+        [
+          "cannot both"
+        ],
+        [
+          "(never|forbids?|rules?).{0,80}(delet|overwrit)"
+        ],
+        [
+          "(delet|overwrit).{0,80}(never|forbid|rule)"
+        ]
+      ]
     },
     {
       "id": "deps-lodash-cve",
       "lens": "deps",
       "description": "The change adds lodash 4.17.15, below the fix for CVE-2020-8203 (prototype pollution) and later advisories.",
-      "files": ["package.json", "package-lock.json", "scripts/import-notes.js"],
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "scripts/import-notes.js"
+      ],
       "fileless": true,
-      "lines": [["package.json", 12, 14], ["package-lock.json", 12, 20]],
+      "lines": [
+        [
+          "package.json",
+          12,
+          14
+        ],
+        [
+          "package-lock.json",
+          12,
+          20
+        ]
+      ],
       "lineMatch": false,
-      "match": [["lodash", "cve|vulnerab|advisor|prototype pollution|command injection|redos|audit|insecure|security|4\\.17\\.(15|19|20|21)"]]
+      "match": [
+        [
+          "lodash",
+          "cve|vulnerab|advisor|prototype[- ]pollution|command injection|template[- ]injection|redos|audit|insecure|security|unpatched|4\\.17\\.(15|19|20|21)"
+        ]
+      ]
     },
     {
       "id": "copy-unclear-headline",
       "lens": "copy",
       "description": "The README's title and opening became 'nb-srv' and a jargon line, so a newcomer no longer learns what the app is.",
-      "files": ["README.md"],
-      "lines": [["README.md", 1, 3]],
-      "lineMatch": true,
-      "match": [["head(line|ing)|title"], ["jargon"], ["what (this|the (app|project|tool)) (is|does)"], ["newcomer|new reader|first[- ]time|new (user|visitor|contributor)"], ["nb-srv"], ["egress|fts|flat-file"]]
+      "files": [
+        "README.md"
+      ],
+      "lines": [
+        [
+          "README.md",
+          1,
+          3
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "title|head(line|ing)|opening|intro(duction)?|first (line|paragraph|sentence)|top of"
+        ],
+        [
+          "jargon"
+        ],
+        [
+          "nb-srv"
+        ],
+        [
+          "egress|fts|flat-file"
+        ],
+        [
+          "what (this|the (app|project|tool)) (is|does)"
+        ]
+      ]
     },
     {
       "id": "known-shell-glob",
       "lens": "code",
       "knownAnswer": true,
       "description": "Known-answer case (the #152 miss): failglob is on globally, and nullglob does not override it, so an empty backups/ aborts the script with 'no match'; the comment claims the opposite.",
-      "files": ["scripts/rotate-backups.sh"],
-      "lines": [["scripts/rotate-backups.sh", 5, 19]],
+      "files": [
+        "scripts/rotate-backups.sh"
+      ],
+      "lines": [
+        [
+          "scripts/rotate-backups.sh",
+          5,
+          19
+        ]
+      ],
       "lineMatch": false,
-      "match": [["failglob"], ["nullglob", "abort|exit|fail|error|no match|stop|crash"], ["no match"], ["empty (backups?|folder|director)"]]
+      "match": [
+        [
+          "failglob"
+        ],
+        [
+          "nullglob",
+          "abort|exit|fail|error|no[- ]match|stop|crash|overrid|preceden|beat"
+        ],
+        [
+          "no[- ]match"
+        ],
+        [
+          "empty[- ](backups?|folder|director)"
+        ]
+      ]
     }
   ]
 }
