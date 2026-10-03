@@ -19,7 +19,7 @@ Run a quick browser session to see what's on screen:
 }
 ```
 
-Read the screenshot (use the Read tool on the returned path) and the text output to understand the current state. Briefly state what you think the app does and which flows you plan to test. Let the user correct you before proceeding.
+Read the screenshot (use the Read tool on the returned path) and the text output to understand the current state. Briefly state what you think the app does and which flows you plan to test. On a direct run, let the user correct you before proceeding; a dispatched finder states its plan and goes on.
 
 **If the page is a login screen:** Tell the user you can't test behind authentication. Suggest they either provide a pre-authenticated URL, test only public pages, or add `fill` actions for login credentials as the first steps.
 
