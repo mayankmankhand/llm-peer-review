@@ -16,7 +16,9 @@
 <procedure>
 
 ### Step 1: Scan the codebase
-Run the deterministic scanner and capture its JSON output:
+First resolve the model mode: run `node .claude/scripts/session-init.js --models`, adding `--mode <m>` when the arguments carry a `mode:<m>` word, and say "Models: <models.mode>" as your first line. `models.perRole["index-mapper"]` is the mapper's model for Steps 2 and 3; call it `{mapperModel}`, reading `session` as your own model.
+
+Then run the deterministic scanner and capture its JSON output:
 
 ```
 node .claude/scripts/generate-index.js
@@ -40,7 +42,7 @@ If the JSON has an `error` field, show the message to the user and stop.
 If `manifest.needsConfirm === true`, prompt before spending API tokens. The exact message depends on why confirmation is needed:
 
 **If `totalTokens > 500_000` (project is large):**
-> "Your project has ~{totalTokens} tokens across {totalFiles} files. Generating the codebase map will spawn {chunks.length} parallel subagents (Sonnet via the index-mapper agent). Estimated one-time cost: a few dollars. Proceed?"
+> "Your project has ~{totalTokens} tokens across {totalFiles} files. Generating the codebase map will spawn {chunks.length} parallel subagents ({mapperModel} via the index-mapper agent). Estimated one-time cost: a few dollars. Proceed?"
 
 **If `anyChunkOverflows === true` (a chunk is oversized despite chunking):**
 > "Your largest chunk is ~{largestChunkTokens} tokens, which exceeds the per-chunk target of {chunkTargetTokens}. This usually means one or more files slipped past the size filter. The oversized subagent may truncate or fail. You can proceed (risky), or stop and add the offending files to the skip list. Proceed?"
@@ -48,7 +50,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` - the mapper agent, whose model and effort come from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the model its roster row declares (read the row; do not assume a tier from memory). Use this prompt template, substituting the chunk's file list:
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` with `model` set to its `models.perRole` value, where `session` means your own model family's alias. It is the mapper agent, whose effort comes from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the same `model`. Use this prompt template, substituting the chunk's file list:
 
 <template>
 
