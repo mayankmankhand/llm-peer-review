@@ -46,17 +46,6 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 
 **When in doubt, skip HTML.** Markdown is the default; HTML is additive. Generating HTML for borderline cases creates inconsistent UX from session to session.
 
-## Playground Export-Loop Rule
-
-The `/tk:playground` skill produces throwaway interactive HTML in a fresh folder under `/tmp` (prefix `playground`, per "Temporary folders" below). Hard rules:
-
-1. **HTML never reads back into the toolkit.** Output is text the user pastes manually into chat. No file modifications to any prompt file, skill file, or rules file.
-2. Every playground HTML ends with a **"copy as markdown"** or **"copy as prompt"** button that emits text the user can paste back as a new chat message.
-3. Self-contained: one HTML file, inline CSS/JS, no CDN. Works offline.
-4. Disposable: lands in `/tmp/`, never in the repo.
-
-The `/tk:explore` design step dispatches the playground's rendered-prototypes variant with click-to-expand as a fixed primitive; the pick and notes come back through the same copy button as every other playground.
-
 ## Artifact Locations
 
 | Where HTML lands | When |
@@ -131,7 +120,7 @@ Pass the absolute path `render-html.js` printed, typed out as literal words (see
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review.html`".
 - **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
 
-The `/tk:playground` skill sits outside all of this: it never publishes and never auto-opens, because its output is throwaway `/tmp/` HTML the user pastes back (see the Playground Export-Loop Rule). It emits a clickable `file://` link in chat instead.
+The `/tk:playground` skill sits outside all of this: it never publishes and never auto-opens, because its output is throwaway `/tmp/` HTML the user pastes back (see the `playground` skill). It emits a clickable `file://` link in chat instead.
 
 ## Publishing the Artifact (the primary viewport)
 
@@ -173,12 +162,6 @@ Only change a type's icon if that type's purpose changes, never as part of an or
 | explore, debate, audit | timestamped, one file per run | publish a new page each run |
 | review, document, plan, docview | `--stable`, one file per identity | update the one page for that identity |
 
-**Review is identity-keyed.** A new page every run is a backlog, and no per-page redesign touches a backlog: cut every page to 600 words and after forty cycles there are forty unread pages, because reading one changes nothing about the next. One standing page per repo replaces itself, carries only what is open, and can go empty. `render-html.js` reads the page it is about to overwrite and states what changed since the reader last opened it, so a finding they already saw does not present itself as news. The identity is the repo, so the name is the bare `review`. A direct single-lens run names its lens in the payload's `lenses` key, and the helper then replaces only that lens's findings and carries the other lenses' open findings forward, marked, rather than reporting them resolved. The page is rendered once per run, after the auto-fix loop has settled, so what it shows as open is what the loop left open.
-
-**Document is identity-keyed for the same reason:** one cycle summary per run piles up into a backlog nobody reads. One standing page per repository replaces itself, opens on what changed and why, and carries a running one-line-per-cycle log beneath it, so a reader who was away for three cycles still sees all three. `render-html.js` reads the page it is about to overwrite: the cycle that page showed becomes the newest log entry, and `sinceLast` names it, so the reader is told what the page used to say rather than silently losing it.
-
-**Its `--name` is `cycle`, not `document`, and that is a migration decision rather than a naming preference.** `--name` feeds both the filename and the index key. The timestamped pages already own the key `document`, so a standing page under that name would make `--index-url --name document` return an old cycle page's URL on the first upgraded run - the lookup happens *before* the publish, so the stale row would win on that run and every run after, and a cycle page the user had shared would silently start showing a different cycle. A fresh key returns empty on every repository, published or not, so the behavior is identical everywhere. `scripts/test-render-html.js` pins the guard.
-
 For a stable type, look up its recorded page first:
 
 ```bash
@@ -201,9 +184,3 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-add --type <shell> --n
 **Failure is not an error.** If a publish does not go through, say so in at most one line, open the file locally instead, and move on. Do not retry in a loop. Nothing is lost.
 
 **What to tell the user.** One line with the link and the local path: "Published the review: <url> (local copy: `artifacts/html/...`)". For a review or debate page, add the one clause about what it holds.
-
-## Visual Look
-
-Typography, color tokens, severity badge colors, and the copy-button pattern live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md`. For the seven helper-rendered artifact types (review, document, explore, debate, audit, plan, docview), those tokens are embodied in `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/tokens.css`, which `render-html.js` inlines into every shell at render time - the commands no longer inline `html-look.md` themselves. `tokens.css` mirrors `html-look.md`; update both together when the look changes.
-
-The remaining hand-rendered HTML (`/tk:playground` only) still inlines or reads `html-look.md` directly, since it does not go through a shell.
