@@ -132,7 +132,7 @@ Skip this section if the project has no obvious extension points.}
 
 ### Step 5: Apply size cap and write atomically
 
-**Trim policy** (if synthesized content exceeds ~10k tokens, apply in this exact order). The Module Guide is the semantic core - the whole point of the v4.4.0 redesign was that a flat tree without semantic content does not save tokens. Trim everything else first.
+**Trim policy** (if synthesized content exceeds ~10k tokens, apply in this exact order). The Module Guide is the semantic core: a flat tree without semantic content does not save tokens. Trim everything else first.
 
 1. **Collapse the Directory Tree** to depth 2-3 (drop deeper nesting, keep top-level structure)
 2. **Drop the Gotchas section**
@@ -151,7 +151,7 @@ Record any trimming in the map header (e.g., add `<!-- Trimmed: tree-to-depth-3,
    node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-index.js --finalize
    ```
 
-   It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), renames it over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object. These checks, the rename and the delete used to be a shell compound, which default permission mode stops to ask about (#181).
+   It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), renames it over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object.
 3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 7's size and `indexRemoved` for its legacy-file line.
 4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`.
 
