@@ -183,7 +183,7 @@ Again, it's still not time to build yet. Just write the clear plan document. No 
 
 A plan is judged before it is presented, by a context that did not write it (issue #167). The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
 
-The critic returns gaps, not a grade (issue #204): its old score out of 10 moved by a point on an unchanged plan, and the gaps were always what the loop acted on.
+The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
 <procedure>
 

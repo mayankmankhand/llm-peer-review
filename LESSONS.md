@@ -307,3 +307,4 @@
 - **Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.**
 - **When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.**
 - **A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.**
+- **A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.**
