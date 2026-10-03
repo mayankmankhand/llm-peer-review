@@ -516,6 +516,26 @@ section('model modes', () => {
   check('an unknown mode is a usage error', badMode.status === 2 && /best, fit or cheap/.test(badMode.stderr), badMode.stderr);
 });
 
+section('real config check', () => {
+  const scratch = '/tmp/qc-run.TEST1';
+  const old = Buffer.from('{"at":"1","repo_path":"/home/u/a"}\n');
+  const hash = require('crypto').createHash('sha256').update(old).digest('hex').slice(0, 16);
+  const grow = s => Buffer.concat([old, Buffer.from(s)]);
+  check('appendSource: a line from another project is another session', QC.appendSource(hash, old.length, grow('{"at":"2","repo_path":"/home/u/b"}\n'), scratch) === 'other');
+  check('appendSource: a line naming the scratch folder is the run', QC.appendSource(hash, old.length, grow('{"at":"2","repo_path":"' + scratch + '/project"}\n'), scratch) === 'run');
+  check('appendSource: changed earlier bytes are a rewrite', QC.appendSource(hash, old.length, Buffer.from('{"at":"9","repo_path":"/home/u/a"}\n{"at":"2"}\n'), scratch) === 'rewritten');
+  check('appendSource: a shorter file is a rewrite', QC.appendSource(hash, old.length, Buffer.from('{}\n'), scratch) === 'rewritten');
+  const key = '.claude/correction-heartbeat.jsonl';
+  const before = { [key]: { raw: hash, norm: hash, size: old.length }, '.claude/settings.json': { raw: 'x', norm: 'x' } };
+  const after = (buf, settings) => ({ [key]: { raw: 'new', norm: 'new', size: buf.length, buf }, '.claude/settings.json': { raw: settings, norm: settings } });
+  const other = QC.compareSnapshots(before, after(grow('{"repo_path":"/home/u/b"}\n'), 'x'), scratch);
+  check('compareSnapshots: another session\'s heartbeat leaves the config unchanged, and says so', other.unchanged && other.otherSessions.includes(key), JSON.stringify(other));
+  const mine = QC.compareSnapshots(before, after(grow('{"repo_path":"' + scratch + '/project"}\n'), 'x'), scratch);
+  check('compareSnapshots: a heartbeat line from the run is a change', !mine.unchanged && /a line names this run/.test(mine.changed[0]), JSON.stringify(mine));
+  const settings = QC.compareSnapshots(before, after(old, 'y'), scratch);
+  check('compareSnapshots: any change to a settings file is still a change', !settings.unchanged && settings.changed.includes('.claude/settings.json'), JSON.stringify(settings));
+});
+
 section('score command end to end', () => {
   const a = makeReviewRun({ caught: IDS });
   const b = makeReviewRun({ caught: IDS });

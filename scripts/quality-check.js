@@ -120,7 +120,8 @@
 //
 // Exit codes: 0 done (a valid run, or a score); 2 usage error; 3 the run was
 // invalid; 4 the budget refused the run; 5 a probe or a mode check failed; 6 the owner's real
-// config changed during the run (checked before and after every session); 7 the
+// config changed during the run (checked before and after every session; lines another of the
+// owner's sessions added to the correction files do not count, APPEND_ONLY below); 7 the
 // owner's login token could expire during the run (tokenWindowProblem, below).
 
 const { spawn, spawnSync } = require('child_process');
@@ -1033,32 +1034,54 @@ function sessionEnv(tmp, extra) {
 const REAL_CONFIG_FILES = ['.claude/settings.json', '.claude/settings.local.json', '.claude/plugins/installed_plugins.json',
   '.claude/plugins/known_marketplaces.json', '.claude/plugins/blocklist.json', '.claude/correction-ledger.jsonl',
   '.claude/correction-heartbeat.jsonl', '.claude/correction-rollup.json'];
+// The owner's correction files only ever grow, and every session the owner runs,
+// in any project, may add to them: during a Step 7 run on 2026-10-03, a session
+// in another of the owner's repositories added a heartbeat line, and the run
+// stopped. A change there counts as the run's own only when the old bytes were
+// rewritten or an added line names the run's scratch folder (appendSource).
+const APPEND_ONLY = new Set(['.claude/correction-ledger.jsonl', '.claude/correction-heartbeat.jsonl']);
+const shortHash = b => crypto.createHash('sha256').update(b).digest('hex').slice(0, 16);
+
+// Who grew an append-only file: 'rewritten' when its first `beforeSize` bytes no
+// longer hash to `beforeHash`, 'run' when an added line names `scratch`, else 'other'.
+function appendSource(beforeHash, beforeSize, afterBuf, scratch) {
+  if (afterBuf.length < beforeSize || shortHash(afterBuf.subarray(0, beforeSize)) !== beforeHash) return 'rewritten';
+  return afterBuf.subarray(beforeSize).toString('utf8').includes(scratch) ? 'run' : 'other';
+}
+
 function realConfigSnapshot() {
   const snap = {};
   for (const rel of REAL_CONFIG_FILES) {
     const abs = path.join(REAL_HOME, rel);
     if (!fs.existsSync(abs)) { snap[rel] = { raw: 'missing', norm: 'missing' }; continue; }
-    const text = fs.readFileSync(abs, 'utf8');
+    const buf = fs.readFileSync(abs);
+    const text = buf.toString('utf8');
     let norm = text;
     if (rel.endsWith('known_marketplaces.json')) {
       try { const j = JSON.parse(text); for (const v of Object.values(j)) if (v && typeof v === 'object') delete v.lastUpdated; norm = JSON.stringify(j); } catch (e) { norm = text; }
     }
-    const h = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
-    snap[rel] = { raw: h(text), norm: h(norm) };
+    snap[rel] = { raw: shortHash(buf), norm: shortHash(norm) };
+    if (APPEND_ONLY.has(rel)) Object.assign(snap[rel], { size: buf.length, buf });
   }
   let link = 'none';
   try { link = fs.readlinkSync(path.join(REAL_HOME, '.claude', 'plugins', 'data', 'tk-llm-peer-review', 'current')); } catch (e) { link = 'none'; }
   snap['current-link'] = { raw: link, norm: link };
   return snap;
 }
-function compareSnapshots(before, after) {
+// scratch: the run's scratch folder, which a line the run itself wrote would name.
+function compareSnapshots(before, after, scratch) {
   const changed = [];
   const stampOnly = [];
+  const otherSessions = [];
   for (const k of Object.keys(before)) {
-    if (before[k].norm !== (after[k] || {}).norm) changed.push(k);
-    else if (before[k].raw !== (after[k] || {}).raw) stampOnly.push(k);
+    const b = before[k];
+    const a = after[k] || {};
+    if (b.norm === a.norm) { if (b.raw !== a.raw) stampOnly.push(k); continue; }
+    const src = APPEND_ONLY.has(k) && scratch && b.size !== undefined && a.buf ? appendSource(b.raw, b.size, a.buf, scratch) : null;
+    if (src === 'other') otherSessions.push(k);
+    else changed.push(k + (src === 'run' ? ' (a line names this run)' : src === 'rewritten' ? ' (earlier lines rewritten)' : ''));
   }
-  return { unchanged: changed.length === 0, changed, stampOnly };
+  return { unchanged: changed.length === 0, changed, stampOnly, otherSessions };
 }
 
 function claudeVersion() {
@@ -1354,7 +1377,7 @@ async function commandRun(o) {
     const r = runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env, sessionModel });
     meta.exitCode = r.status;
     meta.wallMs = r.wallMs;
-    meta.realConfig = compareSnapshots(configBefore, realConfigSnapshot());
+    meta.realConfig = compareSnapshots(configBefore, realConfigSnapshot(), tmp);
     meta.endedAt = new Date().toISOString();
     fs.writeFileSync(path.join(out, 'stdout.txt'), r.stdout);
     fs.writeFileSync(path.join(out, 'stderr.txt'), r.stderr);
@@ -1381,7 +1404,8 @@ async function commandRun(o) {
   printRunSummary(analysis);
   if (meta.realConfig) {
     const c = meta.realConfig;
-    console.log('  real config: ' + (c.unchanged ? 'unchanged' : 'CHANGED: ' + c.changed.join(', ')) + (c.stampOnly.length ? ' (only an update-check stamp moved in ' + c.stampOnly.join(', ') + ')' : ''));
+    console.log('  real config: ' + (c.unchanged ? 'unchanged' : 'CHANGED: ' + c.changed.join(', ')) + (c.stampOnly.length ? ' (only an update-check stamp moved in ' + c.stampOnly.join(', ') + ')' : '')
+      + ((c.otherSessions || []).length ? ' (another session of the owner\'s added lines to ' + c.otherSessions.join(', ') + '; none names this run)' : ''));
     if (!c.unchanged) { console.log('STOP: the real config changed during this run. Page the owner (M1) before any further run.'); process.exit(6); }
   }
   if (role === 'probe') {
@@ -1603,7 +1627,7 @@ module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
-  modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict,
+  modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
 };
 
 if (require.main === module) {
