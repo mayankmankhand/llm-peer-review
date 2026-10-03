@@ -2,8 +2,8 @@
 'use strict';
 //
 // test-session-init.js - assertions for .claude/scripts/session-init.js: the plan
-// header's start commit and the --scope mode a review reads to find what it
-// covers. (issue #182)
+// header's start commit, the --scope mode a review reads to find what it covers
+// (issue #182), and the models object every output carries (issue #205).
 //
 // Maintainer-only: lives under scripts/, which never ships downstream.
 //
@@ -190,11 +190,11 @@ section('1. plans[].startCommit and the no-argument output', function () {
   check('startCommit does not disturb progress or status', plan('PLAN-a.md').progress === 40 && plan('PLAN-a.md').status === 'in-progress',
     JSON.stringify(plan('PLAN-a.md')));
 
-  const KEYS = ['generatedAt', 'cwd', 'worktree', 'map', 'lessons', 'plans', 'newestPlan'];
+  const KEYS = ['generatedAt', 'cwd', 'worktree', 'map', 'lessons', 'plans', 'newestPlan', 'models'];
   const keys = Object.keys(r.json);
   check('the no-argument output keeps exactly its top-level keys', sameList(keys.slice().sort(), KEYS.slice().sort()), keys.join(','));
-  check('each plan entry is name, progress, status and startCommit',
-    Object.keys(plan('PLAN-a.md')).join(',') === 'name,progress,status,startCommit', Object.keys(plan('PLAN-a.md')).join(','));
+  check('each plan entry is name, progress, status, startCommit and models',
+    Object.keys(plan('PLAN-a.md')).join(',') === 'name,progress,status,startCommit,models', Object.keys(plan('PLAN-a.md')).join(','));
   check('worktree and newestPlan are still reported',
     r.json.worktree && r.json.worktree.isWorktree === false && typeof r.json.newestPlan === 'string', JSON.stringify(r.json.worktree));
 
@@ -819,6 +819,138 @@ section('13. uncommitted.baseline: the starting snapshot (#202)', function () {
     l.status === 0 && l.parsed && dig(l.json, 'uncommitted.baseline') === null &&
     typeof dig(l.json, 'uncommitted.baselineError') === 'string' && sameList(paths(list(l, 'uncommitted.unstaged.files')), ['f.txt']),
     brief(l) + ' ' + JSON.stringify(l.json.uncommitted));
+});
+
+// --- 14. the model mode (#205) ------------------------------------------------
+// Which model each helper runs on: a --mode flag (a command's "mode:" word) wins,
+// then the newest plan's Models line while that plan is unfinished, then fit. Fit
+// reads each moving role's model from the agent files beside the script, so these
+// checks run a plugin-shaped copy (plugin/scripts/ beside plugin/agents/) whose
+// agent files they control, instead of reading this repo's own roster.
+section('14. the model mode: flag, then an unfinished plan, then fit (#205)', function () {
+  const FINDERS = ['review-code-finder', 'review-security-finder', 'review-ux-finder', 'review-plan-finder',
+    'review-commands-finder', 'review-deps-finder', 'review-browser-finder', 'review-copy-finder'];
+  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'correction-extractor'];
+  const plugin = path.join(TMP, 'plugin layout', 'plugin');
+  const copy = path.join(plugin, 'scripts', 'session-init.js');
+  fs.mkdirSync(path.dirname(copy), { recursive: true });
+  fs.copyFileSync(SCRIPT, copy);
+  function agent(name, modelLine) {
+    write(plugin, 'agents/' + name + '.md', '---\nname: ' + name + '\ndescription: test agent\ntools: Read\n' + (modelLine === null ? '' : 'model: ' + modelLine + '\n') + 'effort: high\n---\n\nBody.\n');
+  }
+  // Fit's values come from these files: a sonnet finder, an opus finder, one that
+  // inherits, one with no model line, one naming a full model id (not an alias).
+  agent('review-code-finder', 'sonnet');
+  agent('review-security-finder', 'opus');
+  agent('review-ux-finder', 'inherit');
+  agent('review-plan-finder', null);
+  agent('review-commands-finder', 'claude-sonnet-5-5');
+  agent('index-mapper', 'sonnet');
+  for (const j of JUDGES) agent(j, 'inherit');
+  function models(repo, args) {
+    const r = spawnSync(process.execPath, [copy].concat(args), { cwd: repo, env: ENV, encoding: 'utf-8' });
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+    return { status: r.status, json: json || {}, m: (json && json.models) || {} };
+  }
+
+  const remote = bareRemote('models remote');
+  const repo = newRepo('models');
+  write(repo, 'base.txt', 'base\n');
+  write(repo, '.gitignore', 'plans/\n');
+  const b = commitAll(repo, 'base');
+  git(repo, ['remote', 'add', 'origin', remote]);
+  git(repo, ['push', '-q', '-u', 'origin', 'main']);
+
+  const none = models(repo, ['--models']);
+  check('no flag and no plan: fit, from the default, built on opus',
+    none.status === 0 && none.m.mode === 'fit' && none.m.source === 'default' && none.m.plan === null && none.m.buildModel === 'opus' && none.m.warning === undefined,
+    JSON.stringify(none.m));
+  check('fit reads each moving role from the agent file beside the script: an alias as written, anything else as "session"',
+    none.m.perRole && none.m.perRole['review-code-finder'] === 'sonnet' && none.m.perRole['review-security-finder'] === 'opus' &&
+    none.m.perRole['review-ux-finder'] === 'session' && none.m.perRole['review-plan-finder'] === 'session' &&
+    none.m.perRole['review-commands-finder'] === 'session' && none.m.perRole['review-deps-finder'] === 'session' &&
+    none.m.perRole['index-mapper'] === 'sonnet',
+    JSON.stringify(none.m.perRole));
+  check('the judges and the extractor are "session" in fit', JUDGES.every(function (j) { return none.m.perRole[j] === 'session'; }), JSON.stringify(none.m.perRole));
+  check('--models prints only generatedAt, cwd and models', sameList(Object.keys(none.json).sort(), ['cwd', 'generatedAt', 'models']), JSON.stringify(Object.keys(none.json)));
+
+  const best = models(repo, ['--models', '--mode', 'best']);
+  check('--mode best: every moving role and every judge on "session", built on the session model',
+    best.m.mode === 'best' && best.m.source === 'argument' && best.m.buildModel === 'session' &&
+    FINDERS.concat(['index-mapper'], JUDGES).every(function (r) { return best.m.perRole[r] === 'session'; }),
+    JSON.stringify(best.m));
+  const cheap = models(repo, ['--mode', 'cheap', '--models']);
+  check('--mode cheap (before --models too): the finders and the mapper on sonnet, the judges still "session"',
+    cheap.m.mode === 'cheap' && cheap.m.source === 'argument' && cheap.m.buildModel === 'opus' &&
+    FINDERS.concat(['index-mapper']).every(function (r) { return cheap.m.perRole[r] === 'sonnet'; }) &&
+    JUDGES.every(function (j) { return cheap.m.perRole[j] === 'session'; }),
+    JSON.stringify(cheap.m));
+  const typo = models(repo, ['--models', '--mode', 'cheep']);
+  check('an unknown mode is ignored with a warning naming it', typo.m.mode === 'fit' && typo.m.source === 'default' && /"cheep" is not a mode/.test(typo.m.warning || ''), JSON.stringify(typo.m));
+  const bare = models(repo, ['--models', '--mode']);
+  check('--mode with no value is a warning, not a failure', bare.status === 0 && bare.m.mode === 'fit' && /--mode needs a value/.test(bare.m.warning || ''), JSON.stringify(bare.m));
+
+  // The newest plan's Models line, while the plan is unfinished.
+  const planFile = 'plans/PLAN-issue-77.md';
+  function plan(modeWord, start, progress) {
+    return '# Plan\n\n**Overall Progress:** `' + (progress || 0) + '%`\n' + (modeWord === null ? '' : '**Models:** ' + modeWord + '\n') +
+      (start ? '**Start commit:** ' + start + '\n' : '') + '\n## Tasks\n';
+  }
+  write(repo, planFile, plan('cheap', null));
+  const fresh = models(repo, ['--models']);
+  check('a plan not begun (no Start commit): its mode, from the plan, naming the file',
+    fresh.m.mode === 'cheap' && fresh.m.source === 'plan' && fresh.m.plan === 'PLAN-issue-77.md', JSON.stringify(fresh.m));
+  check('a flag still wins over the plan', models(repo, ['--models', '--mode', 'best']).m.mode === 'best');
+  write(repo, planFile, plan('cheap', b, 10));
+  const begun = models(repo, ['--models']);
+  check('begun with no commit after its start yet: the plan\'s mode still applies', begun.m.mode === 'cheap' && begun.m.source === 'plan', JSON.stringify(begun.m));
+  write(repo, 'one.txt', 'one\n');
+  commitAll(repo, 'one');
+  write(repo, planFile, plan('cheap', b, 100));
+  const finished = models(repo, ['--models']);
+  check('at 100% with commits not yet pushed (the cycle\'s own review and docs): the plan\'s mode still applies',
+    finished.m.mode === 'cheap' && finished.m.source === 'plan', JSON.stringify(finished.m));
+  const viaScope = models(repo, ['--scope']);
+  check('--scope carries the same models beside its range', viaScope.json.source === 'plan' && viaScope.m.mode === 'cheap' && viaScope.m.source === 'plan', JSON.stringify(viaScope.m));
+  const viaStart = models(repo, []);
+  check('the session-start object carries models, and its plans[] entry carries the Models word',
+    viaStart.m.mode === 'cheap' && (viaStart.json.plans || []).some(function (p) { return p.name === 'PLAN-issue-77.md' && p.models === 'cheap'; }),
+    JSON.stringify(viaStart.json.plans));
+  git(repo, ['push', '-q', 'origin', 'main']);
+  const shipped = models(repo, ['--models']);
+  check('once every commit after the start is pushed, the plan has shipped and the mode lapses to fit',
+    shipped.m.mode === 'fit' && shipped.m.source === 'default' && shipped.m.plan === null, JSON.stringify(shipped.m));
+
+  write(repo, 'two.txt', 'two\n');
+  commitAll(repo, 'two');
+  write(repo, planFile, plan('turbo', null));
+  const odd = models(repo, ['--models']);
+  check('a Models line naming no mode is ignored with a warning', odd.m.mode === 'fit' && /names the mode "turbo"/.test(odd.m.warning || ''), JSON.stringify(odd.m));
+  write(repo, planFile, plan('cheap', '0123456789abcdef0123456789abcdef01234567'));
+  const stray = models(repo, ['--models']);
+  check('a start commit that names no commit: the plan is not about this branch, so fit', stray.m.mode === 'fit' && stray.m.source === 'default', JSON.stringify(stray.m));
+
+  // Only the newest plan counts: an older plan's line never applies.
+  write(repo, planFile, plan('cheap', null));
+  write(repo, 'plans/PLAN-issue-78.md', plan(null, null));
+  const older = path.join(repo, planFile);
+  const past = Date.now() / 1000 - 3600;
+  fs.utimesSync(older, past, past);
+  const newestWins = models(repo, ['--models']);
+  check('a newer plan without a Models line hides an older plan\'s line', newestWins.m.mode === 'fit' && newestWins.m.source === 'default', JSON.stringify(newestWins.m));
+
+  const scoped = models(repo, ['--scope', b + '..HEAD', '--mode', 'best']);
+  const scoped2 = models(repo, ['--mode', 'best', '--scope', b + '..HEAD']);
+  check('--mode beside --scope <range>, before or after it, leaves the range as typed',
+    scoped.json.source === 'argument' && dig(scoped.json, 'range.base') === b && scoped.m.mode === 'best' &&
+    scoped2.json.source === 'argument' && dig(scoped2.json, 'range.base') === b && scoped2.m.mode === 'best',
+    brief(scoped) + ' ' + brief(scoped2));
+
+  const outside = path.join(TMP, 'not a repo');
+  fs.mkdirSync(outside, { recursive: true });
+  const loose = models(outside, ['--models', '--mode', 'cheap']);
+  check('outside a git checkout: still one JSON object, the flag still applies', loose.status === 0 && loose.m.mode === 'cheap' && loose.m.source === 'argument', JSON.stringify(loose.json));
 });
 
 console.log('');

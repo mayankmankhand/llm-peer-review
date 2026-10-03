@@ -20,13 +20,44 @@
 // Modes:
 //   node session-init.js                          the session-start object
 //   node session-init.js --scope [<base>..<end>]  what a review covers (#182, below)
+//   node session-init.js --models                 only the model mode (#205, below)
+// Each takes an optional --mode <best|fit|cheap>, the mode a command's "mode:" word
+// asked for, and each output carries the resolved "models" object.
 // Any other argument prints {"generatedAt", "cwd", "error"} and exits 0.
 //
+// models (#205): which model each helper runs on this cycle.
+//
+//   "models": {
+//     "mode": "best" | "fit" | "cheap",
+//     "source": "argument" | "plan" | "default",
+//     "plan": "PLAN-issue-205.md" | null,       source "plan" only
+//     "buildModel": "opus" | "session",          the model the plan is built on
+//     "perRole": { "review-code-finder": "sonnet", ..., "audit-skeptic": "session" },
+//     "warning": "<one plain sentence>"          only when an input was ignored
+//   }
+//
+//   The mode comes from, in order: --mode; else the newest plans/PLAN-*.md's
+//   `**Models:** <mode>` line while that plan is unfinished; else fit. Unfinished
+//   means the plan has no Start commit yet, no commit after it yet, or some commit
+//   after it that is not on the remote (the same test --scope uses to call a plan
+//   shipped). A plan whose start is missing or not an ancestor of HEAD does not apply.
+//   perRole: the eight review finders and index-mapper move with the mode: best
+//   gives "session", cheap gives "sonnet", and fit gives the model each one's agent
+//   file names, read from the agents/ folder beside this script's own folder (the
+//   plugin's agents on a plugin install, .claude/agents/ in the toolkit repo), the
+//   files the dispatch itself uses; "inherit" or no model line reads as "session".
+//   The judges and the correction extractor are always "session". "session" means
+//   the dispatcher passes the alias of its own model family (the Agent tool's model
+//   takes only sonnet, opus, haiku and fable). buildModel is "session" for best and
+//   "opus" for fit and cheap.
+//
 // Session-start object: generatedAt, cwd, worktree, map, lessons, plans, newestPlan.
-// Each plans[] entry is { name, progress, status, startCommit }. startCommit (#182)
+// Each plans[] entry is { name, progress, status, startCommit, models }. startCommit (#182)
 // is the sha on the plan's `**Start commit:** <sha>` line (exactly that spelling, at
 // the start of a line, 7 to 40 hex characters, nothing after it), which /execute
 // writes into the plan header once when it starts; null when the plan has none.
+// models (#205) is the lowercased word on the plan's `**Models:** <mode>` line, which
+// /create-plan writes; null when the plan has none.
 //
 // --scope [<base>..<end>] (#182)
 //   /execute commits every green step, so a review that looked only at uncommitted
@@ -170,6 +201,10 @@ function emit(payload) {
 // endings), so a sentence that merely mentions the field never matches.
 const START_COMMIT_LINE = /^\*\*Start commit:\*\*[ \t]+([0-9a-fA-F]{7,40})[ \t]*\r?$/m;
 
+// `**Models:** <mode>`, written into the plan header by /create-plan (#205). The
+// same shape: that spelling at the start of a line, one word, nothing after it.
+const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
+
 function sessionStart() {
   // --- Worktree state -------------------------------------------------------
   // A worktree is detected when the per-worktree git dir differs from the shared
@@ -279,6 +314,7 @@ function readPlans(base) {
         const full = path.join(base, PLANS_DIR, name);
         let progress = null;
         let startCommit = null;
+        let models = null;
         let mtime = 0;
         try {
           mtime = fs.statSync(full).mtimeMs;
@@ -289,6 +325,8 @@ function readPlans(base) {
           if (pm) progress = parseInt(pm[1], 10);
           const sc = body.match(START_COMMIT_LINE);
           if (sc) startCommit = sc[1].toLowerCase();
+          const mo = body.match(MODELS_LINE);
+          if (mo) models = mo[1].toLowerCase();
         } catch {
           // Unreadable plan: keep it in the list with null progress rather than
           // dropping it, so the command still sees the file exists.
@@ -297,7 +335,7 @@ function readPlans(base) {
         if (progress === 100) status = "done";
         else if (progress === null || progress === 0) status = "todo";
         else status = "in-progress";
-        return { name, progress, status, startCommit, mtime };
+        return { name, progress, status, startCommit, models, mtime };
       });
 
     withMeta.sort((a, b) => b.mtime - a.mtime);
@@ -923,12 +961,145 @@ function scope(args) {
   return out;
 }
 
+// ==========================================================================
+// models: which model each helper runs on this cycle (#205)
+// ==========================================================================
+
+const MODES = ["best", "fit", "cheap"];
+const ALIASES = ["sonnet", "opus", "haiku", "fable"];
+// The helpers a mode moves: the eight review finders and the map helper.
+const MOVING_ROLES = [
+  "review-code-finder", "review-security-finder", "review-ux-finder", "review-plan-finder",
+  "review-commands-finder", "review-deps-finder", "review-browser-finder", "review-copy-finder",
+  "index-mapper",
+];
+// The helpers no mode moves: a judge never runs below the work it judges, and the
+// correction extractor was not measured.
+const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer", "correction-extractor"];
+// The agent files the dispatch uses: beside this script's own folder, so a plugin
+// install reads the plugin's agents and the toolkit repo reads .claude/agents/.
+const AGENTS_DIR = path.join(__dirname, "..", "agents");
+
+// The model an agent file names, as a dispatch passes it. "inherit", no model
+// line, no file, or a value that is not an alias all read as "session".
+function agentFileModel(name) {
+  try {
+    const text = fs.readFileSync(path.join(AGENTS_DIR, name + ".md"), "utf8");
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+    const m = fm && /^model:[ \t]*([A-Za-z0-9.-]+)[ \t]*\r?$/m.exec(fm[1]);
+    const value = m ? m[1].toLowerCase() : null;
+    return ALIASES.includes(value) ? value : "session";
+  } catch {
+    return "session";
+  }
+}
+
+// HEAD as scopePlan reads it, or null when git cannot say.
+function headAt(root) {
+  const branchRun = gitScope(["symbolic-ref", "-q", "HEAD"], root);
+  const commitRun = gitScope(["rev-parse", "--verify", "-q", "HEAD^{commit}"], root);
+  if (!branchRun.ok && branchRun.status !== 1) return null;
+  if (!commitRun.ok && commitRun.status !== 1) return null;
+  const commit = commitRun.ok ? commitRun.stdout.toString("utf8").trim() : null;
+  if (commit !== null && !SHA.test(commit)) return null;
+  return { commit, unborn: commit === null };
+}
+
+// The newest plan's mode while that plan is unfinished: { mode, plan }, or {}
+// when no plan applies, with a warning when its Models line was ignored.
+function planMode(root) {
+  const { plans } = readPlans(root);
+  if (plans.length === 0 || plans[0].models === null) return {};
+  const newest = plans[0];
+  if (!MODES.includes(newest.models)) {
+    return { warning: "The newest plan, " + newest.name + ", names the mode \"" + newest.models + "\", which is not best, fit or cheap, so it was ignored." };
+  }
+  const applies = { mode: newest.models, plan: newest.name };
+  // Not begun: /execute writes the start line when it starts building.
+  if (newest.startCommit === null) return applies;
+  const head = headAt(root);
+  if (head === null) return { warning: "git could not read HEAD, so " + newest.name + "'s mode was not used." };
+  const found = scopePlan(head, root);
+  if (found.error) return { warning: "git could not tell whether " + newest.name + " has shipped (" + found.error + "), so its mode was not used." };
+  if (found.range) return applies;
+  const reason = found.plan && found.plan.reason;
+  // Begun, with no commit after its start yet: still being built.
+  if (reason === "plan-no-commits") return applies;
+  // Shipped (every commit after the start is pushed), or not about this branch.
+  return {};
+}
+
+// The resolved models object. requested is the --mode value, or null.
+function resolveModels(requested, root) {
+  const warnings = [];
+  let mode = null;
+  let source = "default";
+  let plan = null;
+  if (requested !== null) {
+    if (MODES.includes(requested)) {
+      mode = requested;
+      source = "argument";
+    } else {
+      warnings.push("\"" + requested + "\" is not a mode (best, fit or cheap), so it was ignored.");
+    }
+  }
+  if (mode === null && root !== null) {
+    const p = planMode(root);
+    if (p.warning) warnings.push(p.warning);
+    if (p.mode) {
+      mode = p.mode;
+      source = "plan";
+      plan = p.plan;
+    }
+  }
+  if (mode === null) mode = "fit";
+  const perRole = {};
+  for (const role of MOVING_ROLES) perRole[role] = mode === "best" ? "session" : mode === "cheap" ? "sonnet" : agentFileModel(role);
+  for (const role of FIXED_ROLES) perRole[role] = "session";
+  const out = { mode, source, plan, buildModel: mode === "best" ? "session" : "opus", perRole };
+  if (warnings.length) out.warning = warnings.join(" ");
+  return out;
+}
+
+// The working copy's root for the models lookup, or null outside a git checkout.
+function modelsRoot() {
+  const top = gitScope(["rev-parse", "--show-toplevel"], cwd);
+  if (!top.ok) return null;
+  return top.stdout.toString("utf8").replace(/[\r\n]+$/, "");
+}
+
 // --- Dispatch ---------------------------------------------------------------
 // No process.exit after writing: stdout into a pipe is asynchronous on macOS, and
 // exiting early could cut a long JSON object short.
-const cliArgs = process.argv.slice(2);
+//
+// --mode <m> may sit anywhere among the arguments; it is taken out first, so the
+// rest parse exactly as before.
+const rawArgs = process.argv.slice(2);
+let requestedMode = null;
+let modeError = null;
+const cliArgs = [];
+for (let i = 0; i < rawArgs.length; i++) {
+  if (rawArgs[i] === "--mode") {
+    if (i + 1 >= rawArgs.length) modeError = "--mode needs a value: best, fit or cheap";
+    else requestedMode = rawArgs[++i].trim().toLowerCase();
+  } else {
+    cliArgs.push(rawArgs[i]);
+  }
+}
+// Every output carries the models object; a failure there must never cost the rest.
+function withModels(payload) {
+  try {
+    payload.models = resolveModels(requestedMode, modelsRoot());
+    if (modeError) payload.models.warning = (payload.models.warning ? payload.models.warning + " " : "") + modeError + ".";
+  } catch (e) {
+    payload.models = { error: String(e && e.message) };
+  }
+  return payload;
+}
 if (cliArgs.length === 0) {
-  emit(sessionStart());
+  emit(withModels(sessionStart()));
+} else if (cliArgs[0] === "--models" && cliArgs.length === 1) {
+  emit(withModels({ generatedAt: new Date().toISOString(), cwd }));
 } else if (cliArgs[0] === "--scope") {
   let result;
   try {
@@ -937,7 +1108,7 @@ if (cliArgs.length === 0) {
     // Fail soft on anything unforeseen too: the caller always gets one JSON object.
     result = { generatedAt: new Date().toISOString(), cwd, source: "none", reason: "error", message: String(e && e.message), error: String(e && e.message) };
   }
-  emit(result);
+  emit(withModels(result));
 } else {
-  emit({ generatedAt: new Date().toISOString(), cwd, error: "unknown argument: " + cliArgs[0] + " (expected no argument, or --scope [<base>..<end>])" });
+  emit({ generatedAt: new Date().toISOString(), cwd, error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)" });
 }
