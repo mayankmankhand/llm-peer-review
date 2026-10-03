@@ -23,7 +23,7 @@ The pin lives in agent frontmatter under `.claude/agents/`, never in prose. A pr
 | `fix-verifier` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M3 judgment re-verification, every runner |
 | `plan-critic` | inherit | high | Read | `/create-plan` critic loop before the approval stop |
 | `design-critic` | inherit | high | Read | `/execute` design steps (M15, issue #160) |
-| `design-comparer` | inherit | high | Read | `/execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15, issue #204) |
+| `design-comparer` | inherit | high | Read | `/execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15) |
 | `index-mapper` | sonnet | low | Read, Grep, Glob | `/index` Step 3 chunk analysis |
 | `correction-extractor` | inherit | low | Read | `/document` capture stage |
 | `review-finder` (deprecated in 7.0, removed in 8.0) | inherit | high | Read, Grep, Glob, Bash | Downstream commands that still dispatch the generic finder by name; the toolkit itself no longer does |
