@@ -6,7 +6,7 @@ user-invocable: false
 
 # Browser QA Review Criteria (preloaded)
 
-This is the expertise of `/review-browser`, loaded into the finder that reviews through the Staff QA lens. The direct-run skill inlines the same criteria file, so there is one source (issue #167).
+This is the expertise of `/review-browser`, loaded into the finder that reviews through the Staff QA lens. The direct-run skill inlines the same criteria file, so there is one source.
 
 !`cat .claude/skills/shared/criteria-browser.md`
 

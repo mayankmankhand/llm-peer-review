@@ -9,7 +9,7 @@ allowed-tools:
 
 # Slash Command Review Criteria (preloaded)
 
-This is the expertise of `/tk:review-commands`, loaded into the finder that reviews through the Staff PM (ops) lens. The direct-run skill inlines the same criteria file, so there is one source (issue #167).
+This is the expertise of `/tk:review-commands`, loaded into the finder that reviews through the Staff PM (ops) lens. The direct-run skill inlines the same criteria file, so there is one source.
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-commands.md"`
 
