@@ -177,7 +177,7 @@ function finalizeMap() {
     fail("rename_failed", `${MAP_TMP_FILE} could not be renamed over ${MAP_FILE}: ${e.message}`);
   }
 
-  // Step 6's migration: the flat-tree INDEX.md that CODEBASE_MAP.md replaced
+  // The INDEX.md migration: the flat-tree INDEX.md that CODEBASE_MAP.md replaced
   // goes only after the new map is in place. The name must match exactly: on a
   // case-insensitive filesystem (macOS, Windows) a lookup of INDEX.md also finds
   // a project's own index.md, which is not the toolkit's to delete.

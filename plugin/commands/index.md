@@ -13,7 +13,7 @@ allowed-tools:
 - This is a procedural command. Follow the steps in order.
 - Subagent prompts must direct **conditional detection**: only report conventions and gotchas when there is concrete code evidence. No speculation.
 - The final map MUST stay under ~10k tokens. If synthesis exceeds, trim sections in the order listed in Step 5 - the Module Guide is the semantic core and is trimmed last.
-- Use **atomic write** (Step 5 details). Never delete the legacy `INDEX.md` until the new map is fully written and validated. A failed run must leave the user's existing state intact.
+- Use **atomic write** (Step 5 details): a failed run must leave the user's existing map intact.
 - If any step fails (scanner error, all subagents fail after Step 3's one automatic retry per chunk, validation fails), stop and report. Do NOT partially overwrite `CODEBASE_MAP.md`.
 </rules>
 
@@ -54,7 +54,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=tk:index-mapper` - the pinned mapper agent, whose model and effort (Sonnet at low effort) come from its agent frontmatter per the routing rule in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. The frontmatter pin is what makes the Step 2 cost message ("Sonnet via the index-mapper agent") true rather than aspirational - without it the chunks silently inherit the session model. Pinning subagents is safe and carries no prompt-cache penalty: they build their context from scratch. Do NOT pin Step 4 (synthesis) - that runs on the main loop and must stay on the session model ("pin down, inherit up" per the routing rule). Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the model its roster row declares (read the row; do not assume a tier from memory). Use this prompt template, substituting the chunk's file list:
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=tk:index-mapper` - the mapper agent, whose model and effort come from its agent frontmatter, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the model its roster row declares (read the row; do not assume a tier from memory). Use this prompt template, substituting the chunk's file list:
 
 <template>
 
@@ -88,7 +88,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 
 Launch all subagents in parallel (one Agent tool call per chunk in a single message). Wait for all to return.
 
-If any subagent fails or returns an empty response, re-dispatch that chunk once, one tier up (`subagent_type=general-purpose`, no model parameter, so it inherits the session model) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 7. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
+If any subagent fails or returns an empty response, re-dispatch that chunk once, one tier up (`subagent_type=general-purpose`, no model parameter, so it inherits the session model) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 6. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
 
 ### Step 4: Synthesize the map content
 Combine the subagent responses into a single map content string (do NOT write the file yet - Step 5 handles the write atomically). Use this structure:
@@ -152,13 +152,10 @@ Record any trimming in the map header (e.g., add `<!-- Trimmed: tree-to-depth-3,
    ```
 
    It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), renames it over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object.
-3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 7's size and `indexRemoved` for its legacy-file line.
+3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 6's size and `indexRemoved` for its legacy-file line.
 4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`.
 
-### Step 6: One-time INDEX.md migration (only after successful write)
-Step 5's `--finalize` call handles it: it removes `INDEX.md` (the old flat-tree index that `CODEBASE_MAP.md` replaced) only after the new map is in place, so when Step 5 fails the user's old `INDEX.md` stays as a fallback. Nothing to run here.
-
-### Step 7: Report to the user
+### Step 6: Report to the user
 Tell the user:
 - "Generated `CODEBASE_MAP.md` ({totalFiles} files mapped, ~{mapTokens} tokens)."
 - If trim policy fired, list which sections were trimmed/dropped.
@@ -177,6 +174,6 @@ Tell the user:
 - **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/tk:setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
 - **Not a git repo:** Scanner errors out. Tell the user to `git init` first.
 - **All subagents fail:** Do NOT write a partial/empty map. Report the failure and leave any existing `CODEBASE_MAP.md` and `INDEX.md` untouched.
-- **Per-chunk overflow detected:** Step 2's confirm prompt covers this. If the user proceeds anyway, the oversized subagent may truncate or fail - report the gap in Step 7.
+- **Per-chunk overflow detected:** Step 2's confirm prompt covers this. If the user proceeds anyway, the oversized subagent may truncate or fail - report the gap in Step 6.
 
 </conditions>
