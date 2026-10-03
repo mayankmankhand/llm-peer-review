@@ -28,11 +28,9 @@ allowed-tools:
 
 ## Principle and Signals (single source of truth)
 
-The two-layer principle, signals, and hard vetoes this skill applies are documented in the project's HTML output rules. Inline them so the skill, its docs, and the rules file never drift:
+The two-layer principle, signals, and hard vetoes this skill applies are documented in the project's HTML output rules. Inline them so the skill, its docs, and the rules file never drift. How a page reaches the user is in the `html-viewing` skill, loaded by name only when this skill renders:
 
 !`cat .claude/skills/shared/html-outputs.md`
-
-!`cat .claude/skills/shared/html-viewing.md`
 
 !`cat .claude/skills/shared/html-own-files.md`
 
@@ -135,7 +133,7 @@ No new view will be built.
 
 The audit report is itself a human-read multi-item report. Per `html-outputs.md`, render an HTML view of the audit report when 5 or more candidates are listed: audit candidates are softer than review findings, so a short list stays in markdown.
 
-Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/audit-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`; that folder is `<render-dir>` below. Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/audit-shell.html` (read its header comment for the exact fields - each candidate has `file`, `verdict`, `signals`, `vetoes`, `reason`). Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/audit-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`; that folder is `<render-dir>` below. Load the viewing rules now, through the Skill tool (`Skill(html-viewing)`), then check the publish gate (see **"Render for the viewport"** in them): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
 
 `node .claude/scripts/render-html.js --shell audit --name audit-html --data <render-dir>/data.json`
 
@@ -147,7 +145,7 @@ When the user says "yes, generate the view" after seeing the report:
 
 1. Read the source markdown for the top candidate.
 2. Do NOT hand-write the HTML. Convert the markdown's structure into a JSON payload matching the schema documented in the header of `.claude/skills/shared/shells/docview-shell.html` (sections with heading/level/blocks; block types: prose, list, table, code). The shell builds the viewing behaviors in once: tables are sortable, long sections collapse automatically (explicit `collapsed: true/false` overrides). Write the payload as `data.json` in a fresh folder from `mktemp -d /tmp/docview-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`; that folder is `<render-dir>` in step 3.
-3. Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
+3. Load the viewing rules now, through the Skill tool (`Skill(html-viewing)`), then check the publish gate (see **"Render for the viewport"** in them): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
    `node .claude/scripts/render-html.js --shell docview --name <source-basename> --stable --data <render-dir>/data.json`
    `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
 4. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
