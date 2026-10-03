@@ -80,17 +80,17 @@ When the plan's UI/UX Design section carries a load level of new or improve, the
 ## When to Stop
 
 <rules>
-If you hit a critical blocker, **stop executing**. Don't push through a broken plan. A blocker unresolved within the retry bound is a hard stop that pages the human (M1 in `.claude/skills/shared/hitl-loop.md`) - phrase it as a decision a non-engineer can make. Instead:
+If you hit a critical blocker, **stop executing** rather than push through a broken plan, and instead:
 1. Explain what went wrong and why, what the options are, and a recommended default
 2. Suggest re-running `/create-plan` with what you've learned
+
+A blocker still unresolved within the retry bound is a hard stop that pages the human (M1 in `.claude/skills/shared/hitl-loop.md`): phrase it as a decision a non-engineer can make.
 
 **Critical blocker examples:** the plan assumed an API supports a feature it doesn't, a core dependency is incompatible with the project, or the planned architecture can't work as designed.
 
 **Not a critical blocker:** a typo, a syntax error, a small refactor needed, or a step that takes longer than expected. Fix these and keep going - within the retry bound below.
 
 **Retry bound (small failures):** max 3 fix attempts per step, and a plan's Verify step counts as a step under this same bound. The budget is shared, not fresh: if a failure already used its 3 attempts inside a step, it does not get 3 more when the same failure resurfaces at the Verify step. Each attempt must iterate against that step's verification output (the failing test or build result), not guess blindly. If the 3rd attempt still fails, treat it as a critical blocker: stop and follow the two steps above.
-
-**When a plan's Verify step fails:** the retry bound above applies unchanged. The only Verify-specific addition is the outcome: when the bound is exhausted, stop via the critical-blocker path above and suggest re-running `/create-plan` with what you learned.
 </rules>
 
 ## Status Updates
@@ -106,14 +106,14 @@ After completing each step, update the plan file:
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 
-**Re-render the plan's HTML view** whenever you update the markdown status. Rebuild the same payload `/create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `.claude/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Then run the helper with the same stable name:
+**Re-render the plan's HTML view** at each step boundary, once the markdown status is updated (not after every subtask, so a long step does not spend its time re-rendering). Rebuild the same payload `/create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `.claude/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Then run the helper with the same stable name:
 
 ```bash
 node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
      --out-dir plans --stable --data <render-dir>/data.json
 ```
 
-`--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
+`--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it.
 
 The re-render rewrites the local file only, so republish it too: look the page up with `node .claude/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/create-plan` does under "Viewing the Artifact" in `.claude/skills/shared/html-viewing.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent. A session that cannot publish stops at the local re-render.
 
