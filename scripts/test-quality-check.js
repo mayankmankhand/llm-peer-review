@@ -474,6 +474,14 @@ section('model modes', () => {
   check('a ship run: a report that does not open with the mode line is a warning, not a failure', shipRun.warnings.includes('report-opens-without-mode-line') && shipRun.valid);
   const noLine = analyze(makeReviewRun({ caught: IDS, models: { finder: SONNET }, meta: { expect: { ...cheapExpect, modeLine: { mode: 'cheap' } } } }));
   check('a ship run with no mode line: the check fails, the catches still count', noLine.valid && noLine.checks[0].ok === false);
+  // A review that skipped the chat scope line still names the mode where its report opens.
+  const opened = 'Reviewing 1 commit (`e275ca3..1c24c20`), the range passed in. Models: best, from the mode: word.\n\n';
+  const inReport = analyze(makeReviewRun({ caught: IDS, report: opened + '# Review\n\n### Findings\n\n' + reportLine(1, 'code-search-prefix') + '\n\n### Audited out\n\nAudited out: none\n',
+    meta: { expect: { main: 'opus', finders: 'opus', modeLine: { mode: 'best', from: 'mode:? ?word|argument' } } } }));
+  check('mode line: no mode in chat, but the report opens with it: passes, with a warning',
+    inReport.checks[0].ok && inReport.checks[0].where === 'report' && inReport.warnings.includes('mode-line-only-in-report'), JSON.stringify(inReport.checks) + ' ' + inReport.warnings.join(','));
+  const conflict = analyze(makeReviewRun({ caught: IDS, mainTexts: ['Models: fit, the default'], report: opened + '# Review\n', meta: { expect: { main: 'opus', finders: 'opus', modeLine: { mode: 'best' } } } }));
+  check('mode line: a wrong mode in chat fails even when the report names the right one', !conflict.checks[0].ok && conflict.checks[0].where === 'chat', JSON.stringify(conflict.checks));
   const old = analyze(makeReviewRun({ caught: IDS }));
   check('an older run with no mode expectations carries no checks', Array.isArray(old.checks) && old.checks.length === 0);
 

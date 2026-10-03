@@ -214,9 +214,9 @@ function modeLineCheck(texts, want) {
     let detail = line.trim().slice(0, 200);
     if (got !== want.mode) detail += ' (want ' + want.mode + ')';
     else if (!fromOk) detail += ' (does not say where the mode came from: ' + want.from + ')';
-    return { name: 'mode line', ok: got === want.mode && fromOk, first: i === 0, detail };
+    return { name: 'mode line', ok: got === want.mode && fromOk, found: true, first: i === 0, where: 'chat', detail };
   }
-  return { name: 'mode line', ok: false, first: false, detail: 'no "Models: <mode>" line in the session\'s text' };
+  return { name: 'mode line', ok: false, found: false, first: false, detail: 'no "Models: <mode>" line in the session\'s text' };
 }
 
 // session-init.js's Models line, which /create-plan writes under the progress line.
@@ -228,7 +228,18 @@ const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
 // wrote (planLine: { mode, skip: plans that were there before }).
 function expectChecks(expect, main, run) {
   const checks = [];
-  if (expect.modeLine) checks.push(modeLineCheck(main.texts, expect.modeLine));
+  if (expect.modeLine) {
+    let c = modeLineCheck(main.texts, expect.modeLine);
+    // A review opens its report with the scope line that carries the mode
+    // (review.md). The chat copy of that line was skipped in 4 of 10 measured runs
+    // before modes existed, so a session that named no mode in its text counts when
+    // its report opens with the right one; a wrong mode in the text still fails.
+    if (!c.found && run.report) {
+      const r = modeLineCheck([run.report.split('\n').slice(0, 12).join('\n')], expect.modeLine);
+      if (r.found) c = { ...r, first: false, where: 'report', detail: r.detail + ' (in the report\'s opening, not the chat)' };
+    }
+    checks.push(c);
+  }
   for (const t of expect.texts || []) {
     const re = new RegExp(t, 'i');
     const hit = main.texts.find(x => re.test(x));
@@ -619,7 +630,8 @@ function analyzeRun(run, answers) {
   // so they are kept apart from validity and decide the exit code on their own.
   a.checks = expectChecks(expect, main, run);
   const modeCheck = a.checks.find(c => c.name === 'mode line');
-  if (modeCheck && modeCheck.ok && !modeCheck.first) warnings.push('mode-line-not-first');
+  if (modeCheck && modeCheck.ok && modeCheck.where === 'report') warnings.push('mode-line-only-in-report');
+  else if (modeCheck && modeCheck.ok && !modeCheck.first) warnings.push('mode-line-not-first');
   // /review also opens its report with the scope line that carries the mode.
   if (expect.modeLine && run.report && !MODE_RE.test(run.report.split('\n').slice(0, 12).join('\n'))) warnings.push('report-opens-without-mode-line');
 
