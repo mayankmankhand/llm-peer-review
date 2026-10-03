@@ -12,13 +12,12 @@ I'll handle the rest.
 
 ---
 
-## CRITICAL RULES
+## Rules
 
 <rules>
-1. **ASK 2-3 QUESTIONS FIRST** - Never create the issue immediately
-2. **Keep issues SHORT** - Max 10-15 lines total
-3. **NO implementation details** - No code, no file paths, no technical approach
-4. **Capture the WHAT, not the HOW**
+1. **Ask 2-3 questions before creating the issue** - the answers set the labels and fill the body.
+2. **Keep issues short** - 10-15 lines, in the body format below.
+3. **Capture the what, not the how** - no code, file paths, or technical approach; `/explore` and `/create-plan` decide those later with the codebase in front of them.
 </rules>
 
 ## Questions to Ask
