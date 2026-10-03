@@ -4,7 +4,7 @@
 
 Severity is a routing label, not a ranking of how much you care. Four things read it:
 
-- **The M2 audit tier** - a Block gets three independent skeptics, a Warn or Suggest gets one. Over-calling a Block costs two extra subagents on every run that carries it. Since v6.1.1 (#158) those three voters can also downgrade an over-called Block to Warn or Suggest instead of killing it, so over-calling costs the run two skeptics and no longer costs the finding.
+- **The M2 audit tier** - a Block gets three independent skeptics, a Warn or Suggest gets one. Over-calling a Block costs two extra subagents on every run that carries it. Those three voters can also downgrade an over-called Block to Warn or Suggest instead of killing it, so over-calling costs the run two skeptics, not the finding.
 - **The Overall Verdict line** - any surviving Block makes the report `changes-requested`.
 - **The R-ID order** - findings are numbered Blocks first, then Warns, then Suggests.
 - **The readability backstop** - past 7 findings, the 5 highest-severity ones lead the report in full.

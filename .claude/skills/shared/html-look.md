@@ -2,7 +2,7 @@
 
 Shared visual reference for HTML output produced by toolkit commands and the `/playground` skill. Inline this file into commands/skills via `` !`cat .claude/skills/shared/html-look.md` `` (same pattern as `report-format.md`).
 
-This is the minimal v1: typography, colors, severity badges, and the copy-button pattern.
+It covers typography, colors, severity badges, and the copy-button pattern.
 
 > **Mirror:** The seven helper-rendered shells read these tokens from `.claude/skills/shared/shells/tokens.css`, which mirrors this file. Update BOTH together when the look changes. (`tokens.css` points back here.)
 
@@ -17,8 +17,6 @@ This is the minimal v1: typography, colors, severity badges, and the copy-button
 - Line height: 1.6 for body, 1.3 for headings, 1.1 for display
 - Only one element per page takes `--text-display`. A second one means neither is the loudest thing
 - `body` carries `overflow-wrap: anywhere`, so one unbroken URL, hash, or file path wraps instead of pushing the page sideways. It sits on `body` because `overflow-wrap` is inherited: one declaration covers every shell, including any added later (issue #163). A `<pre>` is unaffected, because `white-space: pre` never wraps and keeps its own scroll box
-
-Two entries here were wrong before issue #161 and are corrected above: h3 was documented as 1.25rem where the code has always set 1.1rem, and a `small 0.875rem` was documented that `tokens.css` never defined. Both files change together; that is the whole point of the mirror.
 
 ## Color Tokens
 
@@ -40,7 +38,7 @@ Pick from this neutral palette unless an element calls for a severity color (see
 
 ## Dark Mode
 
-Supported since issue #155. The hosted page is now the primary place an artifact
+The hosted page is the primary place an artifact
 is read, and it renders inside the **viewer's** theme, so a light-only stylesheet
 hands a dark-mode reader a white slab. The local fallback needs the same
 treatment, since a browser there follows the OS theme too.

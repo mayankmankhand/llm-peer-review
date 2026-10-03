@@ -4,7 +4,7 @@ Shared reference for design work in the toolkit loop (issue #160). Read on deman
 
 Adapted from Anshu Chimala's "How to turn your AI into a world-class designer" (Lenny's Newsletter, 2026), Techniques 1 to 6. The premise: a model picks the most predictable design choice at every step, so variety and taste have to be injected from outside it. Technique 7 onward is not adopted yet.
 
-**The toolkit's own artifact look** (`.claude/skills/shared/shells/`, `tokens.css`, `html-look.md`) is an existing design system in state `exists` under the three-state rule, and the allowed-variance rules apply to it exactly as they do to any other repo's system. It was previously carved out entirely, on the reasoning that the loop should not churn a look every downstream project inherits. That protection now comes from the right place: layout, composition, motion and copy may vary freely, and colors, type, spacing and components still require the divergence page (issue #161). A blanket exemption also blocked fixing the look when it was measurably failing its reader, which is what it turned out to be doing.
+**The toolkit's own artifact look** (`.claude/skills/shared/shells/`, `tokens.css`, `html-look.md`) is an existing design system in state `exists` under the three-state rule, and the allowed-variance rules apply to it exactly as they do to any other repo's system. Layout, composition, motion and copy may vary freely, and colors, type, spacing and components still require the divergence page. That keeps a look every downstream project inherits from churning, while still letting the loop fix it when it fails its reader.
 
 ## The three-state rule
 
@@ -96,7 +96,7 @@ The implementing agent cannot judge its own design: it reviews its own code, dec
 
 **The return.** `Score: N/10` on the first line, then a numbered gaps list. The gaps are the critique; the score is recorded in the digest as a label and decides nothing. A return with no parseable gap line is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a digest note.
 
-**Why the score decides nothing.** Five fresh critics on one unchanged screenshot scored it 4, 4, 4, 5 and 4 (issue #204). The score is steady, but its one-point wobble is the same size as the step a score-based stop rule has to read, and no recorded loop ever reached the old 9/10 bar. The gaps caught every real defect those loops found. So the prompt keeps its score line, and the decisions it used to feed go to the side-by-side judge in Technique 3b. The bound on rounds and what happens when a loop stops are M15.
+**Why the score decides nothing.** Five fresh critics on one unchanged screenshot scored it 4, 4, 4, 5 and 4 (issue #204). The score is steady, but its one-point wobble is the same size as the step a score-based stop rule has to read, and no recorded loop reached 9/10. The gaps caught every real defect those loops found. So the score line stays as a label, and keep-or-revert decisions belong to the side-by-side judge in Technique 3b. The bound on rounds and what happens when a loop stops are M15.
 
 ## Technique 3b: the side-by-side judge
 

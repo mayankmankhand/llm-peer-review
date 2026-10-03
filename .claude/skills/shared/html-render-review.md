@@ -11,7 +11,7 @@ Render the review page whenever **either** is true:
 - the run has any surviving finding, or
 - the standing page already exists at `artifacts/html/review.html`, so this run can carry it forward or take it to empty.
 
-Skip only when there are no findings **and** no page yet. The older gate (three or more findings, visual evidence, or a severity mix) is gone for the review page: a page that must be able to go empty cannot sit behind a findings count, and under that gate a clean run after a busy one left the busy run's findings showing as open (review of the #162 cycle, R2).
+Skip only when there are no findings **and** no page yet. No findings-count gate applies to the review page: a page that must be able to go empty cannot sit behind one, because a clean run after a busy one would leave the busy run's findings showing as open.
 
 ### Announce Upfront
 
@@ -23,13 +23,13 @@ Honor "skip HTML" if the user replies with that phrase. Continue with markdown o
 
 ## How to Render (data injection - do NOT hand-write HTML)
 
-The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `.claude/skills/shared/shells/review-shell.html`. You produce ONLY a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, the one standing page per repository (step 3 below). This is what makes the open fast and collision-free (issues #120, #127). Generating the whole HTML by hand is the old, slow path - do not do it.
+The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `.claude/skills/shared/shells/review-shell.html`. You produce ONLY a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, the one standing page per repository (step 3 below). This is what makes the open fast and collision-free (issues #120, #127). Do not generate the HTML by hand.
 
 Steps:
 
 1. **Build the JSON payload** matching the schema documented at the top of `.claude/skills/shared/shells/review-shell.html`. Read that header comment for the authoritative field list (it is the single source of truth). Compact reference:
    - `title`, `subtitle` (HTML allowed)
-   - `bottomLine`: `[string, string?, string?]` - **the whole first screen.** Two or three sentences, each 25 words or fewer, in fixed slots: (1) is it safe to ship, including "I could not tell, because..."; (2) the one other thing that matters; (3) what happens next. The first renders in display type. Omit the key and the page falls back to the old counter strip.
+   - `bottomLine`: `[string, string?, string?]` - **the whole first screen.** Two or three sentences, each 25 words or fewer, in fixed slots: (1) is it safe to ship, including "I could not tell, because..."; (2) the one other thing that matters; (3) what happens next. The first renders in display type. Omit the key and the page falls back to the counter strip.
    - `disposition`: one sentence of **counts only** - how many were fixed, deferred, and left unchecked. It must not restate any sentence in `bottomLine`; a design critic scored an early draft down for saying the same thing three times before the first finding. `bottomLine` slot 3 says what happens next in words; this says how many, in figures.
    - `alreadyFixed`: `[string]` - one line each, past tense, with the check that confirmed it. This is the base-rate disclosure: a short list of open findings is only believable beside the count of what was handled.
    - `couldNotCheck`: `[string]` - named limits of this pass, one line each, in plain words. Never omitted when a limit exists; a page that states none is claiming there were none.
@@ -39,7 +39,7 @@ Steps:
    - `looksGood`: `[string]` (HTML allowed)
    - `groups`: `[{label, findings:[...]}]` grouped by specialist. Each finding: `{id, severity, specialist, file:{relPath, absPath, line}, what, context, fix, locus, receipt, fields:[{label, value}]}`. `severity` is `"block" | "warn" | "suggest"`.
      - `what` / `context` / `fix` are the two-sentence contract's three prose keys - sentence one, the optional sentence two, and the fix line. **Omit `context` entirely** when there is no second sentence; that is the normal case. All three may carry trusted inline HTML (`<code>`, `<strong>`).
-     - `locus`: `"user"` when only the human can answer this finding. It drives ranking; severity breaks ties. Omit it and the run degrades to severity-then-payload-order, which is today's behavior.
+     - `locus`: `"user"` when only the human can answer this finding. It drives ranking; severity breaks ties. Omit it and the run degrades to severity-then-payload-order.
      - `receipt`: `{cmd, stdoutFile, exit}`. `stdoutFile` is the file the tier-1 runner saved the check's output to as it ran, under `reports/receipts/<run-stamp>/` (M2 tier 1 in `hitl-loop.md` names the folder; "Where the report is written" in `report-format.md` shows the form); **`render-html.js` reads that file itself** and replaces it with a capped `stdout` array, taking the file's own `exit N` last line as the exit code. It refuses a file from anywhere else, a file over 64 KB, or anything that is not a plain file, and drops the receipt with a note on stderr naming the file. Supplying `stdout` inline instead is refused and dropped, because model-typed text presented as machine output is worse than no receipt at all.
      - `fields`: **attachments only**, never prose. Browser findings use `Expected`, `Actual`, `Screenshot` (an `<img>` value), `Evidence` (a `<pre>` value), in that order. Most findings emit none.
    - **What the renderer does to this payload, so you do not have to:** counts the words in `what`/`context`/`fix` and reports every cap violation to stderr; ranks by `locus` then severity; demotes the lowest-ranked findings to one-line rows once the page budget is spent, never a Block while a lower finding renders in full; carries the other lenses' open findings forward when `lenses` is set; sets `isNew`, `carried`, and `demoted` itself (a payload's own copies of those flags are stripped); and drops any `fields` row still using the retired `Why it matters` / `Example` / `Suggested fix` labels, in the Audited out group too. None of this aborts the render. Do not pre-truncate or pre-select findings to "help" - send everything that survived the audit and let the counter decide.
