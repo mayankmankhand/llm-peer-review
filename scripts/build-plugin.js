@@ -185,7 +185,7 @@ const SITE_OVERRIDES = {
     // What the commands review covers: the project's own prompt files (skill description).
     { phrase: 'Use for reviewing .claude/commands/*.md or .claude/skills/*/SKILL.md files.', keep: true },
     // The same scope in the "Use this when" line.
-    { phrase: 'Reviewing slash command prompts (.claude/commands/*.md)', keep: true },
+    { phrase: 'Reviewing slash command prompts (.claude/commands/*.md or .claude/skills/*/SKILL.md)', keep: true },
   ],
   'skills/shared/html-outputs.md': [
     // Prompt files that stay markdown: a project's own commands and skills.
