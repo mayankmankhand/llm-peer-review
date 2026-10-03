@@ -151,7 +151,7 @@ When the user says "yes, generate the view" after seeing the report:
 4. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
 5. Confirm in chat, reporting the local path and, when the publish in step 4 succeeded, the link alongside it, per the "What to tell the user" line in `.claude/skills/shared/html-viewing.md`. Always state that the source markdown is unchanged.
 
-The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them in v1.
+The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them.
 
 <rules>
 
