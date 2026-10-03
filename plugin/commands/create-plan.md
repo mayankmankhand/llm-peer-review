@@ -186,8 +186,6 @@ Save the plan to `plans/` using this naming convention:
 
 Create the `plans/` directory if it doesn't exist.
 
-Again, it's still not time to build yet. Just write the clear plan document. No extra complexity or extra scope beyond what we discussed.
-
 </rules>
 
 ## Plan Critic (before the stop)
