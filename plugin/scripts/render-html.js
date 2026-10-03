@@ -104,7 +104,7 @@
 //              the reference is not hidden (holistic review, R27). Images are
 //              embedded as data: URIs BEFORE the strip runs, so a screenshot
 //              under the home directory still embeds (holistic review, R1). See
-//              "Viewing the Artifact" in .claude/skills/shared/html-outputs.md.
+//              "Viewing the Artifact" in .claude/skills/shared/html-viewing.md.
 //   --stable   write exactly <name>.html in the out dir - no timestamp, no -N
 //              collision guard - overwriting any existing file. This exists for
 //              identity-keyed outputs that pair with a markdown file and are
@@ -628,7 +628,7 @@ function relPathFromAbs(abs) {
 // Deleting the absPath KEY is what triggers each shell's plain-text branch, so
 // that stays - provided relPath is there for the shell to fall back to, which
 // relPathFromAbs above guarantees. But a key-name denylist alone cannot support
-// what the --no-abs description in html-outputs.md promises: absolute paths
+// what the --no-abs description in html-viewing.md promises: absolute paths
 // also appear as ordinary TEXT inside prose fields, receipt commands, and <pre>
 // evidence blocks, and those shipped untouched (issue #155 review, R6). The
 // page is published to a private hosted page without an ask, so this function

@@ -246,6 +246,8 @@ Saying **"report only"** on this run keeps the old present-and-wait behavior for
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs.
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`
+
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md"`

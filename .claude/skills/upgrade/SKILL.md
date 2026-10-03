@@ -109,6 +109,6 @@ The repair checks (C-9 to C-11) run on every upgrade, as the rules stamp check (
 
 ## HTML Output Rules
 
-The sample cycle in step 8 renders the standing review page; this audit's own report is markdown only. The rules are inlined so the publish and record steps that cycle runs are in context:
+This audit's own report is markdown only, and the sample cycle in step 8 runs `/review`, which carries its own page rules. The shared rules are inlined for the temporary-folder steps this run takes (the issue body in step 2):
 
 !`cat .claude/skills/shared/html-outputs.md`

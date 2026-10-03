@@ -32,7 +32,7 @@ Steps:
 2. **Write the JSON to a per-run temp file.** Write it as `data.json` in a fresh folder from `mktemp -d /tmp/debate-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`; that folder is `<render-dir>` below.
 
 3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
-   Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+   Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```
    node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell debate --name debate-<model> --data <render-dir>/data.json
@@ -40,6 +40,6 @@ Steps:
    - `<model>` is `gpt` or `gemini` (passed by the calling command). So `--name debate-gpt` or `--name debate-gemini`.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
-4. **Show it to the user** per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause that the page holds the debate's recommendations.
+4. **Show it to the user** per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause that the page holds the debate's recommendations.
 
 The debate cards reuse the same severity scale, file-link scheme, prose keys, and attachment rows as the review shell for visual consistency across the toolkit.

@@ -115,7 +115,7 @@ node .claude/scripts/render-html.js --shell plan --name PLAN-<basename> \
 
 `--stable` replaces the file in place, so the page keeps its URL. The markdown stays the source of truth; this page mirrors it. Batch the re-render at step boundaries rather than after every subtask, so a long step does not spend its time re-rendering.
 
-The re-render rewrites the local file only, so republish it too: look the page up with `node .claude/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/create-plan` does under "Viewing the Artifact" in `.claude/skills/shared/html-outputs.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent. A session that cannot publish stops at the local re-render.
+The re-render rewrites the local file only, so republish it too: look the page up with `node .claude/scripts/render-html.js --index-url --name PLAN-<basename>`, publish the re-rendered file to that URL when one comes back (a new page when none does), and record the publish with `--index-add`, exactly as `/create-plan` does under "Viewing the Artifact" in `.claude/skills/shared/html-viewing.md`. Without the publish the hosted page stays at the state it was created in, which is the frozen page this step exists to prevent. A session that cannot publish stops at the local re-render.
 
 A stable URL whose content has gone stale is worse than no page.
 </procedure>
@@ -137,6 +137,8 @@ Saying "no chaining" on this run stops here (M14). That is a different opt-out f
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs.
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
 
 !`cat .claude/skills/shared/html-outputs.md`
+
+!`cat .claude/skills/shared/html-viewing.md`

@@ -220,7 +220,7 @@ function noAbsTests() {
   check('index-mode rejection names the flag', msg.indexOf('--no-abs') !== -1, msg.trim());
 
   // --no-abs must scrub absolute paths out of ORDINARY TEXT too, not just the
-  // absPath key - the --no-abs rule in html-outputs.md promises the page
+  // absPath key - the --no-abs rule in html-viewing.md promises the page
   // carries no machine-identifying paths, and a key-name denylist cannot
   // deliver that (issue #155 review, R6).
   const HOME = require('os').homedir();

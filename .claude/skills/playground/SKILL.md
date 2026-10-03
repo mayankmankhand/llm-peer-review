@@ -185,6 +185,6 @@ rm -r /tmp/playground.*
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs.
+Every HTML decision above (whether to render, where the file lands, the temporary folder) is governed by the shared rules fragment, inlined here so it is in context when the page is written. A playground never publishes and never opens itself, so the viewing rules are not loaded here.
 
 !`cat .claude/skills/shared/html-outputs.md`

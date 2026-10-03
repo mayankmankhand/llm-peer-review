@@ -252,7 +252,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 
 Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/document-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Then run the helper from the project root with that folder as `<render-dir>`. The cycle summary is a **standing page**: `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
-Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`): if this session can publish, add `--no-abs` to the command below.
+Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below.
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell document --name cycle --stable --data <render-dir>/data.json
@@ -266,7 +266,7 @@ Because this is a `--stable` type, look up its recorded page before publishing:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-url --name cycle
 ```
 
-Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
+Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
 
 ### Advance the marker (LAST step)
 
@@ -278,6 +278,8 @@ After the HTML is written (or deliberately skipped), write the current `HEAD` SH
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragment, inlined here so it is in context when the render runs.
+Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`
+
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md"`
