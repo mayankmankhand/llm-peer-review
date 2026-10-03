@@ -22,9 +22,9 @@ Based on our full exchange, produce a markdown plan document.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
-**If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure. When `map.stale` in the session JSON is true (10 or more commits behind), run `/tk:index` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), then read the fresh map.
+**If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure. When `map.stale` in the session JSON is true (10 or more commits behind), run `/tk:index mode:<m>` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), with `<m>` the exploration's Models answer (fit when it gave none), then read the fresh map.
 
-**If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index`. After it completes, read the new map and proceed.
+**If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index mode:<m>`, with `<m>` the exploration's Models answer (fit when it gave none). After it completes, read the new map and proceed.
 
 **If it is malformed or `/tk:index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
 
@@ -60,6 +60,7 @@ The text below is this project's own gate, read from `.claude/toolkit/plan-gate.
   - 🟨 In Progress
   - 🟥 To Do
 - Include dynamic tracking of overall progress percentage (at top)
+- Write the exploration's Models answer (best, fit or cheap; fit when it gave none) as the `**Models:**` line under the progress line: while the plan is unfinished, `session-init.js` reads it to pick each helper's model
 - Add no scope or complexity beyond the details the conversation settled
 - Steps should be modular, elegant, minimal, and integrate seamlessly within the existing codebase
 
@@ -120,6 +121,7 @@ Decide whether this plan needs a dedicated test step. This is dynamic, not blank
 # Feature Implementation Plan
 
 **Overall Progress:** `0%`
+**Models:** fit
 
 ## TLDR
 Short summary of what we're building and why.
@@ -250,7 +252,10 @@ Present the plan and stop. Plan approval is the cycle's one human gate, so **`/t
 
 This is the loop's one deliberate non-chaining handoff. It is written down precisely because chaining is the norm everywhere else: an unstated exception drifts into a chain.
 
-Close by telling the user the plan is ready, and that saying "go" runs `/tk:execute`.
+Close by telling the user the plan is ready, in the form its Models line asks for:
+
+- **best:** saying "go" runs `/tk:execute` in this session.
+- **fit or cheap:** the plan is built on Opus, in a fresh session; the plan file carries everything the build needs. Give the steps: start a new session, run `/model opus`, then `/tk:execute`. A model switch inside this conversation would re-read all of it uncached, which costs more than the fresh start.
 
 ## HTML Output Rules
 
