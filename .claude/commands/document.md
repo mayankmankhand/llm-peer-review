@@ -51,9 +51,6 @@ For each changed file:
 ✅ **Current** - Matches actual implementation
 ✅ **Right file** - Put info where it belongs (see Section 3)
 
-❌ No enterprise fluff
-❌ No outdated information
-❌ No assumptions without verification
 ❌ Don't edit `toolkit.md` - it's auto-managed
 
 ## 5. Ask if Uncertain
