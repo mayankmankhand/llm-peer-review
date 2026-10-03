@@ -49,7 +49,7 @@ Install host project deps; toolkit deps depend on how the toolkit is installed.
 
 1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
 2. **Toolkit deps** - two cases:
-   - **Plugin install (v7.0.0 and later, the normal case):** nothing to do. The toolkit's dependencies live with the plugin under `~/.claude/plugins/`, installed once per machine when the plugin is installed and shared by every worktree and every project.
+   - **Plugin install (the normal case):** nothing to do. The toolkit's dependencies live with the plugin under `~/.claude/plugins/`, installed once per machine when the plugin is installed and shared by every worktree and every project.
    - **Copy-install (a `.claude/scripts/package.json` exists in the worktree):** run `npm install --prefix .claude/worktrees/worktree-N/.claude/scripts`. Without it, `/review-browser`, `/ask-gpt`, and `/ask-gemini` will not work in the new worktree. Skip if there is no toolkit package.json.
 
 If either install fails, warn the user but do NOT stop. The worktree is still usable for general work, but the affected toolkit features will not run until the missing deps are installed manually.
