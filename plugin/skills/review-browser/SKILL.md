@@ -31,7 +31,7 @@ Be thorough but concise.
 **Use this when:** Verifying a running web application works correctly - visual layout, interactive flows, error states, and runtime behavior.
 **Don't use this when:** Reviewing static code or markup without a running server (use /tk:review-ux). Reviewing code quality (/tk:review-code), command prompts (/tk:review-commands), plan completion (/tk:review-plan), or doing a pre-release check (/tk:review-full).
 
-**Important:** This command requires a running dev server (e.g. `npm run dev`). It drives a real headless browser to interact with the app and take screenshots. Ask the user to confirm the server is running before you start.
+**Important:** This command requires a running dev server (e.g. `npm run dev`). It drives a real headless browser to interact with the app and take screenshots. If no server answers, start it yourself, once: add `autoStart` to the first session (see Auto-Start in the browse API) or run the project's dev command. If it still does not answer, stop and report what you ran; do not retry.
 
 **Prerequisites:** Browser QA needs two things, both installed inside the toolkit folder so the user's project stays untouched:
 
@@ -47,7 +47,7 @@ sudo npx playwright-core install-deps chromium
 # Alternative: install packages like libnspr4, libnss3, libgbm1 manually.
 ```
 
-If the script returns a "Chromium not found" error, relay these install instructions to the user and stop the review.
+If the script returns a "Chromium not found" error, run steps 1 and 2 above yourself, once, then rerun the session once. The `sudo` line stays with the user: if Chromium still cannot start, relay that line and stop the review.
 
 ## Critical Rules
 
