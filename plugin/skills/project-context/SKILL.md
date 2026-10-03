@@ -40,7 +40,7 @@ Gather lightweight project context so subagents can make informed decisions. Thi
    - File structure conventions (e.g., commands in `.claude/commands/`, skills in `.claude/skills/`)
    - Any patterns called out in CLAUDE.md or rules files
 
-5. **Output a compact summary** - Keep it to 10-15 lines max. Include:
+5. **Output a compact summary** - Keep it to 10-15 lines, because it is pasted into every subagent prompt. Include:
    - Project type and main language
    - Key frameworks and dependencies
    - Critical rules that affect how subagents should behave
