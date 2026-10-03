@@ -135,6 +135,8 @@
       "Skill(tk:design-rules:*)",
       "Skill(tk:html-viewing)",
       "Skill(tk:html-viewing:*)",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
       "Skill(tk:review-commands)",
       "Skill(tk:review-commands:*)",
       "Skill(tk:review-copy)",
