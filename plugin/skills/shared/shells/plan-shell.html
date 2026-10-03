@@ -38,16 +38,13 @@
   no CDN, works offline on file://. Reproduces the gold look of the
   hand-written plan HTML files previously emitted by /create-plan.
 
-  STATUS IS LIVE (issue #161). Each step carries an optional "status" of
+  STATUS IS LIVE. Each step carries an optional "status" of
   todo | doing | done, and /execute re-renders this page as it updates the
   markdown. The markdown plan remains the source of truth: this page is a
   mirror of it, refreshed, never authored directly.
 
-  It was static scaffolding until #161, and the cost was measurable: a plan
-  page sat beside a markdown file recording 62 completed checkboxes while
-  showing every step as not started. A stable page that never updates is the
-  worst of both worlds - it has one durable URL, and everything at that URL
-  is false. A step with no status still renders as To Do, so an older payload
+  A stable page that never updates is worse than no page: it has one durable
+  URL, and everything at that URL is false. A step with no status still renders as To Do, so an older payload
   degrades to exactly the previous behavior.
 
   ==========================================================================
