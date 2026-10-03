@@ -11,7 +11,7 @@
 | Sentence one | 18 words | Required. Opens with the severity spelled out, and carries **both** the defect and its consequence. |
 | Sentence two | 22 words | Optional. Written **only** if it answers exactly one of: who is hit, when it fires, why now. There is never a third sentence. |
 | Fix line | 20 words | Required. States a **cost**, not an approach. |
-| Receipt | 6 lines | Attached, not written. Audit-time output (see The Receipt row). |
+| Receipt | 6 lines | Attached, not written: the runner adds it at audit time. |
 
 Open prose per finding is capped at **40 words** before the fix line. A reader who reads only sentence one must still learn what breaks.
 
@@ -106,7 +106,7 @@ Browser findings use the same two-sentence contract plus extra evidence rows. Th
 
 Expected and Actual come first among the attachments on purpose: a wrong value beside the right one is the fastest thing on the page to understand, and it replaces the sentence of prose that would otherwise describe the gap.
 
-(At audit time the **Receipt:** row is appended last, after `Fix` - defined once under "Audit-Aware Report Sections" below, not part of this authoring list.)
+(At audit time the runner appends a **Receipt:** row last, after `Fix`; it is not part of this authoring list.)
 
 Browser summary also includes:
 - Pages tested: X
