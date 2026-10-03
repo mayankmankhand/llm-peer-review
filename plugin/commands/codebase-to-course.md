@@ -35,7 +35,7 @@ A single self-contained HTML file that teaches a codebase through interactive mo
    - Simple embedded diagrams (using inline SVG or ASCII)
    - Interactive quiz questions with reveal-answer toggles
 5. Save it as `course.html` in a fresh folder from `mktemp -d /tmp/codebase-course.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`
-6. Tell the user the file path so they can open it in a browser
+6. Open it in the user's browser with `bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh <the course.html path>`, typing the path `mktemp` printed (the local open under "Viewing the Artifact"), then tell the user where it is
 
 </procedure>
 
