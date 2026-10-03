@@ -2,8 +2,8 @@
 name: review-ux-finder
 description: UX review finder for /tk:review dispatches and the /tk:review-ux direct-run fan-out. Preloads the ux criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob
-model: inherit
-effort: high
+model: opus
+effort: medium
 skills:
   - review-ux-criteria
   - dispatch-contract

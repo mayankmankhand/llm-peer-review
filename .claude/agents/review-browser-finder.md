@@ -2,8 +2,8 @@
 name: review-browser-finder
 description: Browser QA review finder for /review dispatches and the /review-browser direct-run fan-out. Preloads the browser criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob, Bash
-model: inherit
-effort: high
+model: opus
+effort: medium
 skills:
   - review-browser-criteria
   - dispatch-contract

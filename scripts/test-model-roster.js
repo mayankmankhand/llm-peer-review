@@ -146,9 +146,9 @@ delete someJudge.get('plan-critic').model;
 check('mutation: a judge with its model line removed is caught',
   rosterProblems(someJudge, roster).some(p => p === 'plan-critic: no model line'));
 const pinned = clone(agents);
-pinned.get('review-code-finder').model = 'sonnet';
+pinned.get('review-code-finder').model = 'haiku';
 check('mutation: a finder pinned without its roster row is caught',
-  rosterProblems(pinned, roster).some(p => /^review-code-finder: model sonnet, roster says/.test(p)));
+  rosterProblems(pinned, roster).some(p => /^review-code-finder: model haiku, roster says/.test(p)));
 const effort = clone(agents);
 effort.get('fix-verifier').effort = 'low';
 check('mutation: an effort that leaves its row is caught',
