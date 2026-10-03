@@ -34,7 +34,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 
 ## Step 1: Check the Logs (always start here)
 
-Ask: "What do the logs say? Check your browser console, terminal output, or log files. Paste the error or relevant output here."
+Read the logs you can reach yourself first: terminal output, log files, a failing test's output. Then ask only for what only the user can see: "What does your browser console show? Paste any error here."
 
 If the user hasn't checked logs yet, help them find the right place to look.
 
