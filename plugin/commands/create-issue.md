@@ -23,7 +23,7 @@ I'll handle the rest.
 
 <rules>
 1. **Ask 2-3 questions before creating the issue** - the answers set the labels and fill the body.
-2. **Keep issues short** - 10-15 lines, in the body format below.
+2. **Keep issues short** - about 10-15 lines in the body format below, so `/tk:explore` starts from the problem rather than a solution.
 3. **Capture the what, not the how** - no code, file paths, or technical approach; `/tk:explore` and `/tk:create-plan` decide those later with the codebase in front of them.
 </rules>
 
@@ -61,6 +61,6 @@ Then run the **"Create issue" row** for the detected host, from the project dire
 
 ## REMEMBER
 - Ask questions first
-- Keep it short (10-15 lines max)
+- Keep it short
 - Run the "Create issue" row for the detected host (`gh issue create` or `glab issue create`) to actually create the issue: single-quoted title, body file on both hosts, never `$(...)`
 - No implementation details - that's for /tk:explore
