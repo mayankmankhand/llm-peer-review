@@ -1,6 +1,6 @@
 # HTML Visual Look
 
-Shared visual reference for HTML output produced by toolkit commands and the `/playground` skill. Inline this file into commands/skills via `` !`cat .claude/skills/shared/html-look.md` `` (same pattern as `report-format.md`).
+Shared visual reference for toolkit HTML. The `/playground` skill, the one hand-written page, inlines it via `` !`cat .claude/skills/shared/html-look.md` ``; commands that render through `render-html.js` never do, because their shells read `tokens.css`, which mirrors this file.
 
 It covers typography, colors, severity badges, and the copy-button pattern.
 
