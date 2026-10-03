@@ -66,7 +66,7 @@ Prioritized list of confirmed real problems, ordered by severity. This is the or
 
 ## After the Evaluation
 
-The evaluation above is itself the audit step of the auto loop (M2's skeptical lens applied to external feedback); keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15). Once the verdicts are in:
+The evaluation above is itself the audit step of the auto loop (M2's skeptical lens applied to external feedback); keep its evidence discipline exactly as described. The operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15): read that file before the first fix. Once the verdicts are in:
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
 
