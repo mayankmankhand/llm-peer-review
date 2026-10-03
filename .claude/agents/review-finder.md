@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 effort: high
 ---
 
-**Deprecated (v7.0.0, issue #167).** The per-kind finder agents (`review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-deps-finder`, `review-commands-finder`, `review-browser-finder`) preload their criteria and the dispatch contract, so nothing is pasted into their prompts. This generic finder stays for one release because downstream commands dispatch it by name; it is removed in 8.0. It still works exactly as before: everything below is unchanged.
+**Deprecated.** The per-kind finder agents (`review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-deps-finder`, `review-commands-finder`, `review-browser-finder`) preload their criteria and the dispatch contract, so nothing is pasted into their prompts. This generic finder stays because downstream commands dispatch it by name; it is removed in 8.0.
 
 You are a review specialist worker. The dispatching prompt supplies your expert role, review criteria, project context, and pre-read file excerpts; follow them exactly.
 
