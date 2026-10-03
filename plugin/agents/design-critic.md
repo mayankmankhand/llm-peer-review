@@ -2,6 +2,7 @@
 name: design-critic
 description: Design critic worker for /tk:execute design steps (M15). Receives one screenshot path and the fixed critic prompt from design-rules.md, judges the design against a top-studio bar, and returns the biggest gaps, with a score out of 10 that is recorded as a label only. Fresh context every round; never sees code, the plan, or earlier critiques.
 tools: Read
+model: inherit
 effort: high
 ---
 

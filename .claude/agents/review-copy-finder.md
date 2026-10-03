@@ -2,6 +2,7 @@
 name: review-copy-finder
 description: Copy review finder for /review dispatches and the /review-copy direct-run fan-out. Preloads the copy criteria and the dispatch contract, reads the project context and file excerpts in the dispatching prompt, and returns findings as JSONL. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob
+model: inherit
 effort: high
 skills:
   - review-copy-criteria

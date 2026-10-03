@@ -2,6 +2,7 @@
 name: review-finder
 description: DEPRECATED in 7.0, removed in 8.0 - use the per-kind finders (review-code-finder, review-ux-finder, ...). Generic review specialist worker kept one release for downstream commands that dispatch it by name. Reads the criteria, project context, and file excerpts supplied in the dispatching prompt and reports findings. Declares no file-editing tools; never audits its own findings.
 tools: Read, Grep, Glob, Bash
+model: inherit
 effort: high
 ---
 

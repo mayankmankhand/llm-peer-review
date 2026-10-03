@@ -2,6 +2,7 @@
 name: design-comparer
 description: Side-by-side design judge for /execute design steps (M15). Receives two screenshot paths labeled A and B and the fixed comparer prompt from design-rules.md, and returns which one is closer to a top-studio bar, or neither, with one line of why. Fresh context every dispatch; never told which image is newer, and never sees code, the plan, or critiques.
 tools: Read
+model: inherit
 effort: high
 ---
 
