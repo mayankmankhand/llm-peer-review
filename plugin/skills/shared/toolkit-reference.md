@@ -69,7 +69,7 @@ The lessons captured at `/tk:document` are read back at the start of the next `/
 | `/tk:ask-gpt` | AI peer review with ChatGPT debate (up to 3 rounds) |
 | `/tk:ask-gemini` | AI peer review with Gemini debate (up to 3 rounds) |
 | `/tk:pair-debug` | Focused debugging partner - investigate before fixing |
-| `/tk:package-review` | Review a package/codebase |
+| `/tk:package-review` | Bundle code into one markdown file to paste into an outside AI for review |
 | `/tk:learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - Claude can offer proactively) |
 | `/tk:codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/tk:playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /tk:explore vision mode) |
