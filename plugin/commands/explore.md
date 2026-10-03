@@ -41,12 +41,16 @@ Don't try to guess silently. Always ask, but pre-fill your best guess so it's a 
    - `issue 88`, `#88`, `ticket 88` -> use the number directly
    - An issue URL -> extract the number with the **"Issue URL" note** above. Read it rather than parsing by hand: it holds the per-host anchors, the two paths GitLab serves the same issue under, and why the LAST match is the one to take
    - A bare number on its own (e.g. just `88`) -> ask "Is that an issue number?" before fetching, since a bare number can mean other things
-3. Ask the user with this exact wording, substituting your guess in the brackets:
+3. Ask the user with this exact wording, substituting your guess in the first brackets:
    > Scoping or vision? [scoping]
+   > Models: best, fit or cheap? [fit] (best: every helper on your session model. fit: the tested settings. cheap: Sonnet for the review and map helpers, cheaper, but in testing it missed a bug the others caught. Judges never change.)
+
+   The second line is the cycle's model mode ("Model modes" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`). Leave it out when the arguments already carry a `mode:<m>` word, and use that mode.
 4. Interpret the answer:
    - Empty input or just enter -> proceed with the bracketed guess
    - Anything that clearly maps to scoping or vision (the word itself, single letters `s`/`v`, or common synonyms like "narrow it down" / "big picture") -> use that mode
    - Truly ambiguous input -> proceed with the bracketed guess but acknowledge it out loud: "Couldn't tell from that - going with scoping. Say 'switch to vision mode' anytime."
+   - **Models:** empty -> fit; `best`, `fit` or `cheap` (or `b`, `f`, `c`) -> that mode; anything else -> fit, said out loud. The answer holds for the whole cycle: it goes into the closing summary, and `/tk:create-plan` writes it into the plan.
 
 Once the mode is picked, announce it briefly and tell the user how to switch. Example:
 > "Going with **vision mode**. Say 'switch to scoping mode' anytime if you'd rather narrow down."
@@ -202,6 +206,7 @@ If they say skip, present a vision-mode closing summary:
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/tk:create-plan`'s Goal State section.
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
 - **Design direction** - when the design step fired: load level, design system (state and where), direction name, brief, seed, the two unpicked directions' names and seeds, divergence allowed. `/tk:create-plan` copies this line into its UI/UX Design section.
+- **Models** - the Models answer (best, fit or cheap); `/tk:create-plan` writes it as the plan's Models line
 - **Open questions** - anything unresolved that `/tk:create-plan` should address during execution
 - **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
 - **HTML option comparison (when 2+ options are being compared).** The gate: the exploration surfaced **two or more distinct, named directions the user is actively deciding between**, each with at least one tradeoff or consideration. It does NOT fire for a single recommendation, a set you have already narrowed to one, or open discussion with no competing options. When fewer than 2 options are on the table, skip this entirely. When it fires, work through these steps:
@@ -220,9 +225,9 @@ If they say yes, continue with the analysis below.
 ### Start with the codebase map
 Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root.
 
-**If it exists:** Read it for the directory tree, module purposes, conventions, gotchas, and navigation guide - your starting point before any glob/grep. For staleness, use the session-init JSON instead of running git yourself: `map.commitsBehind` is the count and `map.stale` is true when it is >= 10 (single-commit drift is noisy and not actionable). If the script was unavailable, compute it manually: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD` and run `git rev-list --count <map_commit>..HEAD`. When `map.stale` is true (10 or more commits behind), run `/tk:index` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), then read the fresh map and proceed - tell the user it ran and why. When the map is not stale, proceed without comment. If `map.generatedWhileDirty` is true (the header notes `generated_while_dirty`), mention that to the user regardless of commit count - it signals the map was built from uncommitted state.
+**If it exists:** Read it for the directory tree, module purposes, conventions, gotchas, and navigation guide - your starting point before any glob/grep. For staleness, use the session-init JSON instead of running git yourself: `map.commitsBehind` is the count and `map.stale` is true when it is >= 10 (single-commit drift is noisy and not actionable). If the script was unavailable, compute it manually: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD` and run `git rev-list --count <map_commit>..HEAD`. When `map.stale` is true (10 or more commits behind), run `/tk:index mode:<m>` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), with `<m>` the Models answer, then read the fresh map and proceed - tell the user it ran and why. When the map is not stale, proceed without comment. If `map.generatedWhileDirty` is true (the header notes `generated_while_dirty`), mention that to the user regardless of commit count - it signals the map was built from uncommitted state.
 
-**If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index` to generate the map. After it completes, read the new map and proceed.
+**If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index mode:<m>`, with `<m>` the Models answer, to generate the map. After it completes, read the new map and proceed.
 
 **If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/tk:index` to regenerate.", and continue with glob/grep.
 
@@ -246,6 +251,7 @@ Give the user a brief summary of what you found:
 - How the feature integrates
 - Any technical concerns or trade-offs
 - Design direction, when the design step fired (load level, design system, direction name, brief, seed, the two unpicked directions' names and seeds, divergence allowed)
+- Models: the Models answer (best, fit or cheap)
 - Remaining questions (if any)
 
 **Chain check (M14).** Apply M14's convergence gate, reading **Remaining questions** above as its open-question field. **Read the mode first:** a vision-mode run that accepted Phase 2 arrives here too and the mode is sticky (see Mode Detection), so a vision run still carries M14's scope-dial condition on this path. M14 holds every condition and the not-passing behavior; do not restate them here. An unanswered question is the cheapest thing to fix at this point and the most expensive to fix after a plan is built on it. When the gate passes, announce the handoff in one line ("Exploration converged - chaining into `/tk:create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/tk:create-plan` through the Skill tool.
