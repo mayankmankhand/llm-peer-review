@@ -41,7 +41,7 @@ Each session should have a clear purpose. After each session, read the screensho
 
 **When actions fail:** If a session stops on a failed action, run a new session with just a screenshot to see the current state. Adjust your selectors or action sequence. Don't retry the same failing action more than once. The exception is a click or read that times out on a control the screenshot shows on a page that keeps redrawing: that is a finding of the kind above (the control is rebuilt faster than a click can land), not a selector to adjust.
 
-**Note:** Browser sessions are sequential by nature, so the review phase always runs in single-pass mode - no sub-agents ever drive the browser. That constraint is about browser sessions only: the M2 audit tiers below still dispatch their skeptic subagents after the sessions are done.
+**Note:** Browser sessions are sequential by nature, so a browser review never fans out: one agent runs every session in order, whether that is you on a direct run or the browser finder `/tk:review` dispatched. That constraint is about browser sessions only: the M2 audit tiers below still dispatch their skeptic subagents after the sessions are done.
 
 ### Step 3: Compile findings
 
