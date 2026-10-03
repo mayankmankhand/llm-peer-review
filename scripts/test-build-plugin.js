@@ -60,6 +60,9 @@ function exists(root, rel) { return fs.existsSync(path.join(root, rel)); }
 // matching source file so the fixture build has no unresolved override.
 function sourceRelOf(emitted) { return emitted === 'seed/rules-toolkit.md' ? 'rules/toolkit.md' : emitted; }
 function plantedLines(emitted) { return (lib.SITE_OVERRIDES[emitted] || []).map(s => s.phrase + '\n').join(''); }
+// The same lines as the build emits them: a kept phrase as written, a replaced one as its
+// replacement (the rules seed's install paragraph, #206).
+function emittedLines(emitted) { return (lib.SITE_OVERRIDES[emitted] || []).map(s => (s.keep ? s.phrase : s.replace) + '\n').join(''); }
 // Emitted text with every kept override phrase of that file removed: what is left
 // must carry no project path.
 function withoutKeptPhrases(emitted, text) {
@@ -399,7 +402,7 @@ check('the seed carries every project file the installer seeds', [...RAW_SEEDS, 
 check('every raw seed equals its seed/ source byte for byte', RAW_SEEDS.every(r => fs.readFileSync(path.join(out, 'seed', r)).equals(fs.readFileSync(path.join(fx.root, 'seed', r)))), RAW_SEEDS.filter(r => !fs.readFileSync(path.join(out, 'seed', r)).equals(fs.readFileSync(path.join(fx.root, 'seed', r)))).join(', '));
 check('the maintainer root files are never seeded', read(out, 'seed/CLAUDE.md') !== read(fx.root, 'CLAUDE.md') && read(out, 'seed/gitignore') !== read(fx.root, '.gitignore'));
 check('the conventions file is copied raw, its .claude/ regexes untouched', read(out, 'skills/shared/conventions.md') === read(fx.src, 'skills/shared/conventions.md') && read(out, 'skills/shared/conventions.md').includes('`\\.claude/skills/shared/`'));
-check('the seed rules file is the source with command names scoped and its override kept', read(out, 'seed/rules-toolkit.md') === '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /tk:review, /tk:review-code and /tk:review-*; your permissions live in `.claude/settings.local.json`.\n' + plantedLines('seed/rules-toolkit.md'), read(out, 'seed/rules-toolkit.md'));
+check('the seed rules file is the source with command names scoped, its kept phrase kept and its install paragraph replaced', read(out, 'seed/rules-toolkit.md') === '<!-- Toolkit version: 9.9.9 | seed -->\n\nUse the Skill tool for /tk:review, /tk:review-code and /tk:review-*; your permissions live in `.claude/settings.local.json`.\n' + emittedLines('seed/rules-toolkit.md'), read(out, 'seed/rules-toolkit.md'));
 check('the seed rules file carries no plugin root token', !read(out, 'seed/rules-toolkit.md').includes('${CLAUDE_PLUGIN_ROOT}'));
 const stray = [];
 for (const f of walkFiles(out)) {

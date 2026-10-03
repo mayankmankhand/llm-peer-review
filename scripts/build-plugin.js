@@ -162,6 +162,9 @@ const ROOT_HELPER = /^scripts\/[^/]+$/;
 // fails --check instead of silently shipping a wrong path. Every phrase is
 // matched everywhere it occurs in that file, so each one carries enough context
 // to name only its site.
+// The rules file's opening paragraph as the source writes it, and as the plugin seed ships it.
+const SEED_INSTALL_MODES = 'This project runs the LLM Peer Review toolkit. On the plugin its commands are typed with the `tk:` prefix (`/tk:explore`); on a copy-install, and in the toolkit\'s own repository, the same commands run with no prefix. This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit\'s `toolkit-reference` fragment. On the plugin it ships inside the plugin, at the stable path `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`; on a copy-install, and in the toolkit\'s own repository, it is the project\'s own copy under `.claude/skills/shared/`. Open it there when a question is not answered here.';
+const SEED_PLUGIN_ONLY = 'This project runs the LLM Peer Review toolkit as the `tk` plugin, so its commands are typed with the `tk:` prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit\'s `toolkit-reference` fragment, at `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`. Open it there when a question is not answered here.';
 const SITE_OVERRIDES = {
   'commands/review.md': [
     // Routing row: a project's own commands and skills changed, so /tk:review dispatches the commands finder for them.
@@ -229,8 +232,9 @@ const SITE_OVERRIDES = {
   'seed/rules-toolkit.md': [
     // Setup removes a project's rows naming its old copy-install scripts; the seeded rules file never carries ${CLAUDE_PLUGIN_ROOT}.
     { phrase: 'rows that point at a `.claude/scripts/` file the project no longer has', keep: true },
-    // The seed names the copy-install's manual location (#184 R6); a project path, kept as written.
-    { phrase: "the project's own copy under `.claude/skills/shared/`", keep: true },
+    // A plugin project has one install mode, so its rules file names only the plugin (#206): the
+    // source paragraph also covers copy-installs and this repository, which run unprefixed.
+    { phrase: SEED_INSTALL_MODES, replace: SEED_PLUGIN_ONLY },
   ],
 };
 
