@@ -79,7 +79,7 @@ If you're unsure about intent behind a change or user-facing impact, **ask the u
 
 Records the times the user stepped in during this cycle, so the toolkit can eventually
 count what it keeps getting wrong instead of fixing each instance and forgetting it.
-Issue #157. Full rationale in `.claude/rules/toolkit.md`.
+Full rationale in the Correction Ledger section of the toolkit reference.
 
 **Containment rule, read this before running anything below.** This stage is the only
 place in the toolkit that pulls near-verbatim fragments of what the user typed into
