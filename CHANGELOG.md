@@ -12,6 +12,49 @@ If you last installed v4.3.3, thirty releases have shipped on top of it. v4.4.0 
 
 ---
 
+## Unreleased
+
+Work on `main` that no release carries yet. It moves into a version section when the next release is cut; nothing here changes the rollup above, which describes shipped versions only.
+
+### Changed
+
+- **Commands load less** (#206). The HTML rules file that 21 commands and skills pasted whole is split in three: a core every page-making command keeps, the viewing and publishing rules (`html-viewing.md`), and the own-files rules only `/audit-html` uses. `/explore` and `/audit-html` load the viewing rules on demand, through a new `html-viewing` skill, only when they render a page. Each command now pastes only the parts it uses.
+- **Prompts written for older models are cleaned up** (#206). History notes and about 130 issue tags are gone from the prompts (the reason a rule exists stays; when it was added goes), CRITICAL headings and shouted rules read plainly, and a rule that keeps a number now gives its reason. Each change was checked first against the lessons that explain why the rule exists.
+- **Stale pointers fixed** (#206). `/create-plan` and `/document` pointed at a branch naming rule and a ledger rationale in the wrong file; every finder loaded a retired four-field finding format and its example; five criteria files told finders to report in a shape they no longer return; the command table described `/package-review` wrongly.
+- **Commands do the work they used to hand you** (#206). `/review-browser` starts the dev server itself, once, and runs the Chromium install when the browser is missing (a `sudo` step stays with you); `/pair-debug` reads the terminal output and log files it can reach and asks only for what only you can see; `/codebase-to-course` opens the finished course in your browser instead of printing its path.
+- **The three-vote audit cannot push a finding below its severity floor** (#206). An exposed secret stays at least a Warn even when the voters downgrade it.
+- **The rules file `/setup` writes** now describes only the plugin install, under a plain Rules heading. Existing projects receive the new text through C-7.
+
+### Added
+
+- **`/tk:upgrade` runs Claude Code's prompt audit on your own files, once** (#206, convention C-13). On the upgrade that brings C-13, it asks Claude Code's built-in audit to read your `CLAUDE.md` and `.claude/` files for instructions newer models no longer need. Plugin files are left out; a finding on the toolkit part of your rules file goes to the digest as toolkit text you can report to the toolkit; every proposed edit waits for your approval, like any prompt edit. When the audit is unavailable, the step says so in one line and suggests running `/claude-api prompt-audit` yourself. It never retries.
+- **`/review-commands` checks for prompt debt** (#206). Its criteria name six patterns of instructions written for older models: verification rituals, emphasis boosters, mandatory procedures, stale examples, contradictory rules and dated config. A line that states its reason is not a finding.
+- **A warn-only report of what each command loads** (#206). `npm test` prints the words each command, skill and agent loads against `scripts/prompt-load-baseline.json` and warns when one grows; it never fails a run. Maintainer tool: `scripts/prompt-load.js`.
+- **A test that every skill a command loads by name has its two permission rows** in the seed, so an on-demand skill cannot ship without them again.
+
+### Measured
+
+- Words each command, skill and agent loads, start of the cycle against the end: 377,988 to 337,810 in total (-10.6%). `/review` -8.4%, `/upgrade` -16.1%, `/execute` -19.5%, `/explore` -33.8%, `/audit-html` -44.3%, `/codebase-to-course` -67.1%. Each session carries 11 more words, the new skill's description.
+- A headless smoke cycle in default permission mode ran `/tk:review`, `/tk:create-plan`, `/tk:audit-html` and two `/tk:upgrade` cases on a build of this work. It found one defect, the new skill's missing permission rows, fixed before release.
+- The final audit raised about 30 findings on older text the cycle never touched. They are filed as #207 rather than chased: each rerun of the audit finds new items on unchanged text.
+- The review of the whole range raised 14 findings; none survived its audit.
+
+### Why
+
+Claude Code's new prompt audit flagged instructions that newer models follow too literally, and it never measures the bigger cost: `/review` loaded about 21,000 words per run, much of it rules it never applied. Cleaning the words alone would have left the weight; cutting the weight blind could have dropped a rule some command depends on. So every flag was checked against the lessons behind the rule before it changed, every edit was approved on a page, and every command now loads only what it uses.
+
+### Upgrading
+
+**Claude Code users:** `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, and restart Claude Code. Then, in each project, `/tk:setup` and `/tk:upgrade`.
+
+- `/tk:setup` adds two permission rows, `Skill(tk:html-viewing)` and `Skill(tk:html-viewing:*)`. Without them, `/tk:explore` and `/tk:audit-html` stop to ask the first time they render a page.
+- **C-13** (new, runs once, on the upgrade that brings it): `/tk:upgrade` runs the prompt audit on your own `CLAUDE.md` and `.claude/` files. Each proposed edit is a finding you approve on the run's one approval page; nothing in the plugin is offered.
+- **C-7** brings the new rules-file text (the plain Rules heading, the plugin-only install text) into your `.claude/rules/toolkit.md`, above its project marker.
+
+**Other editors:** re-run `setup.sh` or `setup.ps1` to replace the changed files.
+
+---
+
 ## v7.4.3 - Gaps, Not Grades (2026-09-22)
 
 **A patch on top of v7.4.2, which stays additive on v7.0.0 and v6.0.0.** One change, to how the loop's judges decide: the plan and design critics return gaps instead of grades, a blind side-by-side judge keeps or reverts each design round, a behaviour pass checks what a screenshot cannot show, and the gaps the judges leave open are audited by the review instead of lost.

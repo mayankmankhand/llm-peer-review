@@ -172,7 +172,7 @@
 
 - **Mutation-testing a group of assertions is not mutation-testing each assertion.**
 - **Tokenising the shared layer does not tokenise its consumers.**
-- **A prose sweep needs the wordings that actually occur, not the one you remember writing.**
+- **A prose sweep needs the wordings that actually occur, not the one you remember writing.** (see the #206 refinement in detail)
 - **A measurable claim in a commit message is a claim until you measure it.**
 - **A pipeline's exit status is the last command's, so `grep | head` always succeeds.**
 - **"Falls back" is not "degrades to nothing" - read what the fallback actually produces.**
@@ -308,3 +308,10 @@
 - **When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.**
 - **A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.**
 - **A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.**
+
+## Issue 206 (prompt-audit cleanup)
+
+- **The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.**
+- **Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.**
+- **Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.**
+- **In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.**
