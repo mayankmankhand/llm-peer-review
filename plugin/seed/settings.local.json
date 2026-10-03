@@ -133,6 +133,8 @@
       "Skill(tk:project-context:*)",
       "Skill(tk:design-rules)",
       "Skill(tk:design-rules:*)",
+      "Skill(tk:html-viewing)",
+      "Skill(tk:html-viewing:*)",
       "Skill(tk:review-commands)",
       "Skill(tk:review-commands:*)",
       "Skill(tk:review-copy)",

@@ -467,6 +467,13 @@ for (const [emitted, sites] of Object.entries(lib.SITE_OVERRIDES)) {
   }
 }
 check('live: every kept override phrase survives and every replacement lands', liveMissed.length === 0, liveMissed.join('; '));
+// A skill a command loads by name mid-run needs its two permission rows in the seed, or
+// default permission mode stops on the call (#206: html-viewing first shipped without them).
+const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);
+const byName = [...new Set(['commands', 'skills', 'agents'].flatMap(d => mdUnder(path.join(live, d))).flatMap(f => [...fs.readFileSync(f, 'utf8').matchAll(/Skill\(tk:([a-z-]+)\)/g)].map(m => m[1])))].sort();
+const seedAllow = JSON.parse(fs.readFileSync(path.join(REPO, 'seed', 'settings.local.json'), 'utf8')).permissions.allow;
+const noRows = byName.filter(n => !seedAllow.includes('Skill(tk:' + n + ')') || !seedAllow.includes('Skill(tk:' + n + ':*)'));
+check('live: every skill a command loads by name has both permission rows in the seed', byName.length > 0 && noRows.length === 0, 'missing rows for: ' + noRows.join(', '));
 check('live: the deps criteria audit the plugin root, not scripts/', read(live, 'skills/shared/criteria-deps.md').includes('--prefix "${CLAUDE_PLUGIN_ROOT}"') && !read(live, 'skills/shared/criteria-deps.md').includes('${CLAUDE_PLUGIN_ROOT}/scripts`'));
 const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path.join('shared', 'conventions.md')));
 const liveUnquoted = liveMd.filter(f => UNQUOTED_CAT.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
