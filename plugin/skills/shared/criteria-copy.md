@@ -46,7 +46,7 @@ Read the content files (pages, markdown, HTML, templates, copy). Then pick one o
 
 **Small change** (1-2 files, minor copy update): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or new reader-facing content): when running this skill **directly** (a subagent dispatched by /tk:review is always single-pass - subagents cannot spawn sub-agents), run three focused sub-agents in parallel using the Agent tool (`subagent_type=tk:review-copy-finder`, this kind's finder per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which preloads these criteria and the dispatch contract in `${CLAUDE_PLUGIN_ROOT}/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what its roster row declares, with this file's criteria and that contract pasted into the prompt), then combine their results:
+**Bigger change** (3+ files or new reader-facing content): when running this skill **directly** (a subagent dispatched by /tk:review is always single-pass - subagents cannot spawn sub-agents), run three focused sub-agents in parallel using the Agent tool (`subagent_type=tk:review-copy-finder` with `model` set to its `models.perRole` value, where `session` means your own model family's alias; this kind's finder per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which preloads these criteria and the dispatch contract in `${CLAUDE_PLUGIN_ROOT}/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying the same `model`, with this file's criteria and that contract pasted into the prompt), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|

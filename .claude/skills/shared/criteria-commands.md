@@ -6,7 +6,7 @@ Read the command files being reviewed. Then pick one of two modes:
 
 **Small change** (1-2 files, minor wording tweaks): Review in a single pass. No sub-agents needed.
 
-**Bigger change** (3+ files or new/rewritten commands): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-commands-finder`, this kind's finder per the roster in `.claude/skills/shared/model-routing.md`, which preloads these criteria and the dispatch contract in `.claude/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying what its roster row declares, with this file's criteria and that contract pasted into the prompt), then combine their results:
+**Bigger change** (3+ files or new/rewritten commands): when running this skill **directly** (a subagent dispatched by /review is always single-pass - subagents cannot spawn sub-agents), run four focused sub-agents in parallel using the Agent tool (`subagent_type=review-commands-finder` with `model` set to its `models.perRole` value, where `session` means your own model family's alias; this kind's finder per the roster in `.claude/skills/shared/model-routing.md`, which preloads these criteria and the dispatch contract in `.claude/skills/dispatch-contract/SKILL.md`; fallback per that rule: `general-purpose` carrying the same `model`, with this file's criteria and that contract pasted into the prompt), then combine their results:
 
 | Sub-agent | What it checks |
 |-----------|----------------|
