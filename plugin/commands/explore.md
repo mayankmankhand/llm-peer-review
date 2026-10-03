@@ -81,7 +81,7 @@ After the user describes their idea, **think like an experienced product manager
 **Both modes:** Challenge the idea, not the person.
 
 ### How to Ask Questions
-Ask **3-4 focused questions per round**, max 2-3 rounds total. Keep it digestible:
+Ask **3-4 focused questions per round**, over 2-3 rounds; in vision mode, each Expand on the scope dial adds a round. Keep it digestible:
 
 - **Group related questions** - don't scatter topics
 - **Number them** - easy to reference in answers
@@ -288,7 +288,7 @@ User hits Save
 <rules>
 Your job is not to implement (yet). Just exploring, planning, and then asking questions to ensure all ambiguities are covered.
 
-We will go back and forth until you have no further questions. Do NOT assume any requirements or scope beyond explicitly described details.
+Keep going until no question that would change the plan is left, within those rounds; anything still open goes into the closing summary as an open question. Do NOT assume any requirements or scope beyond explicitly described details.
 </rules>
 
 ---
