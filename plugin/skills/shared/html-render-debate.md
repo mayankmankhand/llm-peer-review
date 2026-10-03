@@ -2,7 +2,7 @@
 
 Shared reference for turning an `/tk:ask-gpt` or `/tk:ask-gemini` debate summary into an HTML view. Inlined into both commands via `` !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-debate.md"` ``.
 
-This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
+This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, not here: you never hand-write the HTML.
 
 ## When to Render (Judgement Gate)
 
@@ -18,9 +18,9 @@ When the gate fires, announce before generating:
 
 Honor "skip HTML" if the user replies with that phrase. Continue with markdown only.
 
-## How to Render (data injection - do NOT hand-write HTML)
+## How to Render (data injection)
 
-The boilerplate (all CSS, the per-round two-column layout, and the synthesis cards) lives once in the prebuilt shell `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/debate-shell.html`. You produce ONLY a compact JSON payload; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file. Do not hand-write the HTML.
+The boilerplate (all CSS, the per-round two-column layout, and the synthesis cards) lives once in the prebuilt shell `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/debate-shell.html`. You produce a compact JSON payload; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained, uniquely-timestamped file.
 
 Steps:
 

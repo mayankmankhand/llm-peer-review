@@ -2,7 +2,7 @@
 
 Shared reference for turning a review's findings into an HTML view. Inlined into the review skills and the `/review` orchestrator via `` !`cat .claude/skills/shared/html-render-review.md` ``.
 
-This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, NOT here - you never hand-write the HTML.
+This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, not here: you never hand-write the HTML.
 
 ## When to Render (the standing-page gate)
 
@@ -21,9 +21,9 @@ When the gate fires, announce before generating:
 
 Honor "skip HTML" if the user replies with that phrase. Continue with markdown only.
 
-## How to Render (data injection - do NOT hand-write HTML)
+## How to Render (data injection)
 
-The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `.claude/skills/shared/shells/review-shell.html`. You produce ONLY a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, the one standing page per repository (step 3 below). This is what makes the open fast and collision-free. Do not generate the HTML by hand.
+The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `.claude/skills/shared/shells/review-shell.html`. You produce a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, the one standing page per repository (step 3 below). This is what makes the open fast and collision-free.
 
 Steps:
 
@@ -63,4 +63,4 @@ Steps:
 
 ## Subagent Rule (orchestrator dispatch only)
 
-When the orchestrator (`/review`) dispatches specialist subagents, those subagents MUST NOT emit their own HTML companion. Only the orchestrator produces HTML for an orchestrator run - this guarantees one combined HTML file per cycle rather than several overlapping ones. Specialist skills only generate HTML when called directly (e.g., `/review-code` on its own).
+When the orchestrator (`/review`) dispatches specialist subagents, those subagents emit no HTML companion of their own. Only the orchestrator produces HTML for an orchestrator run - this guarantees one combined HTML file per cycle rather than several overlapping ones. Specialist skills only generate HTML when called directly (e.g., `/review-code` on its own).
