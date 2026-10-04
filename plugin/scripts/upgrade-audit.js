@@ -904,7 +904,7 @@ function c14Block(lines, at) {
 function c14Names(lines, at, from, to, judge) {
   const alias = /\b(sonnet|opus|haiku|fable)\b/i;
   const param = /\bmodel\s*[=:]\s*["'`]?(?!inherit\b)[a-z]/i;
-  const passed = /`model`|\bmodels\.perRole\b|\bmodel\W{1,3}(sonnet|opus|haiku|fable)\b/i;
+  const passed = /`model`|\bmodels\.perRole\b|\bmodel[\s"'`]{1,3}(sonnet|opus|haiku|fable)\b/i;
   if (judge && alias.test(lines[at])) return true;
   for (let i = from; i <= to; i++) if (param.test(lines[i]) || (!judge && passed.test(lines[i]))) return true;
   return false;

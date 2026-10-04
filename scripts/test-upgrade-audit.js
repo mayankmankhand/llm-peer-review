@@ -2267,6 +2267,8 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   check('C-14: an alias alone on a finder call\'s line, as a choice or in passing, passes no model, so both calls are findings whose receipts pass', c.fs14.length === 2 && c.receipts.every(x => x.status === 0), JSON.stringify(c.fs14).slice(0, 400));
   c = calls('finder-model-alias', cmd('Run `subagent_type=tk:review-code-finder` with model sonnet.', 'Run `subagent_type=tk:review-ux-finder`, Model `Opus`.'));
   check('C-14: model followed directly by an alias, in any case, passes a model for a finder call', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('finder-model-then-alias', cmd('Run `subagent_type=tk:review-code-finder` (no model; opus by default).', 'Dispatch `subagent_type=tk:review-ux-finder`; the default model, Opus, is used.'));
+  check('C-14: model followed by punctuation before an alias is not model followed directly by one, so both calls are findings', c.fs14.length === 2, JSON.stringify(c.fs14).slice(0, 300));
   c = calls('finder-owned', cmd('Run `subagent_type=index-mapper` on each folder.'), { '.claude/agents/index-mapper.md': agentMd({ name: 'index-mapper', description: 'Maps our folders.', model: 'sonnet' }) });
   check('C-14: a bare name an agent of the project\'s own answers to is that agent, so it is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
   d = c14Case('finder-bare', { [CMD]: cmd('Run `subagent_type=review-code-finder` on the diff.') });
