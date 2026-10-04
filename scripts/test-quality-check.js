@@ -575,6 +575,14 @@ section('cleanup steps (review R14, second round)', () => {
   check('runSteps: the failure is named and reported, not thrown', failed.join() === 'write run.json' && said.length === 1 && /could not write run\.json: disk full/.test(said[0]), JSON.stringify({ failed, said }));
 });
 
+section('a failed cleanup step voids the run (review loop, R20)', () => {
+  const fresh = () => ({ valid: true, reasons: [], warnings: [] });
+  const clean = QC.markCleanup(fresh(), []);
+  check('markCleanup: a clean cleanup leaves a valid run valid', clean.valid === true && clean.reasons.length === 0, JSON.stringify(clean));
+  const broken = QC.markCleanup(fresh(), ['write run.json']);
+  check('markCleanup: a failed step makes the run invalid and names it', broken.valid === false && broken.reasons.includes('cleanup-failed') && broken.cleanupFailed.join() === 'write run.json', JSON.stringify(broken));
+});
+
 section('the fixture server listens on loopback only (review R2)', () => {
   const listenAndSay = form => "const s = require('http').createServer(); s.listen(" + form + ", () => { console.log(s.address().address); s.close(); });";
   for (const form of ['0', "0, '0.0.0.0'", '{ port: 0 }', "{ port: 0, host: '::' }"]) {

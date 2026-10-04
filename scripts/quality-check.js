@@ -1273,6 +1273,18 @@ function runSteps(steps, report = msg => console.error('quality-check: ' + msg))
   return failed;
 }
 
+// A cleanup step that failed leaves the run's evidence incomplete (a run.json
+// without its exit code, no record of the project's git state), so the run cannot
+// count as valid on it; before runSteps such a failure stopped the run outright
+// (review loop, R20).
+function markCleanup(analysis, failed) {
+  if (!failed.length) return analysis;
+  analysis.valid = false;
+  analysis.reasons.push('cleanup-failed');
+  analysis.cleanupFailed = failed;
+  return analysis;
+}
+
 function appendLedger(row) {
   fs.mkdirSync(OUT_ROOT, { recursive: true });
   fs.appendFileSync(LEDGER, JSON.stringify(row) + '\n');
@@ -1370,6 +1382,7 @@ async function commandRun(o) {
   let ran = false;
   let reportedCost = null;
   let sessionDone = false;
+  let cleanupFailed = [];
   const enterLedger = valid => appendLedger({ at: meta.endedAt || new Date().toISOString(), role, arm: meta.arm, probe: meta.probe,
     build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
   try {
@@ -1490,7 +1503,7 @@ async function commandRun(o) {
     if (result) fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2) + '\n');
     sessionDone = true;
   } finally {
-    runSteps([
+    cleanupFailed = runSteps([
       ['stop the fixture server', () => stopServer(serverPid)],
       ['copy the transcripts', () => copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'))],
       ['copy the project reports', () => copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'))],
@@ -1512,7 +1525,7 @@ async function commandRun(o) {
   }
   let analysis = null;
   try {
-    analysis = analyzeRun(loadRun(out), loadAnswers());
+    analysis = markCleanup(analyzeRun(loadRun(out), loadAnswers()), cleanupFailed);
     fs.writeFileSync(path.join(out, 'analysis.json'), JSON.stringify(analysis, null, 2) + '\n');
   } finally {
     enterLedger(!!analysis && analysis.valid);
@@ -1748,7 +1761,7 @@ module.exports = {
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
-  runGroup, ledgerCost, runSteps, LOOPBACK_PRELOAD,
+  runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD,
 };
 
 if (require.main === module) {
