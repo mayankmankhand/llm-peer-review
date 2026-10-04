@@ -1069,9 +1069,13 @@ section('15. scopeLine: the line /review prints first (#208)', function () {
   const capped = scope(up);
   const cappedLine = line(capped);
   check('a capped range adds how many older commits were left out and the range that includes them',
-    /^Reviewing 20 commits \(`[0-9a-f]{7}\.\.[0-9a-f]{7}`\), your unpushed commits; no plan names a start commit\. 2 older unpushed commits were left out; `\/review [0-9a-f]{40}\.\.HEAD` includes them\. Models: fit/.test(cappedLine) &&
-    cappedLine.indexOf('`/review ' + dig(capped.json, 'range.fullBase') + '..HEAD`') !== -1,
+    /^Reviewing 20 commits \(`[0-9a-f]{7}\.\.[0-9a-f]{7}`\), your unpushed commits; no plan names a start commit\. 2 older unpushed commits were left out; pass `[0-9a-f]{40}\.\.HEAD` as the review's range to include them\. Models: fit/.test(cappedLine) &&
+    cappedLine.indexOf('pass `' + dig(capped.json, 'range.fullBase') + '..HEAD`') !== -1,
     cappedLine);
+  // The plugin build copies scripts unchanged, so a command name in a line would
+  // miss the plugin's tk: prefix (review of the #208 cycle, R1): name no command.
+  check('no scope line names a slash command', seen.every(function (l) { return !/`\/[a-z]/.test(l); }),
+    JSON.stringify(seen.filter(function (l) { return /`\/[a-z]/.test(l); })));
 
   check('every line is one line and carries a Models part the quality check finds',
     seen.length > 0 && seen.every(function (l) { return l.length > 0 && !/[\r\n]/.test(l) && MODE_RE.test(l); }),

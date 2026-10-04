@@ -120,7 +120,9 @@
 //     them unpushed"; "your unpushed commits; no plan names a start commit"; or
 //     "your unpushed commits; `<plan>` was passed over because <reason>"), ", plus
 //     uncommitted work" when there is any, and for a capped range "N older unpushed
-//     commits were left out; `/review <fullBase>..HEAD` includes them." With no
+//     commits were left out; pass `<fullBase>..HEAD` as the review's range to
+//     include them." (the range, not a command name, which a plugin's tk: prefix
+//     would change). With no
 //     commits it reads "Reviewing uncommitted work only; no commits in range." or
 //     "Nothing to review: no commits in range and no uncommitted changes.", either
 //     followed by "message". A range argument that resolves to nothing reads "That
@@ -1156,8 +1158,10 @@ function scopeLine(o, given) {
       line = "Reviewing " + plural(r.commitCount, "commit") + " (`" + r.base.slice(0, 7) + ".." + r.end.slice(0, 7) + "`), " +
         whyClause(o) + (dirty ? ", plus uncommitted work." : ".");
       if (r.capped) {
+        // Name the range, never the command: the plugin build copies scripts
+        // unchanged, so a command name here would miss the plugin's tk: prefix.
         line += " " + plural(r.omitted, "older unpushed commit") + (r.omitted === 1 ? " was" : " were") +
-          " left out; `/review " + r.fullBase + "..HEAD` includes them.";
+          " left out; pass `" + r.fullBase + "..HEAD` as the review's range to include them.";
       }
     } else if (dirty) {
       line = "Reviewing uncommitted work only; no commits in range." + note;
