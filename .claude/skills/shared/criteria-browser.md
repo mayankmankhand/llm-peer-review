@@ -4,7 +4,7 @@
 
 ### Step 1: Take an initial screenshot and read the page
 
-Run the initial session below. If the `goto` action fails with a connection error, start the server once: add `autoStart` to the session (see Auto-Start in the browse API) or run the project's dev command. If it still does not answer, tell the user: "I can't reach the server. Check that your dev server is running (e.g. `npm run dev`) and confirm the port number." Then stop the review; do not retry.
+Run the initial session below. If the `goto` action fails with a connection error, start the server once. Prefer `autoStart` (see Auto-Start in the browse API): it runs the project's `dev` npm script, else its `start` script, in the background, and stops it when that session ends, so keep `autoStart` in every later session too (a server that already answers makes it a no-op). A project with neither script needs a hand start, and never in the foreground, where a dev command holds the shell until the call times out: make a folder with `mktemp -d /tmp/dev-server.XXXXXX`, run `<dev command> > <folder>/server.log 2>&1 & echo $!` to start it in the background, keep the process id it prints, and stop it with `kill <pid>` when the review ends, early or not; if you cannot, name that process id in your last message. If it still does not answer, tell the user: "I can't reach the server. Check that your dev server is running (e.g. `npm run dev`) and confirm the port number." Then stop the review; do not retry.
 
 Run a quick browser session to see what's on screen:
 

@@ -14,7 +14,7 @@ allowed-tools:
 **Use this when:** Verifying a running web application works correctly - visual layout, interactive flows, error states, and runtime behavior.
 **Don't use this when:** Reviewing static code or markup without a running server (use /review-ux). Reviewing code quality (/review-code), command prompts (/review-commands), plan completion (/review-plan), or doing a pre-release check (/review-full).
 
-**Important:** This command requires a running dev server (e.g. `npm run dev`). It drives a real headless browser to interact with the app and take screenshots. If no server answers, start it yourself, once: add `autoStart` to the first session (see Auto-Start in the browse API) or run the project's dev command. If it still does not answer, stop and report what you ran; do not retry.
+**Important:** This command requires a running dev server (e.g. `npm run dev`). It drives a real headless browser to interact with the app and take screenshots. If no server answers, start it yourself, once: add `autoStart` to the session (see Auto-Start in the browse API), which runs the project's `dev` or `start` npm script in the background and stops it when that session ends, so keep it in every later session. A project with neither script gets the background hand start in Step 1 of the review procedure below (a log file, its process id, `kill` at the end), never a foreground dev command, which holds the shell until the call times out. If it still does not answer, stop and report what you ran; do not retry.
 
 **Prerequisites:** Browser QA needs two things, both installed inside the toolkit folder so the user's project stays untouched:
 
