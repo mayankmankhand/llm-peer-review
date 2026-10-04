@@ -2261,8 +2261,12 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   check('C-14: an alias in another line\'s prose names no model, so the call is a finding', c.fs14.length === 1, JSON.stringify(c.fs14).slice(0, 300));
   write(c.d, CMD, cmd(CODE + '\nThis costs less than running it on opus would.\nmodel: sonnet'));
   check('C-14: a fix that adds model: sonnet on a new line under the call clears it, and the old receipt no longer passes', c14(audit751(c.d)).length === 0 && runReceipt(c.d, c.fs14[0]).status !== 0);
-  c = calls('finder-named', cmd('Run `subagent_type=tk:review-code-finder` on sonnet.', 'Run `subagent_type=tk:review-ux-finder` with model: opus.', '| Code | `subagent_type=tk:review-code-finder` |', 'The tk:review-copy-finder agent reads the copy.'));
-  check('C-14: an alias or model: on the line, a table row, and a mention with no subagent_type are no findings', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('finder-named', cmd('Run `subagent_type=tk:review-ux-finder` with model: opus.', '| Code | `subagent_type=tk:review-code-finder` |', 'The tk:review-copy-finder agent reads the copy.'));
+  check('C-14: model: on the line, a table row, and a mention with no subagent_type are no findings', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('finder-alias', cmd('Run `subagent_type=tk:review-code-finder` on sonnet.', 'Dispatch `subagent_type=tk:review-ux-finder` (it runs on Opus by default).'));
+  check('C-14: an alias alone on a finder call\'s line, as a choice or in passing, passes no model, so both calls are findings whose receipts pass', c.fs14.length === 2 && c.receipts.every(x => x.status === 0), JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('finder-model-alias', cmd('Run `subagent_type=tk:review-code-finder` with model sonnet.', 'Run `subagent_type=tk:review-ux-finder`, Model `Opus`.'));
+  check('C-14: model followed directly by an alias, in any case, passes a model for a finder call', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
   c = calls('finder-owned', cmd('Run `subagent_type=index-mapper` on each folder.'), { '.claude/agents/index-mapper.md': agentMd({ name: 'index-mapper', description: 'Maps our folders.', model: 'sonnet' }) });
   check('C-14: a bare name an agent of the project\'s own answers to is that agent, so it is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
   d = c14Case('finder-bare', { [CMD]: cmd('Run `subagent_type=review-code-finder` on the diff.') });

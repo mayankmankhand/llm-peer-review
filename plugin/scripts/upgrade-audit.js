@@ -890,18 +890,22 @@ function c14Block(lines, at) {
   while (to < end && !dispatches(lines[to + 1])) to++;
   return [from, to];
 }
-// Does a dispatch's block name a model (C-14)? On the dispatch line an alias
-// does. On any line of the block so does a model parameter: `model` with `=` or
-// `:` and any value but `inherit`, which is no per-call value (a call written
-// with it runs the agent file's model). For a finder call two more forms count
-// as passing a model, `model` in backticks and models.perRole, the words of the
-// toolkit's own clause; they never make a judge call a finding, so a line that
-// says not to pass a `model` is left alone. Self-contained, like c14Block.
+// Does a dispatch's block name a model (C-14)? On any line of the block a model
+// parameter does: `model` with `=` or `:` and any value but `inherit`, which is
+// no per-call value (a call written with it runs the agent file's model). For a
+// judge call an alias on the dispatch line does too, so a doubtful judge call is
+// reported and the audit decides. For a finder call an alias alone never
+// counts, so a passing mention such as "it runs on Opus" cannot hide a call
+// that passes no model; three more forms count as passing one there: `model`
+// followed directly by an alias, `model` in backticks, and models.perRole, the
+// words of the toolkit's own clause. They never make a judge call a finding, so
+// a line that says not to pass a `model` is left alone. Self-contained, like
+// c14Block.
 function c14Names(lines, at, from, to, judge) {
   const alias = /\b(sonnet|opus|haiku|fable)\b/i;
   const param = /\bmodel\s*[=:]\s*["'`]?(?!inherit\b)[a-z]/i;
-  const passed = /`model`|\bmodels\.perRole\b/;
-  if (alias.test(lines[at])) return true;
+  const passed = /`model`|\bmodels\.perRole\b|\bmodel\W{1,3}(sonnet|opus|haiku|fable)\b/i;
+  if (judge && alias.test(lines[at])) return true;
   for (let i = from; i <= to; i++) if (param.test(lines[i]) || (!judge && passed.test(lines[i]))) return true;
   return false;
 }
