@@ -255,7 +255,7 @@ This is the loop's one deliberate non-chaining handoff. It is written down preci
 Close by telling the user the plan is ready, in the form its Models line asks for:
 
 - **best:** saying "go" runs `/tk:execute` in this session.
-- **fit or cheap:** the plan is built on Opus, in a fresh session; the plan file carries everything the build needs. Give the steps: start a new session, run `/model opus`, then `/tk:execute`. A model switch inside this conversation would re-read all of it uncached, which costs more than the fresh start.
+- **fit or cheap:** the plan is built on Opus. When this session already runs on Opus, saying "go" runs `/tk:execute` here. Otherwise give the steps: start a new session, run `/model opus`, then `/tk:execute`; the plan file carries everything the build needs, and a model switch inside this conversation would re-read all of it uncached, which costs more than the fresh start.
 
 ## HTML Output Rules
 
