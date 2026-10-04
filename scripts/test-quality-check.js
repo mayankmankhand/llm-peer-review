@@ -556,9 +556,57 @@ section('score command end to end', () => {
   check('a run without --arm is a usage error (exit 2) and starts nothing', u.status === 2, u.stdout + u.stderr);
 });
 
-console.log('');
-console.log(passed + ' passed, ' + failures.length + ' failed');
-if (failures.length) {
-  for (const f of failures) console.log('  - ' + f);
-  process.exit(1);
+section('ledger cost (review R14)', () => {
+  check('ledgerCost: a reported cost is entered as it is', JSON.stringify(QC.ledgerCost(4.19, 25)) === JSON.stringify({ costUsd: 4.19 }));
+  const none = QC.ledgerCost(null, 25);
+  check('ledgerCost: no reported cost is entered at the cap and marked', none.costUsd === 25 && none.costCapped === true, JSON.stringify(none));
+  check('ledgerCost: a zero cost is a reported cost, not a missing one', QC.ledgerCost(0, 25).costUsd === 0 && !QC.ledgerCost(0, 25).costCapped);
+});
+
+section('the fixture server listens on loopback only (review R2)', () => {
+  const listenAndSay = form => "const s = require('http').createServer(); s.listen(" + form + ", () => { console.log(s.address().address); s.close(); });";
+  for (const form of ['0', "0, '0.0.0.0'", '{ port: 0 }', "{ port: 0, host: '::' }"]) {
+    const r = spawnSync(process.execPath, ['--require', QC.LOOPBACK_PRELOAD, '-e', listenAndSay(form)], { encoding: 'utf8', timeout: 10000 });
+    check('loopback.js: listen(' + form + ') binds 127.0.0.1', r.stdout.trim() === '127.0.0.1', r.stdout + r.stderr);
+  }
+  const fixture = fs.readFileSync(path.join(FIXTURE, 'change', 'server.js'), 'utf8');
+  check('the fixture itself is untouched: server.js still passes no host', /server\.listen\(PORT, \(\) =>/.test(fixture));
+});
+
+// A process that no longer runs, or a zombie waiting for its parent to reap it.
+function gone(pid) {
+  try { process.kill(pid, 0); } catch (e) { return e.code === 'ESRCH'; }
+  try { return /^\d+ \(.*\) Z/.test(fs.readFileSync('/proc/' + pid + '/stat', 'utf8')); } catch (e) { return true; }
 }
+
+async function asyncSection(name, fn) {
+  try { await fn(); } catch (e) { check(name + ' (section threw)', false, e && e.stack); }
+}
+
+(async () => {
+  await asyncSection('a timeout stops the whole process group (review R3)', async () => {
+    // The shape of the session wrapper: a shell whose child is not exec'd.
+    const r = await QC.runGroup('bash', ['-c', 'sleep 30 & echo $!; wait'], {}, 500, 1000);
+    const child = Number(r.stdout.trim());
+    check('runGroup: a timeout gives status 124 and says so', r.status === 124 && r.timedOut === true, JSON.stringify(r));
+    let dead = false;
+    for (let i = 0; i < 20 && !(dead = child > 0 && gone(child)); i++) await new Promise(res => setTimeout(res, 100));
+    check('runGroup: the shell\'s child is stopped with it, not orphaned', dead && r.wallMs < 5000, 'pid ' + child + ', ' + r.wallMs + ' ms (a 30 s wait means the child ran on)');
+    const ok = await QC.runGroup('bash', ['-c', 'echo out; echo err >&2; exit 3'], {}, 10000);
+    check('runGroup: a normal exit keeps its status and both streams', ok.status === 3 && ok.stdout === 'out\n' && ok.stderr === 'err\n' && !ok.timedOut, JSON.stringify(ok));
+    const left = await QC.runGroup('bash', ['-c', '(exec sleep 30) & echo $!'], {}, 10000);
+    const leftover = Number(left.stdout.trim());
+    let cleared = false;
+    for (let i = 0; i < 20 && !(cleared = leftover > 0 && gone(leftover)); i++) await new Promise(res => setTimeout(res, 100));
+    check('runGroup: what the command leaves running in its group is stopped when it exits', left.status === 0 && cleared, JSON.stringify(left));
+    const missing = await QC.runGroup('/nonexistent/bin', [], {}, 10000);
+    check('runGroup: a command that cannot start resolves, never hangs', missing.status === 124 && /ENOENT/.test(missing.stderr), JSON.stringify(missing));
+  });
+
+  console.log('');
+  console.log(passed + ' passed, ' + failures.length + ' failed');
+  if (failures.length) {
+    for (const f of failures) console.log('  - ' + f);
+    process.exit(1);
+  }
+})();

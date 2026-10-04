@@ -20,7 +20,8 @@
 //   --role review  The fixture in scripts/fixtures/quality-check/ becomes a
 //                  two-commit git repo (base, then a change that plants one bug
 //                  per review lens plus a known-answer case), its dev server is
-//                  started on port 3000, and the session runs
+//                  started on 127.0.0.1 port 3000 (the fixture's loopback.js keeps
+//                  it off the network), and the session runs
 //                  `/tk:review <all eight lenses> <base>..HEAD report only, no chaining`.
 //   --role mapper  A git archive of a frozen source commit, and one dispatch of
 //                  the index-mapper agent on a frozen chunk of it, with /index's
@@ -116,13 +117,20 @@
 // sizes the request). With one, a run refuses to start when the money already
 // spent plus the most any earlier run of its role cost would pass the approval,
 // and prints the page for the owner. --approve records a new total; run it only
-// after the owner says yes.
+// after the owner says yes. A run that ends without a reported cost (a timeout, a
+// crash, an interrupt) is entered at its cap and marked costCapped, so the spend
+// total never comes out low.
+//
+// Each session runs in a process group of its own, as the fixture server does. At
+// the 90-minute timeout the runner stops the whole group (the wrapper shell and the
+// session under it), and Ctrl-C stops both groups before the runner leaves.
 //
 // Exit codes: 0 done (a valid run, or a score); 2 usage error; 3 the run was
 // invalid; 4 the budget refused the run; 5 a probe or a mode check failed; 6 the owner's real
 // config changed during the run (checked before and after every session; lines another of the
 // owner's sessions added to the correction files do not count, APPEND_ONLY below); 7 the
-// owner's login token could expire during the run (tokenWindowProblem, below).
+// owner's login token could expire during the run (tokenWindowProblem, below); 130
+// interrupted (a session already under way is still entered in the ledger).
 
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
@@ -134,6 +142,7 @@ const path = require('path');
 const REPO = path.resolve(__dirname, '..');
 const FIXTURE = path.join(REPO, 'scripts', 'fixtures', 'quality-check');
 const ANSWERS_FILE = path.join(FIXTURE, 'answers.json');
+const LOOPBACK_PRELOAD = path.join(FIXTURE, 'loopback.js');
 const HARNESS = path.join(REPO, 'scripts', 'setup', 'headless-session.sh');
 const OUT_ROOT = path.join(REPO, 'reports', 'quality-check');
 const LEDGER = path.join(OUT_ROOT, 'ledger.jsonl');
@@ -148,6 +157,8 @@ const SESSION_MODEL = 'opus';
 const SESSION_EFFORT = 'high';
 const PORT = 3000;
 const SESSION_TIMEOUT_MS = 90 * 60 * 1000;
+// A stopped group gets SIGTERM, then SIGKILL for whatever is still running this long after.
+const KILL_GRACE_MS = 10 * 1000;
 const DEFAULT_MAX_USD = { review: 25, mapper: 8, probe: 5 };
 // The two mode probes that run a whole command flow (a fan-out and its audit; an
 // /index, a plan and its critic) get a larger cap than a one-call probe.
@@ -1092,15 +1103,78 @@ function claudeVersion() {
   return v.stdout.trim();
 }
 
+// Every process group this run started and has not stopped yet: the session and
+// the fixture server. Both are detached into groups of their own, so a Ctrl-C in
+// the terminal reaches neither; onInterrupt stops them (review R2, R3).
+const liveGroups = new Set();
+let sessionGroup = null;
+let interrupted = false;
+
+function stopGroup(pid, signal) {
+  try { process.kill(-pid, signal || 'SIGTERM'); } catch (e) { /* already gone */ }
+}
+
+// The first interrupt stops every live group. With a session under way, the run
+// then finishes its own cleanup and ledger line and leaves with 130; otherwise it
+// leaves at once. A second interrupt always leaves at once.
+function onInterrupt(signal) {
+  if (interrupted) process.exit(130);
+  interrupted = true;
+  console.log('quality-check: ' + signal + ': stopping the session and the fixture server (interrupt again to leave at once)');
+  for (const pid of liveGroups) stopGroup(pid);
+  if (!sessionGroup) process.exit(130);
+}
+
+// Runs one command as the leader of a new process group, so a timeout stops
+// everything it started. The session wrapper does not exec claude, and the old
+// spawnSync timeout signalled the wrapper alone: the paid session ran on,
+// unrecorded, past its deleted scratch home (review R3). Resolves
+// { status, stdout, stderr, timedOut, wallMs }; status is 124 on a timeout or a signal.
+function runGroup(cmd, args, opts, timeoutMs, graceMs = KILL_GRACE_MS) {
+  return new Promise(resolve => {
+    const started = Date.now();
+    const child = spawn(cmd, args, { ...opts, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    if (child.pid) liveGroups.add(child.pid);
+    const out = [];
+    const err = [];
+    child.stdout.on('data', d => out.push(d));
+    child.stderr.on('data', d => err.push(d));
+    let timedOut = false;
+    let done = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stopGroup(child.pid, 'SIGTERM');
+      setTimeout(() => stopGroup(child.pid, 'SIGKILL'), graceMs).unref();
+    }, timeoutMs);
+    // Once the leader exits, anything it left running in its group goes too, so
+    // a leftover holding the output pipe cannot keep the run waiting.
+    child.on('exit', () => stopGroup(child.pid));
+    const finish = (code, error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (child.pid) liveGroups.delete(child.pid);
+      resolve({
+        status: timedOut || code === null ? 124 : code,
+        stdout: Buffer.concat(out).toString('utf8'),
+        stderr: Buffer.concat(err).toString('utf8') + (error ? '\n' + error.message : ''),
+        timedOut, wallMs: Date.now() - started,
+      });
+    };
+    child.on('error', e => finish(null, e));
+    child.on('close', code => finish(code));
+  });
+}
+
 // One headless session through scripts/setup/headless-session.sh.
-function runSession(o) {
+async function runSession(o) {
   const args = [HARNESS, '--build', o.build, '--project', o.project, '--home', o.home, '--mode', 'bypassPermissions', '--',
     '--model', o.sessionModel || SESSION_MODEL, '--effort', SESSION_EFFORT, '--output-format', 'json', '--max-budget-usd', String(o.maxUsd),
     '--strict-mcp-config', '--disallowedTools', 'Artifact,ArtifactComments,ArtifactData',
     '--append-system-prompt', SYSTEM_NOTE, o.prompt];
-  const started = Date.now();
-  const r = spawnSync('bash', args, { cwd: REPO, env: o.env, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024, timeout: SESSION_TIMEOUT_MS });
-  return { status: r.status === null ? 124 : r.status, stdout: r.stdout || '', stderr: (r.stderr || '') + (r.error ? '\n' + r.error.message : ''), wallMs: Date.now() - started };
+  const run = runGroup('bash', args, { cwd: REPO, env: o.env }, SESSION_TIMEOUT_MS);
+  sessionGroup = run;
+  try { return await run; } finally { sessionGroup = null; }
 }
 
 function httpOk(port) {
@@ -1113,19 +1187,21 @@ function httpOk(port) {
 
 async function startServer(project) {
   if (await httpOk(PORT)) throw new Error('port ' + PORT + ' already answers; stop whatever runs there (another quality-check run?) and retry');
-  const child = spawn(process.execPath, ['server.js'], { cwd: project, env: { ...process.env, PORT: String(PORT) }, detached: true, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['--require', LOOPBACK_PRELOAD, 'server.js'], { cwd: project, env: { ...process.env, PORT: String(PORT) }, detached: true, stdio: 'ignore' });
   child.unref();
+  liveGroups.add(child.pid);
   for (let i = 0; i < 50; i++) {
     if (await httpOk(PORT)) return child.pid;
     await new Promise(r => setTimeout(r, 200));
   }
-  try { process.kill(-child.pid, 'SIGTERM'); } catch (e) { /* already gone */ }
+  stopServer(child.pid);
   throw new Error('the fixture server did not start on port ' + PORT);
 }
 
 function stopServer(pid) {
   if (!pid) return;
-  try { process.kill(-pid, 'SIGTERM'); } catch (e) { /* already gone */ }
+  stopGroup(pid);
+  liveGroups.delete(pid);
 }
 
 function copyDir(src, dest) {
@@ -1176,6 +1252,13 @@ function budgetCheck(role) {
     return { ok: false, spent, page: 'Budget stop: $' + spent.toFixed(2) + ' spent of $' + Number(approval.approvedUsd).toFixed(2) + ' approved, and the next ' + role + ' run may cost up to $' + estimate.toFixed(2) + '. Ask the owner whether to raise the budget (--approve <usd>) or stop.' };
   }
   return { ok: true, spent, note: '$' + spent.toFixed(2) + ' spent of $' + Number(approval.approvedUsd).toFixed(2) + ' approved' };
+}
+
+// A run's ledger cost: the figure its session reported, or, when it ended without
+// one (a timeout, a crash, an interrupt), its cap, marked costCapped, so the
+// spend total never comes out low (review R14).
+function ledgerCost(reported, maxUsd) {
+  return typeof reported === 'number' ? { costUsd: reported } : { costUsd: maxUsd, costCapped: true };
 }
 
 function appendLedger(row) {
@@ -1270,6 +1353,13 @@ async function commandRun(o) {
   };
   let serverPid = null;
   let envExtra = {};
+  // From the session's start the run may have spent money, so from then on a
+  // ledger line is written however the run ends (review R14).
+  let ran = false;
+  let reportedCost = null;
+  let sessionDone = false;
+  const enterLedger = valid => appendLedger({ at: meta.endedAt || new Date().toISOString(), role, arm: meta.arm, probe: meta.probe,
+    build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
   try {
     if (role === 'review' || (role === 'probe' && o.probe === 'review')) {
       const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort) : armSettings('review', 'a', build, null);
@@ -1374,7 +1464,8 @@ async function commandRun(o) {
     console.log('quality-check: ' + budget.note);
     const env = sessionEnv(tmp, envExtra);
     const configBefore = realConfigSnapshot();
-    const r = runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env, sessionModel });
+    ran = true;
+    const r = await runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env, sessionModel });
     meta.exitCode = r.status;
     meta.wallMs = r.wallMs;
     meta.realConfig = compareSnapshots(configBefore, realConfigSnapshot(), tmp);
@@ -1383,7 +1474,9 @@ async function commandRun(o) {
     fs.writeFileSync(path.join(out, 'stderr.txt'), r.stderr);
     let result = null;
     try { result = JSON.parse(r.stdout.trim().split('\n').filter(Boolean).pop()); } catch (e) { result = null; }
+    if (result && typeof result.total_cost_usd === 'number') reportedCost = result.total_cost_usd;
     if (result) fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2) + '\n');
+    sessionDone = true;
   } finally {
     stopServer(serverPid);
     copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'));
@@ -1397,10 +1490,16 @@ async function commandRun(o) {
     }
     fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n');
     if (!o.keep) fs.rmSync(tmp, { recursive: true, force: true });
+    // A run that broke after its session started still enters its spend.
+    if (ran && !sessionDone) enterLedger(false);
   }
-  const analysis = analyzeRun(loadRun(out), loadAnswers());
-  fs.writeFileSync(path.join(out, 'analysis.json'), JSON.stringify(analysis, null, 2) + '\n');
-  appendLedger({ at: meta.endedAt, role, arm: meta.arm, probe: meta.probe, build: o.build, sha: build.sha, costUsd: analysis.costUsd, valid: analysis.valid, dir: path.relative(REPO, out) });
+  let analysis = null;
+  try {
+    analysis = analyzeRun(loadRun(out), loadAnswers());
+    fs.writeFileSync(path.join(out, 'analysis.json'), JSON.stringify(analysis, null, 2) + '\n');
+  } finally {
+    enterLedger(!!analysis && analysis.valid);
+  }
   printRunSummary(analysis);
   if (meta.realConfig) {
     const c = meta.realConfig;
@@ -1408,6 +1507,7 @@ async function commandRun(o) {
       + ((c.otherSessions || []).length ? ' (another session of the owner\'s added lines to ' + c.otherSessions.join(', ') + '; none names this run)' : ''));
     if (!c.unchanged) { console.log('STOP: the real config changed during this run. Page the owner (M1) before any further run.'); process.exit(6); }
   }
+  if (interrupted) { console.log('quality-check: interrupted; the run is entered in the ledger, and nothing reruns.'); process.exit(130); }
   if (role === 'probe') {
     const ok = probeVerdict(analysis, meta);
     console.log('probe ' + o.probe + ': ' + (ok.ok ? 'PASS' : 'FAIL') + (ok.why ? ' - ' + ok.why : ''));
@@ -1507,7 +1607,8 @@ function commandBudget() {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
-  for (const r of rows) console.log((r.at || '').slice(0, 19) + '  ' + String(r.role + (r.arm ? '-' + r.arm : '') + (r.probe ? '-' + r.probe : '')).padEnd(22) + String(r.build).padEnd(10) + money(r.costUsd).padEnd(9) + (r.valid ? 'valid' : 'INVALID') + '  ' + r.dir);
+  for (const r of rows) console.log((r.at || '').slice(0, 19) + '  ' + String(r.role + (r.arm ? '-' + r.arm : '') + (r.probe ? '-' + r.probe : '')).padEnd(22) + String(r.build).padEnd(10) + (money(r.costUsd) + (r.costCapped ? '*' : '')).padEnd(9) + (r.valid ? 'valid' : 'INVALID') + '  ' + r.dir);
+  if (rows.some(r => r.costCapped)) console.log('* no cost reported (a timeout, a crash, an interrupt): entered at the run\'s cap');
   console.log('spent: ' + money(spent) + '; approved: ' + (approval ? money(approval.approvedUsd) + ' (' + approval.at + ')' : 'none yet'));
 }
 
@@ -1546,6 +1647,8 @@ function parseArgs(argv) {
 }
 
 async function main() {
+  process.on('SIGINT', onInterrupt);
+  process.on('SIGTERM', onInterrupt);
   const o = parseArgs(process.argv.slice(2));
   if (o.budget) return commandBudget();
   if (o.approve !== undefined) {
@@ -1628,6 +1731,7 @@ module.exports = {
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
+  runGroup, ledgerCost, LOOPBACK_PRELOAD,
 };
 
 if (require.main === module) {
