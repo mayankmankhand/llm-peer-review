@@ -29,7 +29,7 @@ Parse the JSON. The manifest contains:
 - `commit` (current HEAD hash, for staleness tracking)
 - `isDirty` and `dirtyFileCount` (uncommitted changes present?)
 - `timestamp` (UTC, for the map header)
-- `chunks` (array of `{ id, files: [{path, tokens}], totalTokens, answerTokens }`; `answerTokens` is the chunk's answer limit: 1,000 tokens plus its file-count share of the rest of a 10,000-token budget)
+- `chunks` (array of `{ id, files: [{path, tokens}], totalTokens }`)
 - `largestChunkTokens` (size of the largest chunk - helps explain overflow)
 - `chunkTargetTokens` (the per-chunk token target - a chunk whose `totalTokens` exceeds this is oversized)
 - `directoryTree` (array of indented strings)
@@ -50,7 +50,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family's alias. It is the mapper agent, whose effort comes from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the same `model`. Use this prompt template, substituting the chunk's file list and its `answerTokens` (2000 when the chunk has none, from an older scanner):
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family's alias. It is the mapper agent, whose effort comes from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the same `model`. Use this prompt template, substituting the chunk's file list:
 
 <template>
 
@@ -77,7 +77,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 **Rules:**
 - Be evidence-based. If you cannot point to specific code or comments as evidence for a convention or gotcha, do NOT include it.
 - Group tightly related small files (e.g., a 5-file utility folder) into one module block. Single large files get their own block.
-- Keep each block under ~200 tokens and the whole response under ~{chunk.answerTokens} tokens: every chunk's blocks are merged into one map that must stay under ~10k tokens, and that is your chunk's share, sized by its file count.
+- Keep each block under ~200 tokens and the whole response under ~2000: every chunk's blocks are merged into one map that must stay under ~10k tokens.
 - Do not output anything besides the module blocks - no preamble, no summary, no commentary.
 
 </template>

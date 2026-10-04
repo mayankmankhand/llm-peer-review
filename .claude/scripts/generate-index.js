@@ -7,9 +7,6 @@
 //   node generate-index.js              the scan: one JSON manifest
 //   node generate-index.js --finalize   check CODEBASE_MAP.md.tmp and move it
 //                                       into place: one JSON result (issue #181)
-//   node generate-index.js --answer-tokens <n,n,...>
-//                                       the answer limit the scan gives chunks
-//                                       holding these many files (issue #208)
 
 const { execFileSync } = require("child_process");
 const path = require("path");
@@ -27,23 +24,6 @@ const CONFIRM_THRESHOLD_TOKENS = 500_000;
 // Sonnet's context window. Generated clients, vendor bundles, and i18n
 // blobs are the usual culprits.
 const MAX_FILE_TOKENS = 50_000;
-
-// Each chunk's answer limit (issue #208): how long the index-mapper's answer for
-// that chunk may be. It used to be ~2000 tokens whatever the chunk held, so a
-// chunk of 217 small files got the same room as one of 9 large ones, and its
-// mapper described a handful of files and lumped the rest into folders. Every
-// chunk now gets a floor, and the rest of the budget is shared by file count,
-// rounded down to 100 so the limits never add up to more than the budget: the
-// map's ~10k tokens, the most five chunks at 2000 could reach before.
-const ANSWER_BUDGET_TOKENS = 10_000;
-const ANSWER_FLOOR_TOKENS = 1_000;
-
-// fileCounts: how many files each chunk holds. Returns one limit per chunk.
-function answerTokensFor(fileCounts) {
-  const total = fileCounts.reduce((a, b) => a + b, 0);
-  const shared = Math.max(0, ANSWER_BUDGET_TOKENS - ANSWER_FLOOR_TOKENS * fileCounts.length);
-  return fileCounts.map((n) => ANSWER_FLOOR_TOKENS + (total > 0 ? Math.floor((shared * n) / total / 100) * 100 : 0));
-}
 
 // Skip files with no semantic value for the map (binaries, lockfiles, minified).
 // git ls-files already respects .gitignore so we only filter the residual.
@@ -224,27 +204,13 @@ function finalizeMap() {
   process.exit(0);
 }
 
-// --answer-tokens <n,n,...> (issue #208): the limits the scan would give chunks
-// holding these many files, as {"answerTokens":[...]}, exit 0. For a chunk saved
-// before the scan carried the field (the quality check's frozen chunk), and for
-// the tests; the scan itself writes each chunk's limit into the manifest.
-function printAnswerTokens(list) {
-  const counts = String(list).split(",").map((s) => s.trim());
-  if (counts.length > MAX_CHUNKS || !counts.every((s) => /^[1-9][0-9]*$/.test(s))) {
-    emitError("bad_arguments", `--answer-tokens takes 1 to ${MAX_CHUNKS} file counts, comma-separated, each a whole number above 0.`);
-  }
-  process.stdout.write(JSON.stringify({ answerTokens: answerTokensFor(counts.map(Number)) }) + "\n");
-  process.exit(0);
-}
-
-// Arguments: none for the scan, --finalize alone, or --answer-tokens with its
-// list. Anything else is refused rather than ignored, so a mistyped flag never
-// prints a manifest in place of the result the caller is waiting for.
+// Arguments: none for the scan, or --finalize alone. Anything else is refused
+// rather than ignored, so a mistyped flag never prints a manifest in place of
+// the result the caller is waiting for.
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === "--finalize") finalizeMap();
-if (args.length === 2 && args[0] === "--answer-tokens") printAnswerTokens(args[1]);
 if (args.length > 0) {
-  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan, with --finalize alone, or with --answer-tokens <file counts>.`);
+  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan, or with --finalize alone.`);
 }
 
 // Get all tracked files via git (respects .gitignore automatically). -z prints
@@ -377,11 +343,6 @@ for (const f of sorted) {
   target.files.push(f);
   target.totalTokens += f.tokens;
 }
-
-// Each chunk's answer limit, from how many files it holds (see answerTokensFor).
-answerTokensFor(chunks.map((c) => c.files.length)).forEach((limit, i) => {
-  chunks[i].answerTokens = limit;
-});
 
 // Per-chunk overflow detection. The project-total `needsConfirm` flag does
 // not catch the case where most chunks are small but one is oversized

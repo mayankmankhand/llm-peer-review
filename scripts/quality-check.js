@@ -26,8 +26,6 @@
 //   --role mapper  A git archive of a frozen source commit, and one dispatch of
 //                  the index-mapper agent on a frozen chunk of it, with /index's
 //                  Step 3 prompt template copied out of the build under test.
-//                  A template with the per-chunk answer limit (#208) gets
-//                  --answer-tokens, else the chunk file's answerTokens, else 2000.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -64,7 +62,7 @@
 //        [--effort <level>] [--max-usd <n>] [--label <text>] [--mode-word <best|fit|cheap>]
 //        [--plan-models <best|fit|cheap>] [--keep]
 //   node scripts/quality-check.js --role mapper --arm <a|b|c|ship> --build <git-ref|tree>
-//        --chunk <manifest.json> [--answer-tokens <n>] [--effort <level>] [--max-usd <n>] [--keep]
+//        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
@@ -1307,21 +1305,10 @@ function mapperTemplate(buildDir) {
   return text.slice(open + '<template>'.length, close).trim();
 }
 
-// answerTokens fills the template's per-chunk answer limit (#208); a template from
-// before it has no placeholder and is filled exactly as it always was.
-function fillMapperTemplate(template, files, answerTokens) {
+function fillMapperTemplate(template, files) {
   const line = template.split('\n').find(l => /\{for each file:/.test(l));
   if (!line) throw new Error('the Step 3 template has no file-list line');
-  return template.replace(line, files.map(f => '- ' + f).join('\n')).split('{chunk.answerTokens}').join(String(answerTokens || 2000));
-}
-
-// The answer limit a mapper run fills in: the --answer-tokens flag, else the chunk
-// file's own answerTokens (a chunk saved by a scan that writes it), else 2000, the
-// limit every chunk had before #208. An explicit flag wins over the file.
-function mapperAnswerTokens(chunk, flag) {
-  if (flag !== undefined) return Number(flag);
-  if (chunk && Number.isInteger(chunk.answerTokens) && chunk.answerTokens > 0) return chunk.answerTokens;
-  return 2000;
+  return template.replace(line, files.map(f => '- ' + f).join('\n'));
 }
 
 // The execute-mismatch probe's plan: one small step, Models line fit.
@@ -1357,7 +1344,6 @@ async function commandRun(o) {
   if (role !== 'probe' && !['a', 'b', 'c', 'ship'].includes(o.arm)) usage('--arm must be a, b, c or ship');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
-  if (o.answerTokens !== undefined && !/^[1-9][0-9]*$/.test(o.answerTokens)) usage('--answer-tokens takes a whole number above 0');
   for (const m of [o.modeWord, o.planModels]) if (m !== undefined && !MODES.includes(m)) usage('a mode is best, fit or cheap');
   const budget = budgetCheck(role === 'probe' ? 'probe' : role);
   if (!budget.ok) { console.log(budget.page); process.exit(4); }
@@ -1424,8 +1410,7 @@ async function commandRun(o) {
       serverPid = await startServer(project);
     } else if (role === 'mapper') {
       const chunk = JSON.parse(fs.readFileSync(path.resolve(o.chunk), 'utf8'));
-      const answerTokens = mapperAnswerTokens(chunk, o.answerTokens);
-      meta.chunk = { file: path.relative(REPO, path.resolve(o.chunk)), sourceRef: chunk.sourceRef, files: chunk.files, answerTokens };
+      meta.chunk = { file: path.relative(REPO, path.resolve(o.chunk)), sourceRef: chunk.sourceRef, files: chunk.files };
       const settings = armSettings('mapper', o.arm, build, o.effort);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
@@ -1437,7 +1422,7 @@ async function commandRun(o) {
       git(['archive', '-o', tar, chunk.sourceRef], REPO);
       const r = sh('tar', ['-xf', tar, '-C', project]);
       if (r.status !== 0) throw new Error('tar failed: ' + r.stderr);
-      meta.expectedPrompt = fillMapperTemplate(mapperTemplate(build.dir), chunk.files, answerTokens);
+      meta.expectedPrompt = fillMapperTemplate(mapperTemplate(build.dir), chunk.files);
       meta.prompt = 'This is a measurement run of one helper agent; do no other work. Make exactly one Agent tool call: '
         + 'subagent_type "tk:index-mapper", description "Map chunk", and as its prompt the text between the two marker lines below, '
         + 'copied exactly, byte for byte. Pass no model. When the agent returns, reply with its full output and nothing else.\n'
@@ -1675,7 +1660,6 @@ function parseArgs(argv) {
     else if (a === '--build') o.build = val();
     else if (a === '--effort') o.effort = val();
     else if (a === '--chunk') o.chunk = val();
-    else if (a === '--answer-tokens') o.answerTokens = val();
     else if (a === '--label') o.label = val();
     else if (a === '--max-usd') o.maxUsd = Number(val());
     else if (a === '--mode-word') o.modeWord = val();
@@ -1777,7 +1761,7 @@ async function probeLocal(o) {
 module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
-  scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperAnswerTokens, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
+  scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD,
 };

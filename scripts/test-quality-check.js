@@ -413,16 +413,6 @@ section('mapper coverage', () => {
   check('twinOf maps both ways and ignores other folders', QC.twinOf('plugin/skills/x/SKILL.md') === '.claude/skills/x/SKILL.md' && QC.twinOf('.claude/agents/y.md') === 'plugin/agents/y.md' && QC.twinOf('plugin/seed/CLAUDE.md') === null);
   const t = QC.fillMapperTemplate('intro\n**Files in your chunk:**\n{for each file: `- {file.path}`}\nrest', ['a.js', 'b.js']);
   check('the template\'s file-list line becomes the chunk list', t === 'intro\n**Files in your chunk:**\n- a.js\n- b.js\nrest', t);
-  // #208: the per-chunk answer limit.
-  const capped = QC.fillMapperTemplate('{for each file: `- {file.path}`}\nunder ~{chunk.answerTokens} tokens', ['a.js'], 4200);
-  check('the answer-limit placeholder is filled with the run\'s limit', capped === '- a.js\nunder ~4200 tokens', capped);
-  check('with no limit given, the placeholder falls back to 2000',
-    QC.fillMapperTemplate('{for each file: x}\n~{chunk.answerTokens}', ['a.js']) === '- a.js\n~2000');
-  check('a template from before the limit, with no placeholder, is filled exactly as before',
-    QC.fillMapperTemplate('intro\n{for each file: `- {file.path}`}\nunder ~2000', ['a.js'], 4200) === 'intro\n- a.js\nunder ~2000');
-  check('the run\'s limit: the --answer-tokens flag, else the chunk file\'s answerTokens, else 2000',
-    QC.mapperAnswerTokens({ answerTokens: 3100 }, '4200') === 4200 && QC.mapperAnswerTokens({ answerTokens: 3100 }, undefined) === 3100 &&
-    QC.mapperAnswerTokens({ files: [] }, undefined) === 2000 && QC.mapperAnswerTokens({ answerTokens: 'lots' }, undefined) === 2000);
 });
 
 section('fixture', () => {
