@@ -172,7 +172,7 @@
 
 - **Mutation-testing a group of assertions is not mutation-testing each assertion.**
 - **Tokenising the shared layer does not tokenise its consumers.**
-- **A prose sweep needs the wordings that actually occur, not the one you remember writing.** (see the #206 refinement in detail)
+- **A prose sweep needs the wordings that actually occur, not the one you remember writing.** (see the #206 and #208 refinements in detail)
 - **A measurable claim in a commit message is a claim until you measure it.**
 - **A pipeline's exit status is the last command's, so `grep | head` always succeeds.**
 - **"Falls back" is not "degrades to nothing" - read what the fallback actually produces.**
@@ -328,3 +328,8 @@
 - **A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.**
 - **A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.**
 - **In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.**
+
+## Issue 208 (three small gaps)
+
+- **The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.**
+- **Before engineering a smarter limit, lift the old one once and see whether it binds.**
