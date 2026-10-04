@@ -2334,6 +2334,10 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   const rosterAliases = ((/const MODEL_WORD = \/\\b\(([a-z|]+)\)\\b/.exec(read(path.join(REPO, 'scripts', 'test-model-roster.js'))) || ['', ''])[1] || '').split('|').filter(Boolean);
   c = calls('drift-alias', cmd(...rosterAliases.map(a => 'Critique with `subagent_type=tk:plan-critic` on ' + a + '.')));
   check('every model word in test-model-roster.js\'s MODEL_WORD, alone on a judge call\'s line, is a C-14 finding', rosterAliases.length >= 4 && c.fs14.length === rosterAliases.length, rosterAliases.join(',') + ' gave ' + c.fs14.length + ' finding(s)');
+  // The finder side keeps its own copy of the same words, for `model` followed
+  // directly by one: each must pass a model there.
+  c = calls('drift-alias-finder', cmd(...rosterAliases.map(a => 'Run `subagent_type=tk:review-code-finder` with model ' + a + '.')));
+  check('every model word in MODEL_WORD, written right after model on a finder call\'s line, passes a model', rosterAliases.length >= 4 && c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
 
   // ---- the upgrade skill stays in step with the script ----
   // Its rerun list names every script detector a convention uses, and its
