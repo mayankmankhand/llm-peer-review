@@ -876,10 +876,26 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
   check('--models prints only generatedAt, cwd and models', sameList(Object.keys(none.json).sort(), ['cwd', 'generatedAt', 'models']), JSON.stringify(Object.keys(none.json)));
 
   const best = models(repo, ['--models', '--mode', 'best']);
-  check('--mode best: every moving role and every judge on "session", built on the session model',
+  check('--mode best: every finder and every judge on "session", built on the session model',
     best.m.mode === 'best' && best.m.source === 'argument' && best.m.buildModel === 'session' &&
-    FINDERS.concat(['index-mapper'], JUDGES).every(function (r) { return best.m.perRole[r] === 'session'; }),
+    FINDERS.concat(JUDGES).every(function (r) { return best.m.perRole[r] === 'session'; }),
     JSON.stringify(best.m));
+  // #208: best leaves the map helper on its agent file's model, exactly as fit reads it.
+  check('--mode best: the map helper keeps its agent file\'s model, the same value fit gives it',
+    best.m.perRole && best.m.perRole['index-mapper'] === 'sonnet' && best.m.perRole['index-mapper'] === none.m.perRole['index-mapper'],
+    JSON.stringify(best.m.perRole));
+  const mapperUnder = function (modelLine) {
+    if (modelLine === undefined) fs.rmSync(path.join(plugin, 'agents', 'index-mapper.md'), { force: true });
+    else agent('index-mapper', modelLine);
+    return models(repo, ['--models', '--mode', 'best']).m.perRole || {};
+  };
+  const inheritBest = mapperUnder('inherit');
+  const noLineBest = mapperUnder(null);
+  const missingBest = mapperUnder(undefined);
+  agent('index-mapper', 'sonnet');
+  check('--mode best: a map helper file reading inherit, with no model line, or missing reads as "session"',
+    inheritBest['index-mapper'] === 'session' && noLineBest['index-mapper'] === 'session' && missingBest['index-mapper'] === 'session',
+    JSON.stringify([inheritBest['index-mapper'], noLineBest['index-mapper'], missingBest['index-mapper']]));
   const cheap = models(repo, ['--mode', 'cheap', '--models']);
   check('--mode cheap (before --models too): the finders and the mapper on sonnet, the judges still "session"',
     cheap.m.mode === 'cheap' && cheap.m.source === 'argument' && cheap.m.buildModel === 'opus' &&

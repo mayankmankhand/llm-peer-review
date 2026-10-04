@@ -44,9 +44,11 @@ Each cycle runs in one of three modes. A mode moves only the helpers whose work 
 
 | Mode | Finders and `index-mapper` | Judges and `correction-extractor` | Code-writing |
 |---|---|---|---|
-| `best` | the session model | the session model | the main session |
+| `best` | the session model for the finders; `index-mapper` keeps its agent file's model, as in fit | the session model | the main session |
 | `fit` (the default) | the model each agent file names (the roster above), never above the session model | the session model | the main session |
 | `cheap` | `sonnet` | the session model | the main session |
+
+Best keeps `index-mapper` on its measured model: on the measured chunk Sonnet at medium covered every file both session-model baselines covered, for $0.50 a run against $0.75 and $1.00 ("Why these tiers"), so in best the session model would add cost and no coverage.
 
 Cheap runs the finders on Sonnet, which missed a planted bug that every Opus run caught ("Tested and revoked"): it trades catches for cost.
 

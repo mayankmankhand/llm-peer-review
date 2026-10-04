@@ -42,10 +42,13 @@
 //   after it that is not on the remote (the same test --scope uses to call a plan
 //   shipped). A plan whose start is missing or not an ancestor of HEAD does not apply.
 //   perRole: the eight review finders and index-mapper move with the mode: best
-//   gives "session", cheap gives "sonnet", and fit gives the model each one's agent
-//   file names, read from the agents/ folder beside this script's own folder (the
-//   plugin's agents on a plugin install, .claude/agents/ in the toolkit repo), the
-//   files the dispatch itself uses; "inherit" or no model line reads as "session".
+//   gives the finders "session", cheap gives "sonnet", and fit gives the model each
+//   one's agent file names, read from the agents/ folder beside this script's own
+//   folder (the plugin's agents on a plugin install, .claude/agents/ in the toolkit
+//   repo), the files the dispatch itself uses; "inherit" or no model line reads as
+//   "session". Best gives index-mapper its agent file's model too, as fit does
+//   (#208): on the measured chunk Sonnet at medium covered every file the session
+//   model did, for less, so in best the session model adds cost and no coverage.
 //   The judges and the correction extractor are always "session". "session" means
 //   the dispatcher passes the alias of its own model family (the Agent tool's model
 //   takes only sonnet, opus, haiku and fable), and a dispatcher never passes a model
@@ -974,6 +977,9 @@ const MOVING_ROLES = [
   "review-commands-finder", "review-deps-finder", "review-browser-finder", "review-copy-finder",
   "index-mapper",
 ];
+// The helpers best leaves on their agent file's model, as fit does, instead of the
+// session model (#208): the map helper's file names the model it was measured on.
+const BEST_KEEPS_FILE_MODEL = ["index-mapper"];
 // The helpers no mode moves: a judge never runs below the work it judges, and the
 // correction extractor was not measured.
 const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer", "correction-extractor"];
@@ -1055,7 +1061,11 @@ function resolveModels(requested, root) {
   }
   if (mode === null) mode = "fit";
   const perRole = {};
-  for (const role of MOVING_ROLES) perRole[role] = mode === "best" ? "session" : mode === "cheap" ? "sonnet" : agentFileModel(role);
+  for (const role of MOVING_ROLES) {
+    if (mode === "cheap") perRole[role] = "sonnet";
+    else if (mode === "best" && !BEST_KEEPS_FILE_MODEL.includes(role)) perRole[role] = "session";
+    else perRole[role] = agentFileModel(role);
+  }
   for (const role of FIXED_ROLES) perRole[role] = "session";
   const out = { mode, source, plan, buildModel: mode === "best" ? "session" : "opus", perRole };
   if (warnings.length) out.warning = warnings.join(" ");

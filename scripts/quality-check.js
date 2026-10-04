@@ -203,9 +203,11 @@ function frontmatterValue(text, key) {
 // as the build holds it (after any arm patch), resolved the way session-init.js
 // resolves it: best is the session family, cheap is Sonnet, fit is the file's own
 // model, where inherit, no model line or a value that is not an alias is the
-// session family.
-function modeFamily(mode, agentText, sessionFamily) {
-  if (mode === 'best') return sessionFamily;
+// session family. role is the agent's name: best leaves the map helper on its
+// file's model, as fit does (#208, BEST_KEEPS_FILE_MODEL in session-init.js).
+const BEST_KEEPS_FILE_MODEL = ['index-mapper'];
+function modeFamily(mode, agentText, sessionFamily, role) {
+  if (mode === 'best' && !BEST_KEEPS_FILE_MODEL.includes(role)) return sessionFamily;
   if (mode === 'cheap') return 'sonnet';
   const value = String(frontmatterValue(agentText, 'model') || '').toLowerCase();
   return ['sonnet', 'opus', 'haiku', 'fable'].includes(value) ? value : sessionFamily;
@@ -1006,10 +1008,10 @@ function applyArm(settings) {
 // agent files as they stand now (after the arm's patch).
 function finderModels(mode, buildDir, sessionFamily) {
   const read = name => fs.readFileSync(path.join(buildDir, 'agents', name + '.md'), 'utf8');
-  return Object.fromEntries(FINDER_KINDS.map(k => [k, modeFamily(mode, read('review-' + k + '-finder'), sessionFamily)]));
+  return Object.fromEntries(FINDER_KINDS.map(k => [k, modeFamily(mode, read('review-' + k + '-finder'), sessionFamily, 'review-' + k + '-finder')]));
 }
 function mapperModel(mode, buildDir, sessionFamily) {
-  return modeFamily(mode, fs.readFileSync(path.join(buildDir, 'agents', 'index-mapper.md'), 'utf8'), sessionFamily);
+  return modeFamily(mode, fs.readFileSync(path.join(buildDir, 'agents', 'index-mapper.md'), 'utf8'), sessionFamily, 'index-mapper');
 }
 
 // Windows browser launchers that do nothing, first on PATH, so a review's

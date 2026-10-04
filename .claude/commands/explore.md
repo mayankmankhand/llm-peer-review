@@ -32,7 +32,7 @@ Don't try to guess silently. Always ask, but pre-fill your best guess so it's a 
    - A bare number on its own (e.g. just `88`) -> ask "Is that an issue number?" before fetching, since a bare number can mean other things
 3. Ask the user with this exact wording, substituting your guess in the first brackets:
    > Scoping or vision? [scoping]
-   > Models: best, fit or cheap? [fit] (best: every helper on your session model. fit: the tested settings. cheap: Sonnet for the review and map helpers, cheaper, but in testing it missed a bug the others caught. Fit and cheap build on Opus; judges always run on the session's own model.)
+   > Models: best, fit or cheap? [fit] (best: the review helpers on your session model, the map helper on Sonnet as tested. fit: the tested settings. cheap: Sonnet for the review and map helpers, cheaper, but in testing it missed a bug the others caught. Fit and cheap build on Opus; judges always run on the session's own model.)
 
    The second line is the cycle's model mode ("Model modes" in `.claude/skills/shared/model-routing.md`). Leave it out when the arguments already carry a `mode:<m>` word, and use that mode.
 4. Interpret the answer:

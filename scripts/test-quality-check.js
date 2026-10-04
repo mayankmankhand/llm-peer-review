@@ -439,7 +439,9 @@ section('fixture', () => {
 
 section('model modes', () => {
   const file = model => '---\nname: x\ntools: Read\n' + (model ? 'model: ' + model + '\n' : '') + 'effort: high\n---\nbody\n';
-  check('modeFamily: best is the session family whatever the file says', QC.modeFamily('best', file('sonnet'), 'opus') === 'opus');
+  check('modeFamily: best is the session family whatever the file says', QC.modeFamily('best', file('sonnet'), 'opus') === 'opus' && QC.modeFamily('best', file('sonnet'), 'opus', 'review-code-finder') === 'opus');
+  check('modeFamily: best leaves the map helper on its file\'s model, as fit does (#208)',
+    QC.modeFamily('best', file('sonnet'), 'opus', 'index-mapper') === 'sonnet' && QC.modeFamily('best', file('inherit'), 'opus', 'index-mapper') === 'opus');
   check('modeFamily: cheap is Sonnet whatever the file says', QC.modeFamily('cheap', file('opus'), 'opus') === 'sonnet');
   check('modeFamily: fit is the file\'s own model', QC.modeFamily('fit', file('sonnet'), 'opus') === 'sonnet' && QC.modeFamily('fit', file('opus'), 'sonnet') === 'opus');
   check('modeFamily: fit reads inherit, no line and a non-alias as the session family',
