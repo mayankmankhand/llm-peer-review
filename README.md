@@ -246,7 +246,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 **Do not overwrite a file a toolkit command opens by name:** `plans/PLAN-*.md`, `CODEBASE_MAP.md`, `LESSONS.md`, `LESSONS-detail.md`.
 
-**One thing to expect rather than fix:** `/review` will not pick up your own reviewer automatically. Its specialist list is fixed, and subagents do not discover skills on their own. Type your command alongside it, or ask for it by name in the session.
+**One thing to expect rather than fix:** `/tk:review` picks up a reviewer of yours only through a row in `.claude/toolkit/review-kinds.md` (see [Extending a toolkit stage](#extending-a-toolkit-stage)), and only when it picks specialists on its own. Without a row, type your command alongside it, or ask for it by name in the session.
 
 ---
 
@@ -258,7 +258,7 @@ The plugin needs **Claude Code** with plugin support (2.x) and **Node.js 22 or n
 
 ## What's New
 
-**Latest release: v7.5.0** (October 2026): commands load about 11% fewer words, each cycle picks whether its review and map helpers run best, fit or cheap, and every helper setting was measured before it shipped. Every release since v4.3.3 is described in [CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), and the [releases page](https://github.com/mayankmankhand/llm-peer-review/releases) has the tags. The copy-install clones `main`, not a tag, so it also gets the work listed under Unreleased in [CHANGELOG.md](CHANGELOG.md); the plugin installs the tagged release.
+**Latest release: v7.5.1** (October 2026), a patch on top of v7.5.0: `/tk:upgrade` now checks that your own agents, and the toolkit helpers your commands call, run on the model they should (C-14). v7.5.0 made commands load about 11% fewer words, let each cycle pick whether its review and map helpers run best, fit or cheap, and measured every helper setting before it shipped. Every release since v4.3.3 is described in [CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), and the [releases page](https://github.com/mayankmankhand/llm-peer-review/releases) has the tags. The copy-install clones `main`, not a tag, so it also gets the work listed under Unreleased in [CHANGELOG.md](CHANGELOG.md); the plugin installs the tagged release.
 
 ---
 
