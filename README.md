@@ -2,6 +2,8 @@
 
 **AI peer review for your work. (Also: a structured workflow.)**
 
+> **In 20 seconds.** LLM Peer Review is a Claude Code plugin (with a copy-install for Cursor and Codex) that gives a project one workflow: explore, plan, build, review, document, with an optional debate between Claude and GPT or Gemini before you commit to anything. It is for product managers and small teams who build with AI and want the plan questioned before the code exists. Every repository on this profile was built with it.
+
 <img src="docs/images/ask-gpt-summary.png" alt="ask-gpt summary showing agreed points, disagreed points, recommended actions, and key insights" width="700">
 
 *A real `/ask-gpt` debate output: Claude and ChatGPT argue across up to three rounds and hand you a structured verdict (what they agreed on, where they disagreed, and a prioritized action list). You approve what gets implemented.*
@@ -248,140 +250,7 @@ The plugin needs **Claude Code** with plugin support (2.x) and **Node.js 22 or n
 
 ## What's New
 
-**Latest release: v7.4.3** (September 2026), a patch on top of v7.4.2: the plan and design critics return gaps instead of grades, a blind side-by-side judge keeps or reverts each design round, a behaviour pass checks what a screenshot cannot show, and the gaps the judges leave open are audited by the review instead of lost. [What v7.4.3 adds](#what-v743-adds) has the details. v7.4.2 was a patch on top of v7.4.1: a project running a stale plugin is no longer told it is current, so an upgrade can no longer accomplish nothing in silence ([What v7.4.2 adds](#what-v742-adds)). v7.4.1 was a patch on top of v7.4.0: a review that could not finish no longer ships anyway, pushes that delete always ask, and three confusing failures say the true thing ([What v7.4.1 adds](#what-v741-adds)). v7.4.0 let your project extend a toolkit stage without editing a plugin file, through five optional files in a `.claude/toolkit/` folder that is yours. v7.3.1 closed follow-ups: toolkit scripts stop asking for approval in the middle of the loop, force pushes always ask, and `/tk:upgrade` is gentler with your permission rows ([What v7.3.1 adds](#what-v731-adds)). v7.3.0 was a regression audit: everything that changed since v6.3.3 was read again and the 22 regressions it found are fixed, and a `/tk:review` typed with no range starts from your plan's own commits and says why ([What v7.3.0 adds](#what-v730-adds)). v7.2.0 made the review that `/tk:execute` chains into see the committed work again, with setup backing up your settings and naming what it changes, `/tk:upgrade` running its repair checks on every upgrade, and written steps for going back to an older release ([What v7.2.0 adds](#what-v720-adds)). v7.1.0 made updates safe to take: the plugin installs from the release tag, each session says when your project and the plugin are on different versions, your project's own `.env.local` is read again, and `/tk:upgrade` repairs projects migrated on 7.0.x ([What v7.1.0 adds](#what-v710-adds)). v7.0.0 made the toolkit a Claude Code **plugin**: install it once per machine, seed each project with `/tk:setup`, and update with `/plugin update` followed by `/tk:upgrade`, which audits the files you wrote yourself against the conventions that changed and fixes what drifted through the same audit-and-fix loop reviews use. Under the hood every review dispatch goes to a typed finder agent that already carries its criteria, so nothing is pasted per dispatch and a review that compacts mid-run loses nothing. [What v7.0.0 adds](#what-v700-adds) has the details; the copy-install scripts still work for other editors.
-
-The copy-install clones `main`, not a tag, so it gets everything on this page, not just the tagged release; the plugin installs the tagged release (from 7.1.0 on). The bullets directly below describe v6.0.0; [What v6.1.0 adds](#what-v610-adds), [What v6.2.0 adds](#what-v620-adds), [What v6.3.0 adds](#what-v630-adds), [What v7.0.0 adds](#what-v700-adds), [What v7.1.0 adds](#what-v710-adds), [What v7.2.0 adds](#what-v720-adds), [What v7.3.0 adds](#what-v730-adds), [What v7.3.1 adds](#what-v731-adds), [What v7.4.0 adds](#what-v740-adds), [What v7.4.1 adds](#what-v741-adds), [What v7.4.2 adds](#what-v742-adds), and [What v7.4.3 adds](#what-v743-adds) list what the newer releases build on top of it. See the CHANGELOG for the full split.
-
-- **The loop no longer stops at a report.** A review used to hand you a list and wait for "fix it". It now fixes the findings that survived its own audit, re-verifies each fix with something other than whatever made it, and starts the next stage on its own. Two per-run phrases take control back, and they do different things: say **"report only"** and the run changes nothing, say **"no chaining"** and it finishes its stage without starting the next. Nothing was renamed or removed; what changed is what a command does once it starts.
-- **Findings have to prove themselves before you see them.** Every finding now ships with a receipt (a read-only command, plus what its output must show), and the run executes it. What survives goes to a fresh skeptic told to refute it, and a Block-severity finding faces three. Expect shorter reports: the first live run killed four of seven findings. What was thrown out is listed rather than hidden.
-- **Nothing gets pushed without a secret scan.** A tripwire reads every outgoing commit before any push the loop makes, looking for secrets, never-push files, and changes to shared settings. It reads commit by commit rather than the final diff, because a secret added and then removed leaves no trace at the end but still lands in history. A file it cannot read is reported rather than waved through: a key store, an archive, a database file, or a binary with no extension stops the push for a look by hand, while images and fonts stay silent. A text file that `.gitattributes` marks as binary is still scanned as text.
-- **It works on GitLab now, not just GitHub.** Commands read your git remote and pick `gh` or `glab` from what they find, so there is nothing to configure at setup time. GitHub is unchanged.
-- **HTML artifacts gained a second viewport.** Plans, reviews, and cycle summaries still open in your local browser as before; when the session can publish, it asks your consent, then publishes the same file as a private Claude-hosted page and gives you the link. Purely additive in this release: if publishing is unavailable, nothing is lost. Every publish is recorded in `artifacts/html/index.jsonl`, and each page is named from its own title. (v6.1.0 then made the hosted page the primary viewport and dropped the ask; see [What v6.1.0 adds](#what-v610-adds).)
-
-Upgrading from v5.2.0 or earlier? v6.0.0 also carries v5.3.0 (the application-security review domain) and v5.4.0 (bounded, verifier-gated loops) - one re-run of setup picks up all of it.
-
-### What v6.1.0 adds
-
-Released 2026-09-01 on top of v6.0.0. Nothing here changes the auto-by-default behavior above; it builds on it. A re-run of setup picks all of it up; [Update an Existing Project](#update-an-existing-project) lists what an upgrade touches.
-
-- **A correction ledger.** `/document` now records each time you stepped in during a cycle, with a note in your own words about what went wrong, and `/error-analysis` groups and ranks those notes so you fix what keeps happening. Rows live under `~/.claude/` on your machine, outside every repo, are never published or sent to another model, and the two fields that quote what was said stay out of every summary. Opt a repo out with `touch .claude/.no-correction-log`; a one-time backfill of older transcripts also exists, run only when you ask and only for the repo you name (documented in the `error-analysis` skill).
-- **The hosted page is now the primary viewport.** Plans, reviews, cycle summaries and the rest are published to a private Claude-hosted page under claude.ai and you get the link. The local browser open is the fallback for a session that cannot publish (Cursor, or the feature turned off). Exactly one viewport opens either way, never a bare file path.
-- **Publishing no longer asks for consent, for any artifact type, reviews and debates included.** The page is private under your own account and the toolkit never changes its sharing setting, so it is not an outward-facing send under the loop's always-ask rule (M9). Everything else on that rule still asks (prompt-file edits, releases, data deletions, force pushes, sharing a page, any other send); its other exemption, the pull request `/document` opens at the end of a chained cycle, is unchanged. Two trade-offs: a review or debate page can hold findings you have not read yet (Claude states its contents in one clause with the link), and updating a shared page reaches everyone you shared it with.
-- **Every published file carries its hosted URL on line 1.** Finding the page a local file was published to used to mean opening the index; now the file's first line says it, as an HTML comment: `<!-- hosted: <url> -->`. Markdown twins (`PLAN-*.md`) are not stamped.
-- **Dark mode, machine-path stripping, and GitLab fixes.** Every shell renders in dark mode when your viewer's theme is dark, and `--no-abs` now strips editor links and rewrites the repo root and home directory out of page text. Browser QA screenshots are inlined into the page so they survive publishing, and the GitLab column of `host-cli.md` was run end to end against a live repo, fixing three defects. One caveat remains untested: `--output json` versus `-F json` on older glab builds.
-- **Installers.** `setup.ps1` now matches `setup.sh` on the `settings.local.json` permission merge, legacy `INDEX.md` cleanup, and the `.claude/plans/` to `plans/` migration, so Windows upgrades finally receive new permission entries. Both installers back up more (the previous manifest, the pre-merge `.gitignore` and `settings.local.json`) and gate the run on a file of yours sitting at a path the toolkit newly ships, instead of replacing it silently. The guarantee suites grew to 129 checks (bash) and 148 (PowerShell), each new check confirmed to fail when its behavior was broken on purpose; [CHANGELOG.md](CHANGELOG.md) and [Update an Existing Project](#update-an-existing-project) list the rest.
-- **The review loop.** Directly-typed `/review-*` runs that fan out sub-agents now dedup with the same rule as `/review`: a merged finding keeps the highest severity of its sources. `/peer-review` is no longer listed as an HTML call site.
-
-### What v6.2.0 adds
-
-Released 2026-09-02 on top of v6.1.1. Nothing here changes how the loop runs; it adds a design step to it. A re-run of setup picks all of it up.
-
-- **A design step in `/explore`.** When a feature has a look, `/explore` names the step, checks whether your repo already has a design system and asks you once, and sets a load level: nothing to design, improve something that exists, or build something new. New work gets an idea list you react to and three seeded working prototypes side by side to pick from. A repo with a design system keeps it: only layout, composition, motion, and copy vary inside one, and anything further asks you first.
-- **A design critic in `/execute`.** A fresh-context `design-critic` agent sees only a screenshot and scores each round out of 10 until the design clears the bar or the round budget runs out (loop rule M15: up to 5 rounds for new work, 2 for an improvement, best-scoring round kept). Polish runs inside every fix pass.
-- **Media generation, optional.** `gen-media.js` prints the seed strings and can generate images (your OpenAI or Gemini key), video, and matted video (an optional `FAL_KEY`). With no key it hands you the prompt to run elsewhere and the workflow continues. See [API-KEYS.md](API-KEYS.md#media-generation-optional).
-- **`DESIGN-PROFILE.md`, yours.** Setup seeds it once and never overwrites it; it remembers the design-system answer, what may vary, your taste notes, directions tried with their seeds, and prompts worth retrying on a newer model.
-- **One permission to check.** The design step calls `node .claude/scripts/gen-media.js`, which needs `Bash(node .claude/scripts/gen-media.js *)` in `.claude/settings.local.json`. v6.2.0 copied the script but never seeded the row, so the first design run prompted until you added it by hand; setup now merges the row like every other toolkit permission (#165). If a design run still prompts, your install predates the fix - re-run setup.
-
-### What v6.3.0 adds
-
-Released 2026-09-03 on top of v6.2.0. Nothing here changes the auto-by-default behavior above; it changes what a review finding says and where the review page lives. A re-run of setup picks all of it up.
-
-- **A finding is one sentence, sometimes two.** The old four-field structure (What / Why it matters / Example / Suggested fix) required four fields whether or not there were four things to say, and told the reviewer to drop anything not worth four fields. The only way to report a small true thing was to inflate it. Now: one sentence of 18 words or fewer opening with the severity in words, an optional second sentence only when it says who is hit or when it fires, and a fix line that states a cost rather than an approach.
-- **Reviews show you the machine's own output.** Every finding already carried a check that the audit ran and then threw away. Its output is now attached to the finding, read off disk by the renderer rather than retyped by a model.
-- **The length caps are enforced in code.** A word budget had been asked for in nine different places and ignored every time. The renderer counts, reports over-runs before you get the link, and demotes the lowest-ranked findings to one-line rows rather than truncating anything.
-- **One standing review page per repository.** It replaces itself, carries only what is open, tells you what changed since you last opened it, and can go empty. The full report is written to `reports/` every run.
-- **The plan page updates as work happens**, instead of showing every step as not started forever.
-- Re-rendering the three largest real past reports cuts them **60%, 67% and 80%**.
-
-**v6.3.1** (2026-09-03) is the patch that made the second and fourth bullets above true in a real run: the audit now writes the receipt file the page reads, the page is rendered once per run after the fix loop, a focused `/review-*` run merges into it instead of overwriting it, and the twenty-seven defects the v6.3.0 review found are fixed. [CHANGELOG.md](CHANGELOG.md) has the list.
-
-### What v7.0.0 adds
-
-Released 2026-09-12 on top of v6.3.3 (#167). The loop is unchanged; what changed is how the toolkit reaches your project and how a review carries its expertise.
-
-- **It is a plugin.** `/plugin marketplace add mayankmankhand/llm-peer-review`, `/plugin install tk@llm-peer-review`, then `/tk:setup` in each project. The commands, skills, agents, and scripts live in the plugin cache and never in your project; a project keeps a short, version-stamped rules file and its own files. Commands carry the `tk:` prefix (`/tk:explore`, `/tk:review`).
-- **Upgrades are audited, not copied over.** `/plugin update tk@llm-peer-review` moves the plugin; `/tk:upgrade` then reads the [conventions](docs/CONVENTIONS.md) that changed since the version your project was last audited against, turns every file of yours that is behind one into a finding with a receipt, and runs it through the normal M2 audit and auto-fix loop, stopping once to ask before it edits your prompt files. A copy-install migrates the same way: `/tk:setup` backs up and removes the toolkit's files, keeps yours, and hands off to `/tk:upgrade`.
-- **Every review dispatch goes to a typed finder.** Eight `review-<kind>-finder` agents preload their criteria and the dispatch contract through their own `skills:` line, so the orchestrator pastes only project context and file excerpts. The M2 skeptics and M3 verifiers are typed too (`audit-skeptic`, `fix-verifier`), with no edit tools, and `/create-plan` scores each plan with a fresh-context `plan-critic` before the approval stop.
-- **The always-on rules got short.** The long manual moved into the plugin (`toolkit-reference`), and the HTML output rules load with the commands that render HTML instead of every turn.
-
-### What v7.1.0 adds
-
-Released 2026-09-14 on top of v7.0.0 (#172 to #177). The loop is unchanged; what changed is how safely an update reaches your project.
-
-- **Updates come from release tags.** The plugin installs the tagged release, so work merged to `main` reaches nobody until it is released, and a release cannot be tagged while a test suite fails or the plugin changed without a version bump.
-- **You are told when versions differ.** Each session start compares your project's recorded toolkit version with the running plugin and says to run `/tk:upgrade` when the plugin is newer, or warns when it is older; a push from an older plugin is blocked. It also notices an old copy-install still sitting beside the plugin.
-- **Your project's `.env.local` works again.** Keys are read from the environment, then the project's `.env.local`, then `~/.claude/plugins/.env.local`, and only the toolkit's key and model variables are taken from those files.
-- **Setup writes files meant for your project** (no toolkit-repo permissions, no `acceptEdits` default), recognizes copy-installs old enough to have no manifest, and prints an undo line that restores the tree when followed in order.
-- **`/tk:upgrade` repairs 7.0.x migrations.** New checks put back permission rows and `.gitignore`/`.gitattributes` lines a 7.0.0 migration removed, drop rows the old seed added, ask before touching `defaultMode`, flag a migration record git still tracks, and add the `tk:` prefix where your own files name toolkit pieces without it.
-
-### What v7.2.0 adds
-
-Released 2026-09-16 on top of v7.1.0 (#178 to #183). The loop is unchanged; what changed is that its review sees the work, and that setup, upgrade and the push check stop surprising your project.
-
-- **The review after `/tk:execute` sees the work.** `/tk:execute` commits every step, and the review it chains into used to look only at uncommitted changes, so it found nothing. It now reviews the commits since the plan started, names that range in its first line, and a `/tk:review` you type on a clean tree covers your newest unpushed commits.
-- **Setup is careful with your settings.** It backs up `.claude/settings.local.json` and `.claude/settings.json` before any change, stops when one cannot be read, names the rows it adds and removes, and never adds back a row you already deleted.
-- **`/tk:upgrade` checks every time.** Its permission, stale-line and name checks run on every upgrade, never offer back a row you removed on purpose, and read your `LESSONS.md` and `DESIGN-PROFILE.md` too.
-- **The push check stops blocking placeholders** such as `${API_KEY}`, while a real value on the same line still blocks, and it checks the commits the push's destination does not have yet.
-- **Fewer approval stops in default permission mode,** and written steps for [going back to an earlier release](#going-back-to-an-earlier-release), [cloning a project that uses the toolkit](#cloning-a-project-that-uses-the-toolkit), and [turning on automatic updates](#automatic-updates).
-
-### What v7.3.0 adds
-
-Released 2026-09-16 on top of v7.2.0 (#184). Nothing about the loop changes; this release is the audit that read everything from v6.3.3 to v7.2.0 again and fixed what it found.
-
-- **22 regressions fixed.** Every change across the four releases since v6.3.3 was read with a receipt and judged by a fresh reviewer; 22 rows survived and all are fixed. Most came from the 7.0.0 plugin build rewriting names and permissions for the plugin while the copy-install kept the old text.
-- **A review with no range starts from your plan.** `/tk:review` typed on its own now covers the commits since your newest plan started, however many, as long as one of them is unpushed, and its first line says which source it used and why. A plan whose commits are all pushed stops the run and names the range to pass.
-- **Copy-installs catch up.** Re-running `setup.sh` or `setup.ps1` adds the four permission rows the 7.x prompts call and removes the old `.claude/rules/html-outputs.md`; the rules file and the shared scripts now say the same thing on both installs.
-- **`/tk:review-full` reviews Operations again** with its own worker, and runs without a plan file instead of returning nothing for that lens.
-- **For maintainers:** `scripts/setup/headless-session.sh` runs a real headless session against a plugin build under a scratch home, so a product test never touches your real `~/.claude`.
-
-### What v7.3.1 adds
-
-Released 2026-09-17 on top of v7.3.0 (#185 to #194, #198). The loop is unchanged; these are the follow-ups the last two releases left open.
-
-- **Fewer approval stops.** `/tk:setup` writes a permission row for every plugin script, anchored to this machine's plugin folder, so a script no longer stops for approval after you answer a question or in a stage the loop starts on its own. Measured on a full default-mode cycle: 0 toolkit-script prompts. Re-run `/tk:setup` after updating to get the rows; it keeps every row of yours.
-- **Force pushes always ask.** Setup adds ask rows for `--force`, `-f` and `+refspec` pushes; a normal push still runs without asking. (Pushes that delete joined them in v7.4.1, below.)
-- **`/tk:upgrade` is gentler with permissions.** Retired toolkit rows are removed in one step, the broad `npm install *` row is left alone for projects that add packages with it, and dated or versioned lines in your lessons files are no longer flagged.
-- **The push check** catches one more secret shape and warns instead of passing silently when git hands it nothing to scan.
-- **Node.js 22 or newer** for `/tk:ask-gpt` and `/tk:ask-gemini`, which move to the current OpenAI and Gemini libraries. Browser QA writes to the Windows temp folder, though native Windows is still not supported for it.
-
-### What v7.4.0 adds
-
-Released 2026-09-21 on top of v7.3.1 (#199). The loop is unchanged, and a project with no `.claude/toolkit/` folder sees no change.
-
-- **A folder that is yours.** Five optional files in `.claude/toolkit/` add your project's own text to a stage: `review-kinds.md`, `plan-gate.md`, `execute-gate.md`, `fix-rules.md` and `severity-anchors.md`. Each is read when present and ignored when absent, so a plugin update never overwrites them. [Extending a toolkit stage](#extending-a-toolkit-stage) explains each one.
-- **Your own review kind, through the same audit.** A row in `review-kinds.md` names an agent of yours; `/tk:review` dispatches it like a toolkit kind, and its findings face the same receipts and skeptics.
-- **Additive only.** A gate or fix rule can add a requirement or an always-ask action. A line that loosens the loop's own rules is void, so a cloned repo cannot switch the safety off.
-- **Your rules survive upgrades.** The seeded rules file ends with a marker line; what you write under it is never compared or rewritten. A project seeded before v7.4.0 copies the marker line in first.
-- **`/tk:upgrade` checks your review kinds** (C-12): a row whose agent is missing, or can edit files, is reported on every upgrade. Re-run `/tk:setup` after updating to get the folder's README.
-
-### What v7.4.1 adds
-
-Released 2026-09-22 on top of v7.4.0 (#195, #196, #197, #200, #201, #202). A patch: the loop is unchanged, and every item is a fix for something that failed quietly or in a confusing way.
-
-- **A review that could not finish no longer ships anyway.** A specialist still failing after its retry pages you (retry, continue anyway, stop) and the hand-off to `/tk:document` waits; a finding whose audit could not run is report-only; and the fixes a review makes are measured from a snapshot of the tree as the review found it, so work you had in progress is never mistaken for a fix.
-- **Pushes that delete always ask.** Setup adds ask rows for `--mirror`, `--delete`, `-d` and `--prune`, including the shortened spellings git accepts (`--mir`, `--del`), beside the force rows, and one for `git remote add --mirror`, which would otherwise turn every later plain push into a mirror push. Two forms have no row that works, `git push origin :branch` and `git -C <dir> push`, so only the loop's own always-ask rule covers them. Re-run `/tk:setup` to get the rows.
-- **The push check reports more of what it cannot read.** A binary archive, database file, dump or binary with no extension stops the push for a look by hand, and a text file that `.gitattributes` marks binary is scanned as text instead of skipped. Images, fonts and videos stay silent whatever their size.
-- **Three confusing failures say the true thing.** `/tk:document` no longer improvises a command that stops the chained loop on a fresh repository; `/tk:ask-gpt` and `/tk:ask-gemini` say plainly when Node is too old (22 and 20) instead of failing inside a library; `/tk:review <kind>` says when it skipped a review kind your project defined, and `/tk:review-full` says those kinds are not in its fan-out.
-
-### What v7.4.2 adds
-
-Released 2026-09-22 on top of v7.4.1 (#203). One fix, released on its own because it is the bug that hides every other update.
-
-- **A stale plugin is no longer invisible.** `/tk:setup` and `/tk:upgrade` used to report "nothing to do" when the installed plugin was itself behind the latest release, and said nothing about the plugin, so you could run both, read a clean report, and be no more up to date than before. Both now name the plugin update steps when a run changed nothing, and stay quiet when it did something.
-- **Why there is no version check.** A local one cannot see this. The marketplace is tag-pinned, so the check would compare the installed plugin against a local pointer that is itself stale: when this was hit, both said 7.3.0 and agreed. The line is unconditional advice, not a detection, which is why it fires only on a run that changed nothing.
-- **The two-command update, spelled out.** `claude plugin marketplace update llm-peer-review` moves the tag pointer; `claude plugin update tk@llm-peer-review` follows it. Running only the second reads the old pointer and reinstalls what you already have. That is the trap this release exists to surface.
-- **Not in the session-start notice.** That hook never calls git and never writes anything, so giving it a per-project frequency limit would have made a read-only hook stateful. Its equal-version branch is still silent, by choice.
-
-### What v7.4.3 adds
-
-Released 2026-09-22 on top of v7.4.2 (#204). One change, to how the loop's judges decide.
-
-- **The critics name gaps; a score decides nothing.** The plan critic returns its biggest gaps or `No material gaps`, which ends its loop, and `/tk:create-plan` closes with one line counting them. The design critic still gives a score, kept only as a label: a score out of 10 moved by a point on identical input, the same step the old stop rule read.
-- **A blind side-by-side judge decides each design round.** The new `design-comparer` agent sees the version before the round's design changes and the version after, as A and B in both orders, never told which is newer. The new version must win both times to continue; a clear loss reverts that round's design commit and stops; anything else stops and keeps the new version. New work gets up to five rounds, improve gets two.
-- **Each round checks behaviour, not just looks.** An interaction pass types into fields and arms two-step controls, waits past a re-render, and reads them back with the new `browse.js` `value` action. Its fixes are committed on their own, so a lost comparison cannot undo them.
-- **Open gaps reach the review.** Gaps the judges leave open go into the plan's `## Must-check for review` section, and `/tk:review` audits each one like any other finding: confirmed, or dismissed with proof. A `[behaviour]` line always selects the browser check, even on a small diff.
-
-Full history: the [version-by-version rollup in CHANGELOG.md](CHANGELOG.md#whats-new-since-v433) or the [GitHub releases page](https://github.com/mayankmankhand/llm-peer-review/releases).
+**Latest release: v7.4.3** (September 2026): the plan and design critics return gaps instead of grades, and a blind side-by-side judge keeps or reverts each design round. Every release since v4.3.3 is described in [CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), and the [releases page](https://github.com/mayankmankhand/llm-peer-review/releases) has the tags.
 
 ---
 
@@ -793,3 +662,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 ## License
 
 MIT - see [LICENSE](LICENSE)
+
+---
+
+Built by [Mayank Mankhand](https://www.linkedin.com/in/mayankmankhand/), AI product manager. More at [github.com/mayankmankhand](https://github.com/mayankmankhand).
