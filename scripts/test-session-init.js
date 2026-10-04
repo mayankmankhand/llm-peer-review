@@ -969,6 +969,115 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
   check('outside a git checkout: still one JSON object, the flag still applies', loose.status === 0 && loose.m.mode === 'cheap' && loose.m.source === 'argument', JSON.stringify(loose.json));
 });
 
+// --- 15. scopeLine: the one line /review prints first (#208) ---------------------
+// The script builds the line, so /review only prints it: every shape, each source's
+// why-clause, the capped note, and the Models part, which the quality check's mode
+// line pattern must find (MODE_RE in scripts/quality-check.js, copied below).
+section('15. scopeLine: the line /review prints first (#208)', function () {
+  const MODE_RE = /\bModels\b\W{0,6}(best|fit|cheap)\b/i;
+  const seen = [];
+  function line(o) {
+    const l = typeof o.json.scopeLine === 'string' ? o.json.scopeLine : '';
+    seen.push(l);
+    return l;
+  }
+  const short = function (sha) { return sha.slice(0, 7); };
+
+  // A range argument: one commit on a clean tree, then with uncommitted work.
+  const repo = newRepo('line-argument');
+  write(repo, 'a.txt', 'a\n');
+  const c1 = commitAll(repo, 'one');
+  write(repo, 'b.txt', 'b\n');
+  const c2 = commitAll(repo, 'two');
+  const one = line(scope(repo, c1 + '..HEAD'));
+  check('a range argument: the count (one commit), the short range, the why, and the default mode',
+    one === 'Reviewing 1 commit (`' + short(c1) + '..' + short(c2) + '`), the range passed in. Models: fit (the default).', one);
+  write(repo, 'c.txt', 'c\n');
+  const dirty = line(scope(repo, c1 + '..HEAD'));
+  check('uncommitted work adds ", plus uncommitted work"', /, the range passed in, plus uncommitted work\. Models: fit \(the default\)\.$/.test(dirty), dirty);
+  const worded = line(runScript(['--scope', c1 + '..HEAD', '--mode', 'cheap'], repo));
+  check('a mode: word ends the line with that mode and where it came from', /\. Models: cheap \(from the mode: word\)\.$/.test(worded), worded);
+  const typo = line(runScript(['--scope', c1 + '..HEAD', '--mode', 'cheep'], repo));
+  check('a models warning follows the Models part', /\. Models: fit \(the default\)\. "cheep" is not a mode/.test(typo), typo);
+  const bad = line(scope(repo, 'no-such-ref..HEAD'));
+  check('a range argument that resolves to nothing says why it cannot be reviewed', /^That range cannot be reviewed: \S.*\. Models: fit/.test(bad), bad);
+  const failed = line(runScript(['--scope', c1 + '..HEAD', 'extra'], repo));
+  check('a failure says no commit range was checked, and that only uncommitted work is reviewed',
+    /^No commit range was checked: \S.* Reviewing uncommitted work only\. Models: fit/.test(failed), failed);
+
+  // No remote: uncommitted work only, with the message saying why there is no range.
+  const lone = newRepo('line-no-remote');
+  write(lone, 'a.txt', 'a\n');
+  commitAll(lone, 'one');
+  write(lone, 'b.txt', 'b\n');
+  const solo = scope(lone);
+  const soloLine = line(solo);
+  check('no commits in range with uncommitted work: "uncommitted work only", then the message',
+    soloLine === 'Reviewing uncommitted work only; no commits in range. ' + String(solo.json.message).trim().replace(/([^.!?])$/, '$1.') + ' Models: fit (the default).',
+    soloLine);
+
+  // No argument, an upstream: nothing, then unpushed commits, then a plan in each state.
+  const remote = bareRemote('line remote');
+  const up = newRepo('line-upstream');
+  write(up, '.gitignore', 'plans/\n');
+  const b = commitAll(up, 'base');
+  git(up, ['remote', 'add', 'origin', remote]);
+  git(up, ['push', '-q', '-u', 'origin', 'main']);
+  const nothing = line(scope(up));
+  check('no commits and nothing uncommitted: "Nothing to review", and no message to add',
+    nothing === 'Nothing to review: no commits in range and no uncommitted changes. Models: fit (the default).', nothing);
+  write(up, 'one.txt', 'one\n');
+  commitAll(up, 'one');
+  write(up, 'two.txt', 'two\n');
+  const u2 = commitAll(up, 'two');
+  const unpushed = line(scope(up));
+  check('unpushed commits with no plan: "your unpushed commits; no plan names a start commit"',
+    unpushed === 'Reviewing 2 commits (`' + short(b) + '..' + short(u2) + '`), your unpushed commits; no plan names a start commit. Models: fit (the default).', unpushed);
+
+  const planFile = 'plans/PLAN-issue-9.md';
+  const plan = function (start, modeWord) {
+    return '# Plan\n\n**Overall Progress:** `50%`\n' + (modeWord ? '**Models:** ' + modeWord + '\n' : '') + (start ? '**Start commit:** ' + start + '\n' : '') + '\n## Tasks\n';
+  };
+  write(up, planFile, plan(b));
+  const viaPlan = line(scope(up));
+  check('the plan source: "from `<plan>`\'s start commit, M of them unpushed"',
+    viaPlan === 'Reviewing 2 commits (`' + short(b) + '..' + short(u2) + '`), from `PLAN-issue-9.md`\'s start commit, 2 of them unpushed. Models: fit (the default).', viaPlan);
+  write(up, planFile, plan(b, 'cheap'));
+  const planMode = line(scope(up));
+  check('a plan\'s Models line ends the line with "from <plan>"', /\. Models: cheap \(from PLAN-issue-9\.md\)\.$/.test(planMode), planMode);
+  write(up, planFile, plan(null));
+  const noStart = line(scope(up));
+  check('a plan passed over is named, with the reason in words',
+    /, your unpushed commits; `PLAN-issue-9\.md` was passed over because it has no start commit yet\. Models: fit/.test(noStart), noStart);
+  write(up, planFile, plan('0123456789abcdef0123456789abcdef01234567'));
+  const missing = line(scope(up));
+  check('a start commit not in this repository reads as its own reason', /was passed over because its start commit is not in this repository\./.test(missing), missing);
+  write(up, planFile, plan(b));
+  git(up, ['push', '-q', 'origin', 'main']);
+  const shipped = scope(up);
+  const shippedLine = line(shipped);
+  check('a shipped plan: "Nothing to review", then the message naming the range to pass',
+    /^Nothing to review: no commits in range and no uncommitted changes\. The newest plan PLAN-issue-9\.md starts at [0-9a-f]{7} .*pass [0-9a-f]{7}\.\.HEAD as the review's range to cover them\. Models: fit \(the default\)\.$/.test(shippedLine),
+    shippedLine);
+
+  // More than 20 unpushed commits: the capped note, with the full base to pass.
+  for (let i = 1; i <= 22; i++) {
+    write(up, 'n' + i + '.txt', 'n' + i + '\n');
+    commitAll(up, 'n' + i);
+  }
+  fs.rmSync(path.join(up, planFile), { force: true });
+  const capped = scope(up);
+  const cappedLine = line(capped);
+  check('a capped range adds how many older commits were left out and the range that includes them',
+    /^Reviewing 20 commits \(`[0-9a-f]{7}\.\.[0-9a-f]{7}`\), your unpushed commits; no plan names a start commit\. 2 older unpushed commits were left out; `\/review [0-9a-f]{40}\.\.HEAD` includes them\. Models: fit/.test(cappedLine) &&
+    cappedLine.indexOf('`/review ' + dig(capped.json, 'range.fullBase') + '..HEAD`') !== -1,
+    cappedLine);
+
+  check('every line is one line and carries a Models part the quality check finds',
+    seen.length > 0 && seen.every(function (l) { return l.length > 0 && !/[\r\n]/.test(l) && MODE_RE.test(l); }),
+    JSON.stringify(seen.filter(function (l) { return !l || /[\r\n]/.test(l) || !MODE_RE.test(l); })));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');

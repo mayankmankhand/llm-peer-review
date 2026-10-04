@@ -110,8 +110,24 @@
 //       "baseline": "<sha>" | null,             the starting snapshot (#202), below
 //       "baselineError": "<one plain line>"     only when the snapshot could not be made
 //     },
-//     "totals": { "lines": 174, "added": 170, "deleted": 4, "fileCount": 3, "binaryCount": 1 }
+//     "totals": { "lines": 174, "added": 170, "deleted": 4, "fileCount": 3, "binaryCount": 1 },
+//     "scopeLine": "Reviewing 2 commits (`1a2b3c4..5d6e7f8`), the range passed in. Models: fit (the default)."
 //   }
+//
+//   scopeLine (#208) is the one line /review prints as its first words and opens its
+//     report with, added after "models": the commit count, the range in short shas,
+//     where it came from ("the range passed in"; "from `<plan>`'s start commit, M of
+//     them unpushed"; "your unpushed commits; no plan names a start commit"; or
+//     "your unpushed commits; `<plan>` was passed over because <reason>"), ", plus
+//     uncommitted work" when there is any, and for a capped range "N older unpushed
+//     commits were left out; `/review <fullBase>..HEAD` includes them." With no
+//     commits it reads "Reviewing uncommitted work only; no commits in range." or
+//     "Nothing to review: no commits in range and no uncommitted changes.", either
+//     followed by "message". A range argument that resolves to nothing reads "That
+//     range cannot be reviewed: <message>", and an error "No commit range was
+//     checked: <error> Reviewing uncommitted work only." Every form ends "Models:
+//     <mode> (from the mode: word | from <plan> | the default)." plus any models
+//     warning. It is left out only if building it throws.
 //
 //   source "argument": base and end are the argument's two sides resolved to full
 //     commit shas (an empty side means HEAD, as in git). base must be an ancestor of
@@ -1079,6 +1095,90 @@ function modelsRoot() {
   return top.stdout.toString("utf8").replace(/[\r\n]+$/, "");
 }
 
+// ==========================================================================
+// scopeLine: the one line /review prints first (#208)
+// ==========================================================================
+//
+// /review used to compose this line itself from a dozen of the fields above,
+// before it dispatched anything, and in 3 of 4 measured runs the chat never led
+// with it (the report always did). Built here, the wording is fixed and the run
+// only has to print it. It reads the scope object after withModels added models.
+
+// Why a plan was passed over, in the words the line uses.
+const PASSED_OVER = {
+  "plan-no-start": "it has no start commit yet",
+  "plan-shipped": "every commit since its start is already pushed",
+  "plan-start-missing": "its start commit is not in this repository",
+  "plan-start-not-ancestor": "its start commit is not on this branch",
+  "plan-no-commits": "nothing has been committed since its start",
+};
+
+function plural(n, word) {
+  return n + " " + word + (n === 1 ? "" : "s");
+}
+
+// A message as a sentence: trimmed, ending in a full stop.
+function asSentence(text) {
+  const s = String(text).trim();
+  return /[.!?]$/.test(s) ? s : s + ".";
+}
+
+// Where the range came from, in plain words.
+function whyClause(o) {
+  if (o.source === "argument") return "the range passed in";
+  if (o.source === "plan") return "from `" + o.plan.name + "`'s start commit, " + o.plan.unpushed + " of them unpushed";
+  if (o.plan && o.plan.reason) {
+    return "your unpushed commits; `" + o.plan.name + "` was passed over because " + (PASSED_OVER[o.plan.reason] || o.plan.reason);
+  }
+  return "your unpushed commits; no plan names a start commit";
+}
+
+// "Models: <mode> (<where it came from>).", plus any models warning.
+function modelsClause(m) {
+  if (!m || !m.mode) return "Models: unresolved" + (m && m.error ? " (" + m.error + ")" : "") + ".";
+  const from = m.source === "argument" ? "from the mode: word" : m.source === "plan" ? "from " + m.plan : "the default";
+  return "Models: " + m.mode + " (" + from + ")." + (m.warning ? " " + m.warning : "");
+}
+
+// given: whether a range argument was typed.
+function scopeLine(o, given) {
+  let line;
+  if (o.error) {
+    line = "No commit range was checked: " + asSentence(o.error) + " Reviewing uncommitted work only.";
+  } else if (given && o.source === "none") {
+    line = "That range cannot be reviewed: " + asSentence(o.message || "it resolves to no commits");
+  } else {
+    const r = o.range;
+    const u = o.uncommitted;
+    const dirty = !!u && u.staged.files.length + u.unstaged.files.length + u.untracked.files.length > 0;
+    const note = o.message ? " " + asSentence(o.message) : "";
+    if (r && r.commitCount > 0) {
+      line = "Reviewing " + plural(r.commitCount, "commit") + " (`" + r.base.slice(0, 7) + ".." + r.end.slice(0, 7) + "`), " +
+        whyClause(o) + (dirty ? ", plus uncommitted work." : ".");
+      if (r.capped) {
+        line += " " + plural(r.omitted, "older unpushed commit") + (r.omitted === 1 ? " was" : " were") +
+          " left out; `/review " + r.fullBase + "..HEAD` includes them.";
+      }
+    } else if (dirty) {
+      line = "Reviewing uncommitted work only; no commits in range." + note;
+    } else {
+      line = "Nothing to review: no commits in range and no uncommitted changes." + note;
+    }
+  }
+  return line + " " + modelsClause(o.models);
+}
+
+// The line rides on the scope object. A failure building it must never cost the
+// rest: review.md has a fixed line for an output without one.
+function withScopeLine(payload, given) {
+  try {
+    payload.scopeLine = scopeLine(payload, given);
+  } catch (e) {
+    // Left out on purpose; see above.
+  }
+  return payload;
+}
+
 // --- Dispatch ---------------------------------------------------------------
 // No process.exit after writing: stdout into a pipe is asynchronous on macOS, and
 // exiting early could cut a long JSON object short.
@@ -1119,7 +1219,7 @@ if (cliArgs.length === 0) {
     // Fail soft on anything unforeseen too: the caller always gets one JSON object.
     result = { generatedAt: new Date().toISOString(), cwd, source: "none", reason: "error", message: String(e && e.message), error: String(e && e.message) };
   }
-  emit(withModels(result));
+  emit(withScopeLine(withModels(result), cliArgs.length > 1 && String(cliArgs[1]).trim() !== ""));
 } else {
   emit({ generatedAt: new Date().toISOString(), cwd, error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)" });
 }
