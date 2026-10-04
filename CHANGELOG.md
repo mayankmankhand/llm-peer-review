@@ -24,6 +24,8 @@ Work on `main` that no release carries yet. It moves into a version section when
 - **Commands do the work they used to hand you** (#206). `/review-browser` starts the dev server itself, once, and runs the Chromium install when the browser is missing (a `sudo` step stays with you); `/pair-debug` reads the terminal output and log files it can reach and asks only for what only you can see; `/codebase-to-course` opens the finished course in your browser instead of printing its path.
 - **The three-vote audit cannot push a finding below its severity floor** (#206). An exposed secret stays at least a Warn even when the voters downgrade it.
 - **The rules file `/setup` writes** now describes only the plugin install, under a plain Rules heading. Existing projects receive the new text through C-7.
+- **The review and map helpers run on measured settings** (#205). The eight review finders run on Opus at medium effort (they followed the session model, at high), and the map helper on Sonnet at medium (from low); see Measured. The judges (audit skeptic, fix verifier, plan and design critics, design comparer) and the correction extractor now say `model: inherit` in their agent files, so a `CLAUDE_CODE_SUBAGENT_MODEL` setting can no longer move a judge below your session model.
+- **The rest of the prompt audit's list is done** (#207, 44 items, one commit each). Three pairs of rules that contradicted each other now agree (ten review skills said "reports only" and then fixed; `/review-copy` forbade suggesting wording its findings then rewrote; `/explore` capped its rounds and then said keep going). Pointers to text a reader never loads are fixed, and the remaining history notes, issue tags, shouted capitals and unexplained number caps are gone or explained. The shared browser criteria start the dev server once before giving up, and `/upgrade` tells a missing prompt-audit skill apart from a failed call.
 
 ### Added
 
@@ -31,6 +33,8 @@ Work on `main` that no release carries yet. It moves into a version section when
 - **`/review-commands` checks for prompt debt** (#206). Its criteria name six patterns of instructions written for older models: verification rituals, emphasis boosters, mandatory procedures, stale examples, contradictory rules and dated config. A line that states its reason is not a finding.
 - **A warn-only report of what each command loads** (#206). `npm test` prints the words each command, skill and agent loads against `scripts/prompt-load-baseline.json` and warns when one grows; it never fails a run. Maintainer tool: `scripts/prompt-load.js`.
 - **A test that every skill a command loads by name has its two permission rows** in the seed, so an on-demand skill cannot ship without them again.
+- **Model modes: best, fit or cheap** (#205). `/explore` asks "Models: best, fit or cheap? [fit]" and `/create-plan` writes the answer into the plan as its `**Models:**` line. Best runs every review and map helper on your session model; fit (the default) runs them on the measured settings, never above your session model; cheap runs them on Sonnet. The judges run on your session model in every mode. A `mode:best`, `mode:fit` or `mode:cheap` word on `/review`, `/review-full`, a `/review-<kind>` skill or `/index` sets the mode for one run, and the review's scope line names the mode it used. Fit and cheap plans build on Opus: `/create-plan` says "go" when your session already runs on Opus and gives the fresh-session steps otherwise, and `/execute` says in one line when it runs on another model.
+- **A planted-bug quality check** (#205; maintainer tool, never shipped). `scripts/quality-check.js` runs headless Claude Code sessions on a small app with eight planted bugs and a known-answer case, and on one chunk of this repository; scores each run on what survives the audit into the report; and keeps a spend ledger against an approved budget. It chose the settings above and checked #206 and #207 for lost catches.
 
 ### Measured
 
@@ -38,10 +42,18 @@ Work on `main` that no release carries yet. It moves into a version section when
 - A headless smoke cycle in default permission mode ran `/tk:review`, `/tk:create-plan`, `/tk:audit-html` and two `/tk:upgrade` cases on a build of this work. It found one defect, the new skill's missing permission rows, fixed before release.
 - The final audit raised about 30 findings on older text the cycle never touched. They are filed as #207 rather than chased: each rerun of the audit finds new items on unchanged text.
 - The review of the whole range raised 14 findings; none survived its audit.
+- **#206 and #207 lost no catch.** On the planted-bug check the builds before and after #206 each caught the same 8 stable bugs in both of two runs ($5.87 and $5.90 a run), and the build after #207 held all 8 ($6.03).
+- **Review finders:** Opus at high effort twice as the baseline (8 of the 9 both times; $6.03 a run, 11.2 minutes); Opus at medium (all 8; $5.57, 8.8 minutes), kept; Sonnet at medium (missed the known-answer bug in both runs; $4.24), dropped. That is the same bug that revoked a Sonnet pin on 2026-08-29, missed for the third time.
+- **Map helper:** Opus at medium twice as the baseline; Opus at low missed a file both baseline runs covered, twice, dropped; Sonnet at medium covered every such file for $0.50, kept.
+- **Every mode routes as it says.** Eleven headless runs (best, fit, cheap, a plan's Models line, `/index`, `/review-code`, `/execute` on Sonnet, `/create-plan`) put every helper on its mode's model and every judge on the session model, for $25.45.
+- **Smoke-level evidence:** one small app and one chunk catch a setting that loses a bug outright, not a small difference between two settings, and each setting is one line in its agent file. $88.87 spent in all, of $150 approved.
+- The review of #205 and #207 kept 10 of 19 findings and fixed all 10, plus one its own fix loop found, each confirmed by a fresh verifier; the biggest was that fit, on a Sonnet session, put the finders above their judges. Follow-ups: #208.
 
 ### Why
 
 Claude Code's new prompt audit flagged instructions that newer models follow too literally, and it never measures the bigger cost: `/review` loaded about 21,000 words per run, much of it rules it never applied. Cleaning the words alone would have left the weight; cutting the weight blind could have dropped a rule some command depends on. So every flag was checked against the lessons behind the rule before it changed, every edit was approved on a page, and every command now loads only what it uses.
+
+#205 asked for a per-cycle choice between quality and cost. Moving the review helpers to a cheaper model is the one change in this release that can lose real bugs, so each setting was measured before it shipped, against a known-answer case taken from a real bug, and #206 and #207 were measured the same way for lost catches. #207 finishes #206's list: the items its final audit raised on older text, each checked against the lessons first.
 
 ### Upgrading
 
@@ -50,6 +62,8 @@ Claude Code's new prompt audit flagged instructions that newer models follow too
 - `/tk:setup` adds two permission rows, `Skill(tk:html-viewing)` and `Skill(tk:html-viewing:*)`. Without them, `/tk:explore` and `/tk:audit-html` stop to ask the first time they render a page.
 - **C-13** (new, runs once, on the upgrade that brings it): `/tk:upgrade` runs the prompt audit on your own `CLAUDE.md` and `.claude/` files. Each proposed edit is a finding you approve on the run's one approval page; nothing in the plugin is offered.
 - **C-7** brings the new rules-file text (the plain Rules heading, the plugin-only install text) into your `.claude/rules/toolkit.md`, above its project marker.
+- `/tk:setup` also adds `Skill(claude-api)` and `Skill(claude-api:*)`, the rows C-13's prompt audit needs.
+- The model modes need no setup: a plan without a `**Models:**` line runs fit. To run every review and map helper on your session model instead, answer best at `/explore`, or add `mode:best` to a review.
 
 **Other editors:** re-run `setup.sh` or `setup.ps1` to replace the changed files.
 
