@@ -198,7 +198,7 @@ A project adds its own rules to the toolkit through five files in `.claude/toolk
 Each cycle picks how its helpers run. `/explore` asks "Models: best, fit or cheap? [fit]", and `/create-plan` writes the answer into the plan as its `**Models:**` line:
 
 - **best** - the review helpers run on your session model; the map helper stays on Sonnet, the model it was tested on.
-- **fit** (the default) - the review and map helpers run on the settings the toolkit's planted-bug test passed, never above your session model.
+- **fit** (the default) - the review and map helpers run on the measured settings (review helpers on Opus, the map helper on Sonnet), never above your session model.
 - **cheap** - the review and map helpers run on Sonnet: cheaper, but in the toolkit's planted-bug test the Sonnet review helpers missed a bug the Opus ones caught.
 
 The judges (the audit, the fix check, the plan and design critics) and code-writing run on your session model in every mode. A `mode:best`, `mode:fit` or `mode:cheap` word on `/review`, `/review-full`, a `/review-<kind>` skill or `/index` sets the mode for that one run. A plan's mode lapses once its commits are pushed. Fit and cheap plans are built on Opus, in a fresh session unless yours already runs on Opus; `/create-plan` gives the steps. The details are in `.claude/skills/shared/model-routing.md`.
