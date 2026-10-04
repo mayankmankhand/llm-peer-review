@@ -197,7 +197,7 @@ A project adds its own rules to the toolkit through five files in `.claude/toolk
 
 Each cycle picks how its helpers run. `/explore` asks "Models: best, fit or cheap? [fit]", and `/create-plan` writes the answer into the plan as its `**Models:**` line:
 
-- **best** - every helper runs on your session model.
+- **best** - the review helpers run on your session model; the map helper stays on Sonnet, the model it was tested on.
 - **fit** (the default) - the review and map helpers run on the settings the toolkit's planted-bug test passed, never above your session model.
 - **cheap** - the review and map helpers run on Sonnet: cheaper, but in the toolkit's planted-bug test the Sonnet review helpers missed a bug the Opus ones caught.
 
