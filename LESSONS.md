@@ -315,3 +315,16 @@
 - **Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.**
 - **Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.**
 - **In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.**
+
+## Issues 205 and 207 (model modes, the quality check)
+
+- **A plan that promises a one-commit revert must say what happens once later work moves the text.**
+- **A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.**
+- **An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.**
+- **A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.**
+- **Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.**
+- **Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.**
+- **Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.**
+- **A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.**
+- **A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.**
+- **In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.**
