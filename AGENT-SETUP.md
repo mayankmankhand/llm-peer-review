@@ -1,4 +1,4 @@
-# AI Agent Setup Instructions (v7.5.0)
+# AI Agent Setup Instructions (v7.5.1)
 
 This file is written for AI agents with shell access (like Cursor or Claude Code). If a user asks you to set up this workflow toolkit in their project, follow the steps below exactly.
 
