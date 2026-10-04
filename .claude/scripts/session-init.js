@@ -48,7 +48,8 @@
 //   files the dispatch itself uses; "inherit" or no model line reads as "session".
 //   The judges and the correction extractor are always "session". "session" means
 //   the dispatcher passes the alias of its own model family (the Agent tool's model
-//   takes only sonnet, opus, haiku and fable). buildModel is "session" for best and
+//   takes only sonnet, opus, haiku and fable), and a dispatcher never passes a model
+//   above its own, so its judges never sit below the finders they audit. buildModel is "session" for best and
 //   "opus" for fit and cheap.
 //
 // Session-start object: generatedAt, cwd, worktree, map, lessons, plans, newestPlan.

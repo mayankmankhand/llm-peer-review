@@ -91,7 +91,7 @@ const MAPPER_FROM_MODE = /`models\.perRole\["index-mapper"\]`[^\n]*`\{mapperMode
 // name the agents, so they are skipped; the dispatch sentence is the line that must
 // carry the clause model-routing.md defines.
 const DISPATCH_LINE = /subagent_type=(?:tk:)?(?:review-(?:code|security|ux|plan|commands|deps|browser|copy)-finder|index-mapper)\b|the Finder column|four per-kind finders/;
-const MODE_CLAUSE = 'with `model` set to its `models.perRole` value, where `session` means your own model family\'s alias';
+const MODE_CLAUSE = 'with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family\'s alias';
 function dispatchProblems(files) {
   const out = [];
   let lines = 0;
@@ -193,7 +193,7 @@ check('mutation: a roster row with no agent file is caught',
 check('mutation: a cost message naming a fixed model is caught',
   costMessageModel('spawn 3 parallel subagents (Sonnet via the index-mapper agent).') !== '{mapperModel}');
 const routed = dispatchProblems(new Map([
-  ['e.md', 'run four sub-agents (`subagent_type=review-code-finder` with `model` set to its `models.perRole` value, where `session` means your own model family\'s alias; ...)'],
+  ['e.md', 'run four sub-agents (`subagent_type=review-code-finder` with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family\'s alias; ...)'],
   ['f.md', 'spawn an Agent with `subagent_type=index-mapper` - the mapper agent, whose model comes from its frontmatter.'],
   ['g.md', '| Code | `subagent_type=review-code-finder` |'],
   ['h.md', 'using the exact `subagent_type=` value in the Finder column, with `model` from the plan.'],
