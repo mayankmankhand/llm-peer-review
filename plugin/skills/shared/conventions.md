@@ -13,7 +13,7 @@ A convention describes the toolkit's contract with a project's own files. It is 
 - **Since:** <version the convention arrived in>
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
 - **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits | review-kinds
-- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | manual
+- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
 ```
@@ -145,6 +145,15 @@ Why: `.claude/toolkit/review-kinds.md` is how a project adds review kinds of its
 - **Fix:** the edit the audit proposes, applied only after the batch page approves it; `/tk:upgrade` step 3b runs the audit that judges this entry
 
 Why: the other conventions follow what changed in the toolkit, and none can say which of the project's own instructions a newer model reads too literally. Claude Code ships an audit for that. This entry runs it once, on the upgrade that brings it, rather than on every upgrade: the audit takes minutes, and a finding the user declines would come back each time. `/claude-api prompt-audit` runs it again by hand.
+
+### C-14: Agents and helper calls follow the model routing rule
+- **Since:** 7.5.1
+- **Runs:** every upgrade
+- **Scope:** prompt-files
+- **Detector:** agent-models
+- **Fix:** give the agent `model: inherit`, or the model you want; give a call to a toolkit finder or the map helper `model` set to its `models.perRole` value from `node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models`, where `session`, or a model above your own, means your own model family's alias; take the model off a call to a toolkit judge
+
+Why: the toolkit's own files keep the routing rule in `model-routing.md`: a judge runs on the session model, a finder never runs above the session that dispatches it, and a call to a judge never names a model, because a model named in a call overrides the agent file. A project's own files can break that rule in three ways, each reported at Should fix. An agent of the project's own with no `model:` line carrying a value follows `CLAUDE_CODE_SUBAGENT_MODEL` when a user sets it, which can move a judge below the work it judges: the detector reports such an agent once when its name or description carries one of C-5's role words, or when a row of `.claude/toolkit/review-kinds.md` names it (found the way C-12 finds it), and a model line with any value is the project's choice and is never reported. A line that dispatches one of the toolkit's finders or its map helper with no model runs that agent file's model (Opus for the finders) from any session, so from a cheaper session the finder works above its own judges. A line that names a model for one of the toolkit's judges (the audit skeptic, the fix verifier, the plan critic, the design critic, the design comparer) overrides that judge's `model: inherit`. A dispatch line gives `subagent_type` the name of a toolkit agent, with the `tk:` scope or bare, and is not a table row; a bare name that an agent of the project's own answers to is that agent, never the toolkit's. A dispatch's model is looked for in its block: its own line and the lines after it up to the next line that dispatches any agent, inside its paragraph (which ends at a blank line, a heading or a `---` line); the paragraph's first dispatch also takes the lines above it, so each model line belongs to exactly one call. On the dispatch line an alias (`sonnet`, `opus`, `haiku`, `fable`) names a model. On any line of the block, so does a model parameter: `model` followed by `=` or `:` and any value but `inherit`, which is no per-call value. For a call to a finder two more forms count as passing a model, the word `model` in backticks and `models.perRole`, the words of the toolkit's own clause; they never make a call to a judge a finding, so a line that says not to pass a `model` is left alone. Two identical dispatch lines in one file are two findings, each with a key of its own. Each receipt reads what the detector read, the agent's frontmatter or the dispatch's block, so it fails once the fix lands, also when the fix adds the model on a line of its own. `/tk:review` dispatches a project's own review kinds with no model, so a kind runs on its agent file's model in every mode, above the session model too when that file names a stronger one; this entry reports such an agent only when it has no model line. Agents and prompts can change on any day, so this entry runs on every upgrade.
 
 ## How a release adds a convention
 

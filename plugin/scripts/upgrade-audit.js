@@ -52,7 +52,7 @@
 //   - **Since:** 7.0.0
 //   - **Runs:** every upgrade            (optional: skip the range filter)
 //   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits | review-kinds)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | manual)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
 //   - **Fix:** dispatch the typed finder for the kind; move any pasted criteria into a skill it preloads
@@ -82,7 +82,11 @@
 // .claude/.toolkit-migration.json, and agent-tools reads every project-owned
 // agent whose name or description says it is a finder, reviewer, critic,
 // skeptic, verifier, judge, or auditor and flags one with no `tools:` line or
-// with Edit, Write, or NotebookEdit in it. `manual` is not run here at all: the
+// with Edit, Write, or NotebookEdit in it. agent-models (C-14) holds the
+// project's own files to the model routing rule: an agent in one of those roles,
+// or one a review kind names, with no `model:` line; a dispatch of a toolkit
+// finder or the map helper whose block names no model; and a dispatch of a
+// toolkit judge whose block names one (see c14Block and c14Names). `manual` is not run here at all: the
 // /tk:upgrade skill judges those by hand (a judgment no grep expresses) and
 // emits findings in the same shape.
 //
@@ -817,9 +821,10 @@ function regexCheck(rel, line, n, pattern) { return lineCheck(rel, line, n) + " 
 // the last matching line wins, the folder level first). The suite runs this
 // program and the JS over the same files, so the two cannot drift unnoticed.
 const STATE_IGNORED_AWK = String.raw`function g(p,  r, i, c) { r = ""; for (i = 1; i <= length(p); i++) { c = substr(p, i, 1); if (c == "*" && substr(p, i + 1, 1) == "*") { if (substr(p, i + 2, 1) == "/") { r = r "(.*/)?"; i += 2 } else { r = r ".*"; i++ } } else if (c == "*") { r = r "[^/]*" } else if (c == "?") { r = r "[^/]" } else if (index(".+^$(){}|[]\\", c)) { r = r "\\" c } else { r = r c } } return "^" r "$" } BEGIN { l = ENVIRON["L"]; n = ENVIRON["N"] + 0 } { sub(/\r$/, "") } $0 == l { c++; print NR ":" $0 } { p = $0; sub(/[ \t\f\v]+$/, "", p); if (p == "" || substr(p, 1, 1) == "#") { next } x = substr(p, 1, 1) == "!"; if (x) { p = substr(p, 2) } if (p == "") { next } d = p ~ /\/$/; sub(/\/+$/, "", p); a = index(p, "/") > 0; sub(/^\//, "", p); r = g(p); if (".claude" ~ r) { s1 = x ? "n" : "i" } if (!d && (a ? ".claude/.toolkit-state.json" : ".toolkit-state.json") ~ r) { s2 = x ? "n" : "i" } } END { exit !(c >= n && (s1 == "i" || s2 == "i")) }`;
-// An agent file's frontmatter as C-5 and C-12 read it: its name, its description,
-// the index of the tools line among the frontmatter lines (-1 when absent), and
-// the edit tools that line and its list items grant.
+// An agent file's frontmatter as C-5, C-12 and C-14 read it: its name, its
+// description, its model ('' when no model line carries a value), the index of
+// the tools line among the frontmatter lines (-1 when absent), and the edit
+// tools that line and its list items grant.
 function agentFrontmatter(text) {
   const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   const head = fm ? fm[1].split(/\r?\n/) : [];
@@ -827,7 +832,7 @@ function agentFrontmatter(text) {
   const toolsIdx = head.findIndex(l => /^tools:/.test(l));
   let tools = '';
   if (toolsIdx >= 0) { tools = head[toolsIdx].replace(/^tools:/, '').trim(); for (let i = toolsIdx + 1; i < head.length && /^\s+-\s/.test(head[i]); i++) tools += ' ' + head[i].replace(/^\s+-\s*/, ''); }
-  return { name: field('name'), description: field('description'), toolsIdx, edits: tools.split(/[\s,]+/).filter(x => /^(Edit|Write|NotebookEdit)$/.test(x)) };
+  return { name: field('name'), description: field('description'), model: field('model'), toolsIdx, edits: tools.split(/[\s,]+/).filter(x => /^(Edit|Write|NotebookEdit)$/.test(x)) };
 }
 // The roles C-5 covers by name or description. C-12 covers an agent a review
 // kind names whatever it is called, and leaves these to C-5 so one agent is
@@ -854,6 +859,83 @@ const TOOLS_EDIT_AWK = String.raw`NR == 1 { if ($0 != "---" && $0 != "---\r") { 
 // `name:` line anywhere else is prose. Exits 0 only while no file answers to W.
 const AGENT_NAMED_AWK = String.raw`function fin() { if (f != "" && (d != "" ? d : b) == ENVIRON["W"]) found = 1 } FNR == 1 { fin(); f = FILENAME; b = f; sub(/.*\//, "", b); sub(/\.md$/, "", b); d = ""; c = ""; o = ($0 == "---" || $0 == "---\r"); e = 0; next } o && !e && /^---/ { e = 1; d = c; next } o && !e && /^name:/ && c == "" { c = $0; sub(/^name:/, "", c); sub(/^[ \t]+/, "", c); sub(/[ \t\r]+$/, "", c) } END { fin(); exit found }`;
 const TOOLS_NONE_AWK = String.raw`{ x = $0; sub(/\r$/, "", x) } NR == 1 { print NR ": " x; if ($0 != "---" && $0 != "---\r") { exit } o = 1; next } o && NR > 2 && /^---/ { e = 1; print NR ": " x; exit } o { print NR ": " x; if (x ~ /^tools:/) { t = 1 } } END { exit (e && t) }`;
+// C-14 (issue #209) holds a project's own files to the model routing rule in
+// model-routing.md: a judge runs on the session model, a finder never above the
+// session that dispatches it, and a call to a judge names no model. The name
+// lists mirror scripts/test-model-roster.js, which holds the toolkit's own files
+// to the same rule; test-upgrade-audit.js fails when this copy drifts from the
+// toolkit's agents or from that test's JUDGES.
+const C14_FINDERS = ['code', 'security', 'ux', 'plan', 'commands', 'deps', 'browser', 'copy'].map(k => 'review-' + k + '-finder').concat('index-mapper');
+const C14_JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
+// A toolkit agent given to subagent_type, `tk:` scoped (group 1) or bare. The
+// name must end there, so `index-mapper-v2` or another plugin's
+// `other:plan-critic` is no match.
+const C14_TARGET = new RegExp('subagent_type\\s*[=:]\\s*["\'`]?(tk:)?(' + C14_FINDERS.concat(C14_JUDGES).join('|') + ')(?![\\w-])', 'g');
+// One dispatch's block (C-14): its own line and the lines after it, up to the
+// next line that dispatches any agent, inside its paragraph, which ends at a
+// blank line, a heading or a `---` line; the paragraph's first dispatch also
+// takes the lines above it. So each model line belongs to exactly one call, and
+// a paragraph holding a finder call and a judge call never mixes them up.
+// Returns [from, to], both inclusive. Self-contained on purpose: C14_CALL_JS
+// pastes its source into the receipt, so the receipt runs this very code.
+function c14Block(lines, at) {
+  const stop = (l) => /^\s*$/.test(l) || /^\s*#/.test(l) || /^\s*---\s*$/.test(l);
+  const dispatches = (l) => /subagent_type\s*[=:]/.test(l) && !/^\s*\|/.test(l);
+  let start = at;
+  while (start > 0 && !stop(lines[start - 1])) start--;
+  let end = at;
+  while (end + 1 < lines.length && !stop(lines[end + 1])) end++;
+  const from = lines.slice(start, at).some(dispatches) ? at : start;
+  let to = at;
+  while (to < end && !dispatches(lines[to + 1])) to++;
+  return [from, to];
+}
+// Does a dispatch's block name a model (C-14)? On the dispatch line an alias
+// does. On any line of the block so does a model parameter: `model` with `=` or
+// `:` and any value but `inherit`, which is no per-call value (a call written
+// with it runs the agent file's model). For a finder call two more forms count
+// as passing a model, `model` in backticks and models.perRole, the words of the
+// toolkit's own clause; they never make a judge call a finding, so a line that
+// says not to pass a `model` is left alone. Self-contained, like c14Block.
+function c14Names(lines, at, from, to, judge) {
+  const alias = /\b(sonnet|opus|haiku|fable)\b/i;
+  const param = /\bmodel\s*[=:]\s*["'`]?(?!inherit\b)[a-z]/i;
+  const passed = /`model`|\bmodels\.perRole\b/;
+  if (alias.test(lines[at])) return true;
+  for (let i = from; i <= to; i++) if (param.test(lines[i]) || (!judge && passed.test(lines[i]))) return true;
+  return false;
+}
+// The receipt for a C-14 dispatch finding, run with F (the file), L (the
+// dispatch line), N (which line reading L, counted from the top) and K (finder
+// or judge) in its environment: it prints the dispatch's block and exits 0 only
+// while the finding's condition holds (a finder's block names no model, a
+// judge's names one), so it fails once the fix lands, also when the fix adds
+// the model on a line of its own and leaves the dispatch line as it was.
+const C14_CALL_JS = 'const fs = require("fs"); ' + c14Block + ' ' + c14Names + ' ' + String.raw`const lines = fs.readFileSync(process.env.F, "utf8").split(/\r?\n/); const n = Number(process.env.N); let at = -1; for (let i = 0, c = 0; i < lines.length; i++) if (lines[i] === process.env.L && ++c === n) { at = i; break; } if (at < 0) { console.log("no line " + n + " of " + process.env.F + " reads the dispatch line"); process.exit(1); } const [from, to] = c14Block(lines, at); for (let i = from; i <= to; i++) console.log((i + 1) + ": " + lines[i]); const judge = process.env.K === "judge"; process.exit(c14Names(lines, at, from, to, judge) === judge ? 0 : 1);`;
+function c14CallCheck(rel, line, n, judge) { return 'F=' + shq(rel) + ' L=' + shq(line) + ' N=' + n + ' K=' + (judge ? 'judge' : 'finder') + ' node -e ' + shq(C14_CALL_JS); }
+// An agent's frontmatter with no model (C-14), read as agentFrontmatter reads
+// it, the way TOOLS_NONE_AWK reads the tools line: it prints the frontmatter and
+// exits 0 only while its first `model:` line carries no value or there is none
+// (a missing or unclosed frontmatter has none).
+const MODEL_NONE_AWK = String.raw`{ x = $0; sub(/\r$/, "", x) } NR == 1 { print NR ": " x; if ($0 != "---" && $0 != "---\r") { exit } o = 1; next } o && NR > 2 && /^---/ { e = 1; print NR ": " x; exit } o { print NR ": " x; if (!s && x ~ /^model:/) { s = 1; if (x ~ /^model:[ \t]*[^ \t]/) { t = 1 } } } END { exit (e && t) }`;
+// The agent names the rows of the project's review-kinds file give, read as
+// C-12 reads them: a row of three cells whose third gives subagent_type a name
+// without a scope. A row C-12 reports for another reason still names its agent
+// here, because C-14 asks only whether that agent states a model.
+function reviewKindNames(P) {
+  const names = new Set();
+  if (!isFile(P(REVIEW_KINDS))) return names;
+  const lines = fs.readFileSync(P(REVIEW_KINDS), 'utf8').split(/\r?\n/);
+  const isRow = (l) => /^[ \t]*\|/.test(l);
+  const isRule = (l) => isRow(l) && tableCells(l).every(x => /^:?-+:?$/.test(x));
+  lines.forEach((line, i) => {
+    if (!isRow(line) || isRule(line) || (i + 1 < lines.length && isRule(lines[i + 1]))) return;
+    const cells = tableCells(line);
+    const m = cells.length === 3 ? /subagent_type\s*[=:]\s*["'`]?([A-Za-z0-9:_-]+)/.exec(cells[2]) : null;
+    if (m && !/:/.test(m[1])) names.add(m[1]);
+  });
+  return names;
+}
 // The seeded rules file's stamp (C-7), read as the seed-stamp detector reads it:
 // the first line carrying `<!-- Toolkit version: `, the version up to a blank or
 // `|`, trimmed and held to the version shape. It prints that line and exits 0
@@ -1507,6 +1589,55 @@ function main() {
           row('edit-access', 'dispatches `' + name + '` (' + hit.rel + ') as a finder, and that agent ' + (hit.fm.toolsIdx >= 0 ? 'is granted ' + hit.fm.edits.join(', ') : 'declares no tools list, so it gets every tool, Edit included') + ': it can change files before the audit judges its findings. Its output contract is C-4\'s to judge.',
             'awk ' + shq(hit.fm.toolsIdx >= 0 ? TOOLS_EDIT_AWK : TOOLS_NONE_AWK) + ' < ' + shq(hit.rel),
             hit.fm.toolsIdx >= 0 ? 'then the agent\'s tools line with an edit tool in it; the check exits 0 only while one is there' : 'then the agent\'s frontmatter with no tools: line; the check exits 0 only while it has none');
+        });
+      }
+    } else if (c.detector === 'agent-models') {
+      const agents = promptFiles.filter(r => r.startsWith('.claude/agents/')).map(rel => ({ rel, fm: agentFrontmatter(fs.readFileSync(P(rel), 'utf8')) }));
+      // The name an agent answers to: the one it declares, else its file name,
+      // which is how C-12 finds the agent a review kind names.
+      const answersTo = (a) => a.fm.name || path.basename(a.rel, '.md');
+      const kinds = reviewKindNames(P);
+      // An agent with no model follows CLAUDE_CODE_SUBAGENT_MODEL. Reported once
+      // per file, when its role or a review kind says it judges work; a model
+      // line with any value is the project's choice.
+      for (const a of agents) {
+        if (a.fm.model) continue;
+        const role = JUDGE_ROLE.test(answersTo(a) + ' ' + a.fm.description);
+        if (!role && !kinds.has(answersTo(a))) continue;
+        emit({ id: c.id, key: claim(c.id + ':' + a.rel + ':no-model').key, severity: 'warn', convention: c.title, file: { relPath: a.rel, line: 1 },
+          what: 'Should fix. ' + a.rel + ' declares no model, so ' + (role ? 'this finder or judge role' : 'the agent a review kind in ' + REVIEW_KINDS + ' names') + ' follows CLAUDE_CODE_SUBAGENT_MODEL whenever a user sets it, which can move it below the session model whose work it judges.',
+          fix: 'add model: inherit to its frontmatter to keep it on the session model, or name the model you want', since: c.since,
+          receipt: { check: 'awk ' + shq(MODEL_NONE_AWK) + ' < ' + shq(a.rel), expect: 'the frontmatter lines, none of them a model: line with a value; the check exits 0 only while the frontmatter declares no model' } });
+      }
+      // Dispatch lines. A bare name an agent of the project's own answers to is
+      // that agent, never the toolkit's, so it is left alone.
+      const owned = new Set(agents.map(answersTo));
+      for (const rel of promptFiles) {
+        const lines = fs.readFileSync(P(rel), 'utf8').split(/\r?\n/);
+        lines.forEach((line, i) => {
+          if (/^\s*\|/.test(line)) return; // a table row names agents; it dispatches none
+          const seen = new Set();
+          for (const m of line.matchAll(C14_TARGET)) {
+            const name = m[2];
+            if ((!m[1] && owned.has(name)) || seen.has(name)) continue;
+            seen.add(name);
+            const judge = C14_JUDGES.includes(name);
+            const [from, to] = c14Block(lines, i);
+            if (c14Names(lines, i, from, to, judge) !== judge) continue;
+            // The receipt finds its line by text and by which line of that text
+            // it is, counted from the top, so of two identical lines it reads
+            // its own even when only one of them is a finding.
+            const occurrence = lines.slice(0, i + 1).filter(l => l === line).length;
+            emit({ id: c.id, key: claim(c.id + ':' + rel + ':' + (judge ? 'judge-call' : 'finder-call') + ':' + name + ':' + digest(line)).key, severity: 'warn', convention: c.title, file: { relPath: rel, line: i + 1 },
+              what: judge
+                ? 'Should fix. ' + rel + ' line ' + (i + 1) + ' names a model for ' + name + ', a toolkit judge: a model named in a call overrides the judge\'s model: inherit, which can move it below the work it judges.'
+                : 'Should fix. ' + rel + ' line ' + (i + 1) + ' dispatches ' + name + ' with no model, so it runs on that agent file\'s model from any session, and from a session below that model it works above the judges that audit it.',
+              fix: judge
+                ? 'take the model off the call; the judge stays on the session model through its own model: inherit'
+                : 'pass model set to its models.perRole value from node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models, where session, or a model above your own, means your own model family\'s alias',
+              since: c.since,
+              receipt: { check: c14CallCheck(rel, line, occurrence, judge), expect: 'the dispatch\'s block, one numbered line each; the check exits 0 only while the block ' + (judge ? 'names a model for the judge' : 'names no model for the finder') } });
+          }
         });
       }
     } else if (c.detector === 'local-edits') {

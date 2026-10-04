@@ -2172,6 +2172,174 @@ console.log('\n9b. project extensions: the rules-file marker (C-7) and review ki
   check('C-12: an escaped bar inside a cell does not split it', c12(r).length === 0, JSON.stringify(c12(r)).slice(0, 300));
 }
 
+console.log('\n9c. agents and helper calls follow the model routing rule (C-14)');
+{
+  // C-14 arrives in 7.5.1 and runs on every upgrade, so it needs a plugin root
+  // at that version; one at 7.5.0 shows it out of range. Both read the real
+  // conventions file, so a detector name the script does not handle fails the
+  // hit checks below.
+  const PLUGIN751 = path.join(TMP, 'plugin751');
+  const PLUGIN750 = path.join(TMP, 'plugin750');
+  for (const [root, v] of [[PLUGIN751, '7.5.1'], [PLUGIN750, '7.5.0']]) {
+    const b = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', root, '--version', v], { cwd: REPO, encoding: 'utf8' });
+    check('build-plugin.js builds a ' + v + ' plugin root', b.status === 0, b.stdout + b.stderr);
+  }
+  const rules751 = read(path.join(PLUGIN751, 'seed', 'rules-toolkit.md'));
+  // A clean, current project audited at 7.5.0, plus whatever the case adds.
+  const c14Case = (name, files, audited) => {
+    const dir = path.join(TMP, 'c14-' + name);
+    commonFiles(dir);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: audited || '7.5.0', path: 'plugin', auditedVersion: audited || '7.5.0' }, null, 2));
+    write(dir, '.claude/rules/toolkit.md', rules751);
+    write(dir, '.claude/settings.local.json', read(path.join(PLUGIN751, 'seed', 'settings.local.json')));
+    write(dir, '.gitattributes', read(path.join(PLUGIN751, 'seed', 'gitattributes')));
+    write(dir, '.gitignore', read(path.join(PLUGIN751, 'seed', 'gitignore')));
+    write(dir, 'artifacts/README.md', read(path.join(PLUGIN751, 'seed', 'artifacts-README.md')));
+    for (const [rel, text] of Object.entries(files || {})) write(dir, rel, text);
+    return dir;
+  };
+  const audit751 = (d, args) => audit(d, args || [], { pluginRoot: PLUGIN751 });
+  const c14 = (res) => res.findings.filter(f => f.id === 'C-14');
+  // An agent file: o.name null leaves the name line out; o.model the model line.
+  const agentMd = (o) => '---\n' + (o.name === null ? '' : 'name: ' + o.name + '\n') + 'description: ' + o.description + '\n' + (o.tools === undefined ? 'tools: Read, Grep, Glob\n' : o.tools === null ? '' : 'tools: ' + o.tools + '\n') + (o.model ? 'model: ' + o.model + '\n' : '') + '---\nReturn one line per gap, or the literal NO GAPS.\n';
+  const CMD = '.claude/commands/ship.md';
+  const cmd = (...paragraphs) => '# Ship\n\n' + paragraphs.join('\n\n') + '\n';
+  // Run the audit on one command file and return the C-14 findings with each
+  // receipt's result, so a check can test both in one line.
+  const calls = (name, text, extra) => {
+    const d = c14Case(name, Object.assign({ [CMD]: text }, extra || {}));
+    const fs14 = c14(audit751(d));
+    return { d, fs14, receipts: fs14.map(f => runReceipt(d, f)) };
+  };
+  const kinds = (fs14) => fs14.map(f => f.key.split(':')[2] + ':' + f.key.split(':')[3]).sort().join(' ');
+
+  // ---- (a) agents with no model line ----
+  const CRITIC = '.claude/agents/brand-critic.md';
+  let d = c14Case('agent', { [CRITIC]: agentMd({ name: 'brand-critic', description: 'Judges the landing page against the brand sheet.' }) });
+  r = audit751(d);
+  const critic = c14(r);
+  const criticOut = critic.length === 1 ? runReceipt(d, critic[0]) : { status: -1, stdout: '' };
+  check('C-14 is in range at 7.5.1, and a role-word agent with no model line is one finding at line 1 whose receipt shows the frontmatter', /C-14/.test(r.summary) && critic.length === 1 && critic[0].key === 'C-14:' + CRITIC + ':no-model' && critic[0].file.line === 1 && critic[0].severity === 'warn' && /^Should fix\./.test(critic[0].what) && criticOut.status === 0 && /^1: ---$/m.test(criticOut.stdout) && /^5: ---$/m.test(criticOut.stdout), JSON.stringify(critic).slice(0, 500) + criticOut.stdout);
+  write(d, CRITIC, agentMd({ name: 'brand-critic', description: 'Judges the landing page against the brand sheet.', model: 'inherit' }));
+  check('C-14: adding model: inherit clears the finding, and the old receipt no longer passes', c14(audit751(d)).length === 0 && critic.length === 1 && runReceipt(d, critic[0]).status !== 0);
+  r = audit751(c14Case('agent-pinned', { [CRITIC]: agentMd({ name: 'brand-critic', description: 'Judges the landing page.', model: 'sonnet' }) }));
+  check('C-14: a deliberate pin (model: sonnet) is no finding', c14(r).length === 0, JSON.stringify(c14(r)).slice(0, 300));
+  r = audit751(c14Case('agent-empty-model', { [CRITIC]: agentMd({ name: 'brand-critic', description: 'Judges the landing page.' }).replace('---\nReturn', 'model:\n---\nReturn') }));
+  check('C-14: a model line with no value is still a finding', c14(r).length === 1, JSON.stringify(c14(r)).slice(0, 300));
+  r = audit751(c14Case('agent-helper', { '.claude/agents/release-notes.md': agentMd({ name: 'release-notes', description: 'Writes the release notes.' }) }));
+  check('C-14: an agent with no role words that no review kind names is no finding', c14(r).length === 0, JSON.stringify(c14(r)).slice(0, 300));
+  const KINDS = '.claude/toolkit/review-kinds.md';
+  const KIND_TABLE = '# Our review kinds\n\n| What changed | Specialist | Finder agent |\n|---|---|---|\n| files under `designs/` | Design Fidelity | `subagent_type=design-fidelity` |\n';
+  r = audit751(c14Case('agent-kind', { [KINDS]: KIND_TABLE, '.claude/agents/design-fidelity.md': agentMd({ name: 'design-fidelity', description: 'Checks the design files against the brand sheet.' }) }));
+  check('C-14: the agent a review kind names, with no model line and no role words, is one finding that says so', c14(r).length === 1 && /a review kind/.test(c14(r)[0].what), JSON.stringify(c14(r)).slice(0, 400));
+  r = audit751(c14Case('agent-kind-role', { [KINDS]: KIND_TABLE, '.claude/agents/design-fidelity.md': agentMd({ name: 'design-fidelity', description: 'Reviews the design files against the brand sheet.' }) }));
+  check('C-14: an agent with role words that a review kind also names is still one finding', c14(r).length === 1, JSON.stringify(c14(r)).slice(0, 400));
+  r = audit751(c14Case('agent-noname', { '.claude/agents/ux-auditor.md': agentMd({ name: null, description: 'Looks at the screens.' }), '.claude/agents/notes-writer.md': agentMd({ name: null, description: 'Writes the notes.' }) }));
+  check('C-14: an agent with frontmatter but no name line is judged by its file name (ux-auditor is a finding, notes-writer is not)', c14(r).length === 1 && c14(r)[0].file.relPath === '.claude/agents/ux-auditor.md', JSON.stringify(c14(r)).slice(0, 400));
+  d = c14Case('agent-nofm', { '.claude/agents/copy-reviewer.md': 'Review the copy and return one line per gap.\n' });
+  r = audit751(d);
+  check('C-14: an agent file with no frontmatter and a role word in its file name is a finding whose receipt passes', c14(r).length === 1 && runReceipt(d, c14(r)[0]).status === 0, JSON.stringify(c14(r)).slice(0, 300));
+
+  // ---- (b) finder calls with no model ----
+  const CODE = 'Run `subagent_type=tk:review-code-finder` on the diff.';
+  const MAPPER = '- subagent_type: "tk:index-mapper"';
+  const CLAUSE = ' Give it `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family\'s alias.';
+  let c = calls('finder', cmd(CODE, MAPPER));
+  check('C-14: a scoped finder and a quoted mapper with no model are two finder-call findings, each receipt passing and showing its line', kinds(c.fs14) === 'finder-call:index-mapper finder-call:review-code-finder' && c.receipts.every(x => x.status === 0) && c.receipts.some(x => /^3: Run/m.test(x.stdout)) && c.receipts.some(x => /^5: - subagent_type/m.test(x.stdout)), JSON.stringify(c.fs14).slice(0, 600));
+  const codeFinding = c.fs14.find(f => /review-code-finder/.test(f.key));
+  write(c.d, CMD, cmd(CODE + CLAUSE, MAPPER));
+  check('C-14: the toolkit\'s clause on the line clears that finding, and its old receipt no longer passes', kinds(c14(audit751(c.d))) === 'finder-call:index-mapper' && runReceipt(c.d, codeFinding).status !== 0);
+  c = calls('finder-next', cmd('- subagent_type: tk:review-code-finder\n- model: opus'));
+  check('C-14: a model parameter on the next bullet is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('finder-above', cmd('Use model: opus for this one.\n- subagent_type: tk:review-code-finder'));
+  check('C-14: a model parameter on the line above, in the same paragraph, is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('finder-blank', cmd('- subagent_type: tk:review-code-finder', '- model: opus'));
+  check('C-14: a model parameter after a blank line is another paragraph, so the call is a finding', c.fs14.length === 1, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('finder-prose', cmd(CODE + '\nThis costs less than running it on opus would.'));
+  check('C-14: an alias in another line\'s prose names no model, so the call is a finding', c.fs14.length === 1, JSON.stringify(c.fs14).slice(0, 300));
+  write(c.d, CMD, cmd(CODE + '\nThis costs less than running it on opus would.\nmodel: sonnet'));
+  check('C-14: a fix that adds model: sonnet on a new line under the call clears it, and the old receipt no longer passes', c14(audit751(c.d)).length === 0 && runReceipt(c.d, c.fs14[0]).status !== 0);
+  c = calls('finder-named', cmd('Run `subagent_type=tk:review-code-finder` on sonnet.', 'Run `subagent_type=tk:review-ux-finder` with model: opus.', '| Code | `subagent_type=tk:review-code-finder` |', 'The tk:review-copy-finder agent reads the copy.'));
+  check('C-14: an alias or model: on the line, a table row, and a mention with no subagent_type are no findings', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('finder-owned', cmd('Run `subagent_type=index-mapper` on each folder.'), { '.claude/agents/index-mapper.md': agentMd({ name: 'index-mapper', description: 'Maps our folders.', model: 'sonnet' }) });
+  check('C-14: a bare name an agent of the project\'s own answers to is that agent, so it is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  d = c14Case('finder-bare', { [CMD]: cmd('Run `subagent_type=review-code-finder` on the diff.') });
+  r = audit751(d);
+  check('C-14: a bare toolkit name is a C-11 finding and a C-14 finding, under different keys', c14(r).length === 1 && r.findings.some(f => f.id === 'C-11' && f.file.relPath === CMD) && r.findings.filter(f => f.file.relPath === CMD).map(f => f.key).length === new Set(r.findings.filter(f => f.file.relPath === CMD).map(f => f.key)).size, JSON.stringify(r.findings.filter(f => f.file.relPath === CMD)).slice(0, 500));
+  c = calls('finder-inherit', cmd('- subagent_type: tk:review-code-finder\n- model: inherit'));
+  check('C-14: model: inherit on a finder call is no per-call value, so the call is still a finding', c.fs14.length === 1, JSON.stringify(c.fs14).slice(0, 300));
+
+  // ---- cross-talk and identical lines ----
+  c = calls('cross-ok', cmd('- subagent_type: tk:review-ux-finder\n- model: opus\n- subagent_type: tk:plan-critic'));
+  check('C-14: one paragraph holding a finder call with its model and then a judge call with none is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('cross-both', cmd('- subagent_type: tk:review-ux-finder\n- subagent_type: tk:plan-critic\n- model: sonnet'));
+  check('C-14: a finder call with no model and then a judge call with its model: sonnet are one finding each', kinds(c.fs14) === 'finder-call:review-ux-finder judge-call:plan-critic' && c.receipts.every(x => x.status === 0), JSON.stringify(c.fs14).slice(0, 500));
+  c = calls('twins', cmd(CODE, CODE));
+  check('C-14: two identical finder lines with no model are two findings with keys of their own, each receipt reading its own line', c.fs14.length === 2 && c.fs14[0].key !== c.fs14[1].key && c.receipts.every(x => x.status === 0) && /^3: /m.test(c.receipts[0].stdout) && /^5: /m.test(c.receipts[1].stdout), JSON.stringify(c.fs14).slice(0, 500) + c.receipts.map(x => x.stdout).join('|'));
+  c = calls('twins-mixed', cmd(CODE + '\nmodel: opus', CODE));
+  check('C-14: of two identical lines only the one with no model is a finding, and its receipt reads that line, not the first', c.fs14.length === 1 && c.fs14[0].file.line === 6 && c.receipts[0].status === 0 && /^6: /m.test(c.receipts[0].stdout), JSON.stringify(c.fs14).slice(0, 400) + (c.receipts[0] || {}).stdout);
+
+  // ---- (c) judge calls that name a model ----
+  c = calls('judge', cmd('Audit with `subagent_type=tk:audit-skeptic` and model: sonnet.', 'Verify with `subagent_type=tk:fix-verifier`, model=sonnet.', 'Critique with `subagent_type=tk:design-critic` on sonnet.'));
+  check('C-14: a judge call with model:, with model= or with an alias on its line is a judge-call finding, each receipt passing', kinds(c.fs14) === 'judge-call:audit-skeptic judge-call:design-critic judge-call:fix-verifier' && c.receipts.every(x => x.status === 0), JSON.stringify(c.fs14).slice(0, 600));
+  const skeptic = c.fs14.find(f => /audit-skeptic/.test(f.key));
+  write(c.d, CMD, cmd('Audit with `subagent_type=tk:audit-skeptic`.', 'Verify with `subagent_type=tk:fix-verifier`, model=sonnet.', 'Critique with `subagent_type=tk:design-critic` on sonnet.'));
+  check('C-14: dropping the model clears the judge finding, and its old receipt no longer passes', !c14(audit751(c.d)).some(f => /audit-skeptic/.test(f.key)) && runReceipt(c.d, skeptic).status !== 0);
+  c = calls('judge-next', cmd('- subagent_type: tk:plan-critic\n- model: sonnet'));
+  check('C-14: a judge line with model: sonnet on the next bullet is a finding', kinds(c.fs14) === 'judge-call:plan-critic', JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('judge-clean', cmd('Critique with `subagent_type=tk:plan-critic`.', 'Compare with `subagent_type=tk:design-comparer`.\nIt is cheaper than opus would be.', 'Audit with `subagent_type=tk:audit-skeptic` and never pass a `model`; it reads its models.perRole entry itself.', '- subagent_type: tk:fix-verifier\n- model: inherit'));
+  check('C-14: a judge call with no model, with only an alias in another line\'s prose, with a line saying not to pass a `model`, or with model: inherit is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('judge-table', cmd('| Audit | `subagent_type=tk:audit-skeptic` | model: sonnet |'));
+  check('C-14: a table row naming a judge and a model is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('judge-owned', cmd('Critique with `subagent_type=plan-critic` and model: sonnet.'), { '.claude/agents/plan-critic.md': agentMd({ name: 'plan-critic', description: 'Critiques our plans.', model: 'inherit' }) });
+  check('C-14: a bare plan-critic the project owns, dispatched with a model, is no finding', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
+
+  // ---- range ----
+  const BAD = { [CRITIC]: agentMd({ name: 'brand-critic', description: 'Judges the landing page.' }), [CMD]: cmd(CODE) };
+  r = audit(c14Case('range-750', BAD), [], { pluginRoot: PLUGIN750 });
+  check('C-14 is out of range while the plugin is below 7.5.1: a bad agent and call emit nothing', !/C-14/.test(r.summary) && c14(r).length === 0, r.summary);
+  r = audit751(c14Case('range-751', BAD, '7.5.1'));
+  check('C-14 runs on every upgrade: a project already audited at 7.5.1 still gets both findings', /C-14/.test(r.summary) && c14(r).length === 2, r.summary + JSON.stringify(c14(r)).slice(0, 300));
+  r = audit751(c14Case('range-c5', { [CRITIC]: agentMd({ name: 'brand-critic', description: 'Judges the landing page.', tools: 'Read, Edit' }) }), ['--from', '6.3.3']);
+  check('C-14: an agent C-5 reports for its tools also gets its one model finding, never two', r.findings.filter(f => f.id === 'C-5' && f.file.relPath === CRITIC).length === 1 && c14(r).length === 1, JSON.stringify(r.findings.filter(f => f.file.relPath === CRITIC)).slice(0, 500));
+
+  // ---- the name lists stay in step with the toolkit ----
+  // Every toolkit agent, dispatched twice by scoped name: with no model, it is a
+  // finding exactly when it is a review-<kind>-finder or the mapper; with a
+  // model, exactly when it is one of test-model-roster.js's JUDGES. A new
+  // finder agent, or a judge that test adds, fails this until the detector's
+  // lists are updated with it.
+  const repoAgents = fs.readdirSync(path.join(REPO, '.claude', 'agents')).filter(n => n.endsWith('.md')).map(n => { const m = /^name:\s*(\S+)/m.exec(read(path.join(REPO, '.claude', 'agents', n))); return m ? m[1] : n.slice(0, -3); });
+  const rosterJudges = (/const JUDGES = \[([^\]]*)\]/.exec(read(path.join(REPO, 'scripts', 'test-model-roster.js'))) || ['', ''])[1].match(/[a-z-]+/g) || [];
+  check('test-model-roster.js names five judges, each a toolkit agent', rosterJudges.length === 5 && rosterJudges.every(j => repoAgents.includes(j)), rosterJudges.join(','));
+  c = calls('drift', cmd(...repoAgents.flatMap(n => ['Dispatch `subagent_type=tk:' + n + '` for the work.', 'Dispatch `subagent_type=tk:' + n + '` with model: sonnet.'])));
+  const wantFinders = repoAgents.filter(n => /^review-[a-z]+-finder$/.test(n) || n === 'index-mapper').sort();
+  const gotFinders = c.fs14.filter(f => f.key.split(':')[2] === 'finder-call').map(f => f.key.split(':')[3]).sort();
+  const gotJudges = c.fs14.filter(f => f.key.split(':')[2] === 'judge-call').map(f => f.key.split(':')[3]).sort();
+  check('C-14\'s finder list is every review-<kind>-finder agent plus the mapper (' + wantFinders.length + ')', wantFinders.length === 9 && JSON.stringify(gotFinders) === JSON.stringify(wantFinders), 'want ' + wantFinders.join(',') + ' got ' + gotFinders.join(','));
+  check('C-14\'s judge list is test-model-roster.js\'s JUDGES', JSON.stringify(gotJudges) === JSON.stringify(rosterJudges.slice().sort()), 'want ' + rosterJudges.join(',') + ' got ' + gotJudges.join(','));
+
+  // ---- the upgrade skill stays in step with the script ----
+  // Its rerun list names every script detector a convention uses, and its
+  // every-upgrade sentence covers every `Runs: every upgrade` id, a range such
+  // as "C-9 to C-12" counted whole. A later convention that forgets the skill
+  // fails here. local-edits (C-6) is the one script detector the rerun never
+  // verifies: its finding is a local script edit the user upstreams or moves,
+  // kept open in the digest by decision, and the skill handles it in its own
+  // paragraph.
+  const convText = read(REAL_CONVENTIONS);
+  const blocks = convText.split(/^### /m).slice(1).filter(b => /^C-\d+:/.test(b));
+  const detectors = [...new Set(blocks.map(b => (/^- \*\*Detector:\*\*\s*(\S+)/m.exec(b) || [])[1]).filter(x => x && x !== 'manual' && x !== 'local-edits'))];
+  const always = blocks.filter(b => /^- \*\*Runs:\*\*\s*every upgrade/m.test(b)).map(b => Number(/^C-(\d+):/.exec(b)[1]));
+  const skillText = read(path.join(REPO, '.claude', 'skills', 'upgrade', 'SKILL.md'));
+  const rerun = ((/a finding from any script detector \(([^)]*)\)/.exec(skillText) || [])[1] || '').split(/,\s*/);
+  const sentence = (/because ([^.]*?) are checked on every upgrade/.exec(skillText) || [])[1] || '';
+  const covered = new Set();
+  for (const m of sentence.matchAll(/C-(\d+)(?: to C-(\d+))?/g)) for (let k = Number(m[1]); k <= Number(m[2] || m[1]); k++) covered.add(k);
+  check('the upgrade skill\'s rerun list names every script detector the conventions use', detectors.length >= 9 && detectors.includes('agent-models') && detectors.every(x => rerun.includes(x)), 'missing: ' + detectors.filter(x => !rerun.includes(x)).join(','));
+  check('the upgrade skill\'s every-upgrade sentence covers every Runs: every upgrade convention', always.includes(14) && always.every(k => covered.has(k)), 'always ' + always.join(',') + '; covered ' + [...covered].join(','));
+}
+
 console.log('\n10. errors and usage');
 const bad1 = spawnSync('node', [SCRIPT, '--project', MIG, '--plugin-root', PLUGIN, '--conventions', path.join(TMP, 'nonexistent.md')], { encoding: 'utf8' });
 check('a missing conventions file exits 1', bad1.status === 1 && /not found/.test(bad1.stderr));
