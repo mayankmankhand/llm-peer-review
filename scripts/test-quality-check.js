@@ -563,6 +563,18 @@ section('ledger cost (review R14)', () => {
   check('ledgerCost: a zero cost is a reported cost, not a missing one', QC.ledgerCost(0, 25).costUsd === 0 && !QC.ledgerCost(0, 25).costCapped);
 });
 
+section('cleanup steps (review R14, second round)', () => {
+  const ran = [];
+  const said = [];
+  const failed = QC.runSteps([
+    ['copy the transcripts', () => ran.push('copy')],
+    ['write run.json', () => { throw new Error('disk full'); }],
+    ['enter the ledger line', () => ran.push('ledger')],
+  ], msg => said.push(msg));
+  check('runSteps: a failing step does not skip the ledger line after it', ran.join(',') === 'copy,ledger', ran.join(','));
+  check('runSteps: the failure is named and reported, not thrown', failed.join() === 'write run.json' && said.length === 1 && /could not write run\.json: disk full/.test(said[0]), JSON.stringify({ failed, said }));
+});
+
 section('the fixture server listens on loopback only (review R2)', () => {
   const listenAndSay = form => "const s = require('http').createServer(); s.listen(" + form + ", () => { console.log(s.address().address); s.close(); });";
   for (const form of ['0', "0, '0.0.0.0'", '{ port: 0 }', "{ port: 0, host: '::' }"]) {

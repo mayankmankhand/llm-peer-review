@@ -1261,6 +1261,18 @@ function ledgerCost(reported, maxUsd) {
   return typeof reported === 'number' ? { costUsd: reported } : { costUsd: maxUsd, costCapped: true };
 }
 
+// Runs each [what, fn] step whatever the one before it did, so one failure (a
+// full disk, a folder gone missing) cannot skip the rest: the server still stops,
+// the scratch folder still goes, and a session that ran still reaches its ledger
+// line (review R14, second round). Reports each failure and returns their names.
+function runSteps(steps, report = msg => console.error('quality-check: ' + msg)) {
+  const failed = [];
+  for (const [what, fn] of steps) {
+    try { fn(); } catch (e) { failed.push(what); report('could not ' + what + ': ' + (e && e.message || e)); }
+  }
+  return failed;
+}
+
 function appendLedger(row) {
   fs.mkdirSync(OUT_ROOT, { recursive: true });
   fs.appendFileSync(LEDGER, JSON.stringify(row) + '\n');
@@ -1478,20 +1490,25 @@ async function commandRun(o) {
     if (result) fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2) + '\n');
     sessionDone = true;
   } finally {
-    stopServer(serverPid);
-    copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'));
-    copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'));
-    copyDir(path.join(project, 'plans'), path.join(out, 'project-plans'));
-    if (fs.existsSync(path.join(project, 'artifacts', 'html', 'review.html'))) fs.copyFileSync(path.join(project, 'artifacts', 'html', 'review.html'), path.join(out, 'review.html'));
-    if (fs.existsSync(path.join(project, '.git'))) {
-      const st = sh('git', ['status', '--porcelain'], { cwd: project, env: GIT_ENV });
-      const lg = sh('git', ['log', '--oneline', '-5'], { cwd: project, env: GIT_ENV });
-      fs.writeFileSync(path.join(out, 'project-git.json'), JSON.stringify({ status: st.stdout, log: lg.stdout }, null, 2) + '\n');
-    }
-    fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n');
-    if (!o.keep) fs.rmSync(tmp, { recursive: true, force: true });
-    // A run that broke after its session started still enters its spend.
-    if (ran && !sessionDone) enterLedger(false);
+    runSteps([
+      ['stop the fixture server', () => stopServer(serverPid)],
+      ['copy the transcripts', () => copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'))],
+      ['copy the project reports', () => copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'))],
+      ['copy the project plans', () => copyDir(path.join(project, 'plans'), path.join(out, 'project-plans'))],
+      ['copy review.html', () => {
+        if (fs.existsSync(path.join(project, 'artifacts', 'html', 'review.html'))) fs.copyFileSync(path.join(project, 'artifacts', 'html', 'review.html'), path.join(out, 'review.html'));
+      }],
+      ['record the project\'s git state', () => {
+        if (!fs.existsSync(path.join(project, '.git'))) return;
+        const st = sh('git', ['status', '--porcelain'], { cwd: project, env: GIT_ENV });
+        const lg = sh('git', ['log', '--oneline', '-5'], { cwd: project, env: GIT_ENV });
+        fs.writeFileSync(path.join(out, 'project-git.json'), JSON.stringify({ status: st.stdout, log: lg.stdout }, null, 2) + '\n');
+      }],
+      ['write run.json', () => fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n')],
+      ['remove the scratch folder', () => { if (!o.keep) fs.rmSync(tmp, { recursive: true, force: true }); }],
+      // A run that broke after its session started still enters its spend.
+      ['enter the ledger line', () => { if (ran && !sessionDone) enterLedger(false); }],
+    ]);
   }
   let analysis = null;
   try {
@@ -1731,7 +1748,7 @@ module.exports = {
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
-  runGroup, ledgerCost, LOOPBACK_PRELOAD,
+  runGroup, ledgerCost, runSteps, LOOPBACK_PRELOAD,
 };
 
 if (require.main === module) {
