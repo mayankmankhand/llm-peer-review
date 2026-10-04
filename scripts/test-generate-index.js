@@ -240,7 +240,10 @@ function initRepo(repo) {
   check('the chunks carry each name verbatim', JSON.stringify(listed) === JSON.stringify(names.slice().sort()), JSON.stringify(listed));
   check('the directory tree shows the non-ASCII names', (m.directoryTree || []).includes('  - café.md') && (m.directoryTree || []).includes('  - 日本語.md'), JSON.stringify(m.directoryTree));
   check('the manifest records the commit and a clean tree', /^[0-9a-f]{40}$/.test(m.commit || '') && m.isDirty === false, (m.commit || '') + ' ' + m.isDirty);
+  check('a one-chunk scan gives its chunk the whole 10,000-token answer budget (#208)',
+    (m.chunks || []).length === 1 && m.chunks[0].answerTokens === 10000, JSON.stringify((m.chunks || []).map((c) => c.answerTokens)));
 }
+
 {
   const repo = fresh('empty-repo');
   initRepo(repo);
@@ -254,6 +257,31 @@ function initRepo(repo) {
   const dir = fresh('not-a-repo');
   const r = run(dir, [], { GIT_CEILING_DIRECTORIES: sandbox });
   check('outside a git repository the scan prints the git_failed error', r.status !== 0 && (r.json || {}).error === 'git_failed', r.stdout + r.stderr);
+}
+
+// --- 6. Each chunk's answer limit (#208) --------------------------------------------
+// A 1,000-token floor per chunk, plus a file-count share of the rest of 10,000,
+// rounded down to 100, so the limits never add up to more than the budget.
+console.log('\n6. answer limits');
+{
+  const dir = fresh('answer-tokens');
+  const limits = (counts) => (run(dir, ['--answer-tokens', counts.join(',')]).json || {}).answerTokens || [];
+  const repoShape = limits([9, 14, 27, 64, 217]);
+  check('this repo\'s shape (9, 14, 27, 64, 217 files) gets 1,100 / 1,200 / 1,400 / 1,900 / 4,200',
+    JSON.stringify(repoShape) === JSON.stringify([1100, 1200, 1400, 1900, 4200]), JSON.stringify(repoShape));
+  check('a single chunk gets the whole budget', JSON.stringify(limits([40])) === '[10000]', JSON.stringify(limits([40])));
+  const shapes = [[1], [1, 1], [3, 500], [100, 100, 100], [1, 1, 1, 1, 1000], [7, 13, 29, 61, 331], [250, 250, 250, 250, 250]];
+  const bad = shapes.map((s) => ({ s, l: limits(s) })).filter(({ s, l }) =>
+    l.length !== s.length || l.reduce((a, b) => a + b, 0) > 10000 || l.some((x) => x < 1000 || x % 100 !== 0));
+  check('for 1 to 5 chunks the limits never add up to more than 10,000, and none is under 1,000 or off the 100s',
+    bad.length === 0, JSON.stringify(bad));
+  const zero = run(dir, ['--answer-tokens', '0,5']);
+  const word = run(dir, ['--answer-tokens', 'many']);
+  const six = run(dir, ['--answer-tokens', '1,1,1,1,1,1']);
+  const none = run(dir, ['--answer-tokens']);
+  check('a zero, a word, six counts, or no list is refused with bad_arguments',
+    [zero, word, six, none].every((r) => r.status !== 0 && (r.json || {}).error === 'bad_arguments'),
+    [zero, word, six, none].map((r) => r.stdout.trim()).join(' | '));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
