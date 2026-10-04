@@ -2324,6 +2324,12 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   const gotJudges = c.fs14.filter(f => f.key.split(':')[2] === 'judge-call').map(f => f.key.split(':')[3]).sort();
   check('C-14\'s finder list is every review-<kind>-finder agent plus the mapper (' + wantFinders.length + ')', wantFinders.length === 9 && JSON.stringify(gotFinders) === JSON.stringify(wantFinders), 'want ' + wantFinders.join(',') + ' got ' + gotFinders.join(','));
   check('C-14\'s judge list is test-model-roster.js\'s JUDGES', JSON.stringify(gotJudges) === JSON.stringify(rosterJudges.slice().sort()), 'want ' + rosterJudges.join(',') + ' got ' + gotJudges.join(','));
+  // The model words as well: each alias in test-model-roster.js's MODEL_WORD,
+  // alone on a judge call's line, must make that call a finding. An alias the
+  // roster test learns and the detector does not fails here.
+  const rosterAliases = ((/const MODEL_WORD = \/\\b\(([a-z|]+)\)\\b/.exec(read(path.join(REPO, 'scripts', 'test-model-roster.js'))) || ['', ''])[1] || '').split('|').filter(Boolean);
+  c = calls('drift-alias', cmd(...rosterAliases.map(a => 'Critique with `subagent_type=tk:plan-critic` on ' + a + '.')));
+  check('every model word in test-model-roster.js\'s MODEL_WORD, alone on a judge call\'s line, is a C-14 finding', rosterAliases.length >= 4 && c.fs14.length === rosterAliases.length, rosterAliases.join(',') + ' gave ' + c.fs14.length + ' finding(s)');
 
   // ---- the upgrade skill stays in step with the script ----
   // Its rerun list names every script detector a convention uses, and its
