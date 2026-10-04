@@ -1,5 +1,5 @@
 {
-  "version": "7.4.3",
+  "version": "7.5.0",
   "paths": [
     ".claude/agents/audit-skeptic.md",
     ".claude/agents/correction-extractor.md",

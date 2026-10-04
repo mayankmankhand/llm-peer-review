@@ -250,7 +250,7 @@ The plugin needs **Claude Code** with plugin support (2.x) and **Node.js 22 or n
 
 ## What's New
 
-**Latest release: v7.4.3** (September 2026): the plan and design critics return gaps instead of grades, and a blind side-by-side judge keeps or reverts each design round. Every release since v4.3.3 is described in [CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), and the [releases page](https://github.com/mayankmankhand/llm-peer-review/releases) has the tags. The copy-install clones `main`, not a tag, so it also gets the work listed under Unreleased in [CHANGELOG.md](CHANGELOG.md); the plugin installs the tagged release.
+**Latest release: v7.5.0** (October 2026): commands load about 11% fewer words, each cycle picks whether its review and map helpers run best, fit or cheap, and every helper setting was measured before it shipped. Every release since v4.3.3 is described in [CHANGELOG.md](CHANGELOG.md#whats-new-since-v433), and the [releases page](https://github.com/mayankmankhand/llm-peer-review/releases) has the tags. The copy-install clones `main`, not a tag, so it also gets the work listed under Unreleased in [CHANGELOG.md](CHANGELOG.md); the plugin installs the tagged release.
 
 ---
 
