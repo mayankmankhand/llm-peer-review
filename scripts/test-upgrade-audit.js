@@ -2234,6 +2234,8 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   check('C-14: the agent a review kind names, with no model line and no role words, is one finding that says so', c14(r).length === 1 && /a review kind/.test(c14(r)[0].what), JSON.stringify(c14(r)).slice(0, 400));
   r = audit751(c14Case('agent-kind-role', { [KINDS]: KIND_TABLE, '.claude/agents/design-fidelity.md': agentMd({ name: 'design-fidelity', description: 'Reviews the design files against the brand sheet.' }) }));
   check('C-14: an agent with role words that a review kind also names is still one finding', c14(r).length === 1, JSON.stringify(c14(r)).slice(0, 400));
+  r = audit751(c14Case('agent-kind-pinned', { [KINDS]: KIND_TABLE, '.claude/agents/design-fidelity.md': agentMd({ name: 'design-fidelity', description: 'Checks the design files against the brand sheet.', model: 'opus' }) }));
+  check('C-14: the agent a review kind names is no finding once it has a model line, even one above the session (the README says so; C-14 does not)', c14(r).length === 0, JSON.stringify(c14(r)).slice(0, 300));
   r = audit751(c14Case('agent-noname', { '.claude/agents/ux-auditor.md': agentMd({ name: null, description: 'Looks at the screens.' }), '.claude/agents/notes-writer.md': agentMd({ name: null, description: 'Writes the notes.' }) }));
   check('C-14: an agent with frontmatter but no name line is judged by its file name (ux-auditor is a finding, notes-writer is not)', c14(r).length === 1 && c14(r)[0].file.relPath === '.claude/agents/ux-auditor.md', JSON.stringify(c14(r)).slice(0, 400));
   d = c14Case('agent-nofm', { '.claude/agents/copy-reviewer.md': 'Review the copy and return one line per gap.\n' });
@@ -2268,6 +2270,10 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   check('C-14: a bare toolkit name is a C-11 finding and a C-14 finding, under different keys', c14(r).length === 1 && r.findings.some(f => f.id === 'C-11' && f.file.relPath === CMD) && r.findings.filter(f => f.file.relPath === CMD).map(f => f.key).length === new Set(r.findings.filter(f => f.file.relPath === CMD).map(f => f.key)).size, JSON.stringify(r.findings.filter(f => f.file.relPath === CMD)).slice(0, 500));
   c = calls('finder-inherit', cmd('- subagent_type: tk:review-code-finder\n- model: inherit'));
   check('C-14: model: inherit on a finder call is no per-call value, so the call is still a finding', c.fs14.length === 1, JSON.stringify(c.fs14).slice(0, 300));
+  c = calls('finder-heading', cmd(CODE + '\n## Models\nmodel: opus', CODE + '\n---\nmodel: opus'));
+  check('C-14: a heading or a --- line ends the paragraph, so a model line past it does not count, and both calls are Should fix findings', c.fs14.length === 2 && c.fs14.every(f => f.severity === 'warn' && /^Should fix\./.test(f.what)), JSON.stringify(c.fs14).slice(0, 400));
+  c = calls('finder-forms', cmd(CODE + '\nPass the `model` your session runs.', CODE.replace('diff', 'staged files') + '\nIt takes its models.perRole entry.'));
+  check('C-14: for a finder call, `model` in backticks alone, or models.perRole alone, on a line of its block passes a model', c.fs14.length === 0, JSON.stringify(c.fs14).slice(0, 300));
 
   // ---- cross-talk and identical lines ----
   c = calls('cross-ok', cmd('- subagent_type: tk:review-ux-finder\n- model: opus\n- subagent_type: tk:plan-critic'));
