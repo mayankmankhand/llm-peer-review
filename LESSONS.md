@@ -333,3 +333,8 @@
 
 - **The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.**
 - **Before engineering a smarter limit, lift the old one once and see whether it binds.**
+
+## Issue 209 (your own helpers' models)
+
+- **A detector's "this one is fine" rule must be as narrow as the text it recognizes: the audit after it can drop a reported finding, never add a missed one.**
+- **A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.**
