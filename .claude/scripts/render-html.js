@@ -1097,23 +1097,12 @@ function applyReviewContract(data) {
 // The other half is memory. Because the file at the stable path is the previous
 // run's page, this run can read it and say what changed. A finding the reader
 // already saw and left alone should not present itself as news.
-// The severity phrase leads every sentence one, so it is stripped before the
-// claim words are taken: otherwise the first two of eight words were always
-// "should fix" (v6.3.0 review, R12). The line number is out of the key too,
-// because a line moves whenever the file above it changes, and a moved line
-// read as one finding resolved and a new one opened (R10). Path plus claim is
-// the identity; the payload's own `key`, when it carries one, wins.
-const SEVERITY_LEAD = /^\s*(?:blocks?|should fix|optional)\b[.:]?\s*/i;
-function stableFindingKey(f) {
-  if (f.key) return String(f.key);
-  const loc = f.file ? (f.file.relPath || '') : '';
-  const claim = String(f.what || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(SEVERITY_LEAD, '')
-    .toLowerCase().replace(/[^a-z0-9 ]+/g, '')
-    .split(/\s+/).filter(Boolean).slice(0, 8).join('-');
-  return loc + ':' + claim;
-}
+// The key rule itself (path plus the first claim words, the severity lead and
+// the line number left out, the payload's own `key` winning) lives in
+// merge-findings.js, the pass that merges findings on it (issue #211), so the
+// identity this page uses to recognise a finding across runs and the identity
+// that pass merges on are one rule in one place.
+const { stableFindingKey } = require('./merge-findings.js');
 
 // Pull the payload back out of a page this script wrote earlier. Three states,
 // because two of them used to collapse into one: no page at all is a first

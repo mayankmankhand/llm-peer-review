@@ -51,6 +51,7 @@
     ".claude/scripts/env-local.js",
     ".claude/scripts/gen-media.js",
     ".claude/scripts/generate-index.js",
+    ".claude/scripts/merge-findings.js",
     ".claude/scripts/open-artifact.sh",
     ".claude/scripts/package-lock.json",
     ".claude/scripts/package.json",

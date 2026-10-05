@@ -1190,6 +1190,9 @@ function shellStructureTests() {
   fs.mkdirSync(path.join(tree, '.claude/scripts'), { recursive: true });
   fs.mkdirSync(path.join(tree, '.claude/skills/shared/shells'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(tree, '.claude/scripts/render-html.js'));
+  // The renderer requires its key rule from merge-findings.js beside it
+  // (issue #211), so a copy of one without the other cannot load.
+  fs.copyFileSync(path.join(path.dirname(SCRIPT), 'merge-findings.js'), path.join(tree, '.claude/scripts/merge-findings.js'));
   fs.readdirSync(shellsDir).forEach(function (f) {
     fs.copyFileSync(path.join(shellsDir, f), path.join(tree, '.claude/skills/shared/shells', f));
   });
@@ -1298,6 +1301,26 @@ function findingContractTests() {
     gone.status === 0 && gone.html.length > 0 &&
     finds(island(gone.html))[0].receipt === undefined &&
     /receipt output unreadable/.test(gone.stderr));
+
+  // --- a merged finding renders as the merge pass emits it -----------------
+  // merge-findings.js (issue #211) joins specialists into one string and adds
+  // `receipts` and `sources` beside the primary's `receipt`. The shell shows
+  // the joined string as the finding's lens and carries the extra keys along
+  // untouched, so the merge pass needs no shell change.
+  const mergedRow = run('merged', { title: 'T', groups: [{ label: 'code', findings: [
+    { id: 'R1', severity: 'block', specialist: 'code, ux', what: 'Blocks. A thing breaks.',
+      key: 'a.js:a-thing-breaks',
+      receipt: { cmd: 'node x.js', stdoutFile: rcpt, exit: 1 },
+      receipts: [{ check: 'grep a a.js', expect: 'x' }, { check: 'grep b a.js', expect: 'y' }],
+      sources: [{ severity: 'warn', specialist: 'code', what: 'Should fix. A thing breaks.' },
+                { severity: 'block', specialist: 'ux', what: 'Blocks. A thing breaks.' }] }] }] });
+  const mf = finds(island(mergedRow.html))[0];
+  check('a merged finding renders with its joined specialist string, receipts and sources intact',
+    mergedRow.status === 0 && mf && mf.specialist === 'code, ux' &&
+    Array.isArray(mf.receipts) && mf.receipts.length === 2 &&
+    Array.isArray(mf.sources) && mf.sources.length === 2 &&
+    mf.receipt && mf.receipt.stdout && mf.receipt.stdout.length === 2,
+    mergedRow.stderr + ' ' + JSON.stringify(mf).slice(0, 300));
 
   // --- the retired four-field labels are refused -------------------------
   // Dropped rather than fatal: aborting would leave a 21-finding run with no
