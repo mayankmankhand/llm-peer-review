@@ -150,8 +150,8 @@ A gap that no longer holds fails its receipt and is logged `RECEIPT FAILED`: dis
 
 Collect the JSONL findings from all subagents (a specialist that emitted `NO FINDINGS` contributes none), together with the seeded ones. Set each `NOT CHECKED:` line aside with its specialist's name for "What I could not check" in Phase 5: it is a disclosure, never a finding, so it gets no ID, no receipt and no audit. Then:
 
-1. **Dedup mechanically** - group findings by their `key`. Findings sharing a key are the same issue: merge them into one, unioning their `specialist` values (e.g. `[code, ux]`) and their `fields` (keep the browser-only evidence fields - Screenshot, Evidence, Expected, Actual - when a browser finding merges with a code one). Keep every merged finding's `receipt`: tier 1 runs each of them, and the finding stands if at least one check passes - a corroborated finding never dies on a single badly-written check. **A merged finding takes the HIGHEST severity of its sources** (Blocks over Warns over Suggests): severity is what routes the audit in Phase 4, so a Block merged down to a Warn would face one skeptic where M2 requires three voters, and two specialists independently flagging the same spot is corroboration, which never lowers confidence. This is a free, mechanical pass over structured data - no re-judging.
-2. **Order and number** - sort by severity (Blocks first, then Warns, then Suggests) and assign a single R1, R2, R3 ... sequence across ALL deduped findings. No gaps, no duplicates. Tag each ID with its merged specialist source(s): `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`. The audit runs next, so some IDs will exit to the Audited out log rather than the report; the sequence stays gap-free across report plus log, and audit verdict lines reference these IDs.
+1. **Merge, sort and number** - Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that path, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one's `key` and record the merge in the report's dedup notes. A merged finding keeps every source receipt (tier 1 runs each of them, and the finding stands if at least one check passes, so a corroborated finding never dies on a single badly-written check), the browser evidence fields beside the code ones, and the highest severity of its sources: severity is what routes the audit in Phase 4, so a Block merged down to a Warn would face one skeptic where M2 requires three voters, and two specialists independently flagging the same spot is corroboration, which never lowers confidence.
+2. **Tag each ID** with its merged specialist string: `**R1** [code] 🚫`, `**R3** [ux, plan] ⚠️`. The audit runs next, so some IDs will exit to the Audited out log rather than the report; the sequence stays gap-free across report plus log, and audit verdict lines reference these IDs.
 
 ### Phase 4: Audit (M2)
 
@@ -208,7 +208,7 @@ The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line -
 
 **Suppress the inlined Summary block.** The shared template inside `<shared_template>` includes its own `### Summary` block. Do NOT render it. Use only the orchestrator-specific Summary below (which adds Specialists run and Deduplicated findings). Otherwise the report ends with two Summary blocks and the reader cannot tell which is authoritative.
 
-**Merging code+browser findings.** When both the code and browser specialists flag the same issue, preserve all fields from both. Do not drop the browser-only evidence fields (Screenshot, Evidence, Expected, Actual) - they pair with the code root cause to form a unified evidence-plus-fix report. The merged finding uses the browser field order from the template, unchanged.
+**Merging code+browser findings.** When both the code and browser specialists flag the same issue, the helper keeps every field from both: the browser evidence fields (Expected, Actual, Screenshot, Evidence) pair with the code root cause to form a unified evidence-plus-fix report, in the template's field order, unchanged.
 
 The tag is the only thing this section adds to a finding. Every row - the three prose keys (`what`, `context`, `fix`), the browser evidence fields, and the audit-time **Receipt** row - is defined by the inlined template and rendered from there:
 
@@ -242,7 +242,7 @@ Rendered exactly as the template's "Audited out" section defines it - placement,
 - Specialists run: X of Y
 - Files reviewed: X
 - Blocks: X | Warns: X | Suggests: X (audit survivors)
-- Deduplicated findings: X (Y raw findings from specialists); audited out: Z
+- Deduplicated findings: X (Y raw findings from specialists, as the helper's stderr line counts them); audited out: Z
 
 End the report with one line so the user knows what happens next: _"The loop now auto-fixes and re-verifies the surviving findings (auto loop in `.claude/skills/shared/hitl-loop.md`); saying 'report only' at the start would have kept this run report-first."_
 

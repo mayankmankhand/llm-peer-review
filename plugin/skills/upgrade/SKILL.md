@@ -13,6 +13,8 @@ allowed-tools:
   - "Bash(gh issue create *)"
   - "Bash(glab issue create *)"
   - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
@@ -83,7 +85,7 @@ The rest go through step 4's audit and step 6's one batch page like every other 
 
 ### 4. Audit (M2)
 
-You are the runner. Assign ids (`R1`, `R2`, ...) across the script's findings and yours, sorted by severity, then run the three tiers exactly as M2 describes: execute every `receipt.check` yourself and save each output under `reports/receipts/<run-stamp>/` per "Where the report is written" below; dispatch tier 2 shards over the surviving Warns and Suggests and, should any finding be a Block, three tier 3 voters, all as `subagent_type=tk:audit-skeptic`, each carrying only its findings' verbatim bytes and the receipt output; tally the verdicts. The typical kill here is C-1 matching a file the project itself owns: the receipt shows the path exists in the project and the skeptic refutes it. The loop's rules are inlined here so nothing is improvised:
+You are the runner. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js` on that path, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. A finding of the script's keeps its convention id as `sourceId`, which the report's summary line shows beside the number. Then run the three tiers exactly as M2 describes: execute every `receipt.check` yourself and save each output under `reports/receipts/<run-stamp>/` per "Where the report is written" below; dispatch tier 2 shards over the surviving Warns and Suggests and, should any finding be a Block, three tier 3 voters, all as `subagent_type=tk:audit-skeptic`, each carrying only its findings' verbatim bytes and the receipt output; tally the verdicts. The typical kill here is C-1 matching a file the project itself owns: the receipt shows the path exists in the project and the skeptic refutes it. The loop's rules are inlined here so nothing is improvised:
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 

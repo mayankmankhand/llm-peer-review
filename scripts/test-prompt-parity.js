@@ -75,5 +75,18 @@ const SITES = [['.claude/commands/review.md', 2], ['.claude/commands/create-plan
 for (const [file, n] of SITES) check(file + ' carries the sentence word for word, ' + n + ' time' + (n === 1 ? '' : 's'), count(read(file), SENTENCE) === n, count(read(file), SENTENCE) + ' found');
 check('model-routing.md, which every site points at, states the registration rule the sentence summarizes', /`\/reload-plugins`/.test(read('.claude/skills/shared/model-routing.md')) && /added by a plugin install or update/.test(read('.claude/skills/shared/model-routing.md')));
 
+console.log('\n4. the merge helper sentence');
+// Issue #211: every runner that combines JSONL from several workers hands the
+// lines to merge-findings.js through one sentence, word for word, so the nine
+// call sites cannot drift back into nine hand-written versions of the pass.
+const MERGE = 'Write every finding line this run collected, the workers\' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that path, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts.';
+const MERGE_SITES = ['.claude/commands/review.md', '.claude/skills/upgrade/SKILL.md', '.claude/skills/shared/criteria-code.md', '.claude/skills/shared/criteria-commands.md', '.claude/skills/shared/criteria-copy.md', '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md', '.claude/skills/review-full/SKILL.md', '.claude/skills/security-audit/SKILL.md'];
+for (const file of MERGE_SITES) check(file + ' carries the merge sentence word for word, once', count(read(file), MERGE) === 1, count(read(file), MERGE) + ' found');
+const byHand = prompts.filter(([, t]) => /Assign R-IDs yourself|assigns Finding IDs after dedup|combine and renumber their findings/.test(t)).map(([f]) => f);
+check('no prompt file keeps the old by-hand wording of the pass', byHand.length === 0, byHand.join(', '));
+const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
+check('the three fragments that describe the pass name the helper', describers.every(f => read(f).includes('merge-findings.js')), describers.filter(f => !read(f).includes('merge-findings.js')).join(', '));
+check('the helper exists where the sentence points', fs.existsSync(path.join(REPO, '.claude/scripts/merge-findings.js')));
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

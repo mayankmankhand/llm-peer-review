@@ -17,6 +17,6 @@ Read the plan file, then read the implementation files. Compare them. Pick one o
 | **Scope Management** | Unplanned additions? Cuts justified and documented? Scope creep? |
 | **Quality Gates** | Success criteria met? Tests written (when the plan warranted them)? Docs updated? |
 
-Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Assign R-IDs yourself after combining and deduping, per the Finding ID format below.
+Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that path, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts.
 
 </procedure>

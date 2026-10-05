@@ -3,6 +3,9 @@ name: review-ux-criteria
 description: The ux review criteria, reading budget, severity anchors, finding ids, and finding contract, preloaded into the review-ux-finder agent. Not a command; the direct-run skill is /tk:review-ux.
 user-invocable: false
 allowed-tools:
+  - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
 ---

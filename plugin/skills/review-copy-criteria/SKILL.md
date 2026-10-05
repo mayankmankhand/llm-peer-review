@@ -3,6 +3,9 @@ name: review-copy-criteria
 description: The copy review criteria, reading budget, severity anchors, finding ids, and finding contract, preloaded into the review-copy-finder agent. Not a command; the direct-run skill is /tk:review-copy.
 user-invocable: false
 allowed-tools:
+  - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
 ---
