@@ -32,17 +32,19 @@ One table, in the same three columns `/tk:review` uses for its own kinds:
 - **Specialist** is the name the review report shows.
 - **Finder agent** names an agent of your own under `.claude/agents/`, without the `tk:` prefix. The toolkit's kinds are already in the table, so a `tk:` name here is a mistake.
 
-The agent is dispatched with the same per-run prompt a toolkit finder gets, and its findings go through the same audit. It needs two things. It must say what it returns (an output contract), because the audit parses its findings. And it must declare a `tools:` line without Edit, Write or NotebookEdit: an agent with no tools line gets every tool, and a finder that can edit could change files before anyone has judged its findings. `/tk:upgrade` tells you when a row names an agent that does not exist, or one that can edit. It does not check the output contract on every upgrade, so that part is yours to get right.
+The agent is dispatched with the same per-run prompt a toolkit finder gets, and its findings go through the same audit. It needs three things. It must say what it returns (an output contract), because the audit parses its findings. It must declare a `tools:` line without Edit, Write or NotebookEdit: an agent with no tools line gets every tool, and a finder that can edit could change files before anyone has judged its findings. And it must carry a `model:` line, `model: inherit` unless you want a particular model: `/tk:review` dispatches your kind with no model, and an agent with no model line follows `CLAUDE_CODE_SUBAGENT_MODEL` whenever a user sets it. `/tk:upgrade` tells you when a row names an agent that does not exist, one that can edit, or one with no model line. It does not check the output contract on every upgrade, so that part is yours to get right.
 
-A minimal agent, saved as `.claude/agents/design-fidelity-finder.md`:
+A minimal agent, saved as `.claude/agents/design-fidelity-finder.md` (its second preload carries the finding contract and the severity anchors the first one refers to; pick the toolkit kind nearest your own):
 
 ```
 ---
 name: design-fidelity-finder
 description: Checks design files against the brand sheet. Returns findings as JSONL.
 tools: Read, Grep, Glob
+model: inherit
 skills:
   - tk:dispatch-contract
+  - tk:review-code-criteria
 ---
 
 You check files under designs/ against the brand sheet in docs/brand.md.

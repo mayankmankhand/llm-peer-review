@@ -1,5 +1,5 @@
 <!--
-  DESIGN-PROFILE.md - this project's design profile (issue #160).
+  DESIGN-PROFILE.md - this project's design profile.
 
   /tk:setup writes this file ONCE, when the project has none, and never overwrites
   it afterwards: it is user-owned, like CLAUDE.md and LESSONS.md. /tk:explore reads
