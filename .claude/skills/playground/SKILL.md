@@ -10,7 +10,7 @@ allowed-tools:
 
 **Use this when:** The user is making a decision that benefits from seeing options side by side, reordering items, toggling between variants, or tuning a value, and a flat markdown comparison would be hard to scan or interact with.
 
-**Don't use this when:** A short markdown list or table is enough (most simple "pick one of two" decisions), the output needs to live in the repo (use markdown), or the user wants a published artifact (use `/codebase-to-course` for learning content, or a regular HTML file in `artifacts/html/` for cycle-bound documents).
+**Don't use this when:** A short markdown list or table is enough (most simple "pick one of two" decisions), the output needs to live in the repo (use markdown), or the user wants a page to read rather than a decision to make (use `/codebase-to-course` for learning content, or the page a toolkit command renders into `artifacts/html/` for cycle-bound documents).
 
 ## Hard Rules
 
@@ -123,7 +123,7 @@ function copyResult() {
 </script>
 ```
 
-Use the `--accent` background and white text per the shared look. Position at the bottom of the page or fixed in the bottom-right corner so it is always reachable.
+Use the `--accent` background and `--badge-text` text per the shared look. Position at the bottom of the page or fixed in the bottom-right corner so it is always reachable.
 
 ### `buildPayload()` sketches per pattern
 

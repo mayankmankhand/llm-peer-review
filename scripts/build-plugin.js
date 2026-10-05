@@ -167,8 +167,8 @@ const SEED_INSTALL_MODES = 'This project runs the LLM Peer Review toolkit. On th
 const SEED_PLUGIN_ONLY = 'This project runs the LLM Peer Review toolkit as the `tk` plugin, so its commands are typed with the `tk:` prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit\'s `toolkit-reference` fragment, at `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`. Open it there when a question is not answered here.';
 const SITE_OVERRIDES = {
   'commands/review.md': [
-    // Routing row: a project's own commands and skills changed, so /tk:review dispatches the commands finder for them.
-    { phrase: '`.claude/commands/` or `.claude/skills/` files changed', keep: true },
+    // Routing row: a project's own commands, skills, agents and rules changed, so /tk:review dispatches the commands finder for them.
+    { phrase: '`.claude/commands/`, `.claude/skills/`, `.claude/agents/` or `.claude/rules/` files changed', keep: true },
   ],
   'commands/index.md': [
     // Example navigation bullet for the mapped project's own extension point.

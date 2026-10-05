@@ -36,7 +36,7 @@ This is a whole-repo audit, so the diff-scoped reading budget does not apply - b
 - Start from the **entry points** (routes, handlers, CLI commands, webhooks, message consumers, public functions) and follow the **security-sensitive** paths from there. Do not read every file in the repo.
 - Prioritize files that handle input, auth, secrets, crypto, file paths, queries, and external calls. Skip vendored code, generated files, and tests except where they reveal a real gap.
 - Stop auditing a path once the risk is judgeable. Depth on the dangerous surfaces beats breadth across the harmless ones.
-- When run directly on a large codebase, you may dispatch focused sub-agents in parallel (e.g. one per area: input/injection, auth/access-control, secrets/crypto, external calls/SSRF), then combine and renumber their findings into one sequence.
+- When run directly on a large codebase, you may dispatch focused sub-agents in parallel (e.g. one per area: input/injection, auth/access-control, secrets/crypto, external calls/SSRF), then combine and renumber their findings into one sequence. Paste the dispatch contract (`.claude/skills/dispatch-contract/SKILL.md` with `.claude/skills/shared/dispatch-format.md`) and the finding contract (`.claude/skills/shared/finding-contract.md`) into each one's prompt with the How to Audit steps for its area (steps 1 and 5 for input, injection and external calls; step 2 for auth and access control; steps 3 and 4 for secrets and crypto) below, and tell it to edit no file: its findings then come back as JSONL with the receipts M2's first tier runs.
 
 ## How to Audit
 

@@ -67,8 +67,6 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat .claude/skills/shared/finding-contract.md`
 
-Security findings use that shape unchanged: the exploit sentence above is sentence two, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described.
-
 ## HTML Companion (when gate fires)
 
 After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:

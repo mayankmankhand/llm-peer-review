@@ -39,6 +39,8 @@ A real finding traces untrusted input from where it **enters** (the source) to w
 
 **Every security finding needs an exploit sentence:** a concrete, one-line "an attacker could ..." that walks input from source to sink. If you cannot write that sentence - because the input is a hardcoded constant, an internal value, or already sanitized upstream - the finding is not real. Drop it. This is the single biggest false-positive killer, and it pairs with the receipt rule in `finding-contract.md` (point at the line; prove the path).
 
+The exploit sentence is the finding's sentence two in the finding contract, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described.
+
 Recognize when something is already safe: a parameterized query, framework auto-escaping (Django, Rails, React outside `dangerouslySetInnerHTML`), or a documented internal sanitizer means do not re-flag it.
 
 ### 4. Severity, and what you do NOT own

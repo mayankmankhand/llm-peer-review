@@ -47,7 +47,7 @@ If the script returns a "Chromium not found" error, run steps 1 and 2 above your
 
 !`cat .claude/skills/shared/browse-api.md`
 
-**Note:** The script also supports `autoStart` (auto-launches the dev server if not running), `a11y` (runs accessibility audits on the page or a specific element), and `responsive` (takes screenshots at multiple viewport widths). See the API reference above for details.
+**Note:** The script also supports `autoStart` (auto-launches the dev server if not running), `a11y` (runs an axe-core accessibility audit of the whole page; it takes no target), and `responsive` (takes screenshots at multiple viewport widths). See the API reference above for details.
 
 !`cat .claude/skills/shared/criteria-browser.md`
 
