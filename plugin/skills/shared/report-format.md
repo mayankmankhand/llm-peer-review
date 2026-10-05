@@ -29,7 +29,7 @@ Derive it mechanically from the findings, never by gut feel:
 ### Looks Good
 - [What's working well - 2-3 items]
 ### What I could not check
-- [One line per named limit of this pass, or the single word "none": a specialist that failed after its retry and was continued past (`[security] ❌ failed, continued without it`), a starting snapshot that could not be taken (`baselineError`, fixes measured from the pinned end), a finding left `unaudited`, a lens whose criteria this run could not apply. The loop rules (M2, M3 in `hitl-loop.md`) send their disclosures here; the HTML page has the same slot, and the markdown never carries less than the page]
+- [One line per named limit of this pass, or the single word "none": a specialist that failed after its retry and was continued past (`[security] ❌ failed, continued without it`), a starting snapshot that could not be taken (`baselineError`, fixes measured from the pinned end), a finding left `unaudited`, a lens whose criteria this run could not apply, a `NOT CHECKED:` line a dispatched specialist returned (`[browser] the server at http://localhost:3000 did not answer, so no page was tested`). The loop rules (M2, M3 in `hitl-loop.md`) send their disclosures here; the HTML page has the same slot, and the markdown never carries less than the page]
 ### Staff Check
 [See Staff Check Variants below for the role matching your review type]
 

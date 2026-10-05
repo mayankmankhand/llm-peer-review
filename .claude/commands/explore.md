@@ -221,7 +221,7 @@ Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root
 **If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
 ### Read past lessons
-After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
+After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ### What to look at
 1. **Entry points** - where does this feature connect to existing code?

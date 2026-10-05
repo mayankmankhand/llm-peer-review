@@ -60,6 +60,10 @@ Read the change like an attacker, not like an author.
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/do-not-report.md"`
 
+The project's own entries, from `.claude/toolkit/do-not-report.md`, in the same format and under the same rules (an entry suppresses a category and never lowers a real severity). A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/do-not-report.md 2>/dev/null || true`
+
 ## Audit Before the Report (M2)
 
 On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
@@ -75,8 +79,6 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md"`
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`
-
-Security findings use that shape unchanged: the exploit sentence above is sentence two, answering when it fires (who is hit belongs in the receipt's demonstrated path, never in a third sentence), or it is the receipt itself when the path can be demonstrated rather than described.
 
 ## HTML Companion (when gate fires)
 

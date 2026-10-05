@@ -1,10 +1,10 @@
 # Project extensions for the toolkit
 
-This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once and never touches the folder again; a plugin update never overwrites anything here.
+This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once and never touches the folder again; a plugin update never overwrites anything here. `/tk:upgrade` may offer the current seed's text for a paragraph of this README that is still an older seed's, and applies nothing without your approval.
 
 Use it when your project needs the toolkit to follow a rule of its own: a kind of review the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
 
-## The five files
+## The six files
 
 Each file has a fixed name. Create only the ones you need.
 

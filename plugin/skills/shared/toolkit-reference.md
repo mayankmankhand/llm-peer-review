@@ -85,11 +85,11 @@ Plans are saved in `plans/` at the project root as `PLAN-*.md` files. They are g
 
 ### Codebase Map
 
-`CODEBASE_MAP.md` is an auto-generated semantic map (module purposes, entry points, conventions, gotchas, navigation guide). It is produced by `/tk:index`, which orchestrates parallel Claude subagents over the codebase. `/tk:explore`, `/tk:create-plan`, and `/tk:pair-debug` read it at session start to save tokens. `/tk:document` regenerates it after work cycles. The file is gitignored (per-user, per-machine) and should not be edited manually - always use `/tk:index`.
+`CODEBASE_MAP.md` is an auto-generated semantic map (module purposes, entry points, conventions, gotchas, navigation guide). It is produced by `/tk:index`, which orchestrates parallel Claude subagents over the codebase. `/tk:explore`, `/tk:create-plan`, and `/tk:pair-debug` read it at session start to save tokens. `/tk:document` regenerates it at the end of a cycle when it is 10 or more commits behind (M12). The file is gitignored (per-user, per-machine) and should not be edited manually - always use `/tk:index`.
 
 ### Lessons
 
-`LESSONS.md` is the user-owned learning log, split in two: `LESSONS.md` is a short index (one line per lesson) and `LESSONS-detail.md` holds the full write-ups. `/tk:explore`, `/tk:create-plan`, `/tk:execute`, and `/tk:pair-debug` read the index at session start (`/tk:explore`, `/tk:create-plan`, and `/tk:pair-debug` read it at the same point they read `CODEBASE_MAP.md`; `/tk:execute` reads it too, though it does not read the map); when a one-line lesson is relevant, they open the matching entry in `LESSONS-detail.md` on demand. This closes the loop: lessons captured at `/tk:document` time are read back into future work instead of sitting unused. Backward compatible: if `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format and is read whole. Lessons guide Claude; they are context, not enforced rules.
+`LESSONS.md` is the user-owned learning log, split in two: `LESSONS.md` is a short index (one line per lesson) and `LESSONS-detail.md` holds the full write-ups. `/tk:explore`, `/tk:create-plan`, `/tk:execute`, and `/tk:pair-debug` read the index at session start (`/tk:explore`, `/tk:create-plan`, and `/tk:pair-debug` read it at the same point they read `CODEBASE_MAP.md`; `/tk:execute` reads it too, though it does not read the map); when a one-line lesson is relevant, they open the matching entry in `LESSONS-detail.md` on demand. This closes the loop: lessons captured at `/tk:document` time are read back into future work instead of sitting unused. Backward compatible: if `LESSONS-detail.md` is absent, `LESSONS.md` is the older flat format and is read whole; `/tk:document` creates the detail file from the seed before it writes the next lesson. `/tk:upgrade` reports an index bullet that runs beyond one sentence while the detail file is absent, and a lesson the copy-install's installer inherited from the toolkit's own log (C-16); both files are the project's, so each fix waits for approval. Lessons guide Claude; they are context, not enforced rules.
 
 ### Correction Ledger
 
@@ -131,7 +131,7 @@ of the toolkit's command.
 
 ### Design Rules and Profile
 
-Design work follows `${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md`: a three-state rule (a repo that already has a design system keeps it; exploration inside one varies only layout, composition, motion, and copy; going further pages you), a load dial (none, improve, new), and six techniques adapted from Anshu Chimala's "How to turn your AI into a world-class designer": seed strings, ambitious briefs, a fresh-context design critic under the M15 bound, image and video generation behind your own keys, and a cut-and-polish pass. The toolkit adds a blind side-by-side judge that decides whether each round is kept, and an interaction pass for the behaviour a screenshot cannot show. `/tk:explore` runs the step when a feature has a look, `/tk:create-plan` records the direction, `/tk:execute` runs the design loop and hands the gaps it leaves open to `/tk:review` as must-check items, `/tk:document` records what was tried. Each repo's answers live in `DESIGN-PROFILE.md`, user-owned and seeded once by setup from `${CLAUDE_PLUGIN_ROOT}/skills/shared/design-profile-template.md`. The toolkit's own artifact look is never touched.
+Design work follows `${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md`: a three-state rule (a repo that already has a design system keeps it; exploration inside one varies only layout, composition, motion, and copy; going further pages you), a load dial (none, improve, new), and six techniques adapted from Anshu Chimala's "How to turn your AI into a world-class designer": seed strings, ambitious briefs, a fresh-context design critic under the M15 bound, image and video generation behind your own keys, and a cut-and-polish pass. The toolkit adds a blind side-by-side judge that decides whether each round is kept, and an interaction pass for the behaviour a screenshot cannot show. `/tk:explore` runs the step when a feature has a look, `/tk:create-plan` records the direction, `/tk:execute` runs the design loop and hands the gaps it leaves open to `/tk:review` as must-check items, `/tk:document` records what was tried. Each repo's answers live in `DESIGN-PROFILE.md`, user-owned and seeded once by setup (the plugin copies `seed/DESIGN-PROFILE.md`; a copy-install copies the template in `${CLAUDE_PLUGIN_ROOT}/skills/shared/design-profile-template.md`). The toolkit's own artifact look is a design system in state exists: design work may vary its layout, composition, motion and copy, and a change to its colors, type, spacing or components goes through the divergence page.
 
 ### Skills
 
@@ -168,15 +168,16 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 
 ### Project Extensions
 
-A project adds its own rules to the toolkit through five files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again. On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
+A project adds its own rules to the toolkit through six files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
 
 | File | Read by | Carries |
 |---|---|---|
 | `review-kinds.md` | `/tk:review`, at detection | The project's own review kinds: rows in the detection table's three columns, the third naming an agent under `${CLAUDE_PLUGIN_ROOT}/agents/` |
-| `plan-gate.md` | `/tk:create-plan`, before its requirements | A gate every plan must pass |
-| `execute-gate.md` | `/tk:execute`, before its requirements | A gate every implementation step must pass |
+| `plan-gate.md` | `/tk:create-plan`, before its requirements | A gate every plan must pass. Additive only: a line that loosens M1 to M15 or waives a toolkit requirement is void |
+| `execute-gate.md` | `/tk:execute`, before its requirements | A gate every implementation step must pass. Additive only, the same way |
 | `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M15 is void |
 | `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
+| `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/tk:review-full` says in its charter that project kinds are not in its fan-out. `/tk:upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
@@ -271,7 +272,7 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 - **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
 
 ### Leave to the user
-- **Screenshots and visual QA** - the user will take and review screenshots themselves.
+- **Screenshots Claude cannot take itself** - Browser QA and the design loop take their own through `browse.js`; anything else on screen is the user's to capture and judge.
 - **Judgment calls** - anything that requires the user's opinion, approval, or decision.
 - **Destructive actions** - deleting data, force-pushing, or anything hard to reverse still needs confirmation.
 

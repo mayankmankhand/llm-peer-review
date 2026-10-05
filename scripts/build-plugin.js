@@ -222,6 +222,13 @@ const SITE_OVERRIDES = {
     { phrase: '`VERSION` beside `.claude/commands/review.md`', keep: true },
     // The same project file, as one way a VERSION is the copy-install's own.
     { phrase: '`.claude/commands/review.md` sits beside it', keep: true },
+    // The settings merge writes no row for a script in the PROJECT's own .claude/scripts/,
+    // dead under the plugin: a project path, kept (the plugin root would say the opposite).
+    { phrase: 'a script in the project\'s own `.claude/scripts/`, which is dead under the plugin', keep: true },
+  ],
+  'commands/document.md': [
+    // The seed /tk:document copies when LESSONS-detail.md is absent (C-16): on the plugin, the plugin's own seed file.
+    { phrase: '`seed/LESSONS-detail.md`', replace: '`${CLAUDE_PLUGIN_ROOT}/seed/LESSONS-detail.md`' },
   ],
   'skills/review-browser/SKILL.md': [
     // The plugin's package.json is at the plugin root; quoted for a root path with a space.
@@ -538,7 +545,10 @@ function injectAllowedTools(text, rules, description) {
 // paths and are removed before scanning. The retired-rows list is exempt: it is
 // the old copy-install rows by definition, read by the upgrade audit and never
 // written into a project as text.
-const SEED_CHECK_EXEMPT = new Set(['seed/retired-permission-rows.txt']);
+// The lesson leads list is exempt too: it quotes the toolkit's own lesson lines,
+// unscoped names and old paths included, and is read by the audit, never
+// written into a project as text.
+const SEED_CHECK_EXEMPT = new Set(['seed/retired-permission-rows.txt', 'seed/toolkit-lesson-leads.txt']);
 const STATE_FILE = '.claude/.toolkit-state.json';
 
 function seedProblems(rel, text, inv) {
@@ -726,6 +736,11 @@ function build(src, version) {
     // The README /tk:setup writes into the project's extension folder (issue #199).
     'seed/toolkit-README.md': path.join(seedDir, 'toolkit-README.md'),
     'seed/retired-permission-rows.txt': path.join(seedDir, 'retired-permission-rows.txt'),
+    // The seed history the upgrade audit reads (C-15 and C-16), written by scripts/seed-history.js
+    // from the release tags: every seeded block an older release shipped, and every bold lead the
+    // toolkit's own LESSONS.md has carried (the copy-installers wrote that file into projects).
+    'seed/historical-seed-blocks.txt': path.join(seedDir, 'historical-seed-blocks.txt'),
+    'seed/toolkit-lesson-leads.txt': path.join(seedDir, 'toolkit-lesson-leads.txt'),
     'seed/rules-toolkit.md': path.join(src, 'rules', 'toolkit.md'),
     'seed/settings.local.json': path.join(seedDir, 'settings.local.json'),
   };

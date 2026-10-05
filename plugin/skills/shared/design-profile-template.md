@@ -10,8 +10,8 @@
   use these sections live in ${CLAUDE_PLUGIN_ROOT}/skills/shared/design-rules.md.
 
   This template ships through the shared-fragment glob, so it is present in every
-  install. It is a template, not this repository's own profile: keep every value
-  below blank here.
+  install. It starts blank: every value below is filled in as this project answers
+  the design questions.
 -->
 # Design Profile
 

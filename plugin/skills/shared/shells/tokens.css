@@ -19,7 +19,7 @@
   --block:#dc2626; --warn:#d97706; --suggest:#2563eb;
   --warn-strong:#b45309; /* AA text/badge variant of --warn (~5:1 contrast); --warn stays for decorative borders only */
   --block-strong:#b91c1c; /* AA variant of --block for red TEXT on --bg-muted (5.9:1); --block itself is 4.4:1 there and fails */
-  --badge-text:#fff;     /* text ON a severity badge; a token because dark mode inverts it */
+  --badge-text:#fff;     /* text ON a severity badge or ON an --accent surface; a token because dark mode inverts it */
   --positive:#15803d;    /* keep / added / pro. NOT a severity - severities are block/warn/suggest */
   /* Tint surfaces for a state drawn ON a card or chip: an "on" chip, a signal
    * or veto tag, a NEW/MOD/DEL file tag. The dark-mode sweep had flattened

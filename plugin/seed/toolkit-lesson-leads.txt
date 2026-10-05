@@ -1,0 +1,211 @@
+# Bold leads the toolkit's own LESSONS.md has carried, for the upgrade audit (C-16).
+# The copy-installers copy that file into a fresh project and the v7.0.x plugin seed carried the same
+# lessons, so a project bullet with one of these leads is the toolkit's lesson. One lead per line.
+# Written by scripts/seed-history.js from the release tags and the working tree; never edit it by hand.
+"Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.
+"Do I understand it?" vs "Can I use it?" is the right split for review skills.
+"Falls back" is not "degrades to nothing" - read what the fallback actually produces.
+"Same command, two gears" vs "new command" decision pattern.
+"Touches no file" is a claim to measure: `git stash create` takes the index lock.
+A "nothing defines X" finding must first refute the generic rule that already covers X.
+A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
+A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.
+A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.
+A caveat in release notes is a deferred defect, not a resolution.
+A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.
+A check that defers to another check must ask whether that other check runs in this range.
+A checked subtask means its wording shipped, not that the nearby diff did.
+A co-location rule is only as strong as its weakest call site.
+A containment check that compares path strings is not containment.
+A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.
+A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.
+A detection pattern must be tested against ordinary prose, not only against what it hunts.
+A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.
+A detector's "this one is fine" rule must be as narrow as the text it recognizes: the audit after it can drop a reported finding, never add a missed one.
+A diff review of already-closed work still earns its keep.
+A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.
+A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.
+A file that is both the maintainer's live config and the downstream seed leaks in both directions.
+A filter whose misses are undetectable must reject only the certain non-matches, never guess the matches.
+A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.
+A fixture that already satisfies one term of a compound gate cannot tell that term from the others; build the fixture from the gate, not from what is nearby.
+A fixture that fails on both pages tells them apart no better than one that passes on both; every-frame redraws made the good page's Delete unclickable too.
+A gate must be countable against the output the model actually produces.
+A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
+A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
+A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
+A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.
+A live check on the friendliest fixture proves the friendly case; write the check against the row the rules actually allow.
+A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.
+A major version bump on additive-only work needs explicit framing.
+A measurable claim in a commit message is a claim until you measure it.
+A missing finding is invisible to the audit; a wrong one is not.
+A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.
+A name that is also a key is a migration decision, not a preference.
+A negative-count receipt needs a pattern that cannot match an incidental word.
+A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".
+A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
+A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.
+A permission you cannot self-provision may have an already-permitted equivalent.
+A pipeline's exit status is the last command's, so `grep | head` always succeeds.
+A plan that promises a one-commit revert must say what happens once later work moves the text.
+A plugin CLI command run inside a project also edits that project's settings file.
+A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.
+A prompt cannot declare a user-owned prerequisite done.
+A prompt's user-facing message is not enforcement.
+A prose sweep needs the wordings that actually occur, not the one you remember writing.
+A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
+A release needs one review of the whole range, not the sum of its per-issue reviews.
+A rewrite keyed on names must be tested on file names that contain those names.
+A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
+A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
+A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.
+A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.
+A self-run consistency check passes while the scoped thing is missing entirely.
+A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.
+A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
+A suite is green when its exit code is 0, not when its tail looks quiet.
+A sweep's receipt is its grep patterns and their output, not the word "clean".
+A test fixture must never carry a real-shaped secret; assemble it at runtime, because the tripwire has no allow-list by design.
+A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.
+A test must plant the state a failure actually leaves, not a convenient stand-in.
+A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.
+A test whose fixture is rejected by two code paths cannot detect either one breaking.
+A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.
+A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.
+A user interrupt also stops running workflow agents, and nothing announces it.
+A version block describes what that version shipped; point at what changed since, never rewrite it.
+A worktree is just a folder, a branch is just a pointer.
+A 🟩 on "ask the user about X" can mislead.
+AI debates surface things standard reviews miss.
+AI peer review recommendations often over-engineer.
+Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.
+An agent file written mid-session is not dispatchable until the session reloads it.
+An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
+An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.
+An audit with only pass and kill discards correct findings that carry the wrong label.
+An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.
+An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.
+An inherited CSS property belongs on the shared root, not copied into each file.
+An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
+Ask what a change means for repos that already installed the last version, before writing the plan.
+Audit before converting.
+Auto-start lifecycle code is hard to verify without a real dev server.
+Before engineering a smarter limit, lift the old one once and see whether it binds.
+Boundary annotations in few-shot examples teach thresholds, not just format.
+Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.
+CLI default-acceptance prompts don't fully translate to chat.
+Call sites paraphrase a shared rule into different behaviors on day one.
+Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.
+Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.
+Check the permission allow-list before designing a mechanism out of shell commands.
+Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
+Copying a script and permitting it are two edits, and only the missing copy is loud.
+Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.
+Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.
+DRY refactors create duplication-of-the-other-kind bugs.
+Define a judgement gate once, in countable terms, consistent with its governing rule.
+Diagnostic output to stderr when stdout is captured by another LLM.
+Don't micro-tag individual bullets.
+Don't state a cited past lesson as if it happened this session.
+Don't trust merged review severities without verifying the source lines.
+Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.
+Editing the currently-running command file trips the harness self-modification guard.
+Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.
+Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.
+Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.
+Extending a running rollup beats adding a competing one.
+FS-probes for "is X installed" should fall through, not be authoritative.
+Fill a plan's Outcomes by replacing the template placeholder, not inserting above it.
+Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.
+Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.
+GPT and Gemini peer review caught things standard reviews missed.
+Generate a long report from parts with one script; never append into a file that is also its own source.
+Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.
+Give a finder a neutral copy of what it judges: a fixture's name and comments state the answer, and a finder with Grep will read the plan.
+Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.
+HTML output is useless if the user only gets a file link - it opens as source in the editor.
+Harden every field on a whitelist, or the whitelist is not a boundary.
+Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.
+Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.
+Hybrid approach beats all-or-nothing.
+In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.
+In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.
+In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.
+Inlining a shared fragment AND repeating its content defeats the point of the fragment.
+Isolate a headless test session's whole home, not only its plugin: a scratch `HOME` is the complete fix.
+Issue framing != actual problem.
+Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.
+Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
+Lazy locators don't throw - validate at parse, not at construction.
+Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.
+Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.
+Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.
+Masking the match that triggered the report is not masking the line.
+Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.
+Mutation-testing a group of assertions is not mutation-testing each assertion.
+Never interpolate shell variables into inline `node -e` strings.
+Never write a literal HTML comment as an example inside an HTML comment.
+Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
+Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
+Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.
+Permission approvals can land in the wrong settings file.
+Pin subagents freely; never switch the main-loop model mid-session.
+Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
+Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
+Prove a harness with the thing it will be used for, not with a trivial prompt.
+Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.
+Read the skeptic's split lines: a refuted row often carries the real defect in a narrower claim.
+Reasoning models share their token budget between reasoning and output.
+Release counts go stale a second time when the fix loop itself changes them; re-sweep after the loop, never before.
+Render a standing page when its content is final, not when it first becomes available.
+Replacing LLM-run prose with a script removes non-determinism and shrinks the permission surface.
+Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.
+Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.
+Review a plan this size with three fresh lenses before executing it.
+Review proposed prompt edits before applying them, and triage the volume hard.
+Review your own AI-generated code before shipping.
+Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.
+Run debates on plans, not just finished work.
+Run your own receipt before you report it as confirmation.
+Scope parity gaps explicitly when fixing one of several.
+Self-enforce release-time conventions in the artifact or the checklist, not in memory.
+Shared files reduce duplication across review skills.
+Silent empty bodies need active detection, not just happy-path returns.
+Skill tool expansions can serve stale command versions.
+Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.
+Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.
+Subagents do NOT auto-discover project skills.
+Tag vocabulary for prompts:
+Test an undo instruction by executing it, not by matching its text.
+The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.
+The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.
+The design critic finds rendering bugs the test suite cannot see.
+The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.
+The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
+Tokenising the shared layer does not tokenise its consumers.
+Two halves of one feature, written in one session, can each be right and still not meet.
+Update (v4.4.0, issue #97):
+Use deterministic scripts for structural data, not LLMs.
+Verify audit findings against file content before acting - subagent claims about file structure are not facts.
+Verify impact, not just existence, before scoping a fix.
+Version bumps touch more files than you think.
+Watch for tool output artifacts in reviews.
+When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.
+When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
+When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.
+When changing user-facing copy, grep for the same description elsewhere.
+When inserting a numbered step, grep for every "step N" reference before and after the insertion.
+When storage is append-only, validate the whole batch before writing any of it.
+Worktree detection: `--git-dir` vs `--git-common-dir`.
+Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.
+Write the validation bar before the result, then honor it when the result is inconvenient.
+XML tags in prompts are a real thing, not just hype.
+`<title>` is RCDATA, so escaping markup inside it changes nothing visible except entities.
+`@axe-core/playwright` is compatible with `playwright-core`
+`failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.
+`for i in "${!array[@]}"` is the idiomatic Bash way to iterate parallel indexed arrays.
+`gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.
+`plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.
+`settings.json` can get modified by research subagents.
+`user-invocable: false` works as documented.

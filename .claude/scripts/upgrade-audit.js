@@ -51,8 +51,8 @@
 //   ### C-12: Criteria reach a worker by preload, not by paste
 //   - **Since:** 7.0.0
 //   - **Runs:** every upgrade            (optional: skip the range filter)
-//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | local-edits | review-kinds)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
+//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
 //   - **Fix:** dispatch the typed finder for the kind; move any pasted criteria into a skill it preloads
@@ -86,7 +86,18 @@
 // project's own files to the model routing rule: an agent in one of those roles,
 // or one a review kind names, with no `model:` line; a dispatch of a toolkit
 // finder or the map helper whose block names no model; and a dispatch of a
-// toolkit judge whose block names one (see c14Block and c14Names). `manual` is not run here at all: the
+// toolkit judge whose block names one (see c14Block and c14Names). seed-blocks
+// (C-15) reads the files setup seeded (CLAUDE.md, LESSONS.md, DESIGN-PROFILE.md
+// and .claude/toolkit/README.md) block by block (SEED_FILES, blocksOf) and
+// flags a block that equals one an older seed shipped, per the plugin's
+// seed/historical-seed-blocks.txt, and not the current seed's, with the
+// current seed's nearest block as the fix (a file that is an older seed's line
+// for line is one finding), plus ${CLAUDE_PLUGIN_ROOT} in a file of the
+// project's own, where Claude Code never expands it. lessons-shape (C-16) reads
+// LESSONS.md and flags a bullet beyond one sentence or 300 characters while
+// LESSONS-detail.md is absent, and a bullet whose bold lead is in the plugin's
+// seed/toolkit-lesson-leads.txt, the toolkit's own lessons that the
+// copy-installers wrote into projects. `manual` is not run here at all: the
 // /tk:upgrade skill judges those by hand (a judgment no grep expresses) and
 // emits findings in the same shape.
 //
@@ -1084,6 +1095,191 @@ function rollbackRecord(P, target) {
   console.error('upgrade-audit: every other key is as it was. Commit ' + STATE_REL + ', then reinstall the ' + target + ' release: its version guard accepts a recorded version equal to its own.');
 }
 
+// --- seeded blocks (C-15) and the lessons index (C-16) --------------------------
+// The text units the toolkit's project seeds are made of, read one way here and
+// by scripts/seed-history.js, the maintainer script that writes the two history
+// seeds from the seed files at every release tag (it requires this file for
+// these readers; the audit runs only when the script is invoked directly):
+//   seed/historical-seed-blocks.txt  one line per block, and per whole file, an
+//                                    older release's seed shipped: hash, kind,
+//                                    project file, first release
+//   seed/toolkit-lesson-leads.txt    every bold lead the toolkit's own
+//                                    LESSONS.md has carried
+// A seeded block is one text unit a seed shipped. Three kinds:
+//   opening-comment  the first HTML comment of the file (DESIGN-PROFILE.md and
+//                    LESSONS.md: the comment that explains the file)
+//   comments         every HTML comment of the file (CLAUDE.md: one per section)
+//   paragraphs       every paragraph of the file, blank-line separated, a fenced
+//                    code block never split (.claude/toolkit/README.md)
+// A block equal to a block an older seed shipped, and not to the current
+// seed's, is seed text that fell behind; a block equal to no seed version is
+// the owner's own text and is never reported. Lines are compared with the byte
+// order mark, the CR and trailing whitespace dropped, so a file saved with
+// Windows line endings is the same seed.
+const HISTORY_FILE = 'historical-seed-blocks.txt';
+const LEADS_FILE = 'toolkit-lesson-leads.txt';
+const HASH_LENGTH = 16;
+// The project files setup seeds: the project path, the seed each comes from
+// under the plugin's seed/ folder, the block kind, and every repository path a
+// release may have shipped that seed at, newest layout first: the seed/ folder
+// from v7.1.0, the committed plugin/seed/ copies of v7.0.x, and before the seed
+// folder existed the repository's own root CLAUDE.md and LESSONS.md, which the
+// copy-installers copied into projects, plus the copy-install's design profile
+// template (v6.2.0 on).
+const SEED_FILES = [
+  { rel: 'CLAUDE.md', seed: 'CLAUDE.md', kind: 'comments', history: ['seed/CLAUDE.md', 'plugin/seed/CLAUDE.md', 'CLAUDE.md'] },
+  { rel: 'LESSONS.md', seed: 'LESSONS.md', kind: 'opening-comment', history: ['seed/LESSONS.md', 'plugin/seed/LESSONS.md', 'LESSONS.md'] },
+  { rel: 'DESIGN-PROFILE.md', seed: 'DESIGN-PROFILE.md', kind: 'opening-comment', history: ['seed/DESIGN-PROFILE.md', 'plugin/seed/DESIGN-PROFILE.md', '.claude/skills/shared/design-profile-template.md'] },
+  { rel: '.claude/toolkit/README.md', seed: 'toolkit-README.md', kind: 'paragraphs', history: ['seed/toolkit-README.md', 'plugin/seed/toolkit-README.md'] },
+];
+const KIND_WORD = { 'opening-comment': 'the comment that explains the file', comments: 'a section comment', paragraphs: 'a paragraph' };
+// The repository paths the toolkit's own lessons file has lived at: the root
+// file every copy-installer copies into a fresh project, and the plugin seed of
+// v7.0.x, which carried the same lessons (from v7.1.0 the seed is blank).
+const LESSON_SOURCES = ['LESSONS.md', 'plugin/seed/LESSONS.md', 'seed/LESSONS.md'];
+const PLUGIN_ROOT_VAR = '${CLAUDE_PLUGIN_ROOT}';
+const STABLE_PLUGIN_PATH = '~/.claude/plugins/data/tk-llm-peer-review/current';
+// How alike (Dice, below) a current block must be to an older one to be
+// offered as its replacement.
+const NEAR_BLOCK = 0.3;
+
+function normalizeLines(text) {
+  return String(text).replace(/^\uFEFF/, '').split('\n').map(l => l.replace(/\r$/, '').replace(/[ \t]+$/, ''));
+}
+function hashLines(lines) {
+  return crypto.createHash('sha256').update(lines.join('\n') + '\n').digest('hex').slice(0, HASH_LENGTH);
+}
+// The whole file, trailing blank lines dropped, so a missing final newline does
+// not make it a different file.
+function fileHash(lines) {
+  const l = lines.slice();
+  while (l.length && l[l.length - 1] === '') l.pop();
+  return hashLines(l);
+}
+// A block: 1-based first and last line, and the lines themselves.
+function blockSpan(lines, a, b) { return { start: a + 1, end: b + 1, lines: lines.slice(a, b + 1) }; }
+// HTML comments: from a line that opens with <!-- (after indentation) to the
+// first line that holds -->, the same line for a one-line comment.
+function commentBlocks(lines) {
+  const out = [];
+  let open = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (open < 0) {
+      if (!/^\s*<!--/.test(lines[i])) continue;
+      open = i;
+    }
+    if (lines[i].includes('-->')) { out.push(blockSpan(lines, open, i)); open = -1; }
+  }
+  return out;
+}
+// Paragraphs: runs of non-blank lines. A fenced code block belongs to the
+// paragraph it starts in, blank lines inside it included.
+function paragraphBlocks(lines) {
+  const out = [];
+  let start = -1;
+  let fenced = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === '' && !fenced) {
+      if (start >= 0) { out.push(blockSpan(lines, start, i - 1)); start = -1; }
+      continue;
+    }
+    if (start < 0) start = i;
+    if (/^\s*(```|~~~)/.test(lines[i])) fenced = !fenced;
+  }
+  if (start >= 0) {
+    let end = lines.length - 1;
+    while (end > start && lines[end].trim() === '') end--;
+    out.push(blockSpan(lines, start, end));
+  }
+  return out;
+}
+function blocksOf(kind, lines) {
+  if (kind === 'comments') return commentBlocks(lines);
+  if (kind === 'opening-comment') return commentBlocks(lines).slice(0, 1);
+  if (kind === 'paragraphs') return paragraphBlocks(lines);
+  throw new Error('upgrade-audit: unknown block kind ' + kind);
+}
+// How alike two blocks are, as the Dice coefficient of their word sets.
+function similarity(a, b) {
+  const words = (ls) => new Set(ls.join(' ').toLowerCase().match(/[a-z0-9][a-z0-9'.-]*/g) || []);
+  const A = words(a);
+  const B = words(b);
+  if (!A.size || !B.size) return 0;
+  let both = 0;
+  for (const w of A) if (B.has(w)) both++;
+  return (2 * both) / (A.size + B.size);
+}
+// One entry per line of the history seed, `<hash> <block|file> <project path>
+// <first release>`; comment lines start with #. Returns project file -> hash ->
+// { kind, release }; the first line for a hash wins.
+function parseHistory(text) {
+  const byFile = new Map();
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const [hash, kind, rel, release] = line.split(/\s+/);
+    if (!hash || !kind || !rel || !release) continue;
+    if (!byFile.has(rel)) byFile.set(rel, new Map());
+    const m = byFile.get(rel);
+    if (!m.has(hash)) m.set(hash, { kind, release });
+  }
+  return byFile;
+}
+// The receipt for a block (or, with A=0, the whole file): prints its lines
+// numbered, then `hash <h>`, and exits 0 only while the hash is still H. The
+// same normalization as normalizeLines and fileHash, so a fix that changes one
+// character of the block, or moves it, fails the receipt.
+const BLOCK_JS = 'const fs=require("fs"),c=require("crypto");'
+  + 'const L=fs.readFileSync(process.env.F,"utf8").replace(/^\\uFEFF/,"").split("\\n").map(l=>l.replace(/\\r$/,"").replace(/[ \\t]+$/,""));'
+  + 'const a=+process.env.A,b=+process.env.B;const s=a?L.slice(a-1,b):L.slice();if(!a)while(s.length&&s[s.length-1]==="")s.pop();'
+  + 's.forEach((l,i)=>console.log((a?a+i:i+1)+":"+l));'
+  + 'const h=c.createHash("sha256").update(s.join("\\n")+"\\n").digest("hex").slice(0,' + HASH_LENGTH + ');console.log("hash "+h);process.exit(h===process.env.H?0:1)';
+function blockCheck(rel, a, b, h) { return 'F=' + shq(rel) + ' A=' + a + ' B=' + b + ' H=' + shq(h) + ' node -e ' + shq(BLOCK_JS); }
+
+// The bullets of a lessons index, HTML comments skipped (the seed's own comment
+// shows an example bullet): each with its first and last line, its text (the
+// continuation lines joined) and its bold lead when it opens with one.
+function lessonBullets(lines) {
+  const out = [];
+  let inComment = false;
+  let cur = null;
+  const flush = () => { if (cur) { out.push(cur); cur = null; } };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (inComment) { if (line.includes('-->')) inComment = false; continue; }
+    if (/^\s*<!--/.test(line)) { flush(); if (!line.includes('-->')) inComment = true; continue; }
+    const m = /^\s*[-*+]\s+(.*)$/.exec(line);
+    if (m) { flush(); cur = { start: i + 1, end: i + 1, text: m[1].trim() }; continue; }
+    if (cur && line.trim() !== '' && !/^\s*#/.test(line)) { cur.text += ' ' + line.trim(); cur.end = i + 1; continue; }
+    flush();
+  }
+  flush();
+  for (const b of out) { const lead = /^\*\*(.+?)\*\*/.exec(b.text); b.lead = lead ? lead[1].trim() : null; }
+  return out;
+}
+// A lead as compared: case, spacing and a closing period or colon set aside.
+function leadKey(lead) { return String(lead).toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.:!]+$/, '').trim(); }
+// Beyond one sentence, or over 300 characters: the index is the always-read
+// surface, so a write-up there costs every session. A sentence ends at a
+// period, question or exclamation mark (closing quotes, stars or a backtick
+// allowed after it) followed by whitespace and more text.
+const SENTENCE_BREAK = /[.!?][\]"')*`]*[ \t]+[^ \t]/g;
+const LONG_BULLET_CHARS = 300;
+function isLongBullet(text) { return text.length > LONG_BULLET_CHARS || (text.match(SENTENCE_BREAK) || []).length > 0; }
+// The receipt for the long-bullet finding: the same reading in awk (comments
+// skipped, continuation lines joined, the same sentence break), printing each
+// bullet beyond the rule as `<line>: <text>` and exiting 0 only while one is
+// left. The caller prefixes the test that LESSONS-detail.md is still absent.
+const LONG_BULLETS_AWK = String.raw`function brk(t,  n) { n = gsub(/[.!?][]"')*` + '`' + String.raw`]*[ \t]+[^ \t]/, "&", t); return n }
+function flush() { if (b) { if (length(t) > ` + LONG_BULLET_CHARS + String.raw` || brk(t) > 0) { print s ": " substr(t, 1, 160); f = 1 } b = 0 } }
+{ sub(/[ \t\r]+$/, "") }
+c { if (index($0, "-->")) c = 0; next }
+/^[ \t]*<!--/ { flush(); if (!index($0, "-->")) c = 1; next }
+/^[ \t]*[-*+][ \t]+/ { flush(); s = NR; t = $0; sub(/^[ \t]*[-*+][ \t]+/, "", t); b = 1; next }
+b && $0 !~ /^[ \t]*$/ && $0 !~ /^[ \t]*#/ { x = $0; sub(/^[ \t]+/, "", x); t = t " " x; next }
+{ flush() }
+END { flush(); exit !f }`;
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
@@ -1644,6 +1840,112 @@ function main() {
           }
         });
       }
+    } else if (c.detector === 'seed-blocks') {
+      // (C-15) The seeded files of the project's own, block by block, against
+      // the plugin's current seed and the history of what older seeds shipped.
+      const historyText = readText(path.join(pluginRoot, 'seed', HISTORY_FILE));
+      const history = historyText === null ? null : parseHistory(historyText);
+      if (history === null) notes.push(c.id + ': no seed/' + HISTORY_FILE + ' under the plugin root, so older seed text is not recognised');
+      const waits = 'a file of the project\'s own, so the edit waits for the batch page\'s approval';
+      for (const sf of SEED_FILES) {
+        const lines = history === null ? null : readLines(P(sf.rel));
+        if (lines === null) continue;
+        const seedLines = readLines(path.join(pluginRoot, 'seed', sf.seed));
+        if (seedLines === null) { notes.push(c.id + ': no seed/' + sf.seed + ' under the plugin root'); continue; }
+        const older = history.get(sf.rel);
+        if (!older) continue;
+        const seedPath = path.join(pluginRoot, 'seed', sf.seed);
+        const current = blocksOf(sf.kind, seedLines);
+        const currentHashes = new Set(current.map(b => hashLines(b.lines)));
+        // The whole file first: one that is an older seed's line for line is
+        // one finding, not one per block.
+        const whole = fileHash(lines);
+        const wholeHit = older.get(whole);
+        if (wholeHit && wholeHit.kind === 'file' && whole !== fileHash(seedLines)) {
+          emit({ id: c.id, key: claim(c.id + ':' + sf.rel + ':file').key, severity: 'suggest', convention: c.title, file: { relPath: sf.rel, line: 1 },
+            what: 'Optional. ' + sf.rel + ' is, line for line, the file the ' + wholeHit.release + ' seed wrote, and the current seed\'s text differs.',
+            fix: 'replace the file with the current seed, ' + seedPath + ', or keep it as it is: nothing in it is yours yet; ' + waits, since: c.since,
+            fields: [{ label: 'Seed file', value: seedPath }],
+            receipt: { check: blockCheck(sf.rel, 0, 0, whole), expect: 'the file\'s lines, numbered, then "hash ' + whole + '", the hash of the file as the ' + wholeHit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
+          continue;
+        }
+        for (const b of blocksOf(sf.kind, lines)) {
+          const h = hashLines(b.lines);
+          const hit = older.get(h);
+          if (!hit || hit.kind !== 'block' || currentHashes.has(h)) continue;
+          // The current seed's nearest block is the replacement; with none
+          // near, the seed file itself is named.
+          let near = null;
+          let score = 0;
+          for (const cb of current) { const s = similarity(b.lines, cb.lines); if (s > score) { score = s; near = cb; } }
+          if (score < NEAR_BLOCK) near = null;
+          const lineRange = (x) => (x.start === x.end ? 'line ' + x.start : 'lines ' + x.start + ' to ' + x.end);
+          const range = lineRange(b);
+          emit({ id: c.id, key: claim(c.id + ':' + sf.rel + ':block:' + h).key, severity: 'suggest', convention: c.title, file: { relPath: sf.rel, line: b.start },
+            what: 'Optional. ' + sf.rel + ' ' + range + ' ' + (b.start === b.end ? 'is' : 'are') + ' a block the ' + hit.release + ' seed wrote (' + KIND_WORD[sf.kind] + '), and the current seed\'s text there differs.',
+            fix: near
+              ? 'replace ' + range + ' with ' + lineRange(near) + ' of the current seed, ' + seedPath + ' (Seed block below), or keep yours; ' + waits
+              : 'the current seed has no block near this one: read ' + seedPath + ' and take the text that fits, or keep yours; ' + waits,
+            since: c.since,
+            fields: near
+              ? [{ label: 'Seed file', value: seedPath + ' ' + lineRange(near) }, { label: 'Seed block', value: near.lines.map(s => s.trim()).join(' ; ') }]
+              : [{ label: 'Seed file', value: seedPath }],
+            receipt: { check: blockCheck(sf.rel, b.start, b.end, h), expect: range + ', numbered, then "hash ' + h + '", the hash of the block as the ' + hit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
+        }
+      }
+      // ${CLAUDE_PLUGIN_ROOT} outside the plugin: Claude Code expands it only in
+      // the plugin's own files, so in a file of the project's it names nothing.
+      // Every file a session reads at its severity, the detail and artifacts
+      // files beside them, and the project's prompt files at warn.
+      const seen = new Set();
+      const rootFiles = SESSION_READ_FILES.concat([['LESSONS-detail.md', 'suggest'], ['artifacts/README.md', 'suggest']], promptFiles.map(r => [r, 'warn']));
+      for (const [rel, severity] of rootFiles) {
+        if (seen.has(rel) || !isFile(P(rel))) continue;
+        seen.add(rel);
+        const prompt = promptFiles.includes(rel);
+        fs.readFileSync(P(rel), 'utf8').split(/\r?\n/).forEach((line, i) => {
+          if (!line.includes(PLUGIN_ROOT_VAR)) return;
+          const { key, n } = claim(c.id + ':' + rel + ':plugin-root:' + digest(line));
+          emit({ id: c.id, key, severity, convention: c.title, file: { relPath: rel, line: i + 1 },
+            what: (severity === 'warn' ? 'Should fix. ' : 'Optional. ') + rel + ' line ' + (i + 1) + ' names ' + PLUGIN_ROOT_VAR + ', which Claude Code expands only inside the plugin\'s own files, so from this file it points at nothing.',
+            fix: 'replace ' + PLUGIN_ROOT_VAR + ' with the stable path ' + STABLE_PLUGIN_PATH + (prompt ? '' : '; ' + waits), since: c.since,
+            receipt: { check: lineCheck(rel, line, n), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
+        });
+      }
+    } else if (c.detector === 'lessons-shape') {
+      // (C-16) The lessons index: one-liners, and none of the toolkit's own.
+      const lines = readLines(P('LESSONS.md'));
+      if (lines !== null) {
+        const bullets = lessonBullets(lines);
+        const waits = 'files of the project\'s own, so the edit waits for the batch page\'s approval';
+        // Write-ups in the index, while there is no detail file to hold them.
+        const long = isFile(P('LESSONS-detail.md')) ? [] : bullets.filter(b => isLongBullet(b.text));
+        if (long.length) {
+          const n = long.length;
+          emit({ id: c.id, key: claim(c.id + ':LESSONS.md:long-bullets').key, severity: 'warn', convention: c.title, file: { relPath: 'LESSONS.md', line: long[0].start },
+            what: 'Should fix. LESSONS.md holds ' + (n === 1 ? 'a bullet' : n + ' bullets') + ' beyond one sentence or over ' + LONG_BULLET_CHARS + ' characters while LESSONS-detail.md is absent, so every session reads the write-ups instead of a one-line index.',
+            fix: 'create LESSONS-detail.md from the plugin seed (' + path.join(pluginRoot, 'seed', 'LESSONS-detail.md') + ') and move each listed bullet\'s write-up there under the same bold lead, leaving one bold line in the index; ' + waits, since: c.since,
+            fields: [{ label: 'Lines', value: long.map(b => String(b.start)).join(', ') }],
+            receipt: { check: 'test ! -e LESSONS-detail.md && awk ' + shq(LONG_BULLETS_AWK) + ' < LESSONS.md', expect: 'one line per bullet beyond one sentence or over ' + LONG_BULLET_CHARS + ' characters, as <line>: <text>; the check exits 0 only while LESSONS-detail.md is absent and such a bullet remains' } });
+        }
+        // The toolkit's own lessons, carried in by a copy-install.
+        const leadsPath = path.join(pluginRoot, 'seed', LEADS_FILE);
+        const leadLines = readLines(leadsPath);
+        if (leadLines === null) notes.push(c.id + ': no seed/' + LEADS_FILE + ' under the plugin root, so inherited lessons are not checked');
+        else {
+          const leads = new Set(leadLines.filter(l => l.trim() && !l.startsWith('#')).map(leadKey));
+          const inherited = bullets.filter(b => b.lead && leads.has(leadKey(b.lead)));
+          if (inherited.length) {
+            const n = inherited.length;
+            emit({ id: c.id, key: claim(c.id + ':LESSONS.md:inherited').key, severity: 'warn', convention: c.title, file: { relPath: 'LESSONS.md', line: inherited[0].start },
+              what: 'Should fix. LESSONS.md carries ' + (n === 1 ? 'a lesson' : n + ' lessons') + ' of the toolkit\'s own: the copy-install\'s installer wrote the toolkit\'s lessons file into projects, so ' + (n === 1 ? 'it describes' : 'these describe') + ' the toolkit\'s history, not this project\'s.',
+              fix: 'remove each listed bullet, and its write-up under the same bold lead in LESSONS-detail.md when it is there; keep any you rely on; ' + waits, since: c.since,
+              fields: [{ label: 'Lines', value: inherited.map(b => String(b.start)).join(', ') }, { label: 'Leads', value: inherited.slice(0, 12).map(b => b.lead).join(' ; ') + (n > 12 ? ' ; and ' + (n - 12) + ' more' : '') }],
+              // The leads as compared: a closing period or colon set aside, case ignored.
+              receipt: { check: 'grep -v ' + shq('^#') + ' -- ' + shq(leadsPath) + ' | sed ' + shq('s/[.:!]*$//') + ' | grep -n -i -F -f - -- LESSONS.md', expect: 'each LESSONS.md line that holds a lead from the toolkit\'s own lessons list, numbered; the check exits 0 only while one remains' } });
+          }
+        }
+      }
     } else if (c.detector === 'local-edits') {
       // The evidence of a local edit is the copy-install's own record: the
       // migration file lists the path, and the manifest the old installer wrote
@@ -1733,4 +2035,10 @@ function main() {
   }
 }
 
-main();
+// The seeded-block and lessons readers, for scripts/seed-history.js (the
+// maintainer script that writes the two history seeds) and its tests, so the
+// history is hashed exactly as the audit hashes a project's file. The audit
+// itself runs only when this script is invoked.
+module.exports = { SEED_FILES, LESSON_SOURCES, HASH_LENGTH, normalizeLines, hashLines, fileHash, blocksOf, similarity, lessonBullets, leadKey, isLongBullet, LONG_BULLET_CHARS, SENTENCE_BREAK, parseHistory };
+
+if (require.main === module) main();

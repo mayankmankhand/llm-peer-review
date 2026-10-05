@@ -28,7 +28,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it is malformed or `/tk:index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
 
-After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/tk:document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ## Worktree Check
 
@@ -192,7 +192,7 @@ Create the `plans/` directory if it doesn't exist.
 
 ## Plan Critic (before the stop)
 
-A plan is judged before it is presented, by a context that did not write it. The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
+A plan is judged before it is presented, by a context that did not write it. The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`. Fallback per that file: when the agent type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
 
 The critic returns gaps, not a grade; the gaps are what the loop acts on.
 

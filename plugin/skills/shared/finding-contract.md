@@ -26,7 +26,7 @@ Open prose per finding is capped at **40 words** before the fix line. A reader w
 | high | `does` | "Blocks. The scanner refuses your next push." |
 | moderate | `probably does` | "Should fix. This probably breaks the first install on a clean machine." |
 | low | `may` | "Optional. A future rename may silence this check." |
-| very low | `I do not know whether` | "Optional. I do not know whether this fires outside CI." |
+| very low | `I do not know whether` | "Optional. I do not know whether this skips the check outside CI." |
 
 Eleven hedges are banned outright, because an uncalibrated hedge reads as anywhere from 20:80 to 80:20 and so carries no information: *it appears, it is possible that, could potentially, consider whether, it may be worth, you might want to, arguably, in a sense, it is worth noting, somewhat, in certain scenarios*.
 
@@ -47,14 +47,14 @@ Whether you write the finding directly (a direct `/tk:review-*` call) or the orc
 - **R2** ⚠️ `file:line` - Should fix. [Sentence one.]
   - **Fix:** [Cost and choice.]
 
-A worked example, so the target is unambiguous - 46 words plus the check's real output:
+A worked example, so the target is unambiguous - 48 words plus the check's real output:
 
 > **R2** ⚠️ `scripts/test-gen-media.js:31` - Should fix. Your own secret scanner will block your next push.
 >   - The new test file's fake keys are shaped like real ones, so the scanner counts three and refuses.
->   - **Fix:** One line in that file: build the fake keys from pieces so they stop matching. Ten minutes.
+>   - **Fix:** One line there: build the fake keys from pieces. Ten minutes, or exempt the file and keep its shape.
 >   - **Receipt:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js` - tripwire hit, three keys flagged at lines 31 to 33, exit 1.
 
-Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Seventeen in the fix line, carrying a cost.
+Eleven words in sentence one, with the harm verb inside it. Eighteen in sentence two, answering when it fires. Nineteen in the fix line, carrying a cost and naming both options.
 
 ## Illustrative Examples
 
@@ -70,7 +70,7 @@ Sentence one is 12 words and names the harm with a verb from the list. Sentence 
 
 ### UX review example
 
-- **R2** ⚠️ `Dashboard.tsx:88` - Should fix. Delete removes work permanently with no confirmation step.
+- **R2** ⚠️ `Dashboard.tsx:88` - Should fix. The Delete control deletes work permanently with no confirmation step.
   - A mistap on mobile destroys unsaved work, and the gesture is next to Edit.
   - **Fix:** One component: a confirm dialog naming the item. An afternoon, or accept the occasional lost record.
 

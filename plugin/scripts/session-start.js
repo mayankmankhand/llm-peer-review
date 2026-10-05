@@ -327,8 +327,8 @@ function notices(projectDir, runningRaw) {
   } else if (cmp === 1) {
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was set up or audited with toolkit ' + reference + ', and this session runs the tk plugin '
-      + running + ', which is newer. Run /tk:upgrade in this project so its own files are checked against the newer '
-      + 'conventions.');
+      + running + ', which is newer. Run /tk:upgrade in this project: its every-upgrade checks cover the rules file, '
+      + 'the settings and the seeded files, and its closing stamp clears this notice.');
   }
   if (copyInstallBeside(projectDir, state)) {
     out.push('Toolkit install notice - tell the user this in plain words at the start of your reply: '

@@ -48,7 +48,7 @@ The text below is this project's own gate, read from `.claude/toolkit/execute-ga
 
 **Model check:** the same JSON's `models` says how this plan is meant to be built. When `models.source` is `plan`, `models.buildModel` is `opus`, and you are not running on Opus, say in one line: "This plan's Models line is <mode>, which builds on Opus; this session runs <your model>. To match it, start a new session, run `/model opus`, then `/tk:execute`." Then carry on: the line is a note, not a stop.
 
-Before implementing, use the lesson index from the JSON (`lessons.content`, one line each; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
+Before implementing, use the lesson index from the JSON (`lessons.content`, one line each; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/tk:document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ## Parallel Steps
 
@@ -89,7 +89,7 @@ When the plan's UI/UX Design section carries a load level of new or improve, the
 - **Media:** run `node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js` through the Bash tool with the tool's maximum timeout; the exit codes and what each one means are in the fragment's Techniques 4 and 5.
 - **Records:** checkpoints per M15, round 0 being the build itself; each round's record and the kept round land in the plan's Outcomes, as the fragment's digest lists them. The loop's open gaps land in the plan's `## Must-check for review` section (M14), with the kept version's screenshot saved to `reports/design/<surface>-final.png` for the `[design]` lines to point at.
 - **Bounds:** the 3-attempt retry bound in When to Stop covers build failures; the design rounds are M15's and never borrow from it.
-- **Registration:** the critic is the `design-critic` agent and the side-by-side judge is the `design-comparer` agent, both dispatched by name. When the toolkit plugin was installed or updated this session and the type is not found, run `/reload-plugins` once before falling back per `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`.
+- **Registration:** the critic is the `design-critic` agent and the side-by-side judge is the `design-comparer` agent, both dispatched by name. When the type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload) before falling back per `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`.
 </conditions>
 
 ## When to Stop
@@ -121,7 +121,7 @@ After completing each step, update the plan file:
 - Update the overall progress percentage at the top
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 
-**Re-render the plan's HTML view** at each step boundary, once the markdown status is updated (not after every subtask, so a long step does not spend its time re-rendering). Rebuild the same payload `/tk:create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Then run the helper with the same stable name:
+**Re-render the plan's HTML view** at each step boundary, once the markdown status is updated (not after every subtask, so a long step does not spend its time re-rendering). Rebuild the same payload `/tk:create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`): when this session can publish, add `--no-abs` to the command below, as `/tk:create-plan` did for the first render. Then run the helper with the same stable name:
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell plan --name PLAN-<basename> \

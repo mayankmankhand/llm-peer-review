@@ -17,7 +17,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it is malformed or `/index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
 
-After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ## Worktree Check
 

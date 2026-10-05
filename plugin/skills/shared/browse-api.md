@@ -10,6 +10,8 @@ cat <run-dir>/actions.json | node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js
 
 Always go through the file, even for a single action: JSON typed inline into `echo '...'` breaks at the first apostrophe inside it.
 
+**The browser finder `/tk:review` dispatches** has no file-writing tool, so it passes the actions as an argument instead: `node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js --actions '<json>'`, the whole JSON inside one pair of single quotes and no apostrophe anywhere in it. Claude Code's command check refuses a quote that is closed and reopened mid-argument, and a JSON escape for the apostrophe tends to be typed back as the apostrophe itself, so match text by a part that has none (text matching is a substring match) and pick fill values without one. When both are given, the argument wins and stdin is ignored. Direct runs keep the file form above.
+
 ## Input Format
 
 ```json

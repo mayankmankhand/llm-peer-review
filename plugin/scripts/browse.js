@@ -84,7 +84,8 @@ const VALID_ACTIONS = ['goto', 'click', 'fill', 'screenshot', 'text', 'value', '
 // ── Error messages ─────────────────────────────────────────────────────────
 
 const ERR = {
-  NO_INPUT: 'No JSON input received on stdin. Pipe a JSON file into this script: cat actions.json | node <path to browse.js>. Run it with --help for the input format.',
+  NO_INPUT: 'No JSON input received. Pipe a JSON file into this script (cat actions.json | node <path to browse.js>) or pass the JSON as one argument (node <path to browse.js> --actions \'<json>\'). Run it with --help for the input format.',
+  NO_ACTIONS_ARG: '--actions needs the JSON as its value: node <path to browse.js> --actions \'<json>\', the whole JSON inside one pair of single quotes with no apostrophe in it. Run it with --help for the input format.',
   INVALID_JSON: (msg) => `Invalid JSON input: ${msg}`,
   NO_ACTIONS: 'Input must include an "actions" array with at least one action.',
   FIRST_MUST_BE_GOTO: 'First action must be "goto" so the browser knows where to navigate.',
@@ -929,9 +930,18 @@ Usage (<scripts> is the toolkit's scripts folder: \${CLAUDE_PLUGIN_ROOT}/scripts
 under the tk plugin, .claude/scripts in a copy-install):
   cat actions.json | node <scripts>/browse.js
   echo '<json>' | node <scripts>/browse.js
+  node <scripts>/browse.js --actions '<json>'
   node <scripts>/browse.js --help
 
-Input format (JSON via stdin):
+  --actions carries the same JSON as one argument, for a caller that cannot
+  write a file. Put the whole JSON inside one pair of single quotes and keep
+  every apostrophe out of it: Claude Code's command check refuses a quote that
+  is closed and reopened mid-argument, and a JSON escape for the apostrophe
+  tends to be typed back as the apostrophe itself. Match text by a part that
+  has none (text matching is a substring match) and pick fill values without
+  one. When both are given, the argument wins and stdin is ignored.
+
+Input format (JSON via stdin or --actions):
   {
     "baseUrl": "http://localhost:3000",
     "autoStart": false,
@@ -999,8 +1009,27 @@ async function main() {
     process.exit(0);
   }
 
-  // Read JSON from stdin
-  const input = await readStdin();
+  // The action JSON comes from stdin (a piped file) or from one `--actions`
+  // argument. The argument form exists for a caller that has no way to write a
+  // file: a dispatched browser finder has Bash but no Write tool, and the
+  // inline forms were measured in a default-mode headless session (7.6.0): a
+  // quoted heredoc and a quote closed and reopened mid-argument are both
+  // refused by Claude Code's command check, and a ' escape is typed back
+  // as a real apostrophe by the model, which breaks the quoting. The one form
+  // that runs is the whole JSON inside one pair of single quotes with no
+  // apostrophe in it, which the help text says. When both are given the
+  // argument wins, so a stray pipe cannot change a run.
+  let input;
+  const actionsAt = process.argv.indexOf('--actions');
+  if (actionsAt !== -1) {
+    input = process.argv[actionsAt + 1];
+    if (input === undefined) {
+      console.error(`\n${ERR.NO_ACTIONS_ARG}\n`);
+      process.exit(1);
+    }
+  } else {
+    input = await readStdin();
+  }
   if (!input.trim()) {
     console.error(`\n${ERR.NO_INPUT}\n`);
     process.exit(1);

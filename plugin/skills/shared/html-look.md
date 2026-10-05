@@ -30,7 +30,7 @@ Pick from this neutral palette unless an element calls for a severity color (see
 | `--text` | `#18181b` | Primary text |
 | `--text-muted` | `#52525b` | Secondary text, captions |
 | `--accent` | `#2563eb` | Links, interactive elements (matches Suggest severity for visual unity) |
-| `--badge-text` | `#fff` | Text on a severity badge. A token rather than a literal because dark mode inverts it |
+| `--badge-text` | `#fff` | Text on a severity badge, and on any `--accent` surface (a chip, a copy-back button). A token rather than a literal because dark mode inverts it |
 | `--accent-soft` | `#eff6ff` | Tint surface under an accent-colored state: an on chip, a signal tag, the version pill, the recommended-option badge |
 | `--positive-soft` | `#dcfce7` | Tint surface under a NEW file tag |
 | `--warn-soft` | `#fef9c3` | Tint surface under a MOD file tag |
@@ -121,7 +121,7 @@ Every interactive HTML artifact (notably from `/tk:playground`) ends with a "cop
 - Position: inline at the end of the main content area, or fixed at the bottom of the page
 - Label: literal text "Copy as markdown" or "Copy as prompt" (whichever fits the use case). No icon-only variants - text is required for clarity.
 - Behavior: copies a markdown-formatted string to the clipboard. The user pastes it back into chat as a new message; that closes the export loop.
-- Visual: solid accent-colored background (`--accent`), white text, slight border radius
+- Visual: solid accent-colored background (`--accent`), `--badge-text` text (white in light mode, near-black in dark mode, where `--accent` lightens), slight border radius
 
 Minimal implementation:
 

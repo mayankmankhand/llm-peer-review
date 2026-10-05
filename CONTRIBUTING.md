@@ -62,7 +62,7 @@ Pass `--resume <session-id>` (from the JSON) with the same `--home` to answer a 
 
 **Release order:**
 
-1. Bump the version: `bash scripts/setup/bump-version.sh <new-version>`. The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`), then rebuilds `plugin/`.
+1. Regenerate the seed history, then bump the version. `node scripts/seed-history.js` rewrites `seed/historical-seed-blocks.txt` (every seeded block each release from v6.0.0 shipped, hashed, for the upgrade audit's C-15) and `seed/toolkit-lesson-leads.txt` (every bold lead the toolkit's own `LESSONS.md` has carried, for C-16) from the release tags and the working tree; commit both with the release. Then bump: `bash scripts/setup/bump-version.sh <new-version>`. The script updates VERSION, package.json, package-lock.json (if present), and the version stamps in the three stamped files (the seeded `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, `.claude/skills/shared/html-outputs.md`), then rebuilds `plugin/`.
 2. In the same change, set the `tk` entry's `source` in `.claude-plugin/marketplace.json` to the full `git-subdir` object below, and do the manual steps below. Commit all of it as one release commit. The gate checks every field, `url` included, against this clone's `origin`.
 
    ```json

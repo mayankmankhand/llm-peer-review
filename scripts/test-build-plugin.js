@@ -70,7 +70,7 @@ function withoutKeptPhrases(emitted, text) {
   return text;
 }
 // The seed files that come straight from seed/ (every seed but the rules file).
-const RAW_SEEDS = ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', 'env.local.example', 'gitattributes', 'gitignore', 'artifacts-README.md', 'toolkit-README.md', 'retired-permission-rows.txt', 'settings.local.json'];
+const RAW_SEEDS = ['CLAUDE.md', 'LESSONS.md', 'LESSONS-detail.md', 'DESIGN-PROFILE.md', 'env.local.example', 'gitattributes', 'gitignore', 'artifacts-README.md', 'toolkit-README.md', 'retired-permission-rows.txt', 'historical-seed-blocks.txt', 'toolkit-lesson-leads.txt', 'settings.local.json'];
 const UNQUOTED_CAT = /!`cat \$\{CLAUDE_PLUGIN_ROOT\}/;
 const QUOTED_CAT = /!`cat "\$\{CLAUDE_PLUGIN_ROOT\}\/[^`"\s]+"`/g;
 const BARE_FAMILY = /(^|[^\w./:\-])\/(review|ask)-\*/;
@@ -157,6 +157,9 @@ function makeFixture() {
   // The project extension folder's README (issue #199): scoped names only, so seedProblems stays quiet.
   write(root, 'seed/toolkit-README.md', '# Project extensions\n\nRead by `/tk:review` and `/tk:create-plan`.\n');
   write(root, 'seed/retired-permission-rows.txt', '# retired rows\nBash(node .claude/scripts/browse.js *)\nBash(bash -n scripts/setup/setup.sh)\nSkill(review)\n');
+  // The seed history (C-15, C-16): hashes, and lesson leads that quote old toolkit text on purpose.
+  write(root, 'seed/historical-seed-blocks.txt', '# seeded blocks\n0123456789abcdef block CLAUDE.md v7.1.0\n');
+  write(root, 'seed/toolkit-lesson-leads.txt', '# leads\nRun /review before every push; the script is .claude/scripts/pre-push-check.js.\n');
   write(root, 'seed/settings.local.json', '{ "permissions": { "allow": ["Bash(git add *)", "Skill(tk:review)"] } }\n');
   write(root, 'scripts/historical-managed-paths.txt', '# a comment line is ignored\n\n.claude/commands/review-code.md\n.claude/skills/shared/output-template.md\nscripts/ask-gpt.js\n');
   // Out of order, one hash twice, a comment and a blank line: the build emits each

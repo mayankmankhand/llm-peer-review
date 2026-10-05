@@ -134,7 +134,7 @@ const PLUGIN = path.join(TMP, 'plugin');
 const build = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN, '--version', '7.1.0'], { cwd: REPO, encoding: 'utf8' });
 check('build-plugin.js builds a 7.1.0 plugin root', build.status === 0 && fs.existsSync(path.join(PLUGIN, '.claude-plugin', 'plugin.json')), build.stdout + build.stderr);
 if (build.status !== 0) finish();
-check('the built root ships the seed and the managed paths the audit reads', ['seed/settings.local.json', 'seed/retired-permission-rows.txt', 'seed/gitignore', 'seed/gitattributes', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'managed-paths.json'].every(r => fs.existsSync(path.join(PLUGIN, r))));
+check('the built root ships the seed and the managed paths the audit reads', ['seed/settings.local.json', 'seed/retired-permission-rows.txt', 'seed/gitignore', 'seed/gitattributes', 'seed/artifacts-README.md', 'seed/rules-toolkit.md', 'seed/historical-seed-blocks.txt', 'seed/toolkit-lesson-leads.txt', 'managed-paths.json'].every(r => fs.existsSync(path.join(PLUGIN, r))));
 check('the built conventions file is the real one, byte for byte', read(path.join(PLUGIN, 'skills', 'shared', 'conventions.md')) === read(REAL_CONVENTIONS));
 const SEED_ALLOW = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.json'))).permissions.allow;
 const SEED_ASK = JSON.parse(read(path.join(PLUGIN, 'seed', 'settings.local.json'))).permissions.ask || [];
@@ -2360,6 +2360,162 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   for (const m of sentence.matchAll(/C-(\d+)(?: to C-(\d+))?/g)) for (let k = Number(m[1]); k <= Number(m[2] || m[1]); k++) covered.add(k);
   check('the upgrade skill\'s rerun list names every script detector the conventions use', detectors.length >= 9 && detectors.includes('agent-models') && detectors.every(x => rerun.includes(x)), 'missing: ' + detectors.filter(x => !rerun.includes(x)).join(','));
   check('the upgrade skill\'s every-upgrade sentence covers every Runs: every upgrade convention', always.includes(14) && always.every(k => covered.has(k)), 'always ' + always.join(',') + '; covered ' + [...covered].join(','));
+}
+
+console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
+{
+  // C-15 and C-16 arrive in 7.6.0 and run on every upgrade, so they need a
+  // plugin root at that version; the 7.1.0 root above shows them out of range.
+  // Both read the real conventions file.
+  const PLUGIN760 = path.join(TMP, 'plugin760');
+  const b760 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN760, '--version', '7.6.0'], { cwd: REPO, encoding: 'utf8' });
+  check('build-plugin.js builds a 7.6.0 plugin root that ships the two seed history files', b760.status === 0 && ['seed/historical-seed-blocks.txt', 'seed/toolkit-lesson-leads.txt'].every(r => fs.existsSync(path.join(PLUGIN760, r))), b760.stdout + b760.stderr);
+  const seed760 = (name) => read(path.join(PLUGIN760, 'seed', name));
+  const audit760 = (d, args) => audit(d, args || [], { pluginRoot: PLUGIN760 });
+  const c15 = (res) => res.findings.filter(f => f.id === 'C-15');
+  const c16 = (res) => res.findings.filter(f => f.id === 'C-16');
+  // A project on the current seeds, audited at 7.6.0, plus whatever the case
+  // adds (null removes a file).
+  const seededCase = (name, files, audited) => {
+    const dir = path.join(TMP, 'c15-' + name);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: audited || '7.6.0', path: 'plugin', auditedVersion: audited || '7.6.0' }, null, 2));
+    write(dir, '.claude/rules/toolkit.md', seed760('rules-toolkit.md'));
+    write(dir, '.claude/settings.local.json', seed760('settings.local.json'));
+    write(dir, '.gitattributes', seed760('gitattributes'));
+    write(dir, '.gitignore', seed760('gitignore'));
+    write(dir, 'artifacts/README.md', seed760('artifacts-README.md'));
+    write(dir, 'CLAUDE.md', seed760('CLAUDE.md'));
+    write(dir, 'LESSONS.md', seed760('LESSONS.md'));
+    write(dir, 'LESSONS-detail.md', seed760('LESSONS-detail.md'));
+    write(dir, 'DESIGN-PROFILE.md', seed760('DESIGN-PROFILE.md'));
+    write(dir, '.claude/toolkit/README.md', seed760('toolkit-README.md'));
+    for (const [rel, text] of Object.entries(files || {})) { if (text === null) fs.rmSync(path.join(dir, rel), { force: true }); else write(dir, rel, text); }
+    return dir;
+  };
+  // Older seed text, as the copy-installers and the v7.0.x plugin wrote it into projects.
+  const OLD_LESSONS_COMMENT = [
+    '<!-- One line per lesson: the bold takeaway only. Full write-ups live in LESSONS-detail.md.',
+    '     Commands read THIS file at session start (it is short on purpose); when a one-liner is',
+    '     relevant to the task at hand, open the matching entry in LESSONS-detail.md for the detail.',
+    '     To add a lesson: put the one-liner here under the right section, and the full write-up in',
+    '     LESSONS-detail.md with the SAME bold lead so the two stay linked. Keep this file short -',
+    '     it is the always-read surface. For deep dives into why a concept works, use /learning-opportunity. -->',
+  ].join('\n');
+  const OLD_CLAUDE_LINE = '<!-- This file is YOURS. Add your project-specific info below. -->';
+  const NEW_CLAUDE_LINE = '<!-- This file is YOURS. Add your project-specific info below. The toolkit never overwrites it. -->';
+  check('the current CLAUDE.md seed carries the section comment the old one grew into', seed760('CLAUDE.md').includes(NEW_CLAUDE_LINE) && !seed760('CLAUDE.md').includes(OLD_CLAUDE_LINE));
+
+  // ---- (a) clean ----
+  let d = seededCase('clean');
+  r = audit760(d);
+  check('C-15 and C-16 are in range at 7.6.0, and a project on the current seeds has no finding from either', /C-15, C-16/.test(r.summary) && c15(r).length === 0 && c16(r).length === 0, r.summary + ' ' + JSON.stringify(c15(r).concat(c16(r))).slice(0, 400));
+
+  // ---- (b) an older opening comment in LESSONS.md ----
+  d = seededCase('old-lessons', { 'LESSONS.md': seed760('LESSONS.md').replace(/<!--[\s\S]*?-->/, OLD_LESSONS_COMMENT) });
+  r = audit760(d);
+  let f = c15(r);
+  let out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-15: a LESSONS.md whose opening comment is the one the copy-installers wrote is one Optional block finding at line 3, naming a release before 7.1.0, with the current comment as its Seed block', f.length === 1 && f[0].file.line === 3 && f[0].severity === 'suggest' && /the v[5-7]\.\d+\.\d+ seed wrote/.test(f[0].what) && !/v7\.[1-9]\.\d+ seed wrote/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && /tk:document/.test(x.value)) && f[0].fields.some(x => x.label === 'Seed file' && /seed[\\/]LESSONS\.md lines \d+ to \d+$/.test(x.value)), JSON.stringify(f).slice(0, 700));
+  check('  its receipt prints the block numbered from line 3 and its hash, and passes', receiptShows(f[0], out) && /\n8:/.test(out.stdout) && /hash [0-9a-f]{16}/.test(out.stdout), out.stdout.slice(0, 300));
+  write(d, 'LESSONS.md', seed760('LESSONS.md'));
+  check('C-15: replacing the comment with the current seed\'s clears the finding, and the old receipt no longer passes', c15(audit760(d)).length === 0 && runReceipt(d, f[0]).status !== 0);
+
+  // ---- (c) a rewritten block ----
+  d = seededCase('rewritten', { 'LESSONS.md': seed760('LESSONS.md').replace(/<!--[\s\S]*?-->/, '<!-- Our own notes on how we keep lessons. -->') });
+  check('C-15: a block that equals no seed version is the owner\'s own and is no finding', c15(audit760(d)).length === 0);
+
+  // ---- (d) CLAUDE.md: one comment from an older seed beside the owner's own section ----
+  d = seededCase('old-claude-line', { 'CLAUDE.md': seed760('CLAUDE.md').replace(NEW_CLAUDE_LINE, OLD_CLAUDE_LINE) + '\n## Ours\n\nOur own section, kept.\n' });
+  r = audit760(d);
+  f = c15(r);
+  check('C-15: a CLAUDE.md with one section comment from an older seed, beside the owner\'s own text, is one finding for that comment, the current comment its Seed block', f.length === 1 && f[0].file.line === 3 && /a section comment/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === NEW_CLAUDE_LINE), JSON.stringify(f).slice(0, 500));
+  check('  its receipt shows the line and passes', f.length === 1 && receiptShows(f[0], runReceipt(d, f[0])));
+
+  // ---- (e) the extension README: one paragraph still v7.4.0's beside one the project rewrote ----
+  const README_NOW = seed760('toolkit-README.md');
+  check('the current extension README says six files', README_NOW.includes('## The six files'));
+  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The six files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
+  r = audit760(d);
+  f = c15(r);
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The six files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
+
+  // ---- (f) a whole file that is an older seed's ----
+  const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md - this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).');
+  check('the 7.5.x profile seed differs from the current one in its second line', OLD_PROFILE !== seed760('DESIGN-PROFILE.md') && OLD_PROFILE.split('\n').length === seed760('DESIGN-PROFILE.md').split('\n').length);
+  d = seededCase('old-profile-file', { 'DESIGN-PROFILE.md': OLD_PROFILE.replace(/\n/g, '\r\n') });
+  r = audit760(d);
+  f = c15(r);
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  // The release named is the first whose seed had this text once trailing
+  // whitespace is set aside, which may be earlier than the last release that
+  // shipped the file byte for byte.
+  check('C-15: a DESIGN-PROFILE.md that is, line for line, the 7.5.x seed (saved with Windows line endings) is one whole-file finding naming a 7.x release, whose receipt passes', f.length === 1 && f[0].key === 'C-15:DESIGN-PROFILE.md:file' && /line for line, the file the v7\.\d+\.\d+ seed wrote/.test(f[0].what) && receiptShows(f[0], out) && /hash [0-9a-f]{16}/.test(out.stdout), JSON.stringify(f).slice(0, 400) + out.stdout.slice(0, 200));
+  write(d, 'DESIGN-PROFILE.md', OLD_PROFILE.replace(/\n/g, '\r\n') + '\r\n## Our palette\r\n\r\nTeal.\r\n');
+  r = audit760(d);
+  f = c15(r);
+  check('C-15: once the owner adds a section the file is no seed\'s, and its opening comment, still an older seed\'s, is one block finding instead', f.length === 1 && f[0].key.startsWith('C-15:DESIGN-PROFILE.md:block:') && f[0].file.line === 1 && /the v7\.\d+\.\d+ seed wrote \(the comment that explains the file\)/.test(f[0].what), JSON.stringify(f).slice(0, 400));
+
+  // ---- (g) ${CLAUDE_PLUGIN_ROOT} outside the plugin ----
+  d = seededCase('plugin-root', {
+    'CLAUDE.md': seed760('CLAUDE.md') + '\nRead `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` first.\n',
+    'LESSONS.md': seed760('LESSONS.md') + '\n- **The loop lives in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md.**\n',
+    '.claude/commands/ship.md': '# Ship\n\nRun `node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js` first.\n',
+  });
+  r = audit760(d);
+  f = c15(r);
+  const byRel = (rel) => f.filter(x => x.file.relPath === rel);
+  check('C-15: ${CLAUDE_PLUGIN_ROOT} in CLAUDE.md is a Should fix, in LESSONS.md an Optional, in a command of the project\'s own a Should fix, each naming the stable path and each receipt showing its line', byRel('CLAUDE.md').length === 1 && byRel('CLAUDE.md')[0].severity === 'warn' && byRel('LESSONS.md').length === 1 && byRel('LESSONS.md')[0].severity === 'suggest' && byRel('.claude/commands/ship.md').length === 1 && byRel('.claude/commands/ship.md')[0].severity === 'warn' && f.length === 3 && f.every(x => /stable path ~\/\.claude\/plugins\/data\/tk-llm-peer-review\/current/.test(x.fix)) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 600) + allReceiptsShow(d, f).join(' | '));
+  const claudeHit = byRel('CLAUDE.md')[0];
+  write(d, 'CLAUDE.md', seed760('CLAUDE.md') + '\nRead `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/hitl-loop.md` first.\n');
+  check('C-15: the stable path clears the CLAUDE.md finding, and its old receipt no longer passes', !!claudeHit && !c15(audit760(d)).some(x => x.file.relPath === 'CLAUDE.md') && runReceipt(d, claudeHit).status !== 0);
+
+  // ---- (h) range ----
+  const BEHIND = { 'CLAUDE.md': seed760('CLAUDE.md').replace(NEW_CLAUDE_LINE, OLD_CLAUDE_LINE) };
+  r = audit(seededCase('range-710', BEHIND), []);
+  check('C-15 and C-16 are out of range while the plugin is below 7.6.0: an older comment emits nothing', !/C-15|C-16/.test(r.summary) && c15(r).length === 0 && c16(r).length === 0, r.summary);
+  r = audit760(seededCase('range-760', BEHIND, '7.6.0'));
+  check('C-15 runs on every upgrade: a project already audited at 7.6.0 still gets the finding', /C-15/.test(r.summary) && c15(r).length === 1, r.summary);
+
+  console.log('\n9e. the lessons index holds one-liners (C-16)');
+  const LEADS = seed760('toolkit-lesson-leads.txt').split(/\r?\n/).filter(l => l && !l.startsWith('#'));
+  check('the shipped leads list carries the toolkit\'s own lessons, its first one included', LEADS.length >= 140 && LEADS.includes('XML tags in prompts are a real thing, not just hype.'), LEADS.length + ' leads');
+  const INDEX = (bullets) => '# Lessons Learned (Index)\n\n<!-- One line per lesson. An index line looks like\n       - **The takeaway, in one bold sentence.** -->\n\n## What I Learned\n\n' + bullets.join('\n') + '\n';
+  const LONG = '- **Cache the token.** The login call is slow, so we keep the token in memory for an hour. It saved three seconds per request in the profiler.';
+  // ---- (a) a write-up in the index, no detail file ----
+  d = seededCase('fat', { 'LESSONS.md': INDEX(['- **Read the map first.**', LONG, '- **Name the port.**']), 'LESSONS-detail.md': null });
+  r = audit760(d);
+  f = c16(r);
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: an index with one bullet beyond one sentence and no detail file is one Should fix listing that line, whose receipt prints that bullet alone and passes', f.length === 1 && f[0].key === 'C-16:LESSONS.md:long-bullets' && f[0].severity === 'warn' && f[0].file.line === 9 && f[0].fields.some(x => x.label === 'Lines' && x.value === '9') && receiptShows(f[0], out) && outLines(out.stdout).length === 1 && /seed[\\/]LESSONS-detail\.md/.test(f[0].fix), JSON.stringify(f).slice(0, 500) + out.stdout);
+  write(d, 'LESSONS-detail.md', seed760('LESSONS-detail.md'));
+  check('C-16: once LESSONS-detail.md exists the index is judged no further, and the old receipt no longer passes', c16(audit760(d)).length === 0 && runReceipt(d, f[0]).status !== 0);
+  // ---- (b) one sentence over 300 characters ----
+  const WIDE = '- **A very long lead that goes on and on about the one thing we learned about the deployment pipeline and the way the cache behaves under load when the region fails over to the secondary and the health checks lag behind the real state of the cluster for a minute or two which is long enough to matter for users mid-checkout and for the on-call engineer.**';
+  check('the wide bullet is one sentence over 300 characters', WIDE.length > 300 && !/[.!?][\]"')*`]*[ \t]+[^ \t]/.test(WIDE));
+  d = seededCase('wide', { 'LESSONS.md': INDEX([WIDE]), 'LESSONS-detail.md': null });
+  f = c16(audit760(d));
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: a one-sentence bullet over 300 characters is a finding too, its receipt passing', f.length === 1 && f[0].fields.some(x => x.label === 'Lines' && x.value === '8') && receiptShows(f[0], out), JSON.stringify(f).slice(0, 300) + out.stdout);
+  // ---- (c) continuation lines ----
+  d = seededCase('wrapped', { 'LESSONS.md': INDEX(['- **Keep the port.** The dev server moves when two', '  projects run at once. Pin it in .env.']), 'LESSONS-detail.md': null });
+  f = c16(audit760(d));
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: a bullet wrapped onto a second line is read whole, and the receipt prints it as one line', f.length === 1 && f[0].fields.some(x => x.label === 'Lines' && x.value === '8') && /^8: .*when two projects run at once\. Pin it/m.test(out.stdout), out.stdout);
+  // ---- (d) one-liners, no detail file ----
+  d = seededCase('terse', { 'LESSONS.md': INDEX(['- **Read the map first.**', '- **Name the port (see #12).**', '- **Use `git rev-parse` v2.0.**']), 'LESSONS-detail.md': null });
+  check('C-16: one-liners with no detail file are no finding, a version number or a parenthesis included, and the seed\'s example bullet inside its comment is not a bullet', c16(audit760(d)).length === 0, JSON.stringify(c16(audit760(d))).slice(0, 300));
+  // ---- (e) the toolkit's own lessons ----
+  d = seededCase('inherited', { 'LESSONS.md': INDEX(['- **Read the map first.**', '- **XML tags in prompts are a real thing, not just hype.**', '- **hybrid approach beats all-or-nothing**']) });
+  r = audit760(d);
+  f = c16(r);
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: two bullets whose leads are the toolkit\'s own lessons (one lowercased, its period dropped) are one Should fix listing both lines and leads, whose receipt numbers both and passes', f.length === 1 && f[0].key === 'C-16:LESSONS.md:inherited' && f[0].severity === 'warn' && f[0].fields.some(x => x.label === 'Lines' && x.value === '9, 10') && f[0].fields.some(x => x.label === 'Leads' && /XML tags/.test(x.value) && /hybrid approach/.test(x.value)) && receiptShows(f[0], out) && /(^|\n)10:/.test(out.stdout) && outLines(out.stdout).length === 2, JSON.stringify(f).slice(0, 500) + out.stdout);
+  write(d, 'LESSONS.md', INDEX(['- **Read the map first.**']));
+  check('C-16: removing the inherited bullets clears the finding, and the old receipt no longer passes', c16(audit760(d)).length === 0 && runReceipt(d, f[0]).status !== 0);
+  // ---- (f) no index at all ----
+  d = seededCase('no-lessons', { 'LESSONS.md': null, 'LESSONS-detail.md': null });
+  check('C-16: a project with no LESSONS.md has no finding', c16(audit760(d)).length === 0);
 }
 
 console.log('\n10. errors and usage');
