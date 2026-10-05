@@ -267,6 +267,41 @@ function runActions(actions, extraArgs) {
   check('value: --help lists the action and its field', /\n  value +Read the current value of a form field\n +Fields: target/.test(help.stdout), help.stdout.slice(0, 200));
 }
 
+// --- 6. --actions: the JSON as one argument, for a caller with no Write tool -------
+// A dispatched browser finder has Bash but no Write tool, so it cannot make the
+// actions file the stdin form needs, and an inline echo breaks at the first
+// apostrophe. `--actions '<json>'` takes the same JSON as one argument, parsed
+// exactly like stdin, and its help tells the caller to keep apostrophes out of
+// the argument: the 7.6.0 headless probe found that Claude Code's command check
+// refuses a quote closed and reopened mid-argument, and that the model types a
+// JSON escape for the apostrophe back as the apostrophe itself.
+console.log('\n6. --actions');
+function runArgs(extraArgs, stdinText) {
+  const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, BROWSE_STUB_BROWSER: 'fake', BROWSE_STUB_LOG: path.join(sandbox, 'args.jsonl'), BROWSE_STUB_PID_FILE: pidFile });
+  const r = spawnSync(process.execPath, ['--require', preload, SCRIPT].concat(extraArgs), { cwd: project, env, input: stdinText || '', encoding: 'utf8', timeout: 25000 });
+  let json = null;
+  try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json };
+}
+{
+  // The apostrophe is written the way a single-quoted shell argument has to carry it.
+  const argJson = '{"baseUrl":"http://127.0.0.1:9","actions":[{"type":"goto","url":"/"},{"type":"fill","target":"css:#f","value":"don\\u0027t"},{"type":"value","target":"css:#f"}]}';
+  const run = runArgs(['--actions', argJson]);
+  const acts = (run.json && run.json.actions) || [];
+  check('--actions: the JSON argument is accepted with nothing on stdin and runs to the end', run.json !== null && run.json.ok === true && acts.length === 3, run.stdout.slice(0, 400) + run.stderr.slice(0, 200));
+  check('--actions: the argument goes through the same JSON parser as stdin (a \\u0027 escape reaches the field as an apostrophe)', acts[2] && acts[2].value === "don't", JSON.stringify(acts[2]));
+
+  const stdinJson = JSON.stringify({ baseUrl: 'http://127.0.0.1:9', actions: [{ type: 'goto', url: '/' }] });
+  const both = runArgs(['--actions', argJson], stdinJson);
+  check('--actions: the argument wins when stdin also carries JSON', both.json !== null && both.json.ok === true && ((both.json.actions || []).length === 3), both.stdout.slice(0, 300));
+
+  const bare = runArgs(['--actions']);
+  check('--actions: the flag with no value is the script\'s own error, exit 1, no stack trace', bare.status === 1 && /--actions needs the JSON as its value/.test(bare.stderr) && !/^\s+at /m.test(bare.stderr), 'exit ' + bare.status + ' ' + bare.stderr.slice(0, 300));
+
+  const help = runArgs(['--help']);
+  check('--actions: --help names the argument and says the JSON sits in one pair of single quotes with no apostrophe inside', /--actions '<json>'/.test(help.stdout) && /one pair of single quotes/.test(help.stdout) && /keep\s+every apostrophe out of it/.test(help.stdout), help.stdout.slice(0, 900));
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
