@@ -1262,15 +1262,18 @@ function leadKey(lead) { return String(lead).toLowerCase().replace(/\s+/g, ' ').
 // Beyond one sentence, or over 300 characters: the index is the always-read
 // surface, so a write-up there costs every session. A sentence ends at a
 // period, question or exclamation mark (closing quotes, stars or a backtick
-// allowed after it) followed by whitespace and more text.
-const SENTENCE_BREAK = /[.!?][\]"')*`]*[ \t]+[^ \t]/g;
+// allowed after it) followed by whitespace and more text. A period right
+// after a single letter (e.g., i.e., a.m.) is an abbreviation, not an end, so
+// a one-sentence bullet that uses one is not reported (review fix R4).
+const SENTENCE_BREAK = /(?:[!?]|(?<!(?:^|[^A-Za-z])[A-Za-z])\.)[\]"')*`]*[ \t]+[^ \t]/g;
 const LONG_BULLET_CHARS = 300;
 function isLongBullet(text) { return text.length > LONG_BULLET_CHARS || (text.match(SENTENCE_BREAK) || []).length > 0; }
 // The receipt for the long-bullet finding: the same reading in awk (comments
-// skipped, continuation lines joined, the same sentence break), printing each
+// skipped, continuation lines joined, the same sentence break and abbreviation
+// rule), printing each
 // bullet beyond the rule as `<line>: <text>` and exiting 0 only while one is
 // left. The caller prefixes the test that LESSONS-detail.md is still absent.
-const LONG_BULLETS_AWK = String.raw`function brk(t,  n) { n = gsub(/[.!?][]"')*` + '`' + String.raw`]*[ \t]+[^ \t]/, "&", t); return n }
+const LONG_BULLETS_AWK = String.raw`function brk(t,  n, i, m, pre) { n = 0; i = 1; while (match(substr(t, i), /[.!?][]"')*` + '`' + String.raw`]*[ \t]+[^ \t]/)) { m = i + RSTART - 1; pre = substr(t, 1, m - 1); if (!(substr(t, m, 1) == "." && pre ~ /(^|[^A-Za-z])[A-Za-z]$/)) n++; i = m + RLENGTH - 1 } return n }
 function flush() { if (b) { if (length(t) > ` + LONG_BULLET_CHARS + String.raw` || brk(t) > 0) { print s ": " substr(t, 1, 160); f = 1 } b = 0 } }
 { sub(/[ \t\r]+$/, "") }
 c { if (index($0, "-->")) c = 0; next }
@@ -1848,9 +1851,14 @@ function main() {
       if (history === null) notes.push(c.id + ': no seed/' + HISTORY_FILE + ' under the plugin root, so older seed text is not recognised');
       const waits = 'a file of the project\'s own, so the edit waits for the batch page\'s approval';
       for (const sf of SEED_FILES) {
-        const lines = history === null ? null : readLines(P(sf.rel));
+        // Read as scripts/seed-history.js hashed the history: the byte order
+        // mark, a CR and trailing blanks dropped, or a file saved with any of
+        // them would never match an older seed (review fix R10).
+        const text = history === null ? null : readText(P(sf.rel));
+        const lines = text === null ? null : normalizeLines(text);
         if (lines === null) continue;
-        const seedLines = readLines(path.join(pluginRoot, 'seed', sf.seed));
+        const seedText = readText(path.join(pluginRoot, 'seed', sf.seed));
+        const seedLines = seedText === null ? null : normalizeLines(seedText);
         if (seedLines === null) { notes.push(c.id + ': no seed/' + sf.seed + ' under the plugin root'); continue; }
         const older = history.get(sf.rel);
         if (!older) continue;

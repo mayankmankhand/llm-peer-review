@@ -93,6 +93,8 @@ const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
 const SCRIPT = path.join(REPO, '.claude', 'scripts', 'upgrade-audit.js');
+// The readers the script exports (it runs its audit only when invoked directly).
+const sb = require(SCRIPT);
 const REAL_CONVENTIONS = path.join(REPO, '.claude', 'skills', 'shared', 'conventions.md');
 let passed = 0; const failures = [];
 function check(name, cond, detail) {
@@ -2420,6 +2422,13 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
   write(d, 'LESSONS.md', seed760('LESSONS.md'));
   check('C-15: replacing the comment with the current seed\'s clears the finding, and the old receipt no longer passes', c15(audit760(d)).length === 0 && runReceipt(d, f[0]).status !== 0);
 
+  // ---- (b2) the same older comment, saved with a byte order mark, CRLF and trailing blanks (review fix R10) ----
+  d = seededCase('old-lessons-bom', { 'LESSONS.md': '\uFEFF' + seed760('LESSONS.md').replace(/<!--[\s\S]*?-->/, OLD_LESSONS_COMMENT.replace(/\n/g, '  \r\n')) });
+  r = audit760(d);
+  f = c15(r);
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-15: the same older comment saved with a byte order mark, CRLF and trailing blanks is still found at line 3, and its receipt passes', f.length === 1 && f[0].file.line === 3 && receiptShows(f[0], out), JSON.stringify(f).slice(0, 300) + out.stdout.slice(0, 200));
+
   // ---- (c) a rewritten block ----
   d = seededCase('rewritten', { 'LESSONS.md': seed760('LESSONS.md').replace(/<!--[\s\S]*?-->/, '<!-- Our own notes on how we keep lessons. -->') });
   check('C-15: a block that equals no seed version is the owner\'s own and is no finding', c15(audit760(d)).length === 0);
@@ -2497,6 +2506,13 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
   f = c16(audit760(d));
   out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
   check('C-16: a one-sentence bullet over 300 characters is a finding too, its receipt passing', f.length === 1 && f[0].fields.some(x => x.label === 'Lines' && x.value === '8') && receiptShows(f[0], out), JSON.stringify(f).slice(0, 300) + out.stdout);
+  // ---- (b2) abbreviations are not sentence ends (review fix R4) ----
+  const ABBR = '- **Document edge cases instead (e.g. trap cleanup in one-liners), i.e. keep the script readable.**';
+  check('isLongBullet: a period after a single letter is an abbreviation, not a break, while a real second sentence still is', !sb.isLongBullet(ABBR) && !sb.isLongBullet('Pin the version (v7.5.1) and move on') && sb.isLongBullet('Stop here. Then rerun it') && sb.isLongBullet('Is it done? Yes.'));
+  d = seededCase('abbr', { 'LESSONS.md': INDEX(['- **Read the map first.**', ABBR, LONG]), 'LESSONS-detail.md': null });
+  f = c16(audit760(d));
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: a one-sentence bullet with e.g. and i.e. is not listed, the write-up beside it is, and the awk receipt agrees line for line', f.length === 1 && f[0].fields.some(x => x.label === 'Lines' && x.value === '10') && receiptShows(f[0], out) && outLines(out.stdout).length === 1 && /^10:/m.test(out.stdout), JSON.stringify(f).slice(0, 300) + out.stdout);
   // ---- (c) continuation lines ----
   d = seededCase('wrapped', { 'LESSONS.md': INDEX(['- **Keep the port.** The dev server moves when two', '  projects run at once. Pin it in .env.']), 'LESSONS-detail.md': null });
   f = c16(audit760(d));
