@@ -90,7 +90,7 @@ If the command fails partway through, it is safe to rerun. Leftover `/tmp/tmp.*`
 This copies:
 - `.claude/commands/` (all slash command definitions)
 - `.claude/skills/` (all skill definitions - review specialists, learning-opportunity, project-context - plus the shared reference files and the prebuilt HTML shells in `shared/shells/`)
-- `.claude/agents/` (all worker definitions - the review finder, index mapper, correction extractor, and design critic, carrying their model, effort, and tool settings - always updated)
+- `.claude/agents/` (every worker definition - the review finders, the judges and critics that audit their work, the index mapper, and the correction extractor - carrying their model, effort, and tool settings - always updated)
 - `.claude/rules/toolkit.md` (the short toolkit rules seed, version-stamped - always updated; the long manual is `.claude/skills/shared/toolkit-reference.md` and the HTML output rules are `.claude/skills/shared/html-outputs.md`, both copied with the shared files and stamped)
 - `.claude/settings.local.json` (permission config - preserved if it already exists; new toolkit permissions are merged in on re-run)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
@@ -99,7 +99,7 @@ This copies:
 - `.claude/scripts/correction-ledger.js` (correction ledger capture and rollup helper behind `/document` and `/error-analysis` - always updated)
 - `.claude/scripts/gen-media.js` (the design workflow's seed and media helper: seeds, images, video, matting behind the user's own keys - always updated)
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` (HTML renderer + cross-platform artifact opener - always updated)
-- `.claude/scripts/` (ask-gpt.js, env-local.js, ask-gemini.js, browse.js, and a quarantined `package.json` + `package-lock.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched, issue #91)
+- `.claude/scripts/` (ask-gpt.js, env-local.js, ask-gemini.js, browse.js, and a quarantined `package.json` + `package-lock.json` - runtime scripts and their deps live here so the project's root `package.json` stays untouched)
 - `artifacts/README.md` (scaffold for the gitignored `artifacts/html/` output directory)
 - `CLAUDE.md` (project instructions template - skipped if it already exists)
 - `LESSONS.md` (learning log index - skipped if it already exists; read at session start so past lessons feed back into new work)
@@ -128,7 +128,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 **What gets updated** (always overwritten - manifest-tracked, and backed up first when the copy on disk differs):
 - `.claude/commands/` - all slash command definitions
-- `.claude/agents/` - all worker definitions (review finder, index mapper, correction extractor, design critic)
+- `.claude/agents/` - every worker definition (review finders, judges and critics, index mapper, correction extractor)
 - `.claude/skills/` - all skill definitions (review specialists, learning-opportunity, project-context, shared references, and the prebuilt HTML shells in `shared/shells/`)
 - `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, and `.claude/skills/shared/html-outputs.md` - the three version-stamped files
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
@@ -150,9 +150,9 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 - `DESIGN-PROFILE.md` - the repo's design answers (seeded once from the installed template)
 - `.claude/settings.local.json` - the user's permission config (preserved, with new toolkit permissions merged in on re-run)
 
-**Migrations that run when needed** (each backed up first): legacy command files that became skills (v3.5), `.claude/plans/` to `plans/` (v4.0), the old top-level `scripts/` location to `.claude/scripts/` plus toolkit deps stripped from the root `package.json` (#91), and the legacy `INDEX.md` removed (replaced by `CODEBASE_MAP.md`, which `/index` generates).
+**Migrations that run when needed** (each backed up first): legacy command files that became skills (v3.5), `.claude/plans/` to `plans/` (v4.0), the old top-level `scripts/` location to `.claude/scripts/` plus toolkit deps stripped from the root `package.json`, and the legacy `INDEX.md` removed (replaced by `CODEBASE_MAP.md`, which `/index` generates).
 
-**The gate on locally modified files.** Installs made with v5.5.0 or later carry `.claude/.toolkit-manifest.json`, and setup compares every managed file against it. A managed file the user edited stops the run: an interactive terminal prompts, a non-interactive run (you, most likely) exits 1 listing the files. Do not add the force flag on your own. Show the user that list, get a yes, then re-run with `--force` (bash) or `-Force` (PowerShell) placed exactly as the v5.5.0 block below describes; every replaced file is backed up first. A file the user created themselves at a path the toolkit now ships under the same name counts as locally modified too, so it gates the run instead of being silently replaced.
+**The gate on locally modified files.** Installs made with v5.5.0 or later carry `.claude/.toolkit-manifest.json`, and setup compares every managed file against it. A managed file the user edited stops the run: an interactive terminal prompts, a non-interactive run (you, most likely) exits 1 listing the files. Do not add the force flag on your own. Show the user that list, get a yes, then re-run the Step 1c command with the force flag inside its quotes, right after the target path: `bash "$TEMP_DIR/scripts/setup/setup.sh" "TARGET_PROJECT_PATH" --force` in bash, or `-Force` right after `` -Target `"TARGET_PROJECT_PATH`" `` in PowerShell. A flag added after the one-liner's closing quote goes to `bash -c`, not to setup. Every replaced file is backed up first. A file the user created themselves at a path the toolkit now ships under the same name counts as locally modified too, so it gates the run instead of being silently replaced.
 
 **Pre-manifest installs (before v5.5.0).** No manifest means no gate: differing managed files show as `[differs, provenance unknown]` in the pre-flight report and are replaced, with a backup, without a prompt. So for these, run the dry run first - `--dry-run` after the target path in bash, `-DryRun` in PowerShell, placed the same way as the force flag - show the user the "provenance unknown" list, and after the real run copy anything they had customized out of the backup folder.
 
@@ -160,7 +160,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 
 **After an upgrade, check five things:**
 1. Run `npm install --prefix .claude/scripts` after any upgrade whose pre-flight listed `.claude/scripts/package.json` or `package-lock.json` as changed, and whenever `.claude/scripts/node_modules` is missing (needed for `/ask-gpt`, `/ask-gemini`, `/review-browser`).
-2. If setup cleaned toolkit dependencies out of the root `package.json` (an install from the v4.2 era, before #91 moved them into `.claude/scripts/`), run `npm install` at the project root as well. Setup does not touch `package-lock.json`, so the lock file keeps listing those dependencies until a reinstall rewrites it. The pre-clean `package.json` is in the backup folder.
+2. If setup cleaned toolkit dependencies out of the root `package.json` (an install from the v4.2 era, before they moved into `.claude/scripts/`), run `npm install` at the project root as well. Setup does not touch `package-lock.json`, so the lock file keeps listing those dependencies until a reinstall rewrites it. The pre-clean `package.json` is in the backup folder.
 3. Run `/index` if `CODEBASE_MAP.md` is missing or the upgrade just removed `INDEX.md`.
 4. If the user's `CLAUDE.md` still says "report first" or carries a "CRITICAL RULES" block from an older version, tell them to retire that wording: the loop is auto by default from 6.0.0, and "report only" is a per-run phrase now.
 5. Permission entries in a project-level `.claude/settings.json` are the user's to clean; setup never touches that file.
@@ -252,9 +252,9 @@ The user can now open their project in Cursor or Claude Code and type `/` to see
                                                        /ask-gpt or /ask-gemini
 ```
 
-The user types `/explore` and approves the plan; the rest chain automatically (rule M14 in `.claude/skills/shared/hitl-loop.md`). Saying "no chaining" on any run stops after that stage. The AI debates are never chained into - the user starts one deliberately.
+The user types `/explore` (on the Claude Code plugin every command above takes the `tk:` prefix, so `/tk:explore`) and approves the plan; the rest chain automatically (rule M14 in the toolkit's `hitl-loop` fragment). Saying "no chaining" on any run stops after that stage. The AI debates are never chained into - the user starts one deliberately.
 
-On any install or update, `/audit-html` can scan the user's own markdown for files that would benefit from an HTML view (report-only). Toolkit outputs already render HTML automatically.
+On any install or update, `/audit-html` (`/tk:audit-html` on the plugin) can scan the user's own markdown for files that would benefit from an HTML view (report-only). Toolkit outputs already render HTML automatically.
 
 </reference>
 
@@ -268,7 +268,7 @@ On any install or update, `/audit-html` can scan the user's own markdown for fil
 - **"target directory does not exist"** - Create the project folder first: `mkdir -p /path/to/project`
 - **"Unknown command" for `/tk:...` right after a plugin install or update, or an agent type such as `tk:review-code-finder` not found** - Run `/reload-plugins` or restart Claude Code
 - **`tk:setup` exits 3** - It needs a decision (dirty tree, a migration outside a git repository, locally modified toolkit files, unknown provenance, a settings file it cannot read) and touched nothing; show the user its list and rerun with `--force` only when they say yes
-- **A toolkit command asks for approval before one of its own scripts, in default permission mode** - A plugin command's permission for its scripts lasts only until the user's next message, so a script it runs after the user answers a question asks; a stage the loop starts on its own ("go" into `/execute`, then `/review` and `/document`) gets no permission of its own, so its scripts ask too; saving a review receipt's output to a file asks as well. Tell the user to approve it; a later release is to lift the first two
+- **A toolkit command asks for approval before one of its own scripts, in default permission mode** - A command's own grant for its scripts ends at the user's next message, and a stage the loop starts on its own gets none, so `tk:setup` writes a permission row for every plugin script into `.claude/settings.local.json`. A prompt for a toolkit script means those rows are missing: run `tk:setup` again in the project and relay its report (it adds the missing rows, or names the ones it holds back because the user deleted them before). Saving a review receipt's output to a file still asks; tell the user to approve it.
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in the project root with `.md` files inside (copy-install only)
 - **`/ask-gpt` or `/ask-gemini` fails** - On the plugin, a key is read from the environment, then the project's `.env.local` (from the working folder up to the git root), then `~/.claude/plugins/.env.local`, and only the toolkit's own key and model variables are read from those files, so check that one of the three holds a valid key under its exact name; on a copy-install, check that `npm install` was run and `.env.local` has valid API keys
 - **"Permission denied"** - Ensure you have write access to the target project directory

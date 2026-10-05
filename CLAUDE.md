@@ -15,4 +15,4 @@
 
 ## Skills
 
-Review capabilities live in `.claude/skills/` as SKILL.md files. They auto-create slash commands and are discoverable by subagents. Shared reference files in `.claude/skills/shared/`. Use `/review` for unified auto-detected review or individual `/review-code`, `/review-ux`, etc. for focused reviews.
+Review capabilities live in `.claude/skills/` as SKILL.md files. They auto-create slash commands and Claude can invoke them through the Skill tool; a subagent gets a skill only when its agent file preloads it (`skills:` frontmatter). Shared reference files in `.claude/skills/shared/`. Use `/review` for unified auto-detected review or individual `/review-code`, `/review-ux`, etc. for focused reviews.
