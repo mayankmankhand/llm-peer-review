@@ -205,6 +205,13 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check merge-findings script (dependency-free; the review's merge, sort and number pass, issue #211;
+# render-html.js requires it from its own folder, so the two ship together)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/merge-findings.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/merge-findings.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/skills/shared/html-outputs.md .claude/skills/shared/toolkit-reference.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -592,7 +599,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js; do
+for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js merge-findings.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1203,6 +1210,12 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/correction-ledger.js" "$TARGET/.claude/
 # in .env.local. It is the only place the design workflow reads a key.
 echo "  Copying .claude/scripts/gen-media.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" "$TARGET/.claude/scripts/gen-media.js"
+
+# merge-findings.js is the review's merge, sort and number pass (issue #211).
+# render-html.js requires the dedup key rule from it, from its own folder, so
+# it is copied beside the renderer.
+echo "  Copying .claude/scripts/merge-findings.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/merge-findings.js" "$TARGET/.claude/scripts/merge-findings.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
