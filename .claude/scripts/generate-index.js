@@ -5,8 +5,9 @@
 // analysis and synthesize CODEBASE_MAP.md. No LLM tokens spent here.
 //
 //   node generate-index.js              the scan: one JSON manifest
-//   node generate-index.js --finalize   check CODEBASE_MAP.md.tmp and move it
-//                                       into place: one JSON result (issue #181)
+//   node generate-index.js --finalize   check CODEBASE_MAP.md.tmp, trim it to the
+//                                       size cap, and move it into place: one
+//                                       JSON result (issues #181, #210)
 
 const { execFileSync } = require("child_process");
 const path = require("path");
@@ -115,8 +116,26 @@ function emitError(code, message) {
 // removes the legacy INDEX.md as step 6 did, and prints one JSON object:
 //
 //   {"finalized":true,"map":"CODEBASE_MAP.md","bytes":<n>,"tokens":<n>,
+//    "tokensBefore":<n>,"trimmed":[<labels>],"overCap":<bool>,
 //    "minimal":<bool>,"replaced":<bool>,"indexRemoved":<bool>}        exit 0
 //   {"finalized":false,"error":"<code>","reason":"<one sentence>"}    exit 1
+//
+// The size cap (issue #210). The map is read at the start of every session
+// that uses it, so /index keeps it under about 10k tokens, measured the way
+// the scan measures a file: bytes divided by four. When the temp file is over
+// the cap, --finalize trims it here, in the fixed order the trim policy has
+// always had (the Module Guide is the semantic core, so everything else goes
+// first): the directory tree to depth 3, then to depth 2, then the Gotchas,
+// Conventions and Navigation Guide sections. Each step runs only while the
+// map is still over the cap, a step that cuts nothing is skipped and left out
+// of the record, and the record is the `<!-- Trimmed: ... -->` line this
+// script writes into the header block (replacing one the map already has) and
+// the `trimmed` array in the JSON. `tokensBefore` is the temp file's size,
+// `tokens` and `bytes` the written map's. A map still over the cap after every
+// step is written anyway and flagged `overCap`: the one cut left is shortening
+// the Module Guide's entries, which is a judgment /index keeps for itself and
+// may make before running --finalize once more. A map under the cap is never
+// rewritten, so it lands byte for byte.
 //
 // Any failure deletes the temp file and leaves CODEBASE_MAP.md and INDEX.md as
 // they were.
@@ -124,6 +143,92 @@ const MAP_FILE = "CODEBASE_MAP.md";
 const MAP_TMP_FILE = MAP_FILE + ".tmp";
 const LEGACY_INDEX_FILE = "INDEX.md";
 const MAP_MIN_BYTES = 200; // a map must be larger than this
+const MAP_TOKEN_CAP = 10_000; // the trim policy's cap, at four bytes a token
+const MAP_TITLE = "# Codebase Map";
+const tokensOf = (bytes) => Math.ceil(bytes / 4);
+
+// The trim steps, in order. Each takes the map's lines and returns
+// { lines, changed }.
+const TRIM_STEPS = [
+  { label: "tree-to-depth-3", apply: (lines) => collapseTree(lines, 3) },
+  { label: "tree-to-depth-2", apply: (lines) => collapseTree(lines, 2) },
+  { label: "gotchas", apply: (lines) => dropSection(lines, "Gotchas") },
+  { label: "conventions", apply: (lines) => dropSection(lines, "Conventions") },
+  { label: "navigation-guide", apply: (lines) => dropSection(lines, "Navigation Guide") },
+];
+
+// The [start, end) line range of the "## <name>" section, heading included,
+// up to the next "## " heading or the end of the file; null when the map has
+// no such section. Fenced code is skipped on the way, so a heading-shaped
+// line inside a code block is never a boundary.
+function sectionBounds(lines, name) {
+  let inFence = false;
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    if (start === -1) {
+      if (line.trimEnd() === "## " + name) start = i;
+    } else if (/^## /.test(line)) {
+      return [start, i];
+    }
+  }
+  return start === -1 ? null : [start, lines.length];
+}
+
+// Remove a section whole. The blank line before its heading stays as the
+// separator between its neighbours; for the last section of the file that
+// blank goes too and the final empty element (the file's closing newline)
+// is kept, so the map still ends with exactly one newline.
+function dropSection(lines, name) {
+  const bounds = sectionBounds(lines, name);
+  if (bounds === null) return { lines, changed: false };
+  let [start, end] = bounds;
+  if (end === lines.length) {
+    if (lines[lines.length - 1] === "") end = lines.length - 1;
+    if (start > 0 && lines[start - 1] === "") start -= 1;
+  }
+  return { lines: lines.slice(0, start).concat(lines.slice(end)), changed: true };
+}
+
+// Collapse the Directory Tree to `depth` levels. The tree is the markdown
+// list /index step 4 renders from the manifest, one level per two spaces of
+// indentation; the unit is read from the list itself (its smallest non-zero
+// indent), so a tree indented by four still collapses by level. Lines deeper
+// than `depth` are dropped; everything else in the section is kept.
+function collapseTree(lines, depth) {
+  const bounds = sectionBounds(lines, "Directory Tree");
+  if (bounds === null) return { lines, changed: false };
+  const items = [];
+  for (let i = bounds[0] + 1; i < bounds[1]; i++) {
+    const m = /^( *)[-*+] /.exec(lines[i]);
+    if (m) items.push({ at: i, indent: m[1].length });
+  }
+  let unit = 0;
+  for (const it of items) if (it.indent > 0 && (unit === 0 || it.indent < unit)) unit = it.indent;
+  if (unit === 0) unit = 2;
+  const drop = new Set(items.filter((it) => Math.floor(it.indent / unit) + 1 > depth).map((it) => it.at));
+  if (drop.size === 0) return { lines, changed: false };
+  return { lines: lines.filter((_, i) => !drop.has(i)), changed: true };
+}
+
+// Write the Trimmed line into the header block, the run of comment lines
+// above the title that --finalize has already checked begins with the
+// Generated line. A Trimmed line already there (one the map's author wrote)
+// is replaced, so the record is this script's and appears once.
+function withTrimmedHeader(lines, labels) {
+  const record = "<!-- Trimmed: " + labels.join(", ") + " -->";
+  const titleAt = lines.findIndex((l) => l.trimEnd() === MAP_TITLE);
+  const out = lines.slice();
+  let lastComment = -1;
+  for (let i = 0; i < titleAt; i++) {
+    if (out[i].startsWith("<!-- Trimmed:")) { out[i] = record; return out; }
+    if (out[i].startsWith("<!--")) lastComment = i;
+  }
+  out.splice(lastComment + 1, 0, record);
+  return out;
+}
 
 function finalizeMap() {
   const tmpPath = path.join(cwd, MAP_TMP_FILE);
@@ -155,12 +260,13 @@ function finalizeMap() {
   if (buf.length <= MAP_MIN_BYTES) {
     fail("too_small", `${MAP_TMP_FILE} is ${buf.length} bytes; a map must be over ${MAP_MIN_BYTES}.`);
   }
-  const lines = buf.toString("utf8").split(/\r?\n/);
+  const text = buf.toString("utf8");
+  const lines = text.split(/\r?\n/);
   if (!lines[0].startsWith("<!-- Generated:")) {
     fail("no_generated_header", `The first line of ${MAP_TMP_FILE} is not the <!-- Generated: ... --> header.`);
   }
-  const titleAt = lines.findIndex((l) => l.trimEnd() === "# Codebase Map");
-  if (titleAt === -1) fail("no_title", `${MAP_TMP_FILE} has no "# Codebase Map" heading.`);
+  const titleAt = lines.findIndex((l) => l.trimEnd() === MAP_TITLE);
+  if (titleAt === -1) fail("no_title", `${MAP_TMP_FILE} has no "${MAP_TITLE}" heading.`);
   // The empty-repo minimal map (/index, "Empty repo") has no Module Guide,
   // because the scan kept no file to describe, and its header says so with a
   // "<!-- Files: 0, ..." line. Only the header above the title counts, so a map
@@ -169,6 +275,37 @@ function finalizeMap() {
   if (!minimal && !lines.some((l) => l.startsWith("## Module Guide"))) {
     fail("no_module_guide", `${MAP_TMP_FILE} has no "## Module Guide" section.`);
   }
+
+  // The size cap: trim in order while over it, then write the trimmed map
+  // back to the temp file so the rename below stays the one atomic step. The
+  // file's own line endings are kept (CRLF when it has any). Each measurement
+  // includes the Trimmed line the map will carry, so a map the loop leaves
+  // under the cap is under it as written.
+  const tokensBefore = tokensOf(buf.length);
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const trimmed = [];
+  let current = lines;
+  let bytes = buf.length;
+  if (!minimal && tokensOf(bytes) > MAP_TOKEN_CAP) {
+    for (const step of TRIM_STEPS) {
+      if (tokensOf(bytes) <= MAP_TOKEN_CAP) break;
+      const result = step.apply(current);
+      if (!result.changed) continue;
+      current = result.lines;
+      trimmed.push(step.label);
+      bytes = Buffer.byteLength(withTrimmedHeader(current, trimmed).join(eol));
+    }
+    if (trimmed.length > 0) {
+      const out = withTrimmedHeader(current, trimmed).join(eol);
+      bytes = Buffer.byteLength(out);
+      try {
+        fs.writeFileSync(tmpPath, out);
+      } catch (e) {
+        fail("trim_write_failed", `The trimmed map could not be written back to ${MAP_TMP_FILE}: ${e.message}`);
+      }
+    }
+  }
+  const overCap = tokensOf(bytes) > MAP_TOKEN_CAP;
 
   const replaced = fs.existsSync(mapPath);
   try {
@@ -195,8 +332,11 @@ function finalizeMap() {
   process.stdout.write(JSON.stringify({
     finalized: true,
     map: MAP_FILE,
-    bytes: buf.length,
-    tokens: Math.ceil(buf.length / 4),
+    bytes,
+    tokens: tokensOf(bytes),
+    tokensBefore,
+    trimmed,
+    overCap,
     minimal,
     replaced,
     indexRemoved,
