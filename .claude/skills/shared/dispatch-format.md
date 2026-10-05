@@ -1,5 +1,7 @@
 **Dispatched findings format (JSONL).** A dispatched specialist does NOT write a prose report. It emits its findings as JSONL - one JSON object per line - or the single literal line `NO FINDINGS` if it found nothing. The orchestrator parses these, dedups them, assigns IDs, and derives both the markdown report and the HTML from this one structure: findings are authored once and formatted twice, never re-written.
 
+**One optional line beside them: `NOT CHECKED: <one sentence>`.** A specialist that could not check something it was asked to (a server that did not answer, a page behind a login, controls past its session cap) says so on a line of its own that starts `NOT CHECKED: `, beside its JSONL lines or beside `NO FINDINGS`, one sentence per line. The line is a disclosure, not a finding: it gets no ID, no receipt and no audit, and the orchestrator copies it under "What I could not check" with the specialist's name. A problem the specialist saw is never a `NOT CHECKED:` line; it is a finding.
+
 Each finding object (the field names match the HTML shell's finding schema, so the HTML maps directly):
 
 - `severity`: `"block" | "warn" | "suggest"`

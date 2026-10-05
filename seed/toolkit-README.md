@@ -15,8 +15,9 @@ Each file has a fixed name. Create only the ones you need.
 | `execute-gate.md` | `/tk:execute`, before it implements a step | A gate every implementation step must pass |
 | `fix-rules.md` | every stage that runs the auto-fix loop | Extra conditions before a fix is applied, or extra actions that must always ask you first |
 | `severity-anchors.md` | every reviewer | How severe your own kinds' findings are (what is a Block here, what is only a Suggest) |
+| `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security finder `/tk:review` dispatches), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
 
-Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules and severity anchors are read right after the toolkit's.
+Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's.
 
 ## review-kinds.md
 
@@ -56,9 +57,13 @@ Your agent can reuse the toolkit's review machinery instead of copying it. List 
 
 A project kind runs when `/tk:review` detects changes on its own. A focus, such as `/tk:review code`, names toolkit kinds only: your own kind cannot be run by name, and a focused run skips it.
 
-## fix-rules.md is additive only
+## do-not-report.md
 
-Your rules can add a precondition or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules: a line that tries to is ignored.
+One bullet per category: `- <category> - <why it is noise here>`. Keep entries specific: a vague entry ("style stuff") suppresses real findings, a specific one ("trailing-whitespace-only changes in generated files") does not. An entry only suppresses noise and never lowers a real severity: the toolkit's Universal Anchors (an exposed secret, injection, insecure auth, data loss, an accessibility blocker) win over any match.
+
+## fix-rules.md and the two gates are additive only
+
+Your rules and gates can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored.
 
 ## Your own lines in the rules file
 

@@ -467,6 +467,11 @@ for (const [emitted, sites] of Object.entries(lib.SITE_OVERRIDES)) {
   }
 }
 check('live: every kept override phrase survives and every replacement lands', liveMissed.length === 0, liveMissed.join('; '));
+// The setup skill's settings-merge sentence names the PROJECT's own .claude/scripts/ (dead under
+// the plugin); rewritten to the plugin root it would say the plugin's scripts are dead.
+const liveSetupSkill = read(live, 'skills/setup/SKILL.md');
+check('live: the setup skill keeps "the project\'s own `.claude/scripts/`" in its settings-merge sentence, never the plugin root',
+  liveSetupSkill.includes('a script in the project\'s own `.claude/scripts/`, which is dead under the plugin') && !liveSetupSkill.includes('own `${CLAUDE_PLUGIN_ROOT}/scripts/`'));
 // A skill a command loads by name mid-run needs its two permission rows in the seed, or
 // default permission mode stops on the call (#206: html-viewing first shipped without them).
 const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);

@@ -2,7 +2,9 @@
 
 A living list of finding categories that are **not worth flagging** in this project. It is the noise-control companion to the receipt rule in `finding-contract.md`: the receipt rule keeps unprovable findings out, this list keeps known-noisy *classes* out.
 
-**This list ships nearly empty on purpose.** It is grown from real false alarms, never pre-filled with guesses. When a review surfaces a finding you decide was noise, add its category here so future reviews skip it. Think of it as a `LESSONS.md` scoped to review noise.
+**This list ships nearly empty on purpose.** It is grown from real false alarms, never pre-filled with guesses. When a review surfaces a finding you decide was noise, add its category to your project's own list so future reviews skip it. Think of it as a `LESSONS.md` scoped to review noise.
+
+**Your project's entries live in `.claude/toolkit/do-not-report.md`**, a file your project owns, in the entry format below. Every reviewer that reads this list reads that file right after it, and a project with no such file adds nothing. This file is the toolkit's, read-only in a project on the plugin, so the project file is the only place an entry can go; the Active entries below stay empty unless the same false alarm recurs across projects.
 
 ## How to use it
 

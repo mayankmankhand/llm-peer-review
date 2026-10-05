@@ -89,6 +89,10 @@ Because an audit can surface many findings, structure the report so the reader g
 
 !`cat .claude/skills/shared/do-not-report.md`
 
+The project's own entries, from `.claude/toolkit/do-not-report.md`, in the same format and under the same rules (an entry suppresses a category and never lowers a real severity). A note that the command printed nothing means this project adds none.
+
+!`cat .claude/toolkit/do-not-report.md 2>/dev/null || true`
+
 ## Audit Before the Report (M2)
 
 On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
