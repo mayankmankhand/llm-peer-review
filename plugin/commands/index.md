@@ -14,7 +14,7 @@ allowed-tools:
 <rules>
 - This is a procedural command. Follow the steps in order.
 - Subagent prompts must direct **conditional detection**: only report conventions and gotchas when there is concrete code evidence. No speculation.
-- The final map MUST stay under ~10k tokens. If synthesis exceeds, trim sections in the order listed in Step 5 - the Module Guide is the semantic core and is trimmed last.
+- The final map stays under about 10k tokens. `--finalize` enforces that cap itself (Step 5): it trims the other sections in a fixed order and never cuts the Module Guide, the semantic core, which only you shorten, and only when the script says the map is still over.
 - Use **atomic write** (Step 5 details): a failed run must leave the user's existing map intact.
 - If any step fails (scanner error, all subagents fail after Step 3's one automatic retry per chunk, validation fails), stop and report. Do NOT partially overwrite `CODEBASE_MAP.md`.
 </rules>
@@ -134,35 +134,25 @@ Skip this section if the project has no obvious extension points.}
 
 </template>
 
-### Step 5: Apply size cap and write atomically
+### Step 5: Write atomically and let the script apply the size cap
 
-**Trim policy** (if synthesized content exceeds ~10k tokens, apply in this exact order). The Module Guide is the semantic core: a flat tree without semantic content does not save tokens. Trim everything else first.
-
-1. **Collapse the Directory Tree** to depth 2-3 (drop deeper nesting, keep top-level structure)
-2. **Drop the Gotchas section**
-3. **Drop the Conventions section**
-4. **Drop the Navigation Guide**
-5. **As a last resort:** trim Module Guide entries to one-line Purpose summaries (still preferable to dropping the section entirely)
-
-Record any trimming in the map header (e.g., add `<!-- Trimmed: tree-to-depth-3, gotchas -->` so consumers know what's missing).
-
-**Atomic write** (this is critical for not corrupting user state on partial failure):
-
-1. Write the content to `CODEBASE_MAP.md.tmp` in the project root with the file-writing tool.
+1. Write the full synthesized content to `CODEBASE_MAP.md.tmp` in the project root with the file-writing tool. Trim nothing yourself: the script measures the map and applies the size cap below.
 2. From the project root, finish the write with one call:
 
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-index.js --finalize
    ```
 
-   It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), renames it over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object.
-3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 6's size and `indexRemoved` for its legacy-file line.
+   It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), applies the size cap, renames the result over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object.
+
+   **The size cap.** A map over about 10k tokens is trimmed in this order, each step only while the map is still over: the Directory Tree to depth 3, then to depth 2, then the Gotchas section, then Conventions, then the Navigation Guide. The Module Guide is the semantic core and the script never cuts it. The script records what it cut in a `<!-- Trimmed: ... -->` header line and in the JSON's `trimmed` array; a step that cut nothing is left out of both.
+3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 6's size, `trimmed` for its trimmed-sections line, and `indexRemoved` for its legacy-file line. When `overCap` is true, the map is in place but still over the cap after every step: shorten each Module Guide entry to a one-line Purpose (still better than dropping the section), write the temp file again, and run `--finalize` once more; report the second result. Once is the limit.
 4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`.
 
 ### Step 6: Report to the user
 Tell the user:
 - "Generated `CODEBASE_MAP.md` ({totalFiles} files mapped, ~{mapTokens} tokens)."
-- If trim policy fired, list which sections were trimmed/dropped.
+- If `trimmed` is not empty, list its entries as the sections trimmed or dropped, and say so when `overCap` stayed true after the second run.
 - If `isDirty` was true: "Note: map generated against a dirty worktree. Consider regenerating after your next commit for an accurate commit reference."
 - If old `INDEX.md` was removed, mention it: "Removed legacy `INDEX.md`."
 - If any subagent failed and was skipped, mention the gap.
