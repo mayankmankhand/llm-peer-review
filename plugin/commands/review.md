@@ -90,7 +90,7 @@ Categorize the changes and pick relevant specialists:
 | Active `PLAN-*.md` exists in `plans/` | Plan Compliance | `subagent_type=tk:review-plan-finder` |
 | `.claude/commands/`, `.claude/skills/`, `.claude/agents/` or `.claude/rules/` files changed | Command Quality | `subagent_type=tk:review-commands-finder` |
 | `package.json` or lockfile changed | Dependency Security | `subagent_type=tk:review-deps-finder` |
-| Visual/UI changes AND a dev server is running | Browser QA | `subagent_type=tk:review-browser-finder` |
+| Visual/UI changes AND (a dev server answers OR `package.json` has a `dev` or `start` script the finder can start) | Browser QA | `subagent_type=tk:review-browser-finder` |
 | `README.md`, `index.html`, or files in `docs/`, `pages/`, `content/`, `posts/` (exclude `CHANGELOG.md`, ADRs, API refs, generated docs) | Copy Clarity | `subagent_type=tk:review-copy-finder` |
 
 **Project review kinds.** Rows this project adds to the table above, in the same three columns, read from `.claude/toolkit/review-kinds.md`. Treat each one exactly like a row of the table: its Finder column names the project's own agent, dispatched by that name with the same per-run prompt and through the same audit. A note that the command printed nothing means this project adds none.
@@ -103,8 +103,8 @@ Categorize the changes and pick relevant specialists:
 - When copy and UX both run on the same artifact, copy focuses on meaning/orientation while UX focuses on usability/accessibility. Deduplicate overlapping findings in synthesis.
 - An empty scope never reaches this table: Phase 0 already stopped the run, or it is a focus call, which skips detection
 - A project review kind is selected by its own What changed cell, on this auto-detect path only: a focus argument names toolkit kinds, and one that names a project kind says so (Focus Mode)
-- For browser-qa, check if a server is reachable on common ports (3000, 3001, 5173, 8080) before dispatching
-- A `[behaviour]` line in the plan's `## Must-check for review` section (M14) selects Browser QA the same way a visual change does, because a design loop's still images could not see behaviour. With no server reachable, name that surface under "What I could not check" instead
+- For browser-qa, check which common port (3000, 3001, 5173, 8080) answers and pass it as the dev server URL in the Run notes; with none answering, dispatch anyway when `package.json` has a `dev` or `start` script (the finder starts it in the background, per its criteria); with neither a server nor a script, skip Browser QA and say so under What I could not check
+- A `[behaviour]` line in the plan's `## Must-check for review` section (M14) selects Browser QA the same way a visual change does, because a design loop's still images could not see behaviour. A surface the finder could not reach comes back on its `NOT CHECKED:` line and lands under "What I could not check"
 
 ### Phase 1.5: Size gate (skip the fan-out for tiny diffs)
 

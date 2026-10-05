@@ -140,8 +140,7 @@ primary way the feature introduces itself. Say it once, then never again in this
 ### Read the candidates cold
 
 Dispatch the `correction-extractor` agent (`subagent_type=tk:correction-extractor`; when the type is not
-found, run `/reload-plugins` once, since an agent added by a plugin install or update, or
-written this session, registers only after a reload, then the fallback in
+found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then the fallback in
 `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`) with
 the candidate list. It has no memory of this session, which is the point: a participant
 has a stake in reading a correction as a clarification, the same reason the M2 audit never
