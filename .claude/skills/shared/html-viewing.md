@@ -64,19 +64,19 @@ The `/playground` skill sits outside all of this: it never publishes and never a
 
 **Naming is already handled.** `render-html.js` writes the payload's title into the page's `<title>`, and that tag is what names the published page. A title passed alongside the file is ignored when the file carries its own tag.
 
-**Use a fixed icon per artifact type.** Publishing takes a tab icon, and the icon is how a user finds the page again among open tabs. Use the same one every time for a given type, so an updated plan does not read as a different page:
+**Use a fixed icon per artifact type.** Publishing takes a tab icon, one short generic word, and the icon is how a user finds the page again among open tabs. Pass it on a page's first publish and leave it out of an update, which keeps the icon the page already has, so an updated plan does not read as a different page:
 
 | Type | Icon |
 |---|---|
-| review | 🔍 |
-| document | 📋 |
-| explore | 🧭 |
-| debate | 💬 |
-| audit | 📊 |
-| plan | 🗺️ |
-| docview | 📄 |
+| review | search |
+| document | clipboard |
+| explore | compass |
+| debate | chat |
+| audit | chart |
+| plan | map |
+| docview | document |
 
-Only change a type's icon if that type's purpose changes, never as part of an ordinary update.
+Only change a type's icon if that type's purpose changes.
 
 **Two publish modes, matching how the file is named.**
 

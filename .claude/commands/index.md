@@ -1,7 +1,7 @@
 # Codebase Map Generator (Index)
 
 **Use this when:** You want to (re)generate `CODEBASE_MAP.md` - a semantic map of the project that `/explore`, `/create-plan`, and `/pair-debug` read for context.
-**Don't use this when:** You're doing a full documentation pass - use `/document` instead, which regenerates the map as part of broader doc updates.
+**Don't use this when:** You're doing a full documentation pass - use `/document` instead, which refreshes the map when it is missing or stale (M12) as part of broader doc updates.
 
 <rules>
 - This is a procedural command. Follow the steps in order.
@@ -50,7 +50,7 @@ If `manifest.needsConfirm === true`, prompt before spending API tokens. The exac
 If `needsConfirm === false`, skip this step silently.
 
 ### Step 3: Spawn parallel analysis subagents
-For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family's alias. It is the mapper agent, whose effort comes from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is unavailable (run `/reload-plugins` once first when the toolkit plugin was installed this session; otherwise it is an older install), use `subagent_type=general-purpose` carrying the same `model`. Use this prompt template, substituting the chunk's file list:
+For each chunk in `manifest.chunks`, spawn an Agent with `subagent_type=index-mapper` with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family's alias. It is the mapper agent, whose effort comes from its agent frontmatter, per the roster in `.claude/skills/shared/model-routing.md` (which also says why). Step 4 (synthesis) runs in the main session, on the session model. Fallback per that rule: if the `index-mapper` agent type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then use `subagent_type=general-purpose` carrying the same `model`. Use this prompt template, substituting the chunk's file list:
 
 <template>
 

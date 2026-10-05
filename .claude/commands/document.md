@@ -124,8 +124,9 @@ primary way the feature introduces itself. Say it once, then never again in this
 
 ### Read the candidates cold
 
-Dispatch the `correction-extractor` agent (`subagent_type=correction-extractor`; an unknown
-type right after a plugin install means `/reload-plugins` once, then the fallback in
+Dispatch the `correction-extractor` agent (`subagent_type=correction-extractor`; when the type is not
+found, run `/reload-plugins` once, since an agent added by a plugin install or update, or
+written this session, registers only after a reload, then the fallback in
 `.claude/skills/shared/model-routing.md`) with
 the candidate list. It has no memory of this session, which is the point: a participant
 has a stake in reading a correction as a clarification, the same reason the M2 audit never
@@ -193,7 +194,7 @@ Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-
 
 **If in a worktree:**
 
-Run the steps below automatically, attaching a receipt to each per M8 (what ran, plus the evidence: command output, count delta, diff stat). The receipts land in the end-of-run digest. Three steps are deliberate exceptions that still ask the user: step 1 (uncommitted changes - their intent is a fact only the user holds, M1), step 3 (branch naming), and step 6 (removing a worktree folder sits next to the M9 data-deletion gate). In step 4, showing the PR draft is an announcement, not a wait.
+Run the steps below automatically, attaching a receipt to each per M8 (what ran, plus the evidence: command output, count delta, diff stat). The receipts land in the end-of-run digest. Three steps are deliberate exceptions that still ask the user: step 1 (uncommitted changes - their intent is a fact only the user holds, M1), step 3 (branch naming), and step 6 (removing a worktree folder sits next to the M9 data-deletion gate). In step 4, showing the PR draft is an announcement, not a wait, when this run was chained from `/review`: M9 exempts that one PR, because its plan was human-approved and its push already cleared M11. When `/document` was typed directly, step 4 asks before creating the PR, like any other outward send.
 
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote, behind the tripwire exactly as Section 7 says.
@@ -225,7 +226,7 @@ Inspect `git diff --stat <window>`. If there are **zero meaningful changes** (on
 
 Do NOT hand-write the HTML. Produce a JSON payload matching the schema documented at the top of `.claude/skills/shared/shells/document-shell.html` (read its header comment for the exact fields); the helper injects it into the prebuilt shell. Contents:
 - **The cycle's name** -> `title`. Give it a real name ("The Page That Can Go Empty"), never the words "Cycle Summary". It is the loudest element on the page and the line the running log carries forward, and a generic title is dropped from that log entirely.
-- **The narrative** - the first screen, and the reason the page exists. Three short blocks: `priorState` (what the system did *before* this cycle), `whatShipped` (what changed), `why` (why it changed). For `why`, route the `### Why` section you have just written into `CHANGELOG.md` rather than composing the same reasoning twice. Any of the three may be omitted; a missing one is skipped, not stubbed.
+- **The narrative** - the first screen, and the reason the page exists. Three short blocks: `priorState` (what the system did *before* this cycle), `whatShipped` (what changed), `why` (why it changed). For `why`, when the CHANGELOG entry you have just written carries a `### Why` section, route that section here rather than composing the same reasoning twice; a project whose CHANGELOG has no such section writes `why` fresh. Any of the three may be omitted; a missing one is skipped, not stubbed.
 - **Diagram** (optional) -> `diagram`, a self-contained inline `<svg>`, and ONLY when the cycle has a flow worth drawing. Most cycles have none, and omitting the key is the normal case. No CDN and no library: the page works offline. A value that does not parse as SVG is dropped silently, so never let the diagram carry meaning the prose does not also carry.
 - **Do NOT author `sinceLast` or `cycleLog`.** The renderer owns both and overwrites whatever you supply: `sinceLast` is what changed since the reader last opened the page, and `cycleLog` is the running history, built from the page this run replaces.
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`

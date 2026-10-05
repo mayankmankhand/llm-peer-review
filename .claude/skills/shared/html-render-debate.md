@@ -31,7 +31,7 @@ Steps:
 
 2. **Write the JSON to a per-run temp file.** Write it as `data.json` in a fresh folder from `mktemp -d /tmp/debate-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`; that folder is `<render-dir>` below.
 
-3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, overwrites freely, and prints the output path):
+3. **Run the helper from the project root** (it computes the timestamped name, creates `artifacts/html/`, needs no read-before-write step, and prints the output path):
    Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```

@@ -131,7 +131,7 @@ of the toolkit's command.
 
 ### Design Rules and Profile
 
-Design work follows `.claude/skills/shared/design-rules.md`: a three-state rule (a repo that already has a design system keeps it; exploration inside one varies only layout, composition, motion, and copy; going further pages you), a load dial (none, improve, new), and six techniques adapted from Anshu Chimala's "How to turn your AI into a world-class designer": seed strings, ambitious briefs, a fresh-context design critic under the M15 bound, image and video generation behind your own keys, and a cut-and-polish pass. The toolkit adds a blind side-by-side judge that decides whether each round is kept, and an interaction pass for the behaviour a screenshot cannot show. `/explore` runs the step when a feature has a look, `/create-plan` records the direction, `/execute` runs the design loop and hands the gaps it leaves open to `/review` as must-check items, `/document` records what was tried. Each repo's answers live in `DESIGN-PROFILE.md`, user-owned and seeded once by setup from `.claude/skills/shared/design-profile-template.md`. The toolkit's own artifact look is never touched.
+Design work follows `.claude/skills/shared/design-rules.md`: a three-state rule (a repo that already has a design system keeps it; exploration inside one varies only layout, composition, motion, and copy; going further pages you), a load dial (none, improve, new), and six techniques adapted from Anshu Chimala's "How to turn your AI into a world-class designer": seed strings, ambitious briefs, a fresh-context design critic under the M15 bound, image and video generation behind your own keys, and a cut-and-polish pass. The toolkit adds a blind side-by-side judge that decides whether each round is kept, and an interaction pass for the behaviour a screenshot cannot show. `/explore` runs the step when a feature has a look, `/create-plan` records the direction, `/execute` runs the design loop and hands the gaps it leaves open to `/review` as must-check items, `/document` records what was tried. Each repo's answers live in `DESIGN-PROFILE.md`, user-owned and seeded once by setup (the plugin copies `seed/DESIGN-PROFILE.md`; a copy-install copies the template in `.claude/skills/shared/design-profile-template.md`). The toolkit's own artifact look is a design system in state exists: design work may vary its layout, composition, motion and copy, and a change to its colors, type, spacing or components goes through the divergence page.
 
 ### Skills
 
@@ -271,7 +271,7 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 - **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
 
 ### Leave to the user
-- **Screenshots and visual QA** - the user will take and review screenshots themselves.
+- **Screenshots Claude cannot take itself** - Browser QA and the design loop take their own through `browse.js`; anything else on screen is the user's to capture and judge.
 - **Judgment calls** - anything that requires the user's opinion, approval, or decision.
 - **Destructive actions** - deleting data, force-pushing, or anything hard to reverse still needs confirmation.
 

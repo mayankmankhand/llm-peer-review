@@ -181,7 +181,7 @@ Create the `plans/` directory if it doesn't exist.
 
 ## Plan Critic (before the stop)
 
-A plan is judged before it is presented, by a context that did not write it. The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that file: `/reload-plugins` once when the toolkit plugin was installed this session, then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
+A plan is judged before it is presented, by a context that did not write it. The judge is the `plan-critic` agent: fresh context, Read only, session model at high effort, per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that file: when the agent type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then `general-purpose` with no model parameter and the agent's body pasted as the prompt.
 
 The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
