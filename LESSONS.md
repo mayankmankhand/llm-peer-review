@@ -338,3 +338,12 @@
 
 - **A detector's "this one is fine" rule must be as narrow as the text it recognizes: the audit after it can drop a reported finding, never add a missed one.**
 - **A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.**
+
+## Prompt audit fixes (v7.6.0)
+
+- **A detector, its receipt and the generator of the digests it compares against must read a file the same way; prove it with a fixture saved with a byte order mark and trailing blanks.**
+- **A sentence-break rule needs its abbreviation exception before it ships: when a critic names the false positive, that input goes into the test first.**
+- **A sentence that must read the same in several prompt files gets a parity test; a reviewer found the one site of nine that kept the old wording.**
+- **When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.**
+- **A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.**
+- **Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.**
