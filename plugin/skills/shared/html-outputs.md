@@ -41,8 +41,6 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 - `/tk:explore` vision-mode summary: 2+ options being compared
 - `/tk:ask-gpt` / `/tk:ask-gemini`: 3+ Recommended Actions in the final summary
 - `/tk:audit-html`: 5+ candidates listed in the report
-- `/tk:learning-opportunity` (planned - not yet wired): 3+ depth levels with concrete examples at each, OR the concept is interactive (state machines, hashing, retries, etc.)
-- `/tk:pair-debug` (planned - not yet wired): 3+ hypotheses tracked
 
 **When in doubt, skip HTML.** Markdown is the default; HTML is additive. Generating HTML for borderline cases creates inconsistent UX from session to session.
 
@@ -69,7 +67,7 @@ By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-
 
 The four identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run: plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run), the standing cycle summary (`--shell document --name cycle --stable` -> `artifacts/html/cycle.html`, replaced on every `/tk:document` run - note the shell and the name differ here, and the name is the index key), and the `/tk:audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
 
-**Exception** (still hand-rendered, NOT via the helper): `/tk:playground` throwaways (`/tmp/`, interactive).
+**Exceptions.** Two pages are written by hand rather than rendered through the helper: `/tk:playground` throwaways (`/tmp/`, interactive) and the `/tk:codebase-to-course` course, which opens locally and is not published.
 
 ## Temporary folders
 
