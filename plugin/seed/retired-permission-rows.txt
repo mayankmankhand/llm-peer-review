@@ -10,6 +10,9 @@
 # /index's old map-finalizing steps. `Bash(npm install *)` was narrowed too but is
 # left off this list on purpose (issue #198): a project that adds packages with
 # `npm install <name>` needs it, and the audit would remove it on every upgrade.
+# Since issue #213 the seed carries that row in its ask list instead, so a
+# project whose 7.3.0 upgrade removed it is offered it back as a missing ask row
+# and one that still allows it sees no finding; it stays off this list.
 # The upgrade audit removes these rows from projects that still carry them.
 #
 # Format: one row per line, exactly as the JSON string in the allow list, sorted.

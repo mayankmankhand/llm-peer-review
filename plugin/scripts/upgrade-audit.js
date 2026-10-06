@@ -5,7 +5,8 @@
 // keys and the rollback record, issues #179 and #183).
 //
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--project <dir>]
-//        [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp]
+//        [--plugin-root <dir>] [--conventions <file>] [--from <version>]
+//        [--stamp [--refuted <file>]]
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js --rollback-to <x.y.z>
 //
 // Reads the conventions document (the plugin's skills/shared/conventions.md by
@@ -265,6 +266,91 @@ function fillPluginCache(rows, pluginRoot) {
   });
 }
 // <<< offered permission rows <<<
+
+// >>> refuted finding keys (issue #213) >>>
+// The refuted record lists the keys of findings the /tk:upgrade audit killed
+// (tier 1 RECEIPT FAILED, tier 2 REFUTED, tier 3 REFUTED 2/3 or 3/3) in this
+// working copy, so the next audit does not report them again: a history line
+// that C-11 flags and a skeptic refutes was otherwise flagged, refuted and
+// flagged again on every upgrade. A finding's key digests the line it is about
+// (see keyMaker below), so a changed line is a new finding and is reported. A
+// fix the owner declined is not a kill and is never written here, which is why
+// a declined C-7, C-15 or C-16 finding still comes back as those conventions
+// promise. Like the offered-rows record it lives in the git directory (`git
+// rev-parse --git-path tk-refuted-findings.json`), never committed, so a fresh
+// clone reports everything once more. Only --stamp writes it, from the file
+// --refuted names (one key per line); the audit reads it, says how many
+// findings it suppressed, and treats a record it cannot read as empty, saying
+// so once. The block is written beside the offered-rows one rather than
+// folded into it because that block must stay byte-identical to its copy in
+// setup-project.js.
+//
+// Shape (version 1): { "version": 1, "refuted": ["C-11:CLAUDE.md:0123456789ab", ...] },
+// sorted, each key once.
+const REFUTED_FILE = 'tk-refuted-findings.json';
+const REFUTED_VERSION = 1;
+// The record's absolute path for the working copy at `dir`, or null outside a
+// git repository (or when git cannot be run).
+function refutedRecordPath(dir) {
+  let out;
+  try { out = execFileSync('git', ['rev-parse', '--git-path', REFUTED_FILE], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); }
+  catch (e) { return null; }
+  const printed = out.replace(/\r?\n$/, '');
+  return printed === '' ? null : path.resolve(dir, printed);
+}
+// { status: 'absent' | 'unreadable' | 'ok', keys }: a Set of the recorded
+// keys, empty unless the status is 'ok'.
+function readRefutedKeys(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); }
+  catch (e) { return { status: e && e.code === 'ENOENT' ? 'absent' : 'unreadable', keys: new Set() }; }
+  let data = null;
+  try { data = JSON.parse(text); } catch (e) { data = null; }
+  const ok = data !== null && typeof data === 'object' && !Array.isArray(data) && data.version === REFUTED_VERSION
+    && Array.isArray(data.refuted) && data.refuted.every(k => typeof k === 'string');
+  return ok ? { status: 'ok', keys: new Set(data.refuted) } : { status: 'unreadable', keys: new Set() };
+}
+// Writes the record listing `keys` (sorted, each once) through a temporary
+// file renamed over the record. True when written.
+function writeRefutedKeys(file, keys) {
+  const refuted = [...new Set(keys)].filter(k => typeof k === 'string' && k !== '').sort();
+  const tmp = file + '.' + process.pid + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify({ version: REFUTED_VERSION, refuted }, null, 2) + '\n');
+    fs.renameSync(tmp, file);
+    return true;
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* nothing left to clean */ }
+    return false;
+  }
+}
+// The keys in a --refuted file: one per line, blanks dropped, a byte order
+// mark and CRLF endings tolerated. Null when the file cannot be read.
+function readRefutedFile(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return null; }
+  return text.replace(/^﻿/, '').split(/\r?\n/).map(l => l.trim()).filter(l => l !== '');
+}
+// The end of a clean /tk:upgrade, after --stamp recorded the version: the
+// killed keys join the record. Nothing is written for an empty list.
+function recordRefutedKeys(project, keys) {
+  if (!keys.length) return;
+  const file = refutedRecordPath(project);
+  if (file === null) {
+    console.error('upgrade-audit: not a git repository, so the ' + keys.length + ' refuted finding key' + (keys.length === 1 ? ' is' : 's are') + ' not recorded: the next audit reports ' + (keys.length === 1 ? 'it' : 'them') + ' again');
+    return;
+  }
+  const record = readRefutedKeys(file);
+  const known = record.status === 'ok' ? record.keys : new Set();
+  const fresh = keys.filter(k => !known.has(k));
+  if (!fresh.length) { console.error('upgrade-audit: every refuted finding key was already in the refuted record'); return; }
+  if (!writeRefutedKeys(file, [...known, ...fresh])) {
+    console.error('upgrade-audit: could not write the refuted record, so the next audit reports the ' + fresh.length + ' refuted finding' + (fresh.length === 1 ? '' : 's') + ' again');
+    return;
+  }
+  console.error('upgrade-audit: recorded ' + fresh.length + ' refuted finding key' + (fresh.length === 1 ? '' : 's') + ' in the refuted record, so the next audit skips ' + (fresh.length === 1 ? 'it while its line stays' : 'them while their lines stay') + ' unchanged');
+}
+// <<< refuted finding keys <<<
 // The project script a permission row runs, as a plain project-relative path
 // under .claude/scripts/, or null. The relative form is the extraction
 // deadPermission uses (the same regex, copied from setup-project.js;
@@ -374,11 +460,15 @@ function referenceVersion(state) {
   return null;
 }
 
-const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp]\n'
+// --stamp [--refuted <file>]: the file names the keys of the findings this
+// run's audit killed, one per line, and the stamp records them in the refuted
+// record (see recordRefutedKeys). It is read before anything is written, so a
+// path that cannot be read stops the run with the state file untouched.
+const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--refuted <file>]]\n'
   + '       node upgrade-audit.js [--project <dir>] --rollback-to <x.y.z>';
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, rollbackTo: null };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
@@ -386,11 +476,14 @@ function parseArgs(argv) {
     else if (a === '--conventions') o.conventions = argv[++i];
     else if (a === '--from') o.from = argv[++i];
     else if (a === '--stamp') o.stamp = true;
+    else if (a === '--refuted') o.refuted = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--rollback-to') o.rollbackTo = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else { console.error('upgrade-audit: unknown argument ' + a + '\n' + USAGE); process.exit(1); }
   }
   if (o.rollbackTo !== null && o.stamp) { console.error('upgrade-audit: --rollback-to lowers the record and --stamp raises it; run one of them\n' + USAGE); process.exit(1); }
+  if (o.refuted !== null && !o.stamp) { console.error('upgrade-audit: --refuted names the keys the audit killed for --stamp to record; run it with --stamp\n' + USAGE); process.exit(1); }
+  if (o.refuted === '') { console.error('upgrade-audit: --refuted takes the path of a file with one finding key per line\n' + USAGE); process.exit(1); }
   return o;
 }
 function git(args, cwd) {
@@ -1295,6 +1388,10 @@ function main() {
   if (toVersion === null) { console.error('upgrade-audit: no usable version in ' + path.join(pluginRoot, '.claude-plugin', 'plugin.json')); process.exit(1); }
   const state = readJson(P(STATE_REL), null);
   if (opts.stamp) {
+    // The --refuted file is read before anything is written, so a bad path
+    // stops the run with the state file untouched.
+    const refutedKeys = opts.refuted === null ? [] : readRefutedFile(path.resolve(opts.refuted));
+    if (refutedKeys === null) { console.error('upgrade-audit: the --refuted file could not be read: ' + opts.refuted); process.exit(1); }
     // A stamp never lowers the record: a project audited (or set up) on a
     // newer plugin than this one keeps what it has. Only validated versions are
     // compared or printed.
@@ -1314,6 +1411,7 @@ function main() {
     // its stamp, and C-7 reports it again on the next upgrade.
     restampRules(P, pluginRoot, toVersion);
     recordLostRowOffers(P, project, pluginRoot);
+    recordRefutedKeys(project, refutedKeys);
     return;
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
@@ -1339,6 +1437,11 @@ function main() {
   const scopeFiles = { 'prompt-files': promptFiles, 'claude-md': claudeMd, 'prompt-files+claude-md': [...promptFiles, ...claudeMd], 'prompt-files+session-files': [...promptFiles, ...sessionFiles] };
   const sessionSeverity = new Map(SESSION_READ_FILES);
   const notes = [];
+  // The refuted record (issue #213): findings whose key it lists are left out
+  // of the output below, and the summary counts them.
+  const refutedFile = refutedRecordPath(project);
+  const refutedRecord = refutedFile === null ? { status: 'absent', keys: new Set() } : readRefutedKeys(refutedFile);
+  if (refutedRecord.status === 'unreadable') notes.push('the refuted record ' + refutedFile + ' could not be read, so it suppresses nothing this run');
   const retiredKeys = readRetiredKeys(pluginRoot);
   const localExists = fs.existsSync(P(LOCAL_SETTINGS));
   const local = readJson(P(LOCAL_SETTINGS), null);
@@ -2024,10 +2127,14 @@ function main() {
       if (skipped) notes.push(c.id + ': skipped ' + skipped + ' migration record(s) whose path is not a plain project path');
     }
   }
-  for (const f of findings) process.stdout.write(JSON.stringify(f) + '\n');
+  // A finding the audit killed on an earlier upgrade stays out while its key,
+  // which digests its line, is unchanged; the summary says how many.
+  const reported = findings.filter(f => !refutedRecord.keys.has(f.key));
+  const suppressed = findings.length - reported.length;
+  for (const f of reported) process.stdout.write(JSON.stringify(f) + '\n');
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
   for (const n of notes) console.error('upgrade-audit: ' + n);
-  console.error('upgrade-audit: ' + findings.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s)');
+  console.error('upgrade-audit: ' + reported.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s); ' + suppressed + ' suppressed by the refuted record');
   // Zero findings over an empty range is the run that reads the same whether
   // the plugin is current or five releases behind: the range is measured
   // against the INSTALLED plugin and never against the latest release (#203).
@@ -2038,7 +2145,7 @@ function main() {
   // would call those different from `7.1.0` and so stay silent on exactly the
   // empty range this line exists for. compareVersions returns null when either
   // value is unusable, which is never 0, so it carries the old guard too.
-  if (findings.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
+  if (reported.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
     console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
   }
 }

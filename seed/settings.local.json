@@ -164,7 +164,8 @@
       "Bash(git push *--m*)",
       "Bash(git push *--de*)",
       "Bash(git push *--pru*)",
-      "Bash(git remote add *--mi*)"
+      "Bash(git remote add *--mi*)",
+      "Bash(npm install *)"
     ],
     "additionalDirectories": [
       "/tmp"

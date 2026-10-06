@@ -1580,6 +1580,100 @@ console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, 
   bad = allReceiptsShow(dir, c11);
   check('#187   both receipts show their line', bad.length === 0, bad.join(' | '));
 }
+{
+  // Issue #213: the broad npm install row is a seed ask row, so a project that
+  // lost it to the 7.3.0 upgrade is offered it back as a missing ask row, and
+  // one that still allows it sees no finding about it.
+  check('#213 fixture: the shipped seed carries Bash(npm install *) as an ask row and the retired list still leaves it out', SEED_ASK.includes('Bash(npm install *)') && !RETIRED.includes('Bash(npm install *)'), JSON.stringify(SEED_ASK));
+  const lost = path.join(TMP, 'npm-lost');
+  write(lost, '.claude/.toolkit-state.json', STATE_701);
+  write(lost, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== 'Bash(npm install *)') } }, null, 2) + '\n');
+  let res = audit(lost);
+  const f = res.findings.find(x => /:missing-ask-rows$/.test(x.key));
+  check('#213 a project lacking the row in every list is offered it as the one missing ask row, re-running /tk:setup being the fix', !!f && JSON.stringify(f.fields[0].value.split(' ; ')) === JSON.stringify(['Bash(npm install *)']) && /\/tk:setup/.test(f.fix), JSON.stringify(res.findings.map(x => [x.key, x.fields && x.fields[0].value])));
+  const kept = path.join(TMP, 'npm-kept');
+  write(kept, '.claude/.toolkit-state.json', STATE_701);
+  write(kept, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(npm install *)']), ask: SEED_ASK.filter(x => x !== 'Bash(npm install *)') } }, null, 2) + '\n');
+  res = audit(kept);
+  check('#213 a project that still allows the row gets no finding naming it', !res.findings.some(x => JSON.stringify(x).includes('npm install *')), JSON.stringify(res.findings.map(x => x.key)));
+}
+
+// --- 4n. the refuted record --------------------------------------------------------------
+// Issue #213: a finding the audit's skeptics refuted on one upgrade (a history
+// line C-11 flags, say) is not reported again on the next while its line is
+// unchanged. --stamp --refuted <file> records the killed keys in the git
+// directory; the audit leaves those keys out and counts them.
+console.log('\n4n. the refuted record: a finding the audit killed is not reported again while its line is unchanged (issue #213)');
+{
+  const dir = path.join(TMP, 'refuted');
+  const refutedPathOf = (d) => { const r = gitIn(d, ['rev-parse', '--git-path', 'tk-refuted-findings.json']); return r.status === 0 ? path.resolve(d, r.stdout.trim()) : null; };
+  const refutedKeysOf = (d) => { try { return JSON.parse(read(refutedPathOf(d))).refuted; } catch (e) { return null; } };
+  const stampWith = (d, args) => spawnSync('node', [SCRIPT, '--project', d, '--plugin-root', PLUGIN, '--stamp'].concat(args || []), { encoding: 'utf8' });
+  const CLAUDE_LINES = ['# Project', '', 'Run /review after execute.', '', 'Run /document before a release.', ''];
+  const c11 = (r) => r.findings.filter(x => x.id === 'C-11' && x.file.relPath === 'CLAUDE.md');
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK } }, null, 2) + '\n');
+  write(dir, 'CLAUDE.md', CLAUDE_LINES.join('\n'));
+  gitIn(dir, ['init', '-q']);
+  let res = audit(dir);
+  check('fixture: both instructions are reported and the summary counts nothing suppressed', res.status === 0 && JSON.stringify(c11(res).map(x => x.file.line)) === JSON.stringify([3, 5]) && /; 0 suppressed by the refuted record$/m.test(res.summary), res.summary + JSON.stringify(c11(res).map(x => x.file.line)));
+  const killed = c11(res).find(x => x.file.line === 3) || { key: '' };
+  check('  the audit writes no refuted record (it only reads one)', refutedPathOf(dir) !== null && !fs.existsSync(refutedPathOf(dir)));
+  // --refuted goes with --stamp, and a file that cannot be read stops the run
+  // before anything is written.
+  write(dir, 'refuted.txt', '﻿\r\n' + killed.key + '\r\n\r\n');
+  const alone = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--refuted', path.join(dir, 'refuted.txt')], { encoding: 'utf8' });
+  check('--refuted without --stamp is a usage error with nothing on stdout', alone.status === 1 && /usage/.test(alone.stderr) && alone.stdout === '', alone.stderr);
+  const bare = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp', '--refuted'], { encoding: 'utf8' });
+  check('--refuted with no path is a usage error', bare.status === 1 && /usage/.test(bare.stderr), bare.stderr);
+  const stateBefore = read(path.join(dir, '.claude', '.toolkit-state.json'));
+  const gone = stampWith(dir, ['--refuted', path.join(dir, 'nope.txt')]);
+  check('--stamp with a --refuted file that cannot be read exits 1 and leaves the state file and the record untouched', gone.status === 1 && /could not be read/.test(gone.stderr) && read(path.join(dir, '.claude', '.toolkit-state.json')) === stateBefore && !fs.existsSync(refutedPathOf(dir)), gone.stderr);
+  // The stamp records the key (blank lines, a byte order mark and CRLF endings tolerated).
+  let st = stampWith(dir, ['--refuted', path.join(dir, 'refuted.txt')]);
+  check('--stamp --refuted records the killed key in the git directory and says so', st.status === 0 && JSON.stringify(refutedKeysOf(dir)) === JSON.stringify([killed.key]) && /recorded 1 refuted finding key in the refuted record/.test(st.stderr), st.stderr + JSON.stringify(refutedKeysOf(dir)));
+  res = audit(dir);
+  check('the next audit leaves the refuted finding out, still reports the other, and counts one suppressed', res.status === 0 && !res.findings.some(x => x.key === killed.key) && JSON.stringify(c11(res).map(x => x.file.line)) === JSON.stringify([5]) && /; 1 suppressed by the refuted record$/m.test(res.summary), res.summary + JSON.stringify(res.findings.map(x => x.key)));
+  // The same line, changed, is a new finding under a new key.
+  write(dir, 'CLAUDE.md', CLAUDE_LINES.map(l => l === 'Run /review after execute.' ? 'Run /review right after execute.' : l).join('\n'));
+  res = audit(dir);
+  const again = c11(res).find(x => x.file.line === 3) || { key: '' };
+  check('the same line, changed, is reported again under a new key, and nothing is suppressed', again.key !== '' && again.key !== killed.key && /; 0 suppressed by the refuted record$/m.test(res.summary), res.summary + JSON.stringify(c11(res).map(x => [x.file.line, x.key])));
+  // A second stamp unions the new keys with the record (the stale key of the
+  // line's old text stays, matching nothing), a repeated set changes nothing,
+  // and an empty file records nothing.
+  const other = c11(res).find(x => x.file.line === 5) || { key: '' };
+  write(dir, 'refuted2.txt', again.key + '\n' + other.key + '\n' + killed.key + '\n');
+  const allThree = [killed.key, again.key, other.key].sort();
+  st = stampWith(dir, ['--refuted', path.join(dir, 'refuted2.txt')]);
+  check('a second --stamp --refuted unions the two new keys with the record and keeps the old one', st.status === 0 && JSON.stringify(refutedKeysOf(dir)) === JSON.stringify(allThree) && /recorded 2 refuted finding keys/.test(st.stderr), st.stderr + JSON.stringify(refutedKeysOf(dir)));
+  const same = stampWith(dir, ['--refuted', path.join(dir, 'refuted2.txt')]);
+  check('  a stamp whose keys are all recorded leaves the record as it was and says so', same.status === 0 && JSON.stringify(refutedKeysOf(dir)) === JSON.stringify(allThree) && /already in the refuted record/.test(same.stderr), same.stderr);
+  write(dir, 'empty.txt', '\n\n');
+  const empty = stampWith(dir, ['--refuted', path.join(dir, 'empty.txt')]);
+  check('  a stamp with an empty --refuted file records nothing and says nothing about the record', empty.status === 0 && !/refuted record/.test(empty.stderr), empty.stderr);
+  res = audit(dir);
+  check('with both live lines recorded, both are suppressed and the count says two; the stale key matches nothing', res.status === 0 && c11(res).length === 0 && /; 2 suppressed by the refuted record$/m.test(res.summary), res.summary);
+  // An unreadable record suppresses nothing, and the run says so once.
+  fs.writeFileSync(refutedPathOf(dir), '{ "version": 1, "refuted": [\n');
+  res = audit(dir);
+  check('an unreadable record counts as none: both lines are reported, nothing is suppressed, and a note says why', res.status === 0 && c11(res).length === 2 && /; 0 suppressed by the refuted record$/m.test(res.summary) && /refuted record .* could not be read, so it suppresses nothing this run/.test(res.summary), res.summary);
+  // Nothing but --stamp --refuted writes the record: an audit run leaves it as it is.
+  fs.writeFileSync(refutedPathOf(dir), JSON.stringify({ version: 1, refuted: [killed.key] }, null, 2) + '\n');
+  const before = read(refutedPathOf(dir));
+  res = audit(dir);
+  check('an audit run never writes the record', res.status === 0 && read(refutedPathOf(dir)) === before);
+  // Outside a git repository there is no record to write or read.
+  const nogit = path.join(TMP, 'refuted-nogit');
+  write(nogit, '.claude/.toolkit-state.json', STATE_701);
+  write(nogit, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK } }, null, 2) + '\n');
+  write(nogit, 'CLAUDE.md', CLAUDE_LINES.join('\n'));
+  write(nogit, 'refuted.txt', killed.key + '\n');
+  const ng = stampWith(nogit, ['--refuted', path.join(nogit, 'refuted.txt')]);
+  check('outside a git repository --stamp --refuted records nothing and says so', ng.status === 0 && /not a git repository, so the 1 refuted finding key is not recorded/.test(ng.stderr) && !fs.existsSync(path.join(nogit, '.git')), ng.stderr);
+  res = audit(nogit);
+  check('  and the audit there reports both lines with nothing suppressed', c11(res).length === 2 && /; 0 suppressed by the refuted record$/m.test(res.summary), res.summary);
+}
 
 {
   // 7.3.1 review, R1: the plugin cache rows are filled in with this machine's
