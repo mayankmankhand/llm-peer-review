@@ -1591,11 +1591,30 @@ console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, 
   let res = audit(lost);
   const f = res.findings.find(x => /:missing-ask-rows$/.test(x.key));
   check('#213 a project lacking the row in every list is offered it as the one missing ask row, re-running /tk:setup being the fix', !!f && JSON.stringify(f.fields[0].value.split(' ; ')) === JSON.stringify(['Bash(npm install *)']) && /\/tk:setup/.test(f.fix), JSON.stringify(res.findings.map(x => [x.key, x.fields && x.fields[0].value])));
+  // Issue #216: with only the npm row missing, the harm clause must not name a
+  // force push (no push-family row is missing) and must stay conditional, since
+  // the seed allows only the bare `npm install`: the ask row exists to keep
+  // asking when a project's own broader allow row would match.
+  check('#216 with only the npm row missing, the clause names no force push and is conditional on an allow row matching', !!f && !/force push/.test(f.what) && /any allow row that matches/.test(f.what), f ? f.what : 'no finding');
   const kept = path.join(TMP, 'npm-kept');
   write(kept, '.claude/.toolkit-state.json', STATE_701);
   write(kept, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW.concat(['Bash(npm install *)']), ask: SEED_ASK.filter(x => x !== 'Bash(npm install *)') } }, null, 2) + '\n');
   res = audit(kept);
   check('#213 a project that still allows the row gets no finding naming it', !res.findings.some(x => JSON.stringify(x).includes('npm install *')), JSON.stringify(res.findings.map(x => x.key)));
+  // Issue #216: the force-push sentence belongs to the push family alone, so
+  // each push-family seed row (the git push forms and the mirror remote) is
+  // proven on its own: with only that row missing, the finding still names a
+  // force push. Row by row, not the rows the #192 fixture happens to omit.
+  const pushRows = SEED_ASK.filter(x => x !== 'Bash(npm install *)');
+  check('#216 fixture: the seed ask list is the npm row plus at least one push-family row', pushRows.length > 0 && pushRows.every(r => /^Bash\(git (push|remote add) /.test(r)), JSON.stringify(pushRows));
+  pushRows.forEach((row, i) => {
+    const one = path.join(TMP, 'push-row-' + i);
+    write(one, '.claude/.toolkit-state.json', STATE_701);
+    write(one, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== row) } }, null, 2) + '\n');
+    const r = audit(one);
+    const g = r.findings.find(x => /:missing-ask-rows$/.test(x.key));
+    check('#216 with only ' + row + ' missing, the ask-row finding names a force push', !!g && JSON.stringify(g.fields[0].value.split(' ; ')) === JSON.stringify([row]) && /force push/.test(g.what), g ? g.what : JSON.stringify(r.findings.map(x => x.key)));
+  });
 }
 
 // --- 4n. the refuted record --------------------------------------------------------------
