@@ -17,4 +17,6 @@ One more check runs once per project, on the upgrade that brings it: C-13 (added
 
 Each file still behind one becomes a review finding with the check's output attached. Those findings are double-checked by a second agent, fixed automatically, and checked again with the same test, and the run stops to ask you once before it edits any prompt file. A finding about `defaultMode` in your settings is a question for you, asked in that same stop and never fixed automatically. Toolkit files themselves are never touched, because they live in the plugin. Moving a copy-install to the plugin runs the same audit over every convention since the version you came from.
 
+A finding that double-check rejects is remembered in that working copy (in a small record inside the git directory, never committed), so it is not raised again on the next upgrade while the line it is about is unchanged; the audit's summary says how many it skipped. A fix you declined is not a rejection, so it does come back, as the conventions that edit your own files promise.
+
 The CHANGELOG's Upgrading section names the conventions each release adds, by id.
