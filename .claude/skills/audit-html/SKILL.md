@@ -137,7 +137,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 
 `node .claude/scripts/render-html.js --shell audit --name audit-html --data <render-dir>/data.json`
 
-Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
+Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision.
 
 ## Static View Generation (opt-in, on request only)
 
@@ -148,7 +148,7 @@ When the user says "yes, generate the view" after seeing the report:
 3. Load the viewing rules now, through the Skill tool (`Skill(html-viewing)`), then check the publish gate (see **"Render for the viewport"** in them): if this session can publish, add `--no-abs` to the command below. Then run the helper from the project root:
    `node .claude/scripts/render-html.js --shell docview --name <source-basename> --stable --data <render-dir>/data.json`
    `--stable` writes exactly `artifacts/html/<source-basename>.html` (the default out dir). Do not modify the source markdown. A same-basename re-run overwrites the prior view (latest wins) - unlike the helper-rendered audit report (which is timestamped), this static view is intentionally not timestamped, because it is keyed to the source file's identity. Malformed JSON dies before any file write.
-4. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish. This is a `--stable` type, so it updates its existing page rather than creating a new one.
+4. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. This is a `--stable` type, so it updates its existing page rather than creating a new one.
 5. Confirm in chat, reporting the local path and, when the publish in step 4 succeeded, the link alongside it, per the "What to tell the user" line in `.claude/skills/shared/html-viewing.md`. Always state that the source markdown is unchanged.
 
 The view is read-only and disposable. It can be regenerated any time the markdown changes; do not build any sync mechanism between them.

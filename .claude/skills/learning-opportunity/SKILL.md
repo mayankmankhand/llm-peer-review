@@ -27,7 +27,7 @@ Pause development mode: the user wants to understand something better.
 
 ## Three-Level Explanation
 
-Present the concept at **three increasing complexity levels**. Let me absorb each level before moving on.
+Present the concept at **three increasing complexity levels**. Pause after each level so the user can absorb it before moving on.
 
 ### Level 1: Core Concept
 - What this is and why it exists
