@@ -12,7 +12,7 @@ If you last installed v4.3.3, thirty-three releases have shipped on top of it. v
 
 ---
 
-## v7.6.0 - The Seeded Files, Checked (2026-10-05)
+## v7.6.0 - The Seeded Files, Checked (2026-10-06)
 
 **A minor release on top of v7.5.1, which stays additive on v7.0.0 and v6.0.0.** The loop runs as before. Two checks join the set `/tk:upgrade` runs on every upgrade: the files setup seeded once (`CLAUDE.md`, `LESSONS.md`, `DESIGN-PROFILE.md`, `.claude/toolkit/README.md`) are compared block by block against every seed the toolkit has shipped (C-15), and the lessons index is checked for write-ups that belong in the detail file and for lessons inherited from the toolkit's own log (C-16). A sixth project seam names the security findings that are noise in a project, a dispatched finder can say what it could not check, and the browser finder hands its actions to the helper in one line. The rest is a text pass over the prompt files, chosen hunk by hunk from a bundled prompt audit of this repository and of three projects on the plugin, and the four follow-ups that audit raised ship here too: the map's size cap moves into the scanner's `--finalize` (#210), the review's merge-and-number pass becomes a script every runner calls (#211), the 48 wording sites the pass deferred are tidied (#212), and `/tk:upgrade` remembers the findings its audit refuted, `/tk:document` knows where an upgrade's record goes and the broad `npm install` row comes back as a seed ask row (#213).
 
