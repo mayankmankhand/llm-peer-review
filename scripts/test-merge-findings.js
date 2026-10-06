@@ -174,6 +174,21 @@ console.log('\n4. bad input is refused with nothing on stdout');
   const extra = run([jsonl([CODE]), '--force']);
   check('no argument, a missing file and an extra argument each exit 1 with an error line and no stdout', none.status === 1 && none.stdout === '' && missing.status === 1 && missing.stdout === '' && extra.status === 1 && extra.stdout === '' && /usage/.test(none.stderr) && /not_found|usage/.test(missing.stderr), none.stderr + missing.stderr + extra.stderr);
 }
+{
+  // Issue #217: the merge sentence names the folder right before the script
+  // call, so a runner may hand over the folder. A directory argument reads the
+  // findings.jsonl inside it; an empty folder is reported as that missing file.
+  const dir = path.join(sandbox, 'folder-' + (++counter));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'findings.jsonl'), JSON.stringify(CODE) + '\n');
+  const viaFile = run([path.join(dir, 'findings.jsonl')]);
+  const viaDir = run([dir]);
+  check('a folder that holds findings.jsonl gives the same stdout and counts as the file', viaDir.status === 0 && viaFile.rows !== null && viaFile.rows.length === 1 && viaDir.stdout === viaFile.stdout && viaDir.stderr === viaFile.stderr, viaDir.status + ' ' + viaDir.stdout + ' ' + viaDir.stderr);
+  const empty = path.join(sandbox, 'folder-' + (++counter));
+  fs.mkdirSync(empty, { recursive: true });
+  const bare = run([empty]);
+  check('an empty folder exits 1 with no stdout and a not_found line naming findings.jsonl', bare.status === 1 && bare.stdout === '' && /not_found/.test(bare.stderr) && /findings\.jsonl/.test(bare.stderr), bare.status + ' ' + bare.stdout + ' ' + bare.stderr);
+}
 
 // --- 5. the dedup key rule, once -------------------------------------------------
 console.log('\n5. a missing key is derived by the one shared rule');

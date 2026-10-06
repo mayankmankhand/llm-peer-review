@@ -57,6 +57,7 @@
 // scripts.
 
 const fs = require('fs');
+const path = require('path');
 
 const SEVERITY_RANK = { block: 0, warn: 1, suggest: 2 };
 
@@ -186,9 +187,15 @@ function main(argv) {
     process.stderr.write(JSON.stringify(out) + '\n');
     process.exit(1);
   };
-  if (argv.length !== 1) fail('usage', null, 'usage: node merge-findings.js <findings.jsonl>');
+  if (argv.length !== 1) fail('usage', null, 'usage: node merge-findings.js <findings.jsonl, or the folder that holds it>');
+  // Issue #217: the merge sentence names the folder right before this call, so
+  // a runner may hand over the folder; the findings.jsonl inside it is then the
+  // file. The check must not throw on a path that does not exist: that case is
+  // left to the read below, which reports it as not_found.
+  let file = argv[0];
+  try { if (fs.statSync(file).isDirectory()) file = path.join(file, 'findings.jsonl'); } catch (e) { /* absent: the read below reports it */ }
   let text;
-  try { text = fs.readFileSync(argv[0], 'utf8'); } catch (e) { fail('not_found', null, argv[0] + ' could not be read: ' + e.message); }
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { fail('not_found', null, file + ' could not be read: ' + e.message); }
   let parsed;
   try { parsed = parseLines(text); } catch (e) { fail(e.error || 'bad_line', e.line, e.message); }
   const merged = mergeFindings(parsed.findings);
