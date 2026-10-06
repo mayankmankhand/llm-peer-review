@@ -125,7 +125,19 @@ const OLD_LESSONS_COMMENT = [
 const oldHit = shipped.get('LESSONS.md') && shipped.get('LESSONS.md').get(sb.hashLines(OLD_LESSONS_COMMENT));
 check('it knows the LESSONS.md comment the copy-installers wrote into projects, first shipped before v7.1.0', !!oldHit && oldHit.kind === 'block' && /^v[5-7]\./.test(oldHit.release) && !/^v7\.[1-9]/.test(oldHit.release), oldHit && oldHit.release);
 const readmeShipped = shipped.get('.claude/toolkit/README.md') || new Map();
-check('a block is history only once a release shipped it: the five-files heading is, the six-files heading is not yet', readmeShipped.has(sb.hashLines(['## The five files'])) && !readmeShipped.has(sb.hashLines(['## The six files'])));
+// A block is history once a release shipped it, and the file says which releases
+// it covers in its own header ("from the release tags vA to vB"). The five-files
+// heading shipped in v7.4.0 and the six-files heading in v7.6.0, so the second is
+// in the file exactly when its range reaches v7.6.0: absent in the file 7.6.0
+// itself shipped (generated before that tag existed), present from 7.6.1 on.
+// Pinning "not yet" to a fixed heading broke the moment the next release
+// regenerated the file (the 7.6.1 release gate).
+const historyHeader = read(path.join(REPO, 'seed', 'historical-seed-blocks.txt')).split('\n').find(l => /release tags v\d+\.\d+\.\d+ to v\d+\.\d+\.\d+/.test(l)) || '';
+const historyUpper = (historyHeader.match(/to v(\d+\.\d+\.\d+)/) || [])[1] || '0.0.0';
+const versionAtLeast = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if (x[i] !== y[i]) return x[i] > y[i]; } return true; };
+const fiveShipped = readmeShipped.get(sb.hashLines(['## The five files']));
+const sixShipped = readmeShipped.get(sb.hashLines(['## The six files']));
+check('a block is history once a release shipped it: the five-files heading is v7.4.0\'s, and the six-files heading is v7.6.0\'s exactly when the file\'s own tag range reaches v7.6.0 (it reads to v' + historyUpper + ')', !!fiveShipped && fiveShipped.release === 'v7.4.0' && (versionAtLeast(historyUpper, '7.6.0') ? (!!sixShipped && sixShipped.release === 'v7.6.0') : !sixShipped), JSON.stringify({ upper: historyUpper, five: fiveShipped && fiveShipped.release, six: sixShipped && sixShipped.release }));
 const shippedLeads = read(path.join(REPO, 'seed', 'toolkit-lesson-leads.txt')).split('\n').filter(l => l && !l.startsWith('#'));
 const ownLeads = sb.lessonBullets(sb.normalizeLines(read(path.join(REPO, 'LESSONS.md')))).filter(b => b.lead);
 check('seed/toolkit-lesson-leads.txt carries every lead of the toolkit\'s own index (' + shippedLeads.length + ' leads, ' + ownLeads.length + ' in the index now)', shippedLeads.length >= 140 && ownLeads.length > 0 && ownLeads.every(b => shippedLeads.some(l => sb.leadKey(l) === sb.leadKey(b.lead))), ownLeads.filter(b => !shippedLeads.some(l => sb.leadKey(l) === sb.leadKey(b.lead))).map(b => b.lead).join(' | '));
