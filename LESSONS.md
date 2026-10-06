@@ -279,7 +279,7 @@
 
 ## Issues 196, 200, 202 (the outside audit)
 
-- **A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".**
+- **A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".** (third occurrence in detail: the re-key sentence, #211)
 - **Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.**
 - **A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.**
 - **"Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.**
@@ -337,7 +337,7 @@
 ## Issue 209 (your own helpers' models)
 
 - **A detector's "this one is fine" rule must be as narrow as the text it recognizes: the audit after it can drop a reported finding, never add a missed one.**
-- **A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.**
+- **A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.** (see the #211 refinement in detail: the installer lists)
 
 ## Prompt audit fixes (v7.6.0)
 
@@ -347,3 +347,8 @@
 - **When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.**
 - **A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.**
 - **Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.**
+
+## Issues 210-213 (the follow-ups folded into 7.6.0)
+
+- **A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.**
+- **A standing page published in an earlier session is read in full before it is updated; the publish is refused until then.**

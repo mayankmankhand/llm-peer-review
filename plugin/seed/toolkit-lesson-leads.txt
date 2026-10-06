@@ -57,6 +57,7 @@ A prompt cannot declare a user-owned prerequisite done.
 A prompt's user-facing message is not enforcement.
 A prose sweep needs the wordings that actually occur, not the one you remember writing.
 A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
+A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.
 A release needs one review of the whole range, not the sum of its per-issue reviews.
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
@@ -67,6 +68,7 @@ A self-run consistency check passes while the scoped thing is missing entirely.
 A sentence that must read the same in several prompt files gets a parity test; a reviewer found the one site of nine that kept the old wording.
 A sentence-break rule needs its abbreviation exception before it ships: when a critic names the false positive, that input goes into the test first.
 A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.
+A standing page published in an earlier session is read in full before it is updated; the publish is refused until then.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
 A suite is green when its exit code is 0, not when its tail looks quiet.
 A sweep's receipt is its grep patterns and their output, not the word "clean".
