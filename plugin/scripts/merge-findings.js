@@ -8,6 +8,8 @@
 // its own words. This script does that pass once, the same way every time.
 //
 //   node merge-findings.js <file>
+//   node merge-findings.js <folder>   the same, reading the findings.jsonl
+//                                     inside that folder (issue #217)
 //
 // <file> holds one JSON object per line in the dispatch format (severity,
 // specialist, file, what, context, fix, fields, key, receipt). The runner

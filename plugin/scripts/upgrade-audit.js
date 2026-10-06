@@ -1571,9 +1571,12 @@ function main() {
         // Seed ask rows the project lacks (issue #192): without them the broad
         // `Bash(git push *)` allow row lets a force push run unasked, so this is
         // its own Should fix finding, filtered like the allow rows above. The
-        // harm clause follows from the rows (issue #216): the force-push sentence
-        // only when a push-family row (a `git push` form, or the mirror remote)
-        // is missing. Any other row's harm is conditional, because the seed
+        // harm clause follows from the rows (issue #216): the push sentence only
+        // when a push-family row (a `git push` form, or the mirror remote) is
+        // missing, and it names a force push or another push that deletes or
+        // rewrites remote history, because the family holds delete, mirror and
+        // prune rows too: an install missing only those still reads true (the
+        // review of this change, R1). Any other row's harm is conditional, because the seed
         // allows no command those rows guard (only the bare `npm install`); the
         // ask row exists to keep asking when a project's own broader allow row
         // would match. A fixed sentence here was refuted by the audit's skeptic
@@ -1582,7 +1585,7 @@ function main() {
         const missingAsk = seedAsk.filter(p => { const k = permissionRowKey(p); if (seedKeys.has(k)) return false; seedKeys.add(k); return notYet(k); });
         const pushFamily = missingAsk.some(p => /^Bash\(git (push|remote add) /.test(p));
         const askHarm = pushFamily
-          ? 'so a force push matches the allow row for git push and runs without asking.'
+          ? 'so a force push, or another push that deletes or rewrites remote history, matches the allow row for git push and runs without asking.'
           : 'so any allow row that matches one of those commands lets it run without asking.';
         if (localExists && missingAsk.length) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':missing-ask-rows').key, severity: 'warn', convention: c.title, file: { relPath: LOCAL_SETTINGS },
           what: 'Should fix. ' + LOCAL_SETTINGS + ' lacks ' + missingAsk.length + ' ask row' + (missingAsk.length === 1 ? '' : 's') + ' the shipped toolkit seed carries, ' + askHarm,

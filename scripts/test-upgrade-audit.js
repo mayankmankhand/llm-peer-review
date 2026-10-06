@@ -1613,7 +1613,7 @@ console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, 
     write(one, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== row) } }, null, 2) + '\n');
     const r = audit(one);
     const g = r.findings.find(x => /:missing-ask-rows$/.test(x.key));
-    check('#216 with only ' + row + ' missing, the ask-row finding names a force push', !!g && JSON.stringify(g.fields[0].value.split(' ; ')) === JSON.stringify([row]) && /force push/.test(g.what), g ? g.what : JSON.stringify(r.findings.map(x => x.key)));
+    check('#216 with only ' + row + ' missing, the ask-row finding names a force push or another push that rewrites remote history', !!g && JSON.stringify(g.fields[0].value.split(' ; ')) === JSON.stringify([row]) && /force push, or another push that deletes or rewrites remote history/.test(g.what), g ? g.what : JSON.stringify(r.findings.map(x => x.key)));
   });
 }
 
