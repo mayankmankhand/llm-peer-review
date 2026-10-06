@@ -21,7 +21,7 @@ Findings from peer review:
 
 <procedure>
 
-For EACH finding in the pasted feedback:
+For each finding in the pasted feedback:
 
 1. **Verify it exists** - Actually check the code. Does this issue really exist?
 2. **If it doesn't exist** - Explain why (already handled, misunderstood the architecture, etc.)

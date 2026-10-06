@@ -21,13 +21,13 @@ Record the output. Echo it back to the user so it's anchored in the conversation
 
 > Session ID for this debate: `1747700000-29481`. All temp files for this run will use this suffix.
 
-**You will use this exact session ID in every `/tmp/ask-gpt-*-<session-id>.md` path throughout this entire command** - Step 2's context file, Step 3's debate file, every Step 4 round, AND Step 5's summary call. Do NOT regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
+Use this exact session ID in every `/tmp/ask-gpt-*-<session-id>.md` path throughout this command: Step 2's context file, Step 3's debate file, every Step 4 round, and Step 5's summary call. Do not regenerate the ID between steps or rounds. A different ID mid-flow would split the debate across two file pairs, the `respond` script would see only part of the transcript, and the Node script will warn you about the mismatch.
 
 **Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
 
 1. Run `ls -t /tmp/ask-gpt-debate-*.md` to list debate files (newest first).
 2. If only one file exists, read its first line - it contains `<!-- Session: <session-id> -->` and gives you the ID.
-3. If multiple files exist (another parallel `/ask-gpt` tab is running), do NOT just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
+3. If multiple files exist (another parallel `/ask-gpt` tab is running), do not just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
 4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gpt-context-<session-id>.md` and `/tmp/ask-gpt-debate-<session-id>.md`. Reconstruct both paths and continue.
 
 **Why this matters:** two parallel Cursor or Claude Code tabs running `/ask-gpt` would otherwise overwrite each other's context and debate files. The session ID gives each run its own isolated pair.

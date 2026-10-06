@@ -16,7 +16,7 @@ allowed-tools:
 - Subagent prompts must direct **conditional detection**: only report conventions and gotchas when there is concrete code evidence. No speculation.
 - The final map stays under about 10k tokens. `--finalize` enforces that cap itself (Step 5): it trims the other sections in a fixed order and never cuts the Module Guide, the semantic core, which only you shorten, and only when the script says the map is still over.
 - Use **atomic write** (Step 5 details): a failed run must leave the user's existing map intact.
-- If any step fails (scanner error, all subagents fail after Step 3's one automatic retry per chunk, validation fails), stop and report. Do NOT partially overwrite `CODEBASE_MAP.md`.
+- If any step fails (scanner error, all subagents fail after Step 3's one automatic retry per chunk, validation fails), stop and report. Do not partially overwrite `CODEBASE_MAP.md`.
 </rules>
 
 ## Steps
@@ -92,10 +92,10 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 
 Launch all subagents in parallel (one Agent tool call per chunk in a single message). Wait for all to return.
 
-If any subagent fails or returns an empty response, re-dispatch that chunk once, one tier up (`subagent_type=general-purpose` with `model` set to your own model family's alias: a call with no model parameter follows `CLAUDE_CODE_SUBAGENT_MODEL` when a user has set it, measured on Claude Code 2.1.289, and could land the retry on the model that just failed) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 6. If EVERY chunk failed, do not offer partial coverage - follow the "All subagents fail" edge case instead: report the failure and leave the existing map untouched.
+If any subagent fails or returns an empty response, re-dispatch that chunk once on the session model (`subagent_type=general-purpose` with `model` set to your own model family's alias: a call with no model parameter follows `CLAUDE_CODE_SUBAGENT_MODEL` when a user has set it, measured on Claude Code 2.1.289, and could land the retry on the model that just failed) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 6. If every chunk failed, do not offer partial coverage: follow the "All subagents fail" edge case instead.
 
 ### Step 4: Synthesize the map content
-Combine the subagent responses into a single map content string (do NOT write the file yet - Step 5 handles the write atomically). Use this structure:
+Combine the subagent responses into a single map content string (do not write the file yet - Step 5 handles the write atomically). Use this structure:
 
 <template>
 
@@ -167,7 +167,7 @@ Tell the user:
 - **Single tiny project:** Manifest has 1 chunk. Spawn 1 subagent. The flow works identically.
 - **Scanner script missing:** Tell the user the toolkit install is incomplete. On the plugin, reinstall or update it (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, then restart Claude Code); on a copy-install, run `/tk:setup` to move the project onto the plugin, or re-run the copy-install's own setup script (`setup.sh` or `setup.ps1`).
 - **Not a git repo:** Scanner errors out. Tell the user to `git init` first.
-- **All subagents fail:** Do NOT write a partial/empty map. Report the failure and leave any existing `CODEBASE_MAP.md` and `INDEX.md` untouched.
+- **All subagents fail:** report the failure and leave any existing `CODEBASE_MAP.md` and `INDEX.md` untouched; never write a partial or empty map.
 - **Per-chunk overflow detected:** Step 2's confirm prompt covers this. If the user proceeds anyway, the oversized subagent may truncate or fail - report the gap in Step 6.
 
 </conditions>

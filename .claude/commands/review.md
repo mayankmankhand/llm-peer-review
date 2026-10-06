@@ -119,7 +119,7 @@ Project context:
 [PASTE PROJECT CONTEXT SUMMARY HERE]
 
 Scope:
-[THE PHASE 0 SCOPE LINE, e.g. "Reviewing 6 commits (a1b2c3d..e4f5a6b) plus uncommitted work."]
+[THE PHASE 0 SCOPE LINE, as the script printed it, e.g. "Reviewing 6 commits (`a1b2c3d..e4f5a6b`), your unpushed commits; no plan names a start commit, plus uncommitted work. Models: fit (the default)."]
 
 Files to review (excerpts already read for you):
 [PASTE THE RELEVANT EXCERPTS OF EACH CHANGED FILE IN THE SCOPE, committed in the range or uncommitted. For a file over ~400 lines, paste the changed sections plus ~50 surrounding lines and point at the path for the rest.]
@@ -157,7 +157,7 @@ Collect the JSONL findings from all subagents (a specialist that emitted `NO FIN
 
 The three-tier audit runs here, between dedup and the report: the orchestrator is M2's *runner*. M2 in `.claude/skills/shared/hitl-loop.md` (inlined under "After the Report") holds every mechanic - the tiers and what each covers, the skeptic instruction, the verdict formats, dispatch hygiene, the concurrency note, and the redispatch-on-failure rule. Do not restate them here and do not improvise a variant.
 
-Two things are specific to this path:
+What is specific to this path:
 
 - **The bytes are JSONL.** A finding's `receipt.check` is its tier 1 command and `receipt.expect` is the line the output must satisfy. A merged finding carries every source receipt and stands if at least one check passes (Phase 3). What tiers 2 and 3 receive is the original JSONL lines plus each receipt's actual output.
 - **The inline path is not exempt.** When Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh `audit-skeptic` agents. M2's never-judge-your-own-findings rule applies here exactly as it does to dispatched specialists.

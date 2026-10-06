@@ -1,6 +1,6 @@
 # Update Documentation Task
 
-**Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or INDEX after code changes have shipped.
+**Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or the codebase map after code changes have shipped.
 **Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
 
 You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `.claude/skills/shared/hitl-loop.md` (rule IDs M1-M15). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
@@ -250,7 +250,7 @@ Because this is a `--stable` type, look up its recorded page before publishing:
 node .claude/scripts/render-html.js --index-url --name cycle
 ```
 
-Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. Pass `--no-abs` to the render above when this session can publish.
+Update the page whose URL comes back; publish a new one when nothing does. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision.
 
 ### Advance the marker (LAST step)
 
