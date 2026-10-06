@@ -1696,6 +1696,44 @@ console.log('\n4n. the refuted record: a finding the audit killed is not reporte
   check('R1 from a plugin root outside the cache, the cache rows are neither reported nor granted', fieldOf(outside, 'C-9', 'Missing rows') === null, JSON.stringify(fieldOf(outside, 'C-9', 'Missing rows')));
 }
 
+// --- 4o. the refuted record keeps whole-file findings out (review 2026-10-05, R1) ----
+// A key that names a whole file rather than the text it is about (missing ask
+// rows, the rules text, the lessons index) never changes, so a kill recorded
+// under it would hide that check on every later upgrade. The stamp leaves such
+// a key out and says so, and the audit never suppresses on one, even when a
+// record holds it.
+console.log('\n4o. the refuted record keeps whole-file findings out (review 2026-10-05, R1)');
+{
+  const { isContentKey } = require(SCRIPT);
+  check('isContentKey: a line digest, a repeat suffix, a state-file, a finder-call and a seeded-block key are content keys',
+    ['C-11:CLAUDE.md:239d814e728c', 'C-11:CLAUDE.md:239d814e728c#2', 'C-10:.gitignore:line:0123456789ab', 'C-14:.claude/commands/x.md:finder-call:review-code-finder:0123456789ab', 'C-15:CLAUDE.md:block:0123456789abcdef'].every(isContentKey));
+  check('isContentKey: the whole-file keys are not',
+    ['C-9:.claude/settings.local.json:missing-ask-rows', 'C-7:.claude/rules/toolkit.md:rules-text', 'C-16:LESSONS.md:long-bullets', 'C-9:.claude/settings.local.json:missing-rows#2', 'C-15:CLAUDE.md:file'].every(k => !isContentKey(k)));
+  const dir = path.join(TMP, 'refuted-whole');
+  write(dir, '.claude/.toolkit-state.json', STATE_701);
+  write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== 'Bash(npm install *)') } }, null, 2) + '\n');
+  write(dir, 'CLAUDE.md', ['# Project', '', 'Run /review after execute.', ''].join('\n'));
+  gitIn(dir, ['init', '-q']);
+  const recordPath = () => { const r = gitIn(dir, ['rev-parse', '--git-path', 'tk-refuted-findings.json']); return path.resolve(dir, r.stdout.trim()); };
+  const recorded = () => { try { return JSON.parse(read(recordPath())).refuted; } catch (e) { return null; } };
+  const stamp = (file) => spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp', '--refuted', path.join(dir, file)], { encoding: 'utf8' });
+  let res = audit(dir);
+  const whole = res.findings.find(x => /:missing-ask-rows$/.test(x.key)) || { key: '' };
+  const line = res.findings.find(x => x.id === 'C-11' && x.file.relPath === 'CLAUDE.md') || { key: '' };
+  check('fixture: the missing npm ask row carries a whole-file key and the history line a content key', whole.key !== '' && !isContentKey(whole.key) && line.key !== '' && isContentKey(line.key), whole.key + ' | ' + line.key);
+  write(dir, 'refuted.txt', whole.key + '\n' + line.key + '\n');
+  const st = stamp('refuted.txt');
+  check('--stamp --refuted records the content key only and says the whole-file key was left out', st.status === 0 && JSON.stringify(recorded()) === JSON.stringify([line.key]) && /left 1 refuted finding key out of the refuted record: it names a whole file/.test(st.stderr) && /recorded 1 refuted finding key/.test(st.stderr), st.stderr);
+  res = audit(dir);
+  check('the next audit still reports the missing ask row, suppresses the history line, and counts one', res.findings.some(x => x.key === whole.key) && !res.findings.some(x => x.key === line.key) && /; 1 suppressed by the refuted record$/m.test(res.summary), res.summary);
+  fs.writeFileSync(recordPath(), JSON.stringify({ version: 1, refuted: [whole.key, line.key] }, null, 2) + '\n');
+  res = audit(dir);
+  check('a whole-file key placed in the record by hand suppresses nothing: the missing ask row is reported and the count stays one', res.findings.some(x => x.key === whole.key) && /; 1 suppressed by the refuted record$/m.test(res.summary), res.summary);
+  write(dir, 'refuted2.txt', whole.key + '\n');
+  const only = stamp('refuted2.txt');
+  check('a --refuted file holding only whole-file keys records nothing and leaves the record as it was', only.status === 0 && /left 1 refuted finding key out/.test(only.stderr) && !/recorded/.test(only.stderr) && JSON.stringify(recorded()) === JSON.stringify([whole.key, line.key]), only.stderr);
+}
+
 // --- 5. parser mechanics the real file does not exercise ----------------------------
 console.log('\n5. version range and parser mechanics (fixture conventions)');
 const FIXTURE_CONVENTIONS = path.join(TMP, 'conventions.md');

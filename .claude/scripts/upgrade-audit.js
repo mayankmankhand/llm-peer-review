@@ -272,8 +272,13 @@ function fillPluginCache(rows, pluginRoot) {
 // (tier 1 RECEIPT FAILED, tier 2 REFUTED, tier 3 REFUTED 2/3 or 3/3) in this
 // working copy, so the next audit does not report them again: a history line
 // that C-11 flags and a skeptic refutes was otherwise flagged, refuted and
-// flagged again on every upgrade. A finding's key digests the line it is about
-// (see keyMaker below), so a changed line is a new finding and is reported. A
+// flagged again on every upgrade. Only a finding whose key digests the text it
+// is about is remembered, a line or a seeded block (see keyMaker, digest and
+// hashLines below): a changed line is a new finding and is reported, while a
+// finding about a whole file (missing rows, the rules text, the lessons index)
+// has a fixed key that would never change, so a kill recorded under it would
+// hide that check for good; the stamp leaves such a key out and says so, and
+// the audit never suppresses on one, whatever the record holds. A
 // fix the owner declined is not a kill and is never written here, which is why
 // a declined C-7, C-15 or C-16 finding still comes back as those conventions
 // promise. Like the offered-rows record it lives in the git directory (`git
@@ -289,6 +294,13 @@ function fillPluginCache(rows, pluginRoot) {
 // sorted, each key once.
 const REFUTED_FILE = 'tk-refuted-findings.json';
 const REFUTED_VERSION = 1;
+// A key the record may hold: its last segment (before keyMaker's #n suffix for
+// a repeat) is a hex digest of the text the finding is about, a line (digest,
+// twelve characters) or a seeded block (hashLines, HASH_LENGTH). A whole-file
+// key ends in a fixed word instead (missing-ask-rows, rules-text, long-bullets).
+function isContentKey(key) {
+  return /:[0-9a-f]{12,64}(#\d+)?$/.test(String(key));
+}
 // The record's absolute path for the working copy at `dir`, or null outside a
 // git repository (or when git cannot be run).
 function refutedRecordPath(dir) {
@@ -335,6 +347,11 @@ function readRefutedFile(file) {
 // killed keys join the record. Nothing is written for an empty list.
 function recordRefutedKeys(project, keys) {
   if (!keys.length) return;
+  const content = keys.filter(isContentKey);
+  const whole = keys.length - content.length;
+  if (whole) console.error('upgrade-audit: left ' + whole + ' refuted finding key' + (whole === 1 ? '' : 's') + ' out of the refuted record: ' + (whole === 1 ? 'it names' : 'each names') + ' a whole file rather than the text it is about, so that finding returns on the next audit');
+  if (!content.length) return;
+  keys = content;
   const file = refutedRecordPath(project);
   if (file === null) {
     console.error('upgrade-audit: not a git repository, so the ' + keys.length + ' refuted finding key' + (keys.length === 1 ? ' is' : 's are') + ' not recorded: the next audit reports ' + (keys.length === 1 ? 'it' : 'them') + ' again');
@@ -2128,8 +2145,9 @@ function main() {
     }
   }
   // A finding the audit killed on an earlier upgrade stays out while its key,
-  // which digests its line, is unchanged; the summary says how many.
-  const reported = findings.filter(f => !refutedRecord.keys.has(f.key));
+  // which digests the text it is about, is unchanged; a whole-file key never
+  // suppresses, whatever the record holds. The summary says how many.
+  const reported = findings.filter(f => !(isContentKey(f.key) && refutedRecord.keys.has(f.key)));
   const suppressed = findings.length - reported.length;
   for (const f of reported) process.stdout.write(JSON.stringify(f) + '\n');
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
@@ -2154,6 +2172,6 @@ function main() {
 // maintainer script that writes the two history seeds) and its tests, so the
 // history is hashed exactly as the audit hashes a project's file. The audit
 // itself runs only when this script is invoked.
-module.exports = { SEED_FILES, LESSON_SOURCES, HASH_LENGTH, normalizeLines, hashLines, fileHash, blocksOf, similarity, lessonBullets, leadKey, isLongBullet, LONG_BULLET_CHARS, SENTENCE_BREAK, parseHistory };
+module.exports = { SEED_FILES, LESSON_SOURCES, HASH_LENGTH, normalizeLines, hashLines, fileHash, blocksOf, similarity, lessonBullets, leadKey, isLongBullet, LONG_BULLET_CHARS, SENTENCE_BREAK, parseHistory, isContentKey };
 
 if (require.main === module) main();
