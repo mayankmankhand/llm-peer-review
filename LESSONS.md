@@ -352,3 +352,9 @@
 
 - **A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.**
 - **A standing page published in an earlier session is read in full before it is updated; the publish is refused until then.**
+
+## Issues 215-217 (the 7.6.1 patch)
+
+- **A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.**
+- **A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.**
+- **When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.**
