@@ -82,6 +82,11 @@ console.log('\n4. the merge helper sentence');
 const MERGE = 'Write every finding line this run collected, the workers\' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that path, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts.';
 const MERGE_SITES = ['.claude/commands/review.md', '.claude/skills/upgrade/SKILL.md', '.claude/skills/shared/criteria-code.md', '.claude/skills/shared/criteria-commands.md', '.claude/skills/shared/criteria-copy.md', '.claude/skills/shared/criteria-plan.md', '.claude/skills/shared/criteria-ux.md', '.claude/skills/review-full/SKILL.md', '.claude/skills/security-audit/SKILL.md'];
 for (const file of MERGE_SITES) check(file + ' carries the merge sentence word for word, once', count(read(file), MERGE) === 1, count(read(file), MERGE) + ' found');
+// Review 2026-10-05, R2: the one judgment the helper leaves to the runner, a
+// defect reported under two keys, is stated beside the merge sentence at every
+// site in the review command's words, so a direct run re-keys the same way.
+const REKEY = 'Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one\'s `key` and record the merge in the report\'s dedup notes.';
+for (const file of MERGE_SITES) check(file + ' carries the re-key sentence word for word, once', count(read(file), REKEY) === 1, count(read(file), REKEY) + ' found');
 const byHand = prompts.filter(([, t]) => /Assign R-IDs yourself|assigns Finding IDs after dedup|combine and renumber their findings/.test(t)).map(([f]) => f);
 check('no prompt file keeps the old by-hand wording of the pass', byHand.length === 0, byHand.join(', '));
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
