@@ -1,6 +1,6 @@
 # Seeded blocks older releases shipped, for the upgrade audit (C-15).
 # <hash> <block|file> <project file> <first release that shipped it>
-# Written by scripts/seed-history.js from the release tags v6.0.0 to v7.5.1; regenerate it in the release order, never edit it by hand.
+# Written by scripts/seed-history.js from the release tags v6.0.0 to v7.6.0; regenerate it in the release order, never edit it by hand.
 0e89af0bed8f17df block CLAUDE.md v6.0.0
 5f9c8b07ae0940d4 block CLAUDE.md v6.0.0
 61d9d273b3a7ff53 block CLAUDE.md v6.0.0
@@ -11,6 +11,7 @@ ef9824bb6b54740c block CLAUDE.md v6.0.0
 a74cd92aa0eb221c block CLAUDE.md v7.1.0
 3850656b14adbccb file CLAUDE.md v6.0.0
 a3315786af0c79e6 file CLAUDE.md v7.1.0
+bc53dde0dbb65afe file CLAUDE.md v7.6.0
 46cea8c8f3966015 block LESSONS.md v6.0.0
 12a2dde39fa90d5d block LESSONS.md v7.1.0
 3d0c1d5afbb2d645 file LESSONS.md v6.0.0
@@ -32,16 +33,21 @@ b513c5a7a35436d1 file LESSONS.md v7.4.2
 d72801f94647cabe file LESSONS.md v7.4.3
 785d14aea87a8650 file LESSONS.md v7.5.0
 159da40ac528220a file LESSONS.md v7.5.1
+a9112f63fdfc8429 file LESSONS.md v7.6.0
 528144ebf1bcc41e block DESIGN-PROFILE.md v6.2.0
 6ba9be597090a72d block DESIGN-PROFILE.md v7.1.0
 7d363ac197269d32 block DESIGN-PROFILE.md v7.2.0
 7f24c5ede13e4fb0 block DESIGN-PROFILE.md v7.5.0
+30fa54dbe81af415 block DESIGN-PROFILE.md v7.6.0
+f5710268fa624372 block DESIGN-PROFILE.md v7.6.0
 b1c2bb8b7a715c8b file DESIGN-PROFILE.md v6.2.0
 301d288e06621273 file DESIGN-PROFILE.md v7.1.0
 7b4173abe9dd3a29 file DESIGN-PROFILE.md v7.2.0
 65ef39be7f6e2368 file DESIGN-PROFILE.md v7.4.3
 7f5fa057aeb12e59 file DESIGN-PROFILE.md v7.4.3
 c282340c7753991d file DESIGN-PROFILE.md v7.5.0
+20e8feae87bf1884 file DESIGN-PROFILE.md v7.6.0
+3d59fc41a582795c file DESIGN-PROFILE.md v7.6.0
 09cbd38384a8e0ae block .claude/toolkit/README.md v7.4.0
 170456e37effa947 block .claude/toolkit/README.md v7.4.0
 22828b96a05f9af2 block .claude/toolkit/README.md v7.4.0
@@ -62,4 +68,16 @@ c399705e20492036 block .claude/toolkit/README.md v7.4.0
 df1be2b66421ad13 block .claude/toolkit/README.md v7.4.0
 e26a4d8ee9803051 block .claude/toolkit/README.md v7.4.0
 ed5f512529555335 block .claude/toolkit/README.md v7.4.0
+0798d4b8e80e84e2 block .claude/toolkit/README.md v7.6.0
+0c019b2447e5cc12 block .claude/toolkit/README.md v7.6.0
+516847db881cb3a0 block .claude/toolkit/README.md v7.6.0
+5236cd7742c173ef block .claude/toolkit/README.md v7.6.0
+58a870d68b081a1d block .claude/toolkit/README.md v7.6.0
+5a04580ddfb386c9 block .claude/toolkit/README.md v7.6.0
+91186cb6753af973 block .claude/toolkit/README.md v7.6.0
+d66f7b399edbec5d block .claude/toolkit/README.md v7.6.0
+e97100ef4275391d block .claude/toolkit/README.md v7.6.0
+f85e7afe51d831ac block .claude/toolkit/README.md v7.6.0
+fc969dafa7dc49c7 block .claude/toolkit/README.md v7.6.0
 af4fbd9ef4b8eacb file .claude/toolkit/README.md v7.4.0
+a789c112f9023d02 file .claude/toolkit/README.md v7.6.0

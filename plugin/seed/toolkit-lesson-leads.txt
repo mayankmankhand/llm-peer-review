@@ -16,6 +16,7 @@ A caveat in release notes is a deferred defect, not a resolution.
 A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.
 A check that defers to another check must ask whether that other check runs in this range.
 A checked subtask means its wording shipped, not that the nearby diff did.
+A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
 A co-location rule is only as strong as its weakest call site.
 A containment check that compares path strings is not containment.
 A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.
@@ -51,6 +52,7 @@ A permission rule ending in `:*` is read as the older prefix spelling and never 
 A permission you cannot self-provision may have an already-permitted equivalent.
 A pipeline's exit status is the last command's, so `grep | head` always succeeds.
 A plan that promises a one-commit revert must say what happens once later work moves the text.
+A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.
 A plugin CLI command run inside a project also edits that project's settings file.
 A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.
 A prompt cannot declare a user-owned prerequisite done.
@@ -203,6 +205,7 @@ When a rule gains a condition or a trigger, follow it to every restatement and e
 When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.
 When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.
 When changing user-facing copy, grep for the same description elsewhere.
+When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.
 When inserting a numbered step, grep for every "step N" reference before and after the insertion.
 When storage is append-only, validate the whole batch before writing any of it.
 Worktree detection: `--git-dir` vs `--git-common-dir`.
