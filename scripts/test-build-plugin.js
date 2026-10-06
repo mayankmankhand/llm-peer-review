@@ -527,6 +527,36 @@ const mutatedLine = firstDataLine.replace('`' + droppedRow + '`, ', '').replace(
 write(live, 'toolkit-reference.mutated.md', refText.replace(firstDataLine, mutatedLine));
 const mutatedDrift = rowDrift(permissionTableRows(read(live, 'toolkit-reference.mutated.md')), seedAllowRows);
 check('mutation: dropping one table row trips the drift assertion', droppedRow !== '' && mutatedLine !== firstDataLine && mutatedDrift.missing.length === 1 && mutatedDrift.missing[0] === droppedRow && mutatedDrift.extra.length === 0, JSON.stringify({ droppedRow, mutatedDrift }));
+// The installers' script lists name every project script the seed grants (review
+// 2026-10-05, R5). The seed's allow rows run scripts under the plugin root; the
+// copy-install ships the same scripts into .claude/scripts/ through setup.sh (its
+// managed-file list and one safe_copy line each) and setup.ps1 (its managed-file
+// list and a copy), so a script the seed grants but an installer never lists is
+// a row pointing at nothing on a copy-install. The two plugin-only scripts
+// (setup-project.js, upgrade-audit.js) never ship on a copy-install and are left
+// out on purpose.
+const seedScriptNames = [...new Set(seedAllowRows.map(r => (/\/scripts\/([a-z0-9-]+\.(?:js|sh))\b/.exec(r) || [])[1]).filter(Boolean))]
+  .filter(n => n !== 'setup-project.js' && n !== 'upgrade-audit.js');
+function installerGaps(sh, ps1) {
+  const shManaged = ((/^for pf_name in ([a-z0-9.-]+(?: [a-z0-9.-]+)*); do$/m.exec(sh) || ['', ''])[1]).split(/\s+/);
+  const ps1Managed = ((/^foreach \(\$pfName in @\(("[a-z0-9.-]+"(?:, "[a-z0-9.-]+")*)\)\) \{$/m.exec(ps1) || ['', ''])[1]).split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+  const shCopied = (sh.match(/safe_copy "\$TOOLKIT_ROOT\/\.claude\/scripts\/([a-z0-9.-]+)"/g) || []).map(m => /scripts\/([a-z0-9.-]+)"/.exec(m)[1]);
+  const gaps = [];
+  for (const n of seedScriptNames) {
+    if (!shManaged.includes(n)) gaps.push(n + ' (setup.sh managed-file list)');
+    if (!shCopied.includes(n)) gaps.push(n + ' (setup.sh copy)');
+    if (!ps1Managed.includes(n)) gaps.push(n + ' (setup.ps1 managed-file list)');
+    if (ps1.split('"' + n + '"').length - 1 < 2) gaps.push(n + ' (setup.ps1 copy)');
+  }
+  return gaps;
+}
+const shText = fs.readFileSync(path.join(REPO, 'scripts', 'setup', 'setup.sh'), 'utf8');
+const ps1Text = fs.readFileSync(path.join(REPO, 'scripts', 'setup', 'setup.ps1'), 'utf8');
+const installerDrift = installerGaps(shText, ps1Text);
+check('live: setup.sh and setup.ps1 list and copy every project script the seed grants (review 2026-10-05, R5)', seedScriptNames.length >= 10 && installerDrift.length === 0, seedScriptNames.length + ' scripts; gaps: ' + installerDrift.join(', '));
+const mutatedSh = shText.replace(/^(for pf_name in .*?) merge-findings\.js(.*; do)$/m, '$1$2');
+const mutatedGaps = installerGaps(mutatedSh, ps1Text);
+check('mutation: dropping merge-findings.js from setup.sh\'s managed-file list trips the installer check', mutatedSh !== shText && mutatedGaps.length === 1 && mutatedGaps[0] === 'merge-findings.js (setup.sh managed-file list)', mutatedGaps.join(', '));
 // The seed rows grant only what the toolkit runs (issue #180): `git config` is
 // the host-detection read alone, `npm install` is the plain install alone (a
 // worktree row with a wildcard would also allow added package names), the /index grep rows are gone, and every gh or glab host
