@@ -1,6 +1,6 @@
 # Project extensions for the toolkit
 
-This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once and never touches the folder again; a plugin update never overwrites anything here. `/tk:upgrade` may offer the current seed's text for a paragraph of this README that is still an older seed's, and applies nothing without your approval.
+This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once and never touches the folder again; a plugin update never overwrites anything here. `/tk:upgrade` may offer the current seed's text (a seed is the plugin's shipped copy of a project file, the text setup writes in when the file is absent) for a paragraph of this README that is still an older seed's, and applies nothing without your approval.
 
 Use it when your project needs the toolkit to follow a rule of its own: a kind of review the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
 
@@ -35,7 +35,7 @@ One table, in the same three columns `/tk:review` uses for its own kinds:
 
 The agent is dispatched with the same per-run prompt a toolkit finder gets, and its findings go through the same audit. It needs three things. It must say what it returns (an output contract), because the audit parses its findings. It must declare a `tools:` line without Edit, Write or NotebookEdit: an agent with no tools line gets every tool, and a finder that can edit could change files before anyone has judged its findings. And it must carry a `model:` line, `model: inherit` unless you want a particular model: `/tk:review` dispatches your kind with no model, and an agent with no model line follows `CLAUDE_CODE_SUBAGENT_MODEL` whenever a user sets it. `/tk:upgrade` tells you when a row names an agent that does not exist, one that can edit, or one with no model line. It does not check the output contract on every upgrade, so that part is yours to get right.
 
-A minimal agent, saved as `.claude/agents/design-fidelity-finder.md` (its second preload carries the finding contract and the severity anchors the first one refers to; pick the toolkit kind nearest your own):
+A minimal agent, saved as `.claude/agents/design-fidelity-finder.md` (a preload is a skill named in the agent's `skills:` list, loaded into it before it starts; its second preload carries the finding contract and the severity anchors the first one refers to; pick the toolkit kind nearest your own):
 
 ```
 ---
@@ -63,7 +63,7 @@ One bullet per category: `- <category> - <why it is noise here>`. Keep entries s
 
 ## fix-rules.md and the two gates are additive only
 
-Your rules and gates can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored.
+Your rules and gates can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored. `severity-anchors.md` is additive the same way: it sets how severe your own kinds' findings are and cannot lower the toolkit's own floors, because every reviewer that reads it applies the toolkit's Universal Anchors first ("The Universal Anchors above still win").
 
 ## Your own lines in the rules file
 
