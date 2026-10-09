@@ -572,6 +572,12 @@ const HOME_DIR = (function () {
 const ABS_PREFIXES = (function () {
   const out = [];
   try { const r = mainRepoRoot(); if (r && r !== '/') out.push([r + path.sep, '']); } catch (e) {}
+  // A worktree nested inside the main copy (.claude/worktrees/<name>) has a
+  // longer root than the main copy, so with only the main root here a path
+  // came out as ".claude/worktrees/<name>/src/x.js" instead of "src/x.js".
+  // Longest first strips the worktree's own root, the same way REL_ROOTS
+  // below derives a relPath.
+  if (WORK_ROOT && WORK_ROOT !== '/' && WORK_ROOT !== REPO_ROOT) out.push([WORK_ROOT + path.sep, '']);
   if (HOME_DIR) out.push([HOME_DIR + path.sep, '~' + path.sep]);
   // Longest first, so the repo root (usually inside home) wins over the home prefix.
   return out.sort(function (a, b) { return b[0].length - a[0].length; });
@@ -1202,11 +1208,30 @@ function markCycleChanged(data, prior) {
     : 'Since you last opened this page.') + showed;
 }
 
+// The seeded must-check findings (review.md Phase 3) carry the judge that
+// raised the gap as their specialist. They are re-read from the plan the Plan
+// Compliance row selects, so they belong to the plan lens; before issue #219
+// no lens token ever matched them and they were carried forever. Hyphenated
+// tokens are otherwise matched whole on purpose: `security-audit` must never
+// be resolved by a `security` run (security-audit/SKILL.md).
+const SEEDED_SPECIALISTS = ['plan-critic', 'design-critic', 'interaction-pass'];
+function isSeeded(specs) {
+  return specs.some(function (sp) { return SEEDED_SPECIALISTS.indexOf(sp) !== -1; });
+}
+
 // Which lenses a finding belongs to: its `specialist` ("code", "code, ux",
-// "[code, ux]"), falling back to the group it sits in. Lowercased tokens.
+// "[code, ux]"), falling back to the group it sits in. Lowercased tokens, plus
+// `plan` for a seeded finding.
 function specialistsOf(f, groupLabel) {
   const raw = (typeof f.specialist === 'string' && f.specialist) || groupLabel || '';
-  return raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
+  const specs = raw.toLowerCase().split(/[^a-z0-9-]+/).filter(Boolean);
+  return isSeeded(specs) && specs.indexOf('plan') === -1 ? specs.concat('plan') : specs;
+}
+
+// A path as a payload might spell it, reduced to the form session-init's scope
+// prints: forward slashes, no leading "./".
+function normRelPath(p) {
+  return String(p).trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '');
 }
 function openFindingsWithLabels(data) {
   const out = [];
@@ -1228,26 +1253,59 @@ function openFindingsWithLabels(data) {
 // carried forward, marked, ranked and budgeted with the rest, and counted as
 // still open. A payload with no `lenses` is a full run and replaces the whole
 // page, which is what every run did before this key existed.
+//
+// A lens running is not evidence about a file it never looked at (issue #219):
+// a security pass over one range reported resolved a user-locus security
+// finding raised on another. So a payload also names the files it reviewed in
+// `reviewedFiles`, and a finding from a lens that ran is resolved only when its
+// file is in that list. One on an unreviewed file, or with no file to match,
+// is carried like one from a lens that did not run. Seeded must-check findings
+// are the exception while the plan lens runs: they are re-read from the plan
+// every orchestrated run, file or no file. A payload with `lenses` and no
+// `reviewedFiles` (a project's own command written before the key) resolves by
+// lens alone, as before, and says so on stderr.
 function carryForward(data, prior) {
-  if (prior.state !== 'ok') return;
   if (!Array.isArray(data.lenses) || !data.lenses.length) return;
   const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
+  const scoped = Array.isArray(data.reviewedFiles);
+  // Said whenever the list is missing, before the previous page is even read:
+  // this note is how a caller's missing list shows, so it cannot wait for a
+  // finding that happens to resolve (review of the #219 cycle, R4).
+  if (!scoped) {
+    reviewNotes.push('the payload sets lenses (' + lenses.join(', ') + ') but no reviewedFiles, so an open finding ' +
+                     'from a lens that ran resolves by lens alone, whatever files this run reviewed');
+  }
+  if (prior.state !== 'ok') return;
+  const reviewed = {};
+  if (scoped) {
+    data.reviewedFiles.forEach(function (p) {
+      if (typeof p === 'string' && p.trim()) reviewed[normRelPath(p)] = true;
+    });
+  }
   const present = {};
   openFindings(data).forEach(function (f) { present[stableFindingKey(f)] = true; });
 
   const carried = [];
+  const why = { lens: 0, file: 0, nofile: 0 };
   openFindingsWithLabels(prior.data).forEach(function (item) {
     const specs = specialistsOf(item.f, item.label);
+    const key = stableFindingKey(item.f);
     // A finding no lens can be read from is carried rather than resolved: the
     // page never reports as done what it cannot attribute to a lens that ran.
     const ran = specs.some(function (sp) { return lenses.indexOf(sp) !== -1; });
-    if (ran) return;
-    const key = stableFindingKey(item.f);
+    let reason = ran ? null : 'lens';
+    if (ran && scoped && !(isSeeded(specs) && lenses.indexOf('plan') !== -1)) {
+      const rel = item.f.file && typeof item.f.file.relPath === 'string' ? normRelPath(item.f.file.relPath) : '';
+      if (!rel) reason = 'nofile';
+      else if (!reviewed[rel]) reason = 'file';
+    }
+    if (!reason) return;
     if (present[key]) return;
     const copy = JSON.parse(JSON.stringify(item.f));
     delete copy.isNew; delete copy.demoted; delete copy._key;
     copy.carried = true;
     present[key] = true;
+    why[reason] += 1;
     carried.push(copy);
   });
   if (!carried.length) return;
@@ -1274,16 +1332,19 @@ function carryForward(data, prior) {
   const carriedBlocks = carried.filter(function (f) { return f.severity === 'block'; }).length;
   if (carriedBlocks && Array.isArray(data.bottomLine)) {
     data.bottomLine.unshift(carriedBlocks === 1
-      ? 'A blocker carried from a lens this run did not check is still open below.'
-      : carriedBlocks + ' blockers carried from lenses this run did not check are still open below.');
+      ? 'A blocker carried from an earlier run, not re-checked by this one, is still open below.'
+      : carriedBlocks + ' blockers carried from earlier runs, not re-checked by this one, are still open below.');
     data.bottomLine = data.bottomLine.slice(0, 3);
   }
   if (typeof data.disposition === 'string' && data.disposition.trim()) {
     data.disposition = data.disposition.replace(/\s+$/, '') + ' ' + carried.length +
       (carried.length === 1 ? ' carried' : ' carried') + ' from earlier runs, not re-checked.';
   }
-  reviewNotes.push('carried ' + carried.length + ' open finding(s) forward from lenses this run did not check (' +
-                   lenses.join(', ') + ' ran)');
+  const reasons = [];
+  if (why.lens) reasons.push(why.lens + ' from lenses this run did not check (' + lenses.join(', ') + ' ran)');
+  if (why.file) reasons.push(why.file + ' on files it did not review');
+  if (why.nofile) reasons.push(why.nofile + ' with no file to match against reviewedFiles');
+  reviewNotes.push('carried ' + carried.length + ' open finding(s) forward: ' + reasons.join(', '));
 }
 
 function markWhatChanged(data, prior) {
@@ -1323,7 +1384,7 @@ function markWhatChanged(data, prior) {
   }).length;
 
   const stillClause = still + ' still open from last time' +
-    (carried ? ' (' + carried + ' carried from ' + (carried === 1 ? 'a lens' : 'lenses') + ' this run did not check)' : '');
+    (carried ? ' (' + carried + ' carried, not re-checked by this run)' : '');
   const parts = [];
   if (fresh) parts.push(fresh + (fresh === 1 ? ' new finding' : ' new findings'));
   if (still) parts.push(stillClause);

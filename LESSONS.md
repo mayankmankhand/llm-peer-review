@@ -365,3 +365,12 @@
 - **Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.**
 - **When the owner changes a decision at a page, sweep what was already written under the old decision.**
 - **A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.**
+
+## Issues 219 and 220 (the standing page and the interrupt)
+
+- **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
+- **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
+- **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
+- **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
+- **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
