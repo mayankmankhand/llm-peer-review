@@ -2,7 +2,7 @@
 'use strict';
 // Tests that the sentences several prompt files must carry word for word still
 // agree (review fix R5, 2026-10-05): the disclosure line a dispatched finder may
-// return (`NOT CHECKED: <one sentence>`), the six project seam files under
+// return (`NOT CHECKED: <one sentence>`), the seven project seam files under
 // `.claude/toolkit/`, and the reload-then-fallback sentence the commands share.
 // Each of these lives in more than one file on purpose (an inlined fragment, a
 // seed, a command that parses what another file tells a finder to emit), so an
@@ -51,24 +51,28 @@ const bareDisclosures = prompts.filter(([, t]) => /NOT CHECKED[^:]/.test(t.repla
 check('every prompt file that names the line spells it with its colon', bareDisclosures.length === 0, bareDisclosures.join(', '));
 
 console.log('\n2. the project seam files');
-const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md'];
+const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md', 'checks.json'];
 const seamReadme = read('seed/toolkit-README.md');
-check('the seed README lists the six files under a heading that counts them', /## The six files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
+check('the seed README lists the seven files under a heading that counts them', /## The seven files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
 const named = new Map();
 for (const [file, text] of prompts) {
-  for (const m of text.matchAll(/\.claude\/toolkit\/([A-Za-z-]+\.md)/g)) {
+  for (const m of text.matchAll(/\.claude\/toolkit\/([A-Za-z-]+\.(?:md|json))/g)) {
     if (!named.has(m[1])) named.set(m[1], new Set());
     named.get(m[1]).add(file);
   }
 }
 const unknown = [...named.keys()].filter(n => n !== 'README.md' && !SEAMS.includes(n));
-check('every seam a prompt file names is one of the six, or the README setup seeds', unknown.length === 0, unknown.join(', '));
+check('every seam a prompt file names is one of the seven, or the README setup seeds', unknown.length === 0, unknown.join(', '));
 const unread = SEAMS.filter(s => !named.has(s));
-check('each of the six is read by at least one prompt file', unread.length === 0, unread.join(', '));
+check('each of the seven is read by at least one prompt file', unread.length === 0, unread.join(', '));
+// Issue #221: the seventh seam is JSON, not prose, and its reader is the checks runner, called from the execute stage's test step.
+check('checks.json is read by the runner call in execute.md, at the test step', /node \.claude\/scripts\/run-checks\.js --checks \.claude\/toolkit\/checks\.json --out/.test(read('.claude/commands/execute.md')));
 const securityReaders = ['.claude/skills/review-security/SKILL.md', '.claude/skills/security-audit/SKILL.md', '.claude/skills/review-security-criteria/SKILL.md'];
 check('the three security reviewers read do-not-report.md, right after the toolkit\'s own list', securityReaders.every(f => read(f).includes('.claude/toolkit/do-not-report.md')), securityReaders.filter(f => !read(f).includes('.claude/toolkit/do-not-report.md')).join(', '));
 // The sentence moved from README.md to docs/EXTENDING.md on 2026-10-09, when the README became a front door and the manual moved into docs/.
-check('the toolkit reference and the extending guide count the same six files', /six files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Six files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
+check('the toolkit reference counts the seven files', /seven files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')));
+// Still six until the #221 docs sweep (plan Step 8) adds the checks.json row to docs/EXTENDING.md:56; that step flips this line to Seven with it.
+check('the extending guide counts the files it lists', /Six files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
 
 console.log('\n3. the reload-then-fallback sentence');
 const SENTENCE = 'run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload)';

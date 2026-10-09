@@ -2599,12 +2599,12 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
 
   // ---- (e) the extension README: one paragraph still v7.4.0's beside one the project rewrote ----
   const README_NOW = seed760('toolkit-README.md');
-  check('the current extension README says six files', README_NOW.includes('## The six files'));
-  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The six files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
+  check('the current extension README says seven files', README_NOW.includes('## The seven files'));
+  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The seven files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
   r = audit760(d);
   f = c15(r);
   out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
-  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The six files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
+  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The seven files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
 
   // ---- (f) a whole file that is an older seed's ----
   const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md - this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).');
