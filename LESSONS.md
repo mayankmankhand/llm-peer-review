@@ -358,3 +358,10 @@
 - **A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.**
 - **A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.**
 - **When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.**
+
+## Repo front door (the README rewrite)
+
+- **A "nothing reads this file" claim must check every grep hit, test suites included.**
+- **Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.**
+- **When the owner changes a decision at a page, sweep what was already written under the old decision.**
+- **A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.**

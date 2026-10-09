@@ -2,6 +2,33 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**The repository's front door, rewritten for a human visitor.** The README is a page under 1,500 words; the manual it used to carry lives in `docs/`; a word budget in the release gate keeps it that way. The loop runs as before.
+
+### Changed
+
+- **README.md is a front door, not a manual.** 11,622 words became 885: three badges, the About box's sentence as the tagline, four orienting lines, the problem, the February 2026 debate as proof with receipts on every claim, the flow diagram with four bullets, seven ranked commands, a two-minute install, a docs list, prior art. The 28-row command table is gone from the README; the shipped manual (`.claude/skills/shared/toolkit-reference.md`) holds the only full table.
+- **The manual moved verbatim into four docs.** `docs/INSTALL.md` (requirements, add to a new project, update an existing project, going back a release, the copy-install), `docs/COMMANDS.md` (the loop's two brakes, how key commands work, which review to use, how the debates run), `docs/EXTENDING.md` (your own workflow, the file architecture, worktrees, customization) and `docs/TROUBLESHOOTING.md`. Headings were kept, so old section anchors survive as `docs/<file>.md#<anchor>`, and the six links into README sections from `API-KEYS.md`, `SETUP.md`, `CONTRIBUTING.md` and `AGENT-SETUP.md` now point there.
+- **This file's rollup moved to the bottom.** The "What's new since v4.3.3" paragraph (1,815 words) sits at the end under the same heading; the newest release is the first thing a reader meets.
+- **`CLAUDE.md` says where documentation goes** now that the manual lives in `docs/`: new features, setup changes and new commands go there, release notes here.
+
+### Added
+
+- **A README word budget in the release gate** (check R in `scripts/release-check.js`). README.md holds at most 1,500 words, counted like `wc -w`, read from the same repo root as the build check, skipped with a note where no README exists. It runs in the everyday `npm test` and in CI, so the README cannot grow back into a manual one release note at a time; four suite checks cover skip, exactly at budget, one over, and the everyday run.
+- **The community kit.** A Contributor Covenant 2.1 code of conduct, `SECURITY.md` pointing at the repository's private vulnerability reporting (now switched on), bug and feature issue forms with blank issues off, and a pull request template whose checklist keeps the README under budget and `plugin/` rebuilt.
+
+### Fixed
+
+- The parity test that checks the README and the toolkit reference count the same six seam files now reads `docs/EXTENDING.md`, where that sentence moved.
+- The cycle's review found and fixed six orientation gaps the move left: the commands guide now names the plugin prefix, two "see above" pointers that crossed files link to the commands guide, and the README's proof heading says what the February debate was.
+
+### Why
+
+Nearly every visitor arrives from the owner's profile with ten seconds of patience, and the old README asked for an hour: no stated problem, three different pitches (the About box, the tagline, the first paragraph), and 4,000 words of install text in the front door. A page that states the problem, shows one real debate, and links to the manual serves that reader. A gate rather than a written rule keeps it that way, because the docs stage's own guidance still sends new features to the README, and the gate is what catches that on the next push.
+
+---
+
 ## v7.6.1 - The Clause Follows the Rows (2026-10-06)
 
 **A patch on top of v7.6.0, which stays additive on v7.0.0 and v6.0.0.** Three fixes, all found on one downstream `/tk:upgrade` run from 7.5.1 to 7.6.0, and nothing here changes how the loop runs.
