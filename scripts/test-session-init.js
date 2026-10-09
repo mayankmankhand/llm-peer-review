@@ -830,7 +830,7 @@ section('13. uncommitted.baseline: the starting snapshot (#202)', function () {
 section('14. the model mode: flag, then an unfinished plan, then fit (#205)', function () {
   const FINDERS = ['review-code-finder', 'review-security-finder', 'review-ux-finder', 'review-plan-finder',
     'review-commands-finder', 'review-deps-finder', 'review-browser-finder', 'review-copy-finder'];
-  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'correction-extractor'];
+  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
   const plugin = path.join(TMP, 'plugin layout', 'plugin');
   const copy = path.join(plugin, 'scripts', 'session-init.js');
   fs.mkdirSync(path.dirname(copy), { recursive: true });
@@ -847,6 +847,9 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
   agent('review-commands-finder', 'claude-sonnet-5-5');
   agent('index-mapper', 'sonnet');
   for (const j of JUDGES) agent(j, 'inherit');
+  // The extractor keeps its agent file's model in every mode (issue 221): pinned here so
+  // the three mode checks below can tell a kept file model from "session".
+  agent('correction-extractor', 'haiku');
   function models(repo, args) {
     const r = spawnSync(process.execPath, [copy].concat(args), { cwd: repo, env: ENV, encoding: 'utf-8' });
     let json = null;
@@ -872,7 +875,8 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     none.m.perRole['review-commands-finder'] === 'session' && none.m.perRole['review-deps-finder'] === 'session' &&
     none.m.perRole['index-mapper'] === 'sonnet',
     JSON.stringify(none.m.perRole));
-  check('the judges and the extractor are "session" in fit', JUDGES.every(function (j) { return none.m.perRole[j] === 'session'; }), JSON.stringify(none.m.perRole));
+  check('the judges are "session" in fit', JUDGES.every(function (j) { return none.m.perRole[j] === 'session'; }), JSON.stringify(none.m.perRole));
+  check('fit: the extractor reads its agent file\'s model', none.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(none.m.perRole));
   check('--models prints only generatedAt, cwd and models', sameList(Object.keys(none.json).sort(), ['cwd', 'generatedAt', 'models']), JSON.stringify(Object.keys(none.json)));
 
   const best = models(repo, ['--models', '--mode', 'best']);
@@ -880,6 +884,7 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     best.m.mode === 'best' && best.m.source === 'argument' && best.m.buildModel === 'session' &&
     FINDERS.concat(JUDGES).every(function (r) { return best.m.perRole[r] === 'session'; }),
     JSON.stringify(best.m));
+  check('--mode best: the extractor keeps its agent file\'s model', best.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(best.m.perRole));
   // #208: best leaves the map helper on its agent file's model, exactly as fit reads it.
   check('--mode best: the map helper keeps its agent file\'s model, the same value fit gives it',
     best.m.perRole && best.m.perRole['index-mapper'] === 'sonnet' && best.m.perRole['index-mapper'] === none.m.perRole['index-mapper'],
@@ -902,6 +907,7 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     FINDERS.concat(['index-mapper']).every(function (r) { return cheap.m.perRole[r] === 'sonnet'; }) &&
     JUDGES.every(function (j) { return cheap.m.perRole[j] === 'session'; }),
     JSON.stringify(cheap.m));
+  check('--mode cheap: the extractor keeps its agent file\'s model', cheap.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(cheap.m.perRole));
   const typo = models(repo, ['--models', '--mode', 'cheep']);
   check('an unknown mode is ignored with a warning naming it', typo.m.mode === 'fit' && typo.m.source === 'default' && /"cheep" is not a mode/.test(typo.m.warning || ''), JSON.stringify(typo.m));
   const bare = models(repo, ['--models', '--mode']);

@@ -1011,9 +1011,12 @@ const MOVING_ROLES = [
 // The helpers best leaves on their agent file's model, as fit does, instead of the
 // session model (#208): the map helper's file names the model it was measured on.
 const BEST_KEEPS_FILE_MODEL = ["index-mapper"];
-// The helpers no mode moves: a judge never runs below the work it judges, and the
-// correction extractor was not measured.
-const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer", "correction-extractor"];
+// The helpers no mode moves: a judge never runs below the work it judges.
+const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer"];
+// The helpers that keep their agent file's model in every mode: the correction
+// extractor was measured on Haiku against the session model (issue 221, four
+// identical runs), so no mode moves it up or down.
+const FILE_PINNED_ROLES = ["correction-extractor"];
 // The agent files the dispatch uses: beside this script's own folder, so a plugin
 // install reads the plugin's agents and the toolkit repo reads .claude/agents/.
 const AGENTS_DIR = path.join(__dirname, "..", "agents");
@@ -1098,6 +1101,7 @@ function resolveModels(requested, root) {
     else perRole[role] = agentFileModel(role);
   }
   for (const role of FIXED_ROLES) perRole[role] = "session";
+  for (const role of FILE_PINNED_ROLES) perRole[role] = agentFileModel(role);
   const out = { mode, source, plan, buildModel: mode === "best" ? "session" : "opus", perRole };
   if (warnings.length) out.warning = warnings.join(" ");
   return out;
