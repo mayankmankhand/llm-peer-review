@@ -492,6 +492,16 @@ console.log('\ncorrection-ledger.js\n');
     fj.length === 1 && fj[0].assistant_said.indexOf('INTERRUPTED_J1') !== -1 && j.interruptsWithoutFollowUp === 1,
     JSON.stringify(j));
 
+  // (j2) a session running side by side is not the next session: its
+  // mid-session message keeps its own context (review of the #220 cycle, R2)
+  const j2 = scenario('parallel', { s1: [userE('FIRST_P start the report', 0, 's1'), asstE('OWN_TURN_P drafting section two', 50),
+    userE('MID_P shorten section two please', 110, 's1')],
+    s2: [asstE('INTERRUPTED_P migrating the store', 90), markE(100, 's2')] });
+  const fp = said(j2, 'MID_P');
+  check('a mid-session message in a parallel session is not taken as the follow-up (#220)',
+    fp.length === 1 && fp[0].after_interrupt === false && fp[0].assistant_said.indexOf('OWN_TURN_P') !== -1 &&
+    j2.interruptsWithoutFollowUp === 1, JSON.stringify(j2));
+
   // (k) the count is on every result shape
   const sbN = makeSandbox('int-noscan');
   const noScan = JSON.parse(run(sbN, ['--candidates']));

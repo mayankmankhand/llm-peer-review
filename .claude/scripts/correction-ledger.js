@@ -511,6 +511,7 @@ function runCandidates() {
     try { lines = fs.readFileSync(files[i], 'utf-8').split('\n'); } catch (e) { continue; }
     let lastAssistant = '';
     let pending = null;  // the latest interrupt no human text has answered yet
+    let opened = false;  // whether this file's first human words have gone by
     for (let j = 0; j < lines.length; j++) {
       const line = lines[j].trim();
       if (!line) continue;
@@ -528,6 +529,13 @@ function runCandidates() {
       // as a task notification) leaves a pending interrupt as it is.
       const text = humanText(entry);
       if (!text) continue;
+      // Only a session's opening words can answer another session's interrupt:
+      // a mid-session message in a session running side by side is about its
+      // own work (review of the #220 cycle, R2). Decided before the window
+      // check, so a session that opened before the window has no opener in it.
+      const words = !INTERRUPT.test(text) && !isCommandExpansion(text);
+      const opener = words && !opened;
+      if (words) opened = true;
       if (since && entry.timestamp && entry.timestamp < since) continue;
       if (INTERRUPT.test(text)) {
         // A second marker before any human text replaces the first: the
@@ -561,15 +569,15 @@ function runCandidates() {
       }
       const kept = couldBeIntervention(text);
       if (kept) result.candidates.push(candidate);
-      answers.push({ file: files[i], at: entry.timestamp, candidate: candidate, kept: kept });
+      if (opener) answers.push({ file: files[i], at: entry.timestamp, candidate: candidate, kept: kept });
     }
     if (pending) unanswered.push(pending);
   }
 
   // A session that ends at the interrupt: the human often goes on in a new one.
-  // Oldest interrupt first, each takes the earliest human text in another file
-  // that comes after it within INTERRUPT_LINK_MS and that no earlier interrupt
-  // took. A text already kept as a candidate is upgraded in place, never added
+  // Oldest interrupt first, each takes the earliest opening human text of
+  // another file that comes after it within INTERRUPT_LINK_MS and that no
+  // earlier interrupt took. A text already kept as a candidate is upgraded in place, never added
   // twice; one the gates dropped is added. The rest are counted, not guessed.
   const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
   unanswered.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
