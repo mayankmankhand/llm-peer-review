@@ -1,6 +1,6 @@
 # Seeded blocks older releases shipped, for the upgrade audit (C-15).
 # <hash> <block|file> <project file> <first release that shipped it>
-# Written by scripts/seed-history.js from the release tags v6.0.0 to v7.6.1; regenerate it in the release order, never edit it by hand.
+# Written by scripts/seed-history.js from the release tags v6.0.0 to v7.6.2; regenerate it in the release order, never edit it by hand.
 0e89af0bed8f17df block CLAUDE.md v6.0.0
 5f9c8b07ae0940d4 block CLAUDE.md v6.0.0
 61d9d273b3a7ff53 block CLAUDE.md v6.0.0
@@ -9,9 +9,11 @@ d162006cdeb41652 block CLAUDE.md v6.0.0
 ef9824bb6b54740c block CLAUDE.md v6.0.0
 9a84755590ea5306 block CLAUDE.md v7.1.0
 a74cd92aa0eb221c block CLAUDE.md v7.1.0
+90be433554ea0f7b block CLAUDE.md v7.6.2
 3850656b14adbccb file CLAUDE.md v6.0.0
 a3315786af0c79e6 file CLAUDE.md v7.1.0
 bc53dde0dbb65afe file CLAUDE.md v7.6.0
+37c8d0c39fbb92ee file CLAUDE.md v7.6.2
 46cea8c8f3966015 block LESSONS.md v6.0.0
 12a2dde39fa90d5d block LESSONS.md v7.1.0
 3d0c1d5afbb2d645 file LESSONS.md v6.0.0
@@ -35,6 +37,7 @@ d72801f94647cabe file LESSONS.md v7.4.3
 159da40ac528220a file LESSONS.md v7.5.1
 a9112f63fdfc8429 file LESSONS.md v7.6.0
 54b5d3e919be306d file LESSONS.md v7.6.1
+44c8ead175554fb4 file LESSONS.md v7.6.2
 528144ebf1bcc41e block DESIGN-PROFILE.md v6.2.0
 6ba9be597090a72d block DESIGN-PROFILE.md v7.1.0
 7d363ac197269d32 block DESIGN-PROFILE.md v7.2.0
