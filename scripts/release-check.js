@@ -28,6 +28,15 @@
 //   2. Build       - `node scripts/build-plugin.js --check` exits 0 (plugin/
 //                    matches its source). Skipped with a note when the repo has
 //                    no build-plugin.js (the tests' scratch repos).
+//   R. README      - README.md at the repo root holds at most README_WORD_BUDGET
+//                    words, counted the way `wc -w` counts (runs of whitespace
+//                    separate words). The README is the front door and the
+//                    manual lives in docs/; before this check it had grown to
+//                    11,622 words, one release note at a time. Reads the same
+//                    repo root as check 2, so a run from a subfolder still
+//                    judges the real file. Skipped with a note when the repo
+//                    has no README.md (the tests' scratch repos). Runs in
+//                    every mode, --tests-only included.
 //   T. Tag version - only with --pushing-tag: each pushed tag must be exactly
 //                    v<plugin.json version> of the commit the tag points at.
 //   3. Version     - compares the checked commit with the previous release: the
@@ -73,8 +82,8 @@
 // state (`git show <sha>:<path>`). The suites and the build check always run on
 // the working tree. --repo points every check at another clone (tests).
 //
-// --tests-only is the everyday test run (`npm test`, and CI): checks 1 and 2
-// only. Checks T, 3, 4 and 5 judge a release (a bumped version, a marketplace
+// --tests-only is the everyday test run (`npm test`, and CI): checks 1, 2 and
+// R only. Checks T, 3, 4 and 5 judge a release (a bumped version, a marketplace
 // pin, a tag), which a commit in the middle of a cycle does not have yet and a
 // CI checkout, fetched without tags, cannot show. They are skipped with one
 // line saying so. The suites still go through the same exit-code-only runner.
@@ -93,6 +102,10 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+
+// Check R: the most words README.md may hold. The rewrite of 2026-10-09 landed
+// at 865; the headroom is for a paragraph per release, not for a manual.
+const README_WORD_BUDGET = 1500;
 
 const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
@@ -273,6 +286,20 @@ function checkBuild() {
   const out = (r.stdout || '') + (r.stderr || '');
   if (out.trim()) console.log(tail(out, 15));
   report('build', false, 'build-plugin.js --check exited ' + r.status + '; plugin/ is stale, run node scripts/build-plugin.js and commit');
+}
+
+// --- R. README budget ------------------------------------------------------------------
+// The README is the front door; the manual lives in docs/. Without a gate every
+// release note grows it back, which is how it reached 11,622 words. Words are
+// counted like `wc -w`. REPO is the root check 2 reads, so --repo and a run
+// from a subfolder judge the real README; a repo without one (the tests'
+// scratch repos) passes with a note, the way check 2 does.
+function checkReadmeBudget() {
+  const file = path.join(REPO, 'README.md');
+  if (!fs.existsSync(file)) { report('readme budget', true, 'skipped: no README.md in this repo'); return; }
+  const words = fs.readFileSync(file, 'utf8').split(/\s+/).filter(Boolean).length;
+  if (words <= README_WORD_BUDGET) { report('readme budget', true, words + ' words, budget ' + README_WORD_BUDGET); return; }
+  report('readme budget', false, words + ' words, ' + (words - README_WORD_BUDGET) + ' over the budget of ' + README_WORD_BUDGET + '; the README is the front door, move the detail into docs/');
 }
 
 // --- info: prompt load (issue #206) --------------------------------------------------------
@@ -547,6 +574,7 @@ function checkCommits() {
 console.log('release-check: ' + REPO);
 checkSuites();
 checkBuild();
+checkReadmeBudget();
 infoPromptLoad();
 if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref and release tag judge a release, not an everyday test run; run without the flag for the full gate');
 else checkCommits();

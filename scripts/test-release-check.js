@@ -416,7 +416,25 @@ function releaseRepo(version, tag, opt) {
   check('build-plugin.js --check exits 1: build FAIL, run exits 1', r.status === 1 && isFail(r.out, 'build'), r.out);
 }
 
-// --- --tests-only: the everyday run (`npm test`, CI), checks 1 and 2 only ---------------
+// --- R. readme budget ---------------------------------------------------------------
+{
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  git(repo, ['tag', 'v1.0.0']);
+  let r = run(repo, ['--skip-suites']);
+  check('no README.md: readme budget passes as skipped', r.status === 0 && isOk(r.out, 'readme budget') && /skipped: no README\.md/.test(line(r.out, 'readme budget')), r.out);
+  // "# readme" is two words; 1,498 more land exactly on the budget.
+  write(repo, 'README.md', '# readme\n\n' + 'word '.repeat(1498) + '\n'); commitAll(repo, 'readme at budget');
+  r = run(repo, ['--skip-suites']);
+  check('README.md at exactly 1,500 words: readme budget passes with the count', r.status === 0 && isOk(r.out, 'readme budget') && /readme budget - 1500 words, budget 1500/.test(line(r.out, 'readme budget')), r.out);
+  write(repo, 'README.md', '# readme\n\n' + 'word '.repeat(1499) + '\n'); commitAll(repo, 'readme over budget');
+  r = run(repo, ['--skip-suites']);
+  check('README.md at 1,501 words: readme budget FAIL names the overage, run exits 1', r.status === 1 && isFail(r.out, 'readme budget') && /1501 words, 1 over the budget of 1500/.test(line(r.out, 'readme budget')), r.out);
+  // The everyday run enforces it too: a long README cannot slip past npm test or CI.
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('--tests-only with a long README: readme budget FAIL, run exits 1', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'readme budget'), r.out);
+}
+
+// --- --tests-only: the everyday run (`npm test`, CI), checks 1, 2 and R only -----------
 {
   // A repo the full gate refuses twice over: plugin/ changed since v1.0.0 with
   // no bump, and the marketplace installs from the default branch. Neither is
@@ -428,7 +446,7 @@ function releaseRepo(version, tag, opt) {
   let r = run(repo, ['--suites', 'stubs/pass.js']);
   check('full gate on the unreleasable repo: fails on the release checks', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'version bump') && isFail(r.out, 'marketplace ref'), r.out);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
-  check('--tests-only on the same repo: exits 0 with suites and build ok', r.status === 0 && isOk(r.out, 'suites') && isOk(r.out, 'build') && /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+  check('--tests-only on the same repo: exits 0 with suites, build and readme budget ok', r.status === 0 && isOk(r.out, 'suites') && isOk(r.out, 'build') && isOk(r.out, 'readme budget') && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
   check('--tests-only: one line says the release checks were skipped and why', isOk(r.out, 'release checks') && /skipped \(--tests-only\)/.test(line(r.out, 'release checks')) && /version bump/.test(line(r.out, 'release checks')), r.out);
   check('--tests-only: no release check ran', !line(r.out, 'version bump') && !line(r.out, 'marketplace ref') && !line(r.out, 'release tag') && !line(r.out, 'tag version'), r.out);
 
@@ -461,11 +479,11 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('prompt-load report: printed as an info line with its warnings',
     r.status === 0 && /^ {2}info prompt load - baseline scripts\/prompt-load-baseline\.json: 1 grew/m.test(r.out) && /grew {5}commands\/a\.md 1 -> 2 \(\+1\)/.test(r.out), r.out);
-  check('prompt-load report: not counted as a check', /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+  check('prompt-load report: not counted as a check', /release-check: 4 passed, 0 failed/.test(r.out), r.out);
   write(repo, 'scripts/prompt-load.js', "console.error('boom');\nprocess.exit(1);\n");
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('prompt-load report that fails: says so, and the run still exits 0',
-    r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 3 passed, 0 failed/.test(r.out), r.out);
+    r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
 }
 
 // --- hook routing ------------------------------------------------------------------
