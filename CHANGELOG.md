@@ -2,6 +2,50 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Run Before You Reason
+
+**A minor release on top of v7.6.2, which stays additive on v7.0.0 and v6.0.0.** Issue #221. The loop runs as before, with one rule added under it: when a command can settle a question, the stage runs the command and reads the result, and reasons only about what no command can answer. The question that opened the issue, whether deterministic chores should go to a Haiku sub-agent, was answered by measurement, and the answer was no.
+
+### Added
+
+- **Rule M16, run before you reason** (`.claude/skills/shared/hitl-loop.md`; rationale and measurements in `docs/HITL-MAP.md`). A stage names the command and its pass signal (an exit code, a pattern the output must or must not contain, or a line count), runs it from the project root, and reads the result. About forty prompt spots that said "check" or "verify" now name their command. A check leaves the main session for a sub-agent only when its output is large and irregular and a judge or a human reads the answer afterward; a single command never earns a hand-off.
+- **`run-checks.js`, the guarded checks runner** (`.claude/scripts/run-checks.js`, shipped by both installers and listed in the permissions table). `node .claude/scripts/run-checks.js --checks <file.json> --out <dir>` runs a JSON list of `{"id", "check", "expect"}` from the project root and decides each one by machine. `expect` is an object with exactly one of `exit` (the exit code), `match` (a regex the saved output must contain), `noMatch` (one it must not) or `lines` (`{"min", "max"}` on non-empty output lines); a prose string hands the verdict back to the stage as `model`. Every output is saved as `<out>/<id>.txt`, ending in `exit N`, the shape the review page's receipt slot reads; `<out>` must sit under `reports/` or the system temp folder. The runner is an executor with a guard, not a shell: a check runs only when every segment starts with a read-only command on its allow-list and passes that command's own rule. Command substitution, redirects, subshells, background jobs, environment assignments, acting flags (`sed -i`, `find -exec`, `git branch <name>`) and reads outside the project root (home-relative paths, parent paths, symlinks that leave the project, `$VAR` expansions) are refused before anything runs, with verdict `error` and the reason on stderr. `noMatch` and `lines` pass only when the command ran cleanly, so a misspelled path never confirms an absence. 225 checks in `scripts/test-run-checks.js`, every hostile fixture carrying a canary.
+- **Review receipts run through the runner** (M2 tier 1). A finder writes each receipt as a `check` and an `expect` object; the orchestrator saves them as a checks file as each specialist returns, runs the file, and the saved output is the receipt the report and the standing page show. A check the runner refuses, or whose expectation fails, is RECEIPT FAILED and the finding goes to Audited out. The plan's seeded must-check items take the same shape, and M3 re-checks every mechanical fix through the same runner (`<lens>-<n>-recheck` rows with the flipped expectation); judgment fixes still go to the fix-verifier.
+- **The `/execute` test step, and `checks.json`.** A step is green only when the project's tests pass. By default that is `npm test` or `pytest`, run through the runner so the log is saved without a redirect and a failure is read from the failing row's saved file, never whole; npm's stock placeholder script (`no test specified`) counts as no tests. When `.claude/toolkit/checks.json` exists it is the whole test step: the stage runs exactly its checks, so list your test command in it, and a failed or refused check turns the step red. It is the seventh project-owned seam ([EXTENDING.md](docs/EXTENDING.md)).
+- **Convention C-17, a check step names its command** (suggest). `/tk:upgrade` reports a list line in your own commands and skills that opens with verify, check, confirm, ensure or make sure (a bold label such as `**Verify:**` allowed first) and carries no command. Over the toolkit's own prompts it hits 4 lines, all judgment spots or prose; the wider shape the plan first wrote hits 28, also all judgment. Promotion to warn waits on downstream counts (#224).
+- **Script-side checks for what prompts used to judge by eye.** `session-init.js` reports `map.malformed` (the three byte tests `generate-index.js --finalize` runs, applied to the live map) so `/create-plan`, `/explore` and `/pair-debug` read a verdict; `merge-findings.js` prints one warning per finding that breaks a countable rule of the finding contract (the word caps, the banned hedges, a `what` that does not open with its severity), never dropping the finding; `render-html.js` cuts a bottom-line sentence over 25 words and names the slot on stderr.
+- **The quality harness** (`scripts/quality-check.js`) gained a Haiku arm (`h`), `--only` to run one arm, and a budget gate sized by the run's `--max-usd` cap rather than a fixed default that refused cheap runs.
+
+### Changed
+
+- **`correction-extractor` runs on Haiku in every model mode.** Its A/B (four dispatches on a synthetic fixture, the bar written first) flagged the same six candidates and skipped the same six in all four runs, in less wall time than the inherited model; `session-init.js` reads the model from the agent file for roles pinned that way (`FILE_PINNED_ROLES`).
+- **Two Haiku pins were tested and revoked.** `index-mapper` on Haiku missed 3 of 11 stable files against the Sonnet pair in both runs, and `review-deps-finder` on Haiku raised a dependency finding the skeptic killed both times (an over-claimed exploit path) while the baselines were 5 of 5. Both are recorded under "Tested and revoked" in `model-routing.md`, so neither is proposed again without a new receipt.
+- **The loop-rule count is M16 everywhere.** The fix-rules sentence ("a line that loosens or removes any of M1 to M16 is void") is pinned across 18 files by the parity test.
+- **The prompt-load baseline** is rewritten: +9,943 words (2.8%), the cost of naming commands where prompts used to say "check".
+
+### Fixed
+
+Found and fixed by the cycle's own review (22 raised, 7 audited out, 15 fixed and re-verified):
+
+- **The runner refused real receipts on its first live run:** a backtick inside single quotes and a two-range `sed -n` print list. Both are accepted now, with fixtures for both sides.
+- **Reads were not confined.** An allowed reader could name any path on the machine, so a steered finder could read a secret into the review's receipts; reads now resolve under the project root, with home paths, parent paths, symlinks out and variable expansions refused (R2). A must-not-match or line-count check passed when its command had failed (R1), and an output over the 16 MB buffer was labeled a timeout (R18; now exit 143 and `fail`).
+- **Five inserted commands would have stopped a default-permission session** on an approval prompt: a redirect in the browser finder's step, command substitution in the HTML audit's inventory and in the map fallback of three commands, and inline `node -e` scripts in the plan lookup, the ledger rollup and the design-system check. Each now reads the JSON the script already prints or uses plain pipelines (R3, R6, R20). The manual routed `npm run build` through a runner that refuses builds (R7); builds run directly.
+- **The secret-scan grep in `security-audit` read its own `-----BEGIN` pattern as an option**; it carries `-e` now, found by running every self-contained inserted command once (33 ran, 29 as stated, 3 return an exit code the prompt reads as output, 1 defect).
+- **The seed README and the manual say `checks.json` replaces the default test run** and that a failed or refused check turns the step red (R10, R11); the dated measurements left the rules fragment for `docs/HITL-MAP.md` (R19).
+
+### Why
+
+Eight Haiku sub-agent dispatches were measured before anything was built: each took 5 to 20 seconds and 20,000 to 47,000 startup tokens against 0.02 seconds for the same command run inline, and all eight returned the correct answer, so the round trip, not accuracy, is what a hand-off costs. An 18-agent triage then opened 81 spots where a stage reads or counts what a command could answer and picked zero new hand-offs. The real gap was not who runs the check but that forty prompts said "check" without naming one. The runner exists because each receipt used to be its own tool call through the permission system; a script with a seeded allow row would run every finder-written command unprompted, so it had to be a guarded executor, and the review's first finding against it (reads were not confined) is the shape of risk that guard is for.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. Its permission-row check (C-9) reports the two `run-checks.js` rows the seed now carries, and `/tk:setup` merges them; C-17 then reports any check step of your own that names no command, at suggest, never auto-fixed.
+- Optional: add `.claude/toolkit/checks.json` to replace the default test run with your own checks; its shape is in [EXTENDING.md](docs/EXTENDING.md). List your test command in it, or it never runs.
+- Other editors: re-run `setup.sh` or `setup.ps1` to install `run-checks.js` and the changed scripts.
+- A project command that writes findings by hand gives each receipt an `expect` object (`{"exit": N}`, `{"match": "regex"}`, `{"noMatch": "regex"}` or `{"lines": {"min", "max"}}`), the form `merge-findings.js` and the runner read.
+
+---
+
 ## v7.6.2 - Only What Was Reviewed (2026-10-09)
 
 **A patch on top of v7.6.1, which stays additive on v7.0.0 and v6.0.0.** Two fixes found on downstream 7.6.0 runs, plus one path fix found along the way. The loop runs as before.
