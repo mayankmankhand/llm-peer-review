@@ -1567,6 +1567,58 @@ function issue162Tests() {
   check('the renderer-set flags cannot be supplied by the payload to skip the receipt guard',
     smuggled.html.indexOf('SMUGGLED') === -1 && finds(island(smuggled.html)).every(function (f) { return !f.carried; }));
 
+  // --- issue #219: a lens running is not evidence about a file it never reviewed ---
+  // A downstream /review ran its security lens over a range of prompt fixes and
+  // the page reported resolved a user-locus security finding raised days earlier
+  // on another range. `reviewedFiles` names what the run looked at; an old finding
+  // resolves only when its lens ran AND its file is in that list.
+  const secA = finding('R1', { specialist: 'security', locus: 'user', file: { relPath: 'a.js' } });
+  run('scope-a', page([secA]));
+  const sa = run('scope-a', page([], { lenses: ['security'], reviewedFiles: ['b.js'] }));
+  const saD = island(sa.html);
+  check('a finding on a file the run did not review is carried, not resolved (#219)',
+    finds(saD).length === 1 && finds(saD)[0].carried === true &&
+    /still open/.test(saD.sinceLast || '') && !/resolved/.test(saD.sinceLast || ''), saD.sinceLast);
+  check('the carry note names the unreviewed-file reason (#219)',
+    /on files it did not review/.test(sa.stderr), sa.stderr.trim());
+  check('the sinceLast clause says the carried finding was not re-checked (#219)',
+    /not re-checked by this run/.test(saD.sinceLast || ''), saD.sinceLast);
+
+  run('scope-b', page([secA]));
+  const sb = island(run('scope-b', page([], { lenses: ['security'], reviewedFiles: ['./a.js'] })).html);
+  check('a finding on a reviewed file resolves, with ./ stripped before the compare (#219)',
+    finds(sb).length === 0 && /1 resolved/.test(sb.sinceLast || ''), sb.sinceLast);
+
+  run('scope-c', page([secA]));
+  const sc = run('scope-c', page([], { lenses: ['security'] }));
+  check('with no reviewedFiles a lens that ran still resolves its findings, as before (#219)',
+    finds(island(sc.html)).length === 0 && /1 resolved/.test(island(sc.html).sinceLast || ''), island(sc.html).sinceLast);
+  check('with no reviewedFiles the renderer says on stderr that it resolved by lens alone (#219)',
+    /no reviewedFiles/.test(sc.stderr), sc.stderr.trim());
+
+  run('scope-d', page([finding('R1', { specialist: 'security' })]));
+  const sd2 = run('scope-d', page([], { lenses: ['security'], reviewedFiles: ['a.js'] }));
+  check('a file-less finding is carried when reviewedFiles is set: the page cannot tell it was re-checked (#219)',
+    finds(island(sd2.html)).length === 1 && finds(island(sd2.html))[0].carried === true &&
+    /with no file/.test(sd2.stderr), sd2.stderr.trim());
+
+  // The seeded must-check items (review.md Phase 3) are re-read from the plan
+  // on every orchestrated run, so the plan lens running is the evidence, file
+  // or no file. Before #219 their tokens never matched any lens.
+  ['plan-critic', 'design-critic', 'interaction-pass'].forEach(function (tok) {
+    run('seeded-' + tok, page([finding('R1', { specialist: tok })]));
+    const sp = island(run('seeded-' + tok, page([], { lenses: ['plan'], reviewedFiles: [] })).html);
+    check('a ' + tok + ' finding resolves when the plan lens runs (#219)',
+      finds(sp).length === 0 && /1 resolved/.test(sp.sinceLast || ''), sp.sinceLast);
+  });
+
+  // security-audit has its own token on purpose (security-audit/SKILL.md): a
+  // small security pass must never resolve a whole-repo audit finding.
+  run('audit-sep', page([finding('R1', { specialist: 'security-audit', file: { relPath: 'a.js' } })]));
+  const as = island(run('audit-sep', page([], { lenses: ['security'], reviewedFiles: ['a.js'] })).html);
+  check('a security-audit finding is carried by a security run, even on a reviewed file (#219)',
+    finds(as).length === 1 && finds(as)[0].carried === true, as.sinceLast);
+
   // --- R23: the debate shell refuses the retired labels too --------------------
   const debate = run('debate', { topic: 'T', synthesis: { actions: [{ id: 'R1', severity: 'warn',
     what: 'Should fix. A thing breaks.', fields: [{ label: 'Suggested fix', value: 'RETIRED-DEBATE' },
