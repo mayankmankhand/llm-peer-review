@@ -34,6 +34,10 @@
 //         medium, because its shipped low is the setting under suspicion
 //   b     the session model one effort level lower (the mapper at low)
 //   c     Sonnet at the decided effort, given with --effort
+//   h     Haiku at the decided effort (medium when --effort is not given). With
+//         --only <agent[,agent]> only the named agents are patched and the rest
+//         ship as the build has them, so one helper can be measured on its own
+//         (issue 221, the per-helper A/B receipts)
 //   ship  no patch: the agent files as the build ships them (plan Step 7)
 //
 // Model modes (#205, plan Step 7). A build with the per-cycle switch resolves a
@@ -58,10 +62,10 @@
 // (--max-usd), and the whole measurement has one approved budget (see Budget).
 //
 // Usage:
-//   node scripts/quality-check.js --role review --arm <a|b|c|ship> --build <git-ref|tree>
+//   node scripts/quality-check.js --role review --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        [--effort <level>] [--max-usd <n>] [--label <text>] [--mode-word <best|fit|cheap>]
 //        [--plan-models <best|fit|cheap>] [--keep]
-//   node scripts/quality-check.js --role mapper --arm <a|b|c|ship> --build <git-ref|tree>
+//   node scripts/quality-check.js --role mapper --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--json]
@@ -974,8 +978,15 @@ function prepareBuild(spec, home, tmp) {
 }
 
 // The arm's settings for the measured agents, read against the build's files.
-function armSettings(role, arm, build, effortFlag) {
+function armSettings(role, arm, build, effortFlag, only) {
   const files = role === 'mapper' ? ['index-mapper'] : FINDER_KINDS.map(k => 'review-' + k + '-finder');
+  // --only names the agents the arm patches; every other measured agent ships as
+  // the build has it, so a single helper can be measured against unchanged peers.
+  const onlyNames = Array.isArray(only) && only.length ? only : null;
+  if (onlyNames) {
+    const unknown = onlyNames.filter(n => !files.includes(n));
+    if (unknown.length) throw new Error('--only names no ' + role + ' agent: ' + unknown.join(', ') + ' (choose from ' + files.join(', ') + ')');
+  }
   const out = [];
   for (const name of files) {
     const file = path.join(build.dir, 'agents', name + '.md');
@@ -983,7 +994,7 @@ function armSettings(role, arm, build, effortFlag) {
     const current = frontmatterValue(text, 'effort') || 'high';
     let model;
     let effort;
-    if (arm === 'ship') {
+    if (arm === 'ship' || (onlyNames && !onlyNames.includes(name))) {
       // As shipped: nothing is patched, so --effort does not apply.
       out.push({ file, name, before: { model: frontmatterValue(text, 'model'), effort: current }, model: frontmatterValue(text, 'model'), effort: current, shipped: true });
       continue;
@@ -991,6 +1002,7 @@ function armSettings(role, arm, build, effortFlag) {
     if (arm === 'a') { model = SESSION_MODEL; effort = role === 'mapper' ? 'medium' : current; }
     else if (arm === 'b') { model = SESSION_MODEL; effort = lowerEffort(role === 'mapper' ? 'medium' : current); }
     else if (arm === 'c') { model = 'sonnet'; effort = effortFlag; }
+    else if (arm === 'h') { model = 'haiku'; effort = effortFlag || 'medium'; }
     else throw new Error('unknown arm ' + arm);
     if (effortFlag) effort = effortFlag;
     if (!effort) throw new Error('arm c needs --effort <level> (the effort decided by arms a and b)');
@@ -1341,7 +1353,8 @@ const PLAN_SUMMARY = 'Exploration summary, approved by the owner; write the plan
 async function commandRun(o) {
   const role = o.role;
   if (!['review', 'mapper', 'probe'].includes(role)) usage('--role must be review or mapper');
-  if (role !== 'probe' && !['a', 'b', 'c', 'ship'].includes(o.arm)) usage('--arm must be a, b, c or ship');
+  if (role !== 'probe' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
+  if (o.only && (role === 'probe' || o.arm === 'ship')) usage('--only applies to a measured arm (a, b, c or h) of the review or mapper role');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
   for (const m of [o.modeWord, o.planModels]) if (m !== undefined && !MODES.includes(m)) usage('a mode is best, fit or cheap');
@@ -1362,7 +1375,8 @@ async function commandRun(o) {
   const buildLabel = build.sha ? build.sha.slice(0, 7) : 'tree';
   // The mode a review run resolves, named in its folder when it was chosen.
   const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
-  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role + '-' + o.arm + modeTag;
+  const onlyTag = o.only ? '-only-' + o.only.map(n => n.replace(/^review-|-finder$/g, '')).join('+') : '';
+  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role + '-' + o.arm + onlyTag + modeTag;
   const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
   fs.mkdirSync(out, { recursive: true });
   // Opus, except the probe that checks /execute's note on a session running on
@@ -1370,7 +1384,7 @@ async function commandRun(o) {
   const sessionModel = o.probe === 'execute-mismatch' ? 'sonnet' : SESSION_MODEL;
   const sessionFamily = familyOf(sessionModel);
   const meta = {
-    version: 1, role, arm: o.arm || null, label: o.label || '', probe: o.probe || null,
+    version: 1, role, arm: o.arm || null, only: o.only || null, label: o.label || '', probe: o.probe || null,
     build: { spec: o.build, sha: build.sha, version: build.version },
     session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
@@ -1389,7 +1403,7 @@ async function commandRun(o) {
     build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
   try {
     if (role === 'review' || (role === 'probe' && o.probe === 'review')) {
-      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort) : armSettings('review', 'a', build, null);
+      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only) : armSettings('review', 'a', build, null);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
       if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
@@ -1411,7 +1425,7 @@ async function commandRun(o) {
     } else if (role === 'mapper') {
       const chunk = JSON.parse(fs.readFileSync(path.resolve(o.chunk), 'utf8'));
       meta.chunk = { file: path.relative(REPO, path.resolve(o.chunk)), sourceRef: chunk.sourceRef, files: chunk.files };
-      const settings = armSettings('mapper', o.arm, build, o.effort);
+      const settings = armSettings('mapper', o.arm, build, o.effort, o.only);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
       if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
@@ -1657,6 +1671,7 @@ function parseArgs(argv) {
     const val = () => { if (i + 1 >= argv.length) usage(a + ' needs a value'); return argv[++i]; };
     if (a === '--role') o.role = val();
     else if (a === '--arm') o.arm = val();
+    else if (a === '--only') o.only = val().split(',').map(s => s.trim()).filter(Boolean);
     else if (a === '--build') o.build = val();
     else if (a === '--effort') o.effort = val();
     else if (a === '--chunk') o.chunk = val();

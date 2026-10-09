@@ -168,6 +168,19 @@ section('arm patch', () => {
   check('arm c: sonnet at the given effort', QC.armSettings('review', 'c', b, 'medium').every(s => s.model === 'sonnet' && s.effort === 'medium'));
   check('mapper arm a: opus at medium (the shipped low is under suspicion)', QC.armSettings('mapper', 'a', b, null)[0].effort === 'medium');
   check('mapper arm b: opus at low', QC.armSettings('mapper', 'b', b, null)[0].effort === 'low');
+  // Arm h and --only (issue 221): one helper measured on Haiku against unchanged peers.
+  const h = QC.armSettings('review', 'h', b, null);
+  check('arm h: every finder on haiku at medium when no effort is given', h.length === 8 && h.every(s => s.model === 'haiku' && s.effort === 'medium' && !s.shipped), JSON.stringify(h.map(s => [s.model, s.effort])));
+  check('arm h: haiku at the given effort', QC.armSettings('review', 'h', b, 'low').every(s => s.model === 'haiku' && s.effort === 'low'));
+  check('mapper arm h: haiku at medium', (() => { const m = QC.armSettings('mapper', 'h', b, null)[0]; return m.model === 'haiku' && m.effort === 'medium' && !m.shipped; })());
+  const only = QC.armSettings('review', 'h', b, null, ['review-deps-finder']);
+  check('only: the named finder is patched and the other seven ship unchanged',
+    only.filter(s => !s.shipped).map(s => s.name).join() === 'review-deps-finder' && only.filter(s => s.shipped).length === 7 && only.filter(s => s.shipped).every(s => s.model === QC.frontmatterValue(finder, 'model')),
+    JSON.stringify(only.map(s => [s.name, s.shipped ? 'ship' : s.model])));
+  check('only: an empty list patches every finder', QC.armSettings('review', 'h', b, null, []).every(s => !s.shipped));
+  let onlyThrew = false;
+  try { QC.armSettings('review', 'h', b, null, ['review-nope-finder']); } catch (e) { onlyThrew = /--only names no review agent: review-nope-finder/.test(e.message); }
+  check('only: an unknown agent name throws and names the choices', onlyThrew);
 });
 
 section('finder output and matching', () => {
@@ -519,7 +532,9 @@ section('model modes', () => {
 
   // Flags that would start a session refuse before anything runs.
   const badArm = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'z', '--build', 'HEAD'], { encoding: 'utf8' });
-  check('an unknown arm is a usage error that names ship', badArm.status === 2 && /a, b, c or ship/.test(badArm.stderr), badArm.stderr);
+  check('an unknown arm is a usage error that names ship', badArm.status === 2 && /a, b, c, h or ship/.test(badArm.stderr), badArm.stderr);
+  const onlyShip = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'ship', '--only', 'review-deps-finder', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('--only with the ship arm is a usage error', onlyShip.status === 2 && /--only applies to a measured arm/.test(onlyShip.stderr), onlyShip.stderr);
   const badMode = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'ship', '--build', 'HEAD', '--mode-word', 'fast'], { encoding: 'utf8' });
   check('an unknown mode is a usage error', badMode.status === 2 && /best, fit or cheap/.test(badMode.stderr), badMode.stderr);
 });
