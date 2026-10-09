@@ -572,6 +572,12 @@ const HOME_DIR = (function () {
 const ABS_PREFIXES = (function () {
   const out = [];
   try { const r = mainRepoRoot(); if (r && r !== '/') out.push([r + path.sep, '']); } catch (e) {}
+  // A worktree nested inside the main copy (.claude/worktrees/<name>) has a
+  // longer root than the main copy, so with only the main root here a path
+  // came out as ".claude/worktrees/<name>/src/x.js" instead of "src/x.js".
+  // Longest first strips the worktree's own root, the same way REL_ROOTS
+  // below derives a relPath.
+  if (WORK_ROOT && WORK_ROOT !== '/' && WORK_ROOT !== REPO_ROOT) out.push([WORK_ROOT + path.sep, '']);
   if (HOME_DIR) out.push([HOME_DIR + path.sep, '~' + path.sep]);
   // Longest first, so the repo root (usually inside home) wins over the home prefix.
   return out.sort(function (a, b) { return b[0].length - a[0].length; });
