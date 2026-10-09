@@ -14,9 +14,12 @@ A convention describes the toolkit's contract with a project's own files. It is 
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
 - **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds
 - **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual
+- **Severity:** warn | suggest   (optional; a regex detector's findings default to warn)
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
 ```
+
+`Severity` is what a `regex` detector's hits carry into the audit, `warn` (Should fix) or `suggest` (Optional); the other detectors set it in the script, and a hit's severity is where the audit starts, never its verdict.
 
 `regex` needs one or more `Looks behind` patterns; the other detectors carry their check in the script and take none. `manual` is the one detector the script does not run: the `/tk:upgrade` skill reads the files in scope itself, judges each against the `Looks behind` prose, and emits findings in the same shape with a file-read receipt. Use it only for a judgment no grep expresses.
 
@@ -174,6 +177,16 @@ Why: setup writes `CLAUDE.md`, `LESSONS.md`, `DESIGN-PROFILE.md` and `.claude/to
 - **Fix:** create `LESSONS-detail.md` from the plugin's seed when it is absent and move each long bullet's write-up there under the same bold lead, leaving one bold line in the index; remove a bullet whose bold lead is one of the toolkit's own lessons, and its write-up in `LESSONS-detail.md`; both edit files of yours, applied only after the batch page approves them
 
 Why: `LESSONS.md` is read at the start of every session, which is why it is an index of one-liners with the write-ups in `LESSONS-detail.md`. Two things make it heavier than that. A project with no detail file writes each lesson in full into the index, and every session pays for it; the detector reports an index with a bullet beyond one sentence or over 300 characters while `LESSONS-detail.md` is absent, as one finding listing the lines. And the copy-installers copy the toolkit's own `LESSONS.md` and `LESSONS-detail.md` into a fresh project, as did the v7.0.x plugin seed, so a project set up before v7.1.0 carries the toolkit's lessons as if they were its own; the detector reports a bullet whose bold lead is in `seed/toolkit-lesson-leads.txt` (every lead the toolkit's log has carried, written by `scripts/seed-history.js`), as one finding listing the lines and leads. The toolkit's own repository is never audited: `/tk:upgrade` refuses to run there, and its lessons are the source of the list. Both fixes edit files the toolkit seeded once, so they are applied only after the batch page approves them; the index can change on any day, so this entry runs on every upgrade.
+
+### C-17: A check step names its command
+- **Since:** 7.7.0
+- **Scope:** prompt-files
+- **Detector:** regex
+- **Severity:** suggest
+- **Looks behind:** `^\s*(-|\*|\+|[0-9]+[.)])\s+(\*\*[^*`]+\*\*:?\s+)?(\*\*)?([Vv]erify|[Cc]heck|[Cc]onfirm|[Ee]nsure|[Mm]ake sure)\b[^`]*$`
+- **Fix:** name the command and its pass signal (an exit code, a pattern, or a line count) on that line, or move the check into `.claude/toolkit/checks.json`, where the toolkit's checks runner runs it
+
+Why: a step that says check, verify or confirm and names no command leaves the model to read the files and reason its way to a verdict, which is slower than the command and wrong more often. The toolkit now runs before it reasons (M16), and every check step of its own names the command and the signal that passes it; this entry flags the project's own commands and skills that have not caught up: a list item or numbered step that opens with one of those verbs, a bold label such as `**Verify:**` allowed first, and carries no backtick span, which is where a command would sit. It ships at `suggest` because a regular expression over prose will hit some ordinary sentences, and the audit, not the detector, decides each hit; a release of real hits is the evidence for promoting it to `warn`.
 
 ## How a release adds a convention
 

@@ -23,6 +23,8 @@ Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDI
 
 Newer models follow a prompt more literally than the models most prompt files were first written for, so text that once made up for a weaker reader now costs tokens or steers the wrong way. Check every file under review for these six patterns; the last column says when a line is not a finding. For the first three, a stated reason is what counts: a check or a fixed order that says why it matters stays, and an emphasis line keeps its reason when it loses the shouting. A stale example, a contradiction, or a dated note is wrong in what it says, so no reason saves it.
 
+Start the Emphasis boosters and Dated config rows from the candidate lines (M16): `grep -nE '\b(CRITICAL|MUST|IMPORTANT)\b|#[0-9]{2,}|\bv[0-9]+\.[0-9]+\.[0-9]+|\b20[0-9]{2}-[0-9]{2}-[0-9]{2}\b' <files under review>` (the Grep tool with the same pattern when you have no Bash) lists every line carrying a capitalized emphasis word, an issue number, a version or a date; whether each one carries a reason the reader acts on stays your judgment.
+
 | Pattern | A finding | Not a finding |
 |---|---|---|
 | Verification rituals | A check that shows diligence and decides nothing: "double-check your work", "re-read the file before answering", a confirm step whose answer changes no next step | A check whose result decides the next step: a test run, a receipt a later stage reads |

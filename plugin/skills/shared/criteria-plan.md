@@ -2,7 +2,7 @@
 
 <procedure>
 
-First, find the plan file to review against. Auto-detect the most recently modified `PLAN-*.md` file in `plans/` (also check the project root for `PLAN-*.md` files). If no plan file exists, pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /tk:review-code be more appropriate?" If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user: "Which plan file should I evaluate against?"
+First, find the plan file to review against (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const s=JSON.parse(d);const p=s.plans.find(x=>x.name===s.newestPlan)||null;console.log(JSON.stringify({newestPlan:s.newestPlan,status:p&&p.status,progress:p&&p.progress,others:s.plans.length-1}))})'; ls PLAN-*.md 2>/dev/null` prints the newest `plans/PLAN-*.md` with its `status` (`done` at progress 100), how many `others` exist, and any `PLAN-*.md` at the project root (a finder `/tk:review` dispatched has no Bash and takes the plan its prompt names). If no plan file exists (`newestPlan` null and no root file), pause and ask the user: "I couldn't find a plan file. Which file should I compare against, or would /tk:review-code be more appropriate?" If `others` is above 0 and the newest plan's `status` is not `done`, pause and ask the user: "Which plan file should I evaluate against?"
 
 Read the plan file, then read the implementation files. Compare them. Pick one of two modes:
 

@@ -41,7 +41,7 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh "<file>"
 Pass the absolute path `render-html.js` printed, typed out as literal words (see "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`; the script resolves either an absolute or a project-relative path). It handles macOS (`open`), WSL (PowerShell `Start-Process`, located on PATH or by full path, then `explorer.exe`), and Linux (`xdg-open`). It exits `0` when a launcher succeeded, `1` when every launcher failed or the path did not resolve; on WSL the headless message also prints the Windows-side (UNC) path so it can be pasted into a Windows browser.
 
 - **On exit 0:** tell the user it opened, with the path, e.g. "Opened the review in your browser: `artifacts/html/review.html`".
-- **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. If the path may be wrong, re-check it resolves from the project root before assuming the environment is headless.
+- **On exit 1:** do not retry in a loop. The script already prints the "open this in your browser (not the editor)" guidance with the path, so relay that rather than restating it. It also prints `open-artifact.sh: file not found: <path>` on stderr before it tries any launcher, so that line (or `test -e "<file>"` from the project root, exit 0 meaning it resolves) settles whether the path or the environment is the cause before you call it headless (M16).
 
 The `/tk:playground` skill sits outside all of this: it never publishes and never auto-opens, because its output is throwaway `/tmp/` HTML the user pastes back (see the `playground` skill). It emits a clickable `file://` link in chat instead.
 

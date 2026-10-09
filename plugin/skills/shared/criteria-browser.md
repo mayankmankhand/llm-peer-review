@@ -37,7 +37,7 @@ Then check that state survives the page redrawing itself. A still screenshot can
 
 When the Run notes carry a `[behaviour]` line from the plan's must-check list, run these three checks on every stateful control of the surface it names that the design loop's pass did not cover. The checks count toward the 8-session cap; when the controls outnumber it, cover one control of each kind (field, two-step control, panel) and name the rest under "What I could not check" (a dispatched finder: in one `NOT CHECKED:` line).
 
-Each session should have a clear purpose. After each session, read the screenshots and check the JSON output for console errors, failed network requests, and page errors.
+Each session should have a clear purpose. After each session, read the screenshots, and take the console, failed-request and page-error counts from the saved output with the count one-liner under "Output Format" in the Browse Script API, never by eye (M16): `ok` true and all three counts 0 is a clean session, and any count above 0 is entries to read.
 
 **When actions fail:** If a session stops on a failed action, run a new session with just a screenshot to see the current state. Adjust your selectors or action sequence. Don't retry the same failing action more than once. The exception is a click or read that times out on a control the screenshot shows on a page that keeps redrawing: that is a finding of the kind above (the control is rebuilt faster than a click can land), not a selector to adjust.
 

@@ -26,7 +26,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index mode:<m>`, with `<m>` the exploration's Models answer (fit when it gave none). After it completes, read the new map and proceed.
 
-**If it is malformed or `/tk:index` fails:** Proceed without the map. The plan can still be written, just with less precision on file paths.
+**If it is malformed or `/tk:index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `[ "$(wc -c <CODEBASE_MAP.md)" -gt 200 ] && head -1 CODEBASE_MAP.md | grep -q '^<!-- Generated:' && grep -q '^# Codebase Map' CODEBASE_MAP.md && echo "map ok" || echo "map malformed"`. Proceed without the map. The plan can still be written, just with less precision on file paths.
 
 After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/tk:document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 

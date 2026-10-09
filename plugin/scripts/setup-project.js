@@ -140,7 +140,9 @@
 // changed nothing prints no undo line. Paths are project-relative and
 // shell-quoted.
 //
-// Exit codes: 0 done (or nothing to do), 1 error, 3 paged (a decision is
+// Exit codes: 0 done (or nothing to do), 1 error (the toolkit's own repository
+// included: its marketplace file names the toolkit, see marketplaceNamesToolkit,
+// and the run stops before it reads or writes anything), 3 paged (a decision is
 // needed: locally modified files, provenance unknown, a dirty tree, or a
 // settings file setup cannot merge without replacing it).
 // --dry-run prints the same report and exit code and writes nothing.
@@ -677,8 +679,37 @@ function removeEmptyDirsUpTo(dir, stopAt) {
   }
 }
 
+// Is this project the toolkit's own repository? The source tree is what the
+// plugin is built from, not something to seed or upgrade. The marketplace file
+// names the toolkit itself when the marketplace is named llm-peer-review or
+// lists a plugin named tk; a project that publishes a plugin of its own has a
+// marketplace file too and is treated like any other project.
+// Byte-identical in setup-project.js and upgrade-audit.js;
+// scripts/test-upgrade-audit.js fails when the two copies drift.
+function marketplaceNamesToolkit(projectDir) {
+  let json;
+  try {
+    json = JSON.parse(fs.readFileSync(path.join(projectDir, '.claude-plugin', 'marketplace.json'), 'utf8'));
+  } catch (e) {
+    return false;
+  }
+  if (!json || typeof json !== 'object') return false;
+  if (json.name === 'llm-peer-review') return true;
+  const plugins = Array.isArray(json.plugins) ? json.plugins : [];
+  return plugins.some((p) => p && typeof p === 'object' && p.name === 'tk');
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
+  const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
+  const top = git(['rev-parse', '--show-toplevel'], cwd);
+  const project = top || cwd;
+  // The toolkit's own repository is not a project (the setup skill's rule 3):
+  // stop here, before anything is read, backed up or written.
+  if (marketplaceNamesToolkit(project)) {
+    console.error('setup-project: this is the toolkit\'s own repository (its marketplace file names the toolkit); nothing to seed.');
+    process.exit(1);
+  }
   const pluginRoot = path.resolve(opts.pluginRoot || path.join(__dirname, '..'));
   const seedDir = path.join(pluginRoot, 'seed');
   const pluginMeta = readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {});
@@ -687,9 +718,6 @@ function main() {
   const managedShipped = managedPaths.paths;
   // The root scripts/ files early installers copied, exactly as the shipped list names them.
   const ROOT_SCRIPTS = new Set(managedShipped.filter(rel => /^scripts\/[^/]+$/.test(rel)));
-  const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
-  const top = git(['rev-parse', '--show-toplevel'], cwd);
-  const project = top || cwd;
   const P = (rel) => path.join(project, rel);
   const out = [];
   const say = (line) => out.push(line);

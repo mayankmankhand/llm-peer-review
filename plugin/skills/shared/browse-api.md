@@ -109,4 +109,4 @@ The script returns JSON with per-action results plus diagnostics:
 - `network` - Failed network requests (4xx, 5xx, connection errors). Only present when there are issues.
 - `errors` - Uncaught page errors. Only present when there are issues.
 
-Always check `console`, `network`, and `errors` - they often reveal the root cause of visible UI bugs.
+Always check `console`, `network`, and `errors` - they often reveal the root cause of visible UI bugs. Save each run's stdout (`node ${CLAUDE_PLUGIN_ROOT}/scripts/browse.js ... > <run-dir>/session.json`) and count them from the file (M16): `node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(JSON.stringify({ok:r.ok,console:(r.console||[]).length,network:(r.network||[]).length,errors:(r.errors||[]).length}))' <run-dir>/session.json`; `{"ok":true,"console":0,"network":0,"errors":0}` is a clean session, and any other count is entries to read.
