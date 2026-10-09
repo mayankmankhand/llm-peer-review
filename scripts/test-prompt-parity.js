@@ -67,7 +67,8 @@ const unread = SEAMS.filter(s => !named.has(s));
 check('each of the six is read by at least one prompt file', unread.length === 0, unread.join(', '));
 const securityReaders = ['.claude/skills/review-security/SKILL.md', '.claude/skills/security-audit/SKILL.md', '.claude/skills/review-security-criteria/SKILL.md'];
 check('the three security reviewers read do-not-report.md, right after the toolkit\'s own list', securityReaders.every(f => read(f).includes('.claude/toolkit/do-not-report.md')), securityReaders.filter(f => !read(f).includes('.claude/toolkit/do-not-report.md')).join(', '));
-check('the toolkit reference and the README count the same six files', /six files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Six files in `\.claude\/toolkit\/`/.test(read('README.md')));
+// The sentence moved from README.md to docs/EXTENDING.md on 2026-10-09, when the README became a front door and the manual moved into docs/.
+check('the toolkit reference and the extending guide count the same six files', /six files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Six files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
 
 console.log('\n3. the reload-then-fallback sentence');
 const SENTENCE = 'run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload)';
