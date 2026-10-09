@@ -1,6 +1,6 @@
 # Commands
 
-How each command in the LLM Peer Review toolkit works, the two brakes on the loop, which review command to use, and how the debates run. The full command table, including every review skill, is in the shipped manual: [toolkit-reference.md](../.claude/skills/shared/toolkit-reference.md), under Slash Commands.
+How each command in the LLM Peer Review toolkit works, the two brakes on the loop, which review command to use, and how the debates run. The full command table, including every review skill, is in the shipped manual: [toolkit-reference.md](../.claude/skills/shared/toolkit-reference.md), under Slash Commands. On the plugin every command below carries the `tk:` prefix (`/tk:explore`); the copy-install uses the bare names shown here.
 
 ## The loop and its two brakes
 

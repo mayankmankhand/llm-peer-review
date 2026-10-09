@@ -16,11 +16,11 @@
 
 AI builds the thing in minutes. Nobody questions the plan first, so what gets built is the first idea, polished. A model reviewing its own plan mostly agrees with itself. The fix is a second model arguing with the first before you commit, inside a workflow that makes the argument happen at the right moment: after the plan, before the code.
 
-## One debate, one changed plan
+## One debate, four fixes
 
 <img src="docs/images/ask-gpt-summary.png" alt="ask-gpt verdict after three rounds: nine agreed points, two disagreed points, ten recommended actions ranked critical to minor, and key insights" width="700">
 
-*February 2026, before this repository went public. Claude and ChatGPT reviewed the whole codebase across three rounds and agreed on nine problems. The `Bash(bash:*)` permission that bypassed every other rule and the brittle `.env.local` parser were fixed the same day (commit 8302a9f); the setup script stopped overwriting a project's `.gitignore` three weeks later (f38a124). They disagreed on two. ChatGPT wanted a dry-run flag for the installer; Claude argued safe defaults were enough. The flag shipped anyway, in June, in v5.2.0.*
+*February 2026, before this repository went public. Claude and ChatGPT reviewed the whole codebase across three rounds and agreed on nine problems. The `Bash(bash:*)` permission that bypassed every other rule and the brittle `.env.local` parser were fixed the same day (commit 8302a9f); the setup script stopped overwriting a project's `.gitignore` three weeks later (f38a124). They disagreed on two. ChatGPT wanted a dry-run flag for the installer; Claude argued safe defaults were enough. The flag shipped anyway, in June, in v5.2.0. The same debate runs on a plan before any code exists; this one ran on the code before anyone installed it.*
 
 <!-- GIF: docs/images/ask-gpt.gif, recorded by the owner -->
 
