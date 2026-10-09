@@ -212,6 +212,13 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/merge-findings.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check run-checks script (dependency-free; the guarded checks runner that decides
+# review receipts and a project's declared checks, issue #221, rule M16)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/run-checks.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/run-checks.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/skills/shared/html-outputs.md .claude/skills/shared/toolkit-reference.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -599,7 +606,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js merge-findings.js; do
+for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js merge-findings.js run-checks.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1216,6 +1223,12 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/gen-media.js" "$TARGET/.claude/scripts/
 # it is copied beside the renderer.
 echo "  Copying .claude/scripts/merge-findings.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/merge-findings.js" "$TARGET/.claude/scripts/merge-findings.js"
+
+# run-checks.js is the guarded checks runner (issue #221, rule M16): it runs a
+# list of read-only checks and decides each from a machine expectation, for review
+# receipts and a project's own .claude/toolkit/checks.json.
+echo "  Copying .claude/scripts/run-checks.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/run-checks.js" "$TARGET/.claude/scripts/run-checks.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
