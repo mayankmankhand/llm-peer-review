@@ -106,8 +106,14 @@ would permanently certify a scan that never ran, and `/error-analysis` would lat
 the user capture had run and found nothing. Say one line: capture could not find this
 project's transcripts, so nothing was scanned.
 
+**If `interruptsWithoutFollowUp` is above 0, say one line**, whatever `candidates` holds:
+that many interrupts in this window had no follow-up message the scan could find, so a
+correction made then may be missing from the ledger. The scan pairs an interrupt with the
+next message typed after it, in the same session or in another session that starts within
+ten minutes.
+
 **If `scanned` is true and `candidates` is empty, skip to "Record the heartbeat" and say
-nothing to the user.** The stage is silent when there was genuinely nothing to capture.
+nothing else to the user.** The stage is silent when there was genuinely nothing to capture.
 
 ### Explain it, the first time only
 
