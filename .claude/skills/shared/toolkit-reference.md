@@ -20,7 +20,7 @@ The long manual: workflow, command table, plans, map, lessons, ledger, design, H
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M15); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M16); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 ### Our Workflow
 
@@ -173,9 +173,9 @@ A project adds its own rules to the toolkit through seven files in `.claude/tool
 | File | Read by | Carries |
 |---|---|---|
 | `review-kinds.md` | `/review`, at detection | The project's own review kinds: rows in the detection table's three columns, the third naming an agent under `.claude/agents/` |
-| `plan-gate.md` | `/create-plan`, before its requirements | A gate every plan must pass. Additive only: a line that loosens M1 to M15 or waives a toolkit requirement is void |
+| `plan-gate.md` | `/create-plan`, before its requirements | A gate every plan must pass. Additive only: a line that loosens M1 to M16 or waives a toolkit requirement is void |
 | `execute-gate.md` | `/execute`, before its requirements | A gate every implementation step must pass. Additive only, the same way |
-| `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M15 is void |
+| `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M16 is void |
 | `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
 | `checks.json` | `/execute`, at its test step, through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines` (a prose string is judged by the stage from the saved output) |
