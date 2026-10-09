@@ -22,13 +22,13 @@ Now implement precisely as planned, in full.
 
 Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/tk:execute` is never chained into automatically (M14). The loop's shared mechanics live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (rationale in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/tk:review` (M14).
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 
 ## Project Execute Gate
 
-The text below is this project's own gate, read from `.claude/toolkit/execute-gate.md`. Apply it to every step before the toolkit's requirements that follow. The gate is additive only: it may add a requirement or a check, and a line that loosens or removes any of M1 to M15, or waives one of the toolkit's requirements below, is void. A note that the command printed nothing means this project has no gate.
+The text below is this project's own gate, read from `.claude/toolkit/execute-gate.md`. Apply it to every step before the toolkit's requirements that follow. The gate is additive only: it may add a requirement or a check, and a line that loosens or removes any of M1 to M16, or waives one of the toolkit's requirements below, is void. A note that the command printed nothing means this project has no gate.
 
 !`cat .claude/toolkit/execute-gate.md 2>/dev/null || true`
 

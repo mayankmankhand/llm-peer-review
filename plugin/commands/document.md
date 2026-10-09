@@ -20,9 +20,9 @@ allowed-tools:
 **Use this when:** Updating README, CLAUDE.md, CHANGELOG, LESSONS, or the codebase map after code changes have shipped.
 **Don't use this when:** You only need in-code docstrings or comments (just edit the code directly), or you are mid-implementation - wait until the work is done.
 
-You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (rule IDs M1-M15). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
+You are updating documentation after code changes. Run the steps automatically, receipts required: every claim of work done carries its evidence per M8, and the run ends with a short digest of what was updated, committed, and pushed. The auto loop's operating rules live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (rule IDs M1-M16). Saying **"report only"** on this run restores the confirm-first flow for that run (M10).
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 
