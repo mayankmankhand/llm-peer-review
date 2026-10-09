@@ -344,17 +344,22 @@ const HARNESS_TAGS = [
   'ide_diagnostics', 'local-command-stdout', 'local-command-stderr'
 ];
 
-// Strip harness-inserted markup so only what the human actually typed is examined.
-function humanText(entry) {
+// A user entry's text as written, harness markup included.
+function rawUserText(entry) {
   const content = entry.message && entry.message.content;
-  let text = null;
-  if (typeof content === 'string') text = content;
-  else if (Array.isArray(content)) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
     // A tool result is the harness talking, not the human.
     if (content.some(function (c) { return c.type === 'tool_result'; })) return null;
-    text = content.filter(function (c) { return c.type === 'text'; })
+    return content.filter(function (c) { return c.type === 'text'; })
                   .map(function (c) { return c.text; }).join(' ');
   }
+  return null;
+}
+
+// Strip harness-inserted markup so only what the human actually typed is examined.
+function humanText(entry) {
+  const text = rawUserText(entry);
   if (!text) return null;
   let clean = text;
   for (let i = 0; i < HARNESS_TAGS.length; i++) {
@@ -371,6 +376,14 @@ function humanText(entry) {
 // so it is not a human turn.
 function isCommandExpansion(text) {
   return /\*\*Use this when:\*\*/.test(text) || /^ARGUMENTS:/m.test(text);
+}
+
+// A slash command the human ran: the invocation carries the harness's command
+// tags (which humanText strips to nothing) and its expansion follows as machine
+// text. Either one counts.
+function isSlashCommand(entry, text) {
+  const raw = rawUserText(entry);
+  return (raw !== null && /<command-name>/.test(raw)) || (text !== null && isCommandExpansion(text));
 }
 
 // This filter is NEGATIVE by design: it removes what is definitely not a human
@@ -504,8 +517,9 @@ function runCandidates() {
   }
   result.window.from = since;
 
+  const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
   const unanswered = []; // interrupts still pending when their file ended
-  const answers = [];    // human texts another file's interrupt could link to
+  const answers = [];    // each file's opening entry, which another file's interrupt can link to
   for (let i = 0; i < files.length; i++) {
     let lines;
     try { lines = fs.readFileSync(files[i], 'utf-8').split('\n'); } catch (e) { continue; }
@@ -528,23 +542,44 @@ function runCandidates() {
       // A null here (a tool result, or an entry that held only harness tags such
       // as a task notification) leaves a pending interrupt as it is.
       const text = humanText(entry);
-      if (!text) continue;
-      // Only a session's opening words can answer another session's interrupt:
+      const command = isSlashCommand(entry, text);
+      if (!text && !command) continue;
+      // Only a session's opening entry can answer another session's interrupt:
       // a mid-session message in a session running side by side is about its
-      // own work (review of the #220 cycle, R2). Decided before the window
-      // check, so a session that opened before the window has no opener in it.
-      const words = !INTERRUPT.test(text) && !isCommandExpansion(text);
-      const opener = words && !opened;
-      if (words) opened = true;
+      // own work (review of the #220 cycle, R2). The opening entry is the first
+      // human words or slash command, decided before the window check, so a
+      // session that opened before the window has no opener in it.
+      const marker = !command && INTERRUPT.test(text);
+      const opener = !marker && !opened;
+      if (!marker) opened = true;
       if (since && entry.timestamp && entry.timestamp < since) continue;
-      if (INTERRUPT.test(text)) {
+      if (marker) {
         // A second marker before any human text replaces the first: the
         // downstream case had two, two seconds apart, around one turn.
         pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant };
         continue;
       }
-      // Machine text. A pending interrupt waits for the human's own words.
-      if (isCommandExpansion(text)) continue;
+      if (command) {
+        // The human's next words after an interrupt went into a slash command,
+        // whose arguments this scan never reads, so the interrupt has no
+        // follow-up it can see. Counting it is what makes that miss visible
+        // (the owner's decision in the review of the #220 cycle, R6). The
+        // command itself is machine text, never a candidate.
+        if (pending) { result.interruptsWithoutFollowUp += 1; pending = null; }
+        if (opener) answers.push({ file: files[i], at: entry.timestamp, command: true });
+        continue;
+      }
+      // The wait inside a session is capped at the same window as across
+      // sessions: words typed long after an interrupt are about something else
+      // (R6). The interrupt is counted, and the words are judged as usual.
+      if (pending) {
+        const t0 = time(pending.at);
+        const t = time(entry.timestamp);
+        if (t0 !== null && t !== null && t - t0 > INTERRUPT_LINK_MS) {
+          result.interruptsWithoutFollowUp += 1;
+          pending = null;
+        }
+      }
 
       const candidate = {
         at: entry.timestamp || null,
@@ -575,11 +610,12 @@ function runCandidates() {
   }
 
   // A session that ends at the interrupt: the human often goes on in a new one.
-  // Oldest interrupt first, each takes the earliest opening human text of
-  // another file that comes after it within INTERRUPT_LINK_MS and that no
-  // earlier interrupt took. A text already kept as a candidate is upgraded in place, never added
-  // twice; one the gates dropped is added. The rest are counted, not guessed.
-  const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
+  // Oldest interrupt first, each takes the earliest opening entry of another
+  // file that comes after it within INTERRUPT_LINK_MS and that no earlier
+  // interrupt took. A slash command there counts the interrupt, as it does
+  // inside a session. A text already kept as a candidate is upgraded in place,
+  // never added twice; one the gates dropped is added. The rest are counted,
+  // not guessed.
   unanswered.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
   unanswered.forEach(function (p) {
     const t0 = time(p.at);
@@ -593,6 +629,7 @@ function runCandidates() {
     }
     if (!best) { result.interruptsWithoutFollowUp += 1; return; }
     best.taken = true;
+    if (best.command) { result.interruptsWithoutFollowUp += 1; return; }
     best.candidate.after_interrupt = true;
     best.candidate.assistant_said = truncate(p.assistant_said, 800);
     if (!best.kept) { best.kept = true; result.candidates.push(best.candidate); }

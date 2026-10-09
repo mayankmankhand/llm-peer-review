@@ -475,13 +475,38 @@ console.log('\ncorrection-ledger.js\n');
   check('a marker before --since is neither a candidate nor counted (#220)',
     h.candidates.length === 0 && h.interruptsWithoutFollowUp === 0, JSON.stringify(h));
 
-  // (i) a slash-command expansion between the interrupt and the human's words
+  // (i) a slash command right after an interrupt: the human's next words went
+  // into the command, which this scan cannot read, so the interrupt is counted
+  // as having no follow-up (owner's decision in the review of the #220 cycle, R6)
   const i = scenario('expansion', { s1: [asstE('INTERRUPTED_I adding a cache layer', 0), markE(5, 's1'),
     userE('# Explore\n**Use this when:** Starting a new feature.', 8, 's1'),
     userE('FOLLOWUP_I keep the old name for the cache', 20, 's1')] });
-  check('a command expansion after an interrupt leaves it pending for the human\'s own words (#220)',
-    i.candidates.length === 1 && said(i, 'FOLLOWUP_I').length === 1 && said(i, 'FOLLOWUP_I')[0].after_interrupt === true,
-    JSON.stringify(i.candidates));
+  check('a command expansion right after an interrupt counts it as having no follow-up (#220)',
+    said(i, 'FOLLOWUP_I').length === 1 && said(i, 'FOLLOWUP_I')[0].after_interrupt === false &&
+    i.interruptsWithoutFollowUp === 1, JSON.stringify(i));
+
+  // (i2) the command invocation itself, whose tags strip to nothing
+  const i2 = scenario('invocation', { s1: [asstE('INTERRUPTED_I2 renaming the module', 0), markE(5, 's1'),
+    userE('<command-message>explore</command-message> <command-name>/explore</command-name> <command-args>keep the old name</command-args>', 8, 's1'),
+    userE('FOLLOWUP_I2 and update the docs too', 20, 's1')] });
+  check('a slash command invocation right after an interrupt counts it as having no follow-up (#220)',
+    said(i2, 'FOLLOWUP_I2').length === 1 && said(i2, 'FOLLOWUP_I2')[0].after_interrupt === false &&
+    i2.interruptsWithoutFollowUp === 1, JSON.stringify(i2));
+
+  // (i3) the wait inside a session is capped at the same ten minutes as across sessions
+  const i3 = scenario('samelate', { s1: [asstE('INTERRUPTED_I3 sorting the imports', 0), markE(5, 's1'),
+    userE('FOLLOWUP_I3 next task: the footer', 5 + 11 * 60, 's1')] });
+  check('a message 11 minutes after an interrupt in the same session is not its follow-up (#220)',
+    said(i3, 'FOLLOWUP_I3').length === 1 && said(i3, 'FOLLOWUP_I3')[0].after_interrupt === false &&
+    i3.interruptsWithoutFollowUp === 1, JSON.stringify(i3));
+
+  // (i4) the next session opens with a slash command
+  const i4 = scenario('crosscmd', { s1: [asstE('INTERRUPTED_I4 rewriting the intro', 0), markE(5, 's1')],
+    s2: [userE('<command-name>/explore</command-name> <command-args>read it in full</command-args>', 14, 's2'),
+      userE('FOLLOWUP_I4 also check the footer', 30, 's2')] });
+  check('a next session that opens with a slash command counts the interrupt as having no follow-up (#220)',
+    said(i4, 'FOLLOWUP_I4').every(function (c) { return c.after_interrupt === false; }) &&
+    i4.interruptsWithoutFollowUp === 1, JSON.stringify(i4));
 
   // (j) two sessions end on an interrupt; one later message can answer only one
   const j = scenario('claim', { s1: [asstE('INTERRUPTED_J1 first turn', 0), markE(5, 's1')],
