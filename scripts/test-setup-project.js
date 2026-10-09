@@ -1910,6 +1910,57 @@ undo = undoOf(r.out);
 check('its undo line says there is no git undo and lists the created files', undo !== null && undo.noGit && undo.unknown.length === 0 && undo.checkout.length === 0 && sameSet(undo.del, fileList(repo).filter(f => !filesBefore.includes(f))), r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
+// The toolkit's own repository is not a project (issue #221, C18): when its
+// .claude-plugin/marketplace.json names the toolkit (a marketplace named
+// llm-peer-review, or one listing a plugin named tk) the script refuses it with
+// exit 1 and one stderr line, before it reads a report input, backs up or writes
+// anything. A project publishing a plugin of its own has a marketplace file too
+// and is seeded like any other. The same helper lives in upgrade-audit.js;
+// scripts/test-upgrade-audit.js is where the two copies are compared.
+console.log('\n6. the toolkit\'s own repository is refused (issue #221, C18)');
+const REFUSAL = /^setup-project: this is the toolkit's own repository \(its marketplace file names the toolkit\); nothing to seed\./m;
+function marketplaceProject(marketplace) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-market-'));
+  initRepo(dir);
+  write(dir, 'README.md', '# app\n');
+  if (marketplace !== null) write(dir, '.claude-plugin/marketplace.json', marketplace);
+  commitAll(dir, 'init');
+  return dir;
+}
+repo = marketplaceProject(JSON.stringify({ name: 'llm-peer-review', owner: { name: 'x' }, plugins: [{ name: 'tk', source: './plugin' }] }, null, 2) + '\n');
+treeBefore = treeSnapshot(repo); dirsBefore = dirSnapshot(repo);
+r = run(repo, pluginRoot);
+check('a marketplace named llm-peer-review is refused: exit 1 and the one-line message', r.status === 1 && REFUSAL.test(r.out), r.status + ' ' + r.out);
+check('  nothing was detected, backed up or written: no report, no undo line, the tree byte for byte as it was', treeSnapshot(repo) === treeBefore && sameSet(dirSnapshot(repo), dirsBefore) && !/Install type:/.test(r.out) && !/Undo:/.test(r.out) && !fs.readdirSync(repo).some(n => n.startsWith('.toolkit-backup-')), r.out);
+fs.mkdirSync(path.join(repo, 'sub'));
+r = run(path.join(repo, 'sub'), pluginRoot);
+check('  the check runs on the resolved git root, so a subfolder of the toolkit repository is refused too', r.status === 1 && REFUSAL.test(r.out), r.status + ' ' + r.out);
+r = run(repo, pluginRoot, ['--dry-run']);
+check('  neither --dry-run nor --force gets past it', r.status === 1 && REFUSAL.test(r.out) && run(repo, pluginRoot, ['--force']).status === 1, r.status + ' ' + r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+repo = marketplaceProject(JSON.stringify({ name: 'acme-tools', plugins: [{ name: 'acme', source: './plugins/acme' }, { name: 'tk', source: './plugins/tk' }] }));
+r = run(repo, pluginRoot);
+check('a marketplace under another name whose plugins list a plugin named tk is refused the same way', r.status === 1 && REFUSAL.test(r.out) && !exists(repo, '.claude/rules/toolkit.md'), r.status + ' ' + r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+const OWN_MARKET = JSON.stringify({ name: 'acme-tools', plugins: [{ name: 'acme', source: './plugins/acme' }] });
+repo = marketplaceProject(OWN_MARKET);
+r = run(repo, pluginRoot);
+check('a project publishing a plugin of its own (another marketplace name, another plugin name) is seeded like any other', r.status === 0 && /Install type: fresh install/.test(r.out) && exists(repo, '.claude/rules/toolkit.md') && !REFUSAL.test(r.out), r.status + ' ' + r.out);
+check('  and its marketplace file is left byte for byte', read(repo, '.claude-plugin/marketplace.json') === OWN_MARKET);
+fs.rmSync(repo, { recursive: true, force: true });
+
+repo = marketplaceProject(null);
+r = run(repo, pluginRoot);
+check('no marketplace file: seeded normally', r.status === 0 && /Install type: fresh install/.test(r.out) && exists(repo, '.claude/rules/toolkit.md'), r.status + ' ' + r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
+repo = marketplaceProject('{ not json');
+r = run(repo, pluginRoot);
+check('an unreadable marketplace file names nothing, so the project is seeded normally', r.status === 0 && /Install type: fresh install/.test(r.out) && exists(repo, '.claude/rules/toolkit.md'), r.status + ' ' + r.out);
+fs.rmSync(repo, { recursive: true, force: true });
+
 fs.rmSync(pluginRoot, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }

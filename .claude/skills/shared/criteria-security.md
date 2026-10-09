@@ -31,6 +31,8 @@ When a danger spot is present, look for these specific classes (the ones a code 
 - **Weak crypto / randomness** - MD5/SHA1/DES/ECB, `Math.random()` for tokens, hardcoded keys/IVs, fast hashing for passwords
 - **Disabled transport security** - `verify=False`, `rejectUnauthorized: false`, plaintext for sensitive data
 
+List the candidate lines before judging any (M16): `git diff <base>..<end> | grep -nE '^\+.*(innerHTML|dangerouslySetInnerHTML|document\.write|\beval\(|\bexec\(|verify=False|rejectUnauthorized:\s*false|Math\.random\(|\bmd5\b|\bsha1\b)'` on a direct run, or the Grep tool with the same pattern over the changed files when you have no Bash; no output means none of the named sinks changed, each hit is a line to judge and never a finding by itself, and whether untrusted input reaches it stays your call.
+
 Also flag, as a smell that needs context (not a hard claim): **missing authorization** (an object looked up by id with no ownership check), **broken authentication** (no rate-limit/lockout, non-constant-time compares), and **input that is never validated** before a sensitive use.
 
 ### 3. Reason source-to-sink, and require an exploit sentence
