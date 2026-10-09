@@ -1265,10 +1265,17 @@ function openFindingsWithLabels(data) {
 // `reviewedFiles` (a project's own command written before the key) resolves by
 // lens alone, as before, and says so on stderr.
 function carryForward(data, prior) {
-  if (prior.state !== 'ok') return;
   if (!Array.isArray(data.lenses) || !data.lenses.length) return;
   const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
   const scoped = Array.isArray(data.reviewedFiles);
+  // Said whenever the list is missing, before the previous page is even read:
+  // this note is how a caller's missing list shows, so it cannot wait for a
+  // finding that happens to resolve (review of the #219 cycle, R4).
+  if (!scoped) {
+    reviewNotes.push('the payload sets lenses (' + lenses.join(', ') + ') but no reviewedFiles, so an open finding ' +
+                     'from a lens that ran resolves by lens alone, whatever files this run reviewed');
+  }
+  if (prior.state !== 'ok') return;
   const reviewed = {};
   if (scoped) {
     data.reviewedFiles.forEach(function (p) {
@@ -1280,7 +1287,6 @@ function carryForward(data, prior) {
 
   const carried = [];
   const why = { lens: 0, file: 0, nofile: 0 };
-  let byLensAlone = 0;
   openFindingsWithLabels(prior.data).forEach(function (item) {
     const specs = specialistsOf(item.f, item.label);
     const key = stableFindingKey(item.f);
@@ -1293,10 +1299,7 @@ function carryForward(data, prior) {
       if (!rel) reason = 'nofile';
       else if (!reviewed[rel]) reason = 'file';
     }
-    if (!reason) {
-      if (!scoped && !present[key]) byLensAlone += 1;
-      return;
-    }
+    if (!reason) return;
     if (present[key]) return;
     const copy = JSON.parse(JSON.stringify(item.f));
     delete copy.isNew; delete copy.demoted; delete copy._key;
@@ -1305,10 +1308,6 @@ function carryForward(data, prior) {
     why[reason] += 1;
     carried.push(copy);
   });
-  if (byLensAlone) {
-    reviewNotes.push('resolved ' + byLensAlone + ' open finding(s) by lens alone: the payload has no reviewedFiles, ' +
-                     'so a finding from a lens that ran (' + lenses.join(', ') + ') resolved whatever files this run reviewed');
-  }
   if (!carried.length) return;
 
   // IDs reset per run, so a carried R1 would sit beside this run's R1 and

@@ -1595,6 +1595,11 @@ function issue162Tests() {
     finds(island(sc.html)).length === 0 && /1 resolved/.test(island(sc.html).sinceLast || ''), island(sc.html).sinceLast);
   check('with no reviewedFiles the renderer says on stderr that it resolved by lens alone (#219)',
     /no reviewedFiles/.test(sc.stderr), sc.stderr.trim());
+  // The note is the live proof that a caller sends the list, so it must not
+  // depend on there being something to resolve (review of the #219 cycle, R4).
+  const fresh = run('nolist-fresh', page([], { lenses: ['code'] }));
+  check('a missing reviewedFiles is noted even with no previous page and nothing to resolve (#219)',
+    /no reviewedFiles/.test(fresh.stderr), fresh.stderr.trim());
 
   run('scope-d', page([finding('R1', { specialist: 'security' })]));
   const sd2 = run('scope-d', page([], { lenses: ['security'], reviewedFiles: ['a.js'] }));
