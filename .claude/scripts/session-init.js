@@ -250,7 +250,7 @@ function sessionStart() {
   const headCommit = git(["rev-parse", "HEAD"]);
   let map;
   if (mapRaw === null) {
-    map = { exists: false };
+    map = { exists: false, malformed: false };
   } else {
     // Header shape: <!-- Commit: <hash> (generated_while_dirty: N files) -->
     const commitMatch = mapRaw.match(/<!--\s*Commit:\s*([0-9a-f]+)/i);
@@ -275,6 +275,18 @@ function sessionStart() {
     const ovMatch = mapRaw.match(/##\s*System Overview\s*\n+([\s\S]*?)(?:\n#{2,3}\s|\s*$)/i);
     if (ovMatch) overview = ovMatch[1].trim();
 
+    // Malformed: the three byte tests generate-index.js --finalize runs on the
+    // temp file (over 200 bytes, a "<!-- Generated:" first line, a "# Codebase
+    // Map" title line), run here on the live map so a command reads a verdict
+    // instead of judging the file by eye (issue #221, G7). Kept to those three,
+    // in that script's exact form, so the two always agree; the Module Guide
+    // test stays out because the empty-repo minimal map has none by design.
+    const mapLines = mapRaw.split(/\r?\n/);
+    const malformed =
+      Buffer.byteLength(mapRaw, "utf8") <= 200 ||
+      !mapLines[0].startsWith("<!-- Generated:") ||
+      !mapLines.some((l) => l.trimEnd() === "# Codebase Map");
+
     map = {
       exists: true,
       path: MAP_FILE,
@@ -284,6 +296,7 @@ function sessionStart() {
       // Commands warn only at >=10 commits behind; single-commit drift is noise.
       stale: commitsBehind !== null && commitsBehind >= 10,
       generatedWhileDirty,
+      malformed,
       overview,
     };
   }

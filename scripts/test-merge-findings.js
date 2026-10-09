@@ -207,6 +207,53 @@ console.log('\n5. a missing key is derived by the one shared rule');
   check('requiring the helper as a module runs no command-line body', r.status === 0 && mod.stableFindingKey && typeof mod.main === 'function');
 }
 
+// --- 6. the finding contract's countable rules -----------------------------------
+console.log('\n6. a finding that breaks a countable contract rule warns on stderr, and nothing else changes');
+{
+  const mod = require(SCRIPT);
+  // n words, with an optional two-word lead ("Should fix.") in front.
+  const words = (n, lead) => (lead ? lead + ' ' : '') + Array.from({ length: n }, (_, i) => 'w' + (i + 1)).join(' ') + '.';
+  // Each line carries a key of its own so the findings never merge.
+  const longWhat = Object.assign({}, CODE, { key: 'a:long-what', what: words(23, 'Should fix.') });   // 25 words
+  const longContext = Object.assign({}, CODE, { key: 'a:long-context', context: words(30) });          // 30 words; with the 13-word what, 43 of open prose
+  const longFix = Object.assign({}, CODE, { key: 'a:long-fix', fix: words(25) });                      // 25 words
+  const hedged = Object.assign({}, CODE, { key: 'a:hedge', what: 'Should fix. It appears the login form leaks the token into the log.' });
+  const noLead = Object.assign({}, CODE, { key: 'a:no-lead', what: 'The login form leaks the token into the log.' });
+  const warnLines = (r) => r.stderr.split('\n').filter((l) => /^merge-findings: line \d+ \(/.test(l));
+
+  const caps = run([jsonl([longWhat, longContext, longFix])]);
+  const capWarnings = warnLines(caps);
+  check('a finding over a cap warns once, naming its line, its key and the count over the cap',
+    caps.status === 0 && capWarnings.length === 3
+      && capWarnings[0] === 'merge-findings: line 1 (a:long-what): what 25/18 words'
+      && capWarnings[1] === 'merge-findings: line 2 (a:long-context): context 30/22 words; open prose 43/40 words'
+      && capWarnings[2] === 'merge-findings: line 3 (a:long-fix): fix 25/20 words',
+    caps.stderr);
+  const hedge = run([jsonl([hedged])]);
+  check('a banned hedge warns, quoting the hedge', hedge.status === 0 && /^merge-findings: line 1 \(a:hedge\): hedge "it appears"$/m.test(hedge.stderr), hedge.stderr);
+  const lead = run([jsonl([noLead])]);
+  check('a what that does not open with a severity phrase warns', lead.status === 0 && /^merge-findings: line 1 \(a:no-lead\): what opens without Blocks\. \/ Should fix\. \/ Optional\.$/m.test(lead.stderr), lead.stderr);
+  const clean = run([jsonl([CODE, BROWSER, UX, PLAN, NOKEY])]);
+  check('clean findings produce no warning line, only the summary', clean.status === 0 && warnLines(clean).length === 0 && /^merge-findings: 5 raw/m.test(clean.stderr), clean.stderr);
+
+  // stdout is the merge and nothing else: byte for byte what the module's own
+  // merge of the same lines prints, no warning text in it, exit code 0; and a
+  // clean finding's row is the same with a warning finding beside it as alone.
+  const mixedFile = jsonl([CODE, longWhat, hedged, noLead]);
+  const mixed = run([mixedFile]);
+  const expected = mod.mergeFindings(mod.parseLines(fs.readFileSync(mixedFile, 'utf8')).findings).map((m) => JSON.stringify(m)).join('\n') + '\n';
+  check('with warnings, stdout is byte for byte the merge output and the exit code is 0',
+    mixed.status === 0 && mixed.stdout === expected && warnLines(mixed).length === 3, JSON.stringify(mixed.stdout).slice(0, 200) + ' ' + mixed.stderr);
+  const alone = run([jsonl([CODE])]);
+  check('a clean finding\'s row is identical with and without a warning finding beside it',
+    alone.stdout.split('\n')[0] === mixed.stdout.split('\n')[0] && warnLines(alone).length === 0, alone.stdout.split('\n')[0] + ' vs ' + mixed.stdout.split('\n')[0]);
+  check('parseLines reports each finding\'s line number beside it, skipping the non-finding lines',
+    JSON.stringify(mod.parseLines('NO FINDINGS\n' + JSON.stringify(CODE) + '\n\n' + JSON.stringify(UX) + '\n').lines) === '[2,4]',
+    JSON.stringify(mod.parseLines('NO FINDINGS\n' + JSON.stringify(CODE) + '\n\n' + JSON.stringify(UX) + '\n').lines));
+  check('the warning helper is exported and returns null for a clean finding',
+    typeof mod.contractWarning === 'function' && mod.contractWarning(CODE, 1) === null, String(mod.contractWarning && mod.contractWarning(CODE, 1)));
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }

@@ -28,7 +28,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it does not exist:** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute." Then invoke `/index`. After it completes, read the new map and proceed.
 
-**If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
+**If it is malformed or `/index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `[ "$(wc -c <CODEBASE_MAP.md)" -gt 200 ] && head -1 CODEBASE_MAP.md | grep -q '^<!-- Generated:' && grep -q '^# Codebase Map' CODEBASE_MAP.md && echo "map ok" || echo "map malformed"`. Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 
 After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
 

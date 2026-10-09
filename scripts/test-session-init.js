@@ -1082,6 +1082,61 @@ section('15. scopeLine: the line /review prints first (#208)', function () {
     JSON.stringify(seen.filter(function (l) { return !l || /[\r\n]/.test(l) || !MODE_RE.test(l); })));
 });
 
+// --- 16. map.malformed: the finalize byte tests, run on the live map (#221) ---
+// generate-index.js --finalize checks the temp map's bytes, first line and title
+// and never looks at the live file again; the commands that read the map were
+// left to judge "malformed" by eye. The script now runs those same three tests
+// on the live map, so a command reads one boolean (triage spot G7).
+section('16. map.malformed: the three finalize byte tests on the live map (#221)', function () {
+  const repo = newRepo('map');
+  write(repo, 'README.md', 'x\n');
+  const head = commitAll(repo, 'init');
+  const MAP = 'CODEBASE_MAP.md';
+  const body = '\n## System Overview\n\nA throwaway repository with one file, kept here so the map has a module to describe ' +
+    'and enough bytes to clear the size floor the finalize step applies to a freshly written map.\n\n' +
+    '## Module Guide\n\n- README.md: the one file.\n';
+  const valid = '<!-- Generated: 2026-01-01 -->\n<!-- Commit: ' + head + ' -->\n\n# Codebase Map\n' + body;
+  const wrongFirst = '# Codebase Map\n<!-- Generated: 2026-01-01 -->\n' + body;
+  const noTitle = '<!-- Generated: 2026-01-01 -->\n\n# Codebase map\n' + body;
+  check('the fixtures that must pass the size test are over 200 bytes',
+    Buffer.byteLength(valid) > 200 && Buffer.byteLength(wrongFirst) > 200 && Buffer.byteLength(noTitle) > 200,
+    [valid, wrongFirst, noTitle].map(function (s) { return Buffer.byteLength(s); }).join(','));
+
+  const none = runScript([], repo);
+  check('no map: exists is false and malformed is false',
+    dig(none.json, 'map.exists') === false && dig(none.json, 'map.malformed') === false, JSON.stringify(none.json.map));
+
+  write(repo, MAP, valid);
+  const ok = runScript([], repo);
+  check('a valid map (over 200 bytes, the Generated first line, the title) is not malformed',
+    dig(ok.json, 'map.exists') === true && dig(ok.json, 'map.malformed') === false, JSON.stringify(ok.json.map));
+  check('the valid map still reports its commit and freshness beside the verdict',
+    dig(ok.json, 'map.commit') === head && dig(ok.json, 'map.commitsBehind') === 0 && dig(ok.json, 'map.stale') === false,
+    JSON.stringify(ok.json.map));
+
+  write(repo, MAP, '<!-- Generated: 2026-01-01 -->\n# Codebase Map\n');
+  const tiny = runScript([], repo);
+  check('a file of 200 bytes or fewer is malformed, header and title or not',
+    dig(tiny.json, 'map.exists') === true && dig(tiny.json, 'map.malformed') === true, JSON.stringify(tiny.json.map));
+
+  write(repo, MAP, wrongFirst);
+  const wf = runScript([], repo);
+  check('a first line that is not the Generated header is malformed, whatever follows it',
+    dig(wf.json, 'map.malformed') === true, JSON.stringify(wf.json.map));
+
+  write(repo, MAP, noTitle);
+  const nt = runScript([], repo);
+  check('a map without the exact "# Codebase Map" line is malformed (the title test is exact, as in finalize)',
+    dig(nt.json, 'map.malformed') === true, JSON.stringify(nt.json.map));
+
+  // Finalize allows trailing spaces after the title and reads CRLF files; so
+  // does the verdict, or the two would disagree on a map written on Windows.
+  write(repo, MAP, valid.replace('# Codebase Map\n', '# Codebase Map  \n').replace(/\n/g, '\r\n'));
+  const crlf = runScript([], repo);
+  check('a CRLF map with trailing spaces after the title still passes',
+    dig(crlf.json, 'map.malformed') === false, JSON.stringify(crlf.json.map));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
