@@ -387,6 +387,124 @@ console.log('\ncorrection-ledger.js\n');
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// --- issue #220: an interrupt points at the message typed after it -----------
+// Built from the entry shapes a real transcript uses (the marker as a text
+// block, queue-operation lines, a task notification between two markers), with
+// made-up text only. Each scenario gets its own sandbox, because the cross-file
+// link would otherwise pair one scenario's interrupt with another's message.
+{
+  const BASE = Date.parse('2026-09-01T10:00:00.000Z');
+  const at = function (sec) { return new Date(BASE + sec * 1000).toISOString(); };
+  const asstE = function (t, sec) { return { type: 'assistant', timestamp: at(sec), message: { content: [{ type: 'text', text: t }] } }; };
+  const userE = function (content, sec, sid) { return { type: 'user', timestamp: at(sec), sessionId: sid, message: { content: content } }; };
+  const markE = function (sec, sid, forTool) {
+    return userE([{ type: 'text', text: forTool ? '[Request interrupted by user for tool use]' : '[Request interrupted by user]' }], sec, sid);
+  };
+  const queueE = function (sec, op) { return { type: 'queue-operation', operation: op, timestamp: at(sec) }; };
+
+  // sessions: { sessionId: [entries] }. Scans from --since so every file is read.
+  function scenario(label, sessions, opts) {
+    const sb = makeSandbox('int-' + label);
+    const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+    fs.mkdirSync(dir, { recursive: true });
+    Object.keys(sessions).forEach(function (sid) {
+      fs.writeFileSync(path.join(dir, sid + '.jsonl'),
+        sessions[sid].map(function (e) { return JSON.stringify(e); }).join('\n') + '\n', 'utf-8');
+    });
+    const out = JSON.parse(run(sb, ['--candidates', '--since', (opts && opts.since) || '2026-09-01T00:00:00.000Z']));
+    fs.rmSync(sb.root, { recursive: true, force: true });
+    return out;
+  }
+  const isMarker = function (c) { return /^\[Request interrupted by user/.test(c.human_said || ''); };
+  const said = function (out, marker) { return out.candidates.filter(function (c) { return (c.human_said || '').indexOf(marker) !== -1; }); };
+
+  // (a) same file: the follow-up carries the interrupted turn, the marker is gone
+  const a = scenario('same', { s1: [asstE('INTERRUPTED_A rewriting the whole parser now', 0), markE(5, 's1'),
+    queueE(6, 'enqueue'), queueE(6, 'dequeue'), userE('FOLLOWUP_A read the full file before changing it', 10, 's1')] });
+  const fa = said(a, 'FOLLOWUP_A')[0];
+  check('the bare interrupt marker is never a candidate (#220)',
+    a.candidates.length > 0 && !a.candidates.some(isMarker), JSON.stringify(a.candidates.map(function (c) { return c.human_said; })));
+  check('the message after an interrupt is tagged and paired with the interrupted turn (#220)',
+    fa && fa.after_interrupt === true && fa.assistant_said.indexOf('INTERRUPTED_A') !== -1, JSON.stringify(fa));
+
+  // (b) a short, procedural follow-up is the correction itself
+  const b = scenario('short', { s1: [asstE('INTERRUPTED_B deleting the old tests', 0), markE(3, 's1'), userE('no', 8, 's1')] });
+  check('a short procedural follow-up ("no") is still a candidate after an interrupt (#220)',
+    b.candidates.length === 1 && b.candidates[0].human_said === 'no' && b.candidates[0].after_interrupt === true,
+    JSON.stringify(b.candidates));
+
+  // (c) the downstream shape: marker, task notification, marker two seconds later
+  const c = scenario('double', { s1: [asstE('INTERRUPTED_C skimming the config', 0), queueE(4, 'enqueue'), markE(5, 's1'),
+    queueE(5, 'dequeue'),
+    userE('<task-notification><task-id>t1</task-id><result>NOTIFY_C the worker finished</result></task-notification>', 5, 's1'),
+    markE(7, 's1'), userE('FOLLOWUP_C use the other approach instead', 30, 's1')] });
+  check('a double marker around a task notification gives one tagged follow-up and nothing else (#220)',
+    c.candidates.length === 1 && said(c, 'FOLLOWUP_C').length === 1 && c.candidates[0].after_interrupt === true &&
+    c.interruptsWithoutFollowUp === 0, JSON.stringify(c));
+
+  // (d) the tool-use wording of the marker
+  const d = scenario('tooluse', { s1: [asstE('INTERRUPTED_D running the migration', 0), markE(2, 's1', true),
+    userE('FOLLOWUP_D do not touch the database', 9, 's1')] });
+  check('the "for tool use" marker behaves like the plain one (#220)',
+    !d.candidates.some(isMarker) && said(d, 'FOLLOWUP_D').length === 1 && said(d, 'FOLLOWUP_D')[0].after_interrupt === true,
+    JSON.stringify(d.candidates));
+
+  // (e) the session ends at the interrupt; the next one opens 9 seconds later
+  const e = scenario('cross', { s1: [asstE('INTERRUPTED_E summarizing the log', 0), markE(5, 's1')],
+    s2: [userE('FOLLOWUP_E read it in full this time', 14, 's2')] });
+  const fe = said(e, 'FOLLOWUP_E');
+  check('a follow-up in the next session file links to the interrupt (#220)',
+    fe.length === 1 && fe[0].after_interrupt === true && fe[0].session === 's2' &&
+    fe[0].assistant_said.indexOf('INTERRUPTED_E') !== -1 && e.interruptsWithoutFollowUp === 0, JSON.stringify(e));
+
+  // (f) too late to be the same thought
+  const f = scenario('late', { s1: [asstE('INTERRUPTED_F renaming the module', 0), markE(5, 's1')],
+    s2: [userE('FOLLOWUP_F start the next feature please', 5 + 11 * 60, 's2')] });
+  const ff = said(f, 'FOLLOWUP_F');
+  check('a message 11 minutes later in another session is not linked, and the interrupt is counted (#220)',
+    ff.length === 1 && ff[0].after_interrupt === false && f.interruptsWithoutFollowUp === 1, JSON.stringify(f));
+
+  // (g) nothing follows at all
+  const g = scenario('none', { s1: [asstE('INTERRUPTED_G formatting the tables', 0), markE(5, 's1')] });
+  check('an interrupt with no follow-up anywhere gives no candidate and is counted (#220)',
+    g.candidates.length === 0 && g.interruptsWithoutFollowUp === 1, JSON.stringify(g));
+
+  // (h) a marker before the window is neither emitted nor counted
+  const h = scenario('before', { s1: [asstE('INTERRUPTED_H old work', 0), markE(5, 's1')] },
+    { since: '2026-09-01T11:00:00.000Z' });
+  check('a marker before --since is neither a candidate nor counted (#220)',
+    h.candidates.length === 0 && h.interruptsWithoutFollowUp === 0, JSON.stringify(h));
+
+  // (i) a slash-command expansion between the interrupt and the human's words
+  const i = scenario('expansion', { s1: [asstE('INTERRUPTED_I adding a cache layer', 0), markE(5, 's1'),
+    userE('# Explore\n**Use this when:** Starting a new feature.', 8, 's1'),
+    userE('FOLLOWUP_I keep the old name for the cache', 20, 's1')] });
+  check('a command expansion after an interrupt leaves it pending for the human\'s own words (#220)',
+    i.candidates.length === 1 && said(i, 'FOLLOWUP_I').length === 1 && said(i, 'FOLLOWUP_I')[0].after_interrupt === true,
+    JSON.stringify(i.candidates));
+
+  // (j) two sessions end on an interrupt; one later message can answer only one
+  const j = scenario('claim', { s1: [asstE('INTERRUPTED_J1 first turn', 0), markE(5, 's1')],
+    s2: [asstE('INTERRUPTED_J2 second turn', 2), markE(6, 's2')],
+    s3: [userE('FOLLOWUP_J use the smaller fixture', 12, 's3')] });
+  const fj = said(j, 'FOLLOWUP_J');
+  check('a follow-up is claimed once, by the earliest interrupt, and the other is counted (#220)',
+    fj.length === 1 && fj[0].assistant_said.indexOf('INTERRUPTED_J1') !== -1 && j.interruptsWithoutFollowUp === 1,
+    JSON.stringify(j));
+
+  // (k) the count is on every result shape
+  const sbN = makeSandbox('int-noscan');
+  const noScan = JSON.parse(run(sbN, ['--candidates']));
+  fs.rmSync(sbN.root, { recursive: true, force: true });
+  const sbO = makeSandbox('int-optout');
+  fs.writeFileSync(path.join(sbO.proj, '.claude', '.no-correction-log'), '', 'utf-8');
+  const optOut = JSON.parse(run(sbO, ['--candidates']));
+  fs.rmSync(sbO.root, { recursive: true, force: true });
+  check('interruptsWithoutFollowUp is 0 on the not-scanned and opted-out results (#220)',
+    noScan.scanned === false && noScan.interruptsWithoutFollowUp === 0 &&
+    optOut.optedOut === true && optOut.interruptsWithoutFollowUp === 0, JSON.stringify([noScan, optOut]));
+}
+
 // --- the axial map merges instead of overwriting ----------------------------
 {
   const sb = makeSandbox('axial');

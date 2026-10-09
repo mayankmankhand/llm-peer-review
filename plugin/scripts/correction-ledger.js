@@ -430,6 +430,21 @@ function couldBeIntervention(text) {
   return true;                                // everything else: let a model judge
 }
 
+// The marker the harness writes when the human interrupts a turn (issue #220).
+// It is not something the human typed, so it is never a candidate. It is the
+// strongest sign the pre-filter has that a correction follows, so it points at
+// the next human message instead: that message becomes a candidate even when
+// it is short or procedural ("no" right after an interrupt IS the correction),
+// and it is paired with the turn the human cut off. Emitting the bare marker
+// and dropping the text behind it inverted the filter's purpose.
+const INTERRUPT = /^\[Request interrupted by user( for tool use)?\]$/;
+
+// How long after an interrupt a message in ANOTHER session file still counts as
+// its follow-up, for a session that ends at the interrupt. In the case that
+// raised #220 the next session began 9 seconds later. A wrong pairing costs the
+// extractor one read; a missed one hides the correction for good.
+const INTERRUPT_LINK_MS = 10 * 60 * 1000;
+
 function assistantText(entry) {
   const content = entry.message && entry.message.content;
   if (typeof content === 'string') return content;
@@ -450,7 +465,11 @@ function runCandidates() {
     // one. A stderr line is not countable; this is.
     scanned: false,
     window: { from: null, to: new Date().toISOString() },
-    candidates: []
+    candidates: [],
+    // Interrupts no follow-up message could be found for, in their own session
+    // or the next one (#220). Countable, like `scanned`: a correction typed
+    // somewhere the scan cannot see is otherwise indistinguishable from none.
+    interruptsWithoutFollowUp: 0
   };
 
   if (result.optedOut) {
@@ -485,10 +504,13 @@ function runCandidates() {
   }
   result.window.from = since;
 
+  const unanswered = []; // interrupts still pending when their file ended
+  const answers = [];    // human texts another file's interrupt could link to
   for (let i = 0; i < files.length; i++) {
     let lines;
     try { lines = fs.readFileSync(files[i], 'utf-8').split('\n'); } catch (e) { continue; }
     let lastAssistant = '';
+    let pending = null;  // the latest interrupt no human text has answered yet
     for (let j = 0; j < lines.length; j++) {
       const line = lines[j].trim();
       if (!line) continue;
@@ -502,23 +524,71 @@ function runCandidates() {
       }
       if (entry.type !== 'user') continue;
 
+      // A null here (a tool result, or an entry that held only harness tags such
+      // as a task notification) leaves a pending interrupt as it is.
       const text = humanText(entry);
       if (!text) continue;
       if (since && entry.timestamp && entry.timestamp < since) continue;
-      if (!couldBeIntervention(text)) continue;
+      if (INTERRUPT.test(text)) {
+        // A second marker before any human text replaces the first: the
+        // downstream case had two, two seconds apart, around one turn.
+        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant };
+        continue;
+      }
+      // Machine text. A pending interrupt waits for the human's own words.
+      if (isCommandExpansion(text)) continue;
 
-      result.candidates.push({
+      const candidate = {
         at: entry.timestamp || null,
         session: entry.sessionId || path.basename(files[i], '.jsonl'),
         // A hint for prioritization, never a gate. See the PUSHBACK comment above.
         has_pushback_marker: PUSHBACK.test(text),
+        // Also a hint: this message is the first thing typed after an interrupt.
+        after_interrupt: false,
         // Context for the extractor to read. These are NOT the stored row: the row's
         // private fields are short summaries the extractor writes, capped on --add.
         assistant_said: truncate(lastAssistant, 800),
         human_said: truncate(text, 1200)
+      };
+      if (pending) {
+        // The follow-up skips the length and procedural gates, and is paired
+        // with the turn that was cut off rather than anything said since.
+        candidate.after_interrupt = true;
+        candidate.assistant_said = truncate(pending.assistant_said, 800);
+        pending = null;
+        result.candidates.push(candidate);
+        continue;
+      }
+      const kept = couldBeIntervention(text);
+      if (kept) result.candidates.push(candidate);
+      answers.push({ file: files[i], at: entry.timestamp, candidate: candidate, kept: kept });
+    }
+    if (pending) unanswered.push(pending);
+  }
+
+  // A session that ends at the interrupt: the human often goes on in a new one.
+  // Oldest interrupt first, each takes the earliest human text in another file
+  // that comes after it within INTERRUPT_LINK_MS and that no earlier interrupt
+  // took. A text already kept as a candidate is upgraded in place, never added
+  // twice; one the gates dropped is added. The rest are counted, not guessed.
+  const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
+  unanswered.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+  unanswered.forEach(function (p) {
+    const t0 = time(p.at);
+    let best = null;
+    if (t0 !== null) {
+      answers.forEach(function (ans) {
+        const t = time(ans.at);
+        if (ans.taken || ans.file === p.file || t === null || t <= t0 || t - t0 > INTERRUPT_LINK_MS) return;
+        if (best === null || t < time(best.at)) best = ans;
       });
     }
-  }
+    if (!best) { result.interruptsWithoutFollowUp += 1; return; }
+    best.taken = true;
+    best.candidate.after_interrupt = true;
+    best.candidate.assistant_said = truncate(p.assistant_said, 800);
+    if (!best.kept) { best.kept = true; result.candidates.push(best.candidate); }
+  });
 
   result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
