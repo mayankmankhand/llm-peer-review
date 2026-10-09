@@ -358,3 +358,12 @@
 - **A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.**
 - **A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.**
 - **When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.**
+
+## Issues 219 and 220 (the standing page and the interrupt)
+
+- **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
+- **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
+- **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
+- **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
+- **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
