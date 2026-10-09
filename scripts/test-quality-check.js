@@ -580,6 +580,15 @@ section('ledger cost (review R14)', () => {
   check('ledgerCost: a zero cost is a reported cost, not a missing one', QC.ledgerCost(0, 25).costUsd === 0 && !QC.ledgerCost(0, 25).costCapped);
 });
 
+section('budget estimate honors the run cap (issue 221)', () => {
+  const rows = [{ role: 'mapper', costUsd: 0.45 }, { role: 'mapper', costUsd: 0.88 }, { role: 'review', costUsd: 'n/a' }];
+  check('budgetEstimate: a role with history is sized at its most expensive run', QC.budgetEstimate(rows, 'mapper') === 0.88);
+  check('budgetEstimate: a role with no priced run is sized at its default', QC.budgetEstimate(rows, 'review') === QC.DEFAULT_MAX_USD.review);
+  check('budgetEstimate: the run cap bounds the estimate, so a $7 first review run is sized at $7, not $25', QC.budgetEstimate(rows, 'review', 7) === 7);
+  check('budgetEstimate: a cap above the history leaves the history estimate alone', QC.budgetEstimate(rows, 'mapper', 2) === 0.88);
+  check('budgetEstimate: no cap, a zero cap or a bad cap means the estimate stands', QC.budgetEstimate(rows, 'review', 0) === QC.DEFAULT_MAX_USD.review && QC.budgetEstimate(rows, 'review', null) === QC.DEFAULT_MAX_USD.review && QC.budgetEstimate(rows, 'review', NaN) === QC.DEFAULT_MAX_USD.review);
+});
+
 section('cleanup steps (review R14, second round)', () => {
   const ran = [];
   const said = [];

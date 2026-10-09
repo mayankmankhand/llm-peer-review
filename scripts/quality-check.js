@@ -1251,7 +1251,18 @@ function tokenWindowProblem(credentialsText, nowMs, needMs) {
 }
 const TOKEN_MARGIN_MS = 15 * 60 * 1000;
 
-function budgetCheck(role) {
+// The next run's worst case: the most an earlier run of its role cost, else the
+// role's default, and never more than the run's own cap, which the session itself
+// enforces (--max-budget-usd). Without the cap a first run of a role in a fresh
+// checkout was sized at the role default and refused under an approval that
+// covered it (issue 221: a $7 deps-finder run refused for $25).
+function budgetEstimate(rows, role, maxUsd) {
+  const sameRole = rows.filter(r => r.role === role && typeof r.costUsd === 'number').map(r => r.costUsd);
+  const estimate = sameRole.length ? Math.max(...sameRole) : DEFAULT_MAX_USD[role] || DEFAULT_MAX_USD.probe;
+  return typeof maxUsd === 'number' && maxUsd > 0 ? Math.min(estimate, maxUsd) : estimate;
+}
+
+function budgetCheck(role, maxUsd) {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
@@ -1260,8 +1271,7 @@ function budgetCheck(role) {
     if (measured.length === 0) return { ok: true, spent, note: 'first measured run: no approval needed yet; its cost sizes the request' };
     return { ok: false, spent, page: 'Budget stop: the first measured run is done and the owner has not approved a budget. Ask the owner, then record the answer with --approve <usd>.' };
   }
-  const sameRole = rows.filter(r => r.role === role && typeof r.costUsd === 'number').map(r => r.costUsd);
-  const estimate = sameRole.length ? Math.max(...sameRole) : DEFAULT_MAX_USD[role] || DEFAULT_MAX_USD.probe;
+  const estimate = budgetEstimate(rows, role, maxUsd);
   if (spent + estimate > approval.approvedUsd) {
     return { ok: false, spent, page: 'Budget stop: $' + spent.toFixed(2) + ' spent of $' + Number(approval.approvedUsd).toFixed(2) + ' approved, and the next ' + role + ' run may cost up to $' + estimate.toFixed(2) + '. Ask the owner whether to raise the budget (--approve <usd>) or stop.' };
   }
@@ -1358,7 +1368,7 @@ async function commandRun(o) {
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
   for (const m of [o.modeWord, o.planModels]) if (m !== undefined && !MODES.includes(m)) usage('a mode is best, fit or cheap');
-  const budget = budgetCheck(role === 'probe' ? 'probe' : role);
+  const budget = budgetCheck(role === 'probe' ? 'probe' : role, o.maxUsd);
   if (!budget.ok) { console.log(budget.page); process.exit(4); }
   let credentials = null;
   try { credentials = fs.readFileSync(path.join(os.homedir(), '.claude', '.credentials.json'), 'utf8'); } catch (e) { credentials = null; }
@@ -1778,7 +1788,7 @@ module.exports = {
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
-  runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD,
+  runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
 };
 
 if (require.main === module) {
