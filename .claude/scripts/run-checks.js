@@ -80,8 +80,11 @@ const EXPECT_KEYS = ['exit', 'match', 'noMatch', 'lines'];
 // or process substitution, a brace group, a here-document, a background job,
 // and any redirection other than the exact harmless forms 2>&1, 2>/dev/null,
 // >/dev/null, 1>/dev/null and &>/dev/null. Command substitution ($( and
-// backticks) and brace parameter expansion (${) are refused wherever they
-// appear, quoted or not, because double quotes do not stop them. One brace
+// backticks) and brace parameter expansion (${) are refused unquoted and
+// inside double quotes, where bash expands them; inside single quotes they
+// are literal text (a grep pattern for a markdown backtick, say), which bash
+// never expands, so they pass (a live run refused real receipts over this,
+// issue 221 Step 9). One brace
 // expansion is allowed as an exact literal: ${CLAUDE_PLUGIN_ROOT}, the path
 // the plugin build writes in place of .claude/ in every shipped prompt. It
 // expands to a folder and nothing else, so it is hidden from the tokenizer
@@ -93,9 +96,6 @@ const PLUGIN_ROOT_SENTINEL = '\u0001';
 function tokenize(original) {
   if (original.indexOf(PLUGIN_ROOT_SENTINEL) !== -1) return { error: 'refused: control character in the command' };
   const text = original.split(PLUGIN_ROOT_LITERAL).join(PLUGIN_ROOT_SENTINEL);
-  if (text.indexOf('`') !== -1) return { error: 'refused: command substitution (backtick)' };
-  if (text.indexOf('$(') !== -1) return { error: 'refused: command substitution ($( ))' };
-  if (text.indexOf('${') !== -1) return { error: 'refused: brace parameter expansion (${ }); only the exact literal ${CLAUDE_PLUGIN_ROOT} is allowed' };
   const segments = [];
   let words = [];
   let cur = '';
@@ -106,16 +106,30 @@ function tokenize(original) {
   const flushWord = () => { if (have) { words.push(cur); cur = ''; have = false; } };
   const flushSegment = () => { flushWord(); if (words.length) segments.push(words); words = []; };
   const boundary = (s) => s === '' || /^[\s;|&]/.test(s);   // what may follow a redirection form
+  // The expansions bash performs outside single quotes; each would run or read
+  // something the allow-list never saw. An escaped one (\` or \$) is handled by
+  // the backslash branches above these checks and stays literal.
+  const expansion = (i) => {
+    const c = text[i];
+    if (c === '`') return 'refused: command substitution (backtick)';
+    if (c === '$' && text[i + 1] === '(') return 'refused: command substitution ($( ))';
+    if (c === '$' && text[i + 1] === '{') return 'refused: brace parameter expansion (${ }); only the exact literal ${CLAUDE_PLUGIN_ROOT} is allowed';
+    return null;
+  };
   for (let i = 0; i < n; i++) {
     const c = text[i];
     if (inSingle) { if (c === "'") inSingle = false; else cur += c; continue; }
     if (inDouble) {
       if (c === '"') { inDouble = false; continue; }
       if (c === '\\' && i + 1 < n) { cur += text[i + 1]; i++; continue; }
+      const bad = expansion(i);
+      if (bad) return { error: bad };
       cur += c;
       continue;
     }
     if (c === '\\') { if (i + 1 < n) { cur += text[i + 1]; have = true; i++; } continue; }
+    const bad = expansion(i);
+    if (bad) return { error: bad };
     if (c === "'") { inSingle = true; have = true; continue; }
     if (c === '"') { inDouble = true; have = true; continue; }
     if (c === ' ' || c === '\t' || c === '\r') { flushWord(); continue; }
@@ -171,10 +185,16 @@ const flagIs = (a, names) => names.some((f) => a === f || a.startsWith(f + '='))
 
 // sed: an address-print script (1,3p; /re/p; /a/,/b/p) or a plain
 // substitution s<d>pattern<d>replacement<d>[flags] with <d> one of / | # , and
-// flags from g i p I and digits only. Nothing else, so no e (execute), w or W
-// (write), r or R (read another file), and no second command after a `;`.
+// flags from g i p I and digits only. A `;` list of address prints
+// (2p;11,17p) is one print script, which finders write to quote two spots of a
+// file at once. Nothing else, so no e (execute), w or W (write), r or R (read
+// another file), and nothing but another address print after a `;`.
 const SED_PRINT_RE = /^(\d+|\$|\/(?:[^\/\\]|\\.)+\/)(,(\d+|\$|\/(?:[^\/\\]|\\.)+\/))?p$/;
 const SED_FLAGS_RE = /^-[nEr]+$/;
+function isSedPrintList(s) {
+  const parts = s.split(';').map((p) => p.trim());
+  return parts.every((p) => SED_PRINT_RE.test(p));
+}
 function isSedSubstitution(s) {
   if (s.length < 4 || s[0] !== 's') return false;
   const d = s[1];
@@ -205,8 +225,8 @@ function sedRule(args) {
     // every later non-flag argument is an input file, which sed only reads
   }
   for (const s of scripts) {
-    if (!SED_PRINT_RE.test(s) && !isSedSubstitution(s)) {
-      return "refused: sed script '" + s + "' is not an address print (1,3p; /re/p) or a plain substitution (s/a/b/g)";
+    if (!isSedPrintList(s) && !isSedSubstitution(s)) {
+      return "refused: sed script '" + s + "' is not an address print (1,3p; /re/p), a ; list of them (2p;11,17p) or a plain substitution (s/a/b/g)";
     }
   }
   return null;

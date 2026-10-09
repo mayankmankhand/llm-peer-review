@@ -294,6 +294,11 @@ section('8. a check that is not read-only is refused before anything runs', func
     ['subst', '$(id)', /command substitution/],
     ['subst-canary', 'echo $(touch canary)', /command substitution/],
     ['backtick', 'echo `touch canary`', /backtick/],
+    // Double quotes do not stop bash from expanding these (issue 221 Step 9 loosened the single-quoted case only).
+    ['backtick-dq', 'echo "`touch canary`"', /backtick/],
+    ['subst-dq', 'echo "$(touch canary)"', /command substitution/],
+    ['brace-dq', 'echo "${x@P}"', /brace parameter expansion/],
+    ['sed-list-e', "sed -n '1p;e touch canary' f.txt", /sed script/],
     ['brace-param', 'echo ${PATH}', /brace parameter expansion/],
     ['stamp', 'node .claude/scripts/upgrade-audit.js --stamp', /--stamp/],
     ['rollback', 'node .claude/scripts/upgrade-audit.js --rollback-to=1', /--rollback-to/],
@@ -429,6 +434,28 @@ section('9. the guard accepts the read-only shapes the call sites will write', f
 });
 
 // --- 10. the render check: a runner-written receipt reaches the review page ------
+// The first live run of the review through the runner (issue 221 Step 9, the
+// quality-check harness) refused three real receipts: a grep pattern quoting a
+// markdown backtick in single quotes, and two sed -n prints of two ranges. Single
+// quotes make bash treat every character literally, so the forms are read-only.
+section('9b. single-quoted expansions are literal text and a sed ; list of prints is one print', function () {
+  write('md.txt', 'Delete `data/notes.json` first\nThen $(nothing) and ${nothing}\n');
+  const r = runChecks([
+    { id: 'sq-backtick', check: "grep -c 'Delete `data/notes.json`' md.txt", expect: { match: '^1$' } },
+    { id: 'sq-subst', check: "grep -c '$(nothing)' md.txt", expect: { match: '^1$' } },
+    { id: 'sq-brace', check: "grep -c '${nothing}' md.txt", expect: { match: '^1$' } },
+    { id: 'sq-canary', check: "echo '$(touch canary)' '`touch canary`'", expect: { match: 'touch canary' } },
+    { id: 'escaped-backtick', check: 'echo \\`id\\`', expect: { match: '^`id`$' } },
+    { id: 'sed-two-ranges', check: "sed -n '1p;3,3p' f.txt", expect: { lines: { min: 2, max: 2 } } },
+    { id: 'sed-point-then-range', check: "sed -n '2p;1,1p' f.txt", expect: { match: '^world$' } },
+  ], 'literal');
+  const ids = ['sq-backtick', 'sq-subst', 'sq-brace', 'sq-canary', 'escaped-backtick', 'sed-two-ranges', 'sed-point-then-range'];
+  check('every single-quoted or escaped expansion and every sed print list runs and passes', ids.every((id) => r.byId[id] && r.byId[id].verdict === 'pass'), verdicts(r, ids));
+  check('the single-quoted substitutions were printed as text, not run', /\$\(touch canary\) `touch canary`/.test(savedFile(r, 'sq-canary') || ''), savedFile(r, 'sq-canary'));
+  check('canary: nothing in single quotes ran', !exists('canary'));
+  check('the two-range sed printed exactly the two lines', (savedFile(r, 'sed-two-ranges') || '').startsWith('hello\nhello\n'), savedFile(r, 'sed-two-ranges'));
+});
+
 section('10. a receipt file the runner wrote renders at the review page\'s receipt slot', function () {
   const receiptsOut = path.join('reports', 'receipts', 'run-checks-test');
   const r = run(['--checks', checksFile([{ id: 'R1', check: 'grep -n hello f.txt', expect: { exit: 0 } }]), '--out', receiptsOut]);
