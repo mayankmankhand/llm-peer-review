@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a change or a new idea for the toolkit.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: The proposed change
+      description: What would you like the toolkit to do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried instead
+      description: Any workaround you use today, or another option you looked at.
+    validations:
+      required: false

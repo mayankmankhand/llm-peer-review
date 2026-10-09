@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/TROUBLESHOOTING.md
+    about: Fixes for common setup and run problems. Worth a look before you file a bug.
