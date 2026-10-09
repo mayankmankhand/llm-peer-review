@@ -44,7 +44,7 @@ Mile wide, inch deep. Cross-domain release readiness, not a deep specialist revi
 
 <procedure>
 
-Read the changed files and any relevant plan file, found by command (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const s=JSON.parse(d);const p=s.plans.find(x=>x.name===s.newestPlan)||null;console.log(JSON.stringify({newestPlan:s.newestPlan,status:p&&p.status,progress:p&&p.progress,others:s.plans.length-1}))})'; ls PLAN-*.md 2>/dev/null` prints the newest `plans/PLAN-*.md` with its `status` (`done` at progress 100), how many `others` exist, and any `PLAN-*.md` at the project root. If no plan file exists (`newestPlan` null and no root file), skip plan comparison and note it in the summary. If `others` is above 0 and the newest plan's `status` is not `done`, pause and ask the user which plan to evaluate against.
+Read the changed files and any relevant plan file, found by command (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` prints `newestPlan` and a `plans` list whose matching entry carries `status` (`done` at progress 100) and `progress`, with `others` the list's length minus one, and `ls PLAN-*.md 2>/dev/null` prints any `PLAN-*.md` at the project root. If no plan file exists (`newestPlan` null and no root file), skip plan comparison and note it in the summary. If `others` is above 0 and the newest plan's `status` is not `done`, pause and ask the user which plan to evaluate against.
 
 Then pick one of two modes:
 
