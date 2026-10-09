@@ -4,7 +4,7 @@ Thanks for your interest in LLM Peer Review! Contributions are welcome.
 
 ## Using This for Your Own Workflow
 
-Fork the repo and adapt it to your project. The README has [setup instructions](README.md#add-to-a-new-project) for copying commands into any project.
+Fork the repo and adapt it to your project. The install guide has [setup instructions](docs/INSTALL.md#add-to-a-new-project) for copying commands into any project.
 
 ## How to Contribute
 
@@ -18,7 +18,7 @@ The commands in `.claude/commands/` and skills in `.claude/skills/` are generic 
 
 Shared reference files (`browse-api.md`, `conventions.md`, the eight `criteria-*.md`, `design-rules.md`, `dispatch-format.md`, `do-not-report.md`, `finding-contract.md`, `finding-id-system.md`, `hitl-loop.md`, `host-cli.md`, `html-look.md`, `html-outputs.md`, `html-render-debate.md`, `html-render-review.md`, `reading-budget.md`, `report-format.md`, `severity-anchors.md`) live in `.claude/skills/shared/` and are pulled into multiple skills via `` !`cat .claude/skills/shared/<file>` `` injection; `model-routing.md`, `toolkit-reference.md` and `design-profile-template.md` sit beside them and are read by path rather than injected. The prebuilt HTML shells in `.claude/skills/shared/shells/` (one per artifact type, plus `tokens.css`) are consumed by `.claude/scripts/render-html.js` rather than injected into prompts. If you edit a review skill, check whether the section you are changing comes from a shared file - editing the shared file updates every skill that uses it. If you change the visual look, update `tokens.css` and `html-look.md` together (they mirror each other).
 
-If you are arriving with your own commands or an existing workflow rather than adapting the toolkit's, see [Already Have Your Own Workflow?](README.md#already-have-your-own-workflow) in the README. It covers adding the auto loop to a workflow you already have, and which filenames the installer reclaims on upgrade.
+If you are arriving with your own commands or an existing workflow rather than adapting the toolkit's, see [Already Have Your Own Workflow?](docs/EXTENDING.md#already-have-your-own-workflow) in the extending guide. It covers adding the auto loop to a workflow you already have, and which filenames the installer reclaims on upgrade.
 
 ## Checking `/audit-html` (Maintainer)
 

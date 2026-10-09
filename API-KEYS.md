@@ -2,7 +2,7 @@
 
 The `/ask-gpt` and `/ask-gemini` commands need API keys to talk to ChatGPT and Gemini. This guide walks you through getting the keys and setting them up safely.
 
-> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. The only other place a key is used is optional: the design workflow's media generation (images through the same two keys, video and matting through a `FAL_KEY`), and when a key is absent it hands you the prompt to run elsewhere instead. See [Media Generation](#media-generation-optional) below. (`/review-browser` has its own optional Playwright install - see the optional-features block under [Update an Existing Project](README.md#update-an-existing-project) - but no key.)
+> **Don't need `/ask-gpt` or `/ask-gemini`?** Skip this entirely. The only other place a key is used is optional: the design workflow's media generation (images through the same two keys, video and matting through a `FAL_KEY`), and when a key is absent it hands you the prompt to run elsewhere instead. See [Media Generation](#media-generation-optional) below. (`/review-browser` has its own optional Playwright install - see the optional-features block under [Update an Existing Project](docs/INSTALL.md#update-an-existing-project) - but no key.)
 
 ---
 
@@ -149,7 +149,7 @@ Then try running a debate from inside Claude Code or Cursor:
 
 ## Media Generation (optional)
 
-The design workflow (introduced under `/explore` in the README's [How key commands work](README.md#how-key-commands-work)) can generate images, video clips, and background-matted video for a design through `.claude/scripts/gen-media.js`. Nothing here is required: when the key a kind needs is missing, the script exits with a ready-to-paste prompt and the file name to paste back, and the design continues without the asset if you decline.
+The design workflow (introduced under `/explore` in [How key commands work](docs/COMMANDS.md#how-key-commands-work)) can generate images, video clips, and background-matted video for a design through `.claude/scripts/gen-media.js`. Nothing here is required: when the key a kind needs is missing, the script exits with a ready-to-paste prompt and the file name to paste back, and the design continues without the asset if you decline.
 
 | Kind | Key it uses | Where to get it |
 |---|---|---|

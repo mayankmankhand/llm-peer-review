@@ -203,7 +203,7 @@ The design workflow's video generation takes an optional `FAL_KEY` too; leave it
   - **Mac:** `/Users/your-username/llm-peer-review`
 - Type `/explore` to verify the commands are working
 
-You are set up. Now read the [Add to a New Project](README.md#add-to-a-new-project) section in the README to copy the toolkit into your actual projects.
+You are set up. Now read the [Add to a New Project](docs/INSTALL.md#add-to-a-new-project) section of the install guide to copy the toolkit into your actual projects.
 
 > **Tip:** Next time, you can skip this manual walkthrough by pointing your AI agent at [AGENT-SETUP.md](AGENT-SETUP.md) and letting it do the install for you.
 
