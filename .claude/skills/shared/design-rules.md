@@ -24,7 +24,7 @@ Look in this order and stop at the first hit:
 2. A component library in the `package.json` dependencies: `@mui/*`, `@chakra-ui/*`, shadcn (a `components.json` at the root), `antd`, `@mantine/*`, `vuetify`, `@radix-ui/*`
 3. A design document: `DESIGN.md`, `STYLEGUIDE.md`, a Storybook config (`.storybook/`), a Figma link in `README.md`
 
-Run the three as one command (M16): `ls -d tailwind.config.* theme.* tokens.* design-tokens* styles/variables.* *.tokens.json components.json DESIGN.md STYLEGUIDE.md .storybook 2>/dev/null; node -e 'const p=require("./package.json");const d={...p.dependencies,...p.devDependencies};console.log(Object.keys(d).filter(k=>/^(@mui\/|@chakra-ui\/|@mantine\/|@radix-ui\/|antd$|vuetify$)/.test(k)).join(",")||"none")' 2>/dev/null; grep -c figma.com README.md 2>/dev/null`; a path printed, a dependency other than `none`, or a `figma.com` count above 0 is the hit, and no output, `none` and `0` mean no system.
+Run the three as one command (M16): `ls -d tailwind.config.* theme.* tokens.* design-tokens* styles/variables.* *.tokens.json components.json DESIGN.md STYLEGUIDE.md .storybook 2>/dev/null; grep -oE '"(@mui/|@chakra-ui/|@mantine/|@radix-ui/)[^"]*"|"(antd|vuetify)"' package.json 2>/dev/null; grep -c figma.com README.md 2>/dev/null`; a path printed, a dependency line printed, or a `figma.com` count above 0 is the hit, and no output and `0` mean no system.
 
 ### Confirm once
 
