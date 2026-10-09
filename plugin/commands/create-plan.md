@@ -18,7 +18,7 @@ Based on our full exchange, produce a markdown plan document.
 
 ## Load Project Context
 
-**Session context (fast path):** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` once. It returns a single JSON with `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview), `lessons` (exists, content, hasDetail), `plans` (each with progress and status, for numbering the new plan and avoiding name clashes), and `worktree` (for the Worktree Check below). Use these instead of the individual git/file roundtrips. **Fallback:** if the script is missing or errors, do the manual reads described here and in the Worktree Check instead - behavior is identical.
+**Session context (fast path):** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` once. It returns a single JSON with `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview), `lessons` (exists, content, hasDetail), `plans` (each with progress and status, for numbering the new plan and avoiding name clashes), and `worktree` (for the Worktree Check below). Use these instead of the individual git/file roundtrips. **Fallback:** if the script is missing or errors, do the manual reads described here and in the Worktree Check instead - behavior is identical.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
@@ -37,7 +37,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 **Fallback branch rename** - `/tk:explore` is the primary place this happens, but if the user skipped it or didn't have an issue number yet, handle it here before generating the plan.
 
 1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir` - they differ when you're in a worktree).
-2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern.
+2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern, by command (M16): `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it already matches and `1` when it does not (or test `worktree.branch` from the session-init JSON against the same regex).
 3. If both are true AND an issue is referenced in the conversation, rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."
 5. If not in a worktree, or the branch is already renamed, skip silently.
@@ -99,7 +99,7 @@ Decide whether this plan needs a dedicated test step. This is dynamic, not blank
 - Config, docs, comments, copy, or styling only.
 - Exploratory or research work (investigating a bug, reading code) with no code change yet.
 
-**How to decide (no heavy scanning):** infer from the task descriptions you just wrote, plus `CODEBASE_MAP.md` signals - is there a `tests/` directory? a test framework in the project's dependencies? Do NOT scan the codebase for per-function coverage.
+**How to decide (no heavy scanning):** infer from the task descriptions you just wrote, plus `CODEBASE_MAP.md` signals - is there a `tests/` directory? a test framework in the project's dependencies? Both signals are one command (M16): `test -d tests && echo tests/; test -d test && echo test/; grep -nE '"test":|"(jest|vitest|mocha|ava|tap|playwright|cypress)":' package.json 2>/dev/null; grep -nE 'pytest' pyproject.toml requirements.txt 2>/dev/null` prints one line per test folder or framework found, and no output means the project has no way to run tests yet. Do NOT scan the codebase for per-function coverage.
 
 **Where it goes:** one dedicated step named "Verify" near the end of the Tasks list. It runs existing tests and/or adds new ones, whichever fits. It `depends on` the code steps it verifies (never on the optional setup step below), so the plan stays valid even if that optional step is deleted. Because it is a step, it counts toward the 3-or-more-step threshold for Execution Order Tags above; tag it `[sequential]` when that threshold applies.
 
@@ -198,7 +198,7 @@ The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
 <procedure>
 
-1. Dispatch `subagent_type=tk:plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
+1. Before dispatching, test the paths the plan names (M16): `grep -oE '[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+' plans/<plan>.md | sort -u | while read -r p; do test -e "$p" || echo "not found: $p"; done` prints one `not found:` line per path (a token with at least one `/`) that is not a file under the project root, and nothing when every path exists; skip a path the step creates, check a root-level file such as `package.json` by eye since it carries no slash, and fix every other line in the plan first. Then dispatch `subagent_type=tk:plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
 2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
 3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
 4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), so `/tk:review` checks it against the delivered work.

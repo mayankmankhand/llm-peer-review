@@ -168,7 +168,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 
 ### Project Extensions
 
-A project adds its own rules to the toolkit through six files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
+A project adds its own rules to the toolkit through seven files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
 
 | File | Read by | Carries |
 |---|---|---|
@@ -178,6 +178,7 @@ A project adds its own rules to the toolkit through six files in `.claude/toolki
 | `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M15 is void |
 | `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
+| `checks.json` | `/tk:execute`, at its test step, through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines` (a prose string is judged by the stage from the saved output) |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/tk:review-full` says in its charter that project kinds are not in its fan-out. `/tk:upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
@@ -264,9 +265,9 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 
 ### Do it yourself
 - **Dev servers** - start the server in the background and report the localhost URL. The user should never have to start a server.
-- **Tests and builds** - run `npm test`, `npm run build`, or the project's equivalent to verify your work. Report pass/fail.
+- **Tests and builds** - run `npm test`, `npm run build`, or the project's equivalent to verify your work: the exit code is the verdict, and a long failing log is saved through the checks script (`node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js`, which writes it to a file without a redirect) and read with `grep -nE 'FAIL|not ok'` over that file, never whole (M16). Report pass/fail.
 - **Installing dependencies** - if a package is missing, run `npm install <package>` rather than telling the user to do it. It asks for approval once: the baseline allows only a plain `npm install`, because installing a new package can run that package's own install scripts.
-- **Service status** - before asking "is the server running?", check yourself with `curl`, `lsof`, or similar tools.
+- **Service status** - before asking "is the server running?", run `curl -s -o /dev/null -w '%{http_code}' http://localhost:<port>/` yourself: any three-digit code but `000` means the server answered (M16).
 - **Linting and formatting** - run the linter after changes. Fix what you can, report what you can't.
 
 ### Leave to the user

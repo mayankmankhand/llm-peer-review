@@ -8,6 +8,8 @@ allowed-tools:
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -37,8 +39,8 @@ The text below is this project's own gate, read from `.claude/toolkit/execute-ga
 - Adhere strictly to existing code patterns, conventions, and best practices
 - Include thorough, clear comments/documentation within the code
 - As you implement each step:
-  - Update the markdown tracking document with emoji status and overall progress percentage dynamically
-- After each step's work is green, make a checkpoint commit of that logical unit (M4) before moving on
+  - Update the markdown tracking document with emoji status and the overall progress percentage, counted as Status Updates says (M16)
+- After each step's work is green (green is the test step's verdict, Integration Checkpoint item 2, run for a sequential step as well), make a checkpoint commit of that logical unit (M4) before moving on
 - Always-ask actions page for approval before applying, per M9 - during /tk:execute that is most often an edit to a prompt file; the full list lives in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`
 </rules>
 
@@ -73,7 +75,7 @@ Each parallel agent must:
 ### Integration Checkpoint
 After all parallel steps finish, always run a sequential checkpoint:
 1. Merge results into the codebase
-2. Run tests (if any exist)
+2. Run tests: when `.claude/toolkit/checks.json` exists, `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --checks .claude/toolkit/checks.json --out <scratch> --timeout 600000` (a suite can take minutes; the runner's default is two) is green when its JSON has `summary.fail` 0 and `summary.error` 0, a `model` verdict judged from its saved `stdoutFile`; otherwise write the ecosystem default as a one-entry checks file with the Write tool, `[{"id": "tests", "check": "npm test --if-present", "expect": {"exit": 0}}]` into `<scratch>/checks.json` for a project with a `package.json`, the same row with `pytest -q` as its check when `pyproject.toml` or `pytest.ini` exists, and run the same call on it (the runner saves the log itself; a `>` redirect would prompt in default permission mode); with neither file, skip with one digest line. A failure is read with `grep -nE '^not ok|FAIL|Error' <scratch>/tests.txt | head -30`, never the whole log (M16). `<scratch>` is a fresh folder made per "Temporary folders" in the inlined `html-outputs.md`, prefix `execute-tests`.
 3. Resolve inconsistencies between parallel outputs
 4. Update the plan status
 </conditions>
@@ -105,7 +107,7 @@ A blocker still unresolved within the retry bound is a hard stop that pages the 
 
 **Not a critical blocker:** a typo, a syntax error, a small refactor needed, or a step that takes longer than expected. Fix these and keep going - within the retry bound below.
 
-**Retry bound (small failures):** max 3 fix attempts per step, and a plan's Verify step counts as a step under this same bound. The budget is shared, not fresh: if a failure already used its 3 attempts inside a step, it does not get 3 more when the same failure resurfaces at the Verify step. Each attempt must iterate against that step's verification output (the failing test or build result), not guess blindly. If the 3rd attempt still fails, treat it as a critical blocker: stop and follow the two steps above.
+**Retry bound (small failures):** max 3 fix attempts per step, and a plan's Verify step counts as a step under this same bound. The budget is shared, not fresh: if a failure already used its 3 attempts inside a step, it does not get 3 more when the same failure resurfaces at the Verify step. Each attempt must iterate against that step's verification output (the test step's verdict: a failing check's `detail` and its saved file from the runner, read with the grep the test step names; M16), not guess blindly. If the 3rd attempt still fails, treat it as a critical blocker: stop and follow the two steps above.
 </rules>
 
 ## Status Updates
@@ -118,7 +120,7 @@ Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task
 - Change 🟨 to 🟩 when completing a task
-- Update the overall progress percentage at the top
+- Update the overall progress percentage at the top: 🟩 steps over all steps, from two counts, `grep -cE '^- \[[ x]\] 🟩 \*\*Step' plans/<PLAN>.md` over `grep -cE '^- \[[ x]\] (🟥|🟨|🟩) \*\*Step' plans/<PLAN>.md`, times 100 and rounded down (M16)
 - After all steps are complete, fill in the plan's `## Outcomes` section with what changed, deviations, and key decisions made during execution
 
 **Re-render the plan's HTML view** at each step boundary, once the markdown status is updated (not after every subtask, so a long step does not spend its time re-rendering). Rebuild the same payload `/tk:create-plan` built, carrying each step's current `status` (`todo` | `doing` | `done`) and the real `progress`. Write it as `data.json` in a fresh folder made each time with the prefix `plan-render`, per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md` (inlined at the end of this file), so two projects rendering at once never share a payload; that folder is `<render-dir>` below. Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`): when this session can publish, add `--no-abs` to the command below, as `/tk:create-plan` did for the first render. Then run the helper with the same stable name:

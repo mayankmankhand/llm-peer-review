@@ -1,6 +1,9 @@
 ---
 description: "Pair Debug"
 allowed-tools:
+  - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -26,7 +29,7 @@ Tone: collaborative. "Let's figure this out together."
 
 ## Step 0: Load Project Context
 
-**Session context (fast path):** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` once. It returns a single JSON with `map` (exists, stale, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors, do the manual reads described here instead - behavior is identical.
+**Session context (fast path):** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` once. It returns a single JSON with `map` (exists, stale, malformed, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors, do the manual reads described here instead - behavior is identical.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
@@ -76,4 +79,4 @@ Only fix after a check confirms the root cause and the user agrees with the diag
 
 ## Step 5: Verify the Fix
 
-The fixer never verifies (M3): confirm the fix with a runnable check first - rerun the exact repro from Step 2 - or a fresh context when nothing is runnable. Sweep the touched files for other instances of the same claim (M6). Bounded per M5: still red after 2 rounds means revert and page. If the user wants a different approach, discuss it first.
+The fixer never verifies (M3): confirm the fix with a runnable check first, or a fresh context when nothing is runnable. The runnable check is the exact repro from Step 2, run through `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --checks <file.json> --out <folder>` as the one check with `{"exit": 0}` or `{"match": "<regex>"}` as its expect (`<folder>` from `mktemp -d /tmp/pair-debug.XXXXXX`), and a `pass` verdict is the result (M16); a repro the runner refuses, because it is not a read-only command on its allow-list, runs directly and its exit code is the verdict. Sweep the touched files for other instances of the same claim (M6). Bounded per M5: still red after 2 rounds means revert and page. If the user wants a different approach, discuss it first.
