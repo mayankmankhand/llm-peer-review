@@ -158,7 +158,7 @@ Briefly explain *why* you're asking when it adds value. Example: "I'm asking abo
 <phase name="worktree-setup">
 Before starting codebase analysis, check if this session is running in a Git worktree. A worktree is a separate working folder linked to the same repo - it lets you work on a feature without touching your main code.
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
 
 ### How to detect a worktree
 Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, fall back to comparing the output of these two commands:
@@ -170,7 +170,7 @@ If they return different values, you are in a worktree. If they match, you are i
 ### What to do
 
 **If in a worktree AND an issue number came up during Phase 1:**
-1. Check if the current branch already matches the `worktree-<number>-<label>` pattern. If so, skip - it's already named correctly.
+1. Check if the current branch already matches the `worktree-<number>-<label>` pattern, by command (M16): test `worktree.branch` from the session-init JSON against `^worktree-[0-9]+-[A-Za-z0-9._-]+$`, or run `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?`, where `0` means it matches. If so, skip - it's already named correctly.
 2. If you only have an issue number (no title), fetch it with the **"Read issue" row** for the detected host (detect it now if Phase 1 never needed it, per the Issue Host section)
 3. If in detached HEAD state, create a branch instead: `git checkout -b worktree-<issue-number>-<short-label>`
 4. Otherwise, rename the current branch: `git branch -m worktree-<issue-number>-<short-label>`

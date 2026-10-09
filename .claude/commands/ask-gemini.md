@@ -25,7 +25,7 @@ Use this exact session ID in every `/tmp/ask-gemini-*-<session-id>.md` path thro
 
 **Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
 
-1. Run `ls -t /tmp/ask-gemini-debate-*.md` to list debate files (newest first).
+1. Count and identify the debate files by command (M16): `ls -t /tmp/ask-gemini-debate-*.md 2>/dev/null | wc -l` prints how many exist, and `for f in /tmp/ask-gemini-debate-*.md; do [ -e "$f" ] && printf '%s ' "$f" && head -1 "$f" | grep -o 'Session: [^ ]*'; done` prints each file beside its `Session: <session-id>`; a count of `1` settles the ID without asking.
 2. If only one file exists, read its first line - it contains `<!-- Session: <session-id> -->` and gives you the ID.
 3. If multiple files exist (another parallel `/ask-gemini` tab is running), do not just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
 4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gemini-context-<session-id>.md` and `/tmp/ask-gemini-debate-<session-id>.md`. Reconstruct both paths and continue.
