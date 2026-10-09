@@ -10,7 +10,7 @@ This project runs the LLM Peer Review toolkit. On the plugin its commands are ty
 
 <rules>
 
-1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop` fragment (rules M1 to M15), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
+1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop` fragment (rules M1 to M16), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Show your work** - Tell me what you're doing and why
