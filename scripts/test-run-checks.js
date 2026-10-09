@@ -456,6 +456,75 @@ section('9b. single-quoted expansions are literal text and a sed ; list of print
   check('the two-range sed printed exactly the two lines', (savedFile(r, 'sed-two-ranges') || '').startsWith('hello\nhello\n'), savedFile(r, 'sed-two-ranges'));
 });
 
+// Review of issue 221 (2026-10-09), R2: the allowed readers took any path on the
+// machine, so a steered finder could carry a secret into a receipt. Reads are
+// confined to the project root; the shell's ways out (~, $HOME, .., a symlink)
+// are refused; a pattern that looks like a path but names nothing still passes.
+section('9c. reads stay inside the project root', function () {
+  const { guardCheck } = require(SCRIPT);
+  check('the suite found a folder outside the project to read from', !!OUTSIDE_DIR);
+  if (OUTSIDE_DIR) {
+    try { fs.symlinkSync(OUTSIDE_DIR, path.join(proj, 'link-out')); } catch (e) { /* exists */ }
+    const hostile = [
+      ['abs-read', 'ls ' + OUTSIDE_DIR, /outside the project root/],
+      ['parent-read', 'ls ..', /outside the project root/],
+      ['stdin-read', 'grep -c x <' + OUTSIDE_DIR, /outside the project root/],
+      ['home-read', 'cat ~/.bashrc', /home-relative path/],
+      ['var-read', 'cat $HOME/.bashrc', /home-relative path/],
+      ['var-read-dq', 'cat "$HOME/.bashrc"', /home-relative path/],
+      ['var-path', 'ls $PATH', /variable expansion/],
+      ['var-exit', 'echo $?', /variable expansion/],
+      ['symlink-out', 'ls link-out', /outside the project root/],
+      ['git-C-out', 'git -C ' + OUTSIDE_DIR + ' log -1', /outside the project root|git global option/],
+    ];
+    const r = runChecks(hostile.map(([id, cmd]) => ({ id, check: cmd, expect: { exit: 0 } })), 'reads');
+    for (const [id, cmd, re] of hostile) {
+      const row = r.byId[id];
+      check('refused read: ' + JSON.stringify(cmd).slice(0, 60), !!row && row.verdict === 'error' && row.stdoutFile === null && re.test(row.detail), row ? JSON.stringify(row) : 'no row');
+    }
+    check('no output file was written for any refused read', fs.readdirSync(r.out).length === 0, fs.readdirSync(r.out).join(','));
+  }
+  // A path that names nothing on this machine passes to the shell, which fails on its own; that is not a leak, so it is not refused.
+  const allowed = ["grep -c '/api/' f.txt", 'cat /dev/null', 'cat ./f.txt', 'test -f f.txt', 'grep -n hello ./notes.md', "sed -n '/hello/p' f.txt", 'git log -1 --format=%H -- f.txt'];
+  for (const c of allowed) check('allowed read: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
+  const ra = runChecks(allowed.map((c, i) => ({ id: 'ok-' + i, check: c, expect: 'ran' })), 'reads-ok');
+  check('every allowed read ran (verdict model, never error)', allowed.every((c, i) => ra.byId['ok-' + i] && ra.byId['ok-' + i].verdict === 'model'), JSON.stringify(ra.json && ra.json.summary));
+  // The node script path is nodeRule's, so the plugin folder's copies still run.
+  check('the stable plugin path form is still allowed', guardCheck('node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models', proj) === null, guardCheck('node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models', proj));
+  check('the plugin root form is still allowed', guardCheck('node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models', proj) === null, guardCheck('node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models', proj));
+});
+
+// R1: a must-not-match or line-count check used to pass when the command itself
+// failed (the error went to the saved output, the pattern was absent). Now a
+// negative or counting expectation needs a command that ran cleanly, and lines
+// counts stdout only. R18: an output past the 16 MB buffer is its own outcome.
+section('9d. a failed command never confirms an absence or a count; an overflow is not a timeout', function () {
+  const r = runChecks([
+    { id: 'nomatch-misspelled', check: 'grep -c zzz missing.txt', expect: { noMatch: 'zzz' } },
+    { id: 'nomatch-cat-missing', check: 'cat missing.txt', expect: { noMatch: 'zzz' } },
+    { id: 'nomatch-clean', check: 'grep -c zzz f.txt', expect: { noMatch: 'zzz' } },
+    { id: 'nomatch-exit0', check: 'cat f.txt', expect: { noMatch: 'zzz' } },
+    { id: 'lines-misspelled', check: 'grep -n hello missing.txt', expect: { lines: { min: 1 } } },
+    { id: 'lines-stdout-only', check: 'grep -n hello f.txt', expect: { lines: { min: 2, max: 2 } } },
+    { id: 'match-still-plain', check: 'grep -n hello missing.txt', expect: { match: 'No such file' } },
+  ], 'ran');
+  const v = (id) => r.byId[id] && r.byId[id].verdict;
+  check('noMatch fails on a misspelled path (grep exit 2)', v('nomatch-misspelled') === 'fail' && r.byId['nomatch-misspelled'].exit === 2, JSON.stringify(r.byId['nomatch-misspelled']));
+  check('noMatch fails on a missing file read (exit 1 with an error on stderr)', v('nomatch-cat-missing') === 'fail', JSON.stringify(r.byId['nomatch-cat-missing']));
+  check('noMatch passes on a clean no-match (grep exit 1, nothing on stderr)', v('nomatch-clean') === 'pass', JSON.stringify(r.byId['nomatch-clean']));
+  check('noMatch passes on a clean exit 0', v('nomatch-exit0') === 'pass', JSON.stringify(r.byId['nomatch-exit0']));
+  check('lines fails on a misspelled path instead of counting the error line', v('lines-misspelled') === 'fail', JSON.stringify(r.byId['lines-misspelled']));
+  check('lines counts stdout lines only', v('lines-stdout-only') === 'pass', JSON.stringify(r.byId['lines-stdout-only']));
+  check('match still reads the whole saved output, stderr included', v('match-still-plain') === 'pass', JSON.stringify(r.byId['match-still-plain']));
+  const big = path.join(proj, 'big.txt');
+  fs.writeFileSync(big, Buffer.alloc(17 * 1024 * 1024, 0x61));
+  const o = runChecks([{ id: 'overflow', check: 'cat big.txt', expect: { exit: 0 } }], 'overflow');
+  fs.rmSync(big, { force: true });
+  const row = o.byId.overflow;
+  check('an output past the buffer is a fail with exit 143, not a timeout', !!row && row.verdict === 'fail' && row.exit === 143, JSON.stringify(row));
+  check('its detail and its saved file say the buffer was passed', /passed the 16 MB buffer/.test(row ? row.detail : '') && /passed the 16 MB buffer/.test(savedFile(o, 'overflow') || '') && /\[truncated\]/.test(savedFile(o, 'overflow') || '') && lastLine(savedFile(o, 'overflow') || '') === 'exit 143', (savedFile(o, 'overflow') || '').slice(-200));
+});
+
 section('10. a receipt file the runner wrote renders at the review page\'s receipt slot', function () {
   const receiptsOut = path.join('reports', 'receipts', 'run-checks-test');
   const r = run(['--checks', checksFile([{ id: 'R1', check: 'grep -n hello f.txt', expect: { exit: 0 } }]), '--out', receiptsOut]);

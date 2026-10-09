@@ -20,6 +20,10 @@
 //             { "match": "regex" }       the saved output must match (multiline)
 //             { "noMatch": "regex" }     the saved output must not match
 //             { "lines": {min, max} }    non-empty output lines within bounds
+//           noMatch and lines pass only when the command ran cleanly: exit 0,
+//           or exit 1 with nothing on stderr (grep's no-match). A command that
+//           failed (a misspelled path: exit 2, 127) fails both, so an error
+//           never confirms an absence or a count. lines counts stdout only.
 //
 // Every check's output is saved as <out>/<id>.txt: stdout, then stderr, then a
 // last line `exit N`. That is the exact shape render-html.js reads at a
@@ -33,7 +37,8 @@
 //   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail" } ... ],
 //     "summary": { "pass", "fail", "model", "error" } }
 // verdict is pass, fail, model or error. `exit` is the check's exit code (124
-// on a timeout, null when nothing ran); `stdoutFile` is the saved file's path
+// on a timeout, 143 when the output passed the 16 MB buffer and the check was
+// stopped, null when nothing ran); `stdoutFile` is the saved file's path
 // relative to the project root (absolute when the out folder sits outside it,
 // null when nothing was written); `detail` is the last lines of the output for
 // a fail, the reason for an error, and empty otherwise.
@@ -50,8 +55,13 @@
 // starts with a word on the read-only allow-list and its arguments pass that
 // word's own rule. Command substitution, redirection to a file, subshells,
 // brace groups, background jobs and environment assignments are refused
-// before anything runs. A refused check gets verdict `error` with the reason,
-// no file, and nothing executed.
+// before anything runs. Reads are confined as well: an argument that names an
+// existing file or folder must resolve, through realpath, under the project
+// root (the harmless device files aside), and a home-relative path (~, $HOME),
+// a variable expansion ($PATH) and a parent folder are refused, so a check reads the project and
+// nothing else: an allowed reader with the run of the disk would carry any
+// secret a steered finder named into the review's receipts. A refused check
+// gets verdict `error` with the reason, no file, and nothing executed.
 //
 // Dependency-free, like every script here. Diagnostics go to stderr; stdout
 // is the one JSON object. The script names no command of the toolkit's own,
@@ -114,6 +124,7 @@ function tokenize(original) {
     if (c === '`') return 'refused: command substitution (backtick)';
     if (c === '$' && text[i + 1] === '(') return 'refused: command substitution ($( ))';
     if (c === '$' && text[i + 1] === '{') return 'refused: brace parameter expansion (${ }); only the exact literal ${CLAUDE_PLUGIN_ROOT} is allowed';
+    if (c === '$' && /[A-Za-z_0-9?@#*!-]/.test(text[i + 1] || '') && !/^\$HOME(?![A-Za-z0-9_])/.test(text.slice(i))) return 'refused: variable expansion ($PATH and the like)';
     return null;
   };
   for (let i = 0; i < n; i++) {
@@ -441,12 +452,39 @@ function uniqRule(args) {
 
 const ENV_ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
+// Read confinement. A word that names something on this machine must resolve
+// under the project root: a relative name stays inside, a pattern or a flag
+// value names nothing and passes, and anything that exists elsewhere (an
+// absolute path, a parent folder, a symlink that lands outside) is refused.
+// The shell's two spellings of the home folder, ~ and $HOME, are refused here
+// (every other variable is refused by the tokenizer; $HOME reaches this far so
+// the node script path $HOME/.claude/plugins/.../scripts/x.js, which nodeRule
+// owns, keeps working). The harmless device files a check may read from are
+// listed; a block device would be the disk itself. `< file` reads a file, so
+// the word behind the < is judged.
+const DEV_READ_OK = ['/dev/null', '/dev/zero', '/dev/urandom', '/dev/random', '/dev/stdin'];
+function outsideProject(word, root) {
+  const w = word.startsWith('<') ? word.slice(1) : word;
+  if (w === '' || w === '-') return null;
+  if (w[0] === '~' || /^\$HOME(?![A-Za-z0-9_])/.test(w)) return "refused: home-relative path '" + word + "'";
+  if (root === null) return 'refused: the project root could not be resolved';
+  const abs = path.resolve(root, w);
+  if (DEV_READ_OK.indexOf(abs) !== -1) return null;
+  if (!fs.existsSync(abs)) return null;
+  const real = realpathOrNull(abs);
+  if (real === null) return "refused: '" + word + "' could not be resolved";
+  if (!isUnder(real, root)) return "refused: '" + word + "' is outside the project root";
+  return null;
+}
+
 // The guard over one whole check. Returns null when every segment is allowed,
-// else the first refusal reason.
-function guardCheck(text) {
+// else the first refusal reason. `cwd` is the project root the reads are
+// confined to; it defaults to the process's own.
+function guardCheck(text, cwd) {
   const t = tokenize(text);
   if (t.error) return t.error;
   if (!t.segments.length) return 'refused: empty command';
+  const root = realpathOrNull(cwd || process.cwd());
   for (const words of t.segments) {
     const cmd = words[0];
     if (ENV_ASSIGN_RE.test(cmd)) return "refused: environment assignment '" + cmd.split('=')[0] + "=...' before the command";
@@ -454,14 +492,29 @@ function guardCheck(text) {
     if (!rule) return "refused: first word '" + cmd + "' is not on the read-only allow-list";
     const reason = rule(words.slice(1));
     if (reason) return reason;
+    for (let i = 1; i < words.length; i++) {
+      // The node script path is nodeRule's: it pins it to the toolkit's own
+      // read-only scripts, the plugin folder's copies included.
+      if (cmd === 'node' && i === 1) continue;
+      const outside = outsideProject(words[i], root);
+      if (outside) return outside;
+    }
   }
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// Expectations. `body` is the saved output without the exit line.
+// Expectations. `body` is the saved output without the exit line; `parts`,
+// when given, is { stdout, stderr } so a negative or counting expectation can
+// tell a clean no-match (grep: exit 1, nothing on stderr) from a command that
+// failed (a misspelled path: exit 2 and an error on stderr). A failed command
+// never confirms an absence: before this rule, a typo in a receipt's path made
+// every noMatch pass and every stderr line count toward lines (review R1).
 // ---------------------------------------------------------------------------
-function decide(expect, exitCode, body) {
+function decide(expect, exitCode, body, parts) {
+  const stderr = parts && typeof parts.stderr === 'string' ? parts.stderr : '';
+  const stdout = parts && typeof parts.stdout === 'string' ? parts.stdout : body;
+  const ran = exitCode === 0 || (exitCode === 1 && stderr.trim() === '');
   const err = (reason) => ({ verdict: 'error', detail: reason });
   if (typeof expect === 'string') return { verdict: 'model', detail: '' };
   if (expect === null || typeof expect !== 'object' || Array.isArray(expect)) {
@@ -482,15 +535,15 @@ function decide(expect, exitCode, body) {
     let re;
     try { re = new RegExp(v, 'm'); } catch (e) { return err('expect.' + k + ' is not a valid regex: ' + e.message); }
     const hit = re.test(body);
-    passed = k === 'match' ? hit : !hit;
+    passed = k === 'match' ? hit : (!hit && ran);
   } else {
     if (v === null || typeof v !== 'object' || Array.isArray(v)) return err('expect.lines must be an object with integer min and/or max');
     const hasMin = v.min !== undefined;
     const hasMax = v.max !== undefined;
     if (!hasMin && !hasMax) return err('expect.lines needs min or max');
     if ((hasMin && !Number.isInteger(v.min)) || (hasMax && !Number.isInteger(v.max))) return err('expect.lines min and max must be integers');
-    const count = body.split('\n').filter((l) => l.trim() !== '').length;
-    passed = (!hasMin || count >= v.min) && (!hasMax || count <= v.max);
+    const count = stdout.split('\n').filter((l) => l.trim() !== '').length;
+    passed = ran && (!hasMin || count >= v.min) && (!hasMax || count <= v.max);
   }
   return { verdict: passed ? 'pass' : 'fail', detail: '' };
 }
@@ -523,8 +576,12 @@ function runCheck(check, cwd, timeout) {
   const r = spawnSync('bash', ['-c', check], {
     cwd, timeout, env: checkEnv(), encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT') || (r.status === null && r.signal === 'SIGTERM' && !!r.error);
-  if (r.error && !timedOut && r.error.code !== 'ENOBUFS' && r.status === null && !r.signal) {
+  // Node reports a timeout as ETIMEDOUT and an output past maxBuffer as
+  // ENOBUFS; both kill the child with SIGTERM, so the signal alone cannot tell
+  // them apart (review R18: the overflow used to be reported as a timeout).
+  const timedOut = !!(r.error && r.error.code === 'ETIMEDOUT');
+  const overflow = !!(r.error && r.error.code === 'ENOBUFS');
+  if (r.error && !timedOut && !overflow && r.status === null && !r.signal) {
     return { failed: 'bash could not be started: ' + r.error.message };
   }
   let exit;
@@ -535,6 +592,11 @@ function runCheck(check, cwd, timeout) {
   let stdout = r.stdout || '';
   let stderr = r.stderr || '';
   if (timedOut) stderr += (stderr && !stderr.endsWith('\n') ? '\n' : '') + 'run-checks: timed out after ' + timeout + ' ms\n';
+  if (overflow) {
+    // Keep room for the note below the cap, so the saved file says why it ends.
+    stdout = Buffer.from(stdout, 'utf8').subarray(0, OUTPUT_CAP_BYTES - 1000).toString('utf8') + '\n[truncated]\n';
+    stderr += (stderr && !stderr.endsWith('\n') ? '\n' : '') + 'run-checks: output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped\n';
+  }
   let body = stdout;
   if (body && !body.endsWith('\n')) body += '\n';
   body += stderr;
@@ -544,7 +606,7 @@ function runCheck(check, cwd, timeout) {
     if (!body.endsWith('\n')) body += '\n';
     body += '[truncated]\n';
   }
-  return { exit, body, timedOut };
+  return { exit, body, stdout, stderr, timedOut, overflow };
 }
 
 // ---------------------------------------------------------------------------
@@ -666,7 +728,7 @@ function main(argv) {
   const summary = { pass: 0, fail: 0, model: 0, error: 0 };
   for (const c of checks) {
     const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '' };
-    const refusal = guardCheck(c.check);
+    const refusal = guardCheck(c.check, cwd);
     if (refusal) {
       row.detail = refusal;
     } else {
@@ -684,11 +746,11 @@ function main(argv) {
         }
         row.exit = run.exit;
         if (!row.detail) {
-          if (run.timedOut) {
+          if (run.timedOut || run.overflow) {
             row.verdict = 'fail';
-            row.detail = tailDetail(run.body);
+            row.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
           } else {
-            const d = decide(c.expect, run.exit, run.body);
+            const d = decide(c.expect, run.exit, run.body, { stdout: run.stdout, stderr: run.stderr });
             row.verdict = d.verdict;
             row.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
           }
