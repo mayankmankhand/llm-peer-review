@@ -560,11 +560,12 @@ function runCandidates() {
         continue;
       }
       if (command) {
-        // The human's next words after an interrupt went into a slash command,
-        // whose arguments this scan never reads, so the interrupt has no
-        // follow-up it can see. Counting it is what makes that miss visible
-        // (the owner's decision in the review of the #220 cycle, R6). The
-        // command itself is machine text, never a candidate.
+        // The human's next move after an interrupt was a slash command, any
+        // command, built-ins such as /model included: a correction it carried
+        // sits in arguments this scan never reads, and a built-in carries none,
+        // so the interrupt has no follow-up the scan can see. Counting it is
+        // what makes that visible (the owner's decision in the review of the
+        // #220 cycle, R6). The command itself is machine text, never a candidate.
         if (pending) { result.interruptsWithoutFollowUp += 1; pending = null; }
         if (opener) answers.push({ file: files[i], at: entry.timestamp, command: true });
         continue;

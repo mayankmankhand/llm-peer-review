@@ -109,8 +109,8 @@ project's transcripts, so nothing was scanned.
 **If `interruptsWithoutFollowUp` is above 0, say one line**, whatever `candidates` holds:
 that many interrupts in this window had no follow-up message the scan could find, so a
 correction made then may be missing from the ledger. The scan pairs an interrupt with the
-next message typed after it, in the same session or in another session that starts within
-ten minutes.
+next message typed within ten minutes of it, in the same session or the next one, and
+counts it here when a slash command came first.
 
 **If `scanned` is true and `candidates` is empty, skip to "Record the heartbeat" and say
 nothing else to the user.** The stage is silent when there was genuinely nothing to capture.
