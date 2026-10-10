@@ -230,11 +230,16 @@ const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
 function sessionStart() {
   // --- Worktree state -------------------------------------------------------
   // A worktree is detected when the per-worktree git dir differs from the shared
-  // common dir - the same check the commands do today with two rev-parse calls.
+  // common dir - the same check the commands do with rev-parse. The two are
+  // compared after resolving them against cwd: from a subfolder of the main copy
+  // git prints --git-dir absolute and --git-common-dir relative ("../../.git"), so
+  // the raw strings differ for one folder and the main copy would read as a
+  // worktree (#226). The raw values are still reported as git printed them.
   const gitDir = git(["rev-parse", "--git-dir"]);
   const commonDir = git(["rev-parse", "--git-common-dir"]);
   const worktree = {
-    isWorktree: gitDir !== null && commonDir !== null && gitDir !== commonDir,
+    isWorktree: gitDir !== null && commonDir !== null &&
+      path.resolve(cwd, gitDir) !== path.resolve(cwd, commonDir),
     gitDir,
     commonDir,
     branch: git(["rev-parse", "--abbrev-ref", "HEAD"]),

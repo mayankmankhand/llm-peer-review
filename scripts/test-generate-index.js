@@ -5,8 +5,9 @@
 // CODEBASE_MAP.md.tmp, rename it over CODEBASE_MAP.md and remove the legacy
 // INDEX.md, in place of a shell compound that default permission mode stops to
 // ask about; and the scan's `git ls-files -z` (issue #183), which keeps files
-// with non-ASCII names in the manifest instead of counting them as missing.
-// Every case runs in a throwaway folder under the OS temp dir. The scan cases
+// with non-ASCII names in the manifest instead of counting them as missing;
+// and the manifest's overflowChunkIds (issue #226), the oversized chunks /index
+// must not auto-retry. Every case runs in a throwaway folder under the OS temp dir. The scan cases
 // build scratch git repos that read no global or system git config, so a
 // developer's own settings (core.quotePath, an excludes file) cannot change
 // what the scan sees. Dependency-free; exits non-zero on any failure.
@@ -248,6 +249,41 @@ function initRepo(repo) {
   const r = run(repo, []);
   const m = r.json || {};
   check('an empty repo scans to zero files, no chunks and the no-commit placeholder', r.status === 0 && m.totalFiles === 0 && Array.isArray(m.chunks) && m.chunks.length === 0 && m.commit === '(no commits yet)', r.stdout.slice(0, 300));
+}
+{
+  // overflowChunkIds (#226): a project far under the per-chunk target has no
+  // oversized chunk, so the list is empty and the flag is false.
+  const repo = fresh('no-overflow');
+  initRepo(repo);
+  fs.writeFileSync(path.join(repo, 'README.md'), '# Small\n\nOne short file.\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-qm', 'init']);
+  const m = run(repo, []).json || {};
+  check('a small project has an empty overflowChunkIds and anyChunkOverflows false', Array.isArray(m.overflowChunkIds) && m.overflowChunkIds.length === 0 && m.anyChunkOverflows === false, JSON.stringify({ ids: m.overflowChunkIds, flag: m.anyChunkOverflows }));
+}
+{
+  // overflowChunkIds (#226) at the real limits, no test-only knob: tokens are
+  // bytes / 4, a file over 50,000 tokens is skipped, and the packer fills a
+  // chunk to 250,000 before opening the next, up to 5. Twenty-six files of
+  // 47,500 tokens fill five chunks with five files each (237,500) and push the
+  // 26th into one of them, so exactly one chunk is over the target.
+  // Repetitive text keeps git's stored objects small.
+  const repo = fresh('overflow');
+  initRepo(repo);
+  fs.mkdirSync(path.join(repo, 'src'));
+  const body = 'x'.repeat(189_999) + '\n';
+  for (let i = 1; i <= 26; i++) fs.writeFileSync(path.join(repo, 'src', 'f' + String(i).padStart(2, '0') + '.txt'), body);
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-qm', 'init']);
+  const r = run(repo, []);
+  const m = r.json || {};
+  // Checked against the chunks the scan actually returned, so a change to the
+  // packing order fails here with the real chunk totals in the detail.
+  const over = (m.chunks || []).filter((c) => c.totalTokens > m.chunkTargetTokens).map((c) => c.id);
+  const detail = JSON.stringify({ ids: m.overflowChunkIds, totals: (m.chunks || []).map((c) => c.totalTokens) });
+  check('fixture: 26 files kept, 5 chunks, exactly one chunk over the target', r.status === 0 && m.totalFiles === 26 && (m.chunks || []).length === 5 && over.length === 1, detail);
+  check('overflowChunkIds lists exactly the chunks over chunkTargetTokens', JSON.stringify(m.overflowChunkIds) === JSON.stringify(over), detail);
+  check('anyChunkOverflows is true when the list is non-empty', m.anyChunkOverflows === true, detail);
 }
 {
   // GIT_CEILING_DIRECTORIES stops git from finding a repository above the

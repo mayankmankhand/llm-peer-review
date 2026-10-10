@@ -36,7 +36,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 
 **Fallback branch rename** - `/tk:explore` is the primary place this happens, but if the user skipped it or didn't have an issue number yet, handle it here before generating the plan.
 
-1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir` - they differ when you're in a worktree).
+1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare the last two lines of `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16) - they differ when you're in a worktree; Git older than 2.31 prints the flag back as an extra first line).
 2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern, by command (M16): `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it already matches and `1` when it does not (or test `worktree.branch` from the session-init JSON against the same regex).
 3. If both are true AND an issue is referenced in the conversation, rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."

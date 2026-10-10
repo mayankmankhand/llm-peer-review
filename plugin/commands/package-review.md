@@ -81,11 +81,10 @@ Create a single markdown file containing all code and context needed for externa
 
 ## When User Chooses "Changed Files"
 
-1. Check `git status` for modified/added files
-2. If on a branch, compare to `main` branch
-3. Only include files that have changed
-4. Still include README.md and CLAUDE.md for context
-5. Note in the header which files were changed
+1. List the changed files by command (M16): `git status --porcelain` prints one line per modified, staged or untracked file, and `git diff --name-status main...HEAD` one line per file this branch changed since it left `main`. No output from either means nothing changed. When the diff exits non-zero because the repo has no `main` branch, say so and use the status list alone
+2. Only include files that have changed
+3. Still include README.md and CLAUDE.md for context
+4. Note in the header which files were changed
 
 ## Output
 

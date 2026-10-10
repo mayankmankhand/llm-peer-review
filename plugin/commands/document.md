@@ -211,7 +211,7 @@ This covers every push in this command, including the branch push in Section 8.
 
 ## 8. Worktree Cleanup
 
-Detect if you're in a worktree: compare `git rev-parse --git-dir` with `git rev-parse --git-common-dir`. If they differ, you're in a worktree.
+Detect if you're in a worktree: run `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16) and compare its last two lines (Git older than 2.31 prints the flag back as an extra first line). Two different lines mean you're in a worktree; the absolute form keeps a subfolder of the main copy from reading as one.
 
 **If NOT in a worktree** - skip this section entirely.
 
