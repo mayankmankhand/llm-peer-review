@@ -35,7 +35,7 @@ Run these checks. If any fail, stop with the indicated message.
 
 1. Parse `git worktree list` output and scan `.claude/worktrees/` for existing folders.
 2. Look for folders matching the pattern `worktree-N` (simple numeric only - ignore issue-named folders like `worktree-58-branch-conflicts`).
-3. Find the highest N and use N+1. If none exist, start at 1.
+3. Find the highest N and use N+1, by one pipeline over both sources (M16): `{ git worktree list --porcelain | sed -n 's#^worktree .*/worktree-\([0-9]\+\)$#\1#p'; ls .claude/worktrees 2>/dev/null | sed -n 's#^worktree-\([0-9]\+\)$#\1#p'; } | sort -n | tail -1 | awk '{print $1+1}'` prints the next N, and nothing when none exist, so start at 1.
 
 ### Step 4: Create the worktree
 
@@ -45,7 +45,7 @@ If it fails because the branch name is taken, increment N and try again.
 
 ### Step 5: Install dependencies
 
-Install host project deps; toolkit deps depend on how the toolkit is installed.
+Install host project deps; toolkit deps depend on how the toolkit is installed. Decide every install and copy step here and in Step 6 by command (M16): `W=.claude/worktrees/worktree-N; for p in $W/package.json $W/.claude/scripts/package.json .env.local $W/.env.local CODEBASE_MAP.md $W/CODEBASE_MAP.md; do test -e "$p" && echo "present $p" || echo "absent $p"; done` prints one `present` or `absent` line per file, in the order the steps read them.
 
 1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
 2. **Toolkit deps** - two cases:

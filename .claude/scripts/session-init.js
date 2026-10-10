@@ -250,7 +250,7 @@ function sessionStart() {
   const headCommit = git(["rev-parse", "HEAD"]);
   let map;
   if (mapRaw === null) {
-    map = { exists: false };
+    map = { exists: false, malformed: false };
   } else {
     // Header shape: <!-- Commit: <hash> (generated_while_dirty: N files) -->
     const commitMatch = mapRaw.match(/<!--\s*Commit:\s*([0-9a-f]+)/i);
@@ -275,6 +275,18 @@ function sessionStart() {
     const ovMatch = mapRaw.match(/##\s*System Overview\s*\n+([\s\S]*?)(?:\n#{2,3}\s|\s*$)/i);
     if (ovMatch) overview = ovMatch[1].trim();
 
+    // Malformed: the three byte tests generate-index.js --finalize runs on the
+    // temp file (over 200 bytes, a "<!-- Generated:" first line, a "# Codebase
+    // Map" title line), run here on the live map so a command reads a verdict
+    // instead of judging the file by eye (issue #221, G7). Kept to those three,
+    // in that script's exact form, so the two always agree; the Module Guide
+    // test stays out because the empty-repo minimal map has none by design.
+    const mapLines = mapRaw.split(/\r?\n/);
+    const malformed =
+      Buffer.byteLength(mapRaw, "utf8") <= 200 ||
+      !mapLines[0].startsWith("<!-- Generated:") ||
+      !mapLines.some((l) => l.trimEnd() === "# Codebase Map");
+
     map = {
       exists: true,
       path: MAP_FILE,
@@ -284,6 +296,7 @@ function sessionStart() {
       // Commands warn only at >=10 commits behind; single-commit drift is noise.
       stale: commitsBehind !== null && commitsBehind >= 10,
       generatedWhileDirty,
+      malformed,
       overview,
     };
   }
@@ -998,9 +1011,12 @@ const MOVING_ROLES = [
 // The helpers best leaves on their agent file's model, as fit does, instead of the
 // session model (#208): the map helper's file names the model it was measured on.
 const BEST_KEEPS_FILE_MODEL = ["index-mapper"];
-// The helpers no mode moves: a judge never runs below the work it judges, and the
-// correction extractor was not measured.
-const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer", "correction-extractor"];
+// The helpers no mode moves: a judge never runs below the work it judges.
+const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer"];
+// The helpers that keep their agent file's model in every mode: the correction
+// extractor was measured on Haiku against the session model (issue 221, four
+// identical runs), so no mode moves it up or down.
+const FILE_PINNED_ROLES = ["correction-extractor"];
 // The agent files the dispatch uses: beside this script's own folder, so a plugin
 // install reads the plugin's agents and the toolkit repo reads .claude/agents/.
 const AGENTS_DIR = path.join(__dirname, "..", "agents");
@@ -1085,6 +1101,7 @@ function resolveModels(requested, root) {
     else perRole[role] = agentFileModel(role);
   }
   for (const role of FIXED_ROLES) perRole[role] = "session";
+  for (const role of FILE_PINNED_ROLES) perRole[role] = agentFileModel(role);
   const out = { mode, source, plan, buildModel: mode === "best" ? "session" : "opus", perRole };
   if (warnings.length) out.warning = warnings.join(" ");
   return out;

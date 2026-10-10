@@ -14,13 +14,13 @@ Tone: collaborative. "Let's figure this out together."
 2. **Explain simply** - Use plain English, avoid jargon
 </rules>
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 
 ## Step 0: Load Project Context
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, stale, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors, do the manual reads described here instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, stale, malformed, overview) and `lessons` (exists, content, hasDetail), so you skip the separate reads below. **Fallback:** if the script is missing or errors, do the manual reads described here instead - behavior is identical.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
@@ -28,7 +28,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it does not exist:** Tell the user "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute." Then invoke `/index`. After it completes, read the new map and proceed.
 
-**If it is malformed or `/index` fails:** Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
+**If it is malformed or `/index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 
 After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson matches the symptom or area, open its full write-up in `LESSONS-detail.md` - a past bug pattern may be the fastest route to root cause. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file.
 
@@ -70,4 +70,4 @@ Only fix after a check confirms the root cause and the user agrees with the diag
 
 ## Step 5: Verify the Fix
 
-The fixer never verifies (M3): confirm the fix with a runnable check first - rerun the exact repro from Step 2 - or a fresh context when nothing is runnable. Sweep the touched files for other instances of the same claim (M6). Bounded per M5: still red after 2 rounds means revert and page. If the user wants a different approach, discuss it first.
+The fixer never verifies (M3): confirm the fix with a runnable check first, or a fresh context when nothing is runnable. The runnable check is the exact repro from Step 2, run through `node .claude/scripts/run-checks.js --checks <file.json> --out <folder>` as the one check with `{"exit": 0}` or `{"match": "<regex>"}` as its expect (`<folder>` from `mktemp -d /tmp/pair-debug.XXXXXX`), and a `pass` verdict is the result (M16); a repro the runner refuses, because it is not a read-only command on its allow-list, runs directly and its exit code is the verdict. Sweep the touched files for other instances of the same claim (M6). Bounded per M5: still red after 2 rounds means revert and page. If the user wants a different approach, discuss it first.

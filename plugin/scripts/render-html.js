@@ -787,6 +787,7 @@ function embedInString(str) {
 // of the payload can see in the stderr line the very next run.
 const REVIEW_CAPS = {
   what: 18, context: 22, fix: 20,   // per-finding prose, in words
+  bottomLineWords: 25,               // each first-screen sentence, in words
   pageWords: 700,                    // total open prose on the page
   openFindings: 9,                   // hard ceiling regardless of word count
   receiptLines: 6, receiptCols: 160  // the attached machine output
@@ -1039,6 +1040,22 @@ function applyReviewContract(data) {
   if (retired) {
     reviewNotes.push('refused ' + retired + ' field row(s) using the retired four-field labels ' +
                      '(Why it matters / Example / Suggested fix); they were dropped, not rendered');
+  }
+
+  // The bottom line is the first screen, and its 25-word slot was the one cap
+  // left to the prompt (issue #221, D11 and G2): a sentence that runs long
+  // pushes the page's one job below the fold. An entry over the cap is cut to
+  // its first 25 words and the slot is named on stderr beside the other caps.
+  // Words are whitespace-separated tokens, the count the review prompt asks for.
+  if (Array.isArray(data.bottomLine)) {
+    data.bottomLine = data.bottomLine.map(function (s, i) {
+      if (typeof s !== 'string') return s;
+      const words = s.trim().split(/\s+/).filter(Boolean);
+      if (words.length <= REVIEW_CAPS.bottomLineWords) return s;
+      reviewNotes.push('over cap: bottomLine[' + i + '] ' + words.length + '/' + REVIEW_CAPS.bottomLineWords +
+                       ' words, trimmed to the first ' + REVIEW_CAPS.bottomLineWords);
+      return words.slice(0, REVIEW_CAPS.bottomLineWords).join(' ');
+    });
   }
   if (!findings.length) return;
 

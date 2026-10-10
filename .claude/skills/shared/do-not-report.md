@@ -8,7 +8,7 @@ A living list of finding categories that are **not worth flagging** in this proj
 
 ## How to use it
 
-- Before reporting a finding, check it against this list. If it matches an active entry, drop it silently (do not report it, do not mention that you skipped it).
+- Before reporting a finding, check it against this list. If it matches an active entry, drop it silently (do not report it, do not mention that you skipped it). The project file's size is a command, not a read (M16): `test -s .claude/toolkit/do-not-report.md && grep -cE '^- ' .claude/toolkit/do-not-report.md || echo 0` prints its entry count, and `0` means skip the matching step for it entirely (a finder without Bash reads the same count off the copy inlined below it).
 - This list only *suppresses* noise. It never *lowers* a real severity. The Universal Anchors in `severity-anchors.md` always win: an exposed secret, injection, insecure auth, data-loss, or accessibility-blocking issue is reported even if a category here might otherwise match.
 - Keep entries specific. A vague entry ("style stuff") suppresses real findings; a specific one ("trailing-whitespace-only changes in generated files") does not.
 

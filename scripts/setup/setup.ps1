@@ -141,7 +141,7 @@ foreach ($f in @("setup.sh", "setup.ps1", "install-alias.sh", "install-alias.ps1
 }
 
 # Check dep-free runtime scripts (index generator + artifact opener + HTML renderer + session-init + pre-push tripwire + correction ledger + gen-media + merge-findings) - must exist.
-foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js")) {
+foreach ($f in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js", "run-checks.js")) {
   $p = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $f)
   if (-not (Test-Path -LiteralPath $p -PathType Leaf)) {
     Write-Host "  Error: source file not found: $p"
@@ -522,7 +522,7 @@ if (Test-Path -LiteralPath $pfAgentsDir -PathType Container) {
     Add-PreflightDiff -Source $src.FullName -Rel (Join-Path ".claude\agents" $src.Name)
   }
 }
-foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "env-local.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js")) {
+foreach ($pfName in @("ask-gpt.js", "ask-gemini.js", "env-local.js", "browse.js", "package.json", "generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js", "run-checks.js")) {
   Add-PreflightDiff -Source (Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $pfName)) -Rel (Join-Path ".claude\scripts" $pfName)
 }
 $pfLockSrc = Join-Path $ToolkitRoot ".claude\scripts\package-lock.json"
@@ -1148,8 +1148,8 @@ if (Test-Path -LiteralPath $lockSrc -PathType Leaf) {
 # merge-findings.js is the review's merge, sort and number pass (issue #211);
 # render-html.js requires the dedup key rule from it, from its own folder, so
 # the two are copied together.
-Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh, render-html.js, session-init.js, pre-push-check.js, correction-ledger.js, gen-media.js, merge-findings.js) ..."
-foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js")) {
+Write-Host "  Copying .claude\scripts\ dep-free scripts (generate-index.js, open-artifact.sh, render-html.js, session-init.js, pre-push-check.js, correction-ledger.js, gen-media.js, merge-findings.js, run-checks.js) ..."
+foreach ($name in @("generate-index.js", "open-artifact.sh", "render-html.js", "session-init.js", "pre-push-check.js", "correction-ledger.js", "gen-media.js", "merge-findings.js", "run-checks.js")) {
   try {
     $src = Join-Path $ToolkitRoot (Join-Path ".claude\scripts" $name)
     $dest = Join-Path $Target (Join-Path ".claude\scripts" $name)

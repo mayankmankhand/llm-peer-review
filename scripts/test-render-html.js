@@ -1357,6 +1357,21 @@ function findingContractTests() {
     /over cap: /.test(run('cap', { title: 'T', groups: [{ label: 'code', findings: [
       { id: 'R1', severity: 'warn', what: new Array(40).join('word ') }] }] }).stderr));
 
+  // --- the bottom line's 25-word slot cap is enforced here, not asked for ---
+  // (issue #221, D11 and G2): a 30-word entry renders as its first 25 words
+  // and its slot is named on stderr; a 20-word entry is untouched.
+  const nWords = function (n) { const w = []; for (let i = 1; i <= n; i++) w.push('w' + i); return w.join(' '); };
+  const bl = run('bottomline', { title: 'T', bottomLine: [nWords(20), nWords(30), 'Then it ships.'],
+    groups: [{ label: 'code', findings: [{ id: 'R1', severity: 'warn', what: 'Should fix. One thing breaks.' }] }] });
+  const blOut = island(bl.html).bottomLine || [];
+  check('a 30-word bottom-line entry renders as its first 25 words',
+    blOut[1] === nWords(25), JSON.stringify(blOut[1]));
+  check('a 20-word bottom-line entry is untouched, and so is the short third slot',
+    blOut[0] === nWords(20) && blOut[2] === 'Then it ships.', JSON.stringify(blOut));
+  check('the trimmed slot is named on stderr by its index, and the untouched slots are not',
+    /over cap: bottomLine\[1\] 30\/25 words/.test(bl.stderr) && !/bottomLine\[0\]|bottomLine\[2\]/.test(bl.stderr),
+    bl.stderr.trim());
+
   // --- locus outranks the severity label ---------------------------------
   // severity-anchors.md calls a self-assigned severity unreliable in both
   // directions, so it must not be the primary sort.

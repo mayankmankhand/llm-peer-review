@@ -20,7 +20,7 @@ allowed-tools:
 
 1. **The script decides, you relay.** Everything happens in `node ${CLAUDE_PLUGIN_ROOT}/scripts/setup-project.js`: detection, the page, the backup, the removal, the seed, the settings merge, the report. Never reproduce a step of it by hand, never edit a managed file yourself, and never "help" by deleting something the script chose to keep.
 2. **A page is a decision (M1).** Exit code 3 means the script stopped before writing anything and needs a human answer. Present it as a decision a non-engineer can make: what it found, what the recommended default is, what `--force` will do. Only a clear yes reruns it.
-3. **The toolkit's own repository is not a project.** If `.claude-plugin/marketplace.json` at the root names the toolkit itself (a marketplace named `llm-peer-review`, or one that lists a plugin named `tk`), stop and say so: the source tree is what the plugin is built from, not something to seed. A project that publishes a plugin of its own has a marketplace file too, and is seeded like any other.
+3. **The toolkit's own repository is not a project.** The script checks whether `.claude-plugin/marketplace.json` at the root names the toolkit itself (a marketplace named `llm-peer-review`, or one that lists a plugin named `tk`) and exits 1 with `setup-project: this is the toolkit's own repository (its marketplace file names the toolkit); nothing to seed.` before it reads or writes anything (M16); relay that line and stop, and never read the JSON yourself: the source tree is what the plugin is built from, not something to seed. A project that publishes a plugin of its own has a marketplace file too, and is seeded like any other.
 4. **No em dashes or en dashes** in anything you write.
 
 </rules>
@@ -29,7 +29,7 @@ allowed-tools:
 
 <procedure>
 
-1. **Guard.** Check whether `.claude-plugin/marketplace.json` at the project root names the toolkit itself (rule 3). It does: stop.
+1. **Guard.** The script makes the toolkit's-own-repository check itself, as its first act (rule 3): exit 1 with a message beginning `setup-project: this is the toolkit's own repository` means relay it and stop (M16); you never open the JSON yourself.
 
 2. **Run the script** from the project root, once:
 

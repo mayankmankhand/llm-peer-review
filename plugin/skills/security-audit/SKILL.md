@@ -16,6 +16,8 @@ allowed-tools:
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -63,7 +65,7 @@ For each entry point that touches user-owned or privileged data, check: is there
 
 ### 3. Secrets - in code and in history
 
-Grep the working tree for hardcoded secrets (API keys, passwords, private-key headers, tokens, connection strings, provider patterns like `AKIA`, `ghp_`, `sk-`). Then **recommend a git-history scan**: a secret committed and later removed still lives in history and is still compromised. Recommend `gitleaks detect` (and `gitleaks detect --log-opts=--all` for full history) rather than trying to read history yourself - a scanner is exhaustive where you are not.
+Grep the working tree for hardcoded secrets with the provider patterns `pre-push-check.js` carries (M16): `grep -rnE -e '-----BEGIN [A-Z ]*PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b|\bsk-[A-Za-z0-9_-]{20,}\b|\bAIza[0-9A-Za-z_-]{35}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\bglpat-[A-Za-z0-9_-]{20,}\b|\b(gldt|glrt|glsoat|glptt|glcbt)-[A-Za-z0-9_-]{20,}\b|\bnpm_[A-Za-z0-9]{36}\b|\bpypi-[A-Za-z0-9_-]{16,}\b|\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b' --exclude-dir=node_modules --exclude-dir=.git . | head -50`; no output is clean, each line printed is a candidate to judge, and passwords and connection strings with no fixed shape still need your read. Then **recommend a git-history scan**: a secret committed and later removed still lives in history and is still compromised. Recommend `gitleaks detect` (and `gitleaks detect --log-opts=--all` for full history) rather than trying to read history yourself - a scanner is exhaustive where you are not.
 
 ### 4. Crypto inventory
 
@@ -110,7 +112,7 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 

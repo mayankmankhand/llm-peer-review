@@ -31,7 +31,7 @@ Mile wide, inch deep. Cross-domain release readiness, not a deep specialist revi
 
 <procedure>
 
-Read the changed files and any relevant plan file. Auto-detect the most recently modified `PLAN-*.md` in `plans/` (also check the project root for `PLAN-*.md` files). If no plan file exists, skip plan comparison and note it in the summary. If multiple plan files exist and the most recent one is not clearly complete (all tasks checked off), pause and ask the user which plan to evaluate against.
+Read the changed files and any relevant plan file, found by command (M16): `node .claude/scripts/session-init.js` prints `newestPlan` and a `plans` list whose matching entry carries `status` (`done` at progress 100) and `progress`, with `others` the list's length minus one, and `ls PLAN-*.md 2>/dev/null` prints any `PLAN-*.md` at the project root. If no plan file exists (`newestPlan` null and no root file), skip plan comparison and note it in the summary. If `others` is above 0 and the newest plan's `status` is not `done`, pause and ask the user which plan to evaluate against.
 
 Then pick one of two modes:
 
@@ -79,7 +79,7 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 !`cat .claude/skills/shared/hitl-loop.md`
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 

@@ -16,7 +16,7 @@ Gather lightweight project context so subagents can make informed decisions. Thi
 
 <procedure>
 
-1. **Project type** - Check for these markers in order:
+1. **Project type** - `ls package.json requirements.txt pyproject.toml go.mod Cargo.toml Gemfile 2>/dev/null` prints the markers present (M16); read them in this order:
    - `package.json` - Node.js / JavaScript / TypeScript
    - `requirements.txt` or `pyproject.toml` - Python
    - `go.mod` - Go

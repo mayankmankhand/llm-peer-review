@@ -374,3 +374,9 @@
 - **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
+
+## Issue 221 (run before you reason)
+
+- **Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.**
+- **A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.**
+- **A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.**

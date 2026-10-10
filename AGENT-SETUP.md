@@ -95,6 +95,7 @@ This copies:
 - `.claude/settings.local.json` (permission config - preserved if it already exists; new toolkit permissions are merged in on re-run)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
+- `.claude/scripts/run-checks.js` (the guarded checks runner behind review receipts and the `/execute` test step: runs read-only checks from the project root and decides pass or fail by machine - always updated)
 - `.claude/scripts/pre-push-check.js` (the pre-push tripwire that scans every outgoing commit for secrets, never-push files, and shared-settings changes - always updated)
 - `.claude/scripts/correction-ledger.js` (correction ledger capture and rollup helper behind `/document` and `/error-analysis` - always updated)
 - `.claude/scripts/gen-media.js` (the design workflow's seed and media helper: seeds, images, video, matting behind the user's own keys - always updated)
@@ -134,6 +135,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 - `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, and `.claude/skills/shared/html-outputs.md` - the three version-stamped files
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
+- `.claude/scripts/run-checks.js` - the guarded checks runner (review receipts, the `/execute` test step, a project's `checks.json`)
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
 - `.claude/scripts/pre-push-check.js`, `.claude/scripts/correction-ledger.js`, `.claude/scripts/gen-media.js`, and `.claude/scripts/merge-findings.js` - the pre-push tripwire, the correction ledger helper, the design workflow's media helper, and the review's merge helper
 - `.claude/scripts/ask-gpt.js`, `.claude/scripts/env-local.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` + `package-lock.json` - runtime scripts and their quarantined deps
@@ -172,6 +174,8 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 3. Remove the toolkit sections from their `CLAUDE.md` - they're now managed automatically
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
+
+**Unreleased, on top of v7.6.2 (#221):** A minor release. The loop runs as before, with rule M16 under it: a stage runs the command that settles a question before it reasons. New: `.claude/scripts/run-checks.js`, a guarded read-only checks runner that executes review receipts and the `/execute` test step and decides pass or fail by machine; `.claude/toolkit/checks.json`, a project's own test step, which replaces the default `npm test` or `pytest` run when it exists; convention C-17 (suggest) for a check step of the project's own that names no command. `correction-extractor` runs on Haiku; the `index-mapper` and `review-deps-finder` Haiku pins were tested and revoked. Details in CHANGELOG.md.
 
 **What's new in v7.6.2:** A patch on top of v7.6.1 (#219, #220). The loop runs as before. The standing review page resolves an old finding only when the run reviewed its file: `tk:review` sends `reviewedFiles` from its saved scope, and a finding on a file the run did not review is carried forward, marked `carried`. The seeded must-check findings count as the `plan` lens, so they can resolve. The correction ledger's pre-filter captures the message typed after an interrupt instead of the interrupt marker, across a session boundary within ten minutes, and `tk:document` says one line when an interrupt had no follow-up it could read. `--no-abs` also strips a nested worktree's root. To update: `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, restart Claude Code, then `tk:upgrade` in each project; no new permission rows. A project's own command that renders the standing review page with `lenses` should also pass `reviewedFiles`; without it the page behaves as before and prints a note on stderr.
 

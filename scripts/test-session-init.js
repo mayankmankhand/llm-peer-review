@@ -830,7 +830,7 @@ section('13. uncommitted.baseline: the starting snapshot (#202)', function () {
 section('14. the model mode: flag, then an unfinished plan, then fit (#205)', function () {
   const FINDERS = ['review-code-finder', 'review-security-finder', 'review-ux-finder', 'review-plan-finder',
     'review-commands-finder', 'review-deps-finder', 'review-browser-finder', 'review-copy-finder'];
-  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'correction-extractor'];
+  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
   const plugin = path.join(TMP, 'plugin layout', 'plugin');
   const copy = path.join(plugin, 'scripts', 'session-init.js');
   fs.mkdirSync(path.dirname(copy), { recursive: true });
@@ -847,6 +847,9 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
   agent('review-commands-finder', 'claude-sonnet-5-5');
   agent('index-mapper', 'sonnet');
   for (const j of JUDGES) agent(j, 'inherit');
+  // The extractor keeps its agent file's model in every mode (issue 221): pinned here so
+  // the three mode checks below can tell a kept file model from "session".
+  agent('correction-extractor', 'haiku');
   function models(repo, args) {
     const r = spawnSync(process.execPath, [copy].concat(args), { cwd: repo, env: ENV, encoding: 'utf-8' });
     let json = null;
@@ -872,7 +875,8 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     none.m.perRole['review-commands-finder'] === 'session' && none.m.perRole['review-deps-finder'] === 'session' &&
     none.m.perRole['index-mapper'] === 'sonnet',
     JSON.stringify(none.m.perRole));
-  check('the judges and the extractor are "session" in fit', JUDGES.every(function (j) { return none.m.perRole[j] === 'session'; }), JSON.stringify(none.m.perRole));
+  check('the judges are "session" in fit', JUDGES.every(function (j) { return none.m.perRole[j] === 'session'; }), JSON.stringify(none.m.perRole));
+  check('fit: the extractor reads its agent file\'s model', none.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(none.m.perRole));
   check('--models prints only generatedAt, cwd and models', sameList(Object.keys(none.json).sort(), ['cwd', 'generatedAt', 'models']), JSON.stringify(Object.keys(none.json)));
 
   const best = models(repo, ['--models', '--mode', 'best']);
@@ -880,6 +884,7 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     best.m.mode === 'best' && best.m.source === 'argument' && best.m.buildModel === 'session' &&
     FINDERS.concat(JUDGES).every(function (r) { return best.m.perRole[r] === 'session'; }),
     JSON.stringify(best.m));
+  check('--mode best: the extractor keeps its agent file\'s model', best.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(best.m.perRole));
   // #208: best leaves the map helper on its agent file's model, exactly as fit reads it.
   check('--mode best: the map helper keeps its agent file\'s model, the same value fit gives it',
     best.m.perRole && best.m.perRole['index-mapper'] === 'sonnet' && best.m.perRole['index-mapper'] === none.m.perRole['index-mapper'],
@@ -902,6 +907,7 @@ section('14. the model mode: flag, then an unfinished plan, then fit (#205)', fu
     FINDERS.concat(['index-mapper']).every(function (r) { return cheap.m.perRole[r] === 'sonnet'; }) &&
     JUDGES.every(function (j) { return cheap.m.perRole[j] === 'session'; }),
     JSON.stringify(cheap.m));
+  check('--mode cheap: the extractor keeps its agent file\'s model', cheap.m.perRole['correction-extractor'] === 'haiku', JSON.stringify(cheap.m.perRole));
   const typo = models(repo, ['--models', '--mode', 'cheep']);
   check('an unknown mode is ignored with a warning naming it', typo.m.mode === 'fit' && typo.m.source === 'default' && /"cheep" is not a mode/.test(typo.m.warning || ''), JSON.stringify(typo.m));
   const bare = models(repo, ['--models', '--mode']);
@@ -1080,6 +1086,61 @@ section('15. scopeLine: the line /review prints first (#208)', function () {
   check('every line is one line and carries a Models part the quality check finds',
     seen.length > 0 && seen.every(function (l) { return l.length > 0 && !/[\r\n]/.test(l) && MODE_RE.test(l); }),
     JSON.stringify(seen.filter(function (l) { return !l || /[\r\n]/.test(l) || !MODE_RE.test(l); })));
+});
+
+// --- 16. map.malformed: the finalize byte tests, run on the live map (#221) ---
+// generate-index.js --finalize checks the temp map's bytes, first line and title
+// and never looks at the live file again; the commands that read the map were
+// left to judge "malformed" by eye. The script now runs those same three tests
+// on the live map, so a command reads one boolean (triage spot G7).
+section('16. map.malformed: the three finalize byte tests on the live map (#221)', function () {
+  const repo = newRepo('map');
+  write(repo, 'README.md', 'x\n');
+  const head = commitAll(repo, 'init');
+  const MAP = 'CODEBASE_MAP.md';
+  const body = '\n## System Overview\n\nA throwaway repository with one file, kept here so the map has a module to describe ' +
+    'and enough bytes to clear the size floor the finalize step applies to a freshly written map.\n\n' +
+    '## Module Guide\n\n- README.md: the one file.\n';
+  const valid = '<!-- Generated: 2026-01-01 -->\n<!-- Commit: ' + head + ' -->\n\n# Codebase Map\n' + body;
+  const wrongFirst = '# Codebase Map\n<!-- Generated: 2026-01-01 -->\n' + body;
+  const noTitle = '<!-- Generated: 2026-01-01 -->\n\n# Codebase map\n' + body;
+  check('the fixtures that must pass the size test are over 200 bytes',
+    Buffer.byteLength(valid) > 200 && Buffer.byteLength(wrongFirst) > 200 && Buffer.byteLength(noTitle) > 200,
+    [valid, wrongFirst, noTitle].map(function (s) { return Buffer.byteLength(s); }).join(','));
+
+  const none = runScript([], repo);
+  check('no map: exists is false and malformed is false',
+    dig(none.json, 'map.exists') === false && dig(none.json, 'map.malformed') === false, JSON.stringify(none.json.map));
+
+  write(repo, MAP, valid);
+  const ok = runScript([], repo);
+  check('a valid map (over 200 bytes, the Generated first line, the title) is not malformed',
+    dig(ok.json, 'map.exists') === true && dig(ok.json, 'map.malformed') === false, JSON.stringify(ok.json.map));
+  check('the valid map still reports its commit and freshness beside the verdict',
+    dig(ok.json, 'map.commit') === head && dig(ok.json, 'map.commitsBehind') === 0 && dig(ok.json, 'map.stale') === false,
+    JSON.stringify(ok.json.map));
+
+  write(repo, MAP, '<!-- Generated: 2026-01-01 -->\n# Codebase Map\n');
+  const tiny = runScript([], repo);
+  check('a file of 200 bytes or fewer is malformed, header and title or not',
+    dig(tiny.json, 'map.exists') === true && dig(tiny.json, 'map.malformed') === true, JSON.stringify(tiny.json.map));
+
+  write(repo, MAP, wrongFirst);
+  const wf = runScript([], repo);
+  check('a first line that is not the Generated header is malformed, whatever follows it',
+    dig(wf.json, 'map.malformed') === true, JSON.stringify(wf.json.map));
+
+  write(repo, MAP, noTitle);
+  const nt = runScript([], repo);
+  check('a map without the exact "# Codebase Map" line is malformed (the title test is exact, as in finalize)',
+    dig(nt.json, 'map.malformed') === true, JSON.stringify(nt.json.map));
+
+  // Finalize allows trailing spaces after the title and reads CRLF files; so
+  // does the verdict, or the two would disagree on a map written on Windows.
+  write(repo, MAP, valid.replace('# Codebase Map\n', '# Codebase Map  \n').replace(/\n/g, '\r\n'));
+  const crlf = runScript([], repo);
+  check('a CRLF map with trailing spaces after the title still passes',
+    dig(crlf.json, 'map.malformed') === false, JSON.stringify(crlf.json.map));
 });
 
 console.log('');

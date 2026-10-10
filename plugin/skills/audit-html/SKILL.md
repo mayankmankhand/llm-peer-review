@@ -50,7 +50,7 @@ When in doubt during the audit, defer to those definitions rather than guessing.
 
 ### 1. Gather the project's markdown
 
-Use `Glob` to enumerate all `.md` files in the project, excluding common build/output directories: `node_modules`, `.git`, `dist`, `build`, `out`, `coverage`, `.next`, `.nuxt`, `vendor`, `target`, `__pycache__`. Also exclude `.claude/` (prompt files, vetoed anyway), `plans/PLAN-*.md` (Claude-read), and `artifacts/` (already HTML territory). If the project's `.gitignore` lists additional output directories, exclude those too - Glob does not auto-respect `.gitignore`.
+Run `git ls-files '*.md' | grep -vE '^(\.claude/|plans/PLAN-|artifacts/|node_modules/)' | xargs wc -l` once, then the same listing piped into `xargs grep -c '^##'` and into `xargs grep -cE '✅|🟥|🟨|🟩|- \[x\]'` (M16): the three outputs give every tracked markdown file its line count, `##` heading count and progress-marker count, which is both the inventory and the numbers step 3 scores, with no command substitution, so default permission mode never stops; tracked files already honor `.gitignore`, and the pipe drops `.claude/` (prompt files, vetoed anyway), `plans/PLAN-*.md` (Claude-read) and `artifacts/` (already HTML territory). Outside a git repository, fall back to `Glob` over `**/*.md` with the same three exclusions plus the common build/output directories (`node_modules`, `.git`, `dist`, `build`, `out`, `coverage`, `.next`, `.nuxt`, `vendor`, `target`, `__pycache__`) and whatever else the project's `.gitignore` lists, since Glob does not auto-respect it.
 
 If the project has a `CODEBASE_MAP.md`, read it once for context on which files are "trackers" vs "docs" vs "self-description data" - that map already labels file purposes and saves re-deriving them.
 
@@ -62,13 +62,15 @@ Before evaluating individual files, scan for projects that already render markdo
 - `.js` / `.ts` files that `readFileSync` a `.md` and call `.write` or `res.send` with HTML
 - A `public/` or `dist/` folder with `.html` files whose names mirror `.md` files in the repo
 
+The first two are one command (M16): `grep -E '"(dashboard|render|html|docs:build|pages)"' package.json 2>/dev/null; grep -rlE 'readFileSync.*\.md' --include='*.js' --include='*.ts' . 2>/dev/null | grep -v node_modules`; no output means neither exists, and each line printed is a script or file to read before deciding.
+
 If any of these exist, **stop the audit short**. Report the existing setup, do not propose building a new view, and offer two options:
 - Align the existing output with the toolkit visual tokens in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md` (typography, color palette, severity badge colors)
 - Register the existing script as the project's "view-generator of record" by noting it in `CLAUDE.md` so future sessions know not to suggest rebuilding it
 
 ### 3. Score each markdown file against signals and vetoes
 
-For every file not excluded by a hard veto, evaluate the signals from `html-own-files.md`:
+For every file not excluded by a hard veto, evaluate the signals from `html-own-files.md`, taking the line, heading and marker counts from step 1's output rather than opening each file (M16), and opening a file only for what the counts cannot show (nested tables, long sections without subheadings, a veto):
 
 - **Read-every-session tracker:** look for files in the project root or `docs/` whose contents are dense status tables, progress markers (`✅`, `🟥`, `🟨`, `🟩`, `- [x]`), or repeated section headers indicating tracked items.
 - **Markdown degrading into walls of text:** file is over ~200 lines, contains 3+ nested tables, or has long sections (>50 lines) without subheadings.

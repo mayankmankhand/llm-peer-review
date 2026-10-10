@@ -52,7 +52,7 @@ Stop after this. There is nothing to code.
 
 ### 3. Say when there is too little to rank
 
-A ranking built on one or two instances per bucket is noise wearing a chart's clothes. Before presenting anything, check the shape:
+A ranking built on one or two instances per bucket is noise wearing a chart's clothes. Before presenting anything, read the shape from the rollup, never by eye (M16): `node .claude/scripts/correction-ledger.js --show-rollup` prints the rollup JSON; read `rows` (under 10 is too few to rank) and, under `kinds`, every bucket whose `count` is exactly 1, the `kind/bucket` names to treat as noise rather than rank:
 
 - Fewer than **10 rows total**: report the individual open codes as a list, with counts, and say explicitly that this is too few to rank. Do not sort them into categories yet.
 - Any bucket at **count 1**: show it, but never describe it as a pattern.

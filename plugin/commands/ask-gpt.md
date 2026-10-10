@@ -36,7 +36,7 @@ Use this exact session ID in every `/tmp/ask-gpt-*-<session-id>.md` path through
 
 **Recovery:** if you ever lose track of the session ID mid-flow (for example after a context compression):
 
-1. Run `ls -t /tmp/ask-gpt-debate-*.md` to list debate files (newest first).
+1. Count and identify the debate files by command (M16): `ls -t /tmp/ask-gpt-debate-*.md 2>/dev/null | wc -l` prints how many exist, and `for f in /tmp/ask-gpt-debate-*.md; do [ -e "$f" ] && printf '%s ' "$f" && head -1 "$f" | grep -o 'Session: [^ ]*'; done` prints each file beside its `Session: <session-id>`; a count of `1` settles the ID without asking.
 2. If only one file exists, read its first line - it contains `<!-- Session: <session-id> -->` and gives you the ID.
 3. If multiple files exist (another parallel `/tk:ask-gpt` tab is running), do not just pick the most recent - that file may belong to the other tab and was touched more recently. Ask the user which session ID was echoed back in Step 0, or read the first line of each candidate to find the match.
 4. Once you have the session ID, both temp files use the same suffix: `/tmp/ask-gpt-context-<session-id>.md` and `/tmp/ask-gpt-debate-<session-id>.md`. Reconstruct both paths and continue.
@@ -213,9 +213,9 @@ Pass `--name debate-gpt` to the helper.
 
 <rules>
 
-After the summary is presented, the Recommended Actions enter the auto loop, and you are M2's **runner** for them: audit them per M2 before any fix. The operating rules live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (rule IDs M1-M15): read that file before the first action, then follow it as written.
+After the summary is presented, the Recommended Actions enter the auto loop, and you are M2's **runner** for them: audit them per M2 before any fix. The operating rules live in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (rule IDs M1-M16): read that file before the first action, then follow it as written.
 
-**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M15 is void. A note that the command printed nothing means this project adds none.
+**Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void. A note that the command printed nothing means this project adds none.
 
 !`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`
 

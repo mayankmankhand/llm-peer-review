@@ -20,6 +20,7 @@ A check that defers to another check must ask whether that other check runs in t
 A checked subtask means its wording shipped, not that the nearby diff did.
 A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
 A co-location rule is only as strong as its weakest call site.
+A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.
 A containment check that compares path strings is not containment.
 A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.
 A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.
@@ -37,6 +38,7 @@ A fixture that already satisfies one term of a compound gate cannot tell that te
 A fixture that fails on both pages tells them apart no better than one that passes on both; every-frame redraws made the good page's Delete unclickable too.
 A gate must be countable against the output the model actually produces.
 A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
+A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
 A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
 A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.
@@ -157,6 +159,7 @@ Lift the gold artifact verbatim into a shared tokens file for zero visual regres
 Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.
 Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.
 Masking the match that triggered the report is not masking the line.
+Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.
 Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.
 Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.
 Mutation-testing a group of assertions is not mutation-testing each assertion.

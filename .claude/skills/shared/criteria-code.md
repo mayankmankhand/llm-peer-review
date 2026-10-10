@@ -19,7 +19,7 @@ Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDI
 
 **Rebuilt render paths** (the Logic pass owns it in a fan-out). When the diff adds or changes code that empties and rebuilds part of the page (an `innerHTML` reassignment, a children replace, a list re-rendered from scratch, a render scheduled on every animation frame, timer, or state change), work it as a count, not an impression:
 
-1. Find each rebuild and the subtree it empties.
+1. Find each rebuild and the subtree it empties: `git diff <base>..<end> | awk '/^\+.*(\.innerHTML[ \t]*=|replaceChildren\(|requestAnimationFrame\(|setInterval\()/{n++; print} END{print "rebuild sites: " n+0}'` prints the candidate lines and a `rebuild sites: N` total (M16), or the Grep tool with the same pattern over the changed files when you have no Bash; which hits empty a subtree, and what state it holds, stays your judgment.
 2. List every piece of state held on an element inside that subtree: a typed draft in a field, focus or a text selection, the armed first step of a two-step control, an open or collapsed panel, a scroll position.
 3. Each one is a finding unless the code keeps that state outside the DOM and restores it after the rebuild, or skips the rebuild while that state exists.
 

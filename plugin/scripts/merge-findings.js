@@ -50,6 +50,15 @@
 //
 // stderr: one summary line,
 //   merge-findings: N raw, M merged (K merges), B block / W warn / S suggest, D non-finding line(s) skipped
+// and before it, one warning line per finding that breaks a countable rule of
+// the finding contract (.claude/skills/shared/finding-contract.md; issue #221):
+//   merge-findings: line N (<key>): what 24/18 words; hedge "it appears"
+// The rules checked are the word caps (what 18, context 22, fix 20, and 40 of
+// open prose before the fix line), the eleven banned hedges, and a `what` that
+// does not open with Blocks. / Should fix. / Optional. Warnings only: stdout
+// and the exit code are what they would be without them, because the
+// contract's judgment rules are not this script's call, and a merge that
+// dropped a finding over its prose would hide a defect to tidy a sentence.
 // A line that is not a JSON object, or carries an unknown severity, stops the
 // run: exit 1, nothing on stdout, and on stderr one JSON object
 // {"error":"bad_line","line":<n>,"reason":"..."}. A missing argument, an extra
@@ -92,10 +101,13 @@ function badInput(error, line, reason) {
   return e;
 }
 
-// The findings in a JSONL text, each with its line number, plus the count of
-// non-finding lines (NO FINDINGS, NOT CHECKED) skipped on the way.
+// The findings in a JSONL text, with `lines[i]` the line number of
+// `findings[i]` (kept beside the finding, never on it: `sources` carries each
+// line as written), plus the count of non-finding lines (NO FINDINGS, NOT
+// CHECKED) skipped on the way.
 function parseLines(text) {
   const findings = [];
+  const lineNumbers = [];
   let skipped = 0;
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -111,8 +123,9 @@ function parseLines(text) {
       throw badInput('bad_line', n, 'line ' + n + ' has severity ' + JSON.stringify(obj.severity) + '; expected block, warn or suggest');
     }
     findings.push(obj);
+    lineNumbers.push(n);
   }
-  return { findings, skipped };
+  return { findings, skipped, lines: lineNumbers };
 }
 
 const rankOf = (f) => SEVERITY_RANK[String(f.severity).toLowerCase()];
@@ -173,6 +186,39 @@ function mergeFindings(findings) {
   return merged.map((m, i) => Object.assign({ id: 'R' + (i + 1) }, m.out));
 }
 
+// The finding contract's countable rules (issue #221, D10): the word caps, the
+// eleven banned hedges and the severity phrase. Words are counted the way
+// render-html.js counts them (tags stripped, whitespace-separated), so the two
+// scripts never disagree about one finding. The judgment rules (an honest harm
+// verb, a cost in the fix line) stay with the audit.
+const CONTRACT_CAPS = { what: 18, context: 22, fix: 20, prose: 40 };
+const SEVERITY_PHRASE = /^\s*(?:Blocks|Should fix|Optional)\./;
+const BANNED_HEDGES = [
+  'it appears', 'it is possible that', 'could potentially', 'consider whether',
+  'it may be worth', 'you might want to', 'arguably', 'in a sense',
+  'it is worth noting', 'somewhat', 'in certain scenarios',
+];
+const HEDGE_RE = new RegExp('\\b(?:' + BANNED_HEDGES.join('|') + ')\\b', 'gi');
+const untagged = (s) => (typeof s === 'string' ? s.replace(/<[^>]*>/g, ' ') : '');
+const proseWords = (s) => untagged(s).split(/\s+/).filter(Boolean).length;
+
+// One stderr line for a finding that breaks a countable rule, or null.
+function contractWarning(f, lineNo) {
+  const broken = [];
+  const w = { what: proseWords(f.what), context: proseWords(f.context), fix: proseWords(f.fix) };
+  for (const k of ['what', 'context', 'fix']) {
+    if (w[k] > CONTRACT_CAPS[k]) broken.push(k + ' ' + w[k] + '/' + CONTRACT_CAPS[k] + ' words');
+  }
+  if (w.what + w.context > CONTRACT_CAPS.prose) broken.push('open prose ' + (w.what + w.context) + '/' + CONTRACT_CAPS.prose + ' words');
+  if (!SEVERITY_PHRASE.test(untagged(f.what))) broken.push('what opens without Blocks. / Should fix. / Optional.');
+  const hedges = untagged([f.what, f.context, f.fix].filter((s) => typeof s === 'string').join(' ')).match(HEDGE_RE) || [];
+  const seen = [];
+  for (const h of hedges) { const key = h.toLowerCase(); if (!seen.includes(key)) seen.push(key); }
+  if (seen.length) broken.push('hedge ' + seen.map((h) => JSON.stringify(h)).join(', '));
+  if (!broken.length) return null;
+  return 'merge-findings: line ' + lineNo + ' (' + stableFindingKey(f) + '): ' + broken.join('; ');
+}
+
 function summaryLine(raw, merged, skipped) {
   const count = (sev) => merged.filter((m) => m.severity === sev).length;
   const merges = raw - merged.length;
@@ -200,10 +246,14 @@ function main(argv) {
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { fail('not_found', null, file + ' could not be read: ' + e.message); }
   let parsed;
   try { parsed = parseLines(text); } catch (e) { fail(e.error || 'bad_line', e.line, e.message); }
+  parsed.findings.forEach((f, i) => {
+    const warning = contractWarning(f, parsed.lines[i]);
+    if (warning) process.stderr.write(warning + '\n');
+  });
   const merged = mergeFindings(parsed.findings);
   if (merged.length) process.stdout.write(merged.map((m) => JSON.stringify(m)).join('\n') + '\n');
   process.stderr.write(summaryLine(parsed.findings.length, merged, parsed.skipped) + '\n');
 }
 
-module.exports = { stableFindingKey, parseLines, mergeFindings, main };
+module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, main };
 if (require.main === module) main(process.argv.slice(2));

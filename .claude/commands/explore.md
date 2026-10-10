@@ -158,7 +158,7 @@ Briefly explain *why* you're asking when it adds value. Example: "I'm asking abo
 <phase name="worktree-setup">
 Before starting codebase analysis, check if this session is running in a Git worktree. A worktree is a separate working folder linked to the same repo - it lets you work on a feature without touching your main code.
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
 
 ### How to detect a worktree
 Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, fall back to comparing the output of these two commands:
@@ -170,7 +170,7 @@ If they return different values, you are in a worktree. If they match, you are i
 ### What to do
 
 **If in a worktree AND an issue number came up during Phase 1:**
-1. Check if the current branch already matches the `worktree-<number>-<label>` pattern. If so, skip - it's already named correctly.
+1. Check if the current branch already matches the `worktree-<number>-<label>` pattern, by command (M16): test `worktree.branch` from the session-init JSON against `^worktree-[0-9]+-[A-Za-z0-9._-]+$`, or run `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?`, where `0` means it matches. If so, skip - it's already named correctly.
 2. If you only have an issue number (no title), fetch it with the **"Read issue" row** for the detected host (detect it now if Phase 1 never needed it, per the Issue Host section)
 3. If in detached HEAD state, create a branch instead: `git checkout -b worktree-<issue-number>-<short-label>`
 4. Otherwise, rename the current branch: `git branch -m worktree-<issue-number>-<short-label>`
@@ -218,7 +218,7 @@ Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root
 
 **If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/index mode:<m>`, with `<m>` the Models answer, to generate the map. After it completes, read the new map and proceed.
 
-**If it exists but is malformed:** Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
+**If it exists but is malformed:** `map.malformed` in the session-init JSON is the verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
 ### Read past lessons
 After the codebase map, use the lesson index from the session-init JSON (`lessons.content` is the full index, one line each; `lessons.hasDetail` tells you whether `LESSONS-detail.md` exists). If the script was unavailable, read `LESSONS.md` directly instead. If a lesson looks relevant to this feature, open its full write-up in `LESSONS-detail.md` before scoping, so exploration does not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.

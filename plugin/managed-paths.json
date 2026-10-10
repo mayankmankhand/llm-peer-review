@@ -57,6 +57,7 @@
     ".claude/scripts/package.json",
     ".claude/scripts/pre-push-check.js",
     ".claude/scripts/render-html.js",
+    ".claude/scripts/run-checks.js",
     ".claude/scripts/session-init.js",
     ".claude/scripts/session-start.js",
     ".claude/scripts/setup-project.js",

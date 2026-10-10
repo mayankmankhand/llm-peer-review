@@ -54,6 +54,7 @@
 //   - **Runs:** every upgrade            (optional: skip the range filter)
 //   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds)
 //   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
+//   - **Severity:** suggest             (optional: warn, the default, or suggest; what a regex detector's findings carry)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
 //   - **Fix:** dispatch the typed finder for the kind; move any pasted criteria into a skill it preloads
@@ -112,8 +113,13 @@
 // `"` in it would otherwise break the command and kill a true finding as
 // RECEIPT FAILED.
 //
+// The toolkit's own repository is never a project: when .claude-plugin/
+// marketplace.json at the project root names the toolkit (see
+// marketplaceNamesToolkit), every mode stops with one stderr line before it
+// reads or writes anything else.
+//
 // Exit codes: 0 (findings are data, zero is a valid count; a refused stamp is
-// also 0), 1 on error or on a refused rollback.
+// also 0), 1 on error, on a refused rollback, or in the toolkit's own repository.
 // Dependency-free, like every script under .claude/scripts/.
 
 const fs = require('fs');
@@ -574,7 +580,7 @@ function parseConventions(text) {
   let cur = null;
   for (const raw of text.split(/\r?\n/)) {
     const h = /^###\s+(C-\d+):\s*(.+?)\s*$/.exec(raw);
-    if (h) { cur = { id: h[1], title: h[2], since: '0.0.0', always: false, scope: 'prompt-files', detector: 'regex', patterns: [], fix: '' }; out.push(cur); continue; }
+    if (h) { cur = { id: h[1], title: h[2], since: '0.0.0', always: false, scope: 'prompt-files', detector: 'regex', severity: 'warn', patterns: [], fix: '' }; out.push(cur); continue; }
     if (!cur) continue;
     const b = /^-\s+\*\*([A-Za-z ]+):\*\*\s*(.*)$/.exec(raw);
     if (!b) continue;
@@ -585,6 +591,9 @@ function parseConventions(text) {
     else if (key === 'runs') cur.always = /^every upgrade\b/i.test(val);
     else if (key === 'scope') cur.scope = val;
     else if (key === 'detector') cur.detector = val;
+    // `Severity` is what a regex detector's findings carry: warn (the default)
+    // or suggest; main() refuses any other value.
+    else if (key === 'severity') cur.severity = val;
     else if (key === 'looks behind') { const m = /`(.+)`/.exec(val); if (m) cur.patterns.push(m[1]); }
     else if (key === 'fix') cur.fix = val;
   }
@@ -1393,11 +1402,34 @@ b && $0 !~ /^[ \t]*$/ && $0 !~ /^[ \t]*#/ { x = $0; sub(/^[ \t]+/, "", x); t = t
 { flush() }
 END { flush(); exit !f }`;
 
+// Is this project the toolkit's own repository? The source tree is what the
+// plugin is built from, not something to seed or upgrade. The marketplace file
+// names the toolkit itself when the marketplace is named llm-peer-review or
+// lists a plugin named tk; a project that publishes a plugin of its own has a
+// marketplace file too and is treated like any other project.
+// Byte-identical in setup-project.js and upgrade-audit.js;
+// scripts/test-upgrade-audit.js fails when the two copies drift.
+function marketplaceNamesToolkit(projectDir) {
+  let json;
+  try {
+    json = JSON.parse(fs.readFileSync(path.join(projectDir, '.claude-plugin', 'marketplace.json'), 'utf8'));
+  } catch (e) {
+    return false;
+  }
+  if (!json || typeof json !== 'object') return false;
+  if (json.name === 'llm-peer-review') return true;
+  const plugins = Array.isArray(json.plugins) ? json.plugins : [];
+  return plugins.some((p) => p && typeof p === 'object' && p.name === 'tk');
+}
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
   const project = git(['rev-parse', '--show-toplevel'], cwd) || cwd;
   const P = (rel) => path.join(project, rel);
+  // The source tree the plugin is built from is not a project: nothing here is
+  // audited, stamped or rolled back, and the skill relays this line.
+  if (marketplaceNamesToolkit(project)) { console.error('upgrade-audit: this is the toolkit\'s own repository (its marketplace file names the toolkit); nothing to audit.'); process.exit(1); }
   if (opts.rollbackTo !== null) { rollbackRecord(P, opts.rollbackTo); return; }
   const pluginRoot = path.resolve(opts.pluginRoot || path.join(__dirname, '..'));
   const conventionsPath = opts.conventions || path.join(pluginRoot, 'skills', 'shared', 'conventions.md');
@@ -1442,6 +1474,7 @@ function main() {
 
   const all = parseConventions(fs.readFileSync(conventionsPath, 'utf8'));
   for (const c of all) if (validVersion(c.since) === null) { console.error('upgrade-audit: bad Since in ' + c.id); process.exit(1); }
+  for (const c of all) if (c.severity !== 'warn' && c.severity !== 'suggest') { console.error('upgrade-audit: bad Severity in ' + c.id + ': ' + c.severity + ' (warn or suggest)'); process.exit(1); }
   const afterFrom = (c) => fromVersion === null || compareVersions(c.since, fromVersion) > 0;
   const inRange = all.filter(c => (c.always || afterFrom(c)) && compareVersions(c.since, toVersion) <= 0);
 
@@ -1480,8 +1513,8 @@ function main() {
           lines.forEach((line, i) => {
             if (!re.test(line)) return;
             const { key, n } = claim(c.id + ':' + rel + ':' + digest(pat + '\n' + line));
-            emit({ id: c.id, key, severity: 'warn', convention: c.title, file: { relPath: rel, line: i + 1 },
-              what: 'Should fix. ' + rel + ' line ' + (i + 1) + ' is behind convention ' + c.id + ' (' + c.title + ').',
+            emit({ id: c.id, key, severity: c.severity, convention: c.title, file: { relPath: rel, line: i + 1 },
+              what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + rel + ' line ' + (i + 1) + ' is behind convention ' + c.id + ' (' + c.title + ').',
               fix: c.fix, since: c.since,
               receipt: { check: regexCheck(rel, line, n, pat), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
           });

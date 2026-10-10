@@ -4,7 +4,7 @@ This folder is yours. The LLM Peer Review plugin reads the files below when they
 
 Use it when your project needs the toolkit to follow a rule of its own: a kind of review the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
 
-## The six files
+## The seven files
 
 Each file has a fixed name. Create only the ones you need.
 
@@ -16,8 +16,11 @@ Each file has a fixed name. Create only the ones you need.
 | `fix-rules.md` | every stage that runs the auto-fix loop | Extra conditions before a fix is applied, or extra actions that must always ask you first |
 | `severity-anchors.md` | every reviewer | How severe your own kinds' findings are (what is a Block here, what is only a Suggest) |
 | `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security finder `/tk:review` dispatches), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
+| `checks.json` | `/tk:execute`, at its test step, through the toolkit's checks runner | Your project's checks: a JSON array of `{ "id", "check", "expect" }`, for example `[{"id": "tests", "check": "npm test", "expect": {"exit": 0}}]` |
 
 Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's.
+
+`checks.json` is the one file that is not prose: a JSON array, each entry a check the runner executes from your project root. `expect` is an object with exactly one of `exit` (the exit code the check must return), `match` (a regex the saved output must contain), `noMatch` (a regex it must not contain) or `lines` (`{"min": 1, "max": 3}`, bounds on the non-empty lines of output); regexes are tested with the multiline flag against the saved output. A prose string in place of the object means the stage reads the saved output and judges it against your sentence. `check` must be a read-only command the runner allows (`npm test`, `pytest`, `grep`, `git log` and the like); one that writes, redirects or substitutes is refused and never run. When this file exists it is the whole test step: the stage runs these checks instead of the project's default `npm test` or `pytest`, so list your test command as one of the entries or it never runs. A check that fails, or one the runner refuses, turns the test step red; the reason is on the runner's output, and each check's saved output sits in the folder the stage names.
 
 ## review-kinds.md
 

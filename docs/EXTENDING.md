@@ -53,7 +53,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 ### Extending a toolkit stage
 
-**On the plugin you cannot edit a toolkit file, and from v7.4.0 you do not need to.** Six files in `.claude/toolkit/`, a folder that is yours, let your project add its own text to a stage. Each is read when it exists and changes nothing when it does not:
+**On the plugin you cannot edit a toolkit file, and from v7.4.0 you do not need to.** Seven files in `.claude/toolkit/`, a folder that is yours, let your project add its own text to a stage. Each is read when it exists and changes nothing when it does not:
 
 | File | What it adds |
 |---|---|
@@ -63,6 +63,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 | `fix-rules.md` | Extra conditions before a fix is applied, or extra actions that must always ask you. Additive only: a line that loosens one of the loop's own rules is ignored |
 | `severity-anchors.md` | How severe your own kinds' findings are |
 | `do-not-report.md` | Finding categories that are noise in your project, read by the security reviewers right after the toolkit's own list; an entry suppresses a category and never lowers a real severity |
+| `checks.json` | Your project's checks, run by `/tk:execute` at its test step through the toolkit's checks runner: a JSON array of `{"id", "check", "expect"}`, for example `[{"id": "tests", "check": "npm test", "expect": {"exit": 0}}]`; `expect` is one of `exit`, `match`, `noMatch` or `lines`, and `check` must be a read-only command the runner allows. When the file exists it replaces the default test run, so include your test command; a failed or refused check fails the step |
 
 `/tk:setup` writes a README into the folder that explains each file and the table format, and never touches the folder again. Your kinds run when `/tk:review` picks specialists on its own from what changed. `/tk:review <your-kind>` does not run it: it prints one line saying so (the name matches the short name in parentheses in your row's Specialist cell, or the whole cell), and `/tk:review-full` leaves your kinds out of its fan-out and says so in its charter (#201). Your review agent goes through the same audit as the toolkit's, so it needs an output contract and no edit tools; `/tk:upgrade` tells you when a row names an agent that is missing or can edit (C-12). Your kind runs on the model its agent file names in every mode, whatever the cycle's best, fit or cheap answer (see [If your command spawns subagents](#if-your-command-spawns-subagents)). The agent can stay short: list the plugin's skills in its `skills:` line by their scoped names (`tk:dispatch-contract`, `tk:review-code-criteria`) and write only what is specific to your project.
 
