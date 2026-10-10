@@ -68,8 +68,14 @@
 // segment at a time with every existing prefix through realpath, because a
 // lexical resolve cancels `link/..` before anyone looks at the link and the
 // kernel does not (second-round audit of the 7.6.3 review: `cat d/../x` with
-// d a symlink read the project's parent). A refused check gets verdict
-// `error` with the reason, no file, and nothing executed.
+// d a symlink read the project's parent). The fence judges only the paths a
+// check names, so a reader that follows the links it discovers while walking
+// the tree (grep -R, rg -L, find -L, diff -r) has that flag refused, as does
+// one that opens whatever a folder or a list hands it (diff on a folder,
+// sort and wc --files0-from, file -f, find -files0-from), while the forms
+// that follow only a named link stay allowed (grep -r, rg, find -H; review of
+// 7.6.4, R17). A refused check gets verdict `error` with the reason, no
+// file, and nothing executed.
 //
 // Two spellings the audit used to slip a value past a rule, and the answer to
 // each: GNU getopt accepts any unambiguous prefix of a long option (sort
@@ -337,6 +343,18 @@ function longOptionIs(a, name, shortest) {
   const opt = a.split('=')[0];
   return opt.length >= shortest.length && opt.length <= name.length && name.startsWith(opt);
 }
+// A short-flag cluster (-rnR) read letter by letter, the way grepPositions
+// reads one: the first letter that takes a value owns the rest of the word
+// (grep -eR is the pattern R, not the flag -R), so the reading stops there.
+// True when `letter` is a flag of the cluster.
+function clusterHasFlag(a, letter, valueLetters) {
+  if (a.length < 2 || a[0] !== '-' || a[1] === '-') return false;
+  for (let k = 1; k < a.length; k++) {
+    if (a[k] === letter) return true;
+    if (valueLetters.indexOf(a[k]) !== -1) return false;
+  }
+  return false;
+}
 
 // sed: an address-print script (1,3p; /re/p; /a/,/b/p) or a plain
 // substitution s<d>pattern<d>replacement<d>[flags] with <d> one of / | # , and
@@ -388,10 +406,19 @@ function sedRule(args) {
 }
 
 // find: every action that writes or runs something is named here; the rest
-// of find only walks and prints.
+// of find only walks and prints. -L and -follow make the walk follow every
+// symbolic link it finds, so a link to an outside folder would list that
+// folder's names (R17); -H follows only the starting points, which the fence
+// judges, and -P follows none, so both stay. -files0-from reads the starting
+// points from a file, so the walk would begin wherever that file says.
 const FIND_REFUSED = ['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprintf', '-fls', '-fprint0'];
 function findRule(args) {
-  for (const a of args) if (FIND_REFUSED.indexOf(a) !== -1) return "refused: find " + a + " writes or runs a command";
+  for (const a of args) {
+    if (FIND_REFUSED.indexOf(a) !== -1) return "refused: find " + a + " writes or runs a command";
+    if (a === '-follow') return 'refused: find -follow' + SYMLINK_WALK;
+    if (/^-[HLP]*L[HLP]*$/.test(a)) return 'refused: find -L' + SYMLINK_WALK;
+    if (a === '-files0-from') return 'refused: find -files0-from walks every starting point a list names, which the read fence cannot judge';
+  }
   return null;
 }
 
@@ -581,19 +608,19 @@ function curlRule(args) {
 const ALLOW = {
   // Plain filters and readers: each reads files or stdin and writes only to
   // its own stdout. The few with a write or exec flag have that flag refused.
-  grep: ok,                                   // searches; no exec or write flag
-  rg: (a) => a.some((x) => flagIs(x, ['--pre', '--pre-glob'])) ? 'refused: rg --pre runs a preprocessor command' : null,
+  grep: grepRule,                             // searches; -R and -S follow the links it finds
+  rg: rgRule,                                 // --pre runs a program; -L follows the links it finds
   cat: ok,                                    // concatenates to stdout
   head: ok,                                   // prints the first lines
   tail: ok,                                   // prints the last lines
-  wc: ok,                                     // counts
+  wc: wcRule,                                 // counts; --files0-from opens the files a list names
   ls: ok,                                     // lists a folder
   test: ok,                                   // evaluates a condition, prints nothing
   '[': ok,                                    // the same as test
-  diff: ok,                                   // compares, prints the difference
+  diff: diffRule,                             // compares, prints the difference; -r opens through the links it finds
   cmp: ok,                                    // compares bytes
   jq: ok,                                     // filters JSON; has no file write or exec
-  sort: sortRule,                             // -o writes; --compress-program runs a program; -T picks a temp folder
+  sort: sortRule,                             // -o writes; --compress-program runs a program; -T picks a temp folder; --files0-from opens the files a list names
   uniq: uniqRule,                             // a second file argument is an output file
   comm: ok,                                   // compares sorted files
   cut: ok,                                    // selects columns
@@ -601,7 +628,7 @@ const ALLOW = {
   echo: ok,                                   // prints its arguments
   printf: ok,                                 // prints its arguments
   stat: ok,                                   // prints file metadata
-  file: (a) => a.some((x) => x === '-C' || x === '--compile') ? 'refused: file -C compiles a magic file to disk' : null,
+  file: fileRule,                             // prints a file's type; -C compiles to disk, -f opens the files a list names
   basename: ok,                               // string work on a path
   dirname: ok,                                // string work on a path
   realpath: ok,                               // resolves a path
@@ -611,7 +638,7 @@ const ALLOW = {
   sleep: ok,                                  // waits
   lsof: ok,                                   // lists open files and ports
   sed: sedRule,                               // only print and substitute scripts, no -i
-  find: findRule,                             // walks and prints; the acting flags refused
+  find: findRule,                             // walks and prints; the acting, the following and the list-fed flags refused
   git: gitRule,                               // read-only subcommands only
   node: nodeRule,                             // the toolkit's own read-only scripts only
   // Ecosystem test entry points.
@@ -636,14 +663,44 @@ const ALLOW = {
 // runs on every temporary file it spills (second-round audit: `sort -S 1k
 // --compress-program=./x big.txt` ran x many times, and a bare name such as
 // gzip runs from PATH), in the = and the separate-word spelling. -T and
-// --temporary-directory choose where those files are written. Each long
-// option is refused by its unambiguous prefixes as well (--out, --co, --t).
+// --temporary-directory choose where those files are written. --files0-from
+// opens every file named in a list it reads from a file or stdin (second
+// round of R17: `find . -type l -printf '%l\0' | sort --files0-from=-` saved
+// an outside file's text, the names being the link targets find printed; so
+// did a project file holding the outside path), and --fil is its shortest
+// unambiguous prefix (--fi is shared with --field-separator). Each long
+// option is refused by its unambiguous prefixes as well (--out, --co, --t,
+// --fil).
 function sortRule(args) {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (/^-[A-Za-z]*o/.test(a) || longOptionIs(a, '--output', '--o')) return 'refused: sort -o writes a file';
     if (longOptionIs(a, '--compress-program', '--co')) return 'refused: sort --compress-program runs a program on its temporary files';
     if (/^-[A-Za-z]*T/.test(a) || longOptionIs(a, '--temporary-directory', '--t')) return 'refused: sort -T writes temporary files to a folder of the check\'s choosing';
+    if (longOptionIs(a, '--files0-from', '--fil')) return 'refused: sort --files0-from' + LIST_READ;
+  }
+  return null;
+}
+// wc --files0-from (--f and longer: no other wc long option starts with f)
+// opens every file a list names the same way; it prints counts and the names,
+// never text, but what it opens the fence never judged. file -f and
+// --files-from (--f and longer) open every file a list names to type them;
+// -f is read inside a cluster the way grepPositions reads one (file's
+// value-taking letters are e, F, f, m and P), and -C compiles a magic file to
+// disk in either spelling.
+function wcRule(args) {
+  for (const a of args) {
+    if (a === '--') break;
+    if (longOptionIs(a, '--files0-from', '--f')) return 'refused: wc --files0-from' + LIST_READ;
+  }
+  return null;
+}
+const FILE_SHORT_VALUE = 'eFfmP';
+function fileRule(args) {
+  for (const a of args) {
+    if (a === '--') break;
+    if (a === '--compile' || clusterHasFlag(a, 'C', FILE_SHORT_VALUE)) return 'refused: file -C compiles a magic file to disk';
+    if (longOptionIs(a, '--files-from', '--f') || clusterHasFlag(a, 'f', FILE_SHORT_VALUE)) return 'refused: file -f (--files-from)' + LIST_READ;
   }
   return null;
 }
@@ -785,6 +842,93 @@ function grepPositions(cmd, words, meta) {
   return { exempt, judge };
 }
 
+// The readers that walk a tree and open what they find (R17, review of
+// 7.6.4). The fence judges every path a check names and follows a named link
+// through realpath, but a walker that follows the links it discovers reads
+// through a link the fence never saw: a project holding a directory link to
+// an outside folder let `grep -R pattern .` save that folder's text into a
+// receipt. grep -r, --recursive and rg follow only the links named on the
+// command line, so they stay; grep -R and --dereference-recursive (every
+// unambiguous prefix: --der and longer, the --de ones are ambiguous with
+// --devices), BSD grep's -S (file links under -R), rg -L and --follow (--fol
+// and longer), and diff -r and --recursive (--rec and longer; a recursive
+// compare opens the files it finds) are refused, in the separate and the
+// clustered spelling, with the cluster read the way grepPositions reads it.
+// ls -R prints names only and stays allowed; the other readers on the list
+// take named paths, which the fence judges.
+//
+// Second round (same review): the skeptics got outside through two readers
+// that open what they are HANDED rather than what they walk. A folder named
+// to diff: a directory compare, recursive or not, opens every file it finds
+// in the two folders, and GNU diff follows a file symlink by default (the
+// opt-out is --no-dereference), so `diff dirA dirB` with dirA/x a link to an
+// outside file saved that file's text while the fence judged only the two
+// folder names; -N, -y, a trailing slash and --from-file=dirB were the same
+// hole. So diffFolderOperand refuses every operand that resolves to an
+// existing folder, positional or a --from-file / --to-file value, resolved
+// the way the fence resolves a path. A list of names: sort --files0-from
+// opens every NUL-terminated name it reads from a file or from stdin, and
+// find -printf '%l' or git show of a tracked link prints an outside target
+// as a name, so the pipe `find . -type l -printf '%l\0' | sort
+// --files0-from=-` saved the outside text. The list-fed flags are refused on
+// every reader that has one (sort and wc --files0-from, file -f, find
+// -files0-from); the name printers stay, since a name is not a read.
+const SYMLINK_WALK = ' follows symbolic links while walking the tree, which the read fence cannot judge';
+const LIST_READ = ' opens every file a list names, which the read fence cannot judge';
+function isFolder(root, w) {
+  if (root === null) return false;
+  try { return fs.statSync(physicalResolve(root, w).abs).isDirectory(); } catch (e) { return false; }
+}
+// Every diff operand that is a folder: the positional words and the value of
+// a --from-file= / --to-file= spelling (a separate-word value is a positional
+// word already). A flag's own value that happens to name a folder (-L dir)
+// is refused as well, which costs a label and nothing else. Runs after the
+// fence, so an outside folder keeps its outside reason.
+function diffFolderOperand(words, meta, root, env) {
+  for (let i = 1; i < words.length; i++) {
+    if (meta[i].input) continue;
+    const w = substitutePluginRoot(meta[i].raw, env);
+    let cand = w;
+    if (w.length > 1 && w[0] === '-') {
+      const fv = FLAG_VALUE_RE.exec(w);
+      if (!fv) continue;
+      cand = fv[2];
+    }
+    if (cand === '' || cand === '-') continue;
+    if (isFolder(root, cand)) {
+      return "refused: diff on the folder '" + cand + "' opens every file it finds there and follows the symbolic links among them, which the read fence cannot judge (name the files instead)";
+    }
+  }
+  return null;
+}
+const DIFF_SHORT_VALUE = 'CDFILSUWxX';
+function grepRule(args) {
+  for (const a of args) {
+    if (a === '--') break;
+    if (longOptionIs(a, '--dereference-recursive', '--der')) return 'refused: grep --dereference-recursive (-R)' + SYMLINK_WALK + ' (grep -r follows only the links a check names)';
+    if (clusterHasFlag(a, 'R', GREP_SHORT_VALUE)) return 'refused: grep -R' + SYMLINK_WALK + ' (grep -r follows only the links a check names)';
+    if (clusterHasFlag(a, 'S', GREP_SHORT_VALUE)) return 'refused: grep -S' + SYMLINK_WALK;
+  }
+  return null;
+}
+function rgRule(args) {
+  for (const a of args) {
+    if (a === '--') break;
+    if (flagIs(a, ['--pre', '--pre-glob'])) return 'refused: rg --pre runs a preprocessor command';
+    if (longOptionIs(a, '--follow', '--fol')) return 'refused: rg --follow (-L)' + SYMLINK_WALK;
+    if (clusterHasFlag(a, 'L', RG_SHORT_VALUE)) return 'refused: rg -L' + SYMLINK_WALK;
+  }
+  return null;
+}
+function diffRule(args) {
+  for (const a of args) {
+    if (a === '--') break;
+    if (longOptionIs(a, '--recursive', '--rec')) return 'refused: diff --recursive (-r)' + SYMLINK_WALK + ' (a recursive compare opens the files it finds)';
+    if (clusterHasFlag(a, 'r', DIFF_SHORT_VALUE)) return 'refused: diff -r' + SYMLINK_WALK + ' (a recursive compare opens the files it finds)';
+  }
+  return null;
+}
+
 // The guard over one parsed check. Returns null when every segment is allowed,
 // else the first refusal reason. `root` is the resolved project root the reads
 // are confined to, `env` the environment the check would run with (for the
@@ -820,6 +964,10 @@ function guardParsed(parsed, root, env) {
     for (const w of positions.judge) {
       const outside = outsideProject(substitutePluginRoot(w, env), root, {});
       if (outside) return outside;
+    }
+    if (cmd === 'diff') {
+      const folder = diffFolderOperand(words, meta, root, env);
+      if (folder) return folder;
     }
   }
   return null;
