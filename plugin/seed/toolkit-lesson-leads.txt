@@ -39,6 +39,7 @@ A fixture that fails on both pages tells them apart no better than one that pass
 A gate must be countable against the output the model actually produces.
 A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
 A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
+A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
 A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
 A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.
@@ -96,6 +97,7 @@ A 🟩 on "ask the user about X" can mislead.
 AI debates surface things standard reviews miss.
 AI peer review recommendations often over-engineer.
 Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.
+After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
 An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.

@@ -380,3 +380,8 @@
 - **Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.**
 - **A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.**
 - **A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.**
+
+## Review of 7.6.3 (the runner executes what it judged)
+
+- **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
+- **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
