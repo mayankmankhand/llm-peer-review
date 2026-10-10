@@ -3,7 +3,8 @@
 //
 // test-session-init.js - assertions for .claude/scripts/session-init.js: the plan
 // header's start commit, the --scope mode a review reads to find what it covers
-// (issue #182), and the models object every output carries (issue #205).
+// (issue #182), the models object every output carries (issue #205), and the
+// worktree test from a subfolder (issue #226).
 //
 // Maintainer-only: lives under scripts/, which never ships downstream.
 //
@@ -1141,6 +1142,26 @@ section('16. map.malformed: the three finalize byte tests on the live map (#221)
   const crlf = runScript([], repo);
   check('a CRLF map with trailing spaces after the title still passes',
     dig(crlf.json, 'map.malformed') === false, JSON.stringify(crlf.json.map));
+});
+
+section('17. worktree.isWorktree from a subfolder (#226)', function () {
+  // From a subfolder of the main copy git prints --git-dir absolute and
+  // --git-common-dir relative, so comparing the raw strings called the main copy
+  // a worktree. Each case runs from the root and from a subfolder.
+  const repo = newRepo('wt-main');
+  write(repo, 'sub/deep/file.txt', 'x\n');
+  commitAll(repo, 'init');
+  const wt = path.join(TMP, 'wt-linked');
+  git(repo, ['worktree', 'add', '-q', '-b', 'wt-branch', wt]);
+  fs.mkdirSync(path.join(wt, 'sub'), { recursive: true });
+  const at = function (cwd) { return runScript([], cwd).json.worktree || {}; };
+  const sub = at(path.join(repo, 'sub', 'deep'));
+  check('fixture: from the subfolder git prints the two dirs differently',
+    typeof sub.gitDir === 'string' && typeof sub.commonDir === 'string' && sub.gitDir !== sub.commonDir, JSON.stringify(sub));
+  check('the main copy is not a worktree at its root', at(repo).isWorktree === false, JSON.stringify(at(repo)));
+  check('the main copy is not a worktree from a subfolder', sub.isWorktree === false, JSON.stringify(sub));
+  check('a linked worktree is a worktree at its root', at(wt).isWorktree === true, JSON.stringify(at(wt)));
+  check('a linked worktree is a worktree from a subfolder', at(path.join(wt, 'sub')).isWorktree === true, JSON.stringify(at(path.join(wt, 'sub'))));
 });
 
 console.log('');
