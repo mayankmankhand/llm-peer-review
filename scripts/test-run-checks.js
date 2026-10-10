@@ -55,6 +55,10 @@ Object.assign(ENV, {
   GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com',
   GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com',
 });
+// The same environment with no plugin root: the ${CLAUDE_PLUGIN_ROOT} literal
+// is inert text for the guard only while the variable is absent.
+const ENV_NO_PLUGIN = Object.assign({}, ENV);
+delete ENV_NO_PLUGIN.CLAUDE_PLUGIN_ROOT;
 
 // --- the sandbox project ----------------------------------------------------
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'run-checks-'));
@@ -86,17 +90,18 @@ function checksFile(list) {
 }
 function outDir(label) { return path.join(proj, 'reports', 'out-' + label + '-' + (++counter)); }
 // Run the runner. `json` is the parsed stdout or null; `byId` maps id to row.
-function run(args, cwd) {
-  const r = spawnSync(process.execPath, [SCRIPT].concat(args), { cwd: cwd || proj, encoding: 'utf8', env: ENV });
+// `env` replaces the child's environment (ENV by default).
+function run(args, cwd, env) {
+  const r = spawnSync(process.execPath, [SCRIPT].concat(args), { cwd: cwd || proj, encoding: 'utf8', env: env || ENV });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
   const byId = {};
   if (json && Array.isArray(json.checks)) for (const c of json.checks) byId[c.id] = c;
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json, byId };
 }
-function runChecks(list, label, extra) {
+function runChecks(list, label, extra, env) {
   const out = outDir(label);
-  const r = run(['--checks', checksFile(list), '--out', out].concat(extra || []));
+  const r = run(['--checks', checksFile(list), '--out', out].concat(extra || []), null, env);
   r.out = out;
   return r;
 }
@@ -375,7 +380,8 @@ section('9. the guard accepts the read-only shapes the call sites will write', f
   const allowed = [
     "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/",
     'curl -sS -I -m 2 http://127.0.0.1:5173',
-    'curl -f --max-time 5 -H "Accept: text/html" http://[::1]:8080/health',
+    // The IPv6 address carries a [, which bash would glob: it must be quoted (review of 7.6.3, R1).
+    'curl -f --max-time 5 -H "Accept: text/html" "http://[::1]:8080/health"',
     'node .claude/scripts/session-init.js --scope',
     'node .claude/scripts/merge-findings.js reports/x/findings.jsonl',
     'node .claude/scripts/upgrade-audit.js --since 7.6.0',
@@ -419,7 +425,8 @@ section('9. the guard accepts the read-only shapes the call sites will write', f
     'node $HOME/.claude/plugins/data/tk-llm-peer-review/current/scripts/pre-push-check.js origin main',
     'echo ${CLAUDE_PLUGIN_ROOT}',
   ];
-  for (const c of pluginForms) check('allowed (plugin path): ' + c, guardCheck(c) === null, guardCheck(c));
+  // Judged with the variable absent: once it is set, the literal becomes that folder and is fenced (section 11).
+  for (const c of pluginForms) check('allowed (plugin path): ' + c, guardCheck(c, undefined, ENV_NO_PLUGIN) === null, guardCheck(c, undefined, ENV_NO_PLUGIN));
   const pluginRefused = [
     ['node ${CLAUDE_PLUGIN_ROOT}/scripts/other.js', /node may run only/],
     ['node ${OTHER_ROOT}/scripts/session-init.js', /brace parameter expansion/],
@@ -566,6 +573,375 @@ section('10. a receipt file the runner wrote renders at the review page\'s recei
   check('the page text contains the receipt output', html.indexOf('1:hello') !== -1 && html.indexOf('3:hello') !== -1);
   check('the local path never reaches the page', !!finding && finding.receipt && finding.receipt.stdoutFile === undefined && html.indexOf('reports/receipts/run-checks-test/R1.txt') === -1);
   check('the renderer did not refuse or drop the receipt', !/receipt .* (refused|dropped|unreadable)/.test(rr.stderr), rr.stderr);
+});
+
+// Review of 7.6.3 (2026-10-09), R1: the guard judged the tokenizer's words but
+// bash ran the original text, so anything bash expanded after the guard looked
+// (an ANSI-C quote, the ${CLAUDE_PLUGIN_ROOT} literal while unset, $HOME inside
+// a word, an unquoted wildcard, a --flag=value) reached a file the fence never
+// saw. Now bash runs a line rebuilt from the judged words with every word in
+// single quotes, and the spellings that relied on bash expanding are refused.
+// R6: pipefail, so an early stage's failure is the pipeline's. R7: a quoted
+// tilde and a grep pattern are text, not paths. R9: the other test wrappers.
+section('11. bash runs the judged words: expansions refused or inert, pipefail, patterns are text, more wrappers', function () {
+  const { tokenize, guardCheck, rebuildCommand } = require(SCRIPT);
+  // A canary beside the project: inside the sandbox (so the suite cleans it
+  // up), outside the project root (so the fence must refuse it).
+  const canaryDir = path.join(sandbox, 'canary');
+  fs.mkdirSync(canaryDir, { recursive: true });
+  const CANARY = 'CANARY-MARK-' + process.pid + '-' + Date.now();
+  const canaryFile = path.join(canaryDir, 'secret.txt');
+  fs.writeFileSync(canaryFile, CANARY + '\n');
+  // HOME is the sandbox for these runs, so /$HOME/canary/secret.txt (bash: a
+  // double slash, the same file) would reach the canary without touching the
+  // real home folder.
+  const homeIsSandbox = Object.assign({}, ENV_NO_PLUGIN, { HOME: sandbox });
+  const pluginIsCanary = Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: canaryDir });
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+
+  // --- the expansion spellings: each refused, the canary never read ---
+  const expansions = [
+    ['ansi-c', "cat $'" + canaryFile + "'", /ANSI-C or locale quoting/],
+    ['locale', 'cat $"' + canaryFile + '"', /ANSI-C or locale quoting/],
+    ['home-in-word', 'cat /$HOME/canary/secret.txt', /\$HOME inside a word/],
+    ['home-in-word-dq', 'cat "/$HOME/canary/secret.txt"', /\$HOME inside a word/],
+    ['glob-star', 'cat ' + path.join(sandbox, 'canar*', 'secret.txt'), /unquoted wildcard '\*'/],
+    ['glob-question', 'cat ' + path.join(sandbox, 'canar?', 'secret.txt'), /unquoted wildcard '\?'/],
+    ['glob-bracket', 'cat ' + path.join(sandbox, '[c]anary', 'secret.txt'), /unquoted wildcard '\['/],
+    ['flag-value', 'diff --from-file=' + canaryFile + ' f.txt', /outside the project root/],
+    ['flag-value-short', 'cat -x=' + canaryFile, /outside the project root/],
+    ['ipv6-unquoted', 'curl http://[::1]:8080/health', /unquoted wildcard '\['/],
+  ];
+  const re = runChecks(expansions.map(([id, cmd]) => ({ id, check: cmd, expect: { exit: 0 } })), 'expansions', [], homeIsSandbox);
+  check('the expansion run itself exits 0', re.status === 0 && re.json !== null, re.status + ' ' + re.stderr.slice(0, 300));
+  for (const [id, cmd, rx] of expansions) {
+    const row = re.byId[id];
+    check('refused expansion: ' + JSON.stringify(cmd).slice(0, 70), !!row && row.verdict === 'error' && row.exit === null && row.stdoutFile === null && rx.test(row.detail), row ? JSON.stringify(row) : 'no row');
+  }
+  check('no saved file at all for the refused spellings', fs.readdirSync(re.out).length === 0, fs.readdirSync(re.out).join(','));
+  // The plugin-root literal with the variable SET names the canary folder: fenced like any other path.
+  const rp = runChecks([
+    { id: 'plugin-set', check: 'cat ${CLAUDE_PLUGIN_ROOT}/secret.txt', expect: { exit: 0 } },
+    { id: 'plugin-set-dq', check: 'cat "${CLAUDE_PLUGIN_ROOT}/secret.txt"', expect: { exit: 0 } },
+    { id: 'plugin-set-echo', check: 'echo ${CLAUDE_PLUGIN_ROOT}', expect: { exit: 0 } },
+  ], 'plugin-set', [], pluginIsCanary);
+  for (const id of ['plugin-set', 'plugin-set-dq', 'plugin-set-echo']) {
+    check('with CLAUDE_PLUGIN_ROOT set, ' + id + ' is fenced as the folder it names', !!rp.byId[id] && rp.byId[id].verdict === 'error' && /outside the project root/.test(rp.byId[id].detail), JSON.stringify(rp.byId[id]));
+  }
+  check('guard level: echo ${CLAUDE_PLUGIN_ROOT} is allowed with the variable absent and fenced when it names an outside folder', guardCheck('echo ${CLAUDE_PLUGIN_ROOT}', proj, {}) === null && /outside the project root/.test(guardCheck('echo ${CLAUDE_PLUGIN_ROOT}', proj, { CLAUDE_PLUGIN_ROOT: canaryDir }) || ''), guardCheck('echo ${CLAUDE_PLUGIN_ROOT}', proj, { CLAUDE_PLUGIN_ROOT: canaryDir }));
+  // The plugin-root literal with the variable UNSET: bash used to expand it to
+  // nothing and read the absolute remainder; now it is inert quoted text.
+  const ru = runChecks([
+    { id: 'plugin-unset-path', check: 'cat ${CLAUDE_PLUGIN_ROOT}' + canaryFile, expect: { exit: 0 } },
+    { id: 'plugin-unset-echo', check: 'echo ${CLAUDE_PLUGIN_ROOT}', expect: { match: '^\\$\\{CLAUDE_PLUGIN_ROOT\\}$' } },
+  ], 'plugin-unset', [], ENV_NO_PLUGIN);
+  check('unset: the literal plus an absolute path ran as literal text and failed to open it', !!ru.byId['plugin-unset-path'] && ru.byId['plugin-unset-path'].verdict === 'fail' && ru.byId['plugin-unset-path'].exit !== 0 && /No such file/.test(savedFile(ru, 'plugin-unset-path') || ''), JSON.stringify(ru.byId['plugin-unset-path']) + ' ' + JSON.stringify(savedFile(ru, 'plugin-unset-path')));
+  check('unset: echo prints the literal itself, so bash never expanded it', !!ru.byId['plugin-unset-echo'] && ru.byId['plugin-unset-echo'].verdict === 'pass', JSON.stringify(savedFile(ru, 'plugin-unset-echo')));
+  check('canary: no saved file of these runs holds the canary text', noFileHolds(re, CANARY) && noFileHolds(rp, CANARY) && noFileHolds(ru, CANARY));
+
+  // --- the rebuilt line keeps what the check meant ---
+  const line = (t) => { const p = tokenize(t); return p.error ? p.error : rebuildCommand(p, ENV_NO_PLUGIN).line; };
+  check('rebuild: every word single-quoted, an input redirection kept', line('grep -c hello < f.txt') === "'grep' '-c' 'hello' < 'f.txt'", line('grep -c hello < f.txt'));
+  check('rebuild: 2>&1 stays on its segment, the pipe is kept', line('cat missing.txt 2>&1 | wc -l') === "'cat' 'missing.txt' 2>&1 | 'wc' '-l'", line('cat missing.txt 2>&1 | wc -l'));
+  check('rebuild: redirections keep their original order', line('cat f.txt 2>/dev/null 2>&1') === "'cat' 'f.txt' 2>/dev/null 2>&1" && line('cat f.txt 2>&1 2>/dev/null') === "'cat' 'f.txt' 2>&1 2>/dev/null", line('cat f.txt 2>/dev/null 2>&1'));
+  check('rebuild: a quote inside a word becomes the four characters', line("echo \"it's\"") === "'echo' 'it'\\''s'", line("echo \"it's\""));
+  check('rebuild: ; and newline lists and && || chains keep their operators', line('echo one; echo two') === "'echo' 'one' ; 'echo' 'two'" && line('echo one\necho two') === "'echo' 'one'\n'echo' 'two'" && line('test -f f.txt && echo yes || echo no') === "'test' '-f' 'f.txt' && 'echo' 'yes' || 'echo' 'no'", line('test -f f.txt && echo yes || echo no'));
+  const divs = tokenize("grep -c '<div>' f.txt");
+  check("tokenize: a quoted '<div>' is a pattern, not an input redirection", !divs.error && divs.meta[0][2].input === false && divs.meta[0][2].quoted === true && divs.meta[0][2].quote === "'", JSON.stringify(divs));
+  const spaced = tokenize('wc -l <   f.txt');
+  check('tokenize: an unquoted < followed by spaces binds to the next word', !spaced.error && spaced.meta[0][2].input === true && spaced.segments[0][2] === '<f.txt', JSON.stringify(spaced));
+  const ops = tokenize('a | b || c && d; e\nf');
+  check('tokenize: operators are recorded per segment', !ops.error && JSON.stringify(ops.operators) === JSON.stringify(['|', '||', '&&', ';', '\n', null]), JSON.stringify(ops.operators));
+  const rb = runChecks([
+    { id: 'input-redirect', check: 'grep -c hello < f.txt', expect: { match: '^2$' } },
+    { id: 'input-redirect-spaced', check: 'wc -l <   f.txt', expect: { match: '^3$' } },
+    { id: 'stderr-quiet', check: 'grep hello missing.txt 2>/dev/null', expect: { exit: 2 } },
+    { id: 'stderr-piped', check: 'grep hello missing.txt 2>&1 | wc -l', expect: { match: '^1$' } },
+    { id: 'list', check: 'echo one; echo two', expect: { lines: { min: 2, max: 2 } } },
+    { id: 'newline-list', check: 'echo one\necho two', expect: { lines: { min: 2, max: 2 } } },
+    { id: 'pipeline', check: 'cat f.txt | grep hello | wc -l', expect: { match: '^2$' } },
+    { id: 'and-or', check: 'test -f f.txt && echo yes || echo no', expect: { match: '^yes$' } },
+    { id: 'quote-in-word', check: 'echo "it\'s"', expect: { match: "^it's$" } },
+    { id: 'dq-backslash-kept', check: 'echo "a\\nb"', expect: { match: '^a\\\\nb$' } },
+    { id: 'dq-backslash-dollar', check: 'echo "\\$X"', expect: { match: '^\\$X$' } },
+    { id: 'quoted-div', check: "grep -c '<div>' f.txt", expect: { exit: 1 } },
+    { id: 'bracket-test', check: '[ -f f.txt ]', expect: { exit: 0 } },
+  ], 'rebuild');
+  const rbIds = ['input-redirect', 'input-redirect-spaced', 'stderr-quiet', 'stderr-piped', 'list', 'newline-list', 'pipeline', 'and-or', 'quote-in-word', 'dq-backslash-kept', 'dq-backslash-dollar', 'quoted-div', 'bracket-test'];
+  check('every rebuilt form ran and passed', rbIds.every((id) => rb.byId[id] && rb.byId[id].verdict === 'pass'), verdicts(rb, rbIds) + ' ' + rbIds.map((id) => id + ':' + JSON.stringify(savedFile(rb, id))).join(' '));
+  check('2>/dev/null suppressed the error: the saved file is only the exit line', savedFile(rb, 'stderr-quiet') === 'exit 2\n', JSON.stringify(savedFile(rb, 'stderr-quiet')));
+  check('2>&1 carried the error through the pipe', (savedFile(rb, 'stderr-piped') || '').startsWith('1\n'), JSON.stringify(savedFile(rb, 'stderr-piped')));
+  check('the ; list printed both lines in order', (savedFile(rb, 'list') || '').startsWith('one\ntwo\n'), JSON.stringify(savedFile(rb, 'list')));
+
+  // --- pipefail: an early stage's failure is the pipeline's exit code ---
+  fs.writeFileSync(path.join(proj, 'big-lines.txt'), 'a\n'.repeat(600000));
+  const pf = runChecks([
+    { id: 'pipefail-nomatch', check: 'grep hello missing.txt | head -5', expect: { noMatch: 'zzz' } },
+    { id: 'pipefail-lines', check: 'grep hello missing.txt | head -5', expect: { lines: { max: 5 } } },
+    { id: 'pipefail-clean', check: 'grep hello f.txt | head -5', expect: { lines: { min: 2, max: 2 } } },
+    { id: 'sigpipe', check: 'cat big-lines.txt | head -1', expect: { lines: { min: 1, max: 1 } } },
+  ], 'pipefail');
+  fs.rmSync(path.join(proj, 'big-lines.txt'), { force: true });
+  check('noMatch fails when grep over a missing file is piped to head (exit 2, not head\'s 0)', !!pf.byId['pipefail-nomatch'] && pf.byId['pipefail-nomatch'].verdict === 'fail' && pf.byId['pipefail-nomatch'].exit === 2, JSON.stringify(pf.byId['pipefail-nomatch']));
+  check('lines fails for the same pipeline', !!pf.byId['pipefail-lines'] && pf.byId['pipefail-lines'].verdict === 'fail', JSON.stringify(pf.byId['pipefail-lines']));
+  check('a clean pipeline still passes', !!pf.byId['pipefail-clean'] && pf.byId['pipefail-clean'].verdict === 'pass', JSON.stringify(pf.byId['pipefail-clean']));
+  check('a stage cut short by head (exit 141, silent stderr) is a clean run', !!pf.byId.sigpipe && pf.byId.sigpipe.verdict === 'pass' && pf.byId.sigpipe.exit === 141, JSON.stringify(pf.byId.sigpipe));
+
+  // --- R7: a quoted tilde and a grep pattern are text ---
+  write('docs.md', 'The plugin lives at ~/.claude/plugins/data/tk-llm-peer-review/current\n');
+  const tp = runChecks([
+    { id: 'tilde-pattern-dq', check: 'grep -n "~/.claude/plugins/data" docs.md', expect: { match: '^1:' } },
+    { id: 'tilde-pattern-sq', check: "grep -c '~/.claude' docs.md", expect: { match: '^1$' } },
+    { id: 'tilde-quoted-file', check: 'cat "~/.bashrc"', expect: { exit: 0 } },
+    { id: 'home-single-quoted', check: "cat '$HOME/.bashrc'", expect: { exit: 0 } },
+    { id: 'outside-as-pattern', check: 'grep -c ' + OUTSIDE_DIR + ' f.txt', expect: { exit: 1 } },
+  ], 'patterns');
+  check('a double-quoted tilde pattern is allowed and finds the line', !!tp.byId['tilde-pattern-dq'] && tp.byId['tilde-pattern-dq'].verdict === 'pass', JSON.stringify(tp.byId['tilde-pattern-dq']));
+  check('a single-quoted tilde pattern is allowed and runs', !!tp.byId['tilde-pattern-sq'] && tp.byId['tilde-pattern-sq'].verdict === 'pass', JSON.stringify(tp.byId['tilde-pattern-sq']));
+  check('a quoted ~ file name is literal text: bash looks for a file spelled ~, finds none', !!tp.byId['tilde-quoted-file'] && tp.byId['tilde-quoted-file'].verdict === 'fail' && /No such file/.test(savedFile(tp, 'tilde-quoted-file') || ''), JSON.stringify(savedFile(tp, 'tilde-quoted-file')));
+  check("a single-quoted $HOME is literal text as well", !!tp.byId['home-single-quoted'] && tp.byId['home-single-quoted'].verdict === 'fail' && /No such file/.test(savedFile(tp, 'home-single-quoted') || ''), JSON.stringify(savedFile(tp, 'home-single-quoted')));
+  check('an existing outside folder as the grep pattern is allowed and runs', !!tp.byId['outside-as-pattern'] && tp.byId['outside-as-pattern'].verdict === 'pass', JSON.stringify(tp.byId['outside-as-pattern']));
+  check('unquoted ~ and double-quoted $HOME at word start stay refused', /home-relative/.test(guardCheck('cat ~/.bashrc', proj) || '') && /home-relative/.test(guardCheck('cat "$HOME/.bashrc"', proj) || '') && /home-relative/.test(guardCheck('cat $HOME/.bashrc', proj) || ''), guardCheck('cat ~/.bashrc', proj));
+  const patternAllowed = [
+    'grep -c ' + OUTSIDE_DIR + ' f.txt',
+    'grep -e ' + OUTSIDE_DIR + ' f.txt',
+    'grep --regexp ' + OUTSIDE_DIR + ' f.txt',
+    'grep --regexp=' + OUTSIDE_DIR + ' f.txt',
+    'grep -m 1 ' + OUTSIDE_DIR + ' f.txt',
+    'grep -- ' + OUTSIDE_DIR + ' f.txt',
+    'rg -n ' + OUTSIDE_DIR + ' f.txt',
+    'rg -e ' + OUTSIDE_DIR + ' f.txt',
+  ];
+  for (const c of patternAllowed) check('pattern position exempt: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
+  const patternRefused = [
+    'test -d ' + OUTSIDE_DIR,
+    'ls ' + OUTSIDE_DIR,
+    'grep -c x ' + OUTSIDE_DIR,
+    'grep -e x ' + OUTSIDE_DIR,
+    'grep -f ' + OUTSIDE_DIR + ' f.txt',
+    'grep -f' + OUTSIDE_DIR + ' f.txt',
+    'grep --file ' + OUTSIDE_DIR + ' f.txt',
+    'grep --file=' + OUTSIDE_DIR + ' f.txt',
+    'grep -c x <' + OUTSIDE_DIR,
+    'rg -f ' + OUTSIDE_DIR + ' f.txt',
+  ];
+  for (const c of patternRefused) check('file position judged: ' + c, /outside the project root/.test(guardCheck(c, proj) || ''), guardCheck(c, proj));
+
+  // --- R9: the ecosystem wrappers ---
+  const wrappers = ['yarn test', 'yarn run test', 'pnpm test', 'pnpm run test', 'bun test', 'uv run pytest', 'uv run python -m pytest',
+    'poetry run pytest', 'poetry run python -m pytest', 'bundle exec rspec', 'bundle exec rake test', 'dotnet test'];
+  for (const c of wrappers) check('wrapper allowed: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
+  const rw = runChecks(wrappers.map((c, i) => ({ id: 'w-' + i, check: c, expect: { exit: 0 } })), 'wrappers', ['--timeout', '60000']);
+  check('every wrapper ran: verdict pass or fail, never an error naming the allow-list', wrappers.every((c, i) => rw.byId['w-' + i] && (rw.byId['w-' + i].verdict === 'pass' || rw.byId['w-' + i].verdict === 'fail')), verdicts(rw, wrappers.map((c, i) => 'w-' + i)) + ' ' + rw.stderr.slice(0, 300));
+  const hostileWrappers = [
+    ['uv run python evil.py', /uv only as/], ['uv run evil', /uv only as/], ['uv pip install x', /uv only as/],
+    ['poetry run python evil.py', /poetry only as/], ['poetry install', /poetry only as/],
+    ['bundle exec rm -rf x', /bundle only as/], ['bundle exec rake db:drop', /bundle only as/], ['bundle install', /bundle only as/],
+    ['yarn add left-pad', /yarn only as/], ['yarn run build', /yarn only as/],
+    ['pnpm install', /pnpm only as/], ['pnpm run build', /pnpm only as/],
+    ['bun run evil.js', /bun only as/], ['bun install', /bun only as/],
+    ['dotnet run', /dotnet only as/], ['dotnet tool install x', /dotnet only as/],
+  ];
+  for (const [c, rx] of hostileWrappers) check('wrapper refused: ' + c, rx.test(guardCheck(c, proj) || ''), guardCheck(c, proj));
+
+  // --- node with the plugin literal: resolved by the runner from the environment ---
+  const nodeCheck = [{ id: 'models', check: 'node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models', expect: { match: '^\\{' } }];
+  const nu = runChecks(nodeCheck, 'node-unset', [], ENV_NO_PLUGIN);
+  check('with CLAUDE_PLUGIN_ROOT absent the node check is refused with the not-set reason, nothing run', !!nu.byId.models && nu.byId.models.verdict === 'error' && /CLAUDE_PLUGIN_ROOT is not set/.test(nu.byId.models.detail) && nu.byId.models.stdoutFile === null && fs.readdirSync(nu.out).length === 0, JSON.stringify(nu.byId.models));
+  const nr = runChecks(nodeCheck, 'node-relative', [], Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: 'relative/plugin' }));
+  check('a relative CLAUDE_PLUGIN_ROOT is refused as well', !!nr.byId.models && nr.byId.models.verdict === 'error' && /not an absolute path/.test(nr.byId.models.detail), JSON.stringify(nr.byId.models));
+  const pluginDir = path.join(sandbox, 'plugin');
+  fs.mkdirSync(path.join(pluginDir, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join(REPO, '.claude', 'scripts', 'session-init.js'), path.join(pluginDir, 'scripts', 'session-init.js'));
+  const ns = runChecks(nodeCheck, 'node-set', [], Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: pluginDir }));
+  check('with CLAUDE_PLUGIN_ROOT set to a folder holding the script, the node check runs and prints the models object', !!ns.byId.models && ns.byId.models.verdict === 'pass' && ns.byId.models.exit === 0 && /"models"/.test(savedFile(ns, 'models') || ''), JSON.stringify(ns.byId.models) + ' ' + (savedFile(ns, 'models') || '').slice(0, 200));
+  check('canary: the canary text never reached a saved file in this section', [re, rp, ru, rb, pf, tp, rw, nu, nr, ns].every((r) => noFileHolds(r, CANARY)));
+});
+
+// Second round of the 7.6.3 review (2026-10-09): adversarial skeptics got past
+// the first fix two ways. A symlinked folder followed by .. (`cat d/../x`, d a
+// link to the project): path.resolve cancelled `d/..` lexically, the result
+// named a file that did not exist, so realpath never looked at the link, while
+// the kernel followed it and read the project's parent. And sort's
+// --compress-program, which runs a program the check names on every spilled
+// temp file, in the = and the separate-word spelling. Closing them also closed
+// the spellings in the same class: getopt's unambiguous prefixes (sort --out=,
+// --co=), grep's attached short-option values (-e. puts the pattern inside the
+// cluster and the outside file into the exempt slot), and control characters
+// (a NUL made spawnSync throw). Every probe the skeptics ran is a fixture: the
+// refused ones with their reason and nothing saved, the inert ones run to show
+// they read nothing outside, the controls run to show the fence is not wider
+// than it needs to be.
+section('12. second round: a symlink then .., sort exec flags, option prefixes, attached values', function () {
+  const { tokenize, guardCheck } = require(SCRIPT);
+  // The canary beside the project (sandbox/canary.txt is proj/..), a folder
+  // beside it, the links the probes used, and the sort probe's "compressor".
+  const CANARY2 = 'CANARY-ROUND2-' + process.pid + '-' + Date.now();
+  fs.writeFileSync(path.join(sandbox, 'canary.txt'), CANARY2 + '\n');
+  fs.mkdirSync(path.join(sandbox, 'outside'), { recursive: true });
+  fs.writeFileSync(path.join(sandbox, 'outside', 'canary.txt'), CANARY2 + '\n');
+  fs.mkdirSync(path.join(proj, 'sub'), { recursive: true });
+  write('a.txt', 'alpha\n');
+  write('sub/b.txt', 'beta\n');
+  const link = (at, to) => { try { fs.symlinkSync(to, path.join(proj, at)); } catch (e) { /* exists */ } };
+  link('d', proj);                                             // a link to the project itself
+  link('dir-out', path.join(sandbox, 'outside'));              // a link to a folder outside
+  link('sub/link.txt', path.join(sandbox, 'canary.txt'));      // a link to the outside file
+  link('link-in.txt', path.join(proj, 'a.txt'));               // a link that stays inside
+  write('logger.sh', '#!/bin/sh\necho hit >> PWNED_MARKER.txt\ncat\n');
+  fs.chmodSync(path.join(proj, 'logger.sh'), 0o755);
+  write('big.txt', Array.from({ length: 3000 }, (_, i) => String(i)).join('\n') + '\n');   // -S 1k makes sort spill this
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+  const outsideRe = /outside the project root/;
+  const pluginIsOutside = Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: path.join(sandbox, 'outside') });
+
+  // --- refused: each with its reason, nothing run, nothing saved ---
+  const refused = [
+    // the confirmed bypasses: a symlink then .. (lexical collapse), in every prefix shape
+    ['sym-collapse', 'cat d/../canary.txt', outsideRe],
+    ['sym-grep', 'grep CANARY d/../canary.txt', outsideRe],
+    ['sym-double', 'cat d/d/../../canary.txt', outsideRe],
+    ['sym-dir-out', 'cat dir-out/../outside/canary.txt', outsideRe],
+    ['sym-sub-escape', 'cat sub/../dir-out/../outside/canary.txt', outsideRe],
+    ['sym-dotslash', 'cat ./dir-out/../outside/canary.txt', outsideRe],
+    ['sym-two-up', 'cat dir-out/../../outside/canary.txt', outsideRe],
+    ['sym-dir-direct', 'cat dir-out/canary.txt', outsideRe],
+    ['sym-file', 'cat sub/link.txt', outsideRe],
+    ['sym-realpath', 'realpath dir-out', outsideRe],
+    ['sym-readlink', 'readlink -f sub/link.txt', outsideRe],
+    ['sym-stat', 'stat sub/link.txt', outsideRe],
+    // the parent folder in every quoting the skeptics tried
+    ['parent-plain', 'cat ../canary.txt', outsideRe],
+    ['parent-sq', "cat '../canary.txt'", outsideRe],
+    ['parent-dq', 'cat "../canary.txt"', outsideRe],
+    ['parent-escaped', 'cat \\.\\./canary.txt', outsideRe],
+    ['parent-mixed', "cat ..'/'canary.txt", outsideRe],
+    ['parent-input', "cat < '../canary.txt'", outsideRe],
+    ['parent-glued', 'cat x<../canary.txt', outsideRe],
+    ['parent-second', 'cat a.txt ../canary.txt', outsideRe],
+    ['parent-sub', 'cat sub/../../canary.txt', outsideRe],
+    ['parent-outside-dir', 'cat ../outside/canary.txt', outsideRe],
+    ['parent-abs', 'cat ' + path.join(sandbox, 'outside', 'canary.txt'), outsideRe],
+    ['ansi-c', "cat $'../canary.txt'", /ANSI-C or locale quoting/],
+    ['locale', 'cat $"../canary.txt"', /ANSI-C or locale quoting/],
+    ['dq-escaped-home', 'cat "\\$HOME/x"', /home-relative path/],
+    ['tilde', 'cat ~/.claude/x', /home-relative path/],
+    ['home', 'cat $HOME/.bashrc', /home-relative path/],
+    ['home-dq', 'cat "$HOME/.bashrc"', /home-relative path/],
+    // control characters and lookalike separators
+    ['nul', 'cat a.txt\u0000../canary.txt', /control character/],
+    ['esc', 'cat \u001b../canary.txt', /control character/],
+    ['vtab', 'cat\u000b../canary.txt', /control character/],
+    ['nbsp', 'cat\u00a0../canary.txt', /not on the read-only allow-list/],
+    // redirection shapes that are not one of the safe forms
+    ['fd-quoted', "cat a.txt'2'>&1", /output redirection/],
+    ['fd-3', 'cat a.txt 3>/dev/null', /output redirection/],
+    ['devnullx', 'cat a.txt >/dev/nullx', /output redirection/],
+    ['amp-path', 'cat a.txt &>/dev/null/../../x', /background operator/],
+    // file-valued flags, in the = and attached spellings, and grep's cluster forms
+    ['flag-value', 'diff --from-file=../canary.txt a.txt', outsideRe],
+    ['grep-f', 'grep -f ../canary.txt a.txt', outsideRe],
+    ['grep-file-eq', 'grep --file=../canary.txt a.txt', outsideRe],
+    ['grep-f-attached', 'grep -f../canary.txt a.txt', outsideRe],
+    ['grep-nf-attached', 'grep -nf../canary.txt a.txt', outsideRe],
+    ['grep-e-attached', 'grep -e. ../canary.txt', outsideRe],
+    ['grep-ne-attached', 'grep -ne. ../canary.txt', outsideRe],
+    ['grep-reg-prefix', 'grep --reg=a ../canary.txt', outsideRe],
+    ['grep-reg-prefix-sep', 'grep --reg a ../canary.txt', outsideRe],
+    ['grep-e-file', 'grep -e alpha ../canary.txt', outsideRe],
+    ['rg-ignore-file', 'rg --ignore-file ../canary.txt alpha .', outsideRe],
+    ['rg-pre', 'rg --pre ./logger.sh alpha a.txt', /rg --pre/],
+    ['cut', 'cut -f1 ../canary.txt', outsideRe],
+    ['tail', 'tail -c 100 ../canary.txt', outsideRe],
+    ['sed', 'sed -n 1p ../canary.txt', outsideRe],
+    ['find-parent', 'find .. -name canary.txt', outsideRe],
+    ['git-config-file', 'git config --get --file ../canary.txt user.name', outsideRe],
+    ['git-config-file-eq', 'git config --get --file=../canary.txt user.name', outsideRe],
+    // the confirmed bypass: sort runs the program a check names; its prefixes; its temp folder
+    ['sort-compress-eq', 'sort -S 1k --compress-program=./logger.sh big.txt', /sort --compress-program/],
+    ['sort-compress-sep', 'sort -S 1k --compress-program ./logger.sh big.txt', /sort --compress-program/],
+    ['sort-compress-gzip', 'sort -S 1k --compress-program=gzip big.txt', /sort --compress-program/],
+    ['sort-compress-false', 'sort -S 1k --compress-program=false big.txt', /sort --compress-program/],
+    ['sort-compress-sh', 'sort --compress-program=/bin/sh big.txt', /sort --compress-program/],
+    ['sort-compress-prefix', 'sort -S 1k --co=./logger.sh big.txt', /sort --compress-program/],
+    ['sort-out-prefix', 'sort --out=canary a.txt', /sort -o/],
+    ['sort-o', 'sort -o out.txt a.txt', /sort -o/],
+    ['sort-mo', 'sort -mo out.txt a.txt', /sort -o/],
+    ['sort-output', 'sort --output=out.txt a.txt', /sort -o/],
+    ['sort-T', 'sort -T .. a.txt', /sort -T/],
+    ['sort-T-prefix', 'sort --temp=.. a.txt', /sort -T/],
+    ['git-out-prefix', 'git log --out=canary', /writes a file or runs a program/],
+    ['git-ext-prefix', 'git diff --ext', /writes a file or runs a program/],
+    // the rest of the skeptics' guard-only list, so the whole list stays green together
+    ['make-f', 'make -f ../Makefile test', /make only as/],
+    ['wildcard-star', 'cat *.txt', /unquoted wildcard '\*'/],
+    ['wildcard-bracket', 'cat [a].txt', /unquoted wildcard '\['/],
+    ['brace', 'cat {a,sub/b}.txt', /brace group/],
+    ['uniq-out', 'uniq a.txt out.txt', /uniq with an output file/],
+    ['curl-o', 'curl -o out.txt http://localhost/', /curl -o may write only/],
+    ['procsub', 'diff a.txt <(cat a.txt)', /process substitution/],
+    ['sed-w', 'sed -n -e 1p -e w/tmp/x a.txt', /sed script/],
+    ['node-evil', 'node evil.js', /node may run only/],
+    ['npm-build', 'npm run build', /npm only as/],
+    ['npx-webpack', 'npx webpack', /npx may run only/],
+  ];
+  const rr = runChecks(refused.map(([id, cmd]) => ({ id, check: cmd, expect: { exit: 0 } })), 'round2-refused', [], ENV_NO_PLUGIN);
+  check('the refused run itself exits 0 with one JSON object', rr.status === 0 && rr.json !== null, rr.status + ' ' + rr.stderr.slice(0, 300));
+  for (const [id, cmd, rx] of refused) {
+    const row = rr.byId[id];
+    check('refused: ' + JSON.stringify(cmd).slice(0, 70), !!row && row.verdict === 'error' && row.exit === null && row.stdoutFile === null && rx.test(row.detail) && /^refused: /.test(row.detail), row ? JSON.stringify(row) : 'no row');
+  }
+  check('nothing was saved for any refused check', fs.readdirSync(rr.out).length === 0, fs.readdirSync(rr.out).join(','));
+  check('canary: sort never ran the logger (no PWNED_MARKER.txt), wrote no out.txt and no canary', !exists('PWNED_MARKER.txt') && !exists('out.txt') && !exists('canary'));
+  check('with CLAUDE_PLUGIN_ROOT set to the outside folder, the literal is fenced as that folder', outsideRe.test(guardCheck('cat ${CLAUDE_PLUGIN_ROOT}/canary.txt', proj, pluginIsOutside) || ''), guardCheck('cat ${CLAUDE_PLUGIN_ROOT}/canary.txt', proj, pluginIsOutside));
+  check('tokenize: a NUL byte is refused before spawnSync could throw on it', /control character/.test(tokenize('cat a.txt\u0000x').error || ''), JSON.stringify(tokenize('cat a.txt\u0000x')));
+
+  // --- inert: allowed by the guard, run, and read nothing outside ---
+  const inert = [
+    ['dq-newline', 'cat "a.txt\ncat ../canary.txt"', 'fail'],         // one literal filename with a newline in it
+    ['continuation', 'cat a.txt \\\n../canary.txt', 'fail'],         // the escaped newline is a literal character of the third word
+    ['dq-ansi', 'cat "$\'x\'"', 'fail'],                               // $' inside double quotes is literal text
+    ['escaped-backtick', 'cat \\`id\\`', 'fail'],                      // the literal filename `id`
+    ['fullwidth-dots', 'cat \uff0e\uff0e/canary.txt', 'fail'],         // a lookalike, not ..
+    ['sq-semicolon', "echo 'a;cat ../canary.txt'", 'pass'],            // operators in single quotes are text
+    ['sq-pipe', "echo 'a|cat ../canary.txt'", 'pass'],
+    ['sq-home', "cat '$HOME/x'", 'fail'],
+    ['plugin-unset', 'cat ${CLAUDE_PLUGIN_ROOT}/canary.txt', 'fail'],  // inert literal while the variable is unset
+    ['missing-then-up', 'cat nonexist/../a.txt', 'fail'],              // the guard stays lexical past a missing prefix; the kernel stops there
+  ];
+  const ri = runChecks(inert.map(([id, cmd, v]) => ({ id, check: cmd, expect: v === 'pass' ? { match: 'cat \\.\\./canary\\.txt' } : { exit: 0 } })), 'round2-inert', [], ENV_NO_PLUGIN);
+  for (const [id, cmd, v] of inert) {
+    const row = ri.byId[id];
+    const saved = savedFile(ri, id) || '';
+    check('inert: ' + JSON.stringify(cmd).slice(0, 60) + ' runs as literal text (' + v + ')', !!row && row.verdict === v && (v === 'pass' || /No such file/.test(saved)), row ? JSON.stringify(row) + ' ' + JSON.stringify(saved) : 'no row');
+  }
+  check('canary: no inert run read the canary', noFileHolds(ri, CANARY2) && noFileHolds(rr, CANARY2));
+
+  // --- controls: the fence is no wider than it needs to be ---
+  const controls = [
+    ['legit', 'cat a.txt', { match: '^alpha$' }],
+    ['link-in', 'cat link-in.txt', { match: '^alpha$' }],
+    ['normalized-inside', 'cat ./sub/../a.txt', { match: '^alpha$' }],
+    ['input-inside', 'cat < a.txt', { match: '^alpha$' }],
+    ['grep-m', 'grep -m 1 alpha a.txt', { match: '^alpha$' }],
+    ['grep-e-sep', 'grep -e alpha a.txt', { match: '^alpha$' }],
+    ['grep-e-attached-inside', 'grep -ealpha a.txt', { match: '^alpha$' }],
+    ['grep-cluster-count', 'grep -nm1 alpha a.txt', { match: '^1:alpha$' }],
+    ['sort-plain', 'sort a.txt', { match: '^alpha$' }],
+    ['sort-random', 'sort --random-source=/dev/urandom -R a.txt', { exit: 0 } ],
+    ['sort-files0', 'sort --files0-from=a.txt', 'reads a.txt as a list of names'],
+    ['dev-null', 'cat /dev/null', { exit: 0 }],
+    ['dev-stdin', 'cat /dev/stdin', { exit: 0 }],
+  ];
+  const rc = runChecks(controls.map(([id, cmd, expect]) => ({ id, check: cmd, expect })), 'round2-controls', [], ENV_NO_PLUGIN);
+  for (const [id, cmd, expect] of controls) {
+    const row = rc.byId[id];
+    const want = typeof expect === 'string' ? 'model' : 'pass';
+    check('control: ' + cmd + ' is ' + want, !!row && row.verdict === want, row ? JSON.stringify(row) + ' ' + JSON.stringify(savedFile(rc, id)) : 'no row');
+  }
+  check('canary: no control read the canary', noFileHolds(rc, CANARY2));
+  for (const l of ['d', 'dir-out', 'sub/link.txt', 'link-in.txt']) { try { fs.unlinkSync(path.join(proj, l)); } catch (e) { /* gone */ } }
+  for (const f of ['logger.sh', 'big.txt']) fs.rmSync(path.join(proj, f), { force: true });
 });
 
 console.log('');
