@@ -488,7 +488,10 @@ for (const f of sorted) {
 // not catch the case where most chunks are small but one is oversized
 // (because MAX_CHUNKS was hit). Set the overflow flag - the /index command
 // uses it to widen the cost-confirm prompt to any overflow case, not just
-// projects over the project-total threshold.
+// projects over the project-total threshold. The ids of the oversized chunks
+// go out too (overflowChunkIds), so /index reads which chunks not to
+// auto-retry instead of comparing each chunk's total with the target itself
+// (#226, M16).
 const overflowChunks = chunks.filter((c) => c.totalTokens > CHUNK_TARGET_TOKENS);
 const anyChunkOverflows = overflowChunks.length > 0;
 const largestChunkTokens = chunks.reduce((m, c) => Math.max(m, c.totalTokens), 0);
@@ -527,6 +530,8 @@ const manifest = {
   // user expects, so the /index command prompts before proceeding.
   needsConfirm: totalTokens > CONFIRM_THRESHOLD_TOKENS || anyChunkOverflows,
   anyChunkOverflows,
+  // Empty when no chunk is over the target.
+  overflowChunkIds: overflowChunks.map((c) => c.id),
   directoryTree: treeLines,
   chunks,
 };
