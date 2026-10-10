@@ -2693,16 +2693,16 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
 
 console.log('\n9f. a check step names its command (C-17), the Severity field, and the toolkit\'s own repository');
 {
-  // C-17 arrives in 7.7.0, so it needs a plugin root at that version; the
+  // C-17 arrives in 7.6.3, so it needs a plugin root at that version; the
   // roots above show it out of range. It reads the real conventions file, so a
   // pattern the parser or grep -E cannot take fails the hit checks below.
-  const PLUGIN770 = path.join(TMP, 'plugin770');
-  const b770 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN770, '--version', '7.7.0'], { cwd: REPO, encoding: 'utf8' });
-  check('build-plugin.js builds a 7.7.0 plugin root', b770.status === 0 && fs.existsSync(path.join(PLUGIN770, '.claude-plugin', 'plugin.json')), b770.stdout + b770.stderr);
-  const audit770 = (d, args, o) => audit(d, args || [], Object.assign({ pluginRoot: PLUGIN770 }, o || {}));
+  const PLUGIN763 = path.join(TMP, 'plugin763');
+  const b763 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN763, '--version', '7.6.3'], { cwd: REPO, encoding: 'utf8' });
+  check('build-plugin.js builds a 7.6.3 plugin root', b763.status === 0 && fs.existsSync(path.join(PLUGIN763, '.claude-plugin', 'plugin.json')), b763.stdout + b763.stderr);
+  const audit763 = (d, args, o) => audit(d, args || [], Object.assign({ pluginRoot: PLUGIN763 }, o || {}));
   const c17 = (res) => res.findings.filter(f => f.id === 'C-17');
   const STEP = (i) => '.claude/commands/step' + (i + 1) + '.md';
-  // A project audited at 7.6.2 (the range is 7.6.2 -> 7.7.0), one command file
+  // A project audited at 7.6.2 (the range is 7.6.2 -> 7.6.3), one command file
   // per line under test, the line fifth in its file.
   const c17Case = (name, lines) => {
     const dir = path.join(TMP, 'c17-' + name);
@@ -2713,21 +2713,21 @@ console.log('\n9f. a check step names its command (C-17), the Severity field, an
   const HITS = ['- Verify the file exists before continuing', '3. Check that the tests pass', '- **Confirm:** the server answers on port 3000'];
   const CLEAN = ['- The check runs after dedup.', 'Check with the owner before changing this.', '- Verify it exists: `test -f CODEBASE_MAP.md`'];
   let d = c17Case('hits', HITS);
-  let r = audit770(d);
+  let r = audit763(d);
   let f = c17(r);
-  check('C-17 is in range for a project audited at 7.6.2 on a 7.7.0 build, and out of range on the 7.1.0 build', r.status === 0 && /C-17/.test(r.summary) && !/C-17/.test(audit(d).summary), r.summary);
+  check('C-17 is in range for a project audited at 7.6.2 on a 7.6.3 build, and out of range on the 7.1.0 build', r.status === 0 && /C-17/.test(r.summary) && !/C-17/.test(audit(d).summary), r.summary);
   check('C-17: a dash item, a numbered step and a bold label that open with a check verb are one finding each, on line 5 of their files', f.length === 3 && HITS.every((l, i) => f.some(x => x.file.relPath === STEP(i) && x.file.line === 5)), JSON.stringify(f.map(x => [x.file.relPath, x.file.line])));
-  check('C-17: each is a suggest that opens with Optional, carries Since 7.7.0 and names the checks file in its fix, and its receipt passes showing the line', f.length === 3 && f.every(x => x.severity === 'suggest' && /^Optional\. /.test(x.what) && x.since === '7.7.0' && /\.claude\/toolkit\/checks\.json/.test(x.fix)) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 400) + allReceiptsShow(d, f).join(' | '));
+  check('C-17: each is a suggest that opens with Optional, carries Since 7.6.3 and names the checks file in its fix, and its receipt passes showing the line', f.length === 3 && f.every(x => x.severity === 'suggest' && /^Optional\. /.test(x.what) && x.since === '7.6.3' && /\.claude\/toolkit\/checks\.json/.test(x.fix)) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 400) + allReceiptsShow(d, f).join(' | '));
   d = c17Case('clean', CLEAN);
-  r = audit770(d);
+  r = audit763(d);
   check('C-17: a noun use of check, a prose sentence that is no list item, and an item with its command in backticks are no finding', r.status === 0 && c17(r).length === 0, JSON.stringify(c17(r)).slice(0, 400));
   d = c17Case('fixed', HITS);
-  const before = c17(audit770(d));
+  const before = c17(audit763(d));
   write(d, STEP(0), '# Step 1\n\nSome prose first.\n\n- Verify the file exists before continuing: `test -f CODEBASE_MAP.md` exits 0\n');
-  const after = audit770(d);
+  const after = audit763(d);
   check('C-17: naming the command on the line clears that finding, keeps the other two, and every old receipt agrees with the rerun', before.length === 3 && c17(after).length === 2 && !c17(after).some(x => x.file.relPath === STEP(0)) && receiptsAgree(d, { findings: before }, after).length === 0, receiptsAgree(d, { findings: before }, after).join(' | '));
   const entry = read(REAL_CONVENTIONS).split(/^### /m).find(b => /^C-17:/.test(b)) || '';
-  check('the real C-17 entry is a regex convention since 7.7.0 at Severity suggest', /^- \*\*Since:\*\* 7\.7\.0$/m.test(entry) && /^- \*\*Detector:\*\* regex$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry), entry.slice(0, 300));
+  check('the real C-17 entry is a regex convention since 7.6.3 at Severity suggest', /^- \*\*Since:\*\* 7\.6\.3$/m.test(entry) && /^- \*\*Detector:\*\* regex$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry), entry.slice(0, 300));
 
   // ---- the Severity field ----
   const sevConventions = (severity) => {
@@ -2765,26 +2765,26 @@ console.log('\n9f. a check step names its command (C-17), the Severity field, an
   };
   const NAMED = JSON.stringify({ name: 'llm-peer-review', owner: { name: 'Owner' }, plugins: [] }, null, 2);
   d = mkt('named', NAMED);
-  r = audit770(d);
+  r = audit763(d);
   check('a project whose marketplace is named llm-peer-review is refused: one stderr line, exit 1, nothing on stdout', r.status === 1 && REFUSAL.test(r.summary) && r.stdout === '' && r.summary.trim().split('\n').length === 1, r.summary + r.stdout.slice(0, 100));
   d = mkt('tk-plugin', JSON.stringify({ name: 'a-fork', plugins: [{ name: 'other' }, { name: 'tk', source: { source: 'git-subdir' } }] }));
-  r = audit770(d);
+  r = audit763(d);
   check('a marketplace under another name that lists a plugin named tk is refused too', r.status === 1 && REFUSAL.test(r.summary) && r.stdout === '', r.summary);
-  const st = spawnSync('node', [SCRIPT, '--project', d, '--plugin-root', PLUGIN770, '--stamp'], { encoding: 'utf8' });
+  const st = spawnSync('node', [SCRIPT, '--project', d, '--plugin-root', PLUGIN763, '--stamp'], { encoding: 'utf8' });
   check('--stamp there is refused with the same line and leaves the state file as it was', st.status === 1 && REFUSAL.test(st.stderr) && JSON.parse(read(path.join(d, '.claude', '.toolkit-state.json'))).auditedVersion === '7.6.2', st.stderr);
   d = mkt('own-plugin', JSON.stringify({ name: 'acme-tools', owner: { name: 'Acme' }, plugins: [{ name: 'acme', source: { source: 'git-subdir' } }] }));
-  r = audit770(d);
+  r = audit763(d);
   check('a project that publishes a plugin of its own is audited as any project (C-17 finds its check line)', r.status === 0 && c17(r).length === 1 && /candidate finding/.test(r.summary), r.summary);
   d = mkt('broken', '{ not json');
-  r = audit770(d);
+  r = audit763(d);
   check('an unreadable marketplace file names nothing, so the audit runs', r.status === 0 && c17(r).length === 1, r.summary);
   d = mkt('array', '["llm-peer-review"]');
-  r = audit770(d);
+  r = audit763(d);
   check('a marketplace file that is not an object names nothing either', r.status === 0 && c17(r).length === 1, r.summary);
-  check('no marketplace file: the audit runs', audit770(mkt('none', null)).status === 0);
+  check('no marketplace file: the audit runs', audit763(mkt('none', null)).status === 0);
   const m = mutant('no-marketplace-guard', 'if (marketplaceNamesToolkit(project)) {', 'if (false && marketplaceNamesToolkit(project)) {');
   check('  the guard mutation applies to the source', m.applied);
-  check('  with the guard skipped, the named-marketplace project is audited, so the refusal checks above bite', audit770(mkt('named-mutant', NAMED), [], { script: m.path }).status === 0);
+  check('  with the guard skipped, the named-marketplace project is audited, so the refusal checks above bite', audit763(mkt('named-mutant', NAMED), [], { script: m.path }).status === 0);
 }
 
 console.log('\n10. errors and usage');

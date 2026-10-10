@@ -179,7 +179,7 @@ Why: setup writes `CLAUDE.md`, `LESSONS.md`, `DESIGN-PROFILE.md` and `.claude/to
 Why: `LESSONS.md` is read at the start of every session, which is why it is an index of one-liners with the write-ups in `LESSONS-detail.md`. Two things make it heavier than that. A project with no detail file writes each lesson in full into the index, and every session pays for it; the detector reports an index with a bullet beyond one sentence or over 300 characters while `LESSONS-detail.md` is absent, as one finding listing the lines. And the copy-installers copy the toolkit's own `LESSONS.md` and `LESSONS-detail.md` into a fresh project, as did the v7.0.x plugin seed, so a project set up before v7.1.0 carries the toolkit's lessons as if they were its own; the detector reports a bullet whose bold lead is in `seed/toolkit-lesson-leads.txt` (every lead the toolkit's log has carried, written by `scripts/seed-history.js`), as one finding listing the lines and leads. The toolkit's own repository is never audited: `/tk:upgrade` refuses to run there, and its lessons are the source of the list. Both fixes edit files the toolkit seeded once, so they are applied only after the batch page approves them; the index can change on any day, so this entry runs on every upgrade.
 
 ### C-17: A check step names its command
-- **Since:** 7.7.0
+- **Since:** 7.6.3
 - **Scope:** prompt-files
 - **Detector:** regex
 - **Severity:** suggest
