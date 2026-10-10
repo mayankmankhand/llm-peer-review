@@ -110,6 +110,10 @@
       "Bash(grep -v \".html$\")",
       "Bash(node .claude/scripts/session-init.js)",
       "Bash(node .claude/scripts/session-init.js *)",
+      "Bash(node .claude/scripts/run-checks.js)",
+      "Bash(node .claude/scripts/run-checks.js *)",
+      "Bash(node .claude/scripts/merge-findings.js)",
+      "Bash(node .claude/scripts/merge-findings.js *)",
       "Bash(sed -n '/^\\\\*\\\\*Repeat this cycle up to 3 times total/,/^\\\\*\\\\*Convergence gate/p' .claude/commands/ask-gpt.md)",
       "Bash(sed -n '/^\\\\*\\\\*Repeat this cycle up to 3 times total/,/^\\\\*\\\\*Convergence gate/p' .claude/commands/ask-gemini.md)",
       "Bash(awk '{a+=$1; r+=$2} END {print \"added:\", a, \"removed:\", r, \"total:\", a+r}')"

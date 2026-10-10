@@ -1,6 +1,6 @@
 # Toolkit Rules
 
-<!-- Toolkit version: 7.6.2 | Managed by LLM Peer Review. On the plugin, setup seeds this file once and a plugin update never overwrites it; a copy-install update replaces it. -->
+<!-- Toolkit version: 7.6.3 | Managed by LLM Peer Review. On the plugin, setup seeds this file once and a plugin update never overwrites it; a copy-install update replaces it. -->
 
 This project runs the LLM Peer Review toolkit as the `tk` plugin, so its commands are typed with the `tk:` prefix (`/tk:explore`). This file is the short, always-on part. The full manual (workflow, command table, permissions, git and worktree conventions) is the toolkit's `toolkit-reference` fragment, at `~/.claude/plugins/data/tk-llm-peer-review/current/skills/shared/toolkit-reference.md`. Open it there when a question is not answered here.
 
