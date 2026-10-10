@@ -21,9 +21,12 @@
 //             { "noMatch": "regex" }     the saved output must not match
 //             { "lines": {min, max} }    non-empty output lines within bounds
 //           noMatch and lines pass only when the command ran cleanly: exit 0,
-//           or exit 1 with nothing on stderr (grep's no-match). A command that
-//           failed (a misspelled path: exit 2, 127) fails both, so an error
-//           never confirms an absence or a count. lines counts stdout only.
+//           or exit 1 with nothing on stderr (grep's no-match), or exit 141
+//           with nothing on stderr (a stage cut short by a later `head`). A
+//           command that failed (a misspelled path: exit 2, 127) fails both,
+//           so an error never confirms an absence or a count. lines counts
+//           stdout only. A pipeline runs with pipefail, so a failed early
+//           stage is the pipeline's exit code, not the last stage's.
 //
 // Every check's output is saved as <out>/<id>.txt: stdout, then stderr, then a
 // last line `exit N`. That is the exact shape render-html.js reads at a
@@ -58,10 +61,36 @@
 // before anything runs. Reads are confined as well: an argument that names an
 // existing file or folder must resolve, through realpath, under the project
 // root (the harmless device files aside), and a home-relative path (~, $HOME),
-// a variable expansion ($PATH) and a parent folder are refused, so a check reads the project and
-// nothing else: an allowed reader with the run of the disk would carry any
-// secret a steered finder named into the review's receipts. A refused check
-// gets verdict `error` with the reason, no file, and nothing executed.
+// a variable expansion ($PATH) and a parent folder are refused, so a check
+// reads the project and nothing else: an allowed reader with the run of the
+// disk would carry any secret a steered finder named into the review's
+// receipts. The path is resolved the way the kernel will resolve it, one
+// segment at a time with every existing prefix through realpath, because a
+// lexical resolve cancels `link/..` before anyone looks at the link and the
+// kernel does not (second-round audit of the 7.6.3 review: `cat d/../x` with
+// d a symlink read the project's parent). A refused check gets verdict
+// `error` with the reason, no file, and nothing executed.
+//
+// Two spellings the audit used to slip a value past a rule, and the answer to
+// each: GNU getopt accepts any unambiguous prefix of a long option (sort
+// --out= is --output=, --co= is --compress-program=), so a rule that refuses a
+// long option refuses its prefixes too; and a short option that takes a value
+// accepts it attached (grep -e. is grep -e .), so grep's and rg's short
+// clusters are read letter by letter before the pattern slot is exempted.
+//
+// What bash runs is what the guard judged. The check text is never handed to
+// bash as written: the tokenizer splits it into words, the guard judges those
+// words, and rebuildCommand() writes a new line from them with every word in
+// single quotes (review of 7.6.3, R1). Bash therefore performs no expansion of
+// its own on the line it runs: no wildcard, no tilde, no variable, no ANSI-C
+// quote. A spelling that would have expanded after the guard looked (an
+// unquoted *, $HOME inside a word, $'...') is refused by the tokenizer with a
+// reason that says so, rather than quietly run as literal text, so a finder
+// learns to name the file. The one expansion the runner performs itself is the
+// node script path (${CLAUDE_PLUGIN_ROOT}, ~ and $HOME forms), and the
+// ${CLAUDE_PLUGIN_ROOT} literal in any other word is substituted from the
+// environment BEFORE the guard judges that word, so a path built from it is
+// fenced like any other (and stays inert text when the variable is unset).
 //
 // Dependency-free, like every script here. Diagnostics go to stderr; stdout
 // is the one JSON object. The script names no command of the toolkit's own,
@@ -79,6 +108,7 @@ const DETAIL_LINES = 10;
 const DETAIL_CHARS = 800;
 const MAX_BUFFER = 16 * 1024 * 1024;
 const TIMEOUT_EXIT = 124;              // the exit code `timeout(1)` uses
+const SIGPIPE_EXIT = 141;              // 128 + SIGPIPE: a stage whose reader closed early
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
 const EXPECT_KEYS = ['exit', 'match', 'noMatch', 'lines'];
 
@@ -89,42 +119,105 @@ const EXPECT_KEYS = ['exit', 'match', 'noMatch', 'lines'];
 // could run something the allow-list never saw or write somewhere: a subshell
 // or process substitution, a brace group, a here-document, a background job,
 // and any redirection other than the exact harmless forms 2>&1, 2>/dev/null,
-// >/dev/null, 1>/dev/null and &>/dev/null. Command substitution ($( and
-// backticks) and brace parameter expansion (${) are refused unquoted and
-// inside double quotes, where bash expands them; inside single quotes they
-// are literal text (a grep pattern for a markdown backtick, say), which bash
-// never expands, so they pass (a live run refused real receipts over this,
-// issue 221 Step 9). One brace
-// expansion is allowed as an exact literal: ${CLAUDE_PLUGIN_ROOT}, the path
-// the plugin build writes in place of .claude/ in every shipped prompt. It
-// expands to a folder and nothing else, so it is hidden from the tokenizer
-// behind a sentinel and put back into the words afterwards; any other ${ form
-// (${x@P} expands prompt escapes and can run a command) stays refused.
+// >/dev/null, 1>/dev/null and &>/dev/null (plus a plain `< file`, which reads
+// a file the guard judges). Command substitution ($( and backticks) and brace
+// parameter expansion (${) are refused unquoted and inside double quotes,
+// where bash expands them; inside single quotes they are literal text (a grep
+// pattern for a markdown backtick, say), which bash never expands, so they
+// pass (a live run refused real receipts over this, issue 221 Step 9). One
+// brace expansion is allowed as an exact literal: ${CLAUDE_PLUGIN_ROOT}, the
+// path the plugin build writes in place of .claude/ in every shipped prompt.
+// It expands to a folder and nothing else, so it is held in the word as a
+// sentinel character and substituted by the guard (from the environment) and
+// the rebuild; any other ${ form (${x@P} expands prompt escapes and can run a
+// command) stays refused.
+//
+// Because the rebuilt line quotes every word, bash expands nothing in it. The
+// spellings that bash would have expanded in the raw text are refused here,
+// each with a reason: $'...' and $"..." (ANSI-C and locale quoting), $HOME
+// anywhere but the start of a word (at the start the guard judges it, and the
+// node script path needs it), and an unquoted *, ? or [ (the runner does not
+// expand wildcards, so a glob would silently match nothing).
+//
+// The result: { segments, operators, redirections, meta } or { error }.
+//   segments      one array of word strings per segment, the ${CLAUDE_PLUGIN_ROOT}
+//                 literal spelled out (the rule functions and the tests read this)
+//   operators     per segment, the operator that ended it: '|', '||', '&&', ';',
+//                 '\n', or null for the last one
+//   redirections  per segment, the safe redirection forms consumed, in order
+//   meta          per segment, per word: { raw, input, quoted, quote }
+//                 raw     the word with the plugin-root sentinel still in it
+//                 input   true when the word is the file of an unquoted `<`
+//                         (the word keeps a leading `<`, as before)
+//                 quoted  true when the word began inside quotes
+//                 quote   the quote character that opened it, or null
 // ---------------------------------------------------------------------------
 const PLUGIN_ROOT_LITERAL = '${CLAUDE_PLUGIN_ROOT}';
 const PLUGIN_ROOT_SENTINEL = '\u0001';
+const SEGMENT_JOINERS = ['|', '||', '&&'];   // an operator that needs a command on both sides
+const SAFE_REDIRECTIONS = ['2>&1', '2>/dev/null', '>/dev/null', '1>/dev/null', '&>/dev/null'];
+// Every C0 control character but tab, newline and CR, plus DEL. A NUL would
+// make spawnSync throw (the whole run would stop with no JSON), and the rest
+// (ESC, vertical tab, the sentinel below) have no place in a command line.
+const CONTROL_CHAR_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
 function tokenize(original) {
-  if (original.indexOf(PLUGIN_ROOT_SENTINEL) !== -1) return { error: 'refused: control character in the command' };
-  const text = original.split(PLUGIN_ROOT_LITERAL).join(PLUGIN_ROOT_SENTINEL);
+  if (CONTROL_CHAR_RE.test(original)) return { error: 'refused: control character in the command' };
+  const text = original;
   const segments = [];
+  const operators = [];
+  const redirections = [];
+  const meta = [];
   let words = [];
+  let wordMeta = [];
+  let segRedirs = [];
   let cur = '';
   let have = false;        // a word is open (so '' quoted is still a word)
+  let curMeta = null;      // the open word's meta
   let inSingle = false;
   let inDouble = false;
+  let pendingInput = false;   // an unquoted < was read; the next word is its file
+  let prevOp = null;          // the operator that ended the last pushed segment
   const n = text.length;
-  const flushWord = () => { if (have) { words.push(cur); cur = ''; have = false; } };
-  const flushSegment = () => { flushWord(); if (words.length) segments.push(words); words = []; };
+  const openWord = (quote) => {
+    if (have) return;
+    have = true;
+    curMeta = { raw: '', input: pendingInput, quoted: quote !== null, quote };
+    if (pendingInput) { cur = '<'; pendingInput = false; }
+  };
+  const flushWord = () => {
+    if (have) { curMeta.raw = cur; words.push(cur); wordMeta.push(curMeta); cur = ''; have = false; curMeta = null; }
+  };
+  // Ends a segment on `op` (null at the end of the text).
+  const flushSegment = (op) => {
+    flushWord();
+    if (pendingInput) return 'refused: input redirection (<) without a file';
+    if (words.length === 0) {
+      if (segRedirs.length) return 'refused: a redirection without a command';
+      if (SEGMENT_JOINERS.indexOf(op) !== -1) return "refused: empty command before '" + op + "'";
+      if (SEGMENT_JOINERS.indexOf(prevOp) !== -1) return "refused: empty command after '" + prevOp + "'";
+      return null;
+    }
+    segments.push(words); meta.push(wordMeta); redirections.push(segRedirs); operators.push(op);
+    words = []; wordMeta = []; segRedirs = [];
+    prevOp = op;
+    return null;
+  };
   const boundary = (s) => s === '' || /^[\s;|&]/.test(s);   // what may follow a redirection form
   // The expansions bash performs outside single quotes; each would run or read
   // something the allow-list never saw. An escaped one (\` or \$) is handled by
-  // the backslash branches above these checks and stays literal.
-  const expansion = (i) => {
+  // the backslash branches before these checks and stays literal.
+  const expansion = (i, quoted) => {
     const c = text[i];
+    const next = text[i + 1] || '';
     if (c === '`') return 'refused: command substitution (backtick)';
-    if (c === '$' && text[i + 1] === '(') return 'refused: command substitution ($( ))';
-    if (c === '$' && text[i + 1] === '{') return 'refused: brace parameter expansion (${ }); only the exact literal ${CLAUDE_PLUGIN_ROOT} is allowed';
-    if (c === '$' && /[A-Za-z_0-9?@#*!-]/.test(text[i + 1] || '') && !/^\$HOME(?![A-Za-z0-9_])/.test(text.slice(i))) return 'refused: variable expansion ($PATH and the like)';
+    if (c === '$' && next === '(') return 'refused: command substitution ($( ))';
+    if (c === '$' && next === '{') return 'refused: brace parameter expansion (${ }); only the exact literal ${CLAUDE_PLUGIN_ROOT} is allowed';
+    if (c === '$' && !quoted && (next === "'" || next === '"')) return "refused: ANSI-C or locale quoting ($' and $\"); write the characters themselves";
+    if (c === '$' && /^\$HOME(?![A-Za-z0-9_])/.test(text.slice(i))) {
+      if (cur !== '') return 'refused: $HOME inside a word (the runner expands nothing; name the file, or put $HOME at the start of the word)';
+      return null;
+    }
+    if (c === '$' && /[A-Za-z_0-9?@#*!-]/.test(next)) return 'refused: variable expansion ($PATH and the like)';
     return null;
   };
   for (let i = 0; i < n; i++) {
@@ -132,24 +225,38 @@ function tokenize(original) {
     if (inSingle) { if (c === "'") inSingle = false; else cur += c; continue; }
     if (inDouble) {
       if (c === '"') { inDouble = false; continue; }
-      if (c === '\\' && i + 1 < n) { cur += text[i + 1]; i++; continue; }
-      const bad = expansion(i);
+      if (c === '\\' && i + 1 < n) {
+        // Bash removes the backslash only before these five; elsewhere both stay.
+        const d = text[i + 1];
+        if (d === '$' || d === '`' || d === '"' || d === '\\' || d === '\n') { cur += d; i++; continue; }
+        cur += c; continue;
+      }
+      if (c === '$' && text.startsWith(PLUGIN_ROOT_LITERAL, i)) { cur += PLUGIN_ROOT_SENTINEL; i += PLUGIN_ROOT_LITERAL.length - 1; continue; }
+      const bad = expansion(i, true);
       if (bad) return { error: bad };
       cur += c;
       continue;
     }
-    if (c === '\\') { if (i + 1 < n) { cur += text[i + 1]; have = true; i++; } continue; }
-    const bad = expansion(i);
+    if (c === '\\') { if (i + 1 < n) { openWord(null); cur += text[i + 1]; i++; } continue; }
+    if (c === '$' && text.startsWith(PLUGIN_ROOT_LITERAL, i)) { openWord(null); cur += PLUGIN_ROOT_SENTINEL; i += PLUGIN_ROOT_LITERAL.length - 1; continue; }
+    const bad = expansion(i, false);
     if (bad) return { error: bad };
-    if (c === "'") { inSingle = true; have = true; continue; }
-    if (c === '"') { inDouble = true; have = true; continue; }
+    if (c === "'") { openWord("'"); inSingle = true; continue; }
+    if (c === '"') { openWord('"'); inDouble = true; continue; }
     if (c === ' ' || c === '\t' || c === '\r') { flushWord(); continue; }
-    if (c === '\n' || c === ';') { flushSegment(); continue; }
-    if (c === '|') { if (text[i + 1] === '|') i++; flushSegment(); continue; }
+    if (c === '\n' || c === ';') { const e = flushSegment(c); if (e) return { error: e }; continue; }
+    if (c === '|') {
+      let op = '|';
+      if (text[i + 1] === '|') { i++; op = '||'; }
+      const e = flushSegment(op);
+      if (e) return { error: e };
+      continue;
+    }
     if (c === '&') {
-      if (text[i + 1] === '&') { i++; flushSegment(); continue; }
+      if (text[i + 1] === '&') { i++; const e = flushSegment('&&'); if (e) return { error: e }; continue; }
       const rest = text.slice(i);
-      if (!have && rest.startsWith('&>/dev/null') && boundary(rest.slice('&>/dev/null'.length))) {
+      if (!have && !pendingInput && rest.startsWith('&>/dev/null') && boundary(rest.slice('&>/dev/null'.length))) {
+        segRedirs.push('&>/dev/null');
         i += '&>/dev/null'.length - 1;
         continue;
       }
@@ -157,32 +264,61 @@ function tokenize(original) {
     }
     if (c === '>') {
       const rest = text.slice(i);
-      const fd = have ? cur : '';
+      const fd = have && !curMeta.quoted ? cur : '';
       let form = null;
       if (fd === '2' && rest.startsWith('>&1')) form = '>&1';
       else if ((fd === '' || fd === '1' || fd === '2') && rest.startsWith('>/dev/null')) form = '>/dev/null';
-      if (form && boundary(rest.slice(form.length))) {
-        cur = ''; have = false;          // the fd digit was part of the redirection
+      if (form && !pendingInput && (fd !== '' || !have) && boundary(rest.slice(form.length))) {
+        segRedirs.push(fd + form);
+        cur = ''; have = false; curMeta = null;   // the fd digit was part of the redirection
         i += form.length - 1;
         continue;
       }
       return { error: 'refused: output redirection' };
     }
     if (c === '<') {
-      if (text[i + 1] === '<') return { error: 'refused: here-document or here-string (<<)' };
-      if (text[i + 1] === '(') return { error: 'refused: process substitution (<( ))' };
-      cur += c; have = true;             // a plain `< file` reads a file
+      const next = text[i + 1] || '';
+      if (next === '<') return { error: 'refused: here-document or here-string (<<)' };
+      if (next === '(') return { error: 'refused: process substitution (<( ))' };
+      if (next === '>' || next === '&') return { error: 'refused: unsupported redirection (<' + next + ')' };
+      if (pendingInput) return { error: 'refused: input redirection (<) without a file' };
+      if (have) {
+        if (/^\d+$/.test(cur) && !curMeta.quoted) return { error: 'refused: unsupported redirection (' + cur + '<)' };
+        flushWord();                     // `grep x<f` is `grep x < f`
+      }
+      pendingInput = true;               // a plain `< file` reads a file; the word is judged
       continue;
     }
     if (c === '(' || c === ')') return { error: 'refused: subshell or process substitution ( )' };
     if (c === '{' || c === '}') return { error: 'refused: brace group or brace expansion { }' };
-    cur += c; have = true;
+    if (c === '*' || c === '?' || (c === '[' && !(cur === '' && !have && /^(\s|$)/.test(text[i + 1] || '')))) {
+      return { error: "refused: unquoted wildcard '" + c + "' (the runner does not expand wildcards; name the file, or quote the pattern)" };
+    }
+    openWord(null);
+    cur += c;
   }
   if (inSingle || inDouble) return { error: 'refused: unterminated quote' };
-  flushSegment();
-  // Put the one allowed brace expansion back; bash expands it when the
-  // original text runs.
-  return { segments: segments.map((words) => words.map((w) => w.split(PLUGIN_ROOT_SENTINEL).join(PLUGIN_ROOT_LITERAL))) };
+  const e = flushSegment(null);
+  if (e) return { error: e };
+  // The guard and the tests read the words with the one allowed brace
+  // expansion spelled out; meta.raw keeps the sentinel for the substitution.
+  return {
+    segments: segments.map((ws) => ws.map((w) => w.split(PLUGIN_ROOT_SENTINEL).join(PLUGIN_ROOT_LITERAL))),
+    operators, redirections, meta,
+  };
+}
+
+// The ${CLAUDE_PLUGIN_ROOT} literal, as the guard and the rebuild see it: the
+// folder from the environment when the variable is set, else the inert
+// literal text (the rebuilt line quotes it, so bash never expands it).
+function pluginRootValue(env) {
+  const v = env && typeof env.CLAUDE_PLUGIN_ROOT === 'string' ? env.CLAUDE_PLUGIN_ROOT : '';
+  return v !== '' ? v : null;
+}
+function substitutePluginRoot(raw, env) {
+  if (raw.indexOf(PLUGIN_ROOT_SENTINEL) === -1) return raw;
+  const v = pluginRootValue(env);
+  return raw.split(PLUGIN_ROOT_SENTINEL).join(v === null ? PLUGIN_ROOT_LITERAL : v);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +329,14 @@ function tokenize(original) {
 // ---------------------------------------------------------------------------
 const ok = () => null;
 const flagIs = (a, names) => names.some((f) => a === f || a.startsWith(f + '='));
+// GNU getopt_long (sort, git's option parser too) takes any unambiguous
+// prefix of a long option: --out=x is --output=x. `shortest` is the shortest
+// prefix that is unambiguous for that program, so a refusal of the full
+// option covers every spelling of it, with or without a value.
+function longOptionIs(a, name, shortest) {
+  const opt = a.split('=')[0];
+  return opt.length >= shortest.length && opt.length <= name.length && name.startsWith(opt);
+}
 
 // sed: an address-print script (1,3p; /re/p; /a/,/b/p) or a plain
 // substitution s<d>pattern<d>replacement<d>[flags] with <d> one of / | # , and
@@ -275,7 +419,10 @@ function gitRule(args) {
   if (!GIT_READ.has(sub)) return "refused: git subcommand '" + sub + "' is not read-only";
   const rest = args.slice(i + 1);
   for (const a of rest) {
-    if (flagIs(a, ['--output', '--ext-diff', '--open-files-in-pager']) || a === '-O' || a.startsWith('-O')) {
+    // Prefixes too (--out, --ext, --open): git's parse-options takes an unambiguous
+    // prefix for most options; where it does not, the refusal costs nothing.
+    if (longOptionIs(a, '--output', '--ou') || longOptionIs(a, '--ext-diff', '--ext') || longOptionIs(a, '--open-files-in-pager', '--op')
+      || a === '-O' || a.startsWith('-O')) {
       return "refused: git argument '" + a + "' writes a file or runs a program";
     }
   }
@@ -309,7 +456,9 @@ function gitRule(args) {
 // shipped prompt), and the plugin's stable path under the home folder spelled
 // with ~ or $HOME. No other path, no node flag before the path (-e, -p, -r,
 // --import and --loader all run code of the caller's choosing), and
-// upgrade-audit.js without the two flags that write its record.
+// upgrade-audit.js without the two flags that write its record. The runner
+// expands the path itself before the run (expandNodePath below), because the
+// rebuilt line quotes every word and bash expands nothing in it.
 const NODE_SCRIPTS = 'session-init|merge-findings|pre-push-check|upgrade-audit';
 const NODE_PATH_RE = new RegExp('^(?:\\.claude\\/scripts|\\$\\{CLAUDE_PLUGIN_ROOT\\}\\/scripts'
   + '|(?:~|\\$HOME)\\/\\.claude\\/plugins\\/data\\/tk-llm-peer-review\\/current\\/scripts)\\/(' + NODE_SCRIPTS + ')\\.js$');
@@ -327,10 +476,27 @@ function nodeRule(args) {
   }
   return null;
 }
+// The node script path, expanded for the run: ${CLAUDE_PLUGIN_ROOT}/... from
+// the environment (refused when the variable is unset or not absolute: an
+// unset variable would expand to nothing and leave a path at the disk's
+// root), ~/... and $HOME/... from the home folder. Returns { path } or { error }.
+function expandNodePath(word, env) {
+  if (word.startsWith(PLUGIN_ROOT_LITERAL + '/')) {
+    const v = pluginRootValue(env);
+    if (v === null) return { error: 'refused: CLAUDE_PLUGIN_ROOT is not set in the environment, so ' + word + ' cannot be resolved' };
+    if (!path.isAbsolute(v)) return { error: "refused: CLAUDE_PLUGIN_ROOT is not an absolute path ('" + v + "'), so " + word + ' cannot be resolved' };
+    return { path: v + word.slice(PLUGIN_ROOT_LITERAL.length) };
+  }
+  if (word.startsWith('~/')) return { path: os.homedir() + word.slice(1) };
+  if (word.startsWith('$HOME/')) return { path: os.homedir() + word.slice('$HOME'.length) };
+  return { path: word };
+}
 
 // The ecosystem test entry points. Running a project's tests is the second
 // consumer's whole job, so these are allowed although a test suite runs the
-// project's own code: that code is the owner's, not the finder's.
+// project's own code: that code is the owner's, not the finder's. Each wrapper
+// is pinned to its test form; anything else (install, add, run <script>, exec
+// <program>) would fetch or run code of the finder's choosing.
 const NPM_RUN_RE = /^(test(:[A-Za-z0-9_-]+)?|lint|typecheck|check(:[A-Za-z0-9_-]+)?)$/;
 function npmRule(args) {
   if (args[0] === 'test') return null;
@@ -356,6 +522,28 @@ function makeRule(args) {
   }
   return null;
 }
+// yarn and pnpm run any script or add any package; only the test script.
+const yarnRule = (args) => (args[0] === 'test' || (args[0] === 'run' && args[1] === 'test')) ? null : "refused: yarn only as 'yarn test' or 'yarn run test'";
+const pnpmRule = (args) => (args[0] === 'test' || (args[0] === 'run' && args[1] === 'test')) ? null : "refused: pnpm only as 'pnpm test' or 'pnpm run test'";
+// bun runs any file or script; only its built-in test runner.
+const bunRule = (args) => args[0] === 'test' ? null : "refused: bun only as 'bun test'";
+// uv run and poetry run start any program in the project's environment; only
+// pytest, as itself or through python -m.
+function pytestRunner(name) {
+  return (args) => {
+    if (args[0] === 'run' && args[1] === 'pytest') return null;
+    if (args[0] === 'run' && args[1] === 'python' && args[2] === '-m' && args[3] === 'pytest') return null;
+    return "refused: " + name + " only as '" + name + " run pytest' or '" + name + " run python -m pytest'";
+  };
+}
+// bundle exec starts any gem's program; only rspec and rake's test task.
+function bundleRule(args) {
+  if (args[0] === 'exec' && args[1] === 'rspec') return null;
+  if (args[0] === 'exec' && args[1] === 'rake' && args[2] === 'test') return null;
+  return "refused: bundle only as 'bundle exec rspec' or 'bundle exec rake test'";
+}
+// dotnet run, tool and the rest build or run arbitrary projects; only test.
+const dotnetRule = (args) => args[0] === 'test' ? null : "refused: dotnet only as 'dotnet test'";
 
 // curl: a dev-server probe and nothing else. The URL must be the local
 // machine over plain http (and carry no @, which would turn the local part
@@ -405,7 +593,7 @@ const ALLOW = {
   diff: ok,                                   // compares, prints the difference
   cmp: ok,                                    // compares bytes
   jq: ok,                                     // filters JSON; has no file write or exec
-  sort: (a) => a.some((x) => /^-[A-Za-z]*o/.test(x) || flagIs(x, ['--output'])) ? 'refused: sort -o writes a file' : null,
+  sort: sortRule,                             // -o writes; --compress-program runs a program; -T picks a temp folder
   uniq: uniqRule,                             // a second file argument is an output file
   comm: ok,                                   // compares sorted files
   cut: ok,                                    // selects columns
@@ -435,8 +623,30 @@ const ALLOW = {
   go: goRule,
   cargo: cargoRule,
   make: makeRule,
+  yarn: yarnRule,
+  pnpm: pnpmRule,
+  bun: bunRule,
+  uv: pytestRunner('uv'),
+  poetry: pytestRunner('poetry'),
+  bundle: bundleRule,
+  dotnet: dotnetRule,
   curl: curlRule,                             // local dev-server probe only
 };
+// sort: -o/--output writes a file. --compress-program names a program sort
+// runs on every temporary file it spills (second-round audit: `sort -S 1k
+// --compress-program=./x big.txt` ran x many times, and a bare name such as
+// gzip runs from PATH), in the = and the separate-word spelling. -T and
+// --temporary-directory choose where those files are written. Each long
+// option is refused by its unambiguous prefixes as well (--out, --co, --t).
+function sortRule(args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (/^-[A-Za-z]*o/.test(a) || longOptionIs(a, '--output', '--o')) return 'refused: sort -o writes a file';
+    if (longOptionIs(a, '--compress-program', '--co')) return 'refused: sort --compress-program runs a program on its temporary files';
+    if (/^-[A-Za-z]*T/.test(a) || longOptionIs(a, '--temporary-directory', '--t')) return 'refused: sort -T writes temporary files to a folder of the check\'s choosing';
+  }
+  return null;
+}
 // uniq's -f, -s and -w take a value; a second remaining positional argument
 // is the output file, which is a write.
 function uniqRule(args) {
@@ -451,56 +661,217 @@ function uniqRule(args) {
 }
 
 const ENV_ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const FLAG_VALUE_RE = /^(-{1,2}[A-Za-z0-9][A-Za-z0-9_-]*)=([\s\S]+)$/;   // --flag=value or -x=value
 
 // Read confinement. A word that names something on this machine must resolve
 // under the project root: a relative name stays inside, a pattern or a flag
 // value names nothing and passes, and anything that exists elsewhere (an
-// absolute path, a parent folder, a symlink that lands outside) is refused.
-// The shell's two spellings of the home folder, ~ and $HOME, are refused here
-// (every other variable is refused by the tokenizer; $HOME reaches this far so
-// the node script path $HOME/.claude/plugins/.../scripts/x.js, which nodeRule
-// owns, keeps working). The harmless device files a check may read from are
-// listed; a block device would be the disk itself. `< file` reads a file, so
-// the word behind the < is judged.
+// absolute path, a parent folder, a symlink that lands outside) is refused,
+// quoted or not. The shell's two spellings of the home folder are refused for
+// an unquoted word: ~ only when the word began unquoted (bash never
+// tilde-expands a quoted word, and the rebuilt line quotes everything, so a
+// quoted "~/.claude/..." is a search pattern: review R7), $HOME unless the
+// word was single-quoted (every other variable is refused by the tokenizer;
+// $HOME reaches this far so the node script path $HOME/.claude/plugins/.../
+// scripts/x.js, which nodeRule owns, keeps working). The harmless device files
+// a check may read from are listed; a block device would be the disk itself.
+// `< file` reads a file, so the word behind the < is judged.
 const DEV_READ_OK = ['/dev/null', '/dev/zero', '/dev/urandom', '/dev/random', '/dev/stdin'];
-function outsideProject(word, root) {
-  const w = word.startsWith('<') ? word.slice(1) : word;
+// Resolves `w` from `root` (already real) the way the kernel will when bash
+// opens it: one segment at a time, every existing prefix through realpath, so
+// a `..` after a symlinked folder steps up from the folder the link points AT.
+// path.resolve cancels `link/..` lexically before anything looks at the link,
+// which let `cat d/../secret` (d a symlink to the project) read the project's
+// parent: the lexical result named a file that did not exist, so the old
+// existence check never ran realpath (second-round audit). A missing prefix
+// stays lexical (the kernel would stop there with ENOENT; nothing is read).
+// Returns { abs, escaped }: escaped says a `..` segment left the root.
+function physicalResolve(root, w) {
+  let cur = path.isAbsolute(w) ? '/' : root;
+  let escaped = false;
+  for (const seg of w.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') { cur = path.dirname(cur); if (!isUnder(cur, root)) escaped = true; continue; }
+    cur = path.join(cur, seg);
+    const real = realpathOrNull(cur);
+    if (real !== null) cur = real;
+  }
+  return { abs: cur, escaped };
+}
+function outsideProject(word, root, meta) {
+  const m = meta || {};
+  const w = m.input && word.startsWith('<') ? word.slice(1) : word;
   if (w === '' || w === '-') return null;
-  if (w[0] === '~' || /^\$HOME(?![A-Za-z0-9_])/.test(w)) return "refused: home-relative path '" + word + "'";
+  if (w[0] === '~' && !m.quoted) return "refused: home-relative path '" + word + "'";
+  if (/^\$HOME(?![A-Za-z0-9_])/.test(w) && m.quote !== "'") return "refused: home-relative path '" + word + "'";
   if (root === null) return 'refused: the project root could not be resolved';
-  const abs = path.resolve(root, w);
+  // The device files are matched by their spelling (/dev/stdin is a link to
+  // whatever stdin is), but only when no `..` could have been cancelled.
+  if (w.split('/').indexOf('..') === -1 && DEV_READ_OK.indexOf(path.resolve(root, w)) !== -1) return null;
+  const { abs, escaped } = physicalResolve(root, w);
   if (DEV_READ_OK.indexOf(abs) !== -1) return null;
-  if (!fs.existsSync(abs)) return null;
-  const real = realpathOrNull(abs);
-  if (real === null) return "refused: '" + word + "' could not be resolved";
-  if (!isUnder(real, root)) return "refused: '" + word + "' is outside the project root";
+  if (fs.existsSync(abs)) {
+    const real = realpathOrNull(abs);
+    if (real === null) return "refused: '" + word + "' could not be resolved";
+    if (!isUnder(real, root)) return "refused: '" + word + "' is outside the project root";
+    return null;
+  }
+  // Nothing there to read, so a pattern or a flag value passes; a `..` that
+  // climbed above the root is still refused, so a parent path never passes
+  // on the strength of a file that happens to be absent right now.
+  if (escaped) return "refused: '" + word + "' is outside the project root (its .. climbs above it)";
   return null;
 }
 
-// The guard over one whole check. Returns null when every segment is allowed,
-// else the first refusal reason. `cwd` is the project root the reads are
-// confined to; it defaults to the process's own.
-function guardCheck(text, cwd) {
-  const t = tokenize(text);
-  if (t.error) return t.error;
-  if (!t.segments.length) return 'refused: empty command';
-  const root = realpathOrNull(cwd || process.cwd());
-  for (const words of t.segments) {
+// grep and rg: the search pattern is text, never a file, so it is exempt from
+// the fence (a pattern that spells an outside path, such as the toolkit's own
+// docs quoting a plugin folder, is still a legitimate search: review R7). The
+// pattern is the first non-flag argument, or every value of -e / --regexp
+// (separate, attached as -ePAT, or --regexp=PAT, --regexp by its unambiguous
+// prefixes --reg and longer). The -f / --file value names a file and stays
+// judged, in each spelling (-f FILE, -fFILE, -nfFILE, --file FILE,
+// --file=FILE; --file has no unambiguous prefix: --files-with-matches and
+// --fixed-strings share them). A short cluster is read letter by letter, the
+// first value-taking letter owning the rest of the word or the next word
+// (second-round audit: `grep -e. ../x` put the pattern inside the cluster,
+// so the outside file took the exempt slot). The values of the other flags
+// that take one are skipped over so a count or a context width is never
+// mistaken for the pattern. The lists hold only options that truly take a
+// value: a flag wrongly listed would skip the real pattern and exempt the
+// file in its place; a flag missing from the list only mistakes a value for
+// the pattern and judges the pattern, which refuses more, never less.
+// Returns a Set of exempt word indices and a list of extra words to judge.
+const GREP_SHORT_VALUE = 'efmABCdDX';
+const RG_SHORT_VALUE = 'efmABCdgtTMjEr';
+const GREP_VALUE_FLAGS = ['--max-count', '--include', '--exclude', '--exclude-dir', '--label', '--context', '--after-context', '--before-context', '--directories', '--devices', '--binary-files'];
+const RG_VALUE_FLAGS = GREP_VALUE_FLAGS.concat(['--glob', '--iglob', '--type', '--type-not', '--type-add', '--max-depth', '--max-filesize', '--max-columns', '--encoding', '--threads', '--context-separator', '--field-context-separator', '--field-match-separator', '--path-separator', '--replace', '--sort', '--sortr', '--dfa-size-limit', '--regex-size-limit', '--ignore-file', '--engine', '--colors']);
+function grepPositions(cmd, words, meta) {
+  const exempt = new Set();
+  const judge = [];
+  const valueFlags = cmd === 'rg' ? RG_VALUE_FLAGS : GREP_VALUE_FLAGS;
+  const shortValue = cmd === 'rg' ? RG_SHORT_VALUE : GREP_SHORT_VALUE;
+  let positional = null;
+  let explicit = false;
+  let afterDashDash = false;
+  for (let i = 1; i < words.length; i++) {
+    const w = words[i];
+    if (meta[i] && meta[i].input) continue;                    // `< file` is never the pattern
+    if (!afterDashDash && w === '--') { afterDashDash = true; continue; }
+    if (!afterDashDash && w.length > 1 && w[0] === '-') {
+      if (w[1] === '-') {
+        if (longOptionIs(w, '--regexp', '--reg')) {
+          explicit = true;
+          if (w.indexOf('=') !== -1) exempt.add(i); else if (i + 1 < words.length) exempt.add(++i);
+          continue;
+        }
+        if (w === '--file') { i++; continue; }                   // the value is a plain word: judged
+        if (valueFlags.indexOf(w) !== -1) { i++; continue; }
+        continue;                                                // --x=value is judged whole by the fence loop
+      }
+      for (let k = 1; k < w.length; k++) {
+        const letter = w[k];
+        if (shortValue.indexOf(letter) === -1) continue;
+        const attached = w.slice(k + 1);
+        if (letter === 'e') { explicit = true; if (attached === '' && i + 1 < words.length) exempt.add(++i); }
+        else if (letter === 'f') { if (attached !== '') judge.push(attached); else i++; }
+        else if (attached === '') i++;
+        break;
+      }
+      continue;
+    }
+    if (positional === null) positional = i;
+  }
+  if (!explicit && positional !== null) exempt.add(positional);
+  return { exempt, judge };
+}
+
+// The guard over one parsed check. Returns null when every segment is allowed,
+// else the first refusal reason. `root` is the resolved project root the reads
+// are confined to, `env` the environment the check would run with (for the
+// ${CLAUDE_PLUGIN_ROOT} substitution).
+function guardParsed(parsed, root, env) {
+  if (!parsed.segments.length) return 'refused: empty command';
+  for (let s = 0; s < parsed.segments.length; s++) {
+    const words = parsed.segments[s];
+    const meta = parsed.meta[s];
     const cmd = words[0];
     if (ENV_ASSIGN_RE.test(cmd)) return "refused: environment assignment '" + cmd.split('=')[0] + "=...' before the command";
     const rule = Object.prototype.hasOwnProperty.call(ALLOW, cmd) ? ALLOW[cmd] : null;
     if (!rule) return "refused: first word '" + cmd + "' is not on the read-only allow-list";
     const reason = rule(words.slice(1));
     if (reason) return reason;
+    const positions = (cmd === 'grep' || cmd === 'rg') ? grepPositions(cmd, words, meta) : { exempt: new Set(), judge: [] };
     for (let i = 1; i < words.length; i++) {
       // The node script path is nodeRule's: it pins it to the toolkit's own
       // read-only scripts, the plugin folder's copies included.
       if (cmd === 'node' && i === 1) continue;
-      const outside = outsideProject(words[i], root);
+      if (positions.exempt.has(i)) continue;
+      // The word as bash would have seen it: the plugin root from the environment.
+      const judged = substitutePluginRoot(meta[i].raw, env);
+      const outside = outsideProject(judged, root, meta[i]);
+      if (outside) return outside;
+      // --flag=value: the value may name a file (diff --from-file=...).
+      const fv = FLAG_VALUE_RE.exec(judged);
+      if (fv) {
+        const outsideValue = outsideProject(fv[2], root, { quoted: meta[i].quoted, quote: meta[i].quote });
+        if (outsideValue) return outsideValue;
+      }
+    }
+    for (const w of positions.judge) {
+      const outside = outsideProject(substitutePluginRoot(w, env), root, {});
       if (outside) return outside;
     }
   }
   return null;
+}
+
+// The guard over one whole check, from its text. `cwd` is the project root the
+// reads are confined to (the process's own by default); `env` the environment
+// the check would run with (process.env by default).
+function guardCheck(text, cwd, env) {
+  const t = tokenize(text);
+  if (t.error) return t.error;
+  return guardParsed(t, realpathOrNull(cwd || process.cwd()), env || process.env);
+}
+
+// ---------------------------------------------------------------------------
+// The rebuilt line: what bash actually runs. Every word the guard judged, in
+// single quotes (a quote inside a word becomes '\''), so bash expands nothing;
+// an input-redirect word as `< 'file'`; the segment's safe redirections after
+// its words, in their original order; the segments joined by their recorded
+// operators. The node script path is expanded by the runner itself (see
+// expandNodePath), and the ${CLAUDE_PLUGIN_ROOT} literal elsewhere is the
+// same text the guard judged. Returns { line } or { error }.
+// ---------------------------------------------------------------------------
+function singleQuote(s) { return "'" + s.replace(/'/g, "'\\''") + "'"; }
+function rebuildCommand(parsed, env) {
+  const out = [];
+  for (let s = 0; s < parsed.segments.length; s++) {
+    const words = parsed.segments[s];
+    const meta = parsed.meta[s];
+    const parts = [];
+    for (let i = 0; i < words.length; i++) {
+      let text;
+      if (words[0] === 'node' && i === 1) {
+        const e = expandNodePath(words[i], env);
+        if (e.error) return { error: e.error };
+        text = e.path;
+      } else {
+        text = substitutePluginRoot(meta[i].raw, env);
+      }
+      if (meta[i].input) parts.push('< ' + singleQuote(text.startsWith('<') ? text.slice(1) : text));
+      else parts.push(singleQuote(text));
+    }
+    for (const r of parsed.redirections[s]) parts.push(r);
+    out.push(parts.join(' '));
+  }
+  let line = '';
+  for (let s = 0; s < out.length; s++) {
+    line += out[s];
+    const op = parsed.operators[s];
+    if (s + 1 < out.length) line += op === '\n' ? '\n' : ' ' + op + ' ';
+  }
+  return { line };
 }
 
 // ---------------------------------------------------------------------------
@@ -514,7 +885,12 @@ function guardCheck(text, cwd) {
 function decide(expect, exitCode, body, parts) {
   const stderr = parts && typeof parts.stderr === 'string' ? parts.stderr : '';
   const stdout = parts && typeof parts.stdout === 'string' ? parts.stdout : body;
-  const ran = exitCode === 0 || (exitCode === 1 && stderr.trim() === '');
+  const quiet = stderr.trim() === '';
+  // Exit 141 is 128 + SIGPIPE: with pipefail on, a pipeline reports it when an
+  // early stage was still writing after a later stage such as `head -5` had
+  // read what it wanted and closed. Nothing failed, so with a silent stderr it
+  // is as clean as exit 0 (review of 7.6.3, R6).
+  const ran = exitCode === 0 || (exitCode === 1 && quiet) || (exitCode === SIGPIPE_EXIT && quiet);
   const err = (reason) => ({ verdict: 'error', detail: reason });
   if (typeof expect === 'string') return { verdict: 'model', detail: '' };
   if (expect === null || typeof expect !== 'object' || Array.isArray(expect)) {
@@ -572,9 +948,12 @@ function checkEnv() {
   return env;
 }
 
-function runCheck(check, cwd, timeout) {
-  const r = spawnSync('bash', ['-c', check], {
-    cwd, timeout, env: checkEnv(), encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'],
+// `line` is the rebuilt line, never the check text as written. pipefail makes
+// a pipeline's exit code the last non-zero one among its stages, so a grep
+// over a missing file piped to head no longer reports head's exit 0.
+function runCheck(line, cwd, timeout, env) {
+  const r = spawnSync('bash', ['-o', 'pipefail', '-c', line], {
+    cwd, timeout, env: env || checkEnv(), encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'pipe'],
   });
   // Node reports a timeout as ETIMEDOUT and an output past maxBuffer as
   // ENOBUFS; both kill the child with SIGTERM, so the signal alone cannot tell
@@ -723,16 +1102,25 @@ function main(argv) {
   try { checks = loadChecks(opts.checks); } catch (e) { fail(e.message); }
   let outDir;
   try { outDir = prepareOutDir(opts.out, cwd); } catch (e) { fail(e.message); }
+  const env = checkEnv();              // the same environment the guard judges with
+  const root = realpathOrNull(cwd);
 
   const results = [];
   const summary = { pass: 0, fail: 0, model: 0, error: 0 };
   for (const c of checks) {
     const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '' };
-    const refusal = guardCheck(c.check, cwd);
+    // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
+    const parsed = tokenize(c.check);
+    let refusal = parsed.error || guardParsed(parsed, root, env);
+    let line = null;
+    if (!refusal) {
+      const built = rebuildCommand(parsed, env);
+      if (built.error) refusal = built.error; else line = built.line;
+    }
     if (refusal) {
       row.detail = refusal;
     } else {
-      const run = runCheck(c.check, cwd, opts.timeout);
+      const run = runCheck(line, cwd, opts.timeout, env);
       if (run.failed) {
         row.detail = run.failed;
       } else {
@@ -764,5 +1152,5 @@ function main(argv) {
   process.stdout.write(JSON.stringify({ checks: results, summary }) + '\n');
 }
 
-module.exports = { tokenize, guardCheck, decide, ALLOW, main };
+module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main };
 if (require.main === module) main(process.argv.slice(2));
