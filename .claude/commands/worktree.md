@@ -22,7 +22,7 @@ Set up an isolated worktree so you can work on a feature in a separate editor wi
 Run these checks. If any fail, stop with the indicated message.
 
 1. **Git repo check** - Run `git rev-parse --git-dir` (M16). A non-zero exit means this is not a repository; stop: "This isn't a git repository. Navigate to your project root and try again."
-2. **Not already a worktree** - Run `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16). It prints the git directory for this working copy, then the shared git directory for the whole repo, both absolute so a subfolder of the main copy still compares correctly. Two different lines mean you're in a worktree. Stop: "You're already in a worktree. Run this command from your main project folder instead."
+2. **Not already a worktree** - Run `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16). It prints the git directory for this working copy, then the shared git directory for the whole repo, both absolute so a subfolder of the main copy still compares correctly. Git older than 2.31 prints the flag back as an extra first line; compare the last two lines. Two different lines mean you're in a worktree. Stop: "You're already in a worktree. Run this command from your main project folder instead."
 3. **Not detached HEAD** - Run `git symbolic-ref HEAD` (M16). A non-zero exit means detached HEAD; stop: "You're in detached HEAD state. Check out a branch first with `git checkout main`."
 4. **Uncommitted changes warning** - Run `git status --porcelain`. If there is output, warn: "You have uncommitted changes. They won't appear in the new worktree - only committed code is copied." Do NOT stop - just inform the user.
 
