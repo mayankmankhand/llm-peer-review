@@ -47,13 +47,13 @@ Every review that produces a report writes it to disk before rendering anything:
 
 - `<run-stamp>` is the same `YYYY-MM-DD-HHMMSS` the markdown report carries. Once per run: `mkdir -p reports/receipts/<run-stamp>`.
 - Each check's file is `reports/receipts/<run-stamp>/<lens>-<n>.txt`, where `<lens>` is the specialist that authored the finding (`orchestrator` uses the specialist's name; a direct run uses its own lens name; the orchestrator's inline path uses `inline`) and `<n>` is that finding's number within that lens's results, counting from 1. That stem, `<lens>-<n>`, is the check's `id`.
-- Per worker return (once, for a direct run's own findings), write that worker's receipts as `<run-dir>/checks.json`, a JSON array of `{ "id": "<lens>-<n>", "check": ..., "expect": ... }` copied from each finding's `receipt`, into a fresh folder from `mktemp -d /tmp/review-checks.XXXXXX` made and written per "Temporary folders" in `html-outputs.md`; then run the checks script from the project root, typed as literal words (M16):
+- Per worker return (once, for a direct run's own findings), write that worker's receipts as `<run-dir>/checks.json`, a JSON array of `{ "id": "<lens>-<n>", "check": ..., "expect": ... }` copied from each finding's `receipt`, into a fresh folder from `mktemp -d /tmp/review-checks.XXXXXX` made and written per "Temporary folders" in `html-outputs.md`; then run the checks script from the project root, typed as literal words (M16): A check that names a browser capture under the temp folder (a browser finding's screenshot, a design re-capture) is rewritten first: copy the file into `reports/receipts/<run-stamp>/` with the file tool and put the copy's path in the check, because the runner refuses a read outside the project.
 
   ```bash
   node .claude/scripts/run-checks.js --checks <run-dir>/checks.json --out reports/receipts/<run-stamp>
   ```
 
-  The script runs each check, saves its output as `<lens>-<n>.txt` with a last line `exit N`, decides a machine `expect` as pass or fail itself, and prints one JSON object whose `checks[]` rows carry `id`, `verdict`, `exit` and `stdoutFile`. Read the verdicts from that JSON: `pass` and `fail` are decided; `model` means the `expect` was a prose line, so read that `<lens>-<n>.txt` and compare it against the line as before; `error` (the script refused the check because it is not read-only, or the `expect` was malformed) is `RECEIPT FAILED`, with the reason on one stderr line, `run-checks: <id>: <reason>`. The finding's HTML `receipt` becomes `{cmd, stdoutFile, exit}` straight from its row: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. The script has its own permission row, so the call does not prompt.
+  The script runs each check, saves its output as `<lens>-<n>.txt` with a last line `exit N`, decides a machine `expect` as pass or fail itself, and prints one JSON object whose `checks[]` rows carry `id`, `verdict`, `exit` and `stdoutFile`. Read the verdicts from that JSON: `pass` and `fail` are decided; `model` means the `expect` was a prose line (accepted until v8.0.0), so read that `<lens>-<n>.txt` and compare it against the line as before; `error` (the script refused the check because it is not read-only, or the `expect` was malformed) is `RECEIPT FAILED`, with the reason on one stderr line, `run-checks: <id>: <reason>`; carry that reason into the finding's Audited out line, so a refusal reads as untested rather than disproven. The finding's HTML `receipt` becomes `{cmd, stdoutFile, exit}` straight from its row: `render-html.js` reads the bytes from there, refuses a file from anywhere else, and drops a receipt whose file is missing, so a capture typed by hand never wears the machine's clothes. The script has its own permission row, so the call does not prompt.
 
 **The markdown and the HTML are named on different principles, deliberately.** The markdown is timestamped per run because it is the archive: every run's full report, kept. The HTML page is `--stable --name review` because it is the standing page: one per repository, replaced in place, carrying only what is still open. One accumulates on purpose; the other refuses to.
 
@@ -99,7 +99,7 @@ When an audit subagent failed twice and its tier could not run (M2), mark that f
 
 After the findings (and `### More findings`, when present), list every finding the audit killed - one line each, with its M2 verdict and a short evidence clause:
 
-- **R7** `RECEIPT FAILED` - [What] (check output did not show the claim)
+- **R7** `RECEIPT FAILED` - [What] (check output did not show the claim; or, when the runner refused the check: refused: <its stderr reason>, so the claim was not tested)
 - **R9** `REFUTED` - [What] (skeptic: one-clause reason)
 - **R2** `REFUTED 2/3` - [What] (two of three skeptics refuted: one-clause reason)
 
