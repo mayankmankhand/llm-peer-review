@@ -929,7 +929,7 @@ section('12. second round: a symlink then .., sort exec flags, option prefixes, 
     ['grep-cluster-count', 'grep -nm1 alpha a.txt', { match: '^1:alpha$' }],
     ['sort-plain', 'sort a.txt', { match: '^alpha$' }],
     ['sort-random', 'sort --random-source=/dev/urandom -R a.txt', { exit: 0 } ],
-    ['sort-files0', 'sort --files0-from=a.txt', 'reads a.txt as a list of names'],
+    ['sort-fieldsep', 'sort --field-separator=, a.txt', 'the --fie prefix is not --fil (--files0-from, refused in section 13)'],
     ['dev-null', 'cat /dev/null', { exit: 0 }],
     ['dev-stdin', 'cat /dev/stdin', { exit: 0 }],
   ];
@@ -942,6 +942,189 @@ section('12. second round: a symlink then .., sort exec flags, option prefixes, 
   check('canary: no control read the canary', noFileHolds(rc, CANARY2));
   for (const l of ['d', 'dir-out', 'sub/link.txt', 'link-in.txt']) { try { fs.unlinkSync(path.join(proj, l)); } catch (e) { /* gone */ } }
   for (const f of ['logger.sh', 'big.txt']) fs.rmSync(path.join(proj, f), { force: true });
+});
+
+// Third round (review of 7.6.4, R17): the fence judges every path a check
+// names and follows a named link through realpath, but a reader that follows
+// the links it DISCOVERS while walking the project reads through a link the
+// fence never saw. The skeptic's proof: with a directory symlink to an
+// outside folder inside the project, `grep -R <pattern> .` saved the outside
+// file's text into the receipt, and `find -L . -name x` listed its names.
+// Each following flag is refused in every spelling (the long option by its
+// unambiguous prefixes, the short letter anywhere in a cluster, read the way
+// grepPositions reads one); the forms that follow only a named link (grep -r,
+// rg, find without -L) and the readers that print names only (ls -R) run and
+// are shown to read nothing outside. The fixture first proves the leak is
+// real by running the raw command outside the runner.
+section('13. third round: a reader that follows the links it discovers while walking', function () {
+  const { guardCheck } = require(SCRIPT);
+  const CANARY3 = 'CANARY-ROUND3-' + process.pid + '-' + Date.now();
+  const outside = path.join(sandbox, 'outside-r17');           // a sibling of proj, outside it
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'canary.txt'), CANARY3 + '\n');
+  fs.mkdirSync(path.join(proj, 'sub'), { recursive: true });
+  const link = (at, to) => { try { fs.symlinkSync(to, path.join(proj, at)); } catch (e) { /* exists */ } };
+  link('dir-out', outside);                                    // a directory link to the outside folder
+  link('sub/link.txt', path.join(outside, 'canary.txt'));      // a file link to the outside file, in a subfolder
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+  const walkRe = /follows symbolic links while walking/;
+
+  // The leak is real: the raw command, outside the runner, reads the outside file through the link.
+  const raw = spawnSync('grep', ['-R', CANARY3, '.'], { cwd: proj, encoding: 'utf8', env: ENV });
+  check('fixture is live: a raw grep -R reads the outside canary through the directory link', raw.stdout.indexOf(CANARY3) !== -1, JSON.stringify(raw.stdout).slice(0, 200) + ' ' + raw.stderr.slice(0, 200));
+  const rawFind = spawnSync('find', ['-L', '.', '-name', 'canary.txt'], { cwd: proj, encoding: 'utf8', env: ENV });
+  check('fixture is live: a raw find -L names the outside file through the link', /dir-out\/canary\.txt/.test(rawFind.stdout), JSON.stringify(rawFind.stdout).slice(0, 200));
+
+  // --- refused: each with a reason naming the flag, nothing run, nothing saved ---
+  const refused = [
+    ['grep-R', 'grep -R ' + CANARY3 + ' .', /grep -R/],
+    ['grep-rnR', 'grep -rnR ' + CANARY3 + ' .', /grep -R/],
+    ['grep-Rn', 'grep -Rn ' + CANARY3 + ' .', /grep -R/],
+    ['grep-nR', 'grep -nR ' + CANARY3 + ' .', /grep -R/],
+    ['grep-deref', 'grep --dereference-recursive ' + CANARY3 + ' .', /grep --dereference-recursive/],
+    ['grep-der', 'grep --der ' + CANARY3 + ' .', /grep --dereference-recursive/],
+    ['grep-S', 'grep -S ' + CANARY3 + ' .', /grep -S/],
+    ['grep-rS', 'grep -rS ' + CANARY3 + ' .', /grep -S/],
+    ['rg-L', 'rg -L ' + CANARY3 + ' .', /rg -L/],
+    ['rg-nL', 'rg -nL ' + CANARY3 + ' .', /rg -L/],
+    ['rg-follow', 'rg --follow ' + CANARY3 + ' .', /rg --follow/],
+    ['rg-fol', 'rg --fol ' + CANARY3 + ' .', /rg --follow/],
+    ['find-L', 'find -L . -name canary.txt', /find -L/],
+    ['find-HL', 'find -HL . -name canary.txt', /find -L/],
+    ['find-follow', 'find . -follow -name canary.txt', /find -follow/],
+    ['diff-r', 'diff -r . sub', /diff -r/],
+    ['diff-ur', 'diff -ur . sub', /diff -r/],
+    ['diff-recursive', 'diff --recursive . sub', /diff --recursive/],
+    ['diff-rec', 'diff --rec . sub', /diff --recursive/],
+  ];
+  const rr = runChecks(refused.map(([id, cmd]) => ({ id, check: cmd, expect: { exit: 0 } })), 'r17-refused', [], ENV_NO_PLUGIN);
+  check('the refused run itself exits 0 with one JSON object', rr.status === 0 && rr.json !== null, rr.status + ' ' + rr.stderr.slice(0, 300));
+  for (const [id, cmd, rx] of refused) {
+    const row = rr.byId[id];
+    check('refused with the symlink reason: ' + cmd.replace(CANARY3, 'CANARY'), !!row && row.verdict === 'error' && row.exit === null && row.stdoutFile === null && /^refused: /.test(row.detail) && rx.test(row.detail) && walkRe.test(row.detail), row ? JSON.stringify(row) : 'no row');
+  }
+  check('nothing was saved for any refused check', fs.readdirSync(rr.out).length === 0, fs.readdirSync(rr.out).join(','));
+
+  // --- the cluster stops at a value-taking letter, and the named-link forms stay allowed ---
+  const guardAllowed = [
+    'grep -eR f.txt',                            // -e owns the rest of the word: the pattern R
+    'grep -r x .', 'grep --recursive x .', 'grep -rn x .', 'grep --devices=skip x f.txt', 'grep -- -R f.txt',
+    'rg -rL x f.txt',                            // -r (replace) owns the rest: the replacement L
+    'rg --files', 'rg --fixed-strings x f.txt', 'rg --files-with-matches x f.txt',   // --fol is the shortest prefix: --files and --fixed-strings stay
+    'find -H . -name canary.txt', 'find -P . -name canary.txt', 'find . -name canary.txt',
+    'diff -Lr f.txt notes.md',                   // -L owns the rest: the label r
+    'diff -u f.txt notes.md', 'diff --report-identical-files f.txt notes.md',
+    'ls -R .', 'ls -RL .',
+  ];
+  for (const c of guardAllowed) check('still allowed: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
+
+  // --- run: the forms that follow only a named link read nothing outside ---
+  const ran = [
+    ['grep-r', 'grep -r ' + CANARY3 + ' .', { noMatch: CANARY3 }],
+    ['grep-recursive', 'grep --recursive ' + CANARY3 + ' .', { noMatch: CANARY3 }],
+    ['rg-plain', 'rg ' + CANARY3 + ' .', { noMatch: CANARY3 }],
+    ['find-plain', 'find . -name canary.txt', { noMatch: 'canary\\.txt' }],
+    ['find-H', 'find -H . -name canary.txt', { noMatch: 'canary\\.txt' }],
+    ['diff-files', 'diff f.txt notes.md', { exit: 1 }],
+    ['ls-R', 'ls -R .', { exit: 0 }],
+  ];
+  const rn = runChecks(ran.map(([id, cmd, expect]) => ({ id, check: cmd, expect })), 'r17-ran', [], ENV_NO_PLUGIN);
+  for (const [id, cmd] of ran) {
+    const row = rn.byId[id];
+    const saved = savedFile(rn, id);
+    check('ran (pass or fail, never error): ' + cmd.replace(CANARY3, 'CANARY'), !!row && (row.verdict === 'pass' || row.verdict === 'fail') && saved !== null, row ? JSON.stringify(row) : 'no row');
+  }
+  check('grep -r and rg: the saved output never holds the canary string', ['grep-r', 'grep-recursive', 'rg-plain'].every((id) => (savedFile(rn, id) || '').indexOf(CANARY3) === -1), ['grep-r', 'grep-recursive', 'rg-plain'].map((id) => JSON.stringify(savedFile(rn, id))).join(' '));
+  check('grep -r: the noMatch verdict is pass (the walk ran cleanly and found nothing)', ['grep-r', 'grep-recursive'].every((id) => rn.byId[id] && rn.byId[id].verdict === 'pass'), verdicts(rn, ['grep-r', 'grep-recursive']));
+  // rg is not installed everywhere: without it the check is a clean fail (exit 127), never an error.
+  check('rg: the noMatch verdict is pass, or a fail on exit 127 where rg is not installed', !!rn.byId['rg-plain'] && (rn.byId['rg-plain'].verdict === 'pass' || (rn.byId['rg-plain'].verdict === 'fail' && rn.byId['rg-plain'].exit === 127)), JSON.stringify(rn.byId['rg-plain']));
+  check('find without -L: the saved output does not name the outside file', ['find-plain', 'find-H'].every((id) => (savedFile(rn, id) || '').indexOf('canary.txt') === -1 && rn.byId[id].verdict === 'pass'), ['find-plain', 'find-H'].map((id) => JSON.stringify(savedFile(rn, id))).join(' '));
+  check('diff f.txt notes.md runs and is pass on exit 1', !!rn.byId['diff-files'] && rn.byId['diff-files'].verdict === 'pass' && rn.byId['diff-files'].exit === 1, JSON.stringify(rn.byId['diff-files']));
+  check('ls -R . runs and the saved output does not hold the canary string', !!rn.byId['ls-R'] && rn.byId['ls-R'].verdict === 'pass' && (savedFile(rn, 'ls-R') || '').indexOf(CANARY3) === -1, JSON.stringify(savedFile(rn, 'ls-R')).slice(0, 300));
+
+  // --- second round: a reader that opens what a folder or a list hands it ---
+  // diff on a folder opens every file it finds in it and follows a file
+  // symlink by default, so dirA/x (a link to the outside canary) against
+  // dirB/x (a plain file) printed the canary while the fence judged only the
+  // two folder names. sort --files0-from opens every NUL-terminated name it
+  // reads, and find -printf '%l' prints the links' outside targets as names,
+  // so the pipe reached the canary too; so did a project file holding the
+  // outside path. wc --files0-from, file -f and find -files0-from open or
+  // walk what a list names the same way (counts, types and names only) and
+  // are refused for the same reason.
+  fs.mkdirSync(path.join(proj, 'dirA'), { recursive: true });
+  fs.mkdirSync(path.join(proj, 'dirB'), { recursive: true });
+  link('dirA/x', path.join(outside, 'canary.txt'));            // a file link to the outside canary
+  write('dirB/x', 'plain\n');
+  write('list.txt', path.join(outside, 'canary.txt') + '\0');  // a NUL-terminated outside name
+  const rawDiff = spawnSync('diff', ['dirA', 'dirB'], { cwd: proj, encoding: 'utf8', env: ENV });
+  check('fixture is live: a raw diff of the two folders reads the outside canary through the file link', rawDiff.stdout.indexOf(CANARY3) !== -1, JSON.stringify(rawDiff.stdout).slice(0, 200) + ' ' + rawDiff.stderr.slice(0, 200));
+  const rawSort = spawnSync('bash', ['-c', "find . -type l -xtype f -printf '%l\\0' | sort --files0-from=-"], { cwd: proj, encoding: 'utf8', env: ENV });
+  check('fixture is live: a raw find -printf %l piped into sort --files0-from=- reads the outside canary', rawSort.stdout.indexOf(CANARY3) !== -1, JSON.stringify(rawSort.stdout).slice(0, 200) + ' ' + rawSort.stderr.slice(0, 200));
+
+  const refused2 = [
+    ['diff-dirs', 'diff dirA dirB', /diff on the folder 'dirA'/],
+    ['diff-dirs-rev', 'diff dirB dirA', /diff on the folder 'dirB'/],
+    ['diff-dirs-slash', 'diff dirA/ dirB/', /diff on the folder 'dirA\/'/],
+    ['diff-N', 'diff -N dirA dirB', /diff on the folder 'dirA'/],
+    ['diff-y', 'diff -y dirA dirB', /diff on the folder 'dirA'/],
+    ['diff-from-file', 'diff --from-file=dirB dirA', /diff on the folder 'dirB'/],
+    ['diff-fr', 'diff --fr=dirB dirA', /diff on the folder 'dirB'/],
+    ['diff-to-file-word', 'diff --to-file dirB dirA', /diff on the folder 'dirB'/],
+    ['diff-one-dir', 'diff dirA dirB/x', /diff on the folder 'dirA'/],
+    ['find-sort-pipe', "find . -type l -xtype f -printf '%l\\0' | sort --files0-from=-", /sort --files0-from/],
+    ['git-show-sort-pipe', 'git show HEAD:canary_link | sort --files0-from=-', /sort --files0-from/],
+    ['git-cat-sort-pipe', 'git cat-file -p HEAD:dirA/x | sort --files0-from=-', /sort --files0-from/],
+    ['sort-files0', 'sort --files0-from=list.txt', /sort --files0-from/],
+    ['sort-fil', 'sort --fil=list.txt', /sort --files0-from/],
+    ['sort-files0-word', 'sort --files0-from list.txt', /sort --files0-from/],
+    ['wc-files0', 'wc --files0-from=list.txt', /wc --files0-from/],
+    ['wc-f', 'wc --f=list.txt', /wc --files0-from/],
+    ['file-f', 'file -f list.txt', /file -f/],
+    ['file-bf', 'file -bf list.txt', /file -f/],
+    ['file-files-from', 'file --files-from list.txt', /file -f/],
+    ['file-fprefix', 'file --f list.txt', /file -f/],
+    ['find-files0', 'find -files0-from list.txt -name canary.txt', /find -files0-from/],
+  ];
+  const listRe = /which the read fence cannot judge/;
+  const rr2 = runChecks(refused2.map(([id, cmd]) => ({ id, check: cmd, expect: { exit: 0 } })), 'r17-refused-2', [], ENV_NO_PLUGIN);
+  check('the second refused run itself exits 0 with one JSON object', rr2.status === 0 && rr2.json !== null, rr2.status + ' ' + rr2.stderr.slice(0, 300));
+  for (const [id, cmd, rx] of refused2) {
+    const row = rr2.byId[id];
+    check('refused, the reason naming the flag or folder: ' + cmd, !!row && row.verdict === 'error' && row.exit === null && row.stdoutFile === null && /^refused: /.test(row.detail) && rx.test(row.detail) && listRe.test(row.detail), row ? JSON.stringify(row) : 'no row');
+  }
+  check('nothing was saved for any second-round refused check', fs.readdirSync(rr2.out).length === 0, fs.readdirSync(rr2.out).join(','));
+
+  const guardAllowed2 = [
+    'diff dirB/x f.txt', 'diff --from-file=f.txt notes.md', 'diff --to-file=f.txt notes.md', 'diff -L label dirB/x f.txt',   // files, not folders
+    'sort --field-separator=, f.txt', 'sort --fie=, f.txt', 'sort -k1 f.txt', 'sort -u f.txt',                               // --fil is the shortest prefix: --fie stays
+    'wc -l f.txt', 'wc --lines f.txt', 'wc --words f.txt',
+    'file f.txt', 'file -b f.txt', 'file -i f.txt', 'file --mime-type f.txt',
+    'find . -newer f.txt -name canary.txt', "find . -type l -printf '%l\\n'",                                           // names only
+    'git show HEAD:f.txt', 'git cat-file -p HEAD:f.txt',
+  ];
+  for (const c of guardAllowed2) check('still allowed: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
+  check('a diff operand is judged by what it resolves to: the outside folder keeps its outside reason', /outside the project root/.test(guardCheck('diff dir-out dirB', proj) || ''), guardCheck('diff dir-out dirB', proj));
+
+  const ran2 = [
+    ['diff-files-2', 'diff dirB/x f.txt', { exit: 1 }],
+    ['sort-plain', 'sort f.txt', { match: '^hello$' }],
+    ['wc-plain', 'wc -l f.txt', { match: '^3' }],
+    ['file-plain', 'file dirB/x', { match: 'text' }],
+    ['find-link-names', "find . -type l -printf '%l\\n'", { match: 'canary\\.txt' }],
+  ];
+  const rn2 = runChecks(ran2.map(([id, cmd, expect]) => ({ id, check: cmd, expect })), 'r17-ran-2', [], ENV_NO_PLUGIN);
+  for (const [id, cmd] of ran2) {
+    const row = rn2.byId[id];
+    check('ran and passed with named files: ' + cmd, !!row && row.verdict === 'pass' && savedFile(rn2, id) !== null, row ? JSON.stringify(row) : 'no row');
+  }
+  check('find -printf %l prints the outside target as a name and never its text', (savedFile(rn2, 'find-link-names') || '').indexOf(CANARY3) === -1, JSON.stringify(savedFile(rn2, 'find-link-names')).slice(0, 300));
+  check('canary: the canary string reached no saved file of this section', noFileHolds(rr, CANARY3) && noFileHolds(rn, CANARY3) && noFileHolds(rr2, CANARY3) && noFileHolds(rn2, CANARY3));
+  check('the outside canary file is intact after every run', fs.readFileSync(path.join(outside, 'canary.txt'), 'utf8') === CANARY3 + '\n' && fs.readdirSync(outside).length === 1, fs.readdirSync(outside).join(','));
+  for (const l of ['dir-out', 'sub/link.txt', 'dirA/x']) { try { fs.unlinkSync(path.join(proj, l)); } catch (e) { /* gone */ } }
+  for (const d of ['dirA', 'dirB']) fs.rmSync(path.join(proj, d), { recursive: true, force: true });
+  fs.rmSync(path.join(proj, 'list.txt'), { force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
 });
 
 console.log('');
