@@ -8,11 +8,11 @@ The toolkit runs on GitHub and GitLab. Nothing about the install differs by host
 
 ## Detect the Host
 
-1. Read the origin remote: `git config --get remote.origin.url`
+1. Read the origin remote: `git config --get remote.origin.url` (M16)
 2. Match that output as a **substring**. Do not parse it as a URL: the SSH form (`git@github.com:owner/repo.git`) and the HTTPS form (`https://github.com/owner/repo.git`) do not parse alike.
    - contains `github.com` -> use `gh`
    - contains `gitlab.com` -> use `glab`
-3. Neither matches (self-hosted GitLab, GitHub Enterprise, or no `origin` remote). Fall back to whichever CLI is installed, via `command -v gh` and `command -v glab`:
+3. Neither matches (self-hosted GitLab, GitHub Enterprise, or no `origin` remote). Fall back to whichever CLI is installed, via `command -v gh` and `command -v glab` (M16):
    - exactly one installed -> use it
    - both installed -> ask the user once, then reuse that answer for the rest of the session
    - neither installed -> stop, and tell the user to install `gh` or `glab`

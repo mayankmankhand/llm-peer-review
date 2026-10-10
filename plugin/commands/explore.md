@@ -172,11 +172,7 @@ Before starting codebase analysis, check if this session is running in a Git wor
 **Session context (fast path):** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js` once now. It returns a single JSON with everything this command reads at startup, so you can skip the individual git/file roundtrips below: `worktree` (isWorktree, gitDir, commonDir, branch) for the detection in this section, `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview) for the Phase 2 staleness check, and `lessons` (exists, content, hasDetail) for the Phase 2 lessons read. **Fallback:** if the script is missing or errors, do the manual reads described in this section and Phase 2 instead - behavior is identical.
 
 ### How to detect a worktree
-Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, fall back to comparing the output of these two commands:
-- `git rev-parse --git-dir` - the Git directory for this working copy
-- `git rev-parse --git-common-dir` - the shared Git directory for the whole repo
-
-If they return different values, you are in a worktree. If they match, you are in the main working copy.
+Use `worktree.isWorktree` from the session-init JSON. Only if the script was unavailable, run `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16): it prints the Git directory for this working copy, then the shared Git directory for the whole repo. Two different lines mean you are in a worktree; two identical lines mean the main working copy. Keep `--path-format=absolute`: without it, a subfolder of the main copy prints one path relative and the two never match.
 
 ### What to do
 

@@ -39,10 +39,11 @@ Parse the JSON. The manifest contains:
 - `timestamp` (UTC, for the map header)
 - `chunks` (array of `{ id, files: [{path, tokens}], totalTokens }`)
 - `largestChunkTokens` (size of the largest chunk - helps explain overflow)
-- `chunkTargetTokens` (the per-chunk token target - a chunk whose `totalTokens` exceeds this is oversized)
+- `chunkTargetTokens` (the per-chunk token target; `overflowChunkIds` names the chunks over it)
 - `directoryTree` (array of indented strings)
 - `needsConfirm` (true if project total > 500k tokens OR any chunk overflows the per-chunk target)
 - `anyChunkOverflows` (true if at least one chunk exceeds the per-chunk target despite chunking)
+- `overflowChunkIds` (the ids of the chunks over `chunkTargetTokens`; empty when none)
 
 If the JSON has an `error` field, show the message to the user and stop.
 
@@ -92,7 +93,7 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 
 Launch all subagents in parallel (one Agent tool call per chunk in a single message). Wait for all to return.
 
-If any subagent fails or returns an empty response, re-dispatch that chunk once on the session model (`subagent_type=general-purpose` with `model` set to your own model family's alias: a call with no model parameter follows `CLAUDE_CODE_SUBAGENT_MODEL` when a user has set it, measured on Claude Code 2.1.289, and could land the retry on the model that just failed) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose `totalTokens` exceeds `manifest.chunkTargetTokens`) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 6. If every chunk failed, do not offer partial coverage: follow the "All subagents fail" edge case instead.
+If any subagent fails or returns an empty response, re-dispatch that chunk once on the session model (`subagent_type=general-purpose` with `model` set to your own model family's alias: a call with no model parameter follows `CLAUDE_CODE_SUBAGENT_MODEL` when a user has set it, measured on Claude Code 2.1.289, and could land the retry on the model that just failed) per guardrail 2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`, which bounds a retry at one extra spawn - do not interrupt the user for a first failure. Exception: do not auto-retry an oversized chunk (one whose id is in `manifest.overflowChunkIds`, M16) - a retry fails the same way, so ask the user directly. If that one re-dispatch also fails or comes back malformed, ask the user whether to retry again or continue with partial coverage, and note the gap for Step 6. If every chunk failed, do not offer partial coverage: follow the "All subagents fail" edge case instead.
 
 ### Step 4: Synthesize the map content
 Combine the subagent responses into a single map content string (do not write the file yet - Step 5 handles the write atomically). Use this structure:
