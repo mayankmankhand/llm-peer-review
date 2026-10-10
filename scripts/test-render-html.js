@@ -1359,15 +1359,20 @@ function findingContractTests() {
 
   // --- the bottom line's 25-word slot cap is enforced here, not asked for ---
   // (issue #221, D11 and G2): a 30-word entry renders as its first 25 words
-  // and its slot is named on stderr; a 20-word entry is untouched.
+  // plus a visible cut marker (three ASCII periods, never a Unicode ellipsis)
+  // and its slot is named on stderr; a 20-word entry is untouched and carries
+  // no marker, so a reader can tell a cut sentence from a complete one.
   const nWords = function (n) { const w = []; for (let i = 1; i <= n; i++) w.push('w' + i); return w.join(' '); };
+  const cutMark = '...';
   const bl = run('bottomline', { title: 'T', bottomLine: [nWords(20), nWords(30), 'Then it ships.'],
     groups: [{ label: 'code', findings: [{ id: 'R1', severity: 'warn', what: 'Should fix. One thing breaks.' }] }] });
   const blOut = island(bl.html).bottomLine || [];
-  check('a 30-word bottom-line entry renders as its first 25 words',
-    blOut[1] === nWords(25), JSON.stringify(blOut[1]));
+  check('a 30-word bottom-line entry renders as its first 25 words plus the three-dot cut marker',
+    blOut[1] === nWords(25) + cutMark, JSON.stringify(blOut[1]));
   check('a 20-word bottom-line entry is untouched, and so is the short third slot',
     blOut[0] === nWords(20) && blOut[2] === 'Then it ships.', JSON.stringify(blOut));
+  check('the untouched slots carry no cut marker',
+    String(blOut[0]).slice(-3) !== cutMark && String(blOut[2]).slice(-3) !== cutMark, JSON.stringify(blOut));
   check('the trimmed slot is named on stderr by its index, and the untouched slots are not',
     /over cap: bottomLine\[1\] 30\/25 words/.test(bl.stderr) && !/bottomLine\[0\]|bottomLine\[2\]/.test(bl.stderr),
     bl.stderr.trim());

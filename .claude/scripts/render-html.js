@@ -1045,7 +1045,9 @@ function applyReviewContract(data) {
   // The bottom line is the first screen, and its 25-word slot was the one cap
   // left to the prompt (issue #221, D11 and G2): a sentence that runs long
   // pushes the page's one job below the fold. An entry over the cap is cut to
-  // its first 25 words and the slot is named on stderr beside the other caps.
+  // its first 25 words, the cut is marked on the page with three plain dots so
+  // the reader sees a shortened sentence rather than a complete-looking one,
+  // and the slot is named on stderr beside the other caps.
   // Words are whitespace-separated tokens, the count the review prompt asks for.
   if (Array.isArray(data.bottomLine)) {
     data.bottomLine = data.bottomLine.map(function (s, i) {
@@ -1054,7 +1056,9 @@ function applyReviewContract(data) {
       if (words.length <= REVIEW_CAPS.bottomLineWords) return s;
       reviewNotes.push('over cap: bottomLine[' + i + '] ' + words.length + '/' + REVIEW_CAPS.bottomLineWords +
                        ' words, trimmed to the first ' + REVIEW_CAPS.bottomLineWords);
-      return words.slice(0, REVIEW_CAPS.bottomLineWords).join(' ');
+      // Three ASCII periods, never the Unicode ellipsis: the marker has to read
+      // the same on the page, on a terminal and in a diff.
+      return words.slice(0, REVIEW_CAPS.bottomLineWords).join(' ') + '...';
     });
   }
   if (!findings.length) return;
