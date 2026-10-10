@@ -2,6 +2,28 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Name the Command
+
+**A patch on top of v7.6.4, which stays additive on v7.0.0 and v6.0.0.** Issue #226. The four spots the #221 triage left for a later cycle now name their command and its pass signal (M16), and the work turned up a worktree check that misread a subfolder of the main copy.
+
+### Fixed
+
+- **Worktree detection reads a subfolder correctly.** From a subfolder of the main copy, git prints `--git-dir` as a full path and `--git-common-dir` as a relative one (`../../.git`), so every check that compared the two raw strings called the main copy a worktree. `session-init.js` now resolves both paths before comparing, so `/explore` and `/create-plan` no longer risk renaming your branch to `worktree-<N>-...`. The prompt checks in `/worktree` (which refused to run there), `/document` (which could start its worktree cleanup) and the fallbacks in `/explore` and `/create-plan` run `git rev-parse --path-format=absolute --git-dir --git-common-dir` and compare its last two lines. Git older than 2.31 prints the flag back as an extra first line; on that Git, a run from a subfolder can still misread, as it did before.
+- **`/index` reads which chunks not to auto-retry.** `generate-index.js` prints `overflowChunkIds`, the chunks over the per-chunk target, and the no-auto-retry exception reads that list instead of asking the model to compare two numbers.
+- **`/package-review` names its compare command.** "Changed Files" lists files with `git status --porcelain` and `git diff --name-status main...HEAD`, says that no output means nothing changed, and falls back to the status list when the repo has no `main` branch.
+- **Host detection and the `/worktree` checks cite M16** and state their pass signals: an exit code, or two lines that match or differ.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. No new permission rows: the commands named here are covered by the existing `git rev-parse`, `git status` and `git diff` rows.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated `session-init.js` and `generate-index.js`.
+
+### Why
+
+#221 made "run before you reason" a rule and named the command at 46 of its 50 triage spots; #226 tracked the last four so they would not slip. Testing the new worktree pass signal from a subfolder showed the old comparison was wrong there, in the startup script and in four prompts, so the fix went wherever the comparison lived.
+
+---
+
 ## v7.6.4 - Execute What You Judged (2026-10-10)
 
 **A patch on top of v7.6.3, which stays additive on v7.0.0 and v6.0.0.** Found by a full pre-release review of the v7.6.3 range: five lenses, a three-vote audit on the Block, and four adversarial rounds on the fix. The loop runs as before. Four #221 triage spots that never got a step are tracked in #226.
