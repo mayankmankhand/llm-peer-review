@@ -242,7 +242,12 @@ async function ask(providerName, state, keys, options) {
     result.ms = Date.now() - t0;
     let json = null;
     try { json = JSON.parse(text); } catch (e) { json = null; }
-    if (!res.ok) { result.error = 'http ' + res.status + ': ' + String(text).slice(0, 160); return result; }
+    if (!res.ok) {
+      // keep the status and the provider's error code or first words, never the whole body
+      const brief = json && json.error ? (json.error.code || json.error.message || '') : String(text);
+      result.error = ('http ' + res.status + ': ' + String(brief).replace(/\s+/g, ' ')).slice(0, 80);
+      return result;
+    }
     if (!json) { result.error = 'non-json body'; return result; }
     result.model = (json && json.model) || p.model;
     result.probs = p.parse(json);
