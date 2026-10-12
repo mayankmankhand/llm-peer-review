@@ -295,6 +295,9 @@ async function processHookInput(input, deps) {
   line.command = stripped.text.length > MAX_STORED_COMMAND ? stripped.text.slice(0, MAX_STORED_COMMAND) + '<capped>' : stripped.text;
   line.strippedBytes = stripped.strippedBytes;
   line.flags = regexFlags(raw);
+  // The models see the stripped text, so a regex hit that lives inside a stripped body is one they
+  // cannot see; flagsAfterStrip lets the scorer count those rather than score them as misses.
+  line.flagsAfterStrip = regexFlags(stripped.text);
   const keys = d.keys || loadKeys();
   const state = buildState(stripped.text, line.cwd);
   const [jev, openai] = await Promise.all([d.ask('jev', state, keys), d.ask('openai', state, keys)]);

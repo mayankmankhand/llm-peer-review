@@ -148,10 +148,15 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     check('the line carries every field', parsed && ['v', 'ts', 'session_id', 'tool_use_id', 'cwd', 'command', 'strippedBytes', 'flags', 'providers'].every(k => k in parsed), parsed && Object.keys(parsed).join(','));
     check('both providers were asked and parsed', parsed && parsed.providers.jev.probs.forcePush === 0.97 && parsed.providers.openai.probs.forcePush === 0.91 && parsed.providers.jev.model === 'typesafe/jev-1.13-20260917', JSON.stringify(parsed && parsed.providers));
     check('the regex flag sits beside the model answers', parsed && parsed.flags.forcePush === true && parsed.flags.release === false);
+    check('the regex is also run on the stripped text the models see', parsed && parsed.flagsAfterStrip && parsed.flagsAfterStrip.forcePush === true);
     check('the description field is never sent', sent.length === 2 && sent.every(s => !JSON.stringify(s.body).includes('never sent')));
     check('the Jev request uses the probed shape', sent.some(s => s.url.includes('openrouter') && s.body.state && s.body.questions && s.body.questions.forcePush && s.body.questions.forcePush.type === 'noul'));
     check('the OpenAI request uses the documented shape', sent.some(s => s.url.includes('openai.com') && typeof s.body.input === 'string' && Array.isArray(s.body.questions) && s.body.questions[0].type === 'predicate'));
     check('usage is kept for cost', parsed && parsed.providers.jev.usage.cost === 0.0000126);
+
+    // a force push hidden inside an inline body: a raw regex hit the models cannot see
+    const hidden = await hook.processHookInput(hookInput("bash -c 'git push --force origin main'"), { keys, logFile: log });
+    check('a regex hit inside a stripped body is flagged raw but not after stripping', hidden.flags.forcePush === true && hidden.flagsAfterStrip.forcePush === false, JSON.stringify([hidden.flags, hidden.flagsAfterStrip]));
 
     // a withheld command: no network call, no command text stored
     sent.length = 0;
