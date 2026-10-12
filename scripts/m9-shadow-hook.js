@@ -26,8 +26,13 @@
 const fs = require('fs');
 const path = require('path');
 
-const PROJECT_ROOT = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
-const LOG_DIR = path.join(PROJECT_ROOT, 'reports', 'issue-222', 'shadow');
+// Where the hook keeps its own things, the keys file and the log: this repository, the hook's
+// home, so a block in another project's local settings can point at this script and still log
+// here. M9_SHADOW_HOME overrides it (the test suite points it at a scratch folder). The project
+// is whatever Claude Code is working in, which is a different folder when another install calls.
+const HOOK_HOME = process.env.M9_SHADOW_HOME || path.resolve(__dirname, '..');
+const PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR || HOOK_HOME;
+const LOG_DIR = path.join(HOOK_HOME, 'reports', 'issue-222', 'shadow');
 const LOG_FILE = path.join(LOG_DIR, 'decisions.jsonl');
 const HOOK_VERSION = 1;
 const TIMEOUT_MS = 5000;
@@ -197,12 +202,13 @@ function strip(command) {
 // Keys: the real environment first, then <project>/.env.local, for the two names only. A base-URL
 // or proxy name in the file is never read, which is the same stance .claude/scripts/env-local.js
 // takes for the shipped scripts (its allowlist is frozen, so this maintainer-only hook parses its
-// own two names rather than widening a shipped file for an experiment).
+// own two names rather than widening a shipped file for an experiment). The file is read from the
+// hook's home, never from the project the command runs in.
 function loadKeys(envFile) {
   const want = ['OPENAI_API_KEY', 'OPENROUTER_API_KEY'];
   const out = {};
   for (const k of want) if (process.env[k] && process.env[k].trim()) out[k] = process.env[k].trim();
-  const file = envFile || path.join(PROJECT_ROOT, '.env.local');
+  const file = envFile || path.join(HOOK_HOME, '.env.local');
   let text = '';
   try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return out; }
   for (const line of text.split(/\r?\n/)) {
@@ -262,7 +268,7 @@ async function ask(providerName, state, keys, options) {
 
 function relativeCwd(cwd) {
   if (!cwd) return null;
-  const rel = path.relative(PROJECT_ROOT, cwd);
+  const rel = path.relative(PROJECT_DIR, cwd);
   if (rel === '') return '.';
   if (rel.startsWith('..') || path.isAbsolute(rel)) return 'outside the project';
   return rel;
@@ -286,6 +292,7 @@ async function processHookInput(input, deps) {
     session_id: input.session_id || null,
     agent_type: input.agent_type || null,
     tool_use_id: input.tool_use_id || null,
+    project: path.basename(PROJECT_DIR),
     cwd: relativeCwd(input.cwd),
     rawLength: raw.length,
   };

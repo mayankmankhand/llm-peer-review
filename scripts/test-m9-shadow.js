@@ -196,17 +196,22 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
   // ---- the hook as a child process: exit 0, empty stdout, no keys, no network ----------------------
   {
     const proj = tmpdir('proj');
-    const env = Object.assign({}, process.env, { CLAUDE_PROJECT_DIR: proj });
+    const env = Object.assign({}, process.env, { CLAUDE_PROJECT_DIR: proj, M9_SHADOW_HOME: proj });
     delete env.OPENAI_API_KEY; delete env.OPENROUTER_API_KEY;
     const r = spawnSync(process.execPath, [path.join(__dirname, 'm9-shadow-hook.js')], { input: JSON.stringify(hookInput('git status', { cwd: proj })), env, encoding: 'utf8' });
     const log = path.join(proj, 'reports', 'issue-222', 'shadow', 'decisions.jsonl');
     check('child process exits 0', r.status === 0, r.status);
     check('child process writes nothing to stdout', r.stdout === '', r.stdout);
-    check('child process logs one line under CLAUDE_PROJECT_DIR with "no key" errors', fs.existsSync(log) && (() => { const l = JSON.parse(fs.readFileSync(log, 'utf8').trim()); return l.providers.jev.error === 'no key' && l.cwd === '.'; })(), fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no log');
+    check('child process logs one line under M9_SHADOW_HOME with "no key" errors', fs.existsSync(log) && (() => { const l = JSON.parse(fs.readFileSync(log, 'utf8').trim()); return l.providers.jev.error === 'no key' && l.cwd === '.'; })(), fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : 'no log');
     const bad = spawnSync(process.execPath, [path.join(__dirname, 'm9-shadow-hook.js')], { input: 'not json', env, encoding: 'utf8' });
     check('malformed stdin still exits 0 with no stdout', bad.status === 0 && bad.stdout === '');
     const off = spawnSync(process.execPath, [path.join(__dirname, 'm9-shadow-hook.js')], { input: JSON.stringify(hookInput('ls', { cwd: proj })), env: Object.assign({}, env, { M9_SHADOW_DISABLE: '1' }), encoding: 'utf8' });
     check('M9_SHADOW_DISABLE=1 logs nothing', off.status === 0 && fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length === 1);
+    // another project calling the same hook: the log stays in the hook's home, the line names the project
+    const other = tmpdir('other-project');
+    const r2 = spawnSync(process.execPath, [path.join(__dirname, 'm9-shadow-hook.js')], { input: JSON.stringify(hookInput('ls', { cwd: path.join(other, 'src') })), env: Object.assign({}, env, { CLAUDE_PROJECT_DIR: other }), encoding: 'utf8' });
+    const two = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+    check('a call from another project logs into the hook home with that project\'s name and relative cwd', r2.status === 0 && two.length === 2 && two[1].project === path.basename(other) && two[1].cwd === 'src' && two[0].project === path.basename(proj), JSON.stringify(two.map(l => [l.project, l.cwd])));
   }
 
   // ---- sampler ------------------------------------------------------------------------------------

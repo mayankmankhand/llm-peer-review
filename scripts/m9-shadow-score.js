@@ -113,12 +113,14 @@ function round(v, d) { return v === null || v === undefined ? null : Number(v.to
 function status(dir) {
   const f = files(dir);
   const { rows, malformed } = readJsonl(f.log);
-  const perDay = {};
+  const perDay = {}, perProject = {};
   let withheld = 0;
   const err = { jev: 0, openai: 0 }, asked = { jev: 0, openai: 0 }, spend = { jev: 0, openai: 0 };
   for (const r of rows) {
     const day = (r.ts || '').slice(0, 10) || 'unknown';
     perDay[day] = (perDay[day] || 0) + 1;
+    const proj = r.project || 'unknown';
+    perProject[proj] = (perProject[proj] || 0) + 1;
     if (r.withheld) { withheld++; continue; }
     for (const p of PROVIDER_NAMES) {
       const x = r.providers && r.providers[p];
@@ -128,7 +130,7 @@ function status(dir) {
       spend[p] += cost(r, p);
     }
   }
-  const out = { lines: rows.length, malformed, withheld, perDay, providers: {} };
+  const out = { lines: rows.length, malformed, withheld, perDay, perProject, providers: {} };
   for (const p of PROVIDER_NAMES) out.providers[p] = { asked: asked[p], errors: err[p], errorRate: asked[p] ? round(err[p] / asked[p]) : null, costUsd: round(spend[p], 4) };
   return out;
 }
@@ -184,7 +186,7 @@ function buildSample(dir) {
   for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
   const random = shuffled.slice(0, SAMPLE_RANDOM);
   const sample = [];
-  const push = (r, reason) => sample.push({ id: rowId(r.command), reason, ts: r.ts, agent_type: r.agent_type || null, command: r.command, flags: r.flags, providers: r.providers });
+  const push = (r, reason) => sample.push({ id: rowId(r.command), reason, ts: r.ts, project: r.project || null, agent_type: r.agent_type || null, command: r.command, flags: r.flags, providers: r.providers });
   for (const r of hits) push(r, 'regex-hit');
   for (const r of positives) push(r, 'model-positive');
   for (const r of random) push(r, 'random');
