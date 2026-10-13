@@ -1,4 +1,5 @@
 [
+  { "paths": ["seed/toolkit-lesson-leads.txt", "seed/historical-seed-blocks.txt"], "rebuild": "node scripts/seed-history.js" },
   { "paths": ["plugin/"], "rebuild": "node scripts/build-plugin.js" },
   { "paths": ["scripts/prompt-load-baseline.json"], "rebuild": "node scripts/prompt-load.js --write-baseline" }
 ]
