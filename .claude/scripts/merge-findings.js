@@ -10,6 +10,8 @@
 //   node merge-findings.js <file>
 //   node merge-findings.js <folder>   the same, reading the findings.jsonl
 //                                     inside that folder (issue #217)
+//   ... [--root <dir>] [--rev <commit>] [--base <commit>]
+//                                     where the citation check looks; see below
 //
 // <file> holds one JSON object per line in the dispatch format (severity,
 // specialist, file, what, context, fix, fields, key, receipt). The runner
@@ -59,6 +61,23 @@
 // and the exit code are what they would be without them, because the
 // contract's judgment rules are not this script's call, and a merge that
 // dropped a finding over its prose would hide a defect to tidy a sentence.
+//
+// The citation check (harness research, P5-C3): after the merge, each merged
+// finding's `file.relPath` is resolved and its `file.line` compared with the
+// file's line count, and a citation that cannot be right gets one more stderr
+// line, keyed by the merged id so the runner can carry it to the skeptics:
+//   merge-findings: citation R3 (<key>): line 18 is past the end of x.md (14 lines)
+// The statuses are missing-file (no such path, and git never had it),
+// deleted-file (not in the copy checked, but git history has it),
+// deleted-in-range (absent now, present at --base), line-out-of-range, and
+// outside-project (the path climbs out of the root). Where it looks: the
+// working copy under --root, default the current folder, which is what a live
+// review read; --rev <commit> checks that commit instead (git cat-file and git
+// show), which is how a saved report is replayed against the end of the range
+// it reviewed. Like the contract warnings it never changes stdout or the exit
+// code: a citation the checker cannot place is a question for the skeptic, not
+// a reason to drop a finding, and a wrong line in an otherwise sound finding
+// is still a sound finding.
 // A line that is not a JSON object, or carries an unknown severity, stops the
 // run: exit 1, nothing on stdout, and on stderr one JSON object
 // {"error":"bad_line","line":<n>,"reason":"..."}. A missing argument, an extra
@@ -219,6 +238,64 @@ function contractWarning(f, lineNo) {
   return 'merge-findings: line ' + lineNo + ' (' + stableFindingKey(f) + '): ' + broken.join('; ');
 }
 
+// The citation check. Line numbers come as a number or a "12" / "12-18"
+// string; a range is checked by its last line. Returns null when the citation
+// can be placed, or { status, detail }.
+const { spawnSync } = require('child_process');
+function citedLine(line) {
+  if (typeof line === 'number' && Number.isFinite(line)) return line;
+  const m = typeof line === 'string' ? line.trim().match(/^(\d+)(?:\s*[-\u2013]\s*(\d+))?$/) : null;
+  return m ? Number(m[2] || m[1]) : null;
+}
+const lineCount = (text) => (text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
+// git inside the root, never through a shell: the path and the commit are
+// arguments, so nothing a finding carries can reach a shell.
+function git(root, args) {
+  const r = spawnSync('git', ['-C', root].concat(args), { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  return r.error ? { status: -1, stdout: '' } : { status: r.status, stdout: r.stdout || '' };
+}
+function citationCheck(file, opts) {
+  if (!file || typeof file.relPath !== 'string' || file.relPath.trim() === '') return null;
+  const o = opts || {};
+  const root = path.resolve(o.root || process.cwd());
+  const rel = path.posix.normalize(file.relPath.trim().replace(/\\/g, '/')).replace(/^\.\//, '');
+  if (path.isAbsolute(rel) || rel === '..' || rel.startsWith('../')) {
+    return { status: 'outside-project', detail: file.relPath + ' leaves the project' };
+  }
+  let text = null;
+  if (o.rev) {
+    const shown = git(root, ['show', o.rev + ':' + rel]);
+    if (shown.status === 0) text = shown.stdout;
+  } else {
+    try { const abs = path.join(root, rel); if (fs.statSync(abs).isFile()) text = fs.readFileSync(abs, 'utf8'); } catch (e) { text = null; }
+  }
+  if (text === null) {
+    if (o.base && git(root, ['cat-file', '-e', o.base + ':' + rel]).status === 0) {
+      return { status: 'deleted-in-range', detail: rel + ' existed at ' + o.base + ' and is gone' };
+    }
+    const history = git(root, ['log', '-1', '--format=%h'].concat(o.rev ? [o.rev] : []).concat(['--', rel]));
+    if (history.status === 0 && history.stdout.trim() !== '') {
+      return { status: 'deleted-file', detail: rel + ' is not in ' + (o.rev ? o.rev : 'the working copy') + ', though git history has it' };
+    }
+    return { status: 'missing-file', detail: rel + ' does not exist' + (o.rev ? ' at ' + o.rev : '') };
+  }
+  const line = citedLine(file.line);
+  const total = lineCount(text);
+  if (line !== null && (line < 1 || line > total)) {
+    return { status: 'line-out-of-range', detail: 'line ' + line + ' is past the end of ' + rel + ' (' + total + ' lines)' };
+  }
+  return null;
+}
+// One stderr line per merged finding whose citation cannot be right.
+function citationWarnings(merged, opts) {
+  const out = [];
+  for (const m of merged) {
+    const c = citationCheck(m.file, opts);
+    if (c) out.push('merge-findings: citation ' + m.id + ' (' + m.key + '): ' + c.status + ': ' + c.detail);
+  }
+  return out;
+}
+
 function summaryLine(raw, merged, skipped) {
   const count = (sev) => merged.filter((m) => m.severity === sev).length;
   const merges = raw - merged.length;
@@ -235,7 +312,21 @@ function main(argv) {
     process.stderr.write(JSON.stringify(out) + '\n');
     process.exit(1);
   };
-  if (argv.length !== 1) fail('usage', null, 'usage: node merge-findings.js <findings.jsonl, or the folder that holds it>');
+  const usage = 'usage: node merge-findings.js <findings.jsonl, or the folder that holds it> [--root <dir>] [--rev <commit>] [--base <commit>]';
+  const opts = {};
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--root' || a === '--rev' || a === '--base') {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--')) fail('usage', null, usage);
+      opts[a.slice(2)] = v;
+      i++;
+    } else if (a.startsWith('--')) fail('usage', null, usage);
+    else positional.push(a);
+  }
+  if (positional.length !== 1) fail('usage', null, usage);
+  argv = positional;
   // Issue #217: the merge sentence names the folder right before this call, so
   // a runner may hand over the folder; the findings.jsonl inside it is then the
   // file. The check must not throw on a path that does not exist: that case is
@@ -251,9 +342,10 @@ function main(argv) {
     if (warning) process.stderr.write(warning + '\n');
   });
   const merged = mergeFindings(parsed.findings);
+  for (const w of citationWarnings(merged, opts)) process.stderr.write(w + '\n');
   if (merged.length) process.stdout.write(merged.map((m) => JSON.stringify(m)).join('\n') + '\n');
   process.stderr.write(summaryLine(parsed.findings.length, merged, parsed.skipped) + '\n');
 }
 
-module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, main };
+module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, main };
 if (require.main === module) main(process.argv.slice(2));

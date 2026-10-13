@@ -254,6 +254,61 @@ console.log('\n6. a finding that breaks a countable contract rule warns on stder
     typeof mod.contractWarning === 'function' && mod.contractWarning(CODE, 1) === null, String(mod.contractWarning && mod.contractWarning(CODE, 1)));
 }
 
+console.log('\n7. the citation check warns on a file or line that cannot be right, and stdout never changes');
+{
+  // A small git repository: a.md has 3 lines, gone.md is committed then
+  // deleted, later.md is added after the first commit.
+  const repo = path.join(sandbox, 'repo');
+  fs.mkdirSync(repo);
+  const g = (args) => spawnSync('git', ['-C', repo, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g(['init', '-q']);
+  fs.writeFileSync(path.join(repo, 'a.md'), 'one\ntwo\nthree\n');
+  fs.writeFileSync(path.join(repo, 'gone.md'), 'x\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'first']);
+  const first = g(['rev-parse', 'HEAD']).stdout.trim();
+  fs.rmSync(path.join(repo, 'gone.md'));
+  fs.writeFileSync(path.join(repo, 'later.md'), 'l1\nl2\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'second']);
+  const cite = (rel, line, extra) => Object.assign({ severity: 'warn', specialist: 'code', file: { relPath: rel, line }, what: 'Should fix. Cited ' + rel + ' line ' + line + ' breaks something real here.', key: rel + ':' + line }, extra || {});
+  const runIn = (args) => {
+    const r = spawnSync(process.execPath, [SCRIPT].concat(args), { cwd: repo, encoding: 'utf8' });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+  };
+  const citeLines = (r) => r.stderr.split('\n').filter((l) => /^merge-findings: citation R\d+ \(/.test(l));
+  const mod = require(SCRIPT);
+
+  const good = runIn([jsonl([cite('a.md', 3)])]);
+  check('a citation inside the file gives no citation line', good.status === 0 && citeLines(good).length === 0, good.stderr);
+  const past = runIn([jsonl([cite('a.md', 18)])]);
+  check('a line past the end warns with the file\'s line count', past.status === 0 && /^merge-findings: citation R1 \(a\.md:18\): line-out-of-range: line 18 is past the end of a\.md \(3 lines\)$/m.test(past.stderr), past.stderr);
+  const range = runIn([jsonl([cite('a.md', '2-9')])]);
+  check('a line range is checked by its last line', /line-out-of-range: line 9 is past the end of a\.md/.test(range.stderr), range.stderr);
+  const missing = runIn([jsonl([cite('execute.md', 79)])]);
+  check('a path git never had is missing-file', /citation R1 \(execute\.md:79\): missing-file: execute\.md does not exist$/m.test(missing.stderr), missing.stderr);
+  const deleted = runIn([jsonl([cite('gone.md', 1)])]);
+  check('a path deleted from the working copy but in git history is deleted-file', /citation R1 \(gone\.md:1\): deleted-file: gone\.md is not in the working copy, though git history has it$/m.test(deleted.stderr), deleted.stderr);
+  const inRange = runIn([jsonl([cite('gone.md', 1)]), '--base', first]);
+  check('with --base, a path present at the base and gone now is deleted-in-range', /citation R1 \(gone\.md:1\): deleted-in-range: gone\.md existed at /m.test(inRange.stderr), inRange.stderr);
+  const atRev = runIn([jsonl([cite('later.md', 1), cite('a.md', 2)]), '--rev', first]);
+  check('with --rev, a file added after that commit does not exist there, and a good citation stays quiet',
+    /citation R\d \(later\.md:1\): missing-file: later\.md does not exist at /m.test(atRev.stderr) && citeLines(atRev).length === 1, atRev.stderr);
+  const outside = runIn([jsonl([cite('../etc/passwd', 1)])]);
+  check('a path that climbs out of the root is outside-project and is never read', /citation R1 \(\.\.\/etc\/passwd:1\): outside-project: /m.test(outside.stderr), outside.stderr);
+  const noFile = runIn([jsonl([{ severity: 'suggest', specialist: 'copy', what: 'Optional. The intro never says who the guide is for, so readers stall early.', key: 'x' }])]);
+  check('a finding with no file slot is never checked', noFile.status === 0 && citeLines(noFile).length === 0, noFile.stderr);
+  const both = [cite('a.md', 18), cite('a.md', 2, { key: 'b' })];
+  const withWarn = runIn([jsonl(both)]);
+  const expected = mod.mergeFindings(both).map((m) => JSON.stringify(m)).join('\n') + '\n';
+  check('with a citation warning, stdout is byte for byte the merge output and the exit code is 0', withWarn.status === 0 && withWarn.stdout === expected && citeLines(withWarn).length === 1, withWarn.stderr);
+  const rootFlag = run([jsonl([cite('a.md', 18)]), '--root', repo]);
+  check('--root points the check at another folder', /line-out-of-range: line 18 is past the end of a\.md/.test(rootFlag.stderr), rootFlag.stderr);
+  const badFlag = run([jsonl([cite('a.md', 1)]), '--nope']);
+  const noValue = run([jsonl([cite('a.md', 1)]), '--rev']);
+  check('an unknown flag or a flag with no value exits 1 with the usage line and no stdout',
+    badFlag.status === 1 && badFlag.stdout === '' && /usage/.test(badFlag.stderr) && noValue.status === 1 && noValue.stdout === '' && /usage/.test(noValue.stderr), badFlag.stderr + noValue.stderr);
+  check('citationCheck is exported and returns null for a good citation', typeof mod.citationCheck === 'function' && mod.citationCheck({ relPath: 'a.md', line: 1 }, { root: repo }) === null);
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
