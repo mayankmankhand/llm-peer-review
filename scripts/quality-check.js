@@ -2593,6 +2593,35 @@ function skepticInputs(o) {
   if (!fs.existsSync(path.join(o.receipts, 'scope.json'))) usage('--role skeptic needs the replayed run\'s receipts folder with its scope.json (--receipts <dir>); not found in ' + o.receipts);
 }
 
+// The scratch project as the replayed review had it: a git checkout of the range
+// end, and the plans its findings and receipt outputs cite. Session 1cefa1a7's
+// skeptics ran `git log <base>..<end>` and read those plans; with a bare archive
+// and no plans (they are gitignored), the first replay's skeptics searched the
+// disk and read both from the owner's checkout. o { project, end, repo, plansFrom,
+// texts }: `project` already holds the end's tree. This fetches the end's own
+// history from `repo` into a fresh repo there (no remote, no tags, nothing after
+// the end), and copies each cited plan from `plansFrom` with its modified time,
+// since today's copy may postdate the dispatch. Returns what run.json records.
+function replayCheckout(o) {
+  const sha = git(['rev-parse', '--verify', o.end + '^{commit}'], o.repo);
+  git(['init', '-q'], o.project);
+  git(['fetch', '-q', '--no-tags', o.repo, sha], o.project);
+  git(['update-ref', 'refs/heads/main', sha], o.project);
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], o.project);
+  git(['reset', '-q'], o.project);
+  git(['checkout', '-q', '--', '.'], o.project); // restores any file the archive left out (export-ignore)
+  const cited = [...new Set(o.texts.join('\n').match(/plans\/PLAN-[A-Za-z0-9._-]+\.md/g) || [])].sort();
+  const plans = cited.map(rel => {
+    const src = path.join(o.plansFrom, rel);
+    if (!fs.existsSync(src)) return { path: rel, missing: true };
+    fs.mkdirSync(path.join(o.project, 'plans'), { recursive: true });
+    fs.copyFileSync(src, path.join(o.project, rel));
+    const st = fs.statSync(src);
+    return { path: rel, bytes: st.size, modified: st.mtime.toISOString() };
+  });
+  return { head: sha, commits: Number(git(['rev-list', '--count', 'HEAD'], o.project)), plans };
+}
+
 // The scratch project and the merge folder a skeptic replay hands the session,
 // built from the evidence: o { evidence, receipts, project, tmp, buildDir }.
 //   - the code the run reviewed: a git archive of its scope's range end, as the
@@ -2603,6 +2632,7 @@ function skepticInputs(o) {
 //     as that build's Phase 3 runs it, and its numbering checked against the run's;
 //   - tier 1's saved outputs for those lines and the scope, the root rewritten, in
 //     the scratch project's reports/receipts/<the run's stamp>/.
+//   - the range end's history and the cited plans, by replayCheckout above.
 // Returns what run.json records as `replay`; throws on any mismatch, before a
 // session starts.
 function prepareSkepticReplay(o) {
@@ -2644,16 +2674,20 @@ function prepareSkepticReplay(o) {
   const dest = path.join(o.project, 'reports', 'receipts', stampName);
   fs.mkdirSync(dest, { recursive: true });
   const stems = require(MERGE_FINDINGS).receiptStems(texts.map(t => JSON.parse(t)));
+  const receiptTexts = [];
   for (const stem of stems) {
     const src = path.join(o.receipts, stem + '.txt');
     if (!fs.existsSync(src)) throw new Error('no saved receipt output ' + stem + '.txt in ' + o.receipts);
-    fs.writeFileSync(path.join(dest, stem + '.txt'), rewriteRoot(fs.readFileSync(src, 'utf8'), fromRoot, o.project));
+    const out = rewriteRoot(fs.readFileSync(src, 'utf8'), fromRoot, o.project);
+    receiptTexts.push(out);
+    fs.writeFileSync(path.join(dest, stem + '.txt'), out);
   }
   fs.writeFileSync(path.join(dest, 'scope.json'), rewriteRoot(scopeText, fromRoot, o.project));
+  const checkout = replayCheckout({ project: o.project, end: range.end, repo: REPO, plansFrom: mainCheckout(), texts: texts.concat(receiptTexts) });
   return {
     session: SKEPTIC_REPLAY.session, firstDispatch: SKEPTIC_REPLAY.firstDispatch, evidence: o.evidence, receipts: o.receipts,
     stamp: stampName, range: { base: range.base, end: range.end }, fromRoot, mergeDir, mergeSummary,
-    finders: found.finders, keyMerges: shared.notes, lines: texts, stems, merged,
+    finders: found.finders, keyMerges: shared.notes, lines: texts, stems, merged, checkout,
   };
 }
 
@@ -3344,7 +3378,7 @@ module.exports = {
   auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
   settingLines, mapperPromptHash, PATH_FILES,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
-  verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt,
+  verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
   ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
 };

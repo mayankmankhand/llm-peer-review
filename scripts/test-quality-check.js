@@ -922,6 +922,49 @@ section('skeptic replay: Phase 3\'s key merge and the receipt path rewrite', () 
     && /deps returned NO FINDINGS/.test(p) && /merged at scripts\/check\.js:530/.test(p) && /fix nothing/.test(p) && /from R1 to R3/.test(p), p);
 });
 
+section('skeptic replay: the scratch checkout and the cited plans', () => {
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const g = (args, cwd) => {
+    const r = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + r.stderr);
+    return r.stdout.trim();
+  };
+  // A source repo: two commits up to the range end, a later commit and a tag
+  // after it, and a gitignored plan, as the owner's checkout holds them.
+  const src = tmp('qc-test-src-');
+  g(['init', '-q'], src);
+  write(path.join(src, '.gitignore'), 'plans/\n');
+  write(path.join(src, 'a.js'), 'one\n');
+  g(['add', '-A'], src); g(['commit', '-q', '-m', 'one'], src);
+  write(path.join(src, 'a.js'), 'two\n');
+  write(path.join(src, 'b.js'), 'kept out of the archive\n');
+  g(['add', '-A'], src); g(['commit', '-q', '-m', 'two'], src);
+  const end = g(['rev-parse', 'HEAD'], src);
+  write(path.join(src, 'a.js'), 'three\n');
+  g(['commit', '-q', '-am', 'later'], src);
+  g(['tag', 'v9'], src);
+  write(path.join(src, 'plans', 'PLAN-x.md'), '# plan x\n');
+  // The scratch project holds the end's tree as an archive leaves it, one file short.
+  const project = tmp('qc-test-proj-');
+  write(path.join(project, '.gitignore'), 'plans/\n');
+  write(path.join(project, 'a.js'), 'two\n');
+  const texts = ['{"what":"Should fix. The plan at plans/PLAN-x.md:4 says so."}', 'receipt: /tmp/p/plans/PLAN-x.md and plans/PLAN-gone.md'];
+  const c = QC.replayCheckout({ project, end: end.slice(0, 7), repo: src, plansFrom: src, texts });
+  check('replayCheckout: the scratch project is a clean checkout of the range end',
+    c.head === end && g(['rev-parse', 'HEAD'], project) === end && g(['symbolic-ref', 'HEAD'], project) === 'refs/heads/main' && g(['status', '--porcelain'], project) === '', JSON.stringify(c));
+  check('replayCheckout: it holds the end\'s own history and nothing after it (no later commit, tag or remote)',
+    c.commits === 2 && g(['rev-list', '--all', '--count'], project) === '2' && g(['tag'], project) === '' && g(['remote'], project) === '', g(['rev-list', '--all', '--count'], project));
+  check('replayCheckout: a tracked file the archive left out is restored', fs.existsSync(path.join(project, 'b.js')) && fs.readFileSync(path.join(project, 'a.js'), 'utf8') === 'two\n');
+  check('replayCheckout: each cited plan is copied once, with its size and modified time recorded',
+    fs.readFileSync(path.join(project, 'plans', 'PLAN-x.md'), 'utf8') === '# plan x\n' && c.plans.length === 2
+    && c.plans[1].path === 'plans/PLAN-x.md' && c.plans[1].bytes === 9 && !isNaN(Date.parse(c.plans[1].modified)), JSON.stringify(c.plans));
+  check('replayCheckout: a cited plan the checkout lacks is recorded as missing, not invented',
+    c.plans[0].path === 'plans/PLAN-gone.md' && c.plans[0].missing === true && !fs.existsSync(path.join(project, 'plans', 'PLAN-gone.md')), JSON.stringify(c.plans[0]));
+  let bad = '';
+  try { QC.replayCheckout({ project: tmp('qc-test-proj-'), end: 'f'.repeat(40), repo: src, plansFrom: src, texts: [] }); } catch (e) { bad = e.message; }
+  check('replayCheckout: a range end the repo does not hold stops the replay', /rev-parse/.test(bad), bad);
+});
+
 // A canned skeptic replay run folder. Four dispatches: D1 a paraphrased shard the
 // session wrote with the Write tool, asking KEEP or KILL; D2 the --shards file,
 // whose copy sits in project-reports; D3 a redispatch of R3 carrying its line byte
