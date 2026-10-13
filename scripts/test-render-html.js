@@ -1636,6 +1636,13 @@ function issue162Tests() {
     check('a ' + tok + ' finding resolves when the plan lens runs (#219)',
       finds(sp).length === 0 && /1 resolved/.test(sp.sinceLast || ''), sp.sinceLast);
   });
+  // The findings /review seeds from a plan's tally and its [check] lines
+  // (#231) carry `check-first` and are re-read from the plan the same way, so
+  // the plan lens running resolves them too; without it they were carried forever.
+  run('seeded-check-first', page([finding('R1', { specialist: 'check-first' })]));
+  const cf = island(run('seeded-check-first', page([], { lenses: ['plan'], reviewedFiles: [] })).html);
+  check('a check-first finding resolves when the plan lens runs (#231)',
+    finds(cf).length === 0 && /1 resolved/.test(cf.sinceLast || ''), cf.sinceLast);
 
   // security-audit has its own token on purpose (security-audit/SKILL.md): a
   // small security pass must never resolve a whole-repo audit finding.

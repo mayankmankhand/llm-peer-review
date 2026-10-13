@@ -99,6 +99,7 @@ Present the ranked buckets in chat:
 - Split toolkit-scope from project-scope visibly. Toolkit-scope patterns generalize to every install and are the ones worth fixing in a prompt or rule; project-scope ones are about this codebase.
 - Name the single bucket you would act on, and say why it is that one rather than the next.
 - Flag anything still in `(unlabeled)`.
+- Show each group's share by month: its `by_month` count over its kind's `months` total for the same month, both read from the rollup, never estimated. Put first the groups a check written before the work would catch (M17); this toolkit's own coding names four: "plan missed a case or a stakeholder", "claimed done without proof", "never tried it as the reader would", "fixed one spot and left the rest". A month with only a few rows is noise, the same as a small bucket.
 
 Keep it short. The point of the ranking is to make one decision obvious, not to produce a report.
 
@@ -123,5 +124,5 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --candidates --since 202
 ## What this command does not do
 
 - **It does not fix anything.** It is advisory. Acting on a pattern is a separate, deliberate choice.
-- **It does not measure whether a past fix worked.** Rates over time are a later phase; nothing here tracks whether a category shrank after you changed something.
+- **The month view shows when, not why.** A group's share falling in the months after a change is the signal to look for, not proof the change caused it: the mix of work, the projects captured and how closely you were watching all move a share too. Name the change and the months on either side, and call it a share that moved, never a fix that worked.
 - **It does not see what you never corrected.** Anything Claude got wrong that you accepted is invisible to this data, and those are concentrated in whatever you scrutinize least. Say so when presenting, if a ranking is about to be treated as the complete picture.
