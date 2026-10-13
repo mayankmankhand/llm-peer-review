@@ -491,6 +491,14 @@ function parseBody(text) {
   const cm = CUT_LINE_RE.exec(lines.join('\n'));
   return { decisions, changelog, cutFrom: cm ? cm[1] : null };
 }
+// What /merge does for each part a PR body lacks (merge-rules.md, "The PR body
+// parts"): a PR opened before the parts existed still lands, through these.
+function missingParts(p, notes) {
+  if (!p.cutFrom) notes.push('no Cut from: line: /merge takes the cut from the branch\'s own record, else its branch log, else the merge-base, which is a weaker check');
+  if (!p.decisions) notes.push('no ## Decisions part: the decision check reads what this PR decides from its text and its changes');
+  if (!p.changelog) notes.push('no ## Changelog part: a changelog edit of its own keeps both sides on a conflict');
+  return p;
+}
 function readBodyArg(arg) {
   const raw = arg === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(arg, 'utf8');
   try {
@@ -714,8 +722,8 @@ function main(argv) {
     const [cl, block] = o['--changelog-place'];
     return finish(Object.assign({ mode: 'changelog-place' }, changelogPlace(path.resolve(cl), path.resolve(block))), [], 0, notes);
   }
-  if (o['--pr-body'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr-body' }, parseBody(readBodyArg(o['--pr-body']))), [], 0, notes);
-  if (o['--pr'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr' }, readPr(o['--pr'])), [], 0, notes);
+  if (o['--pr-body'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr-body' }, missingParts(parseBody(readBodyArg(o['--pr-body'])), notes)), [], 0, notes);
+  if (o['--pr'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr' }, missingParts(readPr(o['--pr']), notes)), [], 0, notes);
   if (o['--marker']) {
     const v = gitTry(['config', '--get', 'tk.landingChecked']);
     return finish({ mode: 'marker', marker: v ? v.trim() : null }, [], 0, notes);

@@ -384,8 +384,12 @@ section('PR bodies: the three parts, a missing part, a legacy body, and both hos
   const partial = mc(dir, ['--pr-body', f]).json;
   check('a body without the changelog part reads it as null', partial.changelog === null && partial.decisions === '- None recorded' && partial.cutFrom === 'b'.repeat(40));
   fs.writeFileSync(f, 'An old PR body.\n\n## Summary\nNothing structured.\n');
-  const legacy = mc(dir, ['--pr-body', f]).json;
+  const legacyRun = mc(dir, ['--pr-body', f]);
+  const legacy = legacyRun.json;
   check('a legacy body has no parts', legacy.decisions === null && legacy.changelog === null && legacy.cutFrom === null);
+  check('a legacy body names the fallback for each missing part, as three notes, and exits 0', legacyRun.status === 0 && legacy.notes.length === 3 && /no Cut from: line/.test(legacy.notes[0]) && /no ## Decisions part/.test(legacy.notes[1]) && /no ## Changelog part/.test(legacy.notes[2]) && /^note: no Cut from: line/m.test(legacyRun.stderr), JSON.stringify(legacy.notes));
+  fs.writeFileSync(path.join(sandbox, 'full-again.md'), full);
+  check('a body with every part carries no such note', mc(dir, ['--pr-body', path.join(sandbox, 'full-again.md')]).json.notes.length === 0);
   fs.writeFileSync(f, JSON.stringify({ body: full }));
   check('gh JSON is read through its body field', mc(dir, ['--pr-body', f]).json.changelog === block);
   fs.writeFileSync(f, JSON.stringify({ description: full }));
