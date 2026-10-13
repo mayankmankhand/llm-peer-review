@@ -134,5 +134,21 @@ check('merge-check.js reads a kept line in that key, file and text apart', kept.
 for (const [file, text] of [['decision-checker.md', CHECKER], ['merge-rules.md', RULES], ['merge-check.js', MC_SRC]]) check(file + ' names the decisions file\'s two headings', text.includes('## This PR') && text.includes('## Landing '), file);
 check('merge.md dispatches the decision-checker by name with no model, and document.md names /merge', /subagent_type=decision-checker/.test(MERGE_CMD) && /no model parameter/.test(MERGE_CMD) && DOC.includes('`/merge <N>`'));
 
+// 8.0.0: Claude Code swaps any single pasted command output over about 30,000
+// bytes for a 2 KB preview (measured 2026-10-13: 30,000 arrived whole, 30,500
+// did not), so a file a command or skill pastes whole with an inline cat must
+// stay under that, with margin. hitl-loop.md crossed it at 7.6.3 and the
+// review commands saw only its first 2 KB until the 8.0.0 split.
+const PASTE_LIMIT = 28500;
+{
+  const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(dir + '/' + e.name) : e.name.endsWith('.md') ? [dir + '/' + e.name] : []);
+  const pasted = new Set();
+  for (const f of [...walk('.claude/commands'), ...walk('.claude/skills')]) {
+    for (const m of read(f).matchAll(/!`cat ([^ `]+)[^`]*`/g)) pasted.add(m[1]);
+  }
+  const over = [...pasted].filter(rel => fs.existsSync(path.join(REPO, rel))).map(rel => [rel, fs.statSync(path.join(REPO, rel)).size]).filter(([, size]) => size > PASTE_LIMIT);
+  check('every file a command or skill pastes whole is at most ' + PASTE_LIMIT + ' bytes (' + pasted.size + ' pasted files)', pasted.size > 10 && over.length === 0, over.map(([rel, size]) => rel + ' ' + size).join(', '));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

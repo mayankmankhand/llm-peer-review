@@ -33,7 +33,7 @@ Tone: collaborative. "Let's figure this out together."
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
-**If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug. When `map.stale` is true (10 or more commits behind), run `/tk:index` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), then read the fresh map.
+**If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug. When `map.stale` is true (10 or more commits behind), run `/tk:index` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`), then read the fresh map.
 
 **If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute." Then invoke `/tk:index`. After it completes, read the new map and proceed.
 

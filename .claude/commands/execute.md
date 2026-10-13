@@ -5,7 +5,7 @@
 
 Now implement precisely as planned, in full.
 
-Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/execute` is never chained into automatically (M14). The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` (rationale in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/review` (M14).
+Executing an approved plan is the auto stage of the toolkit loop: the plan approval was the human gate, and `/execute` is never chained into automatically (M14). The loop's shared mechanics live in `.claude/skills/shared/hitl-loop.md` and `.claude/skills/shared/hitl-stages.md` (rationale in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md)). Two per-run opt-outs: "report only" restores report-first behavior for the run (M10), "no chaining" stops after this stage instead of handing off to `/review` (M14).
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -32,7 +32,7 @@ The text below is this project's own gate, read from `.claude/toolkit/execute-ga
 ## Checks per step (M17)
 
 <procedure>
-Each step proves itself with the check lines indented under it, run through the runner before and after the step's work. The rules are M17's in `.claude/skills/shared/hitl-loop.md`; this is the order to run them in:
+Each step proves itself with the check lines indented under it, run through the runner before and after the step's work. The rules are M17's in `.claude/skills/shared/hitl-stages.md`; this is the order to run them in:
 
 1. **Write the target first:** the step's new test case, its must line, whatever its target checks, and nothing of the step's real work yet.
 2. **Before run:** `node .claude/scripts/run-checks.js --plan plans/<plan>.md --step <N> --phase before --timeout 600000`. Let it finish before any of the step's work starts: a run still going reads the files as they change. It passes when every target row passes, which means each showed its stated failure; a guard that fails here was already broken before the work, and step 4 carries it. When a target did not, and its output shows a crash or a missing file, add the smallest stub (an empty function, the file with no content) and run before once more; when it still does not show its stated failure, the check or its reason is wrong: fix the plan line (this counts against the step's 3 attempts) and record the change in the plan's Outcomes. A lint problem or a refused command stops the run with one line on stderr and nothing run; fix the plan line and run again.
@@ -81,7 +81,7 @@ After all parallel steps finish, always run a sequential checkpoint:
 
 ## Design Steps
 
-When the plan's UI/UX Design section carries a load level of new or improve, the step that builds that surface is a design step. The loop it runs is the "loop procedure" in the `design-rules` skill, bounded by M15 in `.claude/skills/shared/hitl-loop.md`; load the skill through the Skill tool (`Skill(design-rules)`) when the step starts and cite it rather than restating it. What is specific to `/execute`:
+When the plan's UI/UX Design section carries a load level of new or improve, the step that builds that surface is a design step. The loop it runs is the "loop procedure" in the `design-rules` skill, bounded by M15 in `.claude/skills/shared/hitl-stages.md`; load the skill through the Skill tool (`Skill(design-rules)`) when the step starts and cite it rather than restating it. What is specific to `/execute`:
 
 <conditions>
 - **Pre-flight:** a design step is downgraded to `[sequential]` the same way overlapping files are, so it runs in the main loop. A spawned agent cannot dispatch the critic, cannot page, and must not drive the browser.

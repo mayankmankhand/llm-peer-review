@@ -17,9 +17,7 @@ allowed-tools:
 **Use this when:** The toolkit plugin moved to a new version, in every project on the plugin: the checks that run on every upgrade read the rules file, the settings and the seeded files every project has, and the closing stamp is what clears the session notice. Also when `/setup` just migrated a copy-install and handed off here.
 **Don't use this when:** The project is not on the plugin yet (`/setup` first), or you are inside the toolkit's own repository.
 
-Every convention this run checks is written down once, with its id, the version it arrived in, the signal that finds a file behind it, and the shape of the fix:
-
-!`cat .claude/skills/shared/conventions.md`
+Every convention this run checks is written down once, with its id, the version it arrived in, the signal that finds a file behind it, and the shape of the fix, in `.claude/skills/shared/conventions.md`. Read that file in full with the Read tool before "1. Audit for candidates" below: it is too long to paste, because Claude Code cuts any single pasted file over about 30 KB.
 
 ## Critical Rules
 
@@ -76,6 +74,8 @@ The rest go through step 4's audit and step 6's one batch page like every other 
 You are the runner. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that file, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one's `key` and record the merge in the report's dedup notes. A finding of the script's keeps its convention id as `sourceId`, which the report's summary line shows beside the number. Then run the three tiers exactly as M2 describes: execute every `receipt.check` yourself and save each output under `reports/receipts/<run-stamp>/` per "Where the report is written" below; dispatch tier 2 shards over the surviving Warns and Suggests and, should any finding be a Block, three tier 3 voters, all as `subagent_type=audit-skeptic`, each carrying only its findings' verbatim bytes and the receipt output; tally the verdicts. The typical kill here is C-1 matching a file the project itself owns: the receipt shows the path exists in the project and the skeptic refutes it. The loop's rules are inlined here so nothing is improvised:
 
 !`cat .claude/skills/shared/hitl-loop.md`
+
+!`cat .claude/skills/shared/hitl-stages.md`
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 

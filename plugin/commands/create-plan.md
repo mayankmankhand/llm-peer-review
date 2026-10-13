@@ -26,7 +26,7 @@ Based on our full exchange, produce a markdown plan document.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
-**If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure. When `map.stale` in the session JSON is true (10 or more commits behind), run `/tk:index mode:<m>` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), with `<m>` the exploration's Models answer (fit when it gave none), then read the fresh map.
+**If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure. When `map.stale` in the session JSON is true (10 or more commits behind), run `/tk:index mode:<m>` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`), with `<m>` the exploration's Models answer (fit when it gave none), then read the fresh map.
 
 **If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index mode:<m>`, with `<m>` the exploration's Models answer (fit when it gave none). After it completes, read the new map and proceed.
 
@@ -80,7 +80,7 @@ Tag every step: `/tk:execute` reads the tags to decide what can run in parallel.
 - `[parallel]` steps: add `→ delivers: [what this step produces]`
 - `[sequential]` steps: add `→ depends on: Step N`
 - Parallel steps must be independent in both **files AND environment** (dependencies, services, migrations, env vars)
-- A step that builds a surface with load level new or improve is tagged `[sequential]`: its design loop runs in the main loop (M15 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`)
+- A step that builds a surface with load level new or improve is tagged `[sequential]`: its design loop runs in the main loop (M15 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`)
 - Example: "Add button component" + "Write API endpoint" = parallel (different files, no dependency). "Write API endpoint" then "Connect button to API" = sequential (second depends on first).
 - If all steps are sequential, still tag them - the tags confirm you thought about execution order
 
@@ -92,7 +92,7 @@ For plans with fewer than 3 steps, skip the tags.
 
 <conditions>
 
-Every step proves itself the way M17 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` defines: a target check that fails before the step's work, for a reason stated in advance, and passes after it, plus a guard on anything the step could break. `/tk:execute` runs each step's checks before and after its work through the runner, so write them in the one shape the runner reads, as lines indented under the step:
+Every step proves itself the way M17 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md` defines: a target check that fails before the step's work, for a reason stated in advance, and passes after it, plus a guard on anything the step could break. `/tk:execute` runs each step's checks before and after its work through the runner, so write them in the one shape the runner reads, as lines indented under the step:
 
 ```
   - Check target `<id>`: `<command>` - before `<expect>` - after `<expect>`
@@ -189,7 +189,7 @@ Key architectural/implementation choices made during exploration:
   - Check: no target - the whole-system step; its proofs are the runs it lists
 
 ## Must-check for review (optional - only when a judge left gaps open)
-<!-- One line per item, in the shapes M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md gives. /tk:create-plan writes [plan] lines from the plan critic's round 2; /tk:execute design steps add [design], [interaction] and [behaviour] lines, and /tk:execute adds a [check] line for each check M17 lets a step carry on past (flaky, slow, broken before). /tk:review enters each into its audit. Omit the section when nothing is carried. -->
+<!-- One line per item, in the shapes M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md gives. /tk:create-plan writes [plan] lines from the plan critic's round 2; /tk:execute design steps add [design], [interaction] and [behaviour] lines, and /tk:execute adds a [check] line for each check M17 lets a step carry on past (flaky, slow, broken before). /tk:review enters each into its audit. Omit the section when nothing is carried. -->
 - [plan] [Category]: [the gap, verbatim]
 
 ## Outcomes
@@ -219,7 +219,7 @@ The critic returns gaps, not a grade; the gaps are what the loop acts on.
 1. Before dispatching, test the paths the plan names (M16): `grep -oE '[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+' plans/<plan>.md | sort -u | while read -r p; do test -e "$p" || echo "not found: $p"; done` prints one `not found:` line per path (a token with at least one `/`) that is not a file under the project root, and nothing when every path exists; skip a path the step creates, check a root-level file such as `package.json` by eye since it carries no slash, and fix every other line in the plan first. Then lint the plan's check lines (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --plan plans/<plan>.md --lint` prints one JSON object whose `problems` list names, by line, every check line that would not run (a step with neither a target nor a no-target line, a near miss of the shape, a command the runner would refuse, a target whose before and after expects are the same); fix each one until its `summary.problems` is 0. Then dispatch `subagent_type=tk:plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
 2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
 3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
-4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), so `/tk:review` checks it against the delivered work.
+4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`), so `/tk:review` checks it against the delivered work.
 
 </procedure>
 
@@ -266,7 +266,7 @@ Then show it to the user per the **"Viewing the Artifact"** rules in `${CLAUDE_P
 
 ## The Chain Stops Here (M14)
 
-Present the plan and stop. Plan approval is the cycle's one human gate, so **`/tk:execute` is never invoked automatically**, however clear the plan looks (M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`).
+Present the plan and stop. Plan approval is the cycle's one human gate, so **`/tk:execute` is never invoked automatically**, however clear the plan looks (M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`).
 
 This is the loop's one deliberate non-chaining handoff. It is written down precisely because chaining is the norm everywhere else: an unstated exception drifts into a chain.
 

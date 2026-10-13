@@ -72,7 +72,7 @@ Pick the target that shows the change:
 
 **The whole system** stays with the plan's Verify step: the project's full test step, a user flow end to end, and old against new when the plan replaces a system. A docs-only or config-only plan needs no Verify step.
 
-The rules are M17 in [`.claude/skills/shared/hitl-loop.md`](../.claude/skills/shared/hitl-loop.md); the exact line shapes are under "Checks" in [`.claude/commands/create-plan.md`](../.claude/commands/create-plan.md).
+The rules are M17 in [`.claude/skills/shared/hitl-stages.md`](../.claude/skills/shared/hitl-stages.md); the exact line shapes are under "Checks" in [`.claude/commands/create-plan.md`](../.claude/commands/create-plan.md).
 
 ### `/review` - Auto-detect what changed, run the right specialists, fix what they confirm
 

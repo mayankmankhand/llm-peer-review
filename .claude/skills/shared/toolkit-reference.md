@@ -20,7 +20,7 @@ The long manual: workflow, command table, plans, map, lessons, ledger, design, H
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M17); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` and `.claude/skills/shared/hitl-stages.md` (rules M1 to M17); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 ### Our Workflow
 
