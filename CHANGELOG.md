@@ -21,7 +21,7 @@
 
 ### Upgrading
 
-- Not released yet. When a release carries it: update the plugin, restart Claude Code, then run `/tk:upgrade` in each project. No permission rows were added; `/review` now reads its saved scope with `head -c`, which no seeded row names, so a default-mode session may ask once.
+- Not released yet. When a release carries it: update the plugin, restart Claude Code, then run `/tk:upgrade` in each project. No seeded permission rows were added. The plugin build gives the `review-browser`, `review-deps` and `review-security` skills an allowed-tools grant for `merge-findings.js`. `/review` now reads its saved scope with `head -c`, which no seeded row names, so a default-mode session may ask once.
 - Other editors: re-running `setup.sh` or `setup.ps1` copies the updated `merge-findings.js` and `session-init.js`.
 
 ### Why
