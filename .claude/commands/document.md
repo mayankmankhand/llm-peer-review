@@ -62,11 +62,12 @@ Records the times the user stepped in during this cycle, so the toolkit can even
 count what it keeps getting wrong instead of fixing each instance and forgetting it.
 Full rationale in the Correction Ledger section of the toolkit reference.
 
-**Containment rule, read this before running anything below.** This stage is the only
-place in the toolkit that pulls near-verbatim fragments of what the user typed into
-context. Those fragments - the `human_said` and `assistant_said` text in the candidate
-list, and the `produced` and `correction` fields you draft from them - **stay in this
-stage.** They never enter:
+**Containment rule, read this before running anything below.** This stage is one of two
+places in the toolkit that pull near-verbatim fragments of what the user typed into
+context; the other is the evidence step of `/error-analysis`'s fix loop, which reads one
+repo's rows only from inside that repo. Those fragments - the `asked`, `human_said` and
+`assistant_said` text in the candidate list, and the `produced`, `correction`, `trigger`
+and `rewrite` fields you draft from them - **stay in this stage.** They never enter:
 
 - the Section 9 cycle summary or its JSON payload, and never any HTML artifact or
   published page
@@ -143,7 +144,8 @@ not tell it what you think happened.
 
 ### Confirm every open code with the user
 
-Show the drafted rows: for each one, what it thinks happened and the open code it wrote.
+Show the drafted rows: for each one, what it thinks happened, the open code it wrote, and,
+when it copied one, the user's own rewrite, which they can drop without dropping the row.
 
 **Nothing is written until the user accepts it.** They can accept, rewrite the open code in
 their own words, or drop the row. Their wording is better than a paraphrase, and their
@@ -163,7 +165,9 @@ node .claude/scripts/correction-ledger.js --add --data <folder>/rows.json
 `<folder>` is the path `mktemp` printed, typed as literal words.
 
 The script derives `repo`, `repo_path`, and `kind` itself, so those cannot be got wrong
-from here, and it hard-truncates the private fields. It accepts the `at` you pass, but
+from here. It hard-truncates the private fields (`produced`, `correction` and `trigger` at
+300 characters, `rewrite` at 1,200) and turns any `stage` outside the extractor's list into
+`other`. It accepts the `at` you pass, but
 only after checking it is a real ISO timestamp, falling back to now if it is not.
 
 ### Record the heartbeat (always)

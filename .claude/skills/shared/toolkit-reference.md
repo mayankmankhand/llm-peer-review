@@ -113,11 +113,25 @@ corrections. This ledger instruments the half that has no instrument.
 repo, append-only. Each row carries the repo it came from, so repo-specific and
 cross-repo questions are both a filter rather than a decision made at write time. The
 mechanism ships to every install; the data never leaves the machine that wrote it.
+Fix records and the filled-in fields of older rows sit beside it, in
+`correction-fixes.jsonl` and `correction-backfill.jsonl`.
 
-**Privacy.** Two fields (`produced`, `correction`) hold near-verbatim fragments and are a
-private layer: the rollup is built from an explicit whitelist projection that cannot read
-them, and `/error-analysis` never publishes and never sends anything to an external
-model. That is a flat rule with no consent path.
+**Privacy.** Four fields hold near-verbatim fragments and are a private layer:
+`produced`, `correction` and `trigger` (what was produced, what was wrong, and what had
+been asked, each capped at 300 characters) and `rewrite` (your own wording of what you
+wanted, when you wrote one, capped at 1,200). The rollup is built from an explicit
+whitelist projection that cannot read them. The one read path back to them is
+`/error-analysis`'s evidence step, which shows a repo's rows only from inside that repo.
+`/error-analysis` never publishes and never sends anything to an external model. That is
+a flat rule with no consent path.
+
+**From a pattern to a fix.** `/error-analysis` gives each category a home from how widely
+it spreads: one repo means that project's own files; several repos mean your global
+instructions file (`~/.claude/CLAUDE.md`), or the toolkit itself when most of its rows came
+during a toolkit stage. You approve each fix, record it, and later rankings show the
+category's rate per `/document` cycle before and after it. Examples stay in the project
+they came from: a global or toolkit fix is written in generic words, and a toolkit fix
+leaves its repo only as a generic note you approve.
 
 **Turning it off for a repo:** `touch .claude/.no-correction-log`. Nothing is captured at
 all for that repo, rather than captured and redacted.
