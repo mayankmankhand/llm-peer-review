@@ -39,9 +39,10 @@ flowchart TD
     D -.-> E(["/ask-gpt or /ask-gemini"])
     E -.-> F(["Agreed · Disagreed · Actions"])
     F -.-> H
+    H -.-> M(["/merge (worktree PRs)"])
 ```
 
-If the diagram does not render: you type `/explore`, `/create-plan` writes the plan, you approve it, then `/execute`, `/review` and `/document` run in turn. On the plugin the same commands carry the `tk:` prefix (`/tk:explore`).
+If the diagram does not render: you type `/explore`, `/create-plan` writes the plan, you approve it, then `/execute`, `/review` and `/document` run in turn. From a worktree, `/document` opens a PR, and you land it with `/merge`, which checks that no work was lost on the way. On the plugin the same commands carry the `tk:` prefix (`/tk:explore`).
 
 - **You type `/tk:explore` and approve the plan.** Everything after that chains on its own: solid arrows run by themselves, dotted ones start with you.
 - **A finding has to earn its fix.** Each review finding carries a runnable check and survives a skeptical audit before anything is changed; what survives is fixed, re-verified, and committed.

@@ -96,6 +96,7 @@ This copies:
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
 - `.claude/scripts/run-checks.js` (the guarded checks runner behind review receipts, the `/execute` test step, and a plan's own check lines, which it lints for `/create-plan`, runs before and after each step for `/execute`, and tallies for `/review`: runs read-only checks from the project root and decides pass or fail by machine - always updated)
+- `.claude/scripts/merge-check.js` (the lost-work check behind `/merge`: records each worktree branch's cut point and, at each landing, flags lines that landed after the cut and were removed, and lines of the branch's own that did not land - always updated)
 - `.claude/scripts/pre-push-check.js` (the pre-push tripwire that scans every outgoing commit for secrets, never-push files, and shared-settings changes - always updated)
 - `.claude/scripts/correction-ledger.js` (correction ledger capture and rollup helper behind `/document` and `/error-analysis` - always updated)
 - `.claude/scripts/gen-media.js` (the design workflow's seed and media helper: seeds, images, video, matting behind the user's own keys - always updated)
@@ -136,6 +137,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
 - `.claude/scripts/run-checks.js` - the guarded checks runner (review receipts, the `/execute` test step, a project's `checks.json`, a plan's own check lines)
+- `.claude/scripts/merge-check.js` - the lost-work check behind `/merge` (cut points, landings)
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
 - `.claude/scripts/pre-push-check.js`, `.claude/scripts/correction-ledger.js`, `.claude/scripts/gen-media.js`, and `.claude/scripts/merge-findings.js` - the pre-push tripwire, the correction ledger helper, the design workflow's media helper, and the review's merge helper
 - `.claude/scripts/ask-gpt.js`, `.claude/scripts/env-local.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` + `package-lock.json` - runtime scripts and their quarantined deps
@@ -174,6 +176,8 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 3. Remove the toolkit sections from their `CLAUDE.md` - they're now managed automatically
 
 If the user wants a completely fresh `CLAUDE.md` template, they can delete theirs and rerun setup.
+
+**Unreleased, on top of v7.6.5 (harness research):** Not released. `session-init.js` keeps its output under 16,000 characters wherever trimming can do it (a `LESSONS.md` or map overview over 8 KB comes back as a handle or a cut, only the newest 10 plans are listed in full), and `/explore`, `/create-plan`, `/execute` and `/pair-debug` read `LESSONS.md` directly when the content is left out. `merge-findings.js` writes the M2 skeptic shards byte for byte (`--shards`), checks the returns (`--verdicts`), and warns when a finding cites a missing file or a line past the end. Model-routing guardrail 3 holds the build and Claude Code version fixed in a pin's A/B. No seeded permission rows were added; the plugin build gives three review skills an allowed-tools grant for `merge-findings.js`, and `/review` reads its saved scope with `head -c`, which no seeded row names. Details in CHANGELOG.md.
 
 **What's new in v7.6.5:** A patch on top of v7.6.4 (#226). The loop runs as before. Worktree detection no longer calls a subfolder of the main copy a worktree: `.claude/scripts/session-init.js` resolves both git paths before comparing, and the prompt checks in `tk:worktree`, `tk:document`, `tk:explore` and `tk:create-plan` use `git rev-parse --path-format=absolute --git-dir --git-common-dir` and compare the last two lines (Git older than 2.31 echoes the flag first). `generate-index.js` prints `overflowChunkIds`, which `tk:index` reads to decide which chunks not to retry; `tk:package-review` names `git status --porcelain` and `git diff --name-status main...HEAD`. To update: `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, restart Claude Code, then `tk:upgrade` in each project; no new permission rows. Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated scripts. Details in CHANGELOG.md.
 

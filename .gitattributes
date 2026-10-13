@@ -6,3 +6,7 @@
 *.sh text eol=lf
 scripts/** text eol=lf
 .claude/scripts/** text eol=lf
+
+# Lessons files keep both sides on a merge: two branches that each add a lesson never conflict
+LESSONS.md merge=union
+LESSONS-detail.md merge=union

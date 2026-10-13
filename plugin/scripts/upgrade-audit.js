@@ -7,6 +7,7 @@
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--project <dir>]
 //        [--plugin-root <dir>] [--conventions <file>] [--from <version>]
 //        [--stamp [--refuted <file>]]
+//   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--from <version>] --receipt <id> [--release <version>]
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js --rollback-to <x.y.z>
 //
 // Reads the conventions document (the plugin's skills/shared/conventions.md by
@@ -52,8 +53,8 @@
 //   ### C-12: Criteria reach a worker by preload, not by paste
 //   - **Since:** 7.0.0
 //   - **Runs:** every upgrade            (optional: skip the range filter)
-//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
+//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
 //   - **Severity:** suggest             (optional: warn, the default, or suggest; what a regex detector's findings carry)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
@@ -99,9 +100,11 @@
 // LESSONS.md and flags a bullet beyond one sentence or 300 characters while
 // LESSONS-detail.md is absent, and a bullet whose bold lead is in the plugin's
 // seed/toolkit-lesson-leads.txt, the toolkit's own lessons that the
-// copy-installers wrote into projects. `manual` is not run here at all: the
-// /tk:upgrade skill judges those by hand (a judgment no grep expresses) and
-// emits findings in the same shape.
+// copy-installers wrote into projects. lessons-merge (C-18) asks git for the
+// merge attribute of LESSONS.md and LESSONS-detail.md and flags a lessons file
+// the project has that git does not merge with union. `manual` is not run here
+// at all: the /tk:upgrade skill judges those by hand (a judgment no grep
+// expresses) and emits findings in the same shape.
 //
 // Every finding carries a stable `key` (issue #179): the same finding has the
 // same key on every run, so /tk:upgrade's rerun decides FIXED by the key.
@@ -113,6 +116,47 @@
 // `"` in it would otherwise break the command and kill a true finding as
 // RECEIPT FAILED.
 //
+// Call-back receipts (issue #228). The /tk:upgrade audit runs every receipt
+// through the checks runner (run-checks.js), which runs only read-only commands
+// it can judge word by word, and it refused nearly every check above (awk
+// programs, brace groups, `node -e`, environment assignments), so every
+// script finding died at the audit's first tier. A default run (no
+// --plugin-root and no --conventions, the shape the skill runs) therefore
+// prints each finding's receipt as a call-back the runner already allows: this
+// script at the stable path ~/.claude/plugins/data/tk-llm-peer-review/current/
+// scripts/, with `--receipt <id>` (the first 16 hex characters of the SHA-256
+// of the finding's key), `--release <version>` (this plugin's version) and the
+// run's own --from when it was given one.
+// `--receipt` reruns the detection, finds the one finding whose key has that
+// ID, and runs that finding's own check with bash in the project root, passing
+// its output and exit code through, so the runner saves exactly what the check
+// prints; an ID no finding has means the finding no longer stands (exit 1). The
+// ID is a hash so that nothing the project controls (a file name, a line)
+// reaches the call-back's text. A run given --plugin-root or --conventions (a
+// maintainer's or a test's) keeps each finding's own check in its receipt: a
+// call-back cannot carry those paths through the runner, which refuses a path
+// outside the project, so it would rerun another build.
+//
+// The stable path is a link the plugin's SessionStart hook moves, so after an
+// update taken mid-session it still leads to the previous release (or, before
+// any session ran, nowhere). A default run checks first that the link leads to
+// this very file. When it does not, the run writes each receipt as the
+// finding's own check, as an explicit run does (the runner refuses most of
+// those: a loud RECEIPT FAILED rather than a finding vouched for by another
+// release), prints its findings as usual, so a rerun that only counts keys
+// still counts them right, and, when it found anything, ends with one more
+// stderr line saying a new session moves the link, and exit 1. --stamp,
+// --rollback-to and --receipt write no call-back and never look at the link.
+//
+// The link can also move after the run, before its receipts are checked: a
+// session started on another release relinks it. So a call-back names the
+// release that wrote it, and a --receipt run of any other version runs
+// nothing: one stderr line says the receipt was not run and why, and exit 3,
+// where that release's detection might have called a true finding one that
+// no longer stands. Both stop lines end with the same steps: start a new
+// session, and if the upgrade stops the same way there, report the line as a
+// toolkit issue, because then the hook could not make the link.
+//
 // The toolkit's own repository is never a project: when .claude-plugin/
 // marketplace.json at the project root names the toolkit (see
 // marketplaceNamesToolkit), every mode stops with one stderr line before it
@@ -123,9 +167,10 @@
 // Dependency-free, like every script under .claude/scripts/.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 
 // Kept byte-identical to the copies in setup-project.js, pre-push-check.js and
 // session-start.js, and pinned there by scripts/test-session-start.js. Each
@@ -488,10 +533,11 @@ function referenceVersion(state) {
 // record (see recordRefutedKeys). It is read before anything is written, so a
 // path that cannot be read stops the run with the state file untouched.
 const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--refuted <file>]]\n'
+  + '       node upgrade-audit.js [--project <dir>] [--from <version>] --receipt <id> [--release <version>]\n'
   + '       node upgrade-audit.js [--project <dir>] --rollback-to <x.y.z>';
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
@@ -501,12 +547,18 @@ function parseArgs(argv) {
     else if (a === '--stamp') o.stamp = true;
     else if (a === '--refuted') o.refuted = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--rollback-to') o.rollbackTo = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--receipt') o.receipt = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--release') o.release = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else { console.error('upgrade-audit: unknown argument ' + a + '\n' + USAGE); process.exit(1); }
   }
   if (o.rollbackTo !== null && o.stamp) { console.error('upgrade-audit: --rollback-to lowers the record and --stamp raises it; run one of them\n' + USAGE); process.exit(1); }
   if (o.refuted !== null && !o.stamp) { console.error('upgrade-audit: --refuted names the keys the audit killed for --stamp to record; run it with --stamp\n' + USAGE); process.exit(1); }
   if (o.refuted === '') { console.error('upgrade-audit: --refuted takes the path of a file with one finding key per line\n' + USAGE); process.exit(1); }
+  if (o.receipt !== null && (o.stamp || o.rollbackTo !== null)) { console.error('upgrade-audit: --receipt reruns one finding\'s check and writes nothing, so it does not run with ' + (o.stamp ? '--stamp' : '--rollback-to') + '\n' + USAGE); process.exit(1); }
+  if (o.receipt !== null && !RECEIPT_ID.test(o.receipt)) { console.error('upgrade-audit: --receipt takes the 16-character ID a call-back receipt names\n' + USAGE); process.exit(1); }
+  if (o.release !== null && o.receipt === null) { console.error('upgrade-audit: --release names the release that wrote a call-back receipt; run it with --receipt\n' + USAGE); process.exit(1); }
+  if (o.release !== null && validVersion(o.release) === null) { console.error('upgrade-audit: --release takes a version such as 7.6.5\n' + USAGE); process.exit(1); }
   return o;
 }
 function git(args, cwd) {
@@ -928,6 +980,50 @@ function keyMaker() {
   return (base) => { const n = (seen.get(base) || 0) + 1; seen.set(base, n); return { key: n === 1 ? base : base + '#' + n, n }; };
 }
 
+// --- Call-back receipts (issue #228) ----------------------------------------------
+// The one spelling of this script the checks runner runs in a session: the
+// stable link the SessionStart hook keeps pointing at the running release.
+// CLAUDE_PLUGIN_ROOT is not set in a session's shell, and the runner has no
+// rule for the versioned cache folder, so no other spelling would run.
+const STABLE_AUDIT = '~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js';
+function stableAuditPath() { return path.join(os.homedir(), '.claude', 'plugins', 'data', 'tk-llm-peer-review', 'current', 'scripts', 'upgrade-audit.js'); }
+function realpathOrNull(p) { try { return fs.realpathSync(p); } catch (e) { return null; } }
+// The steps both link stops end with: a new session moves the link, and when
+// one does not, the plugin's hook could not make it, which only the toolkit can
+// fix, so starting yet another session would never help.
+const LINK_STEPS = 'start a new session and run the upgrade again, and if it stops the same way there, the plugin\'s session hook could not make the link: report this line as a toolkit issue';
+// A finding's receipt ID: the first 16 hex characters of its key's SHA-256.
+// Keys are unique within a run (keyMaker), so an ID names one finding, and only
+// these 16 characters of the key ever reach the call-back's text.
+function receiptId(key) { return crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16); }
+const RECEIPT_ID = /^[0-9a-f]{16}$/;
+// The finding as a default run prints it: its receipt's check is the call-back,
+// with `release` (this plugin's version, which the call-back must match) and
+// `from` (the run's validated --from, or '' when the range came from the state
+// file, which the call-back reads again) so the rerun covers the same range.
+function withCallBack(f, from, release) {
+  const check = 'node ' + STABLE_AUDIT + ' --receipt ' + receiptId(f.key) + ' --release ' + release + (from ? ' --from ' + from : '');
+  return Object.assign({}, f, { receipt: Object.assign({}, f.receipt, { check }) });
+}
+// --receipt <id>: run that reported finding's own check with bash in the
+// project root and exit with its code. stdin is closed and stdout and stderr
+// are passed straight through, so the runner saves exactly what the check
+// prints and this script adds nothing. The environment loses what the runner
+// strips from its own checks: a file bash would source first (BASH_ENV, ENV)
+// and exported functions, which could stand in for awk or grep.
+function runOneReceipt(project, reported, id) {
+  const hits = reported.filter(f => receiptId(f.key) === id);
+  if (hits.length === 0) { console.error('upgrade-audit: no finding of this run has the receipt ID ' + id + ', so the finding no longer stands'); process.exit(1); }
+  if (hits.length > 1) { console.error('upgrade-audit: ' + hits.length + ' findings share the receipt ID ' + id + ', so none of their checks was run'); process.exit(2); }
+  const env = Object.assign({}, process.env);
+  delete env.BASH_ENV;
+  delete env.ENV;
+  for (const k of Object.keys(env)) if (k.startsWith('BASH_FUNC_')) delete env[k];
+  const r = spawnSync('bash', ['-c', hits[0].receipt.check], { cwd: project, env, stdio: ['ignore', 'inherit', 'inherit'] });
+  if (r.error) { console.error('upgrade-audit: bash could not be started: ' + r.error.message); process.exit(1); }
+  process.exit(typeof r.status === 'number' ? r.status : 128 + (os.constants.signals[r.signal] || 1));
+}
+
 // Receipts read the bytes their detector read and apply the detector's own
 // condition, so after a correct fix a receipt comes back without its evidence
 // exactly when the rerun drops the finding's key (issue #179; before, a whole-file
@@ -996,7 +1092,7 @@ const TOOLS_NONE_AWK = String.raw`{ x = $0; sub(/\r$/, "", x) } NR == 1 { print 
 // to the same rule; test-upgrade-audit.js fails when this copy drifts from the
 // toolkit's agents or from that test's JUDGES.
 const C14_FINDERS = ['code', 'security', 'ux', 'plan', 'commands', 'deps', 'browser', 'copy'].map(k => 'review-' + k + '-finder').concat('index-mapper');
-const C14_JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
+const C14_JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'decision-checker'];
 // A toolkit agent given to subagent_type, `tk:` scoped (group 1) or bare. The
 // name must end there, so `index-mapper-v2` or another plugin's
 // `other:plan-critic` is no match.
@@ -1402,6 +1498,15 @@ b && $0 !~ /^[ \t]*$/ && $0 !~ /^[ \t]*#/ { x = $0; sub(/^[ \t]+/, "", x); t = t
 { flush() }
 END { flush(); exit !f }`;
 
+// --- the lessons files' merge rule (C-18) -----------------------------------------
+// Git's union driver keeps the lines both sides added, so two branches that
+// each add a lesson never conflict. The lines are the shipped seed's
+// (seed/gitattributes) and this repository's own .gitattributes, word for word;
+// scripts/test-upgrade-audit.js fails when the three drift.
+const LESSONS_MERGE_FILES = ['LESSONS.md', 'LESSONS-detail.md'];
+const LESSONS_MERGE_COMMENT = '# Lessons files keep both sides on a merge: two branches that each add a lesson never conflict';
+const lessonsMergeLine = (rel) => rel + ' merge=union';
+
 // Is this project the toolkit's own repository? The source tree is what the
 // plugin is built from, not something to seed or upgrade. The marketplace file
 // names the toolkit itself when the marketplace is named llm-peer-review or
@@ -1435,6 +1540,15 @@ function main() {
   const conventionsPath = opts.conventions || path.join(pluginRoot, 'skills', 'shared', 'conventions.md');
   const toVersion = validVersion(readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {}).version);
   if (toVersion === null) { console.error('upgrade-audit: no usable version in ' + path.join(pluginRoot, '.claude-plugin', 'plugin.json')); process.exit(1); }
+  // A call-back written by another release came through a link that moved
+  // after its run (issue #228): this release's detection could miss the
+  // finding and call it one that no longer stands, so nothing runs. The match
+  // is exact, because a build whose version differs only by a suffix such as
+  // -beta.1 may detect differently too.
+  if (opts.release !== null && validVersion(opts.release) !== toVersion) {
+    console.error('upgrade-audit: not run: this receipt was written by the ' + validVersion(opts.release) + ' audit, but ' + STABLE_AUDIT + ' now leads to the ' + toVersion + ' audit, because a session started on another release moved the link during this upgrade; ' + LINK_STEPS);
+    process.exit(3);
+  }
   const state = readJson(P(STATE_REL), null);
   if (opts.stamp) {
     // The --refuted file is read before anything is written, so a bad path
@@ -1462,6 +1576,25 @@ function main() {
     recordLostRowOffers(P, project, pluginRoot);
     recordRefutedKeys(project, refutedKeys);
     return;
+  }
+  // A default run prints call-back receipts, which reach this script through
+  // the stable link (issue #228). When the link leads anywhere else, a call-back
+  // would run another release or nothing, so this run writes each receipt as
+  // the finding's own check instead (the runner refuses most of those: a loud
+  // RECEIPT FAILED rather than a finding vouched for by another release), still
+  // prints its findings, so a rerun that only counts keys counts them right,
+  // and ends with one more stderr line and exit 1 when it found anything.
+  // --receipt is the call-back itself, and a run given --plugin-root or
+  // --conventions keeps each finding's own check anyway, so neither looks.
+  let callBacks = !opts.pluginRoot && !opts.conventions;
+  let staleLink = null;
+  if (callBacks && opts.receipt === null) {
+    const own = realpathOrNull(__filename);
+    const linked = realpathOrNull(stableAuditPath());
+    if (own === null || linked !== own) {
+      callBacks = false;
+      staleLink = 'upgrade-audit: these receipts are each finding\'s own check, not call-backs, because ' + STABLE_AUDIT + ' leads to ' + (linked || 'nothing') + ' rather than to this audit (' + (own || __filename) + '), and the checks runner refuses most of them; the link moves when a new session starts, so ' + LINK_STEPS;
+    }
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
   if (opts.from && validVersion(opts.from) === null) { console.error('upgrade-audit: --from takes a version such as 7.0.0'); process.exit(1); }
@@ -2121,6 +2254,31 @@ function main() {
           }
         }
       }
+    } else if (c.detector === 'lessons-merge') {
+      // (C-18) The lessons files keep both sides on a merge. Git answers for
+      // both names, so a rule in any attributes file git reads counts; only a
+      // lessons file the project has raises the finding, and the fix lists a
+      // line for each name git does not merge with union, so a detail file that
+      // /tk:document creates later is covered too.
+      const present = LESSONS_MERGE_FILES.filter(rel => isFile(P(rel)));
+      if (present.length) {
+        const out = git(['check-attr', 'merge', '--'].concat(LESSONS_MERGE_FILES), project);
+        if (out === null) notes.push(c.id + ': git check-attr did not run (no git, or not a git repository), so the lessons files\' merge rule is not checked');
+        else {
+          const union = (rel) => out.split('\n').includes(rel + ': merge: union');
+          const flagged = present.filter(rel => !union(rel));
+          const add = LESSONS_MERGE_FILES.filter(rel => !union(rel)).map(lessonsMergeLine);
+          if (flagged.length) {
+            const n = flagged.length;
+            const attrs = isFile(P('.gitattributes'));
+            emit({ id: c.id, key: claim(c.id + ':.gitattributes:lessons-merge').key, severity: c.severity, convention: c.title, file: { relPath: '.gitattributes' },
+              what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + flagged.join(' and ') + (n === 1 ? ' is' : ' are') + ' not merged with git\'s union driver, so two branches that each add a lesson conflict there, and a conflict fixed by hand can drop either side.',
+              fix: 'append the listed lines to .gitattributes' + (attrs ? '' : ' (create the file)') + ', under the listed comment line, and leave every other line as it is', since: c.since,
+              fields: [{ label: 'Comment line', value: LESSONS_MERGE_COMMENT }, { label: 'Lines', value: add.join(' ; ') }],
+              receipt: { check: 'git check-attr merge -- ' + flagged.map(shq).join(' ') + ' | grep -v -e ' + shq(': merge: union$'), expect: 'one line per lessons file whose merge attribute is not union; the check exits 0 only while one remains' } });
+          }
+        }
+      }
     } else if (c.detector === 'local-edits') {
       // The evidence of a local edit is the copy-install's own record: the
       // migration file lists the path, and the manifest the old installer wrote
@@ -2196,7 +2354,11 @@ function main() {
   // suppresses, whatever the record holds. The summary says how many.
   const reported = findings.filter(f => !(isContentKey(f.key) && refutedRecord.keys.has(f.key)));
   const suppressed = findings.length - reported.length;
-  for (const f of reported) process.stdout.write(JSON.stringify(f) + '\n');
+  // A call-back runs its finding's own check and prints nothing else: no
+  // finding lines, no notes, no summary.
+  if (opts.receipt !== null) { runOneReceipt(project, reported, opts.receipt); return; }
+  const from = opts.from ? validVersion(opts.from) : '';
+  for (const f of reported) process.stdout.write(JSON.stringify(callBacks ? withCallBack(f, from, toVersion) : f) + '\n');
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
   for (const n of notes) console.error('upgrade-audit: ' + n);
   console.error('upgrade-audit: ' + reported.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s); ' + suppressed + ' suppressed by the refuted record');
@@ -2213,6 +2375,9 @@ function main() {
   if (reported.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
     console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
   }
+  // Last, so it is the line a reader sees: these receipts will not pass the
+  // checks runner. With no finding there is no receipt to fail, and no stop.
+  if (staleLink !== null && reported.length) { console.error(staleLink); process.exit(1); }
 }
 
 // The seeded-block and lessons readers, for scripts/seed-history.js (the

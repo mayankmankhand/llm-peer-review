@@ -61,6 +61,9 @@ BASELINE_FILES=(
   ".claude/correction-ledger.jsonl"
   ".claude/correction-heartbeat.jsonl"
   ".claude/correction-rollup.json"
+  ".claude/correction-axial-map.json"
+  ".claude/correction-fixes.jsonl"
+  ".claude/correction-backfill.jsonl"
 )
 
 usage() { sed -n '2,45p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }

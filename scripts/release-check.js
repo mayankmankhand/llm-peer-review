@@ -65,6 +65,17 @@
 //                    or a protection rule) would still let main land. The
 //                    marketplace pins that tag, so main without it installs
 //                    nothing (R2). A remote that cannot be reached fails.
+//   6. Landings    - the safety net for landings made without /merge (issue
+//                    #232): `.claude/scripts/merge-check.js --since <previous
+//                    release tag> --main <commit>` reruns rules 1 and 2 over
+//                    every landing on the commit's first-parent line since the
+//                    release check 3 compares with. Any flag fails, with the
+//                    script's own plain lines; keep a line on purpose with an
+//                    empty commit carrying its `Kept on purpose:` line. A
+//                    landing the script cannot check (a squash with no recorded
+//                    cut) is counted in the reason, never a failure. Skipped
+//                    with a note when the repo has no merge-check.js or no
+//                    earlier release tag.
 //
 // After check 2 it also prints one `info prompt load` line: how many words each
 // prompt file loads against scripts/prompt-load-baseline.json (issue #206). It is
@@ -86,7 +97,7 @@
 // the working tree. --repo points every check at another clone (tests).
 //
 // --tests-only is the everyday test run (`npm test`, and CI): checks 1, 2 and
-// R only. Checks T, 3, 4 and 5 judge a release (a bumped version, a marketplace
+// R only. Checks T, 3, 4, 5 and 6 judge a release (a bumped version, a marketplace
 // pin, a tag), which a commit in the middle of a cycle does not have yet and a
 // CI checkout, fetched without tags, cannot show. They are skipped with one
 // line saying so. The suites still go through the same exit-code-only runner.
@@ -329,6 +340,65 @@ function infoPromptLoad() {
   for (const l of lines.slice(1)) console.log('       ' + l);
 }
 
+// --- info: catch rate (harness research, item 7) ---------------------------------------
+// Not a check either: never counted, never fails. It names the newest valid
+// ship-arm review run in the fixture ledger (reports/quality-check/, gitignored),
+// that run's build and Claude Code version, and the review-path files plugin/
+// changed since that build, so a release whose review path moved after its last
+// measured run says so in every gate run. The review path is the harness's own
+// list (PATH_FILES.review in scripts/quality-check.js), read rather than copied,
+// so the two cannot drift. Silent when the ledger or the harness is absent (CI,
+// fresh clones, the tests' scratch repos).
+function infoCatchRate() {
+  const ledger = path.join(REPO, 'reports', 'quality-check');
+  const harness = path.join(REPO, 'scripts', 'quality-check.js');
+  if (!fs.existsSync(ledger) || !fs.existsSync(harness)) return;
+  let reviewPath;
+  try {
+    reviewPath = require(harness).PATH_FILES.review;
+    if (!(reviewPath instanceof RegExp)) throw new Error('PATH_FILES.review is not a pattern');
+  } catch (e) {
+    console.log('  info catch rate - unavailable: ' + e.message);
+    return;
+  }
+  const runs = [];
+  for (const name of fs.readdirSync(ledger)) {
+    let meta;
+    let analysis;
+    try {
+      meta = JSON.parse(fs.readFileSync(path.join(ledger, name, 'run.json'), 'utf8'));
+      analysis = JSON.parse(fs.readFileSync(path.join(ledger, name, 'analysis.json'), 'utf8'));
+    } catch (e) {
+      continue; // not a run folder, or a run still going
+    }
+    if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;
+    if (!meta.build || typeof meta.build.sha !== 'string' || !/^[0-9a-f]{7,64}$/.test(meta.build.sha)) continue;
+    runs.push({ name, meta, at: String(meta.startedAt || name) });
+  }
+  if (!runs.length) {
+    console.log('  info catch rate - no valid ship-arm review run in reports/quality-check yet');
+    return;
+  }
+  runs.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  const newest = runs[0];
+  const sha = newest.meta.build.sha;
+  const head = 'newest valid ship-arm run ' + newest.name + ': build ' + sha.slice(0, 7);
+  if (git(['cat-file', '-e', sha + '^{commit}']).status !== 0) {
+    console.log('  info catch rate - ' + head + " is not in this repository's history");
+    return;
+  }
+  const diff = git(['diff', '--name-only', sha, 'HEAD', '--', 'plugin/']);
+  const changed = diff.status === 0 && diff.out
+    ? diff.out.split('\n').map((f) => f.replace(/^plugin\//, '')).filter((f) => reviewPath.test(f))
+    : [];
+  const version = newest.meta.build.version ? ' (' + newest.meta.build.version + ')' : '';
+  const claude = newest.meta.session && newest.meta.session.claude ? newest.meta.session.claude : 'unknown';
+  console.log('  info catch rate - ' + head + version + ', Claude Code ' + claude + '; ' + changed.length
+    + ' review-path file' + (changed.length === 1 ? '' : 's') + ' changed in plugin/ since that build');
+  for (const f of changed.slice(0, 20)) console.log('       ' + f);
+  if (changed.length > 20) console.log('       ... and ' + (changed.length - 20) + ' more');
+}
+
 // The commit a revision names (peeling an annotated tag), or null.
 function resolveCommit(rev) {
   const r = git(['rev-parse', '--verify', '-q', rev + '^{commit}']);
@@ -361,22 +431,28 @@ function checkTag(t, sha, found) {
 }
 
 // --- 3. version bump ---------------------------------------------------------------
+// The previous release: the nearest v* tag reachable from the commit, with
+// every tag ON the commit excluded. Plain `describe` would return the release
+// commit's own tag, diff the commit with itself, and pass having compared
+// nothing. Tag names cannot hold glob characters, so each is a literal
+// --exclude pattern. Returns { tag } (null when there is none) or { error }.
+function previousTag(sha) {
+  const onCommit = git(['tag', '--points-at', sha, '--list', 'v[0-9]*']);
+  if (onCommit.status !== 0) return { error: 'git tag --points-at failed (exit ' + onCommit.status + '): ' + onCommit.err };
+  const exclude = [];
+  for (const t of onCommit.out.split('\n').filter(Boolean)) exclude.push('--exclude', t);
+  const d = git(['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', ...exclude, sha]);
+  return { tag: d.status === 0 ? d.out : null };
+}
+
 function checkVersionBump(target) {
   const name = 'version bump';
   const at = target.label + ': ';
   const sha = target.sha;
-  // The previous release: the nearest v* tag reachable from the commit, with
-  // every tag ON the commit excluded. Plain `describe` would return the release
-  // commit's own tag, diff the commit with itself, and pass having compared
-  // nothing. Tag names cannot hold glob characters, so each is a literal
-  // --exclude pattern.
-  const onCommit = git(['tag', '--points-at', sha, '--list', 'v[0-9]*']);
-  if (onCommit.status !== 0) { report(name, false, at + 'git tag --points-at failed (exit ' + onCommit.status + '): ' + onCommit.err); return; }
-  const exclude = [];
-  for (const t of onCommit.out.split('\n').filter(Boolean)) exclude.push('--exclude', t);
-  const d = git(['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*', ...exclude, sha]);
-  if (d.status !== 0) { report(name, true, at + 'no earlier v* release tag reachable; nothing to compare (first release)'); return; }
-  const tag = d.out;
+  const prev = previousTag(sha);
+  if (prev.error) { report(name, false, at + prev.error); return; }
+  if (!prev.tag) { report(name, true, at + 'no earlier v* release tag reachable; nothing to compare (first release)'); return; }
+  const tag = prev.tag;
   const tagVersion = tag.replace(/^v/, '');
   // :(top) anchors the pathspec at the repo root whatever the cwd, a second
   // guard behind REPO already being the top level.
@@ -538,7 +614,35 @@ function checkReleaseTag(target, pushedTags) {
   report(name, true, at + local + ', and on remote ' + opts.remote);
 }
 
-// Checks T, 3, 4 and 5. Every commit named by --commit or --pushing-tag is
+// Check 6: every landing since the previous release, rerun through the repo's
+// own merge-check.js. Only its exit code decides (0 clean, 1 flagged, anything
+// else could not check, which fails); its stdout JSON is read for the counts in
+// the reason and its stderr for the flagged lines.
+const LANDINGS_TIMEOUT_MS = 5 * 60 * 1000;
+function checkLandings(target) {
+  const name = 'landings';
+  const at = target.label + ': ';
+  const script = path.join(REPO, '.claude', 'scripts', 'merge-check.js');
+  if (!fs.existsSync(script)) { report(name, true, at + 'skipped: no .claude/scripts/merge-check.js in this repo'); return; }
+  const prev = previousTag(target.sha);
+  if (prev.error) { report(name, false, at + prev.error); return; }
+  if (!prev.tag) { report(name, true, at + 'no earlier v* release tag reachable; nothing to check'); return; }
+  const r = spawnSync(process.execPath, [script, '--since', prev.tag, '--main', target.sha], { cwd: REPO, env: CHILD_ENV, encoding: 'utf8', timeout: LANDINGS_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+  let j = null;
+  try { j = JSON.parse(r.stdout); } catch (e) { j = null; }
+  const lines = String(r.stderr || '').split('\n').filter(Boolean);
+  if ((r.status === 0 || r.status === 1) && j && Array.isArray(j.landings)) {
+    const notCheckable = j.landings.filter((l) => l.rule1 !== 'checked').length;
+    const counts = j.landings.length + ' landing(s) since ' + prev.tag + (notCheckable ? ', ' + notCheckable + ' not checkable (no recorded cut; a note, not a failure)' : '');
+    if (r.status === 0) { report(name, true, at + counts + ', none flagged' + (j.keptOnPurpose ? ' (' + j.keptOnPurpose + ' kept on purpose)' : '')); return; }
+    const flagged = lines.filter((l) => !/^(note|merge-check): /.test(l));
+    report(name, false, at + counts + '; ' + j.flagged + ' line(s) lost: ' + flagged.slice(0, 5).join(' | ') + (flagged.length > 5 ? ' | and ' + (flagged.length - 5) + ' more' : '') + '. Restore each, or keep it on purpose with an empty commit carrying its Kept on purpose: line');
+    return;
+  }
+  report(name, false, at + 'merge-check.js could not check the landings since ' + prev.tag + ' (exit ' + (r.status === null ? 'none, ' + (r.error ? r.error.code : 'killed') : r.status) + '): ' + (lines[0] || 'no output'));
+}
+
+// Checks T, 3, 4, 5 and 6. Every commit named by --commit or --pushing-tag is
 // checked once, labelled with how it was named; with neither, HEAD.
 function checkCommits() {
   const targets = [];
@@ -573,6 +677,7 @@ function checkCommits() {
     checkVersionBump(t);
     checkMarketplace(t);
     checkReleaseTag(t, pushedTags);
+    checkLandings(t);
   }
 }
 
@@ -581,7 +686,8 @@ checkSuites();
 checkBuild();
 checkReadmeBudget();
 infoPromptLoad();
-if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref and release tag judge a release, not an everyday test run; run without the flag for the full gate');
+infoCatchRate();
+if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
 else checkCommits();
 const failedCount = results.filter(ok => !ok).length;
 console.log('release-check: ' + (results.length - failedCount) + ' passed, ' + failedCount + ' failed');

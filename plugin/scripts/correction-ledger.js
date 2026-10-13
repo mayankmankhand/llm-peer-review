@@ -24,13 +24,16 @@
 //      patterns are actually visible.
 //
 // PRIVACY - the single most important property of this file:
-//   `produced` and `correction` are the PRIVATE LAYER. They hold near-verbatim
-//   quotes and can contain anything the user typed. They are never included in a
-//   rollup, never rendered into an artifact, and never sent anywhere. The rollup is
-//   built from shareable(), an explicit whitelist projection, so reading a private
-//   field into a rollup is not expressible rather than merely discouraged. Both
-//   fields are also hard-truncated on write, so a long pasted block can never land
-//   in the ledger wholesale.
+//   `produced`, `correction`, `trigger` and `rewrite` are the PRIVATE LAYER (the
+//   last two since #229: what had been asked, and the user's own wording of what
+//   they wanted). They hold near-verbatim quotes and can contain anything the user
+//   typed. They are never included in a rollup, never rendered into an artifact,
+//   and never sent anywhere. The rollup is built from shareable(), an explicit
+//   whitelist projection, so reading a private field into a rollup is not
+//   expressible rather than merely discouraged. All four are hard-truncated on
+//   write, so a long pasted block can never land in the ledger wholesale. The ONE
+//   read path back to them is --evidence, which prints one category's rows only
+//   for the repo it runs in; runEvidence() says how that is enforced.
 //
 // Storage is PER MACHINE, outside any repo, under ~/.claude/ (or the absolute folder
 // named by TK_LEDGER_DIR, for test runs; see the storage paths below). Every row
@@ -58,8 +61,9 @@ function die(msg) {
 
 // --- storage paths (per machine, outside every repo) ---
 //
-// TK_LEDGER_DIR moves the four files this script writes (ledger, heartbeat, rollup,
-// axial map) into another folder (#182). A chained /document in a scratch or test
+// TK_LEDGER_DIR moves the files this script writes (ledger, heartbeat, rollup,
+// axial map, and since #229 the fix records and the backfill side file) into
+// another folder (#182). A chained /document in a scratch or test
 // project otherwise records its heartbeat in the real ~/.claude/, and the rollup
 // then reports that capture has run on a machine where no real project ever
 // captured. Only an absolute path is used: a relative one would land wherever the
@@ -82,6 +86,13 @@ const LEDGER_PATH = path.join(LEDGER_DIR, 'correction-ledger.jsonl');
 const HEARTBEAT_PATH = path.join(LEDGER_DIR, 'correction-heartbeat.jsonl');
 const ROLLUP_PATH = path.join(LEDGER_DIR, 'correction-rollup.json');
 const AXIAL_MAP_PATH = path.join(LEDGER_DIR, 'correction-axial-map.json');
+// Fix records (#229): one line per fix that landed, shareable fields only, read by
+// the rollup to put a rate before and after each one.
+const FIXES_PATH = path.join(LEDGER_DIR, 'correction-fixes.jsonl');
+// Filled-in request and rewrite fields for rows written before those fields
+// existed (#229). PRIVATE, like the ledger's own private layer: keyed by a row's
+// `at` and `session`, joined back on only by --evidence, never by the rollup.
+const BACKFILL_PATH = path.join(LEDGER_DIR, 'correction-backfill.jsonl');
 const TRANSCRIPT_ROOT = path.join(HOME_CLAUDE_DIR, 'projects');
 
 // Presence of this file in a repo means: never log anything from this repo. Checked
@@ -94,13 +105,40 @@ const OPT_OUT_MARKER = path.join('.claude', '.no-correction-log');
 // because a prompt's user-facing message is not enforcement.
 const MAX_PRIVATE_FIELD = 300;
 const MAX_OPEN_CODE = 400;
+// The owner's own rewrite is the one private field copied rather than summarized
+// (#229), and a reworded paragraph or a set of bullets runs longer than a summary:
+// 1,200 is the limit the scan already reads a human message at.
+const MAX_REWRITE = 1200;
+// What the human had asked for, as the scan hands it to the extractor: the same
+// context limit as the assistant output beside it.
+const MAX_ASKED = 800;
+
+// The stages a row can name: the extractor's own list (correction-extractor.md),
+// plus `unknown` for a row that names none (#229). `stage` is on the shareable
+// whitelist, so it is checked against this list on write AND on projection: a
+// value that was only trimmed to 40 characters was a free-text channel straight
+// through the whitelist, the hole `at` had before isoOrNull(). The first five are
+// toolkit stages, which the rollup's home verdict counts.
+const STAGES = ['explore', 'create-plan', 'execute', 'review', 'document', 'other', 'unknown'];
+const TOOLKIT_STAGES = ['explore', 'create-plan', 'execute', 'review', 'document'];
+
+// Fix records and rates (#229). A fix lives in one of three homes; a toolkit fix
+// names the release that ships it; its label is a few words the user writes.
+const HOMES = ['project', 'global', 'toolkit'];
+const SEMVER = /^\d+\.\d+\.\d+$/;
+const MAX_FIX_LABEL = 120;
+// A before/after comparison over fewer cycles than this on either side is noise:
+// the rollup says so with `enough_cycles`, so the skill never has to judge it.
+const MIN_CYCLES_TO_JUDGE = 5;
 
 // --- parse args (no dependency on an arg-parsing library) ---
 const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
-  rollup: false, showRollup: false, setAxial: false,
-  data: '', since: '', session: '', candidateCount: '', addedCount: ''
+  rollup: false, showRollup: false, setAxial: false, evidence: false, recordFix: false,
+  backfillCandidates: false, addBackfill: false,
+  data: '', since: '', session: '', candidateCount: '', addedCount: '', category: '',
+  home: '', label: '', version: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -110,6 +148,14 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--rollup') opts.rollup = true;
   else if (a === '--show-rollup') opts.showRollup = true;
   else if (a === '--set-axial') opts.setAxial = true;
+  else if (a === '--evidence') opts.evidence = true;
+  else if (a === '--record-fix') opts.recordFix = true;
+  else if (a === '--backfill-candidates') opts.backfillCandidates = true;
+  else if (a === '--add-backfill') opts.addBackfill = true;
+  else if (a === '--category') opts.category = argv[++i] || '';
+  else if (a === '--home') opts.home = argv[++i] || '';
+  else if (a === '--label') opts.label = argv[++i] || '';
+  else if (a === '--version') opts.version = argv[++i] || '';
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--since') opts.since = argv[++i] || '';
   else if (a === '--session') opts.session = argv[++i] || '';
@@ -118,9 +164,13 @@ for (let i = 0; i < argv.length; i++) {
   else die('unknown argument: ' + a);
 }
 
-const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial']
+const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix',
+  'backfillCandidates', 'addBackfill']
   .filter(function (m) { return opts[m]; });
-if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial');
+if (modes.length === 0) {
+  die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, ' +
+    '--record-fix, --backfill-candidates, --add-backfill');
+}
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
@@ -128,11 +178,12 @@ const cwd = process.cwd();
 // Run a git command from cwd, returning trimmed stdout or null on any failure.
 // Mirrors the pattern in session-init.js: argument array (never an interpolated
 // string), stderr discarded, and a null return rather than a throw.
-function git(args) {
+function gitIn(dir, args) {
   try {
-    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch (e) { return null; }
 }
+function git(args) { return gitIn(cwd, args); }
 
 // The working copy's root, so a run started from a subdirectory behaves the same
 // as one started from the top. Falls back to cwd outside a git checkout.
@@ -157,12 +208,76 @@ function mainWorktreeRoot() {
   return path.dirname(path.resolve(cwd, common));
 }
 
+// Repo identity for counting and for the evidence read (#229). A row or heartbeat
+// stores `repo_path`, the WORKING COPY it was written from. That is the right key
+// for a capture window (a worktree's transcripts live under its own path) and the
+// wrong one for counting repos: a worktree counted as a repo of its own, and every
+// project's worktrees named `worktree-1` merged under one label. mainRootOf() maps
+// a stored working-copy path to the main working copy it belongs to:
+//   - a path that still exists asks git for its common directory, whose parent is
+//     the main copy (the LAST line, because a git older than 2.31 echoes the
+//     --path-format flag on a line of its own, as mainWorktreeRoot() notes);
+//   - a path that is gone and sat under a `.claude/worktrees/` folder was a removed
+//     worktree, so the main copy is everything before the first such folder (the
+//     outermost one, so a worktree nested inside a worktree still lands on it);
+//   - anything else is its own root.
+// The answer is a real path, so two spellings of one folder compare equal.
+const rootCache = new Map();
+function realOr(p) {
+  try { return fs.realpathSync(p); } catch (e) { return p; }
+}
+function mainRootOf(p) {
+  if (typeof p !== 'string' || !p || !path.isAbsolute(p)) return null;
+  if (rootCache.has(p)) return rootCache.get(p);
+  const abs = path.resolve(p);
+  let root = abs;
+  if (fs.existsSync(abs)) {
+    const out = gitIn(abs, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (out) {
+      const lines = out.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (lines.length) root = path.dirname(path.resolve(abs, lines[lines.length - 1]));
+    }
+  } else {
+    const marker = path.sep + '.claude' + path.sep + 'worktrees' + path.sep;
+    const at = abs.indexOf(marker);
+    if (at > 0) root = abs.slice(0, at);
+  }
+  root = realOr(root);
+  rootCache.set(p, root);
+  return root;
+}
+
+// The readable repo name for a stored record: its main copy's folder name when it
+// carries a path, the stored name for a record written before repo_path existed.
+// Derived here, never taken from the record's own `repo`, so it is safe on the
+// shareable whitelist. It is still a label, not a key: two different projects with
+// the same folder name share it.
+function repoLabelOf(record) {
+  const root = mainRootOf(record && record.repo_path);
+  if (root) return path.basename(root);
+  return (record && typeof record.repo === 'string') ? record.repo : '';
+}
+
 // Identity. `repo` stays the readable folder name because it is what a human
 // reads in a rollup. It is NOT unique: two projects can share a basename, and
 // before repo_path existed that collision let one project's heartbeat set
 // another's capture window. `repo_path` is the real key; `repo` is the label.
+// New rows and heartbeats carry the main copy's name (#229), so a row written in
+// a worktree reads as the repo it belongs to; `repo_path` keeps the working copy.
 const repoName = path.basename(repoRoot);
 const repoPath = repoRoot;
+const repoLabel = repoLabelOf({ repo_path: repoPath }) || repoName;
+
+// This folder's main working copy as a real path, or null outside a git
+// repository (#229). The evidence read compares every row's resolved root with
+// this one value, so it can only ever print the rows of the repo it runs in.
+function thisMainRoot() {
+  const common = git(['rev-parse', '--git-common-dir']);
+  if (!common) return null;
+  const lines = common.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!lines.length) return null;
+  return realOr(path.dirname(path.resolve(cwd, lines[lines.length - 1])));
+}
 
 // ==========================================================================
 // Shared helpers
@@ -242,6 +357,15 @@ function truncate(value, max) {
   return s.length <= max ? s : s.slice(0, max - 3) + '...';
 }
 
+// Like truncate(), but keeps line breaks (#229): a rewrite's structure, a bullet
+// list or a reworded paragraph, is part of what the owner wrote. Runs of spaces
+// still collapse, CRLF becomes LF, and three or more breaks become two.
+function truncateText(value, max) {
+  const s = String(value == null ? '' : value)
+    .replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return s.length <= max ? s : s.slice(0, max - 3) + '...';
+}
+
 // Accept a timestamp only when it really is one, otherwise fall back.
 //
 // This matters more than it looks. `at` is the one whitelisted field whose value
@@ -254,10 +378,21 @@ function isoOrNull(value) {
   return Number.isNaN(Date.parse(value)) ? null : value;
 }
 
+// A stage name from the fixed list, whatever the caller wrote (#229). A command
+// spelling ("/tk:review") is read as its stage, a missing value is `unknown`, and
+// anything else is `other`: free text never survives, on write or on projection.
+function normStage(value) {
+  const v = String(value == null ? '' : value).trim().toLowerCase().replace(/^\//, '').replace(/^tk:/, '');
+  if (!v) return 'unknown';
+  return STAGES.indexOf(v) !== -1 ? v : 'other';
+}
+
 // THE privacy boundary. Everything downstream of the ledger reads rows through
-// this projection, so `produced` and `correction` cannot reach a rollup, a report,
-// or anything that gets displayed. Adding a field here is a deliberate act, and
-// every field added must be derived in this script or validated on write.
+// this projection, so the private fields (`produced`, `correction`, `trigger`,
+// `rewrite`) cannot reach a rollup, a report, or anything that gets displayed.
+// --evidence is the one reader that does not go through it, on purpose and under
+// its own same-repo check. Adding a field here is a deliberate act, and every field
+// added must be derived in this script or validated on write.
 //
 // `repo_path` is deliberately NOT here. It is an absolute path on this machine,
 // which is exactly the kind of thing that should not travel into a rendered view.
@@ -266,10 +401,10 @@ function isoOrNull(value) {
 function shareable(row) {
   return {
     at: row.at,
-    repo: row.repo,
+    repo: repoLabelOf(row),        // derived from repo_path: the main copy's name (#229)
     kind: row.kind,
     scope: row.scope,
-    stage: row.stage,
+    stage: normStage(row.stage),   // checked against the list, so older rows cannot leak (#229)
     open_code: row.open_code,
     axial_code: row.axial_code == null ? null : row.axial_code
   };
@@ -337,12 +472,39 @@ function sessionFiles(dir) {
 //
 // Stripped rather than rejected outright, because a real message can carry one of
 // these alongside genuine text: an IDE "opened file" event is prepended to whatever
-// the user actually typed in that turn, and that turn is a real intervention.
+// the user actually typed in that turn, and that turn is a real intervention. An
+// entry the harness stamps as machine-sent never gets this far (isMachineStamped,
+// below): the tags cover machine text in entries that carry no such stamp.
 const HARNESS_TAGS = [
   'system-reminder', 'task-notification', 'command-message', 'command-name',
   'command-args', 'command-contents', 'ide_selection', 'ide_opened_file',
   'ide_diagnostics', 'local-command-stdout', 'local-command-stderr'
 ];
+
+// Entries Claude Code itself stamps as machine-sent (issue #230). A current
+// transcript names the sender of every user entry: `origin.kind` is "human" for
+// a message the person typed, "peer" for a report a subagent or another session
+// sends back, "task-notification" for a background task's notice; `isMeta` marks
+// text the harness injects, such as a skill's instructions as the Skill tool
+// loads them (with the call's `sourceToolUseID`) or a note about an image;
+// `isCompactSummary` marks the summary a compaction writes; and an entry with no
+// origin may still carry `turnOrigin`. In the downstream cycle that raised #230,
+// 23 of 23 candidates were such entries, and across this machine's transcripts
+// since 2026-10-01 they were 213 of 534.
+//
+// The list is CLOSED, like the rest of this filter: only a stamp known to mean
+// "not typed by a person" drops an entry. A missing stamp (an older Claude Code;
+// the interrupt marker, which carries none) or an unknown one (a sender kind
+// added later) keeps it. If Claude Code renames these fields, the scan goes back
+// to offering the noise; it never starts dropping what a person typed.
+const MACHINE_ORIGINS = ['peer', 'task-notification'];
+const MACHINE_TURN_ORIGINS = ['peer', 'task_notification', 'system'];
+function isMachineStamped(entry) {
+  if (entry.isMeta === true || entry.isCompactSummary === true) return true;
+  const kind = entry.origin && typeof entry.origin.kind === 'string' ? entry.origin.kind : null;
+  if (kind !== null) return MACHINE_ORIGINS.indexOf(kind) !== -1;
+  return typeof entry.turnOrigin === 'string' && MACHINE_TURN_ORIGINS.indexOf(entry.turnOrigin) !== -1;
+}
 
 // A user entry's text as written, harness markup included.
 function rawUserText(entry) {
@@ -386,6 +548,18 @@ function isSlashCommand(entry, text) {
   return (raw !== null && /<command-name>/.test(raw)) || (text !== null && isCommandExpansion(text));
 }
 
+// The request a slash command carried (#229): its invocation is harness tags,
+// which humanText() strips to nothing, so the words are read from the tags
+// themselves. Returns "/name args", or '' for an expansion or any other entry.
+function commandRequest(entry) {
+  const raw = rawUserText(entry);
+  if (!raw) return '';
+  const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(raw);
+  if (!name) return '';
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(raw);
+  return (name[1] + (args ? ' ' + args[1] : '')).replace(/\s+/g, ' ').trim();
+}
+
 // This filter is NEGATIVE by design: it removes what is definitely not a human
 // intervention and keeps everything else. It does not try to guess which turns are
 // interventions, because that guess is exactly what fails.
@@ -399,7 +573,8 @@ function isSlashCommand(entry, text) {
 // candidate, by contrast, costs a few tokens in one extra read.
 //
 // So the asymmetry decides the shape: reject only the certain non-humans (machine
-// text, bare acknowledgments) and let the extractor judge the rest.
+// text, bare acknowledgments, and the sender stamps isMachineStamped knows) and let
+// the extractor judge the rest.
 //
 // The pushback list below survives as a HINT on each candidate, never as a gate,
 // so the extractor can prioritize without the filter deciding anything.
@@ -470,7 +645,7 @@ function assistantText(entry) {
 
 function runCandidates() {
   const result = {
-    repo: repoName, optedOut: optedOut(), everCaptured: false,
+    repo: repoLabel, optedOut: optedOut(), everCaptured: false,
     // `scanned` separates "there was nothing to find" from "there was nothing to
     // look in". Both produce an empty candidate list, and without this field a
     // caller cannot tell them apart, so it records a heartbeat for a scan that
@@ -517,6 +692,27 @@ function runCandidates() {
   }
   result.window.from = since;
 
+  const scan = scanExchanges(files, since);
+  result.interruptsWithoutFollowUp = scan.interruptsWithoutFollowUp;
+  result.candidates = scan.exchanges.filter(function (x) { return x.kept; }).map(candidateOf);
+
+  result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+// The one walk over a set of session files (review of #229, R15). Capture and the
+// backfill both need each human message paired with the same context: the output
+// it reacts to, the request behind that output, and, for a reply to an interrupt,
+// the turn that was cut off, an interrupt in another session that this one's
+// opening message answers included. The backfill once had its own copy of this
+// walk, and the copy had already drifted (it read one session file, so it never
+// saw that cross-session pairing), so both modes call this one. It returns EVERY
+// human message inside the window as an exchange, in scan order; `kept` marks the
+// ones capture keeps as candidates (they passed the length and procedural gates,
+// or they answer an interrupt), and the backfill looks one up by its exact time
+// whether capture kept it or not.
+function scanExchanges(files, since) {
+  const scan = { exchanges: [], interruptsWithoutFollowUp: 0 };
   const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
   const unanswered = []; // interrupts still pending when their file ended
   const answers = [];    // each file's opening entry, which another file's interrupt can link to
@@ -524,6 +720,11 @@ function runCandidates() {
     let lines;
     try { lines = fs.readFileSync(files[i], 'utf-8').split('\n'); } catch (e) { continue; }
     let lastAssistant = '';
+    // What the human asked for (#229): the newest request, and the one that came
+    // before lastAssistant, which is the request behind the output a correction
+    // reacts to. A fix needs the ask, not only the answer and the pushback.
+    let lastHuman = '';
+    let askedForLast = '';
     let pending = null;  // the latest interrupt no human text has answered yet
     let opened = false;  // whether this file's first human words have gone by
     for (let j = 0; j < lines.length; j++) {
@@ -534,10 +735,14 @@ function runCandidates() {
 
       if (entry.type === 'assistant') {
         const t = assistantText(entry);
-        if (t) lastAssistant = t;
+        if (t) { lastAssistant = t; askedForLast = lastHuman; }
         continue;
       }
       if (entry.type !== 'user') continue;
+      // A message Claude Code stamps as machine-sent is skipped whole (#230): it
+      // is never a candidate, never an interrupt's follow-up, never a session's
+      // opener, and never a slash command that settles an interrupt.
+      if (isMachineStamped(entry)) continue;
 
       // A null here (a tool result, or an entry that held only harness tags such
       // as a task notification) leaves a pending interrupt as it is.
@@ -552,11 +757,16 @@ function runCandidates() {
       const marker = !command && INTERRUPT.test(text);
       const opener = !marker && !opened;
       if (!marker) opened = true;
+      // Remember the request before the window check, so the first candidate
+      // inside the window still knows what came before it. A command's expansion
+      // is machine text: only its invocation names a request.
+      const request = command ? commandRequest(entry) : (marker ? '' : text);
+      if (request) lastHuman = request;
       if (since && entry.timestamp && entry.timestamp < since) continue;
       if (marker) {
         // A second marker before any human text replaces the first: the
         // downstream case had two, two seconds apart, around one turn.
-        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant };
+        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant, asked: askedForLast };
         continue;
       }
       if (command) {
@@ -566,7 +776,7 @@ function runCandidates() {
         // so the interrupt has no follow-up the scan can see. Counting it is
         // what makes that visible (the owner's decision in the review of the
         // #220 cycle, R6). The command itself is machine text, never a candidate.
-        if (pending) { result.interruptsWithoutFollowUp += 1; pending = null; }
+        if (pending) { scan.interruptsWithoutFollowUp += 1; pending = null; }
         if (opener) answers.push({ file: files[i], at: entry.timestamp, command: true });
         continue;
       }
@@ -577,12 +787,12 @@ function runCandidates() {
         const t0 = time(pending.at);
         const t = time(entry.timestamp);
         if (t0 !== null && t !== null && t - t0 > INTERRUPT_LINK_MS) {
-          result.interruptsWithoutFollowUp += 1;
+          scan.interruptsWithoutFollowUp += 1;
           pending = null;
         }
       }
 
-      const candidate = {
+      const ex = {
         at: entry.timestamp || null,
         session: entry.sessionId || path.basename(files[i], '.jsonl'),
         // A hint for prioritization, never a gate. See the PUSHBACK comment above.
@@ -591,21 +801,26 @@ function runCandidates() {
         after_interrupt: false,
         // Context for the extractor to read. These are NOT the stored row: the row's
         // private fields are short summaries the extractor writes, capped on --add.
+        asked: truncate(askedForLast, MAX_ASKED),
         assistant_said: truncate(lastAssistant, 800),
-        human_said: truncate(text, 1200)
+        human_said: truncate(text, 1200),
+        kept: false,       // the scan's own bookkeeping, dropped by candidateOf()
+        file: files[i]
       };
       if (pending) {
         // The follow-up skips the length and procedural gates, and is paired
         // with the turn that was cut off rather than anything said since.
-        candidate.after_interrupt = true;
-        candidate.assistant_said = truncate(pending.assistant_said, 800);
+        ex.after_interrupt = true;
+        ex.assistant_said = truncate(pending.assistant_said, 800);
+        ex.asked = truncate(pending.asked, MAX_ASKED);
+        ex.kept = true;
         pending = null;
-        result.candidates.push(candidate);
+        scan.exchanges.push(ex);
         continue;
       }
-      const kept = couldBeIntervention(text);
-      if (kept) result.candidates.push(candidate);
-      if (opener) answers.push({ file: files[i], at: entry.timestamp, candidate: candidate, kept: kept });
+      ex.kept = couldBeIntervention(text);
+      scan.exchanges.push(ex);
+      if (opener) answers.push({ file: files[i], at: entry.timestamp, exchange: ex });
     }
     if (pending) unanswered.push(pending);
   }
@@ -614,9 +829,8 @@ function runCandidates() {
   // Oldest interrupt first, each takes the earliest opening entry of another
   // file that comes after it within INTERRUPT_LINK_MS and that no earlier
   // interrupt took. A slash command there counts the interrupt, as it does
-  // inside a session. A text already kept as a candidate is upgraded in place,
-  // never added twice; one the gates dropped is added. The rest are counted,
-  // not guessed.
+  // inside a session. The opening text is upgraded in place, and kept even if
+  // the gates dropped it. The rest are counted, not guessed.
   unanswered.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
   unanswered.forEach(function (p) {
     const t0 = time(p.at);
@@ -628,16 +842,24 @@ function runCandidates() {
         if (best === null || t < time(best.at)) best = ans;
       });
     }
-    if (!best) { result.interruptsWithoutFollowUp += 1; return; }
+    if (!best) { scan.interruptsWithoutFollowUp += 1; return; }
     best.taken = true;
-    if (best.command) { result.interruptsWithoutFollowUp += 1; return; }
-    best.candidate.after_interrupt = true;
-    best.candidate.assistant_said = truncate(p.assistant_said, 800);
-    if (!best.kept) { best.kept = true; result.candidates.push(best.candidate); }
+    if (best.command) { scan.interruptsWithoutFollowUp += 1; return; }
+    best.exchange.after_interrupt = true;
+    best.exchange.assistant_said = truncate(p.assistant_said, 800);
+    best.exchange.asked = truncate(p.asked, MAX_ASKED);
+    best.exchange.kept = true;
   });
+  return scan;
+}
 
-  result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+// A candidate as --candidates prints it: the exchange without the scan's own fields.
+function candidateOf(ex) {
+  return {
+    at: ex.at, session: ex.session, has_pushback_marker: ex.has_pushback_marker,
+    after_interrupt: ex.after_interrupt, asked: ex.asked, assistant_said: ex.assistant_said,
+    human_said: ex.human_said
+  };
 }
 
 // ==========================================================================
@@ -692,14 +914,18 @@ function runAdd() {
       // more useful one, but only when it really is a timestamp: this field is on
       // the shareable whitelist, so an unvalidated one is a text channel through it.
       at: isoOrNull(r.at) || now,
-      repo: repoName,                        // derived, never taken from input
+      repo: repoLabel,                       // derived, never taken from input
       repo_path: repoPath,                   // derived; the real identity, not shareable
       kind: 'human',                         // one value today; the extension point
       scope: scope,
-      stage: truncate(r.stage || 'unknown', 40),
+      stage: normStage(r.stage),             // one of STAGES, never free text (#229)
       // PRIVATE LAYER. Capped here so a long pasted block cannot land wholesale.
       produced: truncate(r.produced, MAX_PRIVATE_FIELD),
       correction: truncate(r.correction, MAX_PRIVATE_FIELD),
+      // What had been asked, and the owner's own wording of what they wanted when
+      // they wrote one (#229). The rewrite keeps its line breaks.
+      trigger: truncate(r.trigger, MAX_PRIVATE_FIELD),
+      rewrite: truncateText(r.rewrite, MAX_REWRITE),
       // SHAREABLE LAYER.
       open_code: truncate(r.open_code, MAX_OPEN_CODE),
       axial_code: null,                      // assigned later, via the axial map
@@ -723,6 +949,19 @@ function runAdd() {
 // like a user who never corrected Claude.
 // ==========================================================================
 
+// The toolkit release this copy of the script ships in (#229), recorded on every
+// heartbeat so a toolkit fix's after rate counts only cycles that actually ran the
+// fixed version. A plugin install carries .claude-plugin/plugin.json one folder
+// above scripts/, the same file pre-push-check.js reads. The toolkit's own source
+// copy and a copy-install have none and record null, and a heartbeat with no
+// version never counts toward a toolkit fix: it cannot prove it ran one.
+function toolkitVersion() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.claude-plugin', 'plugin.json'), 'utf-8'));
+    return typeof meta.version === 'string' && SEMVER.test(meta.version) ? meta.version : null;
+  } catch (e) { return null; }
+}
+
 function runHeartbeat() {
   if (optedOut()) {
     process.stdout.write(JSON.stringify({ recorded: false, optedOut: true }) + '\n');
@@ -730,11 +969,12 @@ function runHeartbeat() {
   }
   appendJsonl(HEARTBEAT_PATH, {
     at: new Date().toISOString(),
-    repo: repoName,
+    repo: repoLabel,
     repo_path: repoPath,   // the real key; `repo` alone collides across projects
     session: opts.session || '',
     candidates: Number(opts.candidateCount || 0),
-    added: Number(opts.addedCount || 0)
+    added: Number(opts.addedCount || 0),
+    toolkit_version: toolkitVersion()
   });
   process.stdout.write(JSON.stringify({ recorded: true, heartbeat: HEARTBEAT_PATH }) + '\n');
 }
@@ -745,29 +985,7 @@ function runHeartbeat() {
 // The rollup groups by `kind` FIRST, even though only one kind exists today, so a
 // second kind added later cannot be silently pooled into the same ranking. Pooling
 // human-labeled and machine-labeled rows would make a count meaningless.
-//
-// Each group also counts its rows by month (`by_month`) and each kind totals its
-// rows by month (`months`), so a group's share of its kind is two numbers for any
-// month (#231). The month view reads whitelisted fields only: the month comes from
-// `at` alone, validated on write, and only its digits reach the key, so a month
-// can never carry text from a row. A row with no date counts under "unknown".
 // ==========================================================================
-
-// The month a row counts under: "YYYY-MM" from its own date, else "unknown".
-function monthOf(at) {
-  const m = /^(\d{4}-\d{2})-\d{2}T/.exec(typeof at === 'string' ? at : '');
-  return m ? m[1] : 'unknown';
-}
-
-// Month counts with their keys in time order, "unknown" last.
-function inMonthOrder(counts) {
-  const out = {};
-  Object.keys(counts).sort(function (x, y) {
-    if (x === 'unknown' || y === 'unknown') return x === 'unknown' ? 1 : -1;
-    return x < y ? -1 : 1;
-  }).forEach(function (m) { out[m] = counts[m]; });
-  return out;
-}
 
 // The axial map as it is on disk, as { map } or { error }. A missing file is an
 // empty map, and so is a file holding only whitespace: there is nothing in it to
@@ -804,12 +1022,459 @@ function readAxialMap() {
   return current.map;
 }
 
-function buildRollup() {
-  // Rows are projected through shareable() immediately. Nothing below this line can
-  // see a private field, which is what makes the privacy guarantee structural.
-  const rows = readJsonl(LEDGER_PATH).map(shareable);
-  const beats = readJsonl(HEARTBEAT_PATH);
+// A row's category: its own axial code, else the map's entry for its open code,
+// else "(unlabeled)". One definition, so the rollup and the evidence read can
+// never disagree about which bucket a row is in.
+function labelOf(row, axial) {
+  return row.axial_code || axial[row.open_code] || '(unlabeled)';
+}
+
+// ==========================================================================
+// Mode: --evidence --category <name>  (the one read path back to the private layer)
+//
+// A ranking names a category; a fix needs what actually happened in it: what was
+// asked, what was produced, what the human said, and their own rewrite (#229). This
+// prints exactly that, for ONE category and for the rows of the repo this runs in,
+// to stdout only. It never writes a file.
+//
+// The boundary is enforced here, not requested in a prompt. A row is printed only
+// when its stored working copy resolves (mainRootOf) to the same real path as this
+// folder's main working copy (thisMainRoot): a worktree reads its main copy's rows,
+// a same-named sibling repo reads none of them, and a stored path that climbs out
+// with `..` lands where it resolves, not where it starts. Outside a git repository
+// the read refuses, in an opted-out repo it prints nothing, and a row written
+// before `repo_path` existed is left out and counted, because it cannot prove
+// which repo it came from. The honest limit: the script can check the folder, not
+// which session is asking, so the skill's rule that only a session opened in the
+// repo runs this is what covers a session stepping into another repo's folder.
+// ==========================================================================
+
+function runEvidence() {
+  if (!opts.category) die('--evidence requires --category <name>, one category from the rollup');
+  const here = thisMainRoot();
+  if (!here) {
+    die('--evidence reads a repo\'s rows only from inside that repo, and ' + cwd + ' is not in a git repository. Nothing was printed.');
+  }
+  const out = { repo: path.basename(here), category: opts.category, rows: [], left_out: { no_repo_path: 0 } };
+  if (optedOut()) {
+    out.optedOut = true;
+    process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+    return;
+  }
   const axial = readAxialMap();
+  const fills = fillsFor(here);
+  readJsonl(LEDGER_PATH).forEach(function (r) {
+    if (labelOf(r, axial) !== opts.category) return;
+    if (!r.repo_path) { out.left_out.no_repo_path++; return; }
+    if (mainRootOf(r.repo_path) !== here) return;
+    // An older row's request and rewrite come from the backfill side file.
+    const fill = predatesFields(r) ? fills.get(backfillKey(r)) : null;
+    out.rows.push({
+      at: r.at, stage: normStage(r.stage), scope: r.scope, open_code: r.open_code,
+      produced: r.produced || '', correction: r.correction || '',
+      trigger: r.trigger || (fill && fill.trigger) || '', rewrite: r.rewrite || (fill && fill.rewrite) || '',
+      backfilled: !!fill
+    });
+  });
+  out.rows.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
+// ==========================================================================
+// Mode: --record-fix --category <name> --home <project|global|toolkit>
+//                    --label <text> [--version <x.y.z>]
+//
+// Records that a fix for one category landed (#229), so later rollups can put the
+// category's rate per cycle before and after it. Every field is checked before
+// anything is written, because the record joins the shareable layer: the category
+// must be one the axial map names, the home one of three, the version a plain
+// x.y.z and only on a toolkit fix (the release that ships it; filing a note is not
+// landing it), and a project fix is recorded from inside its own repo. The script
+// stamps the time itself and stores the category's rate so far as `before`.
+// ==========================================================================
+
+function runRecordFix() {
+  const axial = readAxialMap();
+  const categories = Object.keys(axial).map(function (k) { return axial[k]; });
+  if (!opts.category || categories.indexOf(opts.category) === -1) {
+    die('--record-fix needs --category naming a category the axial map already has (run /error-analysis to name them). Nothing was written.');
+  }
+  if (HOMES.indexOf(opts.home) === -1) die('--home must be project, global or toolkit. Nothing was written.');
+  const label = truncate(opts.label, MAX_FIX_LABEL);
+  if (!label) die('--label is required: a few generic words saying what changed. Nothing was written.');
+  let version = null;
+  if (opts.home === 'toolkit') {
+    if (!SEMVER.test(opts.version)) die('a toolkit fix needs --version x.y.z, the release that ships it. Nothing was written.');
+    version = opts.version;
+  } else if (opts.version) {
+    die('--version applies to a toolkit fix only. Nothing was written.');
+  }
+  let root = null;
+  if (opts.home === 'project') {
+    root = thisMainRoot();
+    if (!root) die('a project fix is recorded from inside its repo, and ' + cwd + ' is not in a git repository. Nothing was written.');
+  }
+  const at = new Date().toISOString();
+  const rateRows = readJsonl(LEDGER_PATH).map(function (r) { return rateRow(r, axial); });
+  const before = rateFor(rateRows, buildCycles(readJsonl(HEARTBEAT_PATH)),
+    { category: opts.category, root: root, at: Date.parse(at), side: 'before', version: version });
+  const record = {
+    at: at, category: opts.category, home: opts.home, label: label, version: version,
+    repo: root ? path.basename(root) : null,
+    repo_path: root,   // a project fix's repo, by path; dropped from every rollup like a row's
+    before: before
+  };
+  appendJsonl(FIXES_PATH, record);
+  const shown = shareableFix(record);
+  shown.before = before;
+  process.stdout.write(JSON.stringify({ recorded: true, fix: shown, fixes: FIXES_PATH }, null, 2) + '\n');
+}
+
+// ==========================================================================
+// Modes: --backfill-candidates / --add-backfill  (filling in older rows)
+//
+// A row written before the request and rewrite fields existed can have them
+// filled in from its transcript while the transcript is still on disk (#229).
+// This never adds a row: a duplicated row is indistinguishable afterwards from a
+// genuine recurrence, which is the one number this ledger exists to produce. The
+// fill goes to a PRIVATE side file keyed by the row's `at` and `session`, and only
+// --evidence joins it back on.
+//
+// Both modes work on the rows of the repo they run in, by the same real-path
+// identity as --evidence, and look for a transcript only under that row's own
+// working copy's projects folder: another project's transcripts are never opened.
+// ==========================================================================
+
+const BACKFILL_LOCK_PATH = BACKFILL_PATH + '.lock';
+// A session id names a transcript file, so a stored value is used only when it is
+// a plain id. A value that is not (empty, a path, a "..") is never joined into a
+// path; the row is counted as having no session.
+const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function backfillKey(record) {
+  return String(record.at) + '\u0000' + String(record.session);
+}
+
+// A row that predates the two fields: it carries neither key at all. A newer row
+// whose extractor left both empty is not one; it was asked and had nothing.
+function predatesFields(row) {
+  return !Object.prototype.hasOwnProperty.call(row, 'trigger') && !Object.prototype.hasOwnProperty.call(row, 'rewrite');
+}
+
+// This repo's filled-in entries, first one per key (a race between two runs is
+// resolved the same way every time).
+function fillsFor(here) {
+  const fills = new Map();
+  readJsonl(BACKFILL_PATH).forEach(function (e) {
+    if (!e.repo_path || mainRootOf(e.repo_path) !== here) return;
+    const key = backfillKey(e);
+    if (!fills.has(key)) fills.set(key, e);
+  });
+  return fills;
+}
+
+function transcriptFileFor(repoPath, session) {
+  if (!SESSION_ID.test(String(session || ''))) return null;
+  const encodings = [repoPath.replace(/[/\\]/g, '-'), repoPath.replace(/[^A-Za-z0-9]/g, '-')];
+  for (let i = 0; i < encodings.length; i++) {
+    const file = path.join(TRANSCRIPT_ROOT, encodings[i], session + '.jsonl');
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}
+
+// The exchange a row was drafted from, found through the same walk capture uses
+// (scanExchanges), over every session file in the folder that holds the row's
+// transcript, so a fill-in sees exactly the context capture gives that message,
+// a reply to another session's interrupt included (review of #229, R15). A row's
+// `at` is that message's own timestamp, copied verbatim from its candidate, so the
+// join is exact: the message at that time in that file, no nearest match, no guess
+// between turns. Each folder is walked once per run.
+const exchangeCache = new Map();
+function exchangeAt(file, at) {
+  const folder = path.dirname(file);
+  if (!exchangeCache.has(folder)) exchangeCache.set(folder, scanExchanges(sessionFiles(folder), null).exchanges);
+  const list = exchangeCache.get(folder);
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].file === file && list[i].at === at) return list[i];
+  }
+  return null;
+}
+
+function inThisRepoOrDie(mode) {
+  const here = thisMainRoot();
+  if (!here) die(mode + ' works on the rows of the repo it runs in, and ' + cwd + ' is not in a git repository. Nothing was done.');
+  return here;
+}
+
+function runBackfillCandidates() {
+  const here = inThisRepoOrDie('--backfill-candidates');
+  const result = {
+    repo: path.basename(here),
+    counts: { repo_rows: 0, not_needed: 0, already_filled: 0, no_session: 0, transcript_gone: 0, no_match: 0, candidates: 0 },
+    candidates: []
+  };
+  if (optedOut()) {
+    result.optedOut = true;
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    return;
+  }
+  const fills = fillsFor(here);
+  readJsonl(LEDGER_PATH).forEach(function (r) {
+    if (!r.repo_path || mainRootOf(r.repo_path) !== here) return;
+    const n = result.counts;
+    n.repo_rows++;
+    if (!predatesFields(r)) { n.not_needed++; return; }
+    if (fills.has(backfillKey(r))) { n.already_filled++; return; }
+    if (!SESSION_ID.test(String(r.session || ''))) { n.no_session++; return; }
+    const file = transcriptFileFor(r.repo_path, r.session);
+    if (!file) { n.transcript_gone++; return; }
+    const ex = exchangeAt(file, r.at);
+    if (!ex) { n.no_match++; return; }
+    n.candidates++;
+    result.candidates.push({
+      at: r.at, session: r.session, backfill: true, open_code: r.open_code,
+      asked: ex.asked, assistant_said: ex.assistant_said, human_said: ex.human_said
+    });
+  });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+function runAddBackfill() {
+  if (!opts.data) die('--add-backfill requires --data <file> containing a JSON array of {at, session, trigger, rewrite}');
+  const here = inThisRepoOrDie('--add-backfill');
+  if (optedOut()) {
+    console.error('correction-ledger.js: ' + OPT_OUT_MARKER + ' present, wrote nothing for ' + repoLabel);
+    process.stdout.write(JSON.stringify({ added: 0, optedOut: true }) + '\n');
+    return;
+  }
+  let items;
+  try { items = JSON.parse(fs.readFileSync(opts.data, 'utf-8')); }
+  catch (e) { die('could not read --data as JSON: ' + e.message); }
+  if (!Array.isArray(items)) die('--data must contain a JSON array of {at, session, trigger, rewrite}');
+
+  fs.mkdirSync(path.dirname(BACKFILL_PATH), { recursive: true });
+  let token;
+  try { token = acquireLock(BACKFILL_LOCK_PATH); }
+  catch (e) { die('could not take the backfill lock ' + BACKFILL_LOCK_PATH + ': ' + e.message + '. Nothing was written.'); }
+  if (token === null) die('another run has held the backfill lock for over ' + (LOCK_WAIT_MS / 1000) + ' seconds. Nothing was written.');
+
+  // Check the WHOLE batch before writing any of it, under the lock, so "already
+  // filled" means filled by any run. die() skips finally, so a failure is
+  // collected and reported only once the lock is released.
+  let failure = null;
+  const records = [];
+  try {
+    const rowsByKey = new Map();
+    readJsonl(LEDGER_PATH).forEach(function (r) {
+      if (!r.repo_path || mainRootOf(r.repo_path) !== here || !predatesFields(r)) return;
+      rowsByKey.set(backfillKey(r), r);
+    });
+    const fills = fillsFor(here);
+    const seen = new Set();
+    for (let i = 0; i < items.length && !failure; i++) {
+      const it = items[i] || {};
+      const key = backfillKey(it);
+      const row = rowsByKey.get(key);
+      const trigger = truncate(it.trigger, MAX_PRIVATE_FIELD);
+      const rewrite = truncateText(it.rewrite, MAX_REWRITE);
+      if (!row) failure = 'entry ' + i + ' does not match a row of this repo that predates the request and rewrite fields';
+      else if (fills.has(key) || seen.has(key)) failure = 'entry ' + i + ' fills a row that is already filled';
+      else if (!trigger && !rewrite) failure = 'entry ' + i + ' has neither a trigger nor a rewrite';
+      else {
+        seen.add(key);
+        records.push({ at: row.at, session: row.session, repo_path: row.repo_path, trigger: trigger, rewrite: rewrite, added: new Date().toISOString() });
+      }
+    }
+    if (!failure) records.forEach(function (rec) { appendJsonl(BACKFILL_PATH, rec); });
+  } catch (e) {
+    failure = 'could not write the backfill side file: ' + e.message;
+  } finally {
+    releaseLock(BACKFILL_LOCK_PATH, token);
+  }
+  if (failure) die(failure + '. Nothing was written.');
+
+  removeHandoff(opts.data); // temp directory only, same guard as --add
+  process.stdout.write(JSON.stringify({ added: records.length, backfill: BACKFILL_PATH }) + '\n');
+}
+
+// ==========================================================================
+// Cycles, rates and fixes (#229)
+//
+// A cycle is the stretch of work one /document run closed: it ends at a heartbeat
+// and begins at the previous heartbeat of the SAME working copy, because capture
+// windows are per working copy (isThisRepo keys on repo_path). A repo's cycles are
+// its working copies' cycles together, and each carries its main copy's root, so a
+// project fix can be measured in its own repo.
+//
+// A row belongs to the first cycle of its working copy that ends at or after the
+// row's own time: /document appends a cycle's rows before it records the heartbeat
+// that closes it. Three kinds of row are left out of every rate, and counted:
+//   - a row marked `backfill:`, from a one-time pass over old transcripts, which
+//     no cycle can divide;
+//   - a row in a working copy's FIRST cycle, whose scan window differs from every
+//     later one (the newest session only, or a --since backfill);
+//   - a row with no heartbeat after it, whose cycle has not closed.
+// A rate is rows over cycles, rounded to two places, null with no cycle to divide by.
+// ==========================================================================
+
+function workingCopyKey(record) {
+  return record.repo_path ? 'path:' + record.repo_path : 'name:' + String(record.repo || '');
+}
+
+// The fields a rate needs and nothing else: like shareable(), this projection is
+// taken the moment a row is read, so the rate code never sees a private field.
+function rateRow(row, axial) {
+  return {
+    t: Date.parse(isoOrNull(row.at) || ''),
+    key: workingCopyKey(row),
+    label: labelOf(row, axial),
+    backfill: /^backfill:/i.test(String(row.open_code || ''))
+  };
+}
+
+function buildCycles(beats) {
+  const byKey = new Map();
+  beats.forEach(function (b) {
+    const t = Date.parse(isoOrNull(b.at) || '');
+    if (Number.isNaN(t)) return;
+    const key = workingCopyKey(b);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push({
+      t: t,
+      root: mainRootOf(b.repo_path) || key,
+      version: SEMVER.test(String(b.toolkit_version || '')) ? b.toolkit_version : null
+    });
+  });
+  const cycles = new Map();
+  byKey.forEach(function (list, key) {
+    list.sort(function (a, b) { return a.t - b.t; });
+    cycles.set(key, list.map(function (b, i) {
+      // A cycle runs on the release that closed it: its own heartbeat's version.
+      return { end: b.t, start: i === 0 ? null : list[i - 1].t, first: i === 0, root: b.root, version: b.version };
+    }));
+  });
+  return cycles;
+}
+
+// The cycle a row falls in, or the reason it is left out of every rate.
+function placeRow(r, cycles) {
+  if (r.backfill) return { reason: 'backfill_marked' };
+  const list = cycles.get(r.key);
+  if (!list || Number.isNaN(r.t)) return { reason: 'no_later_cycle' };
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].end >= r.t) return list[i].first ? { reason: 'first_cycle' } : { cycle: list[i] };
+  }
+  return { reason: 'no_later_cycle' };
+}
+
+function versionAtLeast(have, want) {
+  const a = have.split('.').map(Number);
+  const b = want.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+}
+
+// One category's rate on one side of a fix. Before: the cycles that ended at or
+// before the fix's time. After: the cycles that began at or after it, so the cycle
+// in progress when the fix landed counts in neither. `root` narrows a project fix
+// to its repo. `version` narrows a toolkit fix to cycles closed on a recorded
+// version, so both sides count the same kind of install (review of #229, R10):
+// before, a release older than the fix; after, that release or a later one. A
+// cycle with no version (the source copy, a copy-install, anything closed before
+// versions were recorded) cannot say which side it ran on, and one that ran the
+// fixed release before the fix was recorded had the fix, so neither is before.
+function rateFor(rateRows, cycles, w) {
+  const inWindow = new Set();
+  cycles.forEach(function (list) {
+    list.forEach(function (c) {
+      if (c.first) return;
+      if (w.root && c.root !== w.root) return;
+      if (w.side === 'before') {
+        if (c.end > w.at) return;
+        if (w.version && !(c.version && !versionAtLeast(c.version, w.version))) return;
+        inWindow.add(c);
+        return;
+      }
+      if (c.start === null || c.start < w.at) return;
+      if (w.version && !(c.version && versionAtLeast(c.version, w.version))) return;
+      inWindow.add(c);
+    });
+  });
+  let rows = 0;
+  rateRows.forEach(function (r) {
+    if (r.label !== w.category) return;
+    const placed = placeRow(r, cycles);
+    if (placed.cycle && inWindow.has(placed.cycle)) rows++;
+  });
+  const n = inWindow.size;
+  return { rows: rows, cycles: n, rate: n ? Math.round(rows * 100 / n) / 100 : null };
+}
+
+// A stored before snapshot, accepted only when it is the shape --record-fix writes.
+function validRate(v) {
+  if (!v || typeof v !== 'object') return null;
+  const whole = function (x) { return Number.isInteger(x) && x >= 0; };
+  if (!whole(v.rows) || !whole(v.cycles)) return null;
+  if (v.rate !== null && !(typeof v.rate === 'number' && Number.isFinite(v.rate))) return null;
+  return { rows: v.rows, cycles: v.cycles, rate: v.rate };
+}
+
+// A fix record as the rollup prints it: every field derived or validated, and the
+// stored repo path dropped, exactly as shareable() drops it from a row.
+function shareableFix(f) {
+  return {
+    at: isoOrNull(f.at),
+    category: typeof f.category === 'string' && f.category ? truncate(f.category, MAX_OPEN_CODE) : null,
+    home: HOMES.indexOf(f.home) !== -1 ? f.home : null,
+    label: truncate(f.label, MAX_FIX_LABEL),
+    version: SEMVER.test(String(f.version || '')) ? f.version : null,
+    repo: f.home === 'project' && f.repo_path ? repoLabelOf({ repo_path: f.repo_path }) : null
+  };
+}
+
+// Every fix with its rate before (as recorded, or computed for a record written by
+// hand without one) and after (computed now). A record that does not validate is
+// counted, not guessed at.
+function rolledFixes(rateRows, cycles) {
+  const out = { fixes: [], skipped: 0 };
+  readJsonl(FIXES_PATH).forEach(function (raw) {
+    const f = shareableFix(raw);
+    const root = f.home === 'project' ? mainRootOf(raw.repo_path) : null;
+    if (!f.at || !f.category || !f.home || (f.home === 'project' && !root) || (f.home === 'toolkit' && !f.version)) {
+      out.skipped++;
+      return;
+    }
+    const w = { category: f.category, root: root, at: Date.parse(f.at), version: f.home === 'toolkit' ? f.version : null };
+    f.before = validRate(raw.before) || rateFor(rateRows, cycles, Object.assign({ side: 'before' }, w));
+    f.after = rateFor(rateRows, cycles, Object.assign({ side: 'after' }, w));
+    f.enough_cycles = f.before.cycles >= MIN_CYCLES_TO_JUDGE && f.after.cycles >= MIN_CYCLES_TO_JUDGE;
+    out.fixes.push(f);
+  });
+  return out;
+}
+
+// Where a fix for this bucket belongs (#229), from how widely it spreads. One repo
+// is that project. Two or more are the toolkit when MORE than half the rows came
+// during a toolkit stage, and the user's global instructions otherwise, so a tie
+// goes to global: over-claiming that something generalizes to every install is the
+// more expensive error, as the extractor's own scope rule says. One row, or no
+// category yet, is not a pattern and gets no home.
+function homeOf(b) {
+  if (b.axial_code === '(unlabeled)' || b.count < 2) return null;
+  if (b.spread < 2) return 'project';
+  return b.stage_split.toolkit * 2 > b.count ? 'toolkit' : 'global';
+}
+
+function buildRollup() {
+  // Rows are projected through shareable() immediately, and through rateRow() for
+  // the rates, in the same pass. Nothing below this line can see a private field,
+  // which is what makes the privacy guarantee structural.
+  const axial = readAxialMap();
+  const projected = readJsonl(LEDGER_PATH).map(function (r) { return { row: shareable(r), rate: rateRow(r, axial) }; });
+  const rows = projected.map(function (p) { return p.row; });
+  const rateRows = projected.map(function (p) { return p.rate; });
+  const beats = readJsonl(HEARTBEAT_PATH);
 
   // Compute the range; do not assume it. Rows arrive in append order while `at`
   // carries the original exchange's timestamp, and appends from different repos
@@ -820,7 +1485,7 @@ function buildRollup() {
     generated_at: new Date().toISOString(),
     rows: rows.length,
     ever_captured: beats.length > 0,
-    repos_captured: Array.from(new Set(beats.map(function (b) { return b.repo; }))).sort(),
+    repos_captured: Array.from(new Set(beats.map(repoLabelOf))).sort(),
     window: {
       from: ats.length ? ats[0] : null,
       to: ats.length ? ats[ats.length - 1] : null
@@ -833,15 +1498,16 @@ function buildRollup() {
     const kind = r.kind || 'human';
     // An unlabeled row is counted honestly as unlabeled rather than folded into a
     // neighbouring bucket, so a ranking never borrows confidence it has not earned.
-    const label = r.axial_code || axial[r.open_code] || '(unlabeled)';
-    if (!out.kinds[kind]) out.kinds[kind] = { total: 0, months: {}, buckets: {} };
+    const label = labelOf(r, axial);
+    if (!out.kinds[kind]) out.kinds[kind] = { total: 0, buckets: {} };
     const k = out.kinds[kind];
-    const month = monthOf(r.at);
     k.total++;
-    k.months[month] = (k.months[month] || 0) + 1;
     if (!k.buckets[label]) {
       k.buckets[label] = {
         axial_code: label, count: 0, scope_split: { toolkit: 0, project: 0 },
+        // Rows that came during a toolkit stage, against the rest (#229): the home
+        // verdict below counts these, never the capture-time scope tag.
+        stage_split: { toolkit: 0, other: 0 },
         repos: [], last_seen: null,
         // The open codes themselves, with how often each occurs. Without these the
         // rollup carried only labels and counts, so axial coding - whose entire
@@ -849,14 +1515,13 @@ function buildRollup() {
         // a first run every label is "(unlabeled)". They are on the shareable
         // whitelist already, so surfacing them costs nothing and stays inside the
         // privacy boundary; `produced` and `correction` remain unreachable.
-        open_codes: {},
-        by_month: {}
+        open_codes: {}
       };
     }
     const b = k.buckets[label];
     b.count++;
-    b.by_month[month] = (b.by_month[month] || 0) + 1;
     if (r.scope === 'toolkit') b.scope_split.toolkit++; else b.scope_split.project++;
+    if (TOOLKIT_STAGES.indexOf(r.stage) !== -1) b.stage_split.toolkit++; else b.stage_split.other++;
     if (b.repos.indexOf(r.repo) === -1) b.repos.push(r.repo);
     if (!b.last_seen || String(r.at) > String(b.last_seen)) b.last_seen = r.at;
     if (r.open_code) b.open_codes[r.open_code] = (b.open_codes[r.open_code] || 0) + 1;
@@ -866,18 +1531,35 @@ function buildRollup() {
   // codes become a ranked array too so the most frequent wording leads.
   Object.keys(out.kinds).forEach(function (kind) {
     const k = out.kinds[kind];
-    k.months = inMonthOrder(k.months);
     k.buckets = Object.keys(k.buckets)
       .map(function (label) {
         const b = k.buckets[label];
-        b.by_month = inMonthOrder(b.by_month);
         b.open_codes = Object.keys(b.open_codes)
           .map(function (text) { return { open_code: text, count: b.open_codes[text] }; })
           .sort(function (x, y) { return y.count - x.count; });
+        b.spread = b.repos.length;
+        b.home = homeOf(b);
+        // The capture-time tag is a hint (#229): flag it when its majority points
+        // away from the verdict, so the disagreement is read, not hidden.
+        b.hint_disagrees = b.home !== null && ((b.home === 'toolkit') !== (b.scope_split.toolkit > b.scope_split.project));
         return b;
       })
       .sort(function (a, b) { return b.count - a.count; });
   });
+
+  // Rates (#229): which rows each rule left out, and every fix's before and after.
+  const cycles = buildCycles(beats);
+  out.rates_left_out = { first_cycle: 0, backfill_marked: 0, no_later_cycle: 0 };
+  rateRows.forEach(function (r) {
+    const placed = placeRow(r, cycles);
+    if (placed.reason) out.rates_left_out[placed.reason]++;
+  });
+  const rolled = rolledFixes(rateRows, cycles);
+  out.fixes = rolled.fixes;
+  out.fixes_skipped = rolled.skipped;
+  // How many older rows have their request and rewrite filled in: a count of
+  // keys, projected the moment each entry is read, so no filled text can follow.
+  out.backfilled = new Set(readJsonl(BACKFILL_PATH).map(backfillKey)).size;
 
   return out;
 }
@@ -1089,3 +1771,7 @@ else if (opts.heartbeat) runHeartbeat();
 else if (opts.rollup) runRollup(true);
 else if (opts.showRollup) runRollup(false);
 else if (opts.setAxial) runSetAxial();
+else if (opts.evidence) runEvidence();
+else if (opts.recordFix) runRecordFix();
+else if (opts.backfillCandidates) runBackfillCandidates();
+else if (opts.addBackfill) runAddBackfill();

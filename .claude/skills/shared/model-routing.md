@@ -24,6 +24,7 @@ The pin lives in agent frontmatter under `.claude/agents/`, never in prose. A pr
 | `plan-critic` | inherit | high | Read | `/create-plan` critic loop before the approval stop |
 | `design-critic` | inherit | high | Read | `/execute` design steps (M15) |
 | `design-comparer` | inherit | high | Read | `/execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15) |
+| `decision-checker` | inherit | high | Read | `/merge` at every landing: the fresh reviewer whose verdict on contradicting decisions stops the landing or lets it through |
 | `index-mapper` | sonnet | medium | Read, Grep, Glob | `/index` Step 3 chunk analysis |
 | `correction-extractor` | haiku | low | Read | `/document` capture stage |
 | `review-finder` (deprecated in 7.0, removed in 8.0) | inherit | high | Read, Grep, Glob, Bash | Downstream commands that still dispatch the generic finder by name; the toolkit itself no longer does |
@@ -32,7 +33,7 @@ Why these tiers: `index-mapper` runs on Sonnet at medium effort, measured on 202
 
 Read the measured settings as smoke-level evidence: one fixture and one chunk, with every baseline run twice and a single miss rerun, catch a setting that loses a bug outright, not a small difference between two settings. Each setting is one line in its agent file, so undoing one is a one-line edit there and in its roster row (guardrail 4).
 
-Every agent in the roster declares a `tools` list granting no Edit, Write, or NotebookEdit: a finder that could edit would apply changes before the M2 audit judged them, bypassing the loop, and a judge that could edit would be a fixer. Bash appears only where the job runs tooling (the browser and dependency finders) or re-runs a receipt's read-only check (the skeptic and the verifier). `index-mapper`, which only reads its chunk, has none; neither does `correction-extractor`, which reads only the pre-filtered candidate list handed to it, nor `design-critic`, `design-comparer`, and `plan-critic`, which read only the artifacts they are handed (no Bash, so they cannot go looking for the code they are judging).
+Every agent in the roster declares a `tools` list granting no Edit, Write, or NotebookEdit: a finder that could edit would apply changes before the M2 audit judged them, bypassing the loop, and a judge that could edit would be a fixer. Bash appears only where the job runs tooling (the browser and dependency finders) or re-runs a receipt's read-only check (the skeptic and the verifier). `index-mapper`, which only reads its chunk, has none; neither does `correction-extractor`, which reads only the pre-filtered candidate list handed to it, nor `design-critic`, `design-comparer`, `plan-critic`, and `decision-checker`, which read only the artifacts they are handed (no Bash, so they cannot go looking for the code they are judging).
 
 Everything else inherits: `/execute` implementers, `/security-audit` area agents, ad hoc research subagents, and every main-loop stage. When dispatching an inherit role, omit the model parameter entirely rather than pinning a top-tier ID - a hardcoded top-tier pin goes stale across model generations and can be blocked by an org policy.
 
@@ -62,7 +63,7 @@ Cheap runs the finders on Sonnet, which missed a planted bug that every Opus run
 
 1. **Structured output contracts.** Every worker in the roster returns a checkable format (JSONL findings, fixed module blocks), so weak or malformed output is visible rather than silent. This holds whether or not the worker is pinned: a malformed return is the cheapest signal either way, and the A/B that revoked the review pin caught one.
 2. **Bounded re-dispatch.** When a roster worker's output is weak or malformed, re-dispatch that one worker once - on the session model when it ran on a cheaper one (a pin, or its mode's `sonnet`), on the same model when it already ran on the session model (there is nothing above it to escalate to). Bounded worst case: one extra spawn.
-3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
+3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model, same build and same Claude Code version in both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
 4. **Rollback is one line.** Change the agent file's `model:` or `effort:` line, and its roster row with it; `model: inherit` puts a helper back on the session model. `scripts/test-model-roster.js` fails when the two disagree or the `model:` line is missing.
 
 ## Fallback

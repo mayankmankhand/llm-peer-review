@@ -347,6 +347,55 @@ function releaseRepo(version, tag, opt) {
   check('--remote with no value: usage error exit 2', r.status === 2, r.out);
 }
 
+// --- 6. landings since the previous release (#232) -------------------------------------
+// The scratch repo carries this repository's own merge-check.js, as the toolkit
+// does. A landing whose recorded cut predates another landing, and which drops
+// that landing's line, fails the gate with the line named; an empty commit
+// carrying the flag's Kept on purpose: line clears it; no script, or no earlier
+// tag, skips with a note; --tests-only skips it with the other release checks.
+{
+  const MC = path.join(ROOT, '.claude', 'scripts', 'merge-check.js');
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  let r = run(repo, ['--skip-suites']);
+  check('landings: a repo without merge-check.js skips the check with a note', isOk(r.out, 'landings') && /skipped: no \.claude\/scripts\/merge-check\.js/.test(line(r.out, 'landings')), r.out);
+  write(repo, '.claude/scripts/merge-check.js', fs.readFileSync(MC, 'utf8'));
+  write(repo, 'src/app.js', 'one\ntwo\nthree\n');
+  commitAll(repo, 'base');
+  r = run(repo, ['--skip-suites']);
+  check('landings: no earlier release tag, nothing to check', isOk(r.out, 'landings') && /no earlier v\* release tag reachable; nothing to check/.test(line(r.out, 'landings')), r.out);
+  git(repo, ['tag', 'v1.0.0']);
+  const base = git(repo, ['rev-parse', 'HEAD']);
+  const main = git(repo, ['symbolic-ref', '--short', 'HEAD']);
+  // A lands cleanly, cut at the release.
+  git(repo, ['checkout', '-q', '-b', 'a']);
+  write(repo, 'src/app.js', 'one\nTWO by A\nthree\n');
+  commitAll(repo, 'A');
+  git(repo, ['checkout', '-q', main]);
+  git(repo, ['merge', '--no-ff', '-q', '-m', 'Merge PR #1: A\n\nCut from: ' + base, 'a']);
+  r = run(repo, ['--skip-suites']);
+  check('landings: a clean landing after the tag is one landing, none flagged', isOk(r.out, 'landings') && /1 landing\(s\) since v1\.0\.0, none flagged/.test(line(r.out, 'landings')), r.out);
+  // B, cut at the same release, lands with its own side of the conflict: A's line is lost.
+  git(repo, ['checkout', '-q', '-b', 'b', base]);
+  write(repo, 'src/app.js', 'one\nTWO by B\nthree\n');
+  commitAll(repo, 'B');
+  git(repo, ['checkout', '-q', main]);
+  spawnSync('git', ['merge', '--no-ff', '-q', '-m', 'Merge PR #2: B\n\nCut from: ' + base, 'b'], { cwd: repo, encoding: 'utf8' });
+  git(repo, ['checkout', '--theirs', '--', 'src/app.js']);
+  git(repo, ['add', 'src/app.js']);
+  git(repo, ['commit', '-q', '--no-edit']);
+  r = run(repo, ['--skip-suites']);
+  check('landings: a landing that drops a line another landing added after its cut fails, naming the line and the way to keep it', r.status === 1 && isFail(r.out, 'landings') && /TWO by A/.test(line(r.out, 'landings')) && /Kept on purpose:/.test(line(r.out, 'landings')), r.out);
+  const since = spawnSync('node', [MC, '--since', 'v1.0.0'], { cwd: repo, encoding: 'utf8' });
+  let keep = null;
+  try { keep = JSON.parse(since.stdout).landings[1].flags[0].keep; } catch (e) { keep = null; }
+  check('landings: the flag carries the line to keep it on purpose', typeof keep === 'string' && /^Kept on purpose: [0-9a-f]{7} src\/app\.js: TWO by A$/.test(keep), since.stdout + since.stderr);
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'Keep A\'s line out on purpose\n\n' + keep]);
+  r = run(repo, ['--skip-suites']);
+  check('landings: an empty commit carrying that line clears the failure', isOk(r.out, 'landings') && /none flagged \(1 kept on purpose\)/.test(line(r.out, 'landings')), r.out);
+  r = run(repo, ['--skip-suites', '--tests-only']);
+  check('landings: --tests-only skips it with the other release checks', line(r.out, 'landings') === '' && /release tag and landings judge a release/.test(line(r.out, 'release checks')), r.out);
+}
+
 // --- 1. suites -------------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
@@ -489,6 +538,50 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('prompt-load report that fails: says so, and the run still exits 0',
     r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+}
+
+// --- info: the catch-rate line (harness research, item 7) prints, is never counted, never fails
+// It names the newest valid ship-arm review run in the fixture ledger and the
+// review-path files plugin/ changed since that run's build, so a release whose
+// review path moved since its last measurement says so in every gate run.
+{
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  write(repo, 'plugin/commands/review.md', '# Review\n');
+  write(repo, 'plugin/README.md', '# Plugin\n');
+  commitAll(repo, 'review path');
+  const built = git(repo, ['rev-parse', 'HEAD']).trim();
+  let r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('no ledger: no catch-rate line at all', r.status === 0 && !/catch rate/.test(r.out), r.out);
+
+  // The harness's file list, stubbed the way the prompt-load case stubs its script.
+  write(repo, 'scripts/quality-check.js', 'module.exports = { PATH_FILES: { review: /^(commands\\/review\\.md|agents\\/audit-skeptic\\.md)$/ } };\n');
+  const runDir = (name, meta, valid) => {
+    write(repo, 'reports/quality-check/' + name + '/run.json', JSON.stringify(meta));
+    write(repo, 'reports/quality-check/' + name + '/analysis.json', JSON.stringify({ valid }));
+  };
+  runDir('2026-10-01-000000-review-a-x', { role: 'review', arm: 'a', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-03T00:00:00Z' }, true);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a ledger with no valid ship-arm run says so in one info line',
+    r.status === 0 && /^ {2}info catch rate - no valid ship-arm review run in reports\/quality-check yet/m.test(r.out), r.out);
+
+  runDir('2026-10-02-000000-review-ship-x', { role: 'review', arm: 'ship', build: { sha: built, version: '1.0.0' }, session: { claude: '2.1.296 (Claude Code)' }, startedAt: '2026-10-02T00:00:00Z' }, true);
+  runDir('2026-10-04-000000-review-ship-y', { role: 'review', arm: 'ship', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-04T00:00:00Z' }, false);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('the newest valid ship-arm run is named with its build and Claude Code version, and nothing has changed since',
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-02-000000-review-ship-x: build [0-9a-f]{7} \(1\.0\.0\), Claude Code 2\.1\.296 \(Claude Code\); 0 review-path files changed in plugin\/ since that build/.test(r.out), r.out);
+
+  write(repo, 'plugin/commands/review.md', '# Review, edited\n');
+  write(repo, 'plugin/README.md', '# Plugin, edited\n');
+  commitAll(repo, 'move the review path');
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a review-path file changed since the build is listed; a file off the path is not',
+    r.status === 0 && /; 1 review-path file changed in plugin\/ since that build/.test(r.out) && /^ {7}commands\/review\.md$/m.test(r.out) && !/^ {7}README\.md$/m.test(r.out), r.out);
+  check('the catch-rate line is not counted as a check', /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+
+  runDir('2026-10-05-000000-review-ship-z', { role: 'review', arm: 'ship', build: { sha: '0123456789abcdef0123456789abcdef01234567', version: '1.0.0' }, startedAt: '2026-10-05T00:00:00Z' }, true);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a build this repository does not have is said plainly, and the run still exits 0',
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-05-000000-review-ship-z: build 0123456 is not in this repository's history/.test(r.out), r.out);
 }
 
 // --- hook routing ------------------------------------------------------------------

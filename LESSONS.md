@@ -141,7 +141,7 @@
 ### M11 tripwire hardening (issue #149)
 
 - **A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.**
-- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.**
+- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.** (see the harness-research refinement in detail)
 - **Masking the match that triggered the report is not masking the line.**
 
 ### Stage chaining (M14)
@@ -371,7 +371,8 @@
 - **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.**
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
@@ -393,3 +394,29 @@
 - **A batch approval covers the edits it listed; a later correction to the same prompt text asks again.**
 - **A receipt that checks a record exists can be closed by making the record late; check what the record says.**
 - **"Fails before, passes after" needs the after expect held against the before output too.**
+
+## Harness research (after v7.6.5)
+
+- **A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.**
+- **A cap on each part is not a cap on the whole: measure the total against the budget.**
+- **An exclusion applied to one arm of a comparison must apply to the other arm too.**
+- **A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.**
+
+## Issue 229 (the ledger loop)
+
+- **Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.**
+- **An audit agent with Bash can open the real ledger: when the work under review is the ledger, say in the dispatch that its files are off limits.**
+- **A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.**
+- **A second mode that needs the same context as an existing walk should call that walk, not copy it.**
+
+## Issues 228 and 230 (receipts that call back)
+
+- **A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.**
+- **When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.**
+
+## Issue 232 (land without losing work)
+
+- **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.**
+- **A lone `cd` call, then plain commands, matches the permission rows; a subshell, a `cd` joined with `&&`, `git -C` and `env -C` ask every time.**
+- **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
+- **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**

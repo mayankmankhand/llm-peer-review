@@ -7,7 +7,7 @@ Based on our full exchange, produce a markdown plan document.
 
 ## Load Project Context
 
-**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview), `lessons` (exists, content, hasDetail), `plans` (each with progress and status, for numbering the new plan and avoiding name clashes), and `worktree` (for the Worktree Check below). Use these instead of the individual git/file roundtrips. **Fallback:** if the script is missing or errors, do the manual reads described here and in the Worktree Check instead - behavior is identical.
+**Session context (fast path):** Run `node .claude/scripts/session-init.js` once. It returns a single JSON with `map` (exists, commit, headCommit, commitsBehind, stale, generatedWhileDirty, malformed, overview), `lessons` (exists, content, hasDetail), `plans` (newest first: the newest 10 with progress and status, the next 40 by name only, and `plansOmitted` counting any older ones; for numbering the new plan and avoiding name clashes, and when `plansOmitted` is set, `test -e plans/PLAN-<name>.md; echo $?` prints `1` when the new name is free), and `worktree` (for the Worktree Check below). Use these instead of the individual git/file roundtrips. **Fallback:** if the script is missing or errors, do the manual reads described here and in the Worktree Check instead - behavior is identical.
 
 Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was unavailable, look in the project root).
 
@@ -17,7 +17,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it is malformed or `/index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Proceed without the map. The plan can still be written, just with less precision on file paths.
 
-After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
+After the map, use the lesson index from the JSON (`lessons.content`; if the script was unavailable, or `content` is absent because the index is over 8 KB, read `LESSONS.md` directly). If a lesson is relevant to this work, open its full write-up in `LESSONS-detail.md` so the plan reflects past mistakes and patterns. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ## Worktree Check
 
@@ -27,7 +27,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 
 1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare the last two lines of `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16) - they differ when you're in a worktree; Git older than 2.31 prints the flag back as an extra first line).
 2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern, by command (M16): `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it already matches and `1` when it does not (or test `worktree.branch` from the session-init JSON against the same regex).
-3. If both are true AND an issue is referenced in the conversation, rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
+3. If both are true AND an issue is referenced in the conversation, record the branch's cut point (`node .claude/scripts/merge-check.js --record-cut`, M16; it writes nothing when the cut is already recorded, and `/merge` reads it when the branch lands), then rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference. The rename carries the recorded cut with it; when the record fails, say so in one line and rename anyway.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."
 5. If not in a worktree, or the branch is already renamed, skip silently.
 

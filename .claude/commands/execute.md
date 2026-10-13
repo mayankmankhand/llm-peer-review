@@ -48,7 +48,7 @@ A plan with no check lines at all (`grep -cE '^ *- Check( +(target|guard)\b| *:)
 
 **Model check:** the same JSON's `models` says how this plan is meant to be built. When `models.source` is `plan`, `models.buildModel` is `opus`, and you are not running on Opus, say in one line: "This plan's Models line is <mode>, which builds on Opus; this session runs <your model>. To match it, start a new session, run `/model opus`, then `/execute`." Then carry on: the line is a note, not a stop.
 
-Before implementing, use the lesson index from the JSON (`lessons.content`, one line each; if the script was unavailable, read `LESSONS.md` directly). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
+Before implementing, use the lesson index from the JSON (`lessons.content`, one line each; if the script was unavailable, or `content` is absent because the index is over 8 KB, read `LESSONS.md` directly). If a lesson is relevant to the code you are about to write, open its full write-up in `LESSONS-detail.md` first, so you do not repeat a past mistake. If `LESSONS-detail.md` is absent (`lessons.hasDetail` is false), `LESSONS.md` holds each lesson in full, so its content is already the whole file; `/document` creates the detail file from the seed before it writes the next lesson, so the index stays short.
 
 ## Parallel Steps
 

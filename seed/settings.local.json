@@ -10,6 +10,7 @@
       "Bash(git fetch *)",
       "Bash(git branch *)",
       "Bash(git checkout *)",
+      "Bash(git merge *)",
       "Bash(git stash *)",
       "Bash(git status *)",
       "Bash(git log *)",
@@ -44,6 +45,7 @@
       "Bash(glab issue view *)",
       "Bash(glab mr create *)",
       "Bash(glab mr list *)",
+      "Bash(glab mr view *)",
       "Bash(npm install)",
       "Bash(npm uninstall *)",
       "Bash(npm audit *)",
@@ -79,6 +81,8 @@
       "Bash(node <tk-plugin-cache>/*/scripts/gen-media.js)",
       "Bash(node <tk-plugin-cache>/*/scripts/generate-index.js *)",
       "Bash(node <tk-plugin-cache>/*/scripts/generate-index.js)",
+      "Bash(node <tk-plugin-cache>/*/scripts/merge-check.js *)",
+      "Bash(node <tk-plugin-cache>/*/scripts/merge-check.js)",
       "Bash(node <tk-plugin-cache>/*/scripts/merge-findings.js *)",
       "Bash(node <tk-plugin-cache>/*/scripts/merge-findings.js)",
       "Bash(node <tk-plugin-cache>/*/scripts/pre-push-check.js *)",
@@ -109,6 +113,8 @@
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/gen-media.js)",
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/generate-index.js *)",
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/generate-index.js)",
+      "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/merge-check.js *)",
+      "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/merge-check.js)",
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/merge-findings.js *)",
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/merge-findings.js)",
       "Bash(node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/pre-push-check.js *)",
@@ -169,7 +175,9 @@
       "Bash(git push *--de*)",
       "Bash(git push *--pru*)",
       "Bash(git remote add *--mi*)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(gh pr merge *)",
+      "Bash(glab mr merge *)"
     ],
     "additionalDirectories": [
       "/tmp"

@@ -38,7 +38,7 @@ For each changed file:
 **What goes where:**
 - **README.md** - New features, changed behavior, setup instructions, new commands
 - **CLAUDE.md** - Project description, tech stack, team info, coding preferences
-- **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists)
+- **CHANGELOG.md** - User-facing changes: new features, breaking changes, fixes (if the file exists). In a worktree too: write the block as usual, and Section 8 copies the same block into the PR, where `/merge` takes it from when the branch lands
 - **LESSONS.md** / **LESSONS-detail.md** - Read the current lesson index (`LESSONS.md`) first so nothing gets duplicated, then auto-draft this session's lessons and write them per M8: each entry carries its receipt (what happened, where). Capture a lesson when Claude repeated a mistake, a review caught something Claude should have known, or the user typed the same correction twice. When adding one, write the one-liner to `LESSONS.md` (under the right section) AND the full write-up to `LESSONS-detail.md` (same bold lead); when `LESSONS-detail.md` is absent, create it first from the toolkit's seed, `seed/LESSONS-detail.md`, with the Write tool, so the write-up has somewhere to go and the index stays one line per lesson (C-16 reports an index that holds write-ups while the detail file is absent). Check the leads by command, not by eye (M16): `grep -oE '^- \*\*[^*]+\*\*' LESSONS.md | sed 's/^- //' | sort > <scratch>/idx.txt; grep -oE '\*\*[^*]+\*\*' LESSONS-detail.md | sort -u > <scratch>/det.txt; uniq -d <scratch>/idx.txt; comm -23 <scratch>/idx.txt <scratch>/det.txt` (with `<scratch>` a folder from `mktemp -d /tmp/lessons-check.XXXXXX`) prints each duplicated lead, then each lead with no write-up in the detail file; no output means both are clean, and only near-duplicate wording is left to judgment. Then do a quick cleanup pass: dedupe near-duplicate lessons, mark superseded ones, and keep the index short.
 - **DESIGN-PROFILE.md** - When this cycle ran a design step, append every direction from the plan's Direction and Directions tried rows (name, seed, the picked one's rounds run and rounds won in the side-by-side, kept or dropped at pick) under Directions tried, and each brief that failed under Prompts to retry on newer models, with the receipt per M8 (the plan's Outcomes and the design digest). What "failed" means is defined once, in the fragment's digest section. Taste notes are already written by `/explore` as they happen; do not duplicate them here.
 - **CODEBASE_MAP.md** - Refresh it per M12 (`.claude/skills/shared/hitl-loop.md`): when the map is missing, or 10 or more commits behind HEAD (the count is `map.commitsBehind`, with `map.stale` true at 10 or more, where `node .claude/scripts/session-init.js` ran this session; where it did not, `grep -m1 -oE 'Commit: [0-9a-f]+' CODEBASE_MAP.md` then `git rev-list --count <hash>..HEAD` prints the same number; M16), regenerate it by invoking `/index` (the command orchestrates the scanner and parallel subagents to produce a fresh semantic map); otherwise leave it as it is, since smaller drift is noise. For projects over 500k tokens or with per-chunk overflow, `/index` will prompt for cost confirmation before spending API tokens - tell the user this may happen and that they can decline to skip the refresh (the prior map remains intact). If `/index` fails or the user declines, leave the existing map untouched and continue with the rest of `/document`. Do not write the map file manually.
@@ -62,11 +62,12 @@ Records the times the user stepped in during this cycle, so the toolkit can even
 count what it keeps getting wrong instead of fixing each instance and forgetting it.
 Full rationale in the Correction Ledger section of the toolkit reference.
 
-**Containment rule, read this before running anything below.** This stage is the only
-place in the toolkit that pulls near-verbatim fragments of what the user typed into
-context. Those fragments - the `human_said` and `assistant_said` text in the candidate
-list, and the `produced` and `correction` fields you draft from them - **stay in this
-stage.** They never enter:
+**Containment rule, read this before running anything below.** This stage is one of two
+places in the toolkit that pull near-verbatim fragments of what the user typed into
+context; the other is the evidence step of `/error-analysis`'s fix loop, which reads one
+repo's rows only from inside that repo. Those fragments - the `asked`, `human_said` and
+`assistant_said` text in the candidate list, and the `produced`, `correction`, `trigger`
+and `rewrite` fields you draft from them - **stay in this stage.** They never enter:
 
 - the Section 9 cycle summary or its JSON payload, and never any HTML artifact or
   published page
@@ -143,7 +144,8 @@ not tell it what you think happened.
 
 ### Confirm every open code with the user
 
-Show the drafted rows: for each one, what it thinks happened and the open code it wrote.
+Show the drafted rows: for each one, what it thinks happened, the open code it wrote, and,
+when it copied one, the user's own rewrite, which they can drop without dropping the row.
 
 **Nothing is written until the user accepts it.** They can accept, rewrite the open code in
 their own words, or drop the row. Their wording is better than a paraphrase, and their
@@ -163,7 +165,9 @@ node .claude/scripts/correction-ledger.js --add --data <folder>/rows.json
 `<folder>` is the path `mktemp` printed, typed as literal words.
 
 The script derives `repo`, `repo_path`, and `kind` itself, so those cannot be got wrong
-from here, and it hard-truncates the private fields. It accepts the `at` you pass, but
+from here. It hard-truncates the private fields (`produced`, `correction` and `trigger` at
+300 characters, `rewrite` at 1,200) and turns any `stage` outside the extractor's list into
+`other`. It accepts the `at` you pass, but
 only after checking it is a real ISO timestamp, falling back to now if it is not.
 
 ### Record the heartbeat (always)
@@ -204,9 +208,9 @@ Run the steps below automatically, attaching a receipt to each per M8 (what ran,
 
 1. Run `git status`. If there are uncommitted changes, ask the user whether to commit them before proceeding. Follow the commit message conventions in toolkit.md (start with a verb, under 50 characters). Do not continue with uncommitted work.
 2. Push the branch to the remote, behind the tripwire exactly as Section 7 says.
-3. If the branch name does not match `worktree-<number>-<label>` (`git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it matches and `1` when it does not; M16), ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" If they say yes, rename it to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
-4. Draft a PR title and body summarizing the branch's changes. Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on both hosts (inline on GitLab only through the table's `Unknown flag` fallback), and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
-5. Show the user the PR URL.
+3. If the branch name does not match `worktree-<number>-<label>` (`git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it matches and `1` when it does not; M16), ask the user: "Your branch still has its default name. Want to rename it before creating the PR?" If they say yes, record the branch's cut point first (`node .claude/scripts/merge-check.js --record-cut`, M16; it writes nothing when the cut is already recorded), then rename it to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference; the rename carries the recorded cut with it.
+4. Draft a PR title and body summarizing the branch's changes. After the summary, the body carries three parts, in this order and in the formats of "The PR body parts" in `.claude/skills/shared/merge-rules.md`, so they outlive the branch, the worktree and a squash: `## Decisions`, one line per Critical Decision of this cycle's plan as `- <decision> - <why>` (`- None recorded` when the cycle had no plan); `## Changelog`, the block Section 3 wrote to `CHANGELOG.md`, byte for byte, in a fence of four backticks, or one more than the longest backtick run inside it (left out when the cycle wrote no block); and the line `Cut from: <sha>`, with the `cut` that `node .claude/scripts/merge-check.js --cut <branch>` prints (M16; left out when it prints none). Show it to the user for review, then create the PR by running the **"Create PR / MR" row** for the detected host, following the quoting rule under the invocation table: the title in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on both hosts (inline on GitLab only through the table's `Unknown flag` fallback), and never double quotes or `$(...)`. Take the command from that row rather than from memory: the base-branch flag and the body flag are both named differently on GitLab, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
+5. Show the user the PR URL, and the next step in one line: "When it is ready, `/merge <N>` lands it, checked for lost work."
 6. Ask the user: "Want me to delete this worktree? The branch and PR will stay - only the local folder is removed."
 7. If they say yes, run `git worktree remove <worktree-root-path>` from outside the worktree directory. If removal fails due to untracked files (build artifacts, .env.local, etc.), let the user know they can clean up manually or use `--force`.
 8. The branch stays alive on the remote until the PR is merged or closed. To re-create the worktree later if fixes are needed: `git worktree add <path> <branch-name>`.

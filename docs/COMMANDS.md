@@ -10,7 +10,7 @@ You don't have to use every command every time. Following the order prevents the
 
 > **Want to see this in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](../DEMO-SCRIPT.md)**.
 
-> **Working on multiple things at once?** Use `/worktree` first to create an isolated copy, then open it in a new Cursor window and run `/explore` there.
+> **Working on multiple things at once?** Use `/worktree` first to create an isolated copy, then open it in a new Cursor window and run `/explore` there. When the PRs are ready, `/merge` lands them, checked for lost work.
 
 ---
 
@@ -82,6 +82,29 @@ Directly-typed `/review-*` runs are audited the same way before their reports - 
 
 Full prompt: [`.claude/commands/review.md`](../.claude/commands/review.md)
 
+### `/merge` - Land finished worktree PRs without losing work
+
+When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing one of them can quietly drop work it never saw, or its own work, and a squash merge hides the fix. `/merge 241 242` lands PR #241 and then PR #242, in the order you give, one at a time. For each one it brings the branch up to date with main and fixes the conflicts (the lessons files keep both sides, generated files are rebuilt, the changelog block goes back where new entries go), then lands it only when four checks pass:
+
+- your tests (your `checks.json`, or `npm test` or `pytest`);
+- **nothing other work added after the cut is removed** (rule 1);
+- **every line the PR added makes it in** (rule 2);
+- **no decision contradicts one that landed after the cut** (rule 3): a fresh reviewer compares this PR's decisions with theirs, even across files, so "go right" in one PR and "always go left" in another's guide is caught.
+
+All four key on the branch's **cut point**, the commit it was cut from, which `/worktree` records when it makes the branch. Git's merge-base cannot stand in for it: once a branch is updated from main, the merge-base moves past every line the branch never saw. `/document` writes the cut, the plan's decisions and the changelog block into the PR, and the landing commit repeats them, so they survive a squash and a deleted worktree.
+
+**What stops it.** The first flag, failing test or contradiction stops that PR before anything lands, and tells you in plain English what would be lost and who wrote it. You choose: Claude fixes it, you keep it on purpose, or you stop.
+
+**Keeping a removal on purpose.** Sometimes removing a line is right. Say "keep it" and the landing commit records `Kept on purpose: <sha> <file>: <line>`; after the fact, an empty commit on main carrying the same line does the same. The record names the commit that wrote the line, so the same text written by another commit is still checked.
+
+**How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash.
+
+**Landings made another way.** Each run first checks every landing since its last run, so a PR merged with the host's merge button is still checked, one step later. A squash made with the button is checked only when its PR carries the `Cut from:` line `/document` writes, and then only for other work it removed: a squash keeps no branch to compare its own lines against. A rebase made with the button is listed as not checkable, and a squash made with GitLab's button looks like an ordinary commit and is not seen.
+
+It is human-triggered and never chained into: which PR lands first is your call.
+
+Full prompt: [`.claude/commands/merge.md`](../.claude/commands/merge.md) | Rules: [`.claude/skills/shared/merge-rules.md`](../.claude/skills/shared/merge-rules.md)
+
 ### `/ask-gpt` and `/ask-gemini` - Debate with another AI
 
 Run a structured debate of up to 3 rounds between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same two-sentence finding contract as `/review` (one sentence carrying the defect and its harm, a second only when it says who is hit or when it fires, and a fix line that states a cost), so the output model is consistent across all peer-review surfaces. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](../API-KEYS.md) for setup.
@@ -92,7 +115,13 @@ Full prompts: [`.claude/commands/ask-gpt.md`](../.claude/commands/ask-gpt.md) | 
 
 Every time you step in during a cycle, correcting Claude or asking for something different, `/document` records it as one row in a ledger with a short note in your own words about what went wrong. `/error-analysis` reads those notes across every cycle, groups them into categories, counts them, and ranks them, so the thing you fix is the one that actually keeps happening rather than the one that happened most recently. It refuses to rank on fewer than ten rows, because a ranking built on two data points is the exact mistake it exists to prevent. It also shows each category's share month by month, so you can see whether a kind of correction falls after a change meant to prevent it; the month view says when a share moved, never why.
 
-Everything is recorded at `~/.claude/correction-ledger.jsonl`, per machine, outside every repo, so you can open it and read exactly what is stored. A row holds your note plus two short fields quoting what was said, capped at 300 characters each. Those two never leave your machine: they are excluded from every summary by construction, and this command never publishes and never sends anything to another model. To stop future capture in a repo, `touch .claude/.no-correction-log`. That records nothing further; rows already written stay until you delete the file yourself. For a test run that should not touch your real ledger, set `TK_LEDGER_DIR` to an absolute folder: the ledger and its summary files are then written there, while capture still reads your real session transcripts.
+Everything is recorded at `~/.claude/correction-ledger.jsonl`, per machine, outside every repo, so you can open it and read exactly what is stored. A row holds your note plus four private fields: what you had asked, what Claude produced and what was wrong (each capped at 300 characters), and your own rewrite of what you wanted, when you wrote one (capped at 1,200). Those never leave your machine: they are excluded from every summary by construction, only a session opened in the repo they came from can read them back (the fix loop's evidence step below), and this command never publishes and never sends anything to another model. To stop future capture in a repo, `touch .claude/.no-correction-log`. That records nothing further; rows already written stay until you delete the file yourself. For a test run that should not touch your real ledger, set `TK_LEDGER_DIR` to an absolute folder: the ledger and its other files are then written there, while capture still reads your real session transcripts.
+
+Each category also gets a home, the place its fix belongs, worked out from how widely it spreads. A category seen in one repo belongs in that project's own files. One seen in several repos belongs in your global instructions file (`~/.claude/CLAUDE.md`), unless most of its rows came up during the toolkit's own stages (`/explore`, `/create-plan`, `/execute`, `/review` and `/document`); then it belongs in the toolkit itself.
+
+When you act on one, the fix loop reads that category's rows from inside the repo they came from, drafts the fix for its home, and waits for your approval. A global or toolkit fix is written in generic words. A toolkit fix leaves its repo only as a generic note you approve, which is filed as an issue in the toolkit's GitHub repository.
+
+Once a fix lands you record it, and later rankings show the category's rate per `/document` cycle before and after it; a change counts as real only once each side has at least five cycles. Rows recorded before the request and rewrite fields existed can have them filled in from transcripts still on disk, when you ask, without adding any row.
 
 Full prompt: [`.claude/skills/error-analysis/SKILL.md`](../.claude/skills/error-analysis/SKILL.md)
 
