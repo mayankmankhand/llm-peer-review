@@ -61,8 +61,8 @@ function die(msg) {
 
 // --- storage paths (per machine, outside every repo) ---
 //
-// TK_LEDGER_DIR moves the four files this script writes (ledger, heartbeat, rollup,
-// axial map) into another folder (#182). A chained /document in a scratch or test
+// TK_LEDGER_DIR moves the files this script writes (ledger, heartbeat, rollup,
+// axial map, and since #229 the fix records) into another folder (#182). A chained /document in a scratch or test
 // project otherwise records its heartbeat in the real ~/.claude/, and the rollup
 // then reports that capture has run on a machine where no real project ever
 // captured. Only an absolute path is used: a relative one would land wherever the
@@ -85,6 +85,9 @@ const LEDGER_PATH = path.join(LEDGER_DIR, 'correction-ledger.jsonl');
 const HEARTBEAT_PATH = path.join(LEDGER_DIR, 'correction-heartbeat.jsonl');
 const ROLLUP_PATH = path.join(LEDGER_DIR, 'correction-rollup.json');
 const AXIAL_MAP_PATH = path.join(LEDGER_DIR, 'correction-axial-map.json');
+// Fix records (#229): one line per fix that landed, shareable fields only, read by
+// the rollup to put a rate before and after each one.
+const FIXES_PATH = path.join(LEDGER_DIR, 'correction-fixes.jsonl');
 const TRANSCRIPT_ROOT = path.join(HOME_CLAUDE_DIR, 'projects');
 
 // Presence of this file in a repo means: never log anything from this repo. Checked
@@ -114,12 +117,22 @@ const MAX_ASKED = 800;
 const STAGES = ['explore', 'create-plan', 'execute', 'review', 'document', 'other', 'unknown'];
 const TOOLKIT_STAGES = ['explore', 'create-plan', 'execute', 'review', 'document'];
 
+// Fix records and rates (#229). A fix lives in one of three homes; a toolkit fix
+// names the release that ships it; its label is a few words the user writes.
+const HOMES = ['project', 'global', 'toolkit'];
+const SEMVER = /^\d+\.\d+\.\d+$/;
+const MAX_FIX_LABEL = 120;
+// A before/after comparison over fewer cycles than this on either side is noise:
+// the rollup says so with `enough_cycles`, so the skill never has to judge it.
+const MIN_CYCLES_TO_JUDGE = 5;
+
 // --- parse args (no dependency on an arg-parsing library) ---
 const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
-  rollup: false, showRollup: false, setAxial: false, evidence: false,
-  data: '', since: '', session: '', candidateCount: '', addedCount: '', category: ''
+  rollup: false, showRollup: false, setAxial: false, evidence: false, recordFix: false,
+  data: '', since: '', session: '', candidateCount: '', addedCount: '', category: '',
+  home: '', label: '', version: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -130,7 +143,11 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--show-rollup') opts.showRollup = true;
   else if (a === '--set-axial') opts.setAxial = true;
   else if (a === '--evidence') opts.evidence = true;
+  else if (a === '--record-fix') opts.recordFix = true;
   else if (a === '--category') opts.category = argv[++i] || '';
+  else if (a === '--home') opts.home = argv[++i] || '';
+  else if (a === '--label') opts.label = argv[++i] || '';
+  else if (a === '--version') opts.version = argv[++i] || '';
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--since') opts.since = argv[++i] || '';
   else if (a === '--session') opts.session = argv[++i] || '';
@@ -139,9 +156,9 @@ for (let i = 0; i < argv.length; i++) {
   else die('unknown argument: ' + a);
 }
 
-const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence']
+const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix']
   .filter(function (m) { return opts[m]; });
-if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence');
+if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, --record-fix');
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
@@ -858,6 +875,19 @@ function runAdd() {
 // like a user who never corrected Claude.
 // ==========================================================================
 
+// The toolkit release this copy of the script ships in (#229), recorded on every
+// heartbeat so a toolkit fix's after rate counts only cycles that actually ran the
+// fixed version. A plugin install carries .claude-plugin/plugin.json one folder
+// above scripts/, the same file pre-push-check.js reads. The toolkit's own source
+// copy and a copy-install have none and record null, and a heartbeat with no
+// version never counts toward a toolkit fix: it cannot prove it ran one.
+function toolkitVersion() {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.claude-plugin', 'plugin.json'), 'utf-8'));
+    return typeof meta.version === 'string' && SEMVER.test(meta.version) ? meta.version : null;
+  } catch (e) { return null; }
+}
+
 function runHeartbeat() {
   if (optedOut()) {
     process.stdout.write(JSON.stringify({ recorded: false, optedOut: true }) + '\n');
@@ -869,7 +899,8 @@ function runHeartbeat() {
     repo_path: repoPath,   // the real key; `repo` alone collides across projects
     session: opts.session || '',
     candidates: Number(opts.candidateCount || 0),
-    added: Number(opts.addedCount || 0)
+    added: Number(opts.addedCount || 0),
+    toolkit_version: toolkitVersion()
   });
   process.stdout.write(JSON.stringify({ recorded: true, heartbeat: HEARTBEAT_PATH }) + '\n');
 }
@@ -971,12 +1002,227 @@ function runEvidence() {
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
 }
 
-function buildRollup() {
-  // Rows are projected through shareable() immediately. Nothing below this line can
-  // see a private field, which is what makes the privacy guarantee structural.
-  const rows = readJsonl(LEDGER_PATH).map(shareable);
-  const beats = readJsonl(HEARTBEAT_PATH);
+// ==========================================================================
+// Mode: --record-fix --category <name> --home <project|global|toolkit>
+//                    --label <text> [--version <x.y.z>]
+//
+// Records that a fix for one category landed (#229), so later rollups can put the
+// category's rate per cycle before and after it. Every field is checked before
+// anything is written, because the record joins the shareable layer: the category
+// must be one the axial map names, the home one of three, the version a plain
+// x.y.z and only on a toolkit fix (the release that ships it; filing a note is not
+// landing it), and a project fix is recorded from inside its own repo. The script
+// stamps the time itself and stores the category's rate so far as `before`.
+// ==========================================================================
+
+function runRecordFix() {
   const axial = readAxialMap();
+  const categories = Object.keys(axial).map(function (k) { return axial[k]; });
+  if (!opts.category || categories.indexOf(opts.category) === -1) {
+    die('--record-fix needs --category naming a category the axial map already has (run /error-analysis to name them). Nothing was written.');
+  }
+  if (HOMES.indexOf(opts.home) === -1) die('--home must be project, global or toolkit. Nothing was written.');
+  const label = truncate(opts.label, MAX_FIX_LABEL);
+  if (!label) die('--label is required: a few generic words saying what changed. Nothing was written.');
+  let version = null;
+  if (opts.home === 'toolkit') {
+    if (!SEMVER.test(opts.version)) die('a toolkit fix needs --version x.y.z, the release that ships it. Nothing was written.');
+    version = opts.version;
+  } else if (opts.version) {
+    die('--version applies to a toolkit fix only. Nothing was written.');
+  }
+  let root = null;
+  if (opts.home === 'project') {
+    root = thisMainRoot();
+    if (!root) die('a project fix is recorded from inside its repo, and ' + cwd + ' is not in a git repository. Nothing was written.');
+  }
+  const at = new Date().toISOString();
+  const rateRows = readJsonl(LEDGER_PATH).map(function (r) { return rateRow(r, axial); });
+  const before = rateFor(rateRows, buildCycles(readJsonl(HEARTBEAT_PATH)),
+    { category: opts.category, root: root, at: Date.parse(at), side: 'before' });
+  const record = {
+    at: at, category: opts.category, home: opts.home, label: label, version: version,
+    repo: root ? path.basename(root) : null,
+    repo_path: root,   // a project fix's repo, by path; dropped from every rollup like a row's
+    before: before
+  };
+  appendJsonl(FIXES_PATH, record);
+  const shown = shareableFix(record);
+  shown.before = before;
+  process.stdout.write(JSON.stringify({ recorded: true, fix: shown, fixes: FIXES_PATH }, null, 2) + '\n');
+}
+
+// ==========================================================================
+// Cycles, rates and fixes (#229)
+//
+// A cycle is the stretch of work one /document run closed: it ends at a heartbeat
+// and begins at the previous heartbeat of the SAME working copy, because capture
+// windows are per working copy (isThisRepo keys on repo_path). A repo's cycles are
+// its working copies' cycles together, and each carries its main copy's root, so a
+// project fix can be measured in its own repo.
+//
+// A row belongs to the first cycle of its working copy that ends at or after the
+// row's own time: /document appends a cycle's rows before it records the heartbeat
+// that closes it. Three kinds of row are left out of every rate, and counted:
+//   - a row marked `backfill:`, from a one-time pass over old transcripts, which
+//     no cycle can divide;
+//   - a row in a working copy's FIRST cycle, whose scan window differs from every
+//     later one (the newest session only, or a --since backfill);
+//   - a row with no heartbeat after it, whose cycle has not closed.
+// A rate is rows over cycles, rounded to two places, null with no cycle to divide by.
+// ==========================================================================
+
+function workingCopyKey(record) {
+  return record.repo_path ? 'path:' + record.repo_path : 'name:' + String(record.repo || '');
+}
+
+// The fields a rate needs and nothing else: like shareable(), this projection is
+// taken the moment a row is read, so the rate code never sees a private field.
+function rateRow(row, axial) {
+  return {
+    t: Date.parse(isoOrNull(row.at) || ''),
+    key: workingCopyKey(row),
+    label: labelOf(row, axial),
+    backfill: /^backfill:/i.test(String(row.open_code || ''))
+  };
+}
+
+function buildCycles(beats) {
+  const byKey = new Map();
+  beats.forEach(function (b) {
+    const t = Date.parse(isoOrNull(b.at) || '');
+    if (Number.isNaN(t)) return;
+    const key = workingCopyKey(b);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push({
+      t: t,
+      root: mainRootOf(b.repo_path) || key,
+      version: SEMVER.test(String(b.toolkit_version || '')) ? b.toolkit_version : null
+    });
+  });
+  const cycles = new Map();
+  byKey.forEach(function (list, key) {
+    list.sort(function (a, b) { return a.t - b.t; });
+    cycles.set(key, list.map(function (b, i) {
+      // A cycle runs on the release that closed it: its own heartbeat's version.
+      return { end: b.t, start: i === 0 ? null : list[i - 1].t, first: i === 0, root: b.root, version: b.version };
+    }));
+  });
+  return cycles;
+}
+
+// The cycle a row falls in, or the reason it is left out of every rate.
+function placeRow(r, cycles) {
+  if (r.backfill) return { reason: 'backfill_marked' };
+  const list = cycles.get(r.key);
+  if (!list || Number.isNaN(r.t)) return { reason: 'no_later_cycle' };
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].end >= r.t) return list[i].first ? { reason: 'first_cycle' } : { cycle: list[i] };
+  }
+  return { reason: 'no_later_cycle' };
+}
+
+function versionAtLeast(have, want) {
+  const a = have.split('.').map(Number);
+  const b = want.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+}
+
+// One category's rate on one side of a fix. Before: the cycles that ended at or
+// before the fix's time. After: the cycles that began at or after it, so the cycle
+// in progress when the fix landed counts in neither. `root` narrows a project fix
+// to its repo; `version` narrows a toolkit fix's after side to cycles closed on
+// that release or a later one.
+function rateFor(rateRows, cycles, w) {
+  const inWindow = new Set();
+  cycles.forEach(function (list) {
+    list.forEach(function (c) {
+      if (c.first) return;
+      if (w.root && c.root !== w.root) return;
+      if (w.side === 'before') {
+        if (c.end <= w.at) inWindow.add(c);
+        return;
+      }
+      if (c.start === null || c.start < w.at) return;
+      if (w.version && !(c.version && versionAtLeast(c.version, w.version))) return;
+      inWindow.add(c);
+    });
+  });
+  let rows = 0;
+  rateRows.forEach(function (r) {
+    if (r.label !== w.category) return;
+    const placed = placeRow(r, cycles);
+    if (placed.cycle && inWindow.has(placed.cycle)) rows++;
+  });
+  const n = inWindow.size;
+  return { rows: rows, cycles: n, rate: n ? Math.round(rows * 100 / n) / 100 : null };
+}
+
+// A stored before snapshot, accepted only when it is the shape --record-fix writes.
+function validRate(v) {
+  if (!v || typeof v !== 'object') return null;
+  const whole = function (x) { return Number.isInteger(x) && x >= 0; };
+  if (!whole(v.rows) || !whole(v.cycles)) return null;
+  if (v.rate !== null && !(typeof v.rate === 'number' && Number.isFinite(v.rate))) return null;
+  return { rows: v.rows, cycles: v.cycles, rate: v.rate };
+}
+
+// A fix record as the rollup prints it: every field derived or validated, and the
+// stored repo path dropped, exactly as shareable() drops it from a row.
+function shareableFix(f) {
+  return {
+    at: isoOrNull(f.at),
+    category: typeof f.category === 'string' && f.category ? truncate(f.category, MAX_OPEN_CODE) : null,
+    home: HOMES.indexOf(f.home) !== -1 ? f.home : null,
+    label: truncate(f.label, MAX_FIX_LABEL),
+    version: SEMVER.test(String(f.version || '')) ? f.version : null,
+    repo: f.home === 'project' && f.repo_path ? repoLabelOf({ repo_path: f.repo_path }) : null
+  };
+}
+
+// Every fix with its rate before (as recorded, or computed for a record written by
+// hand without one) and after (computed now). A record that does not validate is
+// counted, not guessed at.
+function rolledFixes(rateRows, cycles) {
+  const out = { fixes: [], skipped: 0 };
+  readJsonl(FIXES_PATH).forEach(function (raw) {
+    const f = shareableFix(raw);
+    const root = f.home === 'project' ? mainRootOf(raw.repo_path) : null;
+    if (!f.at || !f.category || !f.home || (f.home === 'project' && !root) || (f.home === 'toolkit' && !f.version)) {
+      out.skipped++;
+      return;
+    }
+    const w = { category: f.category, root: root, at: Date.parse(f.at) };
+    f.before = validRate(raw.before) || rateFor(rateRows, cycles, Object.assign({ side: 'before' }, w));
+    f.after = rateFor(rateRows, cycles, Object.assign({ side: 'after', version: f.home === 'toolkit' ? f.version : null }, w));
+    f.enough_cycles = f.before.cycles >= MIN_CYCLES_TO_JUDGE && f.after.cycles >= MIN_CYCLES_TO_JUDGE;
+    out.fixes.push(f);
+  });
+  return out;
+}
+
+// Where a fix for this bucket belongs (#229), from how widely it spreads. One repo
+// is that project. Two or more are the toolkit when MORE than half the rows came
+// during a toolkit stage, and the user's global instructions otherwise, so a tie
+// goes to global: over-claiming that something generalizes to every install is the
+// more expensive error, as the extractor's own scope rule says. One row, or no
+// category yet, is not a pattern and gets no home.
+function homeOf(b) {
+  if (b.axial_code === '(unlabeled)' || b.count < 2) return null;
+  if (b.spread < 2) return 'project';
+  return b.stage_split.toolkit * 2 > b.count ? 'toolkit' : 'global';
+}
+
+function buildRollup() {
+  // Rows are projected through shareable() immediately, and through rateRow() for
+  // the rates, in the same pass. Nothing below this line can see a private field,
+  // which is what makes the privacy guarantee structural.
+  const axial = readAxialMap();
+  const projected = readJsonl(LEDGER_PATH).map(function (r) { return { row: shareable(r), rate: rateRow(r, axial) }; });
+  const rows = projected.map(function (p) { return p.row; });
+  const rateRows = projected.map(function (p) { return p.rate; });
+  const beats = readJsonl(HEARTBEAT_PATH);
 
   // Compute the range; do not assume it. Rows arrive in append order while `at`
   // carries the original exchange's timestamp, and appends from different repos
@@ -1007,6 +1253,9 @@ function buildRollup() {
     if (!k.buckets[label]) {
       k.buckets[label] = {
         axial_code: label, count: 0, scope_split: { toolkit: 0, project: 0 },
+        // Rows that came during a toolkit stage, against the rest (#229): the home
+        // verdict below counts these, never the capture-time scope tag.
+        stage_split: { toolkit: 0, other: 0 },
         repos: [], last_seen: null,
         // The open codes themselves, with how often each occurs. Without these the
         // rollup carried only labels and counts, so axial coding - whose entire
@@ -1020,6 +1269,7 @@ function buildRollup() {
     const b = k.buckets[label];
     b.count++;
     if (r.scope === 'toolkit') b.scope_split.toolkit++; else b.scope_split.project++;
+    if (TOOLKIT_STAGES.indexOf(r.stage) !== -1) b.stage_split.toolkit++; else b.stage_split.other++;
     if (b.repos.indexOf(r.repo) === -1) b.repos.push(r.repo);
     if (!b.last_seen || String(r.at) > String(b.last_seen)) b.last_seen = r.at;
     if (r.open_code) b.open_codes[r.open_code] = (b.open_codes[r.open_code] || 0) + 1;
@@ -1035,10 +1285,26 @@ function buildRollup() {
         b.open_codes = Object.keys(b.open_codes)
           .map(function (text) { return { open_code: text, count: b.open_codes[text] }; })
           .sort(function (x, y) { return y.count - x.count; });
+        b.spread = b.repos.length;
+        b.home = homeOf(b);
+        // The capture-time tag is a hint (#229): flag it when its majority points
+        // away from the verdict, so the disagreement is read, not hidden.
+        b.hint_disagrees = b.home !== null && ((b.home === 'toolkit') !== (b.scope_split.toolkit > b.scope_split.project));
         return b;
       })
       .sort(function (a, b) { return b.count - a.count; });
   });
+
+  // Rates (#229): which rows each rule left out, and every fix's before and after.
+  const cycles = buildCycles(beats);
+  out.rates_left_out = { first_cycle: 0, backfill_marked: 0, no_later_cycle: 0 };
+  rateRows.forEach(function (r) {
+    const placed = placeRow(r, cycles);
+    if (placed.reason) out.rates_left_out[placed.reason]++;
+  });
+  const rolled = rolledFixes(rateRows, cycles);
+  out.fixes = rolled.fixes;
+  out.fixes_skipped = rolled.skipped;
 
   return out;
 }
@@ -1251,3 +1517,4 @@ else if (opts.rollup) runRollup(true);
 else if (opts.showRollup) runRollup(false);
 else if (opts.setAxial) runSetAxial();
 else if (opts.evidence) runEvidence();
+else if (opts.recordFix) runRecordFix();

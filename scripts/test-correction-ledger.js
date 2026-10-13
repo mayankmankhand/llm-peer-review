@@ -68,6 +68,7 @@ function runRaw(sb, args, opts) {
 }
 
 function ledgerFile(sb) { return path.join(sb.home, '.claude', 'correction-ledger.jsonl'); }
+function isoOrNullTest(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v)); }
 function rollupFile(sb) { return path.join(sb.home, '.claude', 'correction-rollup.json'); }
 
 function writeRows(sb, rows) {
@@ -1083,7 +1084,7 @@ function outsideRoots(dir, roots) {
   check('the ledger itself holds all four private fields (control)',
     markers.every(function (m) { return ledger.indexOf(m) !== -1; }));
   const bucket = JSON.parse(stdout).kinds.human.buckets[0];
-  const expected = ['axial_code', 'count', 'last_seen', 'open_codes', 'repos', 'scope_split'];
+  const expected = ['axial_code', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
   check('a rollup bucket carries exactly the expected fields',
     JSON.stringify(Object.keys(bucket).sort()) === JSON.stringify(expected), JSON.stringify(Object.keys(bucket).sort()));
   fs.rmSync(sb.root, { recursive: true, force: true });
@@ -1185,6 +1186,177 @@ function outsideRoots(dir, roots) {
   } catch (e) {
     check('evidence test set up its repos', false, e.message);
   }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: rates per cycle, before and after a fix -----------------------
+// Planted state: two repos' heartbeats and rows, and fix records written by hand so
+// their times can sit exactly on a cycle boundary. A record with no stored `before`
+// has it computed by the same rule --record-fix stores it with. The repo folders
+// are never created, so each resolves to itself.
+{
+  const sb = makeSandbox('rates229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const A = path.join(sb.root, 'repo-a');
+  const B = path.join(sb.root, 'repo-b');
+  const lines = function (file, recs) {
+    fs.writeFileSync(path.join(dir, file), recs.map(function (r) { return JSON.stringify(r); }).join('\n') + '\n', 'utf-8');
+  };
+  const beat = function (p, at, v) {
+    const b = { at: at, repo: path.basename(p), repo_path: p, session: '', candidates: 0, added: 0 };
+    if (v) b.toolkit_version = v;
+    return b;
+  };
+  const row = function (p, at, code) {
+    return { at: at, repo: path.basename(p), repo_path: p, kind: 'human', scope: 'project', stage: 'execute',
+      produced: 'RATE_PRIVATE_MARKER', correction: '', open_code: code || 'x code', axial_code: null };
+  };
+  lines('correction-heartbeat.jsonl', [
+    beat(A, '2026-09-01T10:00:00.000Z'), beat(A, '2026-09-05T10:00:00.000Z'), beat(A, '2026-09-10T10:00:00.000Z'),
+    beat(A, '2026-09-15T10:00:00.000Z'), beat(A, '2026-09-20T10:00:00.000Z'),
+    beat(B, '2026-09-02T10:00:00.000Z'), beat(B, '2026-09-16T10:00:00.000Z', '7.7.0'), beat(B, '2026-09-21T10:00:00.000Z', '7.7.0')
+  ]);
+  lines('correction-ledger.jsonl', [
+    row(A, '2026-08-30T10:00:00.000Z'),                                    // A's first cycle: left out
+    row(A, '2026-09-03T10:00:00.000Z'),                                    // A cycle 2
+    row(A, '2026-09-07T10:00:00.000Z'), row(A, '2026-09-08T10:00:00.000Z'), // A cycle 3
+    row(A, '2026-09-12T10:00:00.000Z'),                                    // A cycle 4, in progress at the mid-cycle fixes
+    row(A, '2026-09-18T10:00:00.000Z'),                                    // A cycle 5
+    row(A, '2026-09-25T10:00:00.000Z'),                                    // after A's last heartbeat: left out
+    row(A, '2026-09-04T10:00:00.000Z', 'backfill: x code'),                // marked as a backfill: left out
+    row(B, '2026-09-01T12:00:00.000Z'),                                    // B's first cycle: left out
+    row(B, '2026-09-17T10:00:00.000Z')                                     // B cycle 3, closed on 7.7.0
+  ]);
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'),
+    JSON.stringify({ 'x code': 'cat-x', 'backfill: x code': 'cat-x' }), 'utf-8');
+  lines('correction-fixes.jsonl', [
+    { at: '2026-09-13T00:00:00.000Z', category: 'cat-x', home: 'global', label: 'mid-cycle global fix', version: null },
+    { at: '2026-09-13T00:00:00.000Z', category: 'cat-x', home: 'toolkit', label: 'mid-cycle toolkit fix', version: '7.7.0' },
+    { at: '2026-09-05T10:00:00.000Z', category: 'cat-x', home: 'global', label: 'fix on a heartbeat', version: null }
+  ]);
+  const out = run(sb, ['--show-rollup']);
+  const r = JSON.parse(out);
+  const fx = r.fixes || [];
+  const nums = function (f) { return f && f.before && f.after ? [f.before.rows, f.before.cycles, f.after.rows, f.after.cycles] : null; };
+  check('a global fix: before counts the cycles that ended by it, after the cycles that began after it, the one in progress neither',
+    JSON.stringify(nums(fx[0])) === JSON.stringify([3, 2, 2, 2]), JSON.stringify(nums(fx[0])));
+  check('a toolkit fix counts only after-cycles closed on the fixed version; a heartbeat with no version counts for a global fix only',
+    !!fx[1] && !!fx[1].after && fx[1].after.cycles === 1 && fx[1].after.rows === 1 && !!fx[0] && fx[0].after.cycles === 2,
+    JSON.stringify(nums(fx[1])));
+  check('a heartbeat at exactly the fix\'s time falls in before, and the cycle it opens falls in after',
+    JSON.stringify(nums(fx[2])) === JSON.stringify([1, 1, 5, 4]), JSON.stringify(nums(fx[2])));
+  check('rates_left_out counts the rows each rule dropped',
+    !!r.rates_left_out && r.rates_left_out.first_cycle === 2 && r.rates_left_out.backfill_marked === 1 &&
+    r.rates_left_out.no_later_cycle === 1, JSON.stringify(r.rates_left_out));
+  check('a fix is not judged before 5 cycles on each side',
+    !!fx[0] && fx[0].enough_cycles === false, JSON.stringify(fx[0] && fx[0].enough_cycles));
+  check('no private text reaches the rollup through the rates', out.indexOf('RATE_PRIVATE_MARKER') === -1);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the home verdict comes from the spread --------------------------
+// One repo: project. Two or more: toolkit when MORE than half the rows came during
+// a toolkit stage (explore, create-plan, execute, review, document), global
+// otherwise, so a tie goes to global. One row, or no category yet: no home.
+{
+  const sb = makeSandbox('home229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const A = path.join(sb.root, 'repo-a');
+  const B = path.join(sb.root, 'repo-b');
+  let n = 0;
+  const row = function (p, code, stage, scope) {
+    n++;
+    return JSON.stringify({ at: '2026-09-0' + (1 + (n % 9)) + 'T10:00:00.000Z', repo: path.basename(p), repo_path: p,
+      kind: 'human', scope: scope, stage: stage, produced: '', correction: '', open_code: code, axial_code: null });
+  };
+  fs.writeFileSync(path.join(dir, 'correction-ledger.jsonl'), [
+    row(A, 'one repo', 'execute', 'toolkit'), row(A, 'one repo', 'review', 'toolkit'),
+    row(A, 'mostly toolkit', 'execute', 'project'), row(B, 'mostly toolkit', 'review', 'project'), row(B, 'mostly toolkit', 'other', 'project'),
+    row(A, 'a tie', 'execute', 'toolkit'), row(B, 'a tie', 'other', 'toolkit'),
+    row(A, 'never in a stage', 'other', 'project'), row(B, 'never in a stage', 'unknown', 'project'),
+    row(A, 'only once', 'execute', 'project'),
+    row(A, 'no category yet', 'execute', 'project'), row(B, 'no category yet', 'execute', 'project')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({
+    'one repo': 'cat-one-repo', 'mostly toolkit': 'cat-toolkit', 'a tie': 'cat-tie',
+    'never in a stage': 'cat-global', 'only once': 'cat-single'
+  }), 'utf-8');
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  const b = {};
+  r.kinds.human.buckets.forEach(function (x) { b[x.axial_code] = x; });
+  const home = function (k) { return b[k] ? b[k].home : 'missing'; };
+  check('a category in one repo belongs to that project',
+    home('cat-one-repo') === 'project' && b['cat-one-repo'].spread === 1, home('cat-one-repo'));
+  check('a category in two repos, mostly during toolkit stages, belongs to the toolkit',
+    home('cat-toolkit') === 'toolkit' && b['cat-toolkit'].spread === 2 &&
+    JSON.stringify(b['cat-toolkit'].stage_split) === JSON.stringify({ toolkit: 2, other: 1 }), home('cat-toolkit'));
+  check('a tie between toolkit stages and the rest goes to global', home('cat-tie') === 'global', home('cat-tie'));
+  check('a category in two repos outside toolkit stages belongs to the global instructions', home('cat-global') === 'global', home('cat-global'));
+  check('a category with one row, and the unlabeled bucket, get no home',
+    !!b['cat-single'] && b['cat-single'].home === null && !!b['(unlabeled)'] && b['(unlabeled)'].home === null,
+    JSON.stringify([home('cat-single'), home('(unlabeled)')]));
+  check('hint_disagrees is set when the capture tag points away from the verdict',
+    b['cat-toolkit'].hint_disagrees === true && b['cat-tie'].hint_disagrees === true && b['cat-one-repo'].hint_disagrees === true,
+    JSON.stringify([b['cat-toolkit'].hint_disagrees, b['cat-tie'].hint_disagrees, b['cat-one-repo'].hint_disagrees]));
+  check('hint_disagrees is unset when the capture tag agrees', b['cat-global'].hint_disagrees === false,
+    JSON.stringify(b['cat-global'].hint_disagrees));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: --record-fix validates every field and stores the before rate ----
+{
+  const sb = makeSandbox('recordfix229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({ 'x code': 'cat-x' }), 'utf-8');
+  const fixes = path.join(dir, 'correction-fixes.jsonl');
+  const tryFix = function (args, cwd) { return runRaw(sb, ['--record-fix'].concat(args), { cwd: cwd }); };
+  const refused = function (name, args) {
+    const r = tryFix(args);
+    check(name, r.status !== 0 && !fs.existsSync(fixes), 'exit ' + r.status + ', fixes file ' + (fs.existsSync(fixes) ? 'written' : 'absent'));
+  };
+  refused('record-fix refuses a category the axial map does not name', ['--category', 'no such category', '--home', 'global', '--label', 'x']);
+  refused('record-fix refuses an unknown home', ['--category', 'cat-x', '--home', 'nowhere', '--label', 'x']);
+  refused('record-fix refuses a fix with no label', ['--category', 'cat-x', '--home', 'global']);
+  refused('record-fix refuses a toolkit fix without a version', ['--category', 'cat-x', '--home', 'toolkit', '--label', 'x']);
+  refused('record-fix refuses free text in the version',
+    ['--category', 'cat-x', '--home', 'toolkit', '--label', 'x', '--version', '7.7.0; FIX_VERSION_MARKER']);
+  refused('record-fix refuses a version on a fix that is not a toolkit fix',
+    ['--category', 'cat-x', '--home', 'global', '--label', 'x', '--version', '7.7.0']);
+  refused('record-fix refuses a project fix outside a git repository', ['--category', 'cat-x', '--home', 'project', '--label', 'x']);
+  const ok = tryFix(['--category', 'cat-x', '--home', 'global', '--label', 'read the source before answering']);
+  let stored = {};
+  try { stored = JSON.parse(fs.readFileSync(fixes, 'utf-8').trim()); } catch (e) { /* checked below */ }
+  check('record-fix stores the fix with the exact time and a before snapshot',
+    ok.status === 0 && isoOrNullTest(stored.at) && stored.home === 'global' && stored.version === null &&
+    !!stored.before && stored.before.cycles === 0 && stored.before.rows === 0 && stored.before.rate === null,
+    ok.stdout + ok.stderr);
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  check('the rollup lists the recorded fix with its label and home',
+    r.fixes.length === 1 && r.fixes[0].label === 'read the source before answering' && r.fixes[0].home === 'global',
+    JSON.stringify(r.fixes));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: a heartbeat records the toolkit version a plugin install runs ----
+// A plugin install has .claude-plugin/plugin.json one folder above scripts/; the
+// source copy and a copy-install have none and record null.
+{
+  const sb = makeSandbox('version229');
+  const pluginRoot = path.join(sb.root, 'plugin-copy');
+  fs.mkdirSync(path.join(pluginRoot, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(pluginRoot, 'scripts', 'correction-ledger.js'));
+  fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'tk', version: '9.8.7' }), 'utf-8');
+  execFileSync('node', [path.join(pluginRoot, 'scripts', 'correction-ledger.js'), '--heartbeat'],
+    { cwd: sb.proj, env: Object.assign({}, process.env, { HOME: sb.home }), encoding: 'utf-8' });
+  run(sb, ['--heartbeat']);
+  const beats = fs.readFileSync(path.join(sb.home, '.claude', 'correction-heartbeat.jsonl'), 'utf-8')
+    .trim().split('\n').map(function (l) { return JSON.parse(l); });
+  check('a plugin install\'s heartbeat records its toolkit version', beats[0].toolkit_version === '9.8.7', JSON.stringify(beats[0].toolkit_version));
+  check('the source copy\'s heartbeat records no version', beats[1].toolkit_version === null, JSON.stringify(beats[1].toolkit_version));
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
