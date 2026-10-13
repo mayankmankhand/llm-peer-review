@@ -110,6 +110,19 @@ function savedFile(r, id) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
 }
 function lastLine(text) { return text.replace(/\n+$/, '').split('\n').pop(); }
+// A saved file's text as the canary checks read it: an output file whole, and
+// results.json without each row's `check` and `expect`, which repeat the
+// command's own words (a grep for the canary names it) rather than anything
+// the command read (#231).
+function outputText(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  if (path.basename(file) !== 'results.json') return text;
+  try {
+    const r = JSON.parse(text);
+    r.checks = r.checks.map((c) => { const o = Object.assign({}, c); delete o.check; delete o.expect; return o; });
+    return JSON.stringify(r);
+  } catch (e) { return text; }
+}
 const verdicts = (r, ids) => ids.map((id) => id + '=' + (r.byId[id] ? r.byId[id].verdict : '?')).join(' ');
 
 // A folder that exists and is NOT under any allowed root (reports/, the temp
@@ -597,7 +610,7 @@ section('11. bash runs the judged words: expansions refused or inert, pipefail, 
   // real home folder.
   const homeIsSandbox = Object.assign({}, ENV_NO_PLUGIN, { HOME: sandbox });
   const pluginIsCanary = Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: canaryDir });
-  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => outputText(path.join(r.out, f)).indexOf(needle) === -1);
 
   // --- the expansion spellings: each refused, the canary never read ---
   const expansions = [
@@ -791,7 +804,7 @@ section('12. second round: a symlink then .., sort exec flags, option prefixes, 
   write('logger.sh', '#!/bin/sh\necho hit >> PWNED_MARKER.txt\ncat\n');
   fs.chmodSync(path.join(proj, 'logger.sh'), 0o755);
   write('big.txt', Array.from({ length: 3000 }, (_, i) => String(i)).join('\n') + '\n');   // -S 1k makes sort spill this
-  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => outputText(path.join(r.out, f)).indexOf(needle) === -1);
   const outsideRe = /outside the project root/;
   const pluginIsOutside = Object.assign({}, ENV_NO_PLUGIN, { CLAUDE_PLUGIN_ROOT: path.join(sandbox, 'outside') });
 
@@ -966,7 +979,7 @@ section('13. third round: a reader that follows the links it discovers while wal
   const link = (at, to) => { try { fs.symlinkSync(to, path.join(proj, at)); } catch (e) { /* exists */ } };
   link('dir-out', outside);                                    // a directory link to the outside folder
   link('sub/link.txt', path.join(outside, 'canary.txt'));      // a file link to the outside file, in a subfolder
-  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => fs.readFileSync(path.join(r.out, f), 'utf8').indexOf(needle) === -1);
+  const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => outputText(path.join(r.out, f)).indexOf(needle) === -1);
   const walkRe = /follows symbolic links while walking/;
 
   // The leak is real: the raw command, outside the runner, reads the outside file through the link.
@@ -1181,12 +1194,289 @@ section('14. check first: run time, slow flag, re-run and results file (issue #2
   const plain = runChecks([{ id: 'gone', check: 'test -f missing.txt', expect: { exit: 0 } }], 'no-rerun');
   check('without --rerun-failures a failure is not re-run', !!plain.byId.gone && plain.byId.gone.verdict === 'fail' && plain.byId.gone.flaky !== true && !fs.existsSync(path.join(plain.out, 'first-run')), one(JSON.stringify(plain.json)));
 
-  // The saved result: the printed JSON plus when it ran and at which commit.
+  // The saved result: the printed JSON plus when it ran and at which commit,
+  // and on each row the command and expect it ran with.
   const resultsFile = path.join(t.out, 'results.json');
   let saved = null;
   try { saved = JSON.parse(fs.readFileSync(resultsFile, 'utf8')); } catch (e) { saved = null; }
   const headNow = git(['rev-parse', 'HEAD']).trim();
-  check('the result is also saved as results.json', !!saved && !!t.json && JSON.stringify(saved.checks) === JSON.stringify(t.json.checks) && JSON.stringify(saved.summary) === JSON.stringify(t.json.summary) && typeof saved.at === 'string' && !isNaN(Date.parse(saved.at)) && saved.head === headNow, one(saved ? JSON.stringify({ at: saved.at, head: saved.head }) : 'no results.json'));
+  const printedRows = (rows) => rows.map((r) => { const o = Object.assign({}, r); delete o.check; delete o.expect; return o; });
+  check('the result is also saved as results.json', !!saved && !!t.json && JSON.stringify(printedRows(saved.checks)) === JSON.stringify(t.json.checks) && JSON.stringify(saved.summary) === JSON.stringify(t.json.summary) && typeof saved.at === 'string' && !isNaN(Date.parse(saved.at)) && saved.head === headNow, one(saved ? JSON.stringify({ at: saved.at, head: saved.head }) : 'no results.json'));
+  check('results.json rows carry the command and expect that ran', !!saved && saved.checks.length === 2 && saved.checks[1].check === 'sleep 1' && JSON.stringify(saved.checks[1].expect) === '{"exit":0}' && t.json && t.json.checks.every((r) => r.check === undefined), one(saved ? JSON.stringify(saved.checks) : 'no results.json'));
+});
+
+// --- 15. plan mode: lint, before and after, tally (issue #231) -----------------
+// A plan's check lines are read and run by the runner itself, so no model
+// copies a plan line into a checks file between the plan and the run: --lint
+// names every line that would not run, --step/--phase runs one step's checks
+// with that phase's expects and keeps the records under
+// reports/checks/<plan>/step-<N>/<phase>/, and --tally reads the records back
+// and says which steps were proved red then green (M17). The demo plan holds
+// one step of each kind the lint and the tally must tell apart.
+section('15. plan mode: lint, before and after, tally (issue #231)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  fs.mkdirSync(path.join(proj, 'plans'), { recursive: true });
+  write('greet.txt', 'hello\n');
+  write('plans/PLAN-demo.md', [
+    '# Demo plan', '', '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Add a greeting** `[sequential]` → depends on: nothing',
+    '  - [ ] 🟥 Add a second hello',
+    '  - Check target `hello`: `grep -c hello greet.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`',
+    '  - Check guard `world`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '',
+    '- [ ] 🟥 **Step 2: Notes** `[sequential]` → depends on: Step 1',
+    '  - Check: no target - docs only',
+    '',
+    '- [ ] 🟥 **Step 3: Nothing named** `[sequential]` → depends on: Step 2',
+    '  - [ ] 🟥 Something',
+    '',
+    '- [ ] 🟥 **Step 4: Twice** `[sequential]` → depends on: Step 3',
+    '  - Check target `dup`: `true` - before `{"exit": 1}` - after `{"exit": 0}`',
+    '  - Check guard `dup`: `true` - `{"exit": 0}`',
+    '',
+    '- [ ] 🟥 **Step 5: Writes** `[sequential]` → depends on: Step 4',
+    '  - Check target `writes`: `touch canary-plan.txt` - before `{"exit": 1}` - after `{"exit": 0}`',
+    '',
+    '## Outcomes', '',
+  ].join('\n'));
+  const planArg = ['--plan', 'plans/PLAN-demo.md'];
+  const problemsFor = (r, step) => (r.json && Array.isArray(r.json.problems) ? r.json.problems : []).filter((p) => String(p.step) === step).map((p) => p.problem).join(' | ');
+  const recordDir = (step, phase) => path.join(proj, 'reports', 'checks', 'PLAN-demo', 'step-' + step, phase);
+  const readResults = (step, phase) => { try { return JSON.parse(fs.readFileSync(path.join(recordDir(step, phase), 'results.json'), 'utf8')); } catch (e) { return null; } };
+  const stepOf = (r, label) => (r.json && Array.isArray(r.json.steps) ? r.json.steps : []).find((s) => String(s.step) === label) || {};
+
+  const lint = run(planArg.concat(['--lint']));
+  check('plan lint flags a step with no target and no reason', lint.status === 0 && /no target/.test(problemsFor(lint, '3')) && problemsFor(lint, '1') === '' && problemsFor(lint, '2') === '', one(lint.stdout + lint.stderr));
+  check('plan lint flags an id repeated within a step', /dup/.test(problemsFor(lint, '4')) && /more than once/.test(problemsFor(lint, '4')), one(problemsFor(lint, '4') || lint.stdout + lint.stderr));
+  check('plan lint flags a command the guard would refuse', /refused: first word 'touch'/.test(problemsFor(lint, '5')) && !exists('canary-plan.txt'), one(problemsFor(lint, '5') || lint.stdout + lint.stderr));
+
+  const before = run(planArg.concat(['--step', '1', '--phase', 'before']));
+  const bHello = before.byId.hello || {};
+  const bWorld = before.byId.world || {};
+  const bSaved = readResults('1', 'before');
+  check('a before phase passes when a target shows its stated failure', before.status === 0 && bHello.verdict === 'pass' && bHello.role === 'target' && bWorld.verdict === 'pass' && bWorld.role === 'guard' && !!bSaved && bSaved.phase === 'before' && String(bSaved.step) === '1', one(before.stdout + before.stderr));
+
+  write('greet.txt', 'hello\nhello\n');   // the step's work
+  const after = run(planArg.concat(['--step', '1', '--phase', 'after']));
+  const aHello = after.byId.hello || {};
+  const aWorld = after.byId.world || {};
+  const aSaved = readResults('1', 'after');
+  check('an after phase runs each guard with its one expect', after.status === 0 && aWorld.role === 'guard' && aWorld.verdict === 'pass' && aHello.verdict === 'pass' && !!aSaved && aSaved.phase === 'after', one(after.stdout + after.stderr));
+
+  const tally1 = run(planArg.concat(['--tally']));
+  // The same verdicts in the wrong order: the before record now looks newer.
+  let swapped = false;
+  if (bSaved && aSaved) {
+    fs.writeFileSync(path.join(recordDir('1', 'before'), 'results.json'), JSON.stringify(Object.assign({}, bSaved, { at: new Date(Date.parse(aSaved.at) + 1000).toISOString() })) + '\n');
+    swapped = true;
+  }
+  const tally2 = run(planArg.concat(['--tally']));
+  check('tally proves a step only when before is older than after', stepOf(tally1, '1').status === 'proved' && swapped && stepOf(tally2, '1').status === 'unproved' && /older/.test(String(stepOf(tally2, '1').reasons)), one(JSON.stringify([stepOf(tally1, '1'), stepOf(tally2, '1')])));
+  check('tally counts a no-target step with its reason', stepOf(tally1, '2').status === 'noTarget' && stepOf(tally1, '2').reason === 'docs only' && !!tally1.json && tally1.json.summary.noTarget === 1 && stepOf(tally1, '3').status === 'missing', one(JSON.stringify(tally1.json && tally1.json.summary) + ' ' + JSON.stringify(stepOf(tally1, '2'))));
+
+  // A step the lint flags is never run, and a plan outside the project is never read.
+  const refusedStep = run(planArg.concat(['--step', '5', '--phase', 'before']));
+  check('a phase run refuses a step the lint flags, running nothing', refusedStep.status === 1 && /lint/.test(refusedStep.stderr) && !exists('canary-plan.txt') && !fs.existsSync(recordDir('5', 'before')), one(refusedStep.stdout + refusedStep.stderr));
+  const outsidePlan = path.join(sandbox, 'PLAN-outside.md');
+  fs.writeFileSync(outsidePlan, '- [ ] 🟥 **Step 1: Out** `[sequential]`\n  - Check: no target - none\n');
+  const outside = run(['--plan', outsidePlan, '--lint']);
+  check('plan mode reads only a plan inside the project', outside.status === 1 && /inside the project/.test(outside.stderr), one(outside.stdout + outside.stderr));
+});
+
+// --- 16. plan mode holds up: near misses, repeated steps, fences, links -------
+// An adversarial pass over plan mode found ways a check could be dropped, or a
+// step read as proved without its checks running: a near-miss check line
+// skipped in silence, two steps with one number sharing a record folder, a
+// heading inside a code fence ending a step, a no-target step's guards never
+// judged, a record of an edited check or of another plan with the same file
+// name counted as proof, a link on the record path sending a write or a delete
+// outside reports/, and a malformed record crashing the tally. Each case below
+// is one of those, and every detail is one line.
+section('16. plan mode holds up: near misses, repeated steps, fences, links (issue #231)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const problemsAt = (r, step) => (r.json && Array.isArray(r.json.problems) ? r.json.problems : [])
+    .filter((p) => (step === null ? p.step === null : String(p.step) === step)).map((p) => p.problem);
+  const st = (r, label) => (r.json && Array.isArray(r.json.steps) ? r.json.steps : []).find((s) => String(s.step) === label) || {};
+
+  write('plans/PLAN-edge.md', [
+    '# Edge plan', '', '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Near misses** `[sequential]`',
+    '  - Check target `t1`: `grep -c hello greet.txt` - before `{"match": "^2$"}` - after `{"match": "^3$"}`',
+    '  - [ ] 🟥 Check guard `boxed`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  * Check guard `starred`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  - check guard `lower`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  - [ ] 🟥 Check that the page loads',
+    '',
+    '- [ ] 🟥 **Step 2: First two** `[sequential]`',
+    '  - Check: no target - first',
+    '- [ ] 🟥 **Step 2: Second two** `[sequential]`',
+    '  - Check: no target - second',
+    '',
+    '- [ ] 🟥 **Step 3: Fenced** `[sequential]`',
+    '  - Check: no target - a fence',
+    '  ```markdown',
+    '  ## Not a heading',
+    '  - Check guard `fenced`: `grep -c world f.txt` - `{"match": "^9$"}`',
+    '  ```',
+    '  <!-- - Check guard `hidden`: `grep -c world f.txt` - `{"match": "^9$"}` -->',
+    '  - Check guard `kept`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '',
+    '## Outcomes', '',
+  ].join('\n'));
+  const lint = run(['--plan', 'plans/PLAN-edge.md', '--lint']);
+  const p1 = problemsAt(lint, '1');
+  check('plan lint flags a near-miss check line, not a plain subtask', lint.status === 0 && p1.length === 3 && p1.every((p) => /does not parse/.test(p)) && !p1.some((p) => /page loads/.test(p)), one(JSON.stringify(p1) + ' ' + lint.stderr));
+  const twice = run(['--plan', 'plans/PLAN-edge.md', '--step', '2', '--phase', 'before']);
+  check('plan lint flags a step number used twice, and a phase run refuses it', problemsAt(lint, '2').filter((p) => /more than once/.test(p)).length === 2 && twice.status === 1 && /more than once/.test(twice.stderr) && !fs.existsSync(path.join(proj, 'reports', 'checks', 'PLAN-edge', 'step-2')), one(JSON.stringify(problemsAt(lint, '2')) + ' ' + twice.stderr));
+  const s3 = (lint.json && Array.isArray(lint.json.steps) ? lint.json.steps : []).find((s) => s.step === '3') || {};
+  check('a code fence or comment inside a step is not read and does not end it', JSON.stringify(s3.guards) === '["kept"]' && s3.noTarget === 'a fence' && problemsAt(lint, '3').length === 0, one(JSON.stringify(s3) + ' ' + JSON.stringify(problemsAt(lint, '3'))));
+
+  write('plans/PLAN-loose.md', [
+    '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Fine** `[sequential]`',
+    '  - Check: no target - fine',
+    '- [ ] **Step 2: No mark** `[sequential]`',
+    '  - Check guard `orphan`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '```',
+    '- Check guard `unclosed`: `true` - `{"exit": 0}`',
+  ].join('\n'));
+  const loose = run(['--plan', 'plans/PLAN-loose.md', '--lint']);
+  const outsideSteps = problemsAt(loose, null);
+  const looseRun = run(['--plan', 'plans/PLAN-loose.md', '--step', '1', '--phase', 'before']);
+  check('plan lint flags a step line that does not parse, a check line outside any step and an unclosed fence', outsideSteps.length === 3 && /step line that does not parse/.test(outsideSteps[0]) && /outside any step/.test(outsideSteps[1]) && /never closed/.test(outsideSteps[2]) && looseRun.status === 1 && /the plan has lint problems/.test(looseRun.stderr), one(JSON.stringify(outsideSteps) + ' ' + looseRun.stderr));
+
+  // Records: a target step and a refactor (no target, one guard), run red then green.
+  write('greet2.txt', 'hello\n');
+  write('f2.txt', 'world\n');
+  const tallyText = (cmd) => [
+    '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Target** `[sequential]`',
+    '  - Check target `n`: `' + cmd + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`',
+    '- [ ] 🟥 **Step 2: Refactor** `[sequential]`',
+    '  - Check: no target - a refactor',
+    '  - Check guard `w`: `grep -c world f2.txt` - `{"match": "^1$"}`',
+    '', '## Outcomes', '',
+  ].join('\n');
+  write('plans/PLAN-tally.md', tallyText('grep -c hello greet2.txt'));
+  const tp = ['--plan', 'plans/PLAN-tally.md'];
+  run(tp.concat(['--step', '1', '--phase', 'before']));
+  run(tp.concat(['--step', '2', '--phase', 'before']));
+  write('greet2.txt', 'hello\nhello\n');
+  run(tp.concat(['--step', '1', '--phase', 'after']));
+  run(tp.concat(['--step', '2', '--phase', 'after']));
+  const t1 = run(tp.concat(['--tally']));
+  write('f2.txt', 'gone\n');   // the refactor broke what its guard holds
+  run(tp.concat(['--step', '2', '--phase', 'after']));
+  const t2 = run(tp.concat(['--tally']));
+  check("tally judges a no-target step's guards", st(t1, '1').status === 'proved' && st(t1, '2').status === 'noTarget' && st(t2, '2').status === 'unproved' && /guard 'w' failed after/.test(String(st(t2, '2').reasons)), one(JSON.stringify([st(t1, '1'), st(t1, '2'), st(t2, '2')])));
+
+  // The plan's command edited after its runs: the records no longer stand for it.
+  write('plans/PLAN-tally.md', tallyText('grep -c hello greet.txt'));
+  const t3 = run(tp.concat(['--tally']));
+  write('plans/PLAN-tally.md', tallyText('grep -c hello greet2.txt'));
+  check('tally does not count a record whose command changed since it ran', st(t3, '1').status === 'unproved' && /different command/.test(String(st(t3, '1').reasons)), one(JSON.stringify(st(t3, '1'))));
+  fs.mkdirSync(path.join(proj, 'other'), { recursive: true });
+  write('other/PLAN-tally.md', tallyText('grep -c hello greet2.txt'));
+  const t4 = run(['--plan', 'other/PLAN-tally.md', '--tally']);
+  check('tally does not count a record written for another plan with the same name', st(t4, '1').status === 'unproved' && /written for plan/.test(String(st(t4, '1').reasons)), one(JSON.stringify(st(t4, '1'))));
+  fs.writeFileSync(path.join(proj, 'reports', 'checks', 'PLAN-tally', 'step-1', 'after', 'results.json'), JSON.stringify({ at: new Date().toISOString(), checks: [null] }) + '\n');
+  const t5 = run(tp.concat(['--tally']));
+  check('a malformed record cannot count, and the tally does not crash', t5.status === 0 && st(t5, '1').status === 'unproved' && /cannot count/.test(String(st(t5, '1').reasons)), one(t5.stdout + t5.stderr));
+
+  // A link on the record path: refused before anything is cleared or written,
+  // and never read through by the tally.
+  const elsewhere = path.join(sandbox, 'elsewhere');
+  fs.mkdirSync(path.join(elsewhere, 'step-1', 'before'), { recursive: true });
+  fs.writeFileSync(path.join(elsewhere, 'step-1', 'before', 'keep.txt'), 'canary\n');
+  fs.mkdirSync(path.join(proj, 'reports', 'checks'), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(proj, 'reports', 'checks', 'PLAN-link'));
+  write('plans/PLAN-link.md', ['## Tasks', '', '- [ ] 🟥 **Step 1: Linked** `[sequential]`', '  - Check target `n`: `grep -c hello greet2.txt` - before `{"match": "^2$"}` - after `{"match": "^3$"}`', ''].join('\n'));
+  const linked = run(['--plan', 'plans/PLAN-link.md', '--step', '1', '--phase', 'before']);
+  const linkedTally = run(['--plan', 'plans/PLAN-link.md', '--tally']);
+  check('a link on the record path is refused before anything is cleared or written', linked.status === 1 && /is a link/.test(linked.stderr) && fs.existsSync(path.join(elsewhere, 'step-1', 'before', 'keep.txt')) && !fs.existsSync(path.join(elsewhere, 'step-1', 'before', 'results.json')) && st(linkedTally, '1').status === 'unproved' && /is a link/.test(String(st(linkedTally, '1').reasons)), one(linked.stderr + ' ' + JSON.stringify(st(linkedTally, '1'))));
+
+  const dirPlan = run(['--plan', 'plans', '--lint']);
+  check('plan mode reads only a regular file', dirPlan.status === 1 && /regular file/.test(dirPlan.stderr), one(dirPlan.stdout + dirPlan.stderr));
+  const roleRun = runChecks([{ id: 'r', check: 'true', expect: { exit: 0 }, role: 'target' }], 'role');
+  check("a checks file's own role field is not copied onto its row", !!roleRun.byId.r && roleRun.byId.r.verdict === 'pass' && roleRun.byId.r.role === undefined, one(roleRun.stdout + roleRun.stderr));
+
+  // A second adversarial pass: fences and comments read as CommonMark reads
+  // them, a step line that is not bold, near misses with no Check word, no
+  // bullet or a quote mark, two expects equal in another key order, a lines key
+  // a run would ignore, and an Outcomes note that names a step.
+  write('plans/PLAN-edge2.md', [
+    '# Edge plan 2', '', '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Fences and comments** `[sequential]`',
+    '  - Check target `t1`: `grep -c hello greet.txt` - before `{"match": "^2$"}` - after `{"match": "^3$"}`',
+    '  ```npm test``` is the suite this step leans on.',
+    '  - Check guard `g1`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  - [ ] 🟥 Add the config block:',
+    '    ```json',
+    '    {"a": 1}',
+    '  - Check guard `g2`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  <!-->',
+    '  - Check guard `g3`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  <!--->',
+    '  - Check guard `g4`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  <!-- a --> <!-- b',
+    '  - Check guard `hidden2`: `grep -c world f.txt` - `{"match": "^9$"}`',
+    '  -->',
+    '  - [ ] 🟥 Check `npm test` passes',
+    '  - [ ] 🟥 Check guards still pass',
+    '',
+    '- [ ] 🟥 **Step 2: More near misses** `[sequential]`',
+    '  - Check: no target - near misses',
+    '  - Guard `missing-check`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  Check guard `no-bullet`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '  > - Check guard `quoted`: `grep -c world f.txt` - `{"match": "^1$"}`',
+    '',
+    '- [ ] 🟥 **Step 3: Key order** `[sequential]`',
+    '  - Check target `ko`: `wc -l f.txt` - before `{"lines": {"min": 1, "max": 3}}` - after `{"lines": {"max": 3, "min": 1}}`',
+    '  - Check guard `mx`: `grep -c world f.txt` - `{"lines": {"min": 1, "mx": 3}}`',
+    '',
+    '- [ ] 🟥 Step 4: Not bold `[sequential]`',
+    '  - Check: no target - after a broken step line',
+    '',
+    '## Outcomes', '',
+    '- **Step 2:** done, see the records',
+    '- **Step 1 (`abc1234`).** notes',
+    '',
+  ].join('\n'));
+  const lint2 = run(['--plan', 'plans/PLAN-edge2.md', '--lint']);
+  const e1 = (lint2.json && Array.isArray(lint2.json.steps) ? lint2.json.steps : []).find((s) => s.step === '1') || {};
+  check('a line opening with inline triple backticks is not a fence, and a fence in a list item ends with its item', Array.isArray(e1.guards) && e1.guards.indexOf('g1') !== -1 && e1.guards.indexOf('g2') !== -1, one(JSON.stringify(e1) + ' ' + lint2.stderr));
+  check('an empty comment closes on its own line, and one reopened on a line hides what follows', JSON.stringify(e1.guards) === '["g1","g2","g3","g4"]' && problemsAt(lint2, '1').length === 0, one(JSON.stringify(e1.guards) + ' ' + JSON.stringify(problemsAt(lint2, '1'))));
+  const e2 = problemsAt(lint2, '2');
+  check("a near miss with no Check word, no bullet or a quote mark is flagged, and \"Check `npm test` passes\" is not", e2.length === 3 && e2.every((p) => /does not parse/.test(p)) && problemsAt(lint2, '1').length === 0, one(JSON.stringify(e2)));
+  const e3 = problemsAt(lint2, '3');
+  check('two expects equal in another key order, and a lines key a run would ignore, are lint problems', e3.length === 2 && e3.some((p) => /same expect before and after/.test(p)) && e3.some((p) => /only min and max/.test(p)), one(JSON.stringify(e3)));
+  const e0 = problemsAt(lint2, null);
+  const tally2 = run(['--plan', 'plans/PLAN-edge2.md', '--tally']);
+  check('a step line that is not bold is flagged and ends the step above, while an Outcomes note naming a step is not', e0.length === 2 && /step line that does not parse/.test(e0[0]) && /Not bold/.test(e0[0]) && /outside any step/.test(e0[1]) && !e0.some((p) => /done, see the records|abc1234/.test(p)), one(JSON.stringify(e0)));
+  check('the tally counts the problems outside any step in its summary', tally2.status === 0 && !!tally2.json && tally2.json.summary.problems === 2 && Array.isArray(tally2.json.problems) && tally2.json.problems.length === 2, one(tally2.stdout.slice(0, 300) + tally2.stderr));
+
+  // An id named like an object property, and a record an older runner wrote
+  // (no command on its rows): never a result that did not run, and named.
+  write('greet3.txt', 'hello\n');
+  const protoText = (extra) => ['## Tasks', '', '- [ ] 🟥 **Step 1: Proto** `[sequential]`', '  - Check target `n`: `grep -c hello greet3.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`'].concat(extra).concat(['']).join('\n');
+  write('plans/PLAN-proto.md', protoText([]));
+  const pp = ['--plan', 'plans/PLAN-proto.md'];
+  run(pp.concat(['--step', '1', '--phase', 'before']));
+  write('greet3.txt', 'hello\nhello\n');
+  run(pp.concat(['--step', '1', '--phase', 'after']));
+  const p1t = run(pp.concat(['--tally']));
+  const protoBefore = path.join(proj, 'reports', 'checks', 'PLAN-proto', 'step-1', 'before', 'results.json');
+  let bare = null;
+  try { bare = JSON.parse(fs.readFileSync(protoBefore, 'utf8')); } catch (e) { bare = null; }
+  if (bare) {
+    bare.checks = bare.checks.map((c) => { const o = Object.assign({}, c); delete o.check; delete o.expect; return o; });
+    fs.writeFileSync(protoBefore, JSON.stringify(bare) + '\n');
+  }
+  const p2t = run(pp.concat(['--tally']));
+  check('a record with no command on its rows is matched by id, and the tally notes it', st(p1t, '1').status === 'proved' && Array.isArray(st(p1t, '1').notes) && st(p1t, '1').notes.length === 0 && !!bare && st(p2t, '1').status === 'proved' && /names no command for n/.test(String(st(p2t, '1').notes)), one(JSON.stringify([st(p1t, '1'), st(p2t, '1')])));
+  write('plans/PLAN-proto.md', protoText(['  - Check guard `constructor`: `grep -c hello greet3.txt` - `{"match": "^2$"}`']));
+  const p3t = run(pp.concat(['--tally']));
+  check('a check id named like an object property is never read as a result that ran', st(p3t, '1').status === 'unproved' && /guard 'constructor' has no before result/.test(String(st(p3t, '1').reasons)), one(JSON.stringify(st(p3t, '1'))));
 });
 
 console.log('');
