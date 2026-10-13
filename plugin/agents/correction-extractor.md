@@ -49,6 +49,16 @@ Use the human's own framing where they gave one. They said what was wrong better
 
 Set `scope` to `toolkit` when the intervention is about how the toolkit itself behaves (its commands, rules, prompts, scripts, or workflow), and `project` when it is about the content of the project being worked on. When genuinely torn, choose `project`: over-claiming that something generalizes to every install is the more expensive error.
 
+## The request and the rewrite
+
+Each candidate may carry `asked`: what the human had asked for just before the assistant output they are reacting to. Use it to write `trigger`, one short sentence in your own words saying what was asked. When `asked` is empty or tells you nothing, leave `trigger` empty rather than guessing.
+
+`rewrite` is the one field you copy instead of summarizing. Fill it only when the human wrote out the version they wanted in their own words, such as a reworded sentence, their own bullet, or a corrected paragraph, and copy that wording from `human_said` exactly. When they only described what was wrong, leave `rewrite` empty: a summary there would pass your words off as theirs, and their exact wording is the whole value of the field.
+
+## Backfill items
+
+A candidate carrying `"backfill": true` is an exchange that already has a row, recorded before these two fields existed. Do not judge it again and do not write a row for it. Return its `at` and `session`, copied verbatim, with `trigger` and `rewrite` written by the rules above, in the `backfill` array. Its `open_code` is there only so you know what the row was about.
+
 ## Output contract
 
 Return **exactly one JSON object and nothing else**. No prose before or after, no code fence.
@@ -63,18 +73,23 @@ Return **exactly one JSON object and nothing else**. No prose before or after, n
       "stage": "<explore|create-plan|execute|review|document|other>",
       "produced": "<what the assistant asserted or produced, one short sentence>",
       "correction": "<what the human said was wrong or wanted instead, one short sentence>",
+      "trigger": "<what the human had asked for, one short sentence, or empty>",
+      "rewrite": "<the human's own wording of what they wanted, copied exactly, or empty>",
       "open_code": "<plain language, close to the data, what went wrong or was missing>"
     }
   ],
   "skipped": [
     { "at": "<candidate `at`>", "why": "<one short line>" }
+  ],
+  "backfill": [
+    { "at": "<copied verbatim>", "session": "<copied verbatim>", "trigger": "<as above>", "rewrite": "<as above>" }
   ]
 }
 ```
 
 Rules for the contract:
 
-- Every candidate you were given appears in exactly one of `rows` or `skipped`. Never drop one silently.
-- `produced` and `correction` are **short summaries you write**, never pasted quotes. They are stored in a private layer that is capped on write and never leaves the machine, but keeping them short is your job, not the cap's.
-- Emit `{"rows": [], "skipped": [...]}` when nothing qualified. An empty result stated explicitly is a useful answer; prose explaining why is not.
+- Every candidate you were given appears in exactly one of `rows`, `skipped` or `backfill`. A candidate marked `backfill` always goes in `backfill`; any other goes in `rows` or `skipped`. Never drop one silently.
+- `produced`, `correction` and `trigger` are **short summaries you write**, never pasted quotes. `rewrite` is the one exception: the human's own words, copied, and only when they wrote out what they wanted. All four are stored in a private layer that is capped on write and never leaves the machine, but keeping them short is your job, not the cap's.
+- Emit `{"rows": [], "skipped": [...]}` when nothing qualified. An empty result stated explicitly is a useful answer; prose explaining why is not. Leave `backfill` out when no candidate carried the flag.
 - If you cannot parse your input, return `{"rows": [], "skipped": [], "error": "<what was wrong>"}`. A malformed return that looks like success is the one failure mode the contract exists to prevent.

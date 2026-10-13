@@ -4,6 +4,8 @@ allowed-tools:
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
   - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
   - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
@@ -38,7 +40,7 @@ After the map, use the lesson index from the JSON (`lessons.content`; if the scr
 
 1. Detect if you're in a worktree: use `worktree.isWorktree` from the session-init JSON (or, if the script was unavailable, compare the last two lines of `git rev-parse --path-format=absolute --git-dir --git-common-dir` (M16) - they differ when you're in a worktree; Git older than 2.31 prints the flag back as an extra first line).
 2. Check if the current branch name does NOT already match the `worktree-<number>-<label>` pattern, by command (M16): `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?` prints `0` when it already matches and `1` when it does not (or test `worktree.branch` from the session-init JSON against the same regex).
-3. If both are true AND an issue is referenced in the conversation, rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference.
+3. If both are true AND an issue is referenced in the conversation, record the branch's cut point (`node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js --record-cut`, M16; it writes nothing when the cut is already recorded, and `/tk:merge` reads it when the branch lands), then rename the branch to `worktree-<issue-number>-<short-label>`, the branch naming rule in the toolkit reference. The rename carries the recorded cut with it; when the record fails, say so in one line and rename anyway.
 4. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."
 5. If not in a worktree, or the branch is already renamed, skip silently.
 

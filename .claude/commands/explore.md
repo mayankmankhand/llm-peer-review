@@ -168,8 +168,8 @@ Use `worktree.isWorktree` from the session-init JSON. Only if the script was una
 **If in a worktree AND an issue number came up during Phase 1:**
 1. Check if the current branch already matches the `worktree-<number>-<label>` pattern, by command (M16): test `worktree.branch` from the session-init JSON against `^worktree-[0-9]+-[A-Za-z0-9._-]+$`, or run `git rev-parse --abbrev-ref HEAD | grep -Eq '^worktree-[0-9]+-[A-Za-z0-9._-]+$'; echo $?`, where `0` means it matches. If so, skip - it's already named correctly.
 2. If you only have an issue number (no title), fetch it with the **"Read issue" row** for the detected host (detect it now if Phase 1 never needed it, per the Issue Host section)
-3. If in detached HEAD state, create a branch instead: `git checkout -b worktree-<issue-number>-<short-label>`
-4. Otherwise, rename the current branch: `git branch -m worktree-<issue-number>-<short-label>`
+3. If in detached HEAD state, create a branch instead: `git checkout -b worktree-<issue-number>-<short-label>`, then record its cut point with `node .claude/scripts/merge-check.js --record-cut` (M16)
+4. Otherwise, record the branch's cut point first, `node .claude/scripts/merge-check.js --record-cut` (M16; it writes nothing when `/worktree` already recorded it, and `/merge` reads it when the branch lands), then rename the current branch: `git branch -m worktree-<issue-number>-<short-label>`. The rename carries the recorded cut with it. When the record fails, say so in one line and rename anyway: `/merge` then finds the cut another way, as a weaker check.
    - The short label should be 2-3 words from the issue title, lowercase, with only letters, numbers, and hyphens
 5. If the rename fails because the name is taken, tell the user and ask how to proceed (add a suffix, pick a different label, or keep the current name).
 6. Tell the user: "Renamed your branch from `old-name` to `worktree-XX-short-label` to match the issue."

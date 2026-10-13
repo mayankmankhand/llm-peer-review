@@ -30,6 +30,51 @@ The startup size was a live defect the research found on the way, and it grows w
 
 ---
 
+## Unreleased - Receipts That Call Back
+
+**A patch on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issues #228 and #230. `/tk:upgrade` could not prove any script finding, because the checks runner refused nearly every receipt the audit wrote, and the correction scan offered subagent reports and skill loads as things you had said.
+
+### Fixed
+
+- **`/tk:upgrade` receipts run through the checks runner.** A default run of `upgrade-audit.js` writes each finding's receipt as a call-back the runner already allows: `node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --receipt <id> --release <version>`, plus the run's `--from` when it had one. The ID is the first 16 hex characters of the SHA-256 of the finding's key, so no file name or line from your project reaches the command. The call-back reruns the detection and runs that one finding's own check, so the runner saves exactly what the check prints. Before, the runner refused nearly every check the audit wrote (awk programs, brace groups, `node -e`, environment assignments), so the audit's first tier killed every script finding as RECEIPT FAILED. On five local installs, 24 of 24 receipts were refused before and none after, and every saved output matched the finding's own check byte for byte.
+- **A moved plugin link stops the upgrade instead of letting another release vouch.** The stable link moves when a session starts. When it does not lead to the running audit, the audit still prints its findings, writes each receipt as the finding's own check, and ends with one stderr line and exit 1: start a new session, and if it stops the same way there, report the line as a toolkit issue. A call-back that reaches a release other than the one that wrote it runs nothing and says `upgrade-audit: not run:` (exit 3); a release from before call-backs answers `unknown argument --receipt`. The upgrade skill's rule 5 says neither output is a kill: relay the line and stop.
+- **The correction scan skips messages Claude Code stamps as machine-sent.** `correction-ledger.js --candidates` drops subagent reports, background task notices, a skill's text as it loads, compaction summaries and other harness notes, by the sender stamps Claude Code writes on each transcript entry. The list is closed and fails open: an entry with no stamp, or a stamp the scan does not know, stays a candidate. Across this machine's transcripts since 2026-10-01, the 219 machine-stamped candidates of 537 are gone, nothing else was dropped, and one person's reply to an interrupt, which a machine note used to take, is now paired with it.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. The restart matters more than before: the stable link moves at session start, and an upgrade run in the session that took the update stops on the stale link. No new permission rows: a call-back is a `node` call to `upgrade-audit.js` at the stable path, which the checks runner already allows.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated `correction-ledger.js`.
+
+### Why
+
+The 7.6.3 runner made every receipt pass a guard that refuses programs, and the audit's receipts were programs, so the upgrade's audit could prove nothing; moving each check behind the audit itself keeps the runner strict. The scan guessed who wrote a message from its text, while Claude Code already records the sender on every entry, so the scan now reads that.
+
+---
+
+## Unreleased - Land Without Losing Work
+
+**Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #232. When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing it can quietly drop that work, or the branch's own, and a squash then hides the fix. `/tk:merge` lands finished worktree PRs in the order you give and checks each one before it lands.
+
+### Added
+
+- **`/tk:merge` lands worktree PRs, checked for lost work.** `/tk:merge 241 242` lands PR #241 and then PR #242, one at a time. For each it brings the branch up to date with main, fixes the conflicts, and lands it only when four checks pass: your tests; nothing other work added after the branch's cut is removed (rule 1); every line the PR added makes it in (rule 2); and no decision of the PR contradicts one that landed after its cut (rule 3). The first problem stops that PR and tells you in plain English what would be lost, who wrote it, and what you can do. It is human-triggered and never chained into, and a landing on the host always asks first.
+- **A fresh reviewer judges the decisions.** The new `decision-checker` agent reads one file, this PR's decisions beside those of every landing since its cut, and names each pair that cannot both hold, even across files. `merge-check.js` builds that file, so the reviewer never sees the conflict fix or the line checks.
+- **The cut point is recorded.** `/tk:worktree`, and the branch renames in `/tk:explore`, `/tk:create-plan` and `/tk:document`, record the commit each branch was cut from. Git's merge-base cannot stand in for it: once a branch is updated from main, the merge-base moves past every line the branch never saw.
+- **PRs carry their decisions, changelog block and cut.** `/tk:document` writes `## Decisions`, `## Changelog` and a `Cut from:` line into the PR body, and the landing commit repeats them, so they outlive a squash and a deleted worktree. PRs opened before this update still land: their cut comes from git's branch log, and their decisions from the PR text and changes.
+- **Landings made another way are checked on the next run.** Each `/tk:merge` run first checks every landing since its last run: a merge commit fully, and a squash for removed work when its PR carries a `Cut from:` line. A rebase made with the host's button, and a squash made with GitLab's button, are not checked.
+- **The lessons files keep both sides on a merge (C-18).** `/tk:upgrade` offers two `.gitattributes` lines, `LESSONS.md merge=union` and `LESSONS-detail.md merge=union`, so two branches that each add a lesson no longer conflict there, and `/tk:merge` merges a lesson written twice. `CHANGELOG.md` gets no such line on purpose: its block goes back in by rule instead.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. Eight new permission rows: four allow rows for `merge-check.js` (at the plugin cache path and the stable `current` path, each with and without arguments), `Bash(git merge *)` and `Bash(glab mr view *)`, and two ask rows, `Bash(gh pr merge *)` and `Bash(glab mr merge *)`, because a merge on the host leaves the machine. `/tk:upgrade`'s C-9 reports the rows a project lacks, and re-running `/tk:setup` merges them.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy `merge-check.js`, the `decision-checker` agent and the new permission rows.
+
+### Why
+
+Issue #232 asked what happens when four worktrees are cut from main, two land, two more are cut, and then the first batch's other two land. Replayed in scratch repositories, one whole-file "keep mine" conflict fix dropped 9 lines of two earlier landings, including changes that never conflicted, and git reported nothing. The checks key on the recorded cut point because it is the one fact that does not move when a branch is updated. Rule 3 exists because two PRs can each be right alone and contradict once both land: in the live dry run it stopped two landings that both line checks passed.
+
+---
+
 ## v7.6.5 - Name the Command (2026-10-10)
 
 **A patch on top of v7.6.4, which stays additive on v7.0.0 and v6.0.0.** Issue #226, merged as PR #227. The four spots the #221 triage left for a later cycle now name their command and its pass signal (M16), and the work turned up a worktree check that misread a subfolder of the main copy.

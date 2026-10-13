@@ -1160,7 +1160,7 @@ const MOVING_ROLES = [
 // session model (#208): the map helper's file names the model it was measured on.
 const BEST_KEEPS_FILE_MODEL = ["index-mapper"];
 // The helpers no mode moves: a judge never runs below the work it judges.
-const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer"];
+const FIXED_ROLES = ["audit-skeptic", "fix-verifier", "plan-critic", "design-critic", "design-comparer", "decision-checker"];
 // The helpers that keep their agent file's model in every mode: the correction
 // extractor was measured on Haiku against the session model (issue 221, four
 // identical runs), so no mode moves it up or down.

@@ -347,6 +347,55 @@ function releaseRepo(version, tag, opt) {
   check('--remote with no value: usage error exit 2', r.status === 2, r.out);
 }
 
+// --- 6. landings since the previous release (#232) -------------------------------------
+// The scratch repo carries this repository's own merge-check.js, as the toolkit
+// does. A landing whose recorded cut predates another landing, and which drops
+// that landing's line, fails the gate with the line named; an empty commit
+// carrying the flag's Kept on purpose: line clears it; no script, or no earlier
+// tag, skips with a note; --tests-only skips it with the other release checks.
+{
+  const MC = path.join(ROOT, '.claude', 'scripts', 'merge-check.js');
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  let r = run(repo, ['--skip-suites']);
+  check('landings: a repo without merge-check.js skips the check with a note', isOk(r.out, 'landings') && /skipped: no \.claude\/scripts\/merge-check\.js/.test(line(r.out, 'landings')), r.out);
+  write(repo, '.claude/scripts/merge-check.js', fs.readFileSync(MC, 'utf8'));
+  write(repo, 'src/app.js', 'one\ntwo\nthree\n');
+  commitAll(repo, 'base');
+  r = run(repo, ['--skip-suites']);
+  check('landings: no earlier release tag, nothing to check', isOk(r.out, 'landings') && /no earlier v\* release tag reachable; nothing to check/.test(line(r.out, 'landings')), r.out);
+  git(repo, ['tag', 'v1.0.0']);
+  const base = git(repo, ['rev-parse', 'HEAD']);
+  const main = git(repo, ['symbolic-ref', '--short', 'HEAD']);
+  // A lands cleanly, cut at the release.
+  git(repo, ['checkout', '-q', '-b', 'a']);
+  write(repo, 'src/app.js', 'one\nTWO by A\nthree\n');
+  commitAll(repo, 'A');
+  git(repo, ['checkout', '-q', main]);
+  git(repo, ['merge', '--no-ff', '-q', '-m', 'Merge PR #1: A\n\nCut from: ' + base, 'a']);
+  r = run(repo, ['--skip-suites']);
+  check('landings: a clean landing after the tag is one landing, none flagged', isOk(r.out, 'landings') && /1 landing\(s\) since v1\.0\.0, none flagged/.test(line(r.out, 'landings')), r.out);
+  // B, cut at the same release, lands with its own side of the conflict: A's line is lost.
+  git(repo, ['checkout', '-q', '-b', 'b', base]);
+  write(repo, 'src/app.js', 'one\nTWO by B\nthree\n');
+  commitAll(repo, 'B');
+  git(repo, ['checkout', '-q', main]);
+  spawnSync('git', ['merge', '--no-ff', '-q', '-m', 'Merge PR #2: B\n\nCut from: ' + base, 'b'], { cwd: repo, encoding: 'utf8' });
+  git(repo, ['checkout', '--theirs', '--', 'src/app.js']);
+  git(repo, ['add', 'src/app.js']);
+  git(repo, ['commit', '-q', '--no-edit']);
+  r = run(repo, ['--skip-suites']);
+  check('landings: a landing that drops a line another landing added after its cut fails, naming the line and the way to keep it', r.status === 1 && isFail(r.out, 'landings') && /TWO by A/.test(line(r.out, 'landings')) && /Kept on purpose:/.test(line(r.out, 'landings')), r.out);
+  const since = spawnSync('node', [MC, '--since', 'v1.0.0'], { cwd: repo, encoding: 'utf8' });
+  let keep = null;
+  try { keep = JSON.parse(since.stdout).landings[1].flags[0].keep; } catch (e) { keep = null; }
+  check('landings: the flag carries the line to keep it on purpose', typeof keep === 'string' && /^Kept on purpose: [0-9a-f]{7} src\/app\.js: TWO by A$/.test(keep), since.stdout + since.stderr);
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'Keep A\'s line out on purpose\n\n' + keep]);
+  r = run(repo, ['--skip-suites']);
+  check('landings: an empty commit carrying that line clears the failure', isOk(r.out, 'landings') && /none flagged \(1 kept on purpose\)/.test(line(r.out, 'landings')), r.out);
+  r = run(repo, ['--skip-suites', '--tests-only']);
+  check('landings: --tests-only skips it with the other release checks', line(r.out, 'landings') === '' && /release tag and landings judge a release/.test(line(r.out, 'release checks')), r.out);
+}
+
 // --- 1. suites -------------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));

@@ -96,6 +96,7 @@ This copies:
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
 - `.claude/scripts/run-checks.js` (the guarded checks runner behind review receipts and the `/execute` test step: runs read-only checks from the project root and decides pass or fail by machine - always updated)
+- `.claude/scripts/merge-check.js` (the lost-work check behind `/merge`: records each worktree branch's cut point and, at each landing, flags lines that landed after the cut and were removed, and lines of the branch's own that did not land - always updated)
 - `.claude/scripts/pre-push-check.js` (the pre-push tripwire that scans every outgoing commit for secrets, never-push files, and shared-settings changes - always updated)
 - `.claude/scripts/correction-ledger.js` (correction ledger capture and rollup helper behind `/document` and `/error-analysis` - always updated)
 - `.claude/scripts/gen-media.js` (the design workflow's seed and media helper: seeds, images, video, matting behind the user's own keys - always updated)
@@ -136,6 +137,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
 - `.claude/scripts/run-checks.js` - the guarded checks runner (review receipts, the `/execute` test step, a project's `checks.json`)
+- `.claude/scripts/merge-check.js` - the lost-work check behind `/merge` (cut points, landings)
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
 - `.claude/scripts/pre-push-check.js`, `.claude/scripts/correction-ledger.js`, `.claude/scripts/gen-media.js`, and `.claude/scripts/merge-findings.js` - the pre-push tripwire, the correction ledger helper, the design workflow's media helper, and the review's merge helper
 - `.claude/scripts/ask-gpt.js`, `.claude/scripts/env-local.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` + `package-lock.json` - runtime scripts and their quarantined deps

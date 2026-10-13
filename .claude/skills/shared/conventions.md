@@ -12,8 +12,8 @@ A convention describes the toolkit's contract with a project's own files. It is 
 ### C-<n>: <title>
 - **Since:** <version the convention arrived in>
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
-- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds
-- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual
+- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds
+- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual
 - **Severity:** warn | suggest   (optional; a regex detector's findings default to warn)
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
@@ -187,6 +187,15 @@ Why: `LESSONS.md` is read at the start of every session, which is why it is an i
 - **Fix:** name the command and its pass signal (an exit code, a pattern, or a line count) on that line, or move the check into `.claude/toolkit/checks.json`, where the toolkit's checks runner runs it
 
 Why: a step that says check, verify or confirm and names no command leaves the model to read the files and reason its way to a verdict, which is slower than the command and wrong more often. The toolkit now runs before it reasons (M16), and every check step of its own names the command and the signal that passes it; this entry flags the project's own commands and skills that have not caught up: a list item or numbered step that opens with one of those verbs, a bold label such as `**Verify:**` allowed first, and carries no backtick span, which is where a command would sit. It ships at `suggest` because a regular expression over prose will hit some ordinary sentences, and the audit, not the detector, decides each hit; a release of real hits is the evidence for promoting it to `warn`.
+
+### C-18: The lessons files keep both sides on a merge
+- **Since:** 7.7.0
+- **Scope:** gitattributes
+- **Detector:** lessons-merge
+- **Severity:** suggest
+- **Fix:** append the lines the finding lists to `.gitattributes` (create the file when it is absent): the comment line, then `LESSONS.md merge=union` and `LESSONS-detail.md merge=union` for each file git does not already merge that way; leave every other line as it is
+
+Why: two branches that each add a lesson both append to `LESSONS.md` and `LESSONS-detail.md`, so every pair of parallel worktrees conflicts there, and a conflict fixed by hand can drop either side's lesson. Git's built-in union driver keeps the lines both sides added instead, and `/tk:merge` then checks the joined file for a lead written twice. `CHANGELOG.md` is left out on purpose: a union merge can file a line under a version already released, with no conflict to show it. The detector asks git (`git check-attr merge`), so a rule anywhere git reads one counts, and reports one finding when a lessons file the project has is not merged with `union`; a project that is not a git repository has none. It ships at `suggest`: a project that fixes these conflicts by hand loses nothing it had. `/tk:setup` writes the lines into a new `.gitattributes`, and a migration from the copy-install appends them to an existing one, so this entry is for projects set up before it: a project set up later on the plugin with a `.gitattributes` of its own, which setup leaves untouched, adds the lines by hand.
 
 ## How a release adds a convention
 
