@@ -961,6 +961,77 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: a worktree counts as the repo it belongs to -------------------
+// The rollup used to group by the working copy's folder name, so a worktree read
+// as a repo of its own, and every project's `worktree-1` merged under one label.
+// Rows now resolve to their main working copy: a live path through git, a removed
+// one through the `.claude/worktrees/` folder it sat in.
+{
+  const sb = makeSandbox('identity229');
+  const main = path.join(sb.root, 'mainrepo');
+  const wt = path.join(main, '.claude', 'worktrees', 'wt-one');
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    fs.mkdirSync(main, { recursive: true });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    g(['worktree', 'add', wt, '-b', 'side']);
+    const code = 'worktree identity probe';
+    run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: code }])], { cwd: main });
+    run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: code }])], { cwd: wt });
+    // A row left by a worktree that has since been removed: its path is gone.
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-09-20T10:00:00.000Z', repo: 'wt-gone', repo_path: path.join(main, '.claude', 'worktrees', 'wt-gone'),
+      kind: 'human', scope: 'project', stage: 'review', produced: '', correction: '', open_code: code, axial_code: null
+    }) + '\n', 'utf-8');
+    const r = JSON.parse(run(sb, ['--show-rollup']));
+    const bucket = r.kinds.human.buckets[0];
+    check('a worktree row, a removed worktree row and the main copy row count as one repo',
+      bucket.count === 3 && JSON.stringify(bucket.repos) === JSON.stringify(['mainrepo']),
+      JSON.stringify(bucket.repos));
+    const stored = fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n').filter(Boolean).map(function (l) { return JSON.parse(l); });
+    check('a row written from a worktree carries the main copy name, and keeps its own path',
+      stored[1].repo === 'mainrepo' && stored[1].repo_path.indexOf('wt-one') !== -1,
+      JSON.stringify({ repo: stored[1].repo }));
+  } catch (e) {
+    check('worktree identity test set up a repo and a worktree', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: stage is checked against the extractor's list -------------------
+// `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
+// free-text channel through the projection, the hole `at` had before isoOrNull().
+{
+  const sb = makeSandbox('stage229');
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', stage: '/tk:Review', open_code: 'stage normalization probe' },
+    { scope: 'toolkit', stage: 'STAGE_LEAK_MARKER a free-text sentence', open_code: 'stage normalization probe' },
+    { scope: 'toolkit', open_code: 'stage normalization probe' }
+  ])]);
+  const stored = fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n').filter(Boolean).map(function (l) { return JSON.parse(l); });
+  check('a stage spelled as a command is stored as the stage name', stored[0].stage === 'review', stored[0].stage);
+  check('free text in stage is never stored',
+    stored[1].stage === 'other' && fs.readFileSync(ledgerFile(sb), 'utf-8').indexOf('STAGE_LEAK_MARKER') === -1,
+    stored[1].stage);
+  check('a missing stage is stored as unknown', stored[2].stage === 'unknown', stored[2].stage);
+  // An older row written before the check: the projection normalizes it too. The
+  // rollup prints no stage text today, so this guards against later widening.
+  fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+    at: '2026-09-01T10:00:00.000Z', repo: 'proj', kind: 'human', scope: 'toolkit',
+    stage: 'OLD_STAGE_LEAK_MARKER spilled', produced: '', correction: '', open_code: 'stage normalization probe', axial_code: null
+  }) + '\n', 'utf-8');
+  const out = run(sb, ['--rollup']);
+  check('free text in an older row\'s stage never reaches the rollup',
+    out.indexOf('OLD_STAGE_LEAK_MARKER') === -1 && fs.readFileSync(rollupFile(sb), 'utf-8').indexOf('OLD_STAGE_LEAK_MARKER') === -1);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- 3. concurrent appends -------------------------------------------------
 {
   const sb = makeSandbox('concurrent');

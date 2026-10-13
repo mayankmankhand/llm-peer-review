@@ -95,6 +95,15 @@ const OPT_OUT_MARKER = path.join('.claude', '.no-correction-log');
 const MAX_PRIVATE_FIELD = 300;
 const MAX_OPEN_CODE = 400;
 
+// The stages a row can name: the extractor's own list (correction-extractor.md),
+// plus `unknown` for a row that names none (#229). `stage` is on the shareable
+// whitelist, so it is checked against this list on write AND on projection: a
+// value that was only trimmed to 40 characters was a free-text channel straight
+// through the whitelist, the hole `at` had before isoOrNull(). The first five are
+// toolkit stages, which the rollup's home verdict counts.
+const STAGES = ['explore', 'create-plan', 'execute', 'review', 'document', 'other', 'unknown'];
+const TOOLKIT_STAGES = ['explore', 'create-plan', 'execute', 'review', 'document'];
+
 // --- parse args (no dependency on an arg-parsing library) ---
 const argv = process.argv.slice(2);
 const opts = {
@@ -128,11 +137,12 @@ const cwd = process.cwd();
 // Run a git command from cwd, returning trimmed stdout or null on any failure.
 // Mirrors the pattern in session-init.js: argument array (never an interpolated
 // string), stderr discarded, and a null return rather than a throw.
-function git(args) {
+function gitIn(dir, args) {
   try {
-    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
   } catch (e) { return null; }
 }
+function git(args) { return gitIn(cwd, args); }
 
 // The working copy's root, so a run started from a subdirectory behaves the same
 // as one started from the top. Falls back to cwd outside a git checkout.
@@ -157,12 +167,65 @@ function mainWorktreeRoot() {
   return path.dirname(path.resolve(cwd, common));
 }
 
+// Repo identity for counting and for the evidence read (#229). A row or heartbeat
+// stores `repo_path`, the WORKING COPY it was written from. That is the right key
+// for a capture window (a worktree's transcripts live under its own path) and the
+// wrong one for counting repos: a worktree counted as a repo of its own, and every
+// project's worktrees named `worktree-1` merged under one label. mainRootOf() maps
+// a stored working-copy path to the main working copy it belongs to:
+//   - a path that still exists asks git for its common directory, whose parent is
+//     the main copy (the LAST line, because a git older than 2.31 echoes the
+//     --path-format flag on a line of its own, as mainWorktreeRoot() notes);
+//   - a path that is gone and sat under a `.claude/worktrees/` folder was a removed
+//     worktree, so the main copy is everything before the first such folder (the
+//     outermost one, so a worktree nested inside a worktree still lands on it);
+//   - anything else is its own root.
+// The answer is a real path, so two spellings of one folder compare equal.
+const rootCache = new Map();
+function realOr(p) {
+  try { return fs.realpathSync(p); } catch (e) { return p; }
+}
+function mainRootOf(p) {
+  if (typeof p !== 'string' || !p || !path.isAbsolute(p)) return null;
+  if (rootCache.has(p)) return rootCache.get(p);
+  const abs = path.resolve(p);
+  let root = abs;
+  if (fs.existsSync(abs)) {
+    const out = gitIn(abs, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    if (out) {
+      const lines = out.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+      if (lines.length) root = path.dirname(path.resolve(abs, lines[lines.length - 1]));
+    }
+  } else {
+    const marker = path.sep + '.claude' + path.sep + 'worktrees' + path.sep;
+    const at = abs.indexOf(marker);
+    if (at > 0) root = abs.slice(0, at);
+  }
+  root = realOr(root);
+  rootCache.set(p, root);
+  return root;
+}
+
+// The readable repo name for a stored record: its main copy's folder name when it
+// carries a path, the stored name for a record written before repo_path existed.
+// Derived here, never taken from the record's own `repo`, so it is safe on the
+// shareable whitelist. It is still a label, not a key: two different projects with
+// the same folder name share it.
+function repoLabelOf(record) {
+  const root = mainRootOf(record && record.repo_path);
+  if (root) return path.basename(root);
+  return (record && typeof record.repo === 'string') ? record.repo : '';
+}
+
 // Identity. `repo` stays the readable folder name because it is what a human
 // reads in a rollup. It is NOT unique: two projects can share a basename, and
 // before repo_path existed that collision let one project's heartbeat set
 // another's capture window. `repo_path` is the real key; `repo` is the label.
+// New rows and heartbeats carry the main copy's name (#229), so a row written in
+// a worktree reads as the repo it belongs to; `repo_path` keeps the working copy.
 const repoName = path.basename(repoRoot);
 const repoPath = repoRoot;
+const repoLabel = repoLabelOf({ repo_path: repoPath }) || repoName;
 
 // ==========================================================================
 // Shared helpers
@@ -254,6 +317,15 @@ function isoOrNull(value) {
   return Number.isNaN(Date.parse(value)) ? null : value;
 }
 
+// A stage name from the fixed list, whatever the caller wrote (#229). A command
+// spelling ("/tk:review") is read as its stage, a missing value is `unknown`, and
+// anything else is `other`: free text never survives, on write or on projection.
+function normStage(value) {
+  const v = String(value == null ? '' : value).trim().toLowerCase().replace(/^\//, '').replace(/^tk:/, '');
+  if (!v) return 'unknown';
+  return STAGES.indexOf(v) !== -1 ? v : 'other';
+}
+
 // THE privacy boundary. Everything downstream of the ledger reads rows through
 // this projection, so `produced` and `correction` cannot reach a rollup, a report,
 // or anything that gets displayed. Adding a field here is a deliberate act, and
@@ -266,10 +338,10 @@ function isoOrNull(value) {
 function shareable(row) {
   return {
     at: row.at,
-    repo: row.repo,
+    repo: repoLabelOf(row),        // derived from repo_path: the main copy's name (#229)
     kind: row.kind,
     scope: row.scope,
-    stage: row.stage,
+    stage: normStage(row.stage),   // checked against the list, so older rows cannot leak (#229)
     open_code: row.open_code,
     axial_code: row.axial_code == null ? null : row.axial_code
   };
@@ -470,7 +542,7 @@ function assistantText(entry) {
 
 function runCandidates() {
   const result = {
-    repo: repoName, optedOut: optedOut(), everCaptured: false,
+    repo: repoLabel, optedOut: optedOut(), everCaptured: false,
     // `scanned` separates "there was nothing to find" from "there was nothing to
     // look in". Both produce an empty candidate list, and without this field a
     // caller cannot tell them apart, so it records a heartbeat for a scan that
@@ -692,11 +764,11 @@ function runAdd() {
       // more useful one, but only when it really is a timestamp: this field is on
       // the shareable whitelist, so an unvalidated one is a text channel through it.
       at: isoOrNull(r.at) || now,
-      repo: repoName,                        // derived, never taken from input
+      repo: repoLabel,                       // derived, never taken from input
       repo_path: repoPath,                   // derived; the real identity, not shareable
       kind: 'human',                         // one value today; the extension point
       scope: scope,
-      stage: truncate(r.stage || 'unknown', 40),
+      stage: normStage(r.stage),             // one of STAGES, never free text (#229)
       // PRIVATE LAYER. Capped here so a long pasted block cannot land wholesale.
       produced: truncate(r.produced, MAX_PRIVATE_FIELD),
       correction: truncate(r.correction, MAX_PRIVATE_FIELD),
@@ -730,7 +802,7 @@ function runHeartbeat() {
   }
   appendJsonl(HEARTBEAT_PATH, {
     at: new Date().toISOString(),
-    repo: repoName,
+    repo: repoLabel,
     repo_path: repoPath,   // the real key; `repo` alone collides across projects
     session: opts.session || '',
     candidates: Number(opts.candidateCount || 0),
@@ -798,7 +870,7 @@ function buildRollup() {
     generated_at: new Date().toISOString(),
     rows: rows.length,
     ever_captured: beats.length > 0,
-    repos_captured: Array.from(new Set(beats.map(function (b) { return b.repo; }))).sort(),
+    repos_captured: Array.from(new Set(beats.map(repoLabelOf))).sort(),
     window: {
       from: ats.length ? ats[0] : null,
       to: ats.length ? ats[ats.length - 1] : null
