@@ -26,6 +26,14 @@
 //   --role mapper  A git archive of a frozen source commit, and one dispatch of
 //                  the index-mapper agent on a frozen chunk of it, with /index's
 //                  Step 3 prompt template copied out of the build under test.
+//   --role skeptic A replay of the one known judge-input drift, session 1cefa1a7
+//                  (harness research plan Step 10): a git archive of the commit
+//                  that run reviewed, its finders' lines taken from the session
+//                  log, its saved receipts and scope, and the build's /tk:review
+//                  entered at Phase 4 with dedup and tier 1 done, to run the
+//                  skeptic tiers and stop before any fix. It has no arm: it
+//                  measures the build's prompts as they ship. See "The skeptic
+//                  replay" below.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -67,6 +75,11 @@
 //        [--plan-models <best|fit|cheap>] [--keep]
 //   node scripts/quality-check.js --role mapper --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
+//   node scripts/quality-check.js --role skeptic --build <git-ref|tree> [--evidence <dir>] [--receipts <dir>]
+//        [--max-usd <n>] [--label <text>] [--keep]
+//        --evidence is the folder holding the 1cefa1a7 session log (default: the main
+//        checkout's reports/harness-papers-2026-10-12/evidence), --receipts that run's
+//        receipts folder (default: the main checkout's reports/receipts/2026-09-22-002749)
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--allow-drift <reason>] [--pool <dir>] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
@@ -89,13 +102,17 @@
 // session and helper transcript), project-reports/ (the review's markdown
 // report and receipts), analysis.json (validity and catches), and a line in
 // reports/quality-check/ledger.jsonl. reports/ is gitignored and kept on disk.
+// A skeptic run adds replay-merge/ (the Phase 3 merge folder it was handed) and
+// scratchpad/ (the session's scratchpad, where a runner may write shards with
+// Bash, so no transcript holds their bytes).
 //
 // A run is INVALID, and is rerun once, when: the session did not end cleanly
 // (non-zero exit, an error result, a turn or budget stop), it hit a usage limit,
 // any session or helper answered on a model other than the one it should have,
 // any call was denied, a review lens was not dispatched, a finder or the mapper
 // returned nothing, the review wrote no report, the mapper dispatch did not carry
-// the expected prompt, or a tool read outside the scratch project, the scratch
+// the expected prompt, a skeptic replay made no skeptic dispatch, or a tool read
+// outside the scratch project, the scratch
 // home (which holds the plugin build and the stable plugin path) and /tmp. A
 // second invalid run, or a usage limit, pages the owner (M1).
 //
@@ -174,6 +191,9 @@ const LEDGER = path.join(OUT_ROOT, 'ledger.jsonl');
 const BUDGET = path.join(OUT_ROOT, 'budget.json');
 const REAL_HOME = os.homedir();
 const NODE_MODULES = path.join(REPO, '.claude', 'scripts', 'node_modules');
+// This checkout's merge-findings.js: the skeptic replay checks every skeptic's
+// return with its checkVerdicts, whatever build the session ran.
+const MERGE_FINDINGS = path.join(REPO, '.claude', 'scripts', 'merge-findings.js');
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODES = ['best', 'fit', 'cheap'];
@@ -184,7 +204,9 @@ const PORT = 3000;
 const SESSION_TIMEOUT_MS = 90 * 60 * 1000;
 // A stopped group gets SIGTERM, then SIGKILL for whatever is still running this long after.
 const KILL_GRACE_MS = 10 * 1000;
-const DEFAULT_MAX_USD = { review: 25, mapper: 8, probe: 5 };
+// The skeptic replay takes the review role's cap: it runs the same orchestrator
+// over a whole audit, without the finders.
+const DEFAULT_MAX_USD = { review: 25, mapper: 8, skeptic: 25, probe: 5 };
 // The two mode probes that run a whole command flow (a fan-out and its audit; an
 // /index, a plan and its critic) get a larger cap than a one-call probe.
 const PROBE_MAX_USD = { 'review-code-mode': 10, 'create-plan-cheap': 10 };
@@ -709,6 +731,7 @@ function analyzeRun(run, answers) {
   if (meta.role === 'probe') a.probe = meta.probe || null;
   if (meta.role === 'review' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
   else if (meta.role === 'mapper') analyzeMapper(a, run, main, subs, reasons);
+  else if (meta.role === 'skeptic') analyzeSkeptic(a, run, main, subs, reasons, warnings);
 
   // The model-mode checks (plan Step 7): failures do not void the run's catches,
   // so they are kept apart from validity and decide the exit code on their own.
@@ -854,6 +877,425 @@ function analyzeMapper(a, run, main, subs, reasons) {
   const cov = mapperCoverage(files, opened, blocks);
   a.mapper = { files: files.length, opened: opened.size, blocks: blocks.length, described: cov.described.length, covered: cov.covered.length, viaTwin: cov.viaTwin.length };
   a.covered = cov.covered;
+}
+
+// ---------------------------------------------------------------------------
+// The skeptic replay (harness research plan Step 10, D2)
+// ---------------------------------------------------------------------------
+//
+// Session 1cefa1a7 is the one known judge-input drift (the evidence folder's
+// README, plan Step 1): at its Phase 4 audit the /review orchestrator wrote its
+// own skeptic shards, paraphrased all 16 findings, sent no receipt output, and
+// asked the skeptics for KEEP or KILL in place of M2's words. --role skeptic puts
+// a fresh session at that same point, with that run's own inputs, on the build
+// under test, and then reads back what each skeptic dispatch carried and what
+// came back. The run's inputs are read from the evidence at run time and never
+// copied into the repo: the session log is local-only (the README's privacy note).
+//
+// The fixed facts, from the README. firstDispatch is the drift's first
+// audit-skeptic call (log line 1128); the finder wave is every finder dispatch
+// between the judge call before it and that call. keyMerges is the run's one
+// judgment merge (its report: "two merged at pre-push-check.js:530"), which Phase
+// 3 makes by giving the later line the earlier line's key before merge-findings.js
+// runs. raw and merged are the report's counts, checked before a session starts.
+const SKEPTIC_REPLAY = {
+  session: '1cefa1a7-7fd0-4d50-adff-32d1b619b83c',
+  firstDispatch: 'toolu_01S1c7UTdhrREGzJocx5VwF5',
+  evidence: 'reports/harness-papers-2026-10-12/evidence',
+  receipts: 'reports/receipts/2026-09-22-002749',
+  keyMerges: [{ relPath: '.claude/scripts/pre-push-check.js', line: 530 }],
+  raw: 17,
+  merged: 16,
+};
+// The judges a skeptic replay scores: the typed skeptic, and its general-purpose fallback.
+const SKEPTIC_TYPE = /^(tk:)?audit-skeptic$/;
+// M2's skeptic verdict words (tiers 2 and 3); a request for any other word is the drift.
+const M2_SKEPTIC_WORDS = ['REFUTED', 'STANDS', 'DOWNGRADE'];
+// A tier 1 output file in a receipts folder (<lens>-<n>.txt), never a shard.
+const RECEIPT_FILE = /^[a-z][a-z-]*-\d+\.txt$/;
+
+// A hand-back message's report, as the subagent wrote it: the lines after the
+// harness's "[Subagent hand-back]" frame line, the agent-message tags dropped,
+// and the two spaces the harness indents every report line with removed.
+function handbackBody(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const frame = lines.findIndex(l => /^\[Subagent hand-back\]/.test(l));
+  return (frame === -1 ? lines : lines.slice(frame + 1))
+    .filter(l => !/^<\/?agent-message\b[^>]*>\s*$/.test(l))
+    .map(l => (l.startsWith('  ') ? l.slice(2) : l))
+    .join('\n');
+}
+
+// Each agent's return in a session log, by agentId: { at, text } of the first
+// record carrying it. A return reaches the log three ways (all three in 1cefa1a7):
+// a user message with an origin, an attachment with one, or a queue entry that
+// wraps it in <agent-message from="...">.
+function agentReturns(records) {
+  const out = new Map();
+  records.forEach((r, at) => {
+    if (!r || typeof r !== 'object') return;
+    let from = null;
+    let text = null;
+    const origin = r.type === 'attachment' && r.attachment ? r.attachment.origin : r.origin;
+    if (origin && typeof origin.body === 'string' && (origin.senderTaskId || origin.from)) {
+      from = origin.senderTaskId || origin.from;
+      text = origin.body;
+    } else if (r.type === 'queue-operation' && r.operation === 'enqueue' && typeof r.content === 'string') {
+      const m = /<agent-message from="([^"]+)">/.exec(r.content);
+      if (m) { from = m[1]; text = r.content; }
+    }
+    if (from && !out.has(from)) out.set(from, { at, text });
+  });
+  return out;
+}
+
+// The finder lines a session's audit was run over, from its log: the finder
+// dispatches between the judge call before `firstDispatch` and that call, and
+// each one's JSONL lines exactly as its report holds them (trimmed, the way
+// merge-findings.js reads a line), in the order the returns arrived, which is
+// the order the runner collected them in. Throws when the call is missing, the
+// wave is empty, a finder returned nothing before the audit, or the harness
+// neutralized a tag inside a finding line (its bytes could not be recovered).
+function finderLinesFromLog(records, firstDispatch) {
+  const calls = [];
+  const agentOf = new Map();
+  records.forEach((r, at) => {
+    const content = r && r.message && Array.isArray(r.message.content) ? r.message.content : [];
+    if (r && r.type === 'assistant') {
+      for (const c of content) if (c.type === 'tool_use' && (c.name === 'Agent' || c.name === 'Task')) calls.push({ at, id: c.id, type: String((c.input || {}).subagent_type || '') });
+    } else if (r && r.type === 'user' && r.toolUseResult && r.toolUseResult.agentId) {
+      for (const c of content) if (c.type === 'tool_result') agentOf.set(c.tool_use_id, r.toolUseResult.agentId);
+    }
+  });
+  const target = calls.find(c => c.id === firstDispatch);
+  if (!target) throw new Error('the session log has no Agent call ' + firstDispatch);
+  const before = calls.filter(c => c.at < target.at);
+  const lastJudge = before.filter(c => /(^|:)(audit-skeptic|fix-verifier)$/.test(c.type)).pop();
+  const wave = before.filter(c => /(^|:)review-[a-z]+-finder$/.test(c.type) && (!lastJudge || c.at > lastJudge.at));
+  if (!wave.length) throw new Error('no finder dispatch between the judge call before ' + firstDispatch + ' and it');
+  const returns = agentReturns(records);
+  const finders = wave.map(c => {
+    const agentId = agentOf.get(c.id) || null;
+    const ret = agentId ? returns.get(agentId) : null;
+    if (!ret || ret.at > target.at) throw new Error(c.type + ' (' + c.id + ') returned nothing before ' + firstDispatch);
+    const body = handbackBody(ret.text);
+    const neutralized = /Control tags below are neutralized/.test(ret.text);
+    const lines = [];
+    for (const line of body.split('\n')) {
+      const t = line.trim();
+      if (!t.startsWith('{')) continue;
+      let f = null;
+      try { f = JSON.parse(t); } catch (e) { f = null; }
+      if (!f || typeof f !== 'object' || typeof f.severity !== 'string' || typeof f.what !== 'string') continue;
+      if (neutralized && t.includes('<\\')) throw new Error(c.type + ' (' + c.id + '): the harness neutralized a tag inside a finding line, so its bytes are not the finder\'s');
+      lines.push(t);
+    }
+    return { agentId, type: c.type, toolUseId: c.id, at: ret.at, lines, noFindings: body.trim() === 'NO FINDINGS' };
+  }).sort((x, y) => x.at - y.at);
+  return {
+    finders: finders.map(f => ({ agentId: f.agentId, type: f.type, toolUseId: f.toolUseId, count: f.lines.length, noFindings: f.noFindings })),
+    lines: finders.flatMap(f => f.lines.map(text => ({ agentId: f.agentId, type: f.type, text }))),
+  };
+}
+
+// Phase 3's one judgment merge, as review.md words it: of the lines that cite the
+// same relPath and line, each later one is given the earliest one's `key`. Only
+// the key's bytes change; the rest of each line stays as its finder wrote it.
+// Returns { texts, notes }; throws when a merge does not find two lines.
+function shareKeys(texts, merges) {
+  const out = texts.slice();
+  const notes = [];
+  for (const m of merges || []) {
+    const at = [];
+    out.forEach((t, i) => {
+      const f = JSON.parse(t);
+      if (f.file && f.file.relPath === m.relPath && Number(f.file.line) === m.line) at.push(i);
+    });
+    if (at.length < 2) throw new Error('the merge at ' + m.relPath + ':' + m.line + ' found ' + at.length + ' line(s), not two or more');
+    const key = JSON.parse(out[at[0]]).key;
+    if (typeof key !== 'string') throw new Error('the first line at ' + m.relPath + ':' + m.line + ' carries no key');
+    for (const i of at.slice(1)) {
+      const old = JSON.parse(out[i]).key;
+      const from = '"key":' + JSON.stringify(old);
+      if (typeof old !== 'string' || out[i].split(from).length !== 2) throw new Error('line ' + (i + 1) + ' does not carry its key exactly once as ' + from);
+      out[i] = out[i].replace(from, () => '"key":' + JSON.stringify(key));
+    }
+    notes.push({ relPath: m.relPath, line: m.line, key, lines: at.map(i => i + 1) });
+  }
+  return { texts: out, notes };
+}
+
+// `text` with the old project root replaced by the scratch project wherever it
+// stands as a whole path (followed by a separator, a quote or the end), so a
+// sibling folder that shares its prefix is left alone.
+function rewriteRoot(text, from, to) {
+  if (!from) return String(text);
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(text).replace(new RegExp(esc + '(?![A-Za-z0-9._-])', 'g'), () => to);
+}
+
+// The text of each tool result in a transcript, by tool_use id.
+function toolResultTexts(records) {
+  const out = new Map();
+  for (const r of records || []) {
+    const content = r && r.type === 'user' && r.message && Array.isArray(r.message.content) ? r.message.content : [];
+    for (const c of content) {
+      if (c.type !== 'tool_result') continue;
+      out.set(c.tool_use_id, typeof c.content === 'string' ? c.content : Array.isArray(c.content) ? c.content.map(x => x.text || '').join('\n') : '');
+    }
+  }
+  return out;
+}
+
+// The first line of `text` that parses as a JSON object, or null.
+function jsonLine(text) {
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t.startsWith('{')) continue;
+    try { return JSON.parse(t); } catch (e) { /* the next line */ }
+  }
+  return null;
+}
+
+// The files a `merge-findings.js --shards` call wrote, from its stdout:
+// [{ file, tier, ids }], the tier 3 ballot included.
+function shardsOutput(text) {
+  const j = jsonLine(text);
+  if (!j || !Array.isArray(j.shards)) return [];
+  return j.shards.concat(j.tier3 ? [j.tier3] : [])
+    .filter(s => s && typeof s.file === 'string' && Array.isArray(s.ids))
+    .map(s => ({ file: s.file, tier: Number(s.tier) || 2, ids: s.ids }));
+}
+
+// The file paths a prompt names: tokens with a slash whose last part has an
+// extension, trailing punctuation dropped. A citation with a line number
+// (`a.js:12`) is a citation, not a file handed over, and is not returned.
+function namedFiles(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/[\s"'`()<>[\]{},;]+/)) {
+    const t = raw.replace(/[.:!?]+$/, '');
+    if (!t.includes('/') || /^[a-z]+:\/\//i.test(t) || !/[^/]\.[A-Za-z0-9]{1,8}$/.test(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+// The finding IDs a text names that `known` holds, ranges expanded ("R1 to R6",
+// "R7-R11"), in number order.
+function idsIn(text, known) {
+  const s = String(text || '');
+  const ids = new Set(s.match(/\bR\d+\b/g) || []);
+  const range = /\bR(\d+)\s*(?:-|\u2013|\u2014|\.\.|to|through)\s*R?(\d+)\b/g;
+  let m;
+  while ((m = range.exec(s)) !== null) {
+    const lo = Number(m[1]);
+    const hi = Number(m[2]);
+    if (hi > lo && hi - lo < 200) for (let n = lo; n <= hi; n++) ids.add('R' + n);
+  }
+  return [...ids].filter(id => known.has(id)).sort((x, y) => Number(x.slice(1)) - Number(y.slice(1)));
+}
+
+// What a shard file tells its reader to do, without the bytes it carries: fenced
+// blocks, JSON finding lines and the receipt-output sections merge-findings.js
+// writes are dropped, so a verdict word quoted in a finding or a receipt is never
+// read as one the shard asks for.
+function instructionText(body) {
+  const out = [];
+  let fence = false;
+  let receipt = false;
+  for (const line of String(body || '').split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    if (/^Receipt output \(/.test(line)) { receipt = true; continue; }
+    if (/^(Finding \(|Citation check:|=====)/.test(line)) receipt = false;
+    if (receipt || /^\s*\{/.test(line)) continue;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+// The verdict words a text asks for: the word after an ID and a colon,
+// `R1: KEEP`, `RN: REFUTED`, the first word only.
+function verdictAsks(text) {
+  const re = /\bR(?:N|\d+|<N>)[*_`]*\s*:\s*[*_`]*([A-Z]{2,})\b/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+// A skeptic dispatch the replay scores: the typed skeptic, or a general-purpose
+// call (M2's fallback) whose prompt names a finding ID or a skeptic's job.
+function isSkepticDispatch(type, prompt) {
+  if (SKEPTIC_TYPE.test(type)) return true;
+  return type === 'general-purpose' && /\bR\d+\b|skeptic|refute/i.test(String(prompt || ''));
+}
+
+// One skeptic dispatch, scored from its prompt and what the session had written
+// by then. ctx: { project, known: Map(id -> { severity, lines }), writes:
+// Map(abs path -> content written with the Write tool), bash: [commands run],
+// shards: Map(abs path -> { tier, ids }) from merge-findings.js --shards,
+// readLocal(abs) -> the run folder's copy of a file, or null }. Every file the
+// prompt names is read, except a project source file (a citation the skeptic may
+// open, not an input handed over). The class is
+//   script      the prompt names a file merge-findings.js --shards wrote
+//   verbatim    every source line of every finding it covers is in the prompt or
+//               a file it names, byte for byte
+//   unknown     neither, and a file it names could not be read back
+//   paraphrase  neither, and everything it names was read
+// ids are the --shards file's, else the ones the prompt names, else the ones its
+// files name. asks are the verdict words the prompt and its files' instruction
+// lines ask for; m2Words is true when every one is M2's.
+function scoreDispatch(prompt, ctx) {
+  const project = ctx.project || '/';
+  const known = ctx.known || new Map();
+  const texts = [String(prompt || '')];
+  const askTexts = [String(prompt || '')];
+  let script = null;
+  let unreadable = false;
+  let firstFile = null;
+  for (const named of namedFiles(prompt)) {
+    const abs = path.resolve(project, named);
+    const shard = ctx.shards ? ctx.shards.get(abs) : null;
+    if (shard && !script) script = { file: named, tier: shard.tier, ids: shard.ids };
+    if (!shard && isUnder(abs, project) && !isUnder(abs, path.join(project, 'reports'))) continue;
+    if (!firstFile) firstFile = named;
+    let body = ctx.writes && ctx.writes.has(abs) ? ctx.writes.get(abs) : null;
+    if (body === null && ctx.readLocal) body = ctx.readLocal(abs);
+    const mentions = (ctx.bash || []).filter(c => c.includes(named) || c.includes(abs));
+    if (body !== null) {
+      texts.push(body);
+      if (!RECEIPT_FILE.test(path.basename(abs)) && path.basename(abs) !== 'scope.json') askTexts.push(instructionText(body));
+    } else if (!shard && !mentions.some(c => c.includes('<<'))) unreadable = true;
+    texts.push(...mentions);
+  }
+  const fromPrompt = idsIn(prompt, known);
+  const ids = script ? script.ids.filter(id => known.has(id)) : fromPrompt.length ? fromPrompt : idsIn(texts.slice(1).join('\n'), known);
+  const all = texts.join('\n');
+  const found = ids.filter(id => {
+    const lines = (known.get(id) || {}).lines || [];
+    return lines.length > 0 && lines.every(l => all.includes(l));
+  });
+  let asks = verdictAsks(askTexts.join('\n'));
+  // A --shards file opens with M2's instruction for its tier by construction.
+  if (script && asks.length === 0) asks = Number(script.tier) === 3 ? M2_SKEPTIC_WORDS.slice() : ['REFUTED', 'STANDS'];
+  const tier = script ? Number(script.tier) : ids.length && ids.every(id => (known.get(id) || {}).severity === 'block') ? 3 : 2;
+  let cls = 'paraphrase';
+  if (script) cls = 'script';
+  else if (ids.length && found.length === ids.length) cls = 'verbatim';
+  else if (unreadable) cls = 'unknown';
+  return { ids, tier, class: cls, file: script ? script.file : firstFile, linesFound: found.length, asks, m2Words: asks.length > 0 && asks.every(w => M2_SKEPTIC_WORDS.includes(w)) };
+}
+
+// The run folder's copy of a file the session wrote: under the project's
+// reports/ (project-reports/), the replay's merge folder (replay-merge/), or the
+// session's scratchpad, <tmp>/claude-<uid>/<project slug>/ (scratchpad/<slug>/).
+function localCopyOf(abs, dir, meta) {
+  const paths = (meta && meta.paths) || {};
+  const replay = (meta && meta.replay) || {};
+  if (paths.project && isUnder(abs, path.join(paths.project, 'reports'))) return path.join(dir, 'project-reports', path.relative(path.join(paths.project, 'reports'), abs));
+  if (replay.mergeDir && isUnder(abs, replay.mergeDir)) return path.join(dir, 'replay-merge', path.relative(replay.mergeDir, abs));
+  const m = /\/claude-\d+\/([^/]+)\/(.+)$/.exec(abs);
+  return m ? path.join(dir, 'scratchpad', m[1], m[2]) : null;
+}
+
+// The verdict each finding was recorded with: the session's final message, one
+// `RN: <verdict>` line per finding as the replay's prompt asks. { id: word }.
+function recordedVerdicts(text, known) {
+  const out = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^[\s>*_`-]*(R\d+)[*_`]*\s*:\s*[*_`]*\s*([A-Za-z][A-Za-z]*)/.exec(line);
+    if (m && known.has(m[1]) && !out[m[1]]) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+// The skeptic replay's analysis: each skeptic dispatch scored (scoreDispatch),
+// its return checked with this checkout's merge-findings.js checkVerdicts, and
+// which dispatch each recorded verdict came from (the last one whose return ruled
+// on that ID, with a verdict word of any kind). A finding is ruled on from a
+// paraphrase when that dispatch is a paraphrase; one recorded as unaudited was
+// not ruled on.
+function analyzeSkeptic(a, run, main, subs, reasons, warnings) {
+  const meta = run.meta || {};
+  const replay = meta.replay || {};
+  const project = (meta.paths && meta.paths.project) || '/';
+  const lines = replay.lines || [];
+  const known = new Map((replay.merged || []).map(m => [m.id, { severity: m.severity, lines: (m.sources || []).map(i => lines[i]).filter(l => typeof l === 'string') }]));
+  const mf = require(MERGE_FINDINGS);
+  const results = toolResultTexts(run.main || []);
+  const readLocal = abs => {
+    const p = localCopyOf(abs, run.dir, meta);
+    if (!p) return null;
+    try { return fs.readFileSync(p, 'utf8'); } catch (e) { return null; }
+  };
+  const writes = new Map();
+  const bash = [];
+  const shards = new Map();
+  const bySub = new Map(subs.filter(s => s.meta && s.meta.toolUseId).map(s => [s.meta.toolUseId, s]));
+  const dispatches = [];
+  let verdictsCalls = 0;
+  let verdictsRejected = 0;
+  for (const t of main.toolUses) {
+    const input = t.input || {};
+    if (t.name === 'Write' && typeof input.file_path === 'string') writes.set(path.resolve(project, input.file_path), String(input.content || ''));
+    else if (t.name === 'Bash' && typeof input.command === 'string') {
+      bash.push(input.command);
+      if (/merge-findings\.js\b/.test(input.command) && /--shards\b/.test(input.command)) {
+        for (const s of shardsOutput(results.get(t.id))) shards.set(path.resolve(project, s.file), s);
+      }
+      if (/merge-findings\.js\b/.test(input.command) && /--verdicts\b/.test(input.command)) {
+        verdictsCalls++;
+        const j = jsonLine(results.get(t.id));
+        if (j && j.ok === false) verdictsRejected++;
+      }
+    } else if ((t.name === 'Agent' || t.name === 'Task') && isSkepticDispatch(String(input.subagent_type || ''), input.prompt)) {
+      const sc = scoreDispatch(input.prompt, { project, known, writes: new Map(writes), bash: bash.slice(), shards: new Map(shards), readLocal });
+      const sub = bySub.get(t.id);
+      const ret = sub ? (sub.d.handback !== null ? sub.d.handback : sub.d.lastText) : '';
+      let returnOk = null;
+      let problems = [];
+      let ruled = [];
+      if (sc.ids.length) {
+        const v = mf.checkVerdicts(String(sc.tier), sc.ids, [{ file: (sub && sub.agentId) || t.id, text: ret }]);
+        returnOk = v.ok;
+        problems = ((v.returns[0] || {}).problems || []).map(p => p.kind + ' ' + p.id + (p.word ? ' ' + p.word : ''));
+        const rr = mf.readReturn(ret, sc.ids, String(sc.tier));
+        ruled = [...new Set([...Object.keys(rr.decided), ...rr.problems.filter(p => p.kind === 'unknown').map(p => p.id)])];
+      }
+      dispatches.push({ n: dispatches.length + 1, toolUseId: t.id, agentId: sub ? sub.agentId : null, type: String(input.subagent_type || ''),
+        ...sc, returned: String(ret || '').trim() !== '', returnOk, problems, ruled });
+    }
+  }
+  const final = run.result && typeof run.result.result === 'string' ? run.result.result : main.lastText;
+  const recorded = recordedVerdicts(final, known);
+  const lastRuling = {};
+  for (const d of dispatches) for (const id of d.ruled) lastRuling[id] = d;
+  const judged = Object.keys(recorded).length ? Object.keys(recorded).filter(id => !/^unaudited$/i.test(recorded[id])) : Object.keys(lastRuling);
+  const byNum = (x, y) => Number(x.slice(1)) - Number(y.slice(1));
+  const count = cls => dispatches.filter(d => d.class === cls).length;
+  const summary = {
+    dispatches: dispatches.length,
+    byteForByte: count('script') + count('verbatim'),
+    script: count('script'),
+    verbatim: count('verbatim'),
+    paraphrased: count('paraphrase'),
+    unknown: count('unknown'),
+    returnsClean: dispatches.filter(d => d.returnOk === true).length,
+    returnsFlagged: dispatches.filter(d => d.returnOk === false).length,
+    returnsUnchecked: dispatches.filter(d => d.returnOk === null).length,
+    otherWords: dispatches.filter(d => d.asks.some(w => !M2_SKEPTIC_WORDS.includes(w))).length,
+    verdictsCalls,
+    verdictsRejected,
+    recorded: Object.keys(recorded).length,
+    ruledFromParaphrase: judged.filter(id => lastRuling[id] && lastRuling[id].class === 'paraphrase').sort(byNum),
+    ruledFromUnknown: judged.filter(id => lastRuling[id] && lastRuling[id].class === 'unknown').sort(byNum),
+    notJudged: judged.filter(id => !lastRuling[id]).sort(byNum),
+  };
+  summary.drift = summary.paraphrased > 0;
+  a.skeptic = { dispatches, recorded, summary };
+  if (!dispatches.length) reasons.push('no-skeptic-dispatch');
+  if (!summary.recorded) warnings.push('no-recorded-verdicts');
 }
 
 // Was `id` caught in analysis `a`?
@@ -1751,7 +2193,7 @@ function budgetCheck(role, maxUsd) {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
-  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper');
+  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper' || r.role === 'skeptic');
   if (!approval) {
     if (measured.length === 0) return { ok: true, spent, note: 'first measured run: no approval needed yet; its cost sizes the request' };
     return { ok: false, spent, page: 'Budget stop: the first measured run is done and the owner has not approved a budget. Ask the owner, then record the answer with --approve <usd>.' };
@@ -1845,10 +2287,130 @@ const PLAN_SUMMARY = 'Exploration summary, approved by the owner; write the plan
   + 'Decisions: a word is a run of characters between spaces; an empty note shows "0 words" and a one-word note "1 word". '
   + 'Models: cheap. Open questions: none.';
 
+// The main checkout of this clone (the folder holding the shared .git), where the
+// gitignored evidence lives, whichever worktree runs this script; else this one.
+function mainCheckout() {
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8' });
+  return r.status === 0 && r.stdout.trim() ? path.dirname(r.stdout.trim()) : REPO;
+}
+
+// The skeptic replay's two input folders, resolved and checked before anything
+// is spent: a missing one is a usage error (exit 2).
+function skepticInputs(o) {
+  const root = mainCheckout();
+  o.evidence = path.resolve(o.evidence || path.join(root, SKEPTIC_REPLAY.evidence));
+  o.receipts = path.resolve(o.receipts || path.join(root, SKEPTIC_REPLAY.receipts));
+  const log = path.join(o.evidence, SKEPTIC_REPLAY.session + '.jsonl');
+  if (!fs.existsSync(log)) usage('--role skeptic needs the evidence folder that holds ' + path.basename(log) + ' (--evidence <dir>); not found in ' + o.evidence);
+  if (!fs.existsSync(path.join(o.receipts, 'scope.json'))) usage('--role skeptic needs the replayed run\'s receipts folder with its scope.json (--receipts <dir>); not found in ' + o.receipts);
+}
+
+// The scratch project and the merge folder a skeptic replay hands the session,
+// built from the evidence: o { evidence, receipts, project, tmp, buildDir }.
+//   - the code the run reviewed: a git archive of its scope's range end, as the
+//     mapper role archives its source commit;
+//   - the finders' lines from the session log, Phase 3's one key merge applied,
+//     the old project root rewritten to the scratch project, in findings.jsonl;
+//   - the build's own merge-findings.js run on it (merged.jsonl, merge-stderr.txt),
+//     as that build's Phase 3 runs it, and its numbering checked against the run's;
+//   - tier 1's saved outputs for those lines and the scope, the root rewritten, in
+//     the scratch project's reports/receipts/<the run's stamp>/.
+// Returns what run.json records as `replay`; throws on any mismatch, before a
+// session starts.
+function prepareSkepticReplay(o) {
+  const scopeText = fs.readFileSync(path.join(o.receipts, 'scope.json'), 'utf8');
+  const scope = JSON.parse(scopeText);
+  const range = scope.range || {};
+  if (!SHA_RE.test(String(range.base)) || !SHA_RE.test(String(range.end))) throw new Error('the saved scope.json names no commit range');
+  const fromRoot = scope.root || scope.cwd;
+  if (!fromRoot) throw new Error('the saved scope.json names no project root to rewrite');
+  fs.mkdirSync(o.project, { recursive: true });
+  const tar = path.join(o.tmp, 'source.tar');
+  git(['archive', '-o', tar, range.end], REPO);
+  const x = sh('tar', ['-xf', tar, '-C', o.project]);
+  if (x.status !== 0) throw new Error('tar failed: ' + x.stderr);
+
+  const found = finderLinesFromLog(readJsonl(path.join(o.evidence, SKEPTIC_REPLAY.session + '.jsonl')), SKEPTIC_REPLAY.firstDispatch);
+  if (found.lines.length !== SKEPTIC_REPLAY.raw) throw new Error('the log gave ' + found.lines.length + ' finder lines, not the run\'s ' + SKEPTIC_REPLAY.raw);
+  const shared = shareKeys(found.lines.map(l => l.text), SKEPTIC_REPLAY.keyMerges);
+  const texts = shared.texts.map(t => rewriteRoot(t, fromRoot, o.project));
+
+  const mergeDir = path.join(o.tmp, 'review-merge');
+  fs.mkdirSync(mergeDir, { recursive: true });
+  const findingsFile = path.join(mergeDir, 'findings.jsonl');
+  fs.writeFileSync(findingsFile, texts.join('\n') + '\n');
+  const m = sh(process.execPath, [path.join(o.buildDir, 'scripts', 'merge-findings.js'), findingsFile], { cwd: o.project });
+  if (m.status !== 0) throw new Error('the build\'s merge-findings.js failed: ' + (m.stderr || m.stdout));
+  fs.writeFileSync(path.join(mergeDir, 'merged.jsonl'), m.stdout);
+  fs.writeFileSync(path.join(mergeDir, 'merge-stderr.txt'), m.stderr);
+  const mergeSummary = (m.stderr.split('\n').filter(l => /^merge-findings: \d+ raw/.test(l)).pop() || '').trim();
+  const canon = texts.map(t => JSON.stringify(JSON.parse(t)));
+  const merged = m.stdout.split('\n').filter(l => l.trim()).map(l => JSON.parse(l)).map(f => ({
+    id: f.id, severity: f.severity, specialist: f.specialist, sources: (f.sources || []).map(s => canon.indexOf(JSON.stringify(s))),
+  }));
+  if (merged.length !== SKEPTIC_REPLAY.merged || merged.some(f => !f.sources.length || f.sources.includes(-1))) {
+    throw new Error('the build\'s merge gave ' + merged.length + ' findings (want ' + SKEPTIC_REPLAY.merged + ') or a source line it was not given');
+  }
+
+  const stampName = path.basename(o.receipts);
+  const dest = path.join(o.project, 'reports', 'receipts', stampName);
+  fs.mkdirSync(dest, { recursive: true });
+  const stems = require(MERGE_FINDINGS).receiptStems(texts.map(t => JSON.parse(t)));
+  for (const stem of stems) {
+    const src = path.join(o.receipts, stem + '.txt');
+    if (!fs.existsSync(src)) throw new Error('no saved receipt output ' + stem + '.txt in ' + o.receipts);
+    fs.writeFileSync(path.join(dest, stem + '.txt'), rewriteRoot(fs.readFileSync(src, 'utf8'), fromRoot, o.project));
+  }
+  fs.writeFileSync(path.join(dest, 'scope.json'), rewriteRoot(scopeText, fromRoot, o.project));
+  return {
+    session: SKEPTIC_REPLAY.session, firstDispatch: SKEPTIC_REPLAY.firstDispatch, evidence: o.evidence, receipts: o.receipts,
+    stamp: stampName, range: { base: range.base, end: range.end }, fromRoot, mergeDir, mergeSummary,
+    finders: found.finders, keyMerges: shared.notes, lines: texts, stems, merged,
+  };
+}
+
+// The replay's prompt: the build's /tk:review, entered at Phase 4 with what the
+// earlier phases left behind named, and a stop before the report and any fix.
+// The final message is the record of each finding's verdict.
+function skepticPrompt(r) {
+  const receipts = 'reports/receipts/' + r.stamp;
+  const short = s => String(s).slice(0, 7);
+  const ran = r.finders.map(f => f.type.replace(/^(tk:)?review-|-finder$/g, ''));
+  const none = r.finders.filter(f => f.noFindings).map(f => f.type.replace(/^(tk:)?review-|-finder$/g, ''));
+  const merges = (r.keyMerges || []).map(k => 'The lines at ' + k.relPath + ':' + k.line + ' describe one defect, so before the merge each later one was given the first one\'s key (dedup note: merged at ' + k.relPath + ':' + k.line + ').').join(' ');
+  const last = r.merged[r.merged.length - 1].id;
+  return '/tk:review ' + short(r.range.base) + '..' + short(r.range.end) + ' report only, no chaining\n\n'
+    + 'This run resumes a review at Phase 4; it is not a fresh review. Everything before Phase 4 is done, so do none of it again: no scope call, no detection, no finder dispatch, no tier 1 check.\n'
+    + '- Phase 0: the run stamp is ' + r.stamp + ', and the scope call\'s JSON is saved at ' + receipts + '/scope.json.\n'
+    + '- Phase 2: ' + ran.length + ' specialists ran (' + ran.join(', ') + ')' + (none.length ? '; ' + none.join(', ') + ' returned NO FINDINGS' : '') + '.\n'
+    + '- Phase 3: the merge folder is ' + r.mergeDir + '. Its findings.jsonl holds the ' + r.lines.length + ' finding lines the finders returned, as they wrote them. ' + merges
+    + ' merge-findings.js has run on that file: its stdout is merged.jsonl in the same folder (R1 to ' + last + '), and its summary line is: ' + r.mergeSummary + '\n'
+    + '- Tier 1 of the audit has run: each receipt\'s output is saved as ' + receipts + '/<lens>-<n>.txt, and every check showed its claim, so tier 1 killed nothing.\n\n'
+    + 'Run Phase 4 from here: the audit\'s remaining tiers, exactly as this command and M2 say, and decide every finding. Then stop: write no report, fix nothing, commit nothing. '
+    + 'Your final message is one line per finding, `RN: <verdict>`, from R1 to ' + last + ', and nothing else.';
+}
+
+// The session's scratchpad, which Claude Code keeps outside the scratch home at
+// <tmp>/claude-<uid>/<project slug>/: a runner may write its shards there with
+// Bash, and then no transcript holds their bytes. Copied, never removed.
+function copyScratchpads(home, out) {
+  const projects = path.join(home, '.claude', 'projects');
+  if (!fs.existsSync(projects) || typeof process.getuid !== 'function') return;
+  const bases = [...new Set([os.tmpdir(), '/tmp'])].map(t => path.join(t, 'claude-' + process.getuid()));
+  for (const slug of fs.readdirSync(projects)) {
+    const src = bases.map(b => path.join(b, slug)).find(p => fs.existsSync(p));
+    if (src) copyDir(src, path.join(out, 'scratchpad', slug));
+  }
+}
+
 async function commandRun(o) {
   const role = o.role;
-  if (!['review', 'mapper', 'probe'].includes(role)) usage('--role must be review or mapper');
-  if (role !== 'probe' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
+  if (!['review', 'mapper', 'skeptic', 'probe'].includes(role)) usage('--role must be review, mapper or skeptic');
+  if (role === 'skeptic') {
+    if (o.arm !== undefined || o.only || o.effort || o.modeWord !== undefined || o.planModels !== undefined) usage('--role skeptic replays the build as it ships: it takes no --arm, --only, --effort, --mode-word or --plan-models');
+    skepticInputs(o);
+  }
+  if (role !== 'probe' && role !== 'skeptic' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
   if (o.only && (role === 'probe' || o.arm === 'ship')) usage('--only applies to a measured arm (a, b, c or h) of the review or mapper role');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
@@ -1871,7 +2433,7 @@ async function commandRun(o) {
   // The mode a review run resolves, named in its folder when it was chosen.
   const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
   const onlyTag = o.only ? '-only-' + o.only.map(n => n.replace(/^review-|-finder$/g, '')).join('+') : '';
-  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role + '-' + o.arm + onlyTag + modeTag;
+  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' ? 'skeptic' : role + '-' + o.arm + onlyTag + modeTag;
   const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
   fs.mkdirSync(out, { recursive: true });
   // Opus, except the probe that checks /execute's note on a session running on
@@ -1940,6 +2502,11 @@ async function commandRun(o) {
         + 'subagent_type "tk:index-mapper", description "Map chunk", and as its prompt the text between the two marker lines below, '
         + 'copied exactly, byte for byte. Pass no model. When the agent returns, reply with its full output and nothing else.\n'
         + '<<<PROMPT\n' + meta.expectedPrompt + '\nPROMPT>>>';
+    } else if (role === 'skeptic') {
+      // No arm: the skeptics run on the build's own agent file, which inherits
+      // the session model, so the expectation is the session's family.
+      meta.replay = prepareSkepticReplay({ evidence: o.evidence, receipts: o.receipts, project, tmp, buildDir: build.dir });
+      meta.prompt = skepticPrompt(meta.replay);
     } else if (o.probe === 'models-override') {
       fs.mkdirSync(project, { recursive: true });
       meta.expect.byType = { 'tk:plan-critic': 'sonnet' };
@@ -2032,6 +2599,9 @@ async function commandRun(o) {
         const lg = sh('git', ['log', '--oneline', '-5'], { cwd: project, env: GIT_ENV });
         fs.writeFileSync(path.join(out, 'project-git.json'), JSON.stringify({ status: st.stdout, log: lg.stdout }, null, 2) + '\n');
       }],
+      // A skeptic replay's inputs outside the project, read back when it is scored.
+      ['copy the replay\'s merge folder', () => { if (role === 'skeptic' && meta.replay) copyDir(meta.replay.mergeDir, path.join(out, 'replay-merge')); }],
+      ['copy the session scratchpad', () => { if (role === 'skeptic') copyScratchpads(home, out); }],
       ['write run.json', () => fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n')],
       ['remove the scratch folder', () => { if (!o.keep) fs.rmSync(tmp, { recursive: true, force: true }); }],
       // A run that broke after its session started still enters its spend.
@@ -2119,6 +2689,24 @@ function printRunSummary(a, verbose) {
     }
   }
   if (a.role === 'mapper' && a.mapper) console.log('  mapper: ' + JSON.stringify(a.mapper));
+  if (a.role === 'skeptic' && a.skeptic) {
+    const s = a.skeptic.summary;
+    const ids = list => (list.length ? list.join(', ') : 'none');
+    const span = d => (d.ids.length ? d.ids[0] + (d.ids.length > 1 ? '-' + d.ids[d.ids.length - 1] + ' (' + d.ids.length + ')' : '') : 'no IDs');
+    console.log('  skeptic dispatches:');
+    for (const d of a.skeptic.dispatches) {
+      console.log('    D' + d.n + ' ' + d.type + ' tier ' + d.tier + ' ' + span(d) + ': ' + d.class + (d.file ? ' (' + d.file + ')' : '')
+        + ', lines ' + d.linesFound + '/' + d.ids.length + ' byte for byte, asks ' + (d.asks.length ? d.asks.join('/') : 'no verdict words') + (d.m2Words ? ' (M2)' : ' (not M2)')
+        + '; return ' + (!d.returned ? 'none' : d.returnOk === null ? 'unchecked' : d.returnOk ? 'clean' : 'flagged: ' + d.problems.join(', ')));
+    }
+    console.log('  summary: ' + s.dispatches + ' dispatches, ' + s.byteForByte + ' byte for byte (' + s.script + ' script, ' + s.verbatim + ' verbatim), '
+      + s.paraphrased + ' paraphrased, ' + s.unknown + ' unknown; returns ' + s.returnsClean + ' clean, ' + s.returnsFlagged + ' flagged, ' + s.returnsUnchecked + ' unchecked; '
+      + s.otherWords + ' asked for words outside M2; --verdicts calls ' + s.verdictsCalls + ' (' + s.verdictsRejected + ' rejected)');
+    console.log('  recorded verdicts: ' + s.recorded + '; ruled on from a paraphrase: ' + ids(s.ruledFromParaphrase)
+      + (s.ruledFromUnknown.length ? '; from an unreadable dispatch: ' + ids(s.ruledFromUnknown) : '')
+      + (s.notJudged.length ? '; recorded with no skeptic ruling: ' + ids(s.notJudged) : ''));
+    console.log('  drift reproduced: ' + (s.drift ? 'yes (a paraphrased dispatch)' : 'no'));
+  }
 }
 
 // Every saved run under `root` whose role is `role`, analyzed with its setting:
@@ -2222,6 +2810,8 @@ function parseArgs(argv) {
     else if (a === '--build') o.build = val();
     else if (a === '--effort') o.effort = val();
     else if (a === '--chunk') o.chunk = val();
+    else if (a === '--evidence') o.evidence = val();
+    else if (a === '--receipts') o.receipts = val();
     else if (a === '--label') o.label = val();
     else if (a === '--max-usd') o.maxUsd = Number(val());
     else if (a === '--mode-word') o.modeWord = val();
@@ -2330,6 +2920,8 @@ module.exports = {
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
   auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
   settingLines, mapperPromptHash, PATH_FILES,
+  SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
+  verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt,
 };
 
 if (require.main === module) {

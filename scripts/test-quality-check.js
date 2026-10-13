@@ -843,6 +843,208 @@ section('score command: settings, CONFOUNDED and --allow-drift end to end', () =
   check('the score prints a harness-lost column and names the run and entry', /harness-lost\(candidate\)/.test(h.stdout) && /security-path-traversal\s+2\/2\s+1\/1\s+2\/2\s+1/.test(h.stdout) && /harness-lost: security-path-traversal in qc-test-run-\S+ \(R\d+ RECEIPT FAILED\)/.test(h.stdout) && /comparison: a model A\/B/.test(h.stdout), h.stdout);
 });
 
+// ---------------------------------------------------------------------------
+// Harness research plan Step 10: the skeptic replay of session 1cefa1a7. Nothing
+// here reads the real session log: every log and run folder below is made up, in
+// the shapes that log and a saved run hold.
+
+const MF = require(path.resolve(__dirname, '..', '.claude', 'scripts', 'merge-findings.js'));
+const HANDBACK_FRAME = '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:';
+const handback = lines => HANDBACK_FRAME + '\n' + lines.map(l => '  ' + l).join('\n');
+const agentCall = (id, type) => ({ type: 'assistant', message: { model: OPUS, role: 'assistant', content: [{ type: 'tool_use', id, name: 'Agent', input: { subagent_type: type, prompt: '...' } }] } });
+const launched = (id, agentId) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: 'Async agent launched' }] }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId } });
+const peer = (agentId, body) => ({ type: 'user', isMeta: true, message: { role: 'user', content: body }, origin: { kind: 'peer', from: agentId, senderTaskId: agentId, body } });
+// Four finder lines: two security, one code on the same line as the second
+// security one (the run's one judgment merge), one plan.
+const SK = [
+  finding('security', 'seed/settings.json', 152, 'Should fix. An allowed remote-add can make a remote a mirror, so a plain push deletes branches.'),
+  finding('security', 'scripts/check.js', 530, 'Optional. Reading every media file in full blocks the push past the read limit.', { severity: 'suggest' }),
+  finding('code', 'scripts/check.js', 530, 'Should fix. A media file over 64 MB now refuses the push as unreadable.'),
+  finding('plan', 'plans/PLAN-a.md', 11, 'Should fix. Both plans still say nothing was pushed, so the record misses the push.'),
+];
+
+section('skeptic replay: finder lines from the session log', () => {
+  const log = [
+    agentCall('toolu_old', 'review-code-finder'), launched('toolu_old', 'old1'),
+    peer('old1', handback([finding('code', 'a.js', 1, 'Should fix. An earlier review in the same session found this.')])),
+    agentCall('toolu_judge', 'audit-skeptic'), launched('toolu_judge', 'judge1'),
+    agentCall('toolu_f1', 'review-security-finder'), launched('toolu_f1', 'sec'),
+    agentCall('toolu_f2', 'review-code-finder'), launched('toolu_f2', 'code'),
+    agentCall('toolu_f3', 'review-plan-finder'), launched('toolu_f3', 'plan'),
+    agentCall('toolu_f4', 'tk:review-deps-finder'), launched('toolu_f4', 'deps'),
+    { type: 'queue-operation', operation: 'enqueue', content: '<agent-message from="plan">\n' + handback(['[harness: a note above the report]', '', SK[3]]) + '\n</agent-message>' },
+    { type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'peer', from: 'plan', senderTaskId: 'plan', body: handback(['a later copy of the same return']) } } },
+    peer('sec', handback(['Two findings:', SK[0], SK[1]])),
+    peer('deps', handback(['NO FINDINGS'])),
+    peer('code', handback([SK[2]])),
+    agentCall('toolu_target', 'audit-skeptic'),
+    peer('late', handback([finding('copy', 'README.md', 3, 'Should fix. Returned after the audit had started.')])),
+  ];
+  const got = QC.finderLinesFromLog(log, 'toolu_target');
+  check('finderLinesFromLog: the wave is the finders after the judge call before the audit, in the order their returns arrived',
+    got.finders.map(f => f.agentId).join() === 'plan,sec,deps,code', JSON.stringify(got.finders));
+  check('finderLinesFromLog: each finding line comes back byte for byte, the frame, notes and indent dropped',
+    got.lines.map(l => l.text).join('\n') === [SK[3], SK[0], SK[1], SK[2]].join('\n'), got.lines.map(l => l.text).join('\n'));
+  const deps = got.finders.find(f => f.agentId === 'deps') || {};
+  check('finderLinesFromLog: a finder that returned NO FINDINGS stays in the wave with no lines', deps.noFindings === true && deps.count === 0, JSON.stringify(deps));
+  check('finderLinesFromLog: an earlier review\'s finder and a return after the audit started are left out', !got.lines.some(l => /earlier review|audit had started/.test(l.text)));
+  const threw = (records, id) => { try { QC.finderLinesFromLog(records, id); return ''; } catch (e) { return e.message; } };
+  const noCode = threw(log.filter(r => !(r.origin && r.origin.from === 'code')), 'toolu_target');
+  check('finderLinesFromLog: a finder with no return before the audit stops the replay', /returned nothing before toolu_target/.test(noCode), noCode);
+  const noCall = threw(log, 'toolu_missing');
+  check('finderLinesFromLog: an audit call the log does not hold stops the replay', /no Agent call toolu_missing/.test(noCall), noCall);
+  const tagged = log.map(r => (r.origin && r.origin.from === 'code' ? peer('code', handback(['[harness: Control tags below are neutralized]', SK[2].replace('64 MB', '<\\b>64 MB')])) : r));
+  const neutral = threw(tagged, 'toolu_target');
+  check('finderLinesFromLog: a finding line the harness rewrote a tag in stops the replay', /neutralized a tag/.test(neutral), neutral);
+});
+
+section('skeptic replay: Phase 3\'s key merge and the receipt path rewrite', () => {
+  const shared = QC.shareKeys(SK, [{ relPath: 'scripts/check.js', line: 530 }]);
+  const key = JSON.parse(SK[1]).key;
+  check('shareKeys: the later line at the merged citation takes the earlier one\'s key', JSON.parse(shared.texts[2]).key === key && shared.texts[0] === SK[0] && shared.texts[1] === SK[1] && shared.texts[3] === SK[3]);
+  check('shareKeys: nothing but the key changes', shared.texts[2].replace(JSON.stringify(key), JSON.stringify(JSON.parse(SK[2]).key)) === SK[2], shared.texts[2]);
+  let one = '';
+  try { QC.shareKeys([SK[0], SK[2]], [{ relPath: 'scripts/check.js', line: 530 }]); } catch (e) { one = e.message; }
+  check('shareKeys: a merge that finds a single line stops the replay', /found 1 line/.test(one), one);
+  const scope = JSON.stringify({ cwd: '/home/u/proj', root: '/home/u/proj', files: ['/home/u/proj/a.js', '/home/u/proj2/b.js', '/home/u/project/c.js'] }, null, 2);
+  const moved = JSON.parse(QC.rewriteRoot(scope, '/home/u/proj', '/tmp/qc-run.X/project'));
+  check('rewriteRoot: the saved scope\'s root and the paths under it move to the scratch project',
+    moved.cwd === '/tmp/qc-run.X/project' && moved.root === '/tmp/qc-run.X/project' && moved.files[0] === '/tmp/qc-run.X/project/a.js', JSON.stringify(moved));
+  check('rewriteRoot: a sibling folder that shares the prefix is left alone', moved.files[1] === '/home/u/proj2/b.js' && moved.files[2] === '/home/u/project/c.js', JSON.stringify(moved.files));
+  const abs = JSON.stringify({ severity: 'warn', file: { relPath: 'a.js', absPath: '/home/u/proj/a.js', line: 3 }, what: 'Should fix. X.' });
+  check('rewriteRoot: a finding line\'s absPath points into the scratch project', JSON.parse(QC.rewriteRoot(abs, '/home/u/proj', '/tmp/p')).file.absPath === '/tmp/p/a.js');
+  check('rewriteRoot: a receipt output with no root in it stays byte for byte', QC.rewriteRoot('421:  maxBuffer: 64,\nexit 0\n', '/home/u/proj', '/tmp/p') === '421:  maxBuffer: 64,\nexit 0\n');
+  const p = QC.skepticPrompt({ stamp: '2026-09-22-002749', range: { base: 'c3cfff8c129a', end: 'df408f0cdc9e' }, mergeDir: '/tmp/qc-run.X/review-merge', lines: SK,
+    finders: [{ type: 'review-security-finder', noFindings: false }, { type: 'tk:review-deps-finder', noFindings: true }],
+    keyMerges: [{ relPath: 'scripts/check.js', line: 530 }], merged: [{ id: 'R1' }, { id: 'R2' }, { id: 'R3' }], mergeSummary: 'merge-findings: 4 raw, 3 merged (1 merge)' });
+  check('skepticPrompt: the build\'s /tk:review, entered at Phase 4 with the earlier phases\' files named and a stop before any fix',
+    p.startsWith('/tk:review c3cfff8..df408f0 report only, no chaining\n') && /resumes a review at Phase 4/.test(p) && p.includes('/tmp/qc-run.X/review-merge') && p.includes('reports/receipts/2026-09-22-002749/scope.json')
+    && /deps returned NO FINDINGS/.test(p) && /merged at scripts\/check\.js:530/.test(p) && /fix nothing/.test(p) && /from R1 to R3/.test(p), p);
+});
+
+// A canned skeptic replay run folder. Four dispatches: D1 a paraphrased shard the
+// session wrote with the Write tool, asking KEEP or KILL; D2 the --shards file,
+// whose copy sits in project-reports; D3 a redispatch of R3 carrying its line byte
+// for byte; D4 a general-purpose paraphrase of R3 asking KEEP or KILL, the last
+// to rule on it. o.drop: dispatch ids left out; o.final: the session's last text.
+function makeSkepticRun(o) {
+  o = o || {};
+  const dir = tmp('qc-test-skeptic-');
+  const project = '/tmp/qc-run.TEST/project';
+  const mergeDir = '/tmp/qc-run.TEST/review-merge';
+  const stamp = '2026-09-22-002749';
+  const sid = 'sess-skeptic';
+  const slug = '-tmp-qc-run-TEST-project';
+  const pad = '/tmp/claude-1000/' + slug + '/' + sid + '/scratchpad';
+  const shardFile = 'reports/receipts/' + stamp + '/audit-tier2-1.txt';
+  const plugin = 'node /tmp/qc-run.TEST/home/.claude/plugins/cache/llm-peer-review/tk/7.6.5/scripts/merge-findings.js';
+  const drop = o.drop || [];
+  const said = content => ({ type: 'assistant', message: { model: OPUS, role: 'assistant', content } });
+  const tool = (id, name, input) => said([{ type: 'tool_use', id, name, input }]);
+  const result = (id, text) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } });
+  const dispatch = {
+    d1: { type: 'audit-skeptic', prompt: 'Tier-2 skeptic shard. Read ' + pad + '/audit-shard-A.md: two Warn findings (R1 to R2). Return exactly one verdict line per ID (R1: KEEP or R1: KILL) plus one line of reasoning each.', ret: 'R1: KEEP\nthe mirror route is real\nR2: KILL\nalready handled' },
+    d2: { type: 'tk:audit-skeptic', prompt: 'Tier 2. Your findings and M2\'s instruction for this tier are in ' + shardFile + '; read it in full and follow it exactly.', ret: 'R1: STANDS\nthe mirror route is real\nR2: REFUTED\nalready handled\nR3: STANDS\nthe plans still say so' },
+    d3: { type: 'tk:audit-skeptic', prompt: 'Tier 2, a redispatch for R3. The finding, byte for byte:\n' + SK[3] + '\nReturn `RN: REFUTED` or `RN: STANDS` plus one line of reasoning.', ret: 'R3: STANDS\nthe plans still say so' },
+    d4: { type: 'general-purpose', prompt: 'Skeptic pass on R3: the plans still say nothing was pushed. Answer R3: KEEP or R3: KILL.', ret: 'R3: KILL\nthe push is recorded elsewhere' },
+  };
+  const main = [
+    tool('w1', 'Write', { file_path: pad + '/audit-shard-A.md', content: '# Audit shard A: R1 to R2\n\n## R1 (security, warn)\nwhat: An allowed remote-add can make a remote a mirror.\n\n## R2 (code + security, merged; warn)\nwhat: A media file over 64 MB refuses the push.\n' }),
+    result('w1', 'File created'),
+    tool('d1', 'Agent', { subagent_type: dispatch.d1.type, description: 'Audit shard A', prompt: dispatch.d1.prompt }),
+    tool('b1', 'Bash', { command: plugin + ' --shards ' + mergeDir + ' --receipts reports/receipts/' + stamp + ' --out reports/receipts/' + stamp }),
+    result('b1', JSON.stringify({ shards: [{ tier: 2, file: shardFile, ids: ['R1', 'R2', 'R3'] }], tier3: null, dropped: [] })),
+    tool('d2', 'Agent', { subagent_type: dispatch.d2.type, description: 'Tier 2 shard 1', prompt: dispatch.d2.prompt }),
+    tool('b2', 'Bash', { command: plugin + ' --verdicts ' + shardFile + ' ' + pad + '/d1-return.txt' }),
+    result('b2', JSON.stringify({ tier: '2', ids: ['R1', 'R2'], ok: false, returns: [{ file: 'd1-return.txt', problems: [] }] })),
+    tool('d3', 'Agent', { subagent_type: dispatch.d3.type, description: 'R3 again', prompt: dispatch.d3.prompt }),
+    tool('d4', 'Agent', { subagent_type: dispatch.d4.type, description: 'R3 skeptic', prompt: dispatch.d4.prompt }),
+  ].filter(r => !r.message.content.some(c => drop.includes(c.id)));
+  const final = o.final || 'R1: STANDS\nR2: REFUTED\nR3: REFUTED';
+  main.push(said([{ type: 'text', text: final }]));
+  const slugDir = path.join(dir, 'transcripts', slug);
+  write(path.join(slugDir, sid + '.jsonl'), main.map(r => JSON.stringify(r)).join('\n') + '\n');
+  for (const [id, d] of Object.entries(dispatch)) {
+    if (drop.includes(id)) continue;
+    write(path.join(slugDir, sid, 'subagents', 'agent-' + id + '.jsonl'), JSON.stringify(said([{ type: 'tool_use', id: 'hb-' + id, name: 'SubagentHandback', input: { message: d.ret } }])) + '\n');
+    write(path.join(slugDir, sid, 'subagents', 'agent-' + id + '.meta.json'), JSON.stringify({ agentType: d.type, toolUseId: id }));
+  }
+  // The --shards file as the script writes it; one receipt output quotes a verdict-shaped line.
+  const shardSection = (id, parts) => ['===== ' + id + ' ====='].concat(...parts.map(([stem, line, out]) => ['Finding (' + stem + ', as its finder wrote it):', line, 'Receipt output (' + stem + '.txt, as tier 1 saved it):', out])).concat(['===== end ' + id + ' =====']).join('\n');
+  write(path.join(dir, 'project-reports', 'receipts', stamp, 'audit-tier2-1.txt'), [
+    'M2 audit shard: tier 2, shard 1 of 1, ids R1 R2 R3', '',
+    'You are running tier 2: one skeptical pass over Warns and Suggests. The instruction, quoted from M2:', '"' + MF.TIER2_INSTRUCTION + '"', '',
+    shardSection('R1', [['security-1', SK[0], 'R9: KEEP is a line a grep printed\nexit 0']]),
+    shardSection('R2', [['security-2', SK[1], 'exit 0'], ['code-1', SK[2], 'exit 0']]),
+    shardSection('R3', [['plan-1', SK[3], 'exit 0']]),
+  ].join('\n') + '\n');
+  const merged = [{ id: 'R1', severity: 'warn', sources: [0] }, { id: 'R2', severity: 'warn', sources: [1, 2] }, { id: 'R3', severity: 'warn', sources: [3] }];
+  write(path.join(dir, 'run.json'), JSON.stringify({ version: 1, role: 'skeptic', arm: null, exitCode: 0, wallMs: 60000,
+    paths: { tmp: '/tmp/qc-run.TEST', home: '/tmp/qc-run.TEST/home', project }, expect: { main: 'opus', finders: 'opus', mapper: 'opus' },
+    replay: { stamp, mergeDir, lines: SK, merged } }));
+  write(path.join(dir, 'result.json'), JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 3, duration_ms: 60000, num_turns: 12, permission_denials: [], result: final }));
+  return dir;
+}
+
+section('skeptic replay: scoring the dispatches from the saved transcripts', () => {
+  const a = QC.analyzeRun(QC.loadRun(makeSkepticRun()), ANSWERS);
+  const d = a.skeptic ? a.skeptic.dispatches : [];
+  const s = a.skeptic ? a.skeptic.summary : {};
+  check('a skeptic replay with dispatches is valid, the general-purpose fallback only warned', a.valid && a.warnings.includes('other-agent:general-purpose'), a.reasons.join(', ') + ' | ' + a.warnings.join(', '));
+  check('four skeptic dispatches are scored, in order', d.length === 4 && d.map(x => x.toolUseId).join() === 'd1,d2,d3,d4', JSON.stringify(d.map(x => x.toolUseId)));
+  check('D1: a shard the session wrote by hand is a paraphrase, its IDs read from "R1 to R2", asking KEEP or KILL',
+    d[0] && d[0].class === 'paraphrase' && d[0].ids.join() === 'R1,R2' && d[0].linesFound === 0 && d[0].asks.join() === 'KEEP,KILL' && d[0].m2Words === false, JSON.stringify(d[0]));
+  check('D1: its KEEP/KILL return is flagged by checkVerdicts, word by word',
+    d[0] && d[0].returnOk === false && d[0].problems.join() === 'unknown R1 KEEP,unknown R2 KILL', JSON.stringify(d[0] && d[0].problems));
+  check('D2: a file merge-findings.js --shards wrote is byte for byte, its IDs from the script, M2\'s words from its preface only',
+    d[1] && d[1].class === 'script' && d[1].ids.join() === 'R1,R2,R3' && d[1].linesFound === 3 && d[1].asks.join() === 'REFUTED,STANDS' && d[1].m2Words === true, JSON.stringify(d[1]));
+  check('D2: a clean return is clean', d[1] && d[1].returnOk === true && d[1].problems.length === 0, JSON.stringify(d[1] && d[1].problems));
+  check('D3: a prompt carrying the finder\'s line byte for byte is verbatim, and its clean return is clean',
+    d[2] && d[2].class === 'verbatim' && d[2].ids.join() === 'R3' && d[2].linesFound === 1 && d[2].m2Words && d[2].returnOk === true, JSON.stringify(d[2]));
+  check('D4: a general-purpose paraphrase is scored as a skeptic dispatch, and flagged',
+    d[3] && d[3].type === 'general-purpose' && d[3].class === 'paraphrase' && d[3].returnOk === false, JSON.stringify(d[3]));
+  check('summary: dispatches, byte for byte, paraphrased, returns clean and flagged, --verdicts calls',
+    s.dispatches === 4 && s.byteForByte === 2 && s.script === 1 && s.verbatim === 1 && s.paraphrased === 2 && s.unknown === 0
+    && s.returnsClean === 2 && s.returnsFlagged === 2 && s.otherWords === 2 && s.verdictsCalls === 1 && s.verdictsRejected === 1 && s.drift === true, JSON.stringify(s));
+  check('summary: a finding whose last ruling came from a paraphrase is named; one a byte-for-byte dispatch re-ruled is not',
+    s.recorded === 3 && (s.ruledFromParaphrase || []).join() === 'R3', JSON.stringify(s.ruledFromParaphrase));
+  const replaced = QC.analyzeRun(QC.loadRun(makeSkepticRun({ drop: ['d4'] })), ANSWERS).skeptic.summary;
+  check('a paraphrased dispatch whose findings were dispatched again byte for byte rules on nothing (the wired arm\'s bar)',
+    replaced.paraphrased === 1 && replaced.ruledFromParaphrase.length === 0 && replaced.drift === true, JSON.stringify(replaced));
+  const unaudited = QC.analyzeRun(QC.loadRun(makeSkepticRun({ final: 'R1: STANDS\nR2: REFUTED\nR3: unaudited' })), ANSWERS).skeptic.summary;
+  check('a finding recorded as unaudited was not ruled on, whatever asked about it', unaudited.ruledFromParaphrase.length === 0 && unaudited.recorded === 3, JSON.stringify(unaudited));
+  const known = new Map([['R1', { severity: 'warn', lines: [SK[0]] }]]);
+  const ctx = { project: '/tmp/qc-run.TEST/project', known, writes: new Map(), bash: [], shards: new Map(), readLocal: () => null };
+  const lost = QC.scoreDispatch('Judge R1 in /tmp/review-audit.Q/shard.md and reply R1: KEEP or R1: KILL.', ctx);
+  check('scoreDispatch: a named file nothing can read back is unknown, not a paraphrase', lost.class === 'unknown' && lost.ids.join() === 'R1', JSON.stringify(lost));
+  const heredoc = QC.scoreDispatch('Judge R1 in /tmp/review-audit.Q/shard.md.', { ...ctx, bash: ["cat > /tmp/review-audit.Q/shard.md <<'EOF'\n" + SK[0] + '\nEOF'] });
+  check('scoreDispatch: a file written by a heredoc is read from the command, byte for byte', heredoc.class === 'verbatim' && heredoc.asks.length === 0 && heredoc.m2Words === false, JSON.stringify(heredoc));
+  const cited = QC.scoreDispatch('Refute R1; the cited file is plans/PLAN-a.md and seed/settings.json:152.', ctx);
+  check('scoreDispatch: a project source file the prompt cites is not an input, so the dispatch is a paraphrase', cited.class === 'paraphrase' && cited.file === null, JSON.stringify(cited));
+  const c = spawnSync('node', [SCRIPT, '--check', makeSkepticRun()], { encoding: 'utf8' });
+  check('--check prints one line per dispatch and the summary of a skeptic replay',
+    c.status === 0 && /D1 audit-skeptic tier 2 R1-R2 \(2\): paraphrase .*asks KEEP\/KILL \(not M2\); return flagged: unknown R1 KEEP, unknown R2 KILL/.test(c.stdout)
+    && /D2 tk:audit-skeptic tier 2 R1-R3 \(3\): script \(reports\/receipts\/2026-09-22-002749\/audit-tier2-1\.txt\), lines 3\/3 byte for byte/.test(c.stdout)
+    && /summary: 4 dispatches, 2 byte for byte \(1 script, 1 verbatim\), 2 paraphrased, 0 unknown; returns 2 clean, 2 flagged/.test(c.stdout)
+    && /ruled on from a paraphrase: R3/.test(c.stdout) && /drift reproduced: yes/.test(c.stdout), c.stdout + c.stderr);
+});
+
+section('skeptic replay: the usage line', () => {
+  const header = fs.readFileSync(SCRIPT, 'utf8').split('\n').slice(0, 140).join('\n');
+  check('the header\'s usage names the skeptic role and its two folders', /node scripts\/quality-check\.js --role skeptic --build <git-ref\|tree> \[--evidence <dir>\] \[--receipts <dir>\]/.test(header));
+  const role = spawnSync('node', [SCRIPT, '--role', 'judge', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('an unknown role is a usage error that names the skeptic role', role.status === 2 && /review, mapper or skeptic/.test(role.stderr), role.stderr);
+  const arm = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--arm', 'ship', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('--role skeptic with an arm is a usage error', arm.status === 2 && /takes no --arm/.test(arm.stderr), arm.stderr);
+  const empty = tmp('qc-test-no-evidence-');
+  const ev = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--build', 'HEAD', '--evidence', empty], { encoding: 'utf8' });
+  check('--role skeptic without the session log is a usage error (exit 2) that starts nothing', ev.status === 2 && /needs the evidence folder/.test(ev.stderr) && ev.stdout === '', ev.stdout + ev.stderr);
+  const withLog = tmp('qc-test-evidence-');
+  write(path.join(withLog, QC.SKEPTIC_REPLAY.session + '.jsonl'), '');
+  const rc = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--build', 'HEAD', '--evidence', withLog, '--receipts', empty], { encoding: 'utf8' });
+  check('--role skeptic without the run\'s receipts and scope is a usage error (exit 2) that starts nothing', rc.status === 2 && /receipts folder with its scope\.json/.test(rc.stderr) && rc.stdout === '', rc.stdout + rc.stderr);
+});
+
 // A process that no longer runs, or a zombie waiting for its parent to reap it.
 function gone(pid) {
   try { process.kill(pid, 0); } catch (e) { return e.code === 'ESRCH'; }
