@@ -4,6 +4,7 @@
 # Written by scripts/seed-history.js from the release tags and the working tree; never edit it by hand.
 "Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.
 "Do I understand it?" vs "Can I use it?" is the right split for review skills.
+"Fails before, passes after" needs the after expect held against the before output too.
 "Falls back" is not "degrades to nothing" - read what the fallback actually produces.
 "Same command, two gears" vs "new command" decision pattern.
 "Touches no file" is a claim to measure: `git stash create` takes the index lock.
@@ -11,6 +12,7 @@ A "nothing defines X" finding must first refute the generic rule that already co
 A "nothing reads this file" claim must check every grep hit, test suites included.
 A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
+A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
 A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.
 A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.
@@ -64,6 +66,7 @@ A plugin install updates only on a version change, so fixes committed after a ta
 A prompt cannot declare a user-owned prerequisite done.
 A prompt's user-facing message is not enforcement.
 A prose sweep needs the wordings that actually occur, not the one you remember writing.
+A receipt that checks a record exists can be closed by making the record late; check what the record says.
 A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
 A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.
 A release needs one review of the whole range, not the sum of its per-issue reviews.
@@ -174,6 +177,7 @@ Permission approvals can land in the wrong settings file.
 Pin subagents freely; never switch the main-loop model mid-session.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
+Profile a slow suite by section before speeding it up: one fixture check can be the whole cost.
 Prove a harness with the thing it will be used for, not with a trivial prompt.
 Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.
 Read the skeptic's split lines: a refuted row often carries the real defect in a narrower claim.
@@ -191,6 +195,7 @@ Run debates on plans, not just finished work.
 Run your own receipt before you report it as confirmation.
 Scope parity gaps explicitly when fixing one of several.
 Self-enforce release-time conventions in the artifact or the checklist, not in memory.
+Set shell variables before a backgrounded `&&` chain, never inside it.
 Shared files reduce duplication across review skills.
 Silent empty bodies need active detection, not just happy-path returns.
 Skill tool expansions can serve stale command versions.

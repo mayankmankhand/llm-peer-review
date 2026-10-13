@@ -2,6 +2,30 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Every Step Proves Itself
+
+**Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #231. A plan now says how each step proves itself before the work starts: a check that fails before the work, for a reason stated in advance, and passes after it. `/tk:execute` runs those checks around every step, and `/tk:review` reads the saved records back instead of trusting a summary of them (new loop rule M17).
+
+### Added
+
+- **Check lines in every plan.** `/tk:create-plan` writes lines under each step: a target that must fail before the work and pass after it, a guard on anything the step could break, or `Check: no target - <reason>`. The plan critic also asks whether each stated failure would really show. The kinds of check (example, user flow, must-never, old vs new, and must and must-not lines for text edits) are in the manual's new "Kinds of check" section.
+- **`/tk:execute` builds check-first.** For each step it writes the target first, runs the before check, does the work, runs the after check, and commits when it passes. The full test suite runs at parallel checkpoints and at the plan's Verify step rather than after every step. A plan written before this release has no check lines and runs the way it always did.
+- **Plan mode in the checks runner.** `run-checks.js --plan <file>` takes `--lint`, `--step N --phase before|after`, or `--tally`. Records land in `reports/checks/<plan>/step-<N>/<phase>/`, and the tally gives each step a status: proved, unproved, noTarget, missing or problem. A before run also fails a target whose output already meets its after expect, because a pass after the work would then prove nothing.
+- **Slow and flaky flags.** Every check reports its run time, and one that took over half its time limit is flagged `slow`. With `--rerun-failures`, a check that fails and then passes is flagged `flaky` and still counts as a fail, with its first run kept under `first-run/`. A slow check that passed, an older check that flakes, or a guard already broken before the work becomes a `[check]` line for `/tk:review` instead of stopping the build; a check that runs out of time is a plain fail.
+- **`/tk:review` reads the plan's check records.** It seeds a finding for each `[check]` line and for each step whose checks are missing, would not run, or did not prove it. Those step findings come to you rather than the fix loop, because a step cannot be proved after its work. A logic bug a test can show is fixed check-first: the failing test is written before the fix and kept in your tests.
+- **A month view in `/tk:error-analysis`.** The ledger rollup counts each group and each kind by month, counts only, so you can see whether a kind of correction falls after a change meant to prevent it.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. No new permission rows: the before and after runs are calls to the checks runner, which the existing `run-checks.js` rows already cover with any arguments.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated `run-checks.js`, `correction-ledger.js` and `render-html.js`.
+
+### Why
+
+A step used to be called done when the whole test suite passed, and new tests were written after the code, so a check could pass whether or not the work did anything. Writing each step's failing check first, for a stated reason, and keeping its before and after records lets the build and the review prove each step instead of trusting a summary of it.
+
+---
+
 ## v7.6.5 - Name the Command (2026-10-10)
 
 **A patch on top of v7.6.4, which stays additive on v7.0.0 and v6.0.0.** Issue #226, merged as PR #227. The four spots the #221 triage left for a later cycle now name their command and its pass signal (M16), and the work turned up a worktree check that misread a subfolder of the main copy.
