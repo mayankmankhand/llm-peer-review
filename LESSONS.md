@@ -371,7 +371,7 @@
 - **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.**
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
@@ -385,3 +385,8 @@
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
 - **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+
+## Issues 228 and 230 (receipts that call back)
+
+- **A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.**
+- **When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.**
