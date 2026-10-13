@@ -68,7 +68,7 @@
 //   node scripts/quality-check.js --role mapper --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
-//        --against <run[,run...]> [--require-known] [--json]
+//        --against <run[,run...]> [--require-known] [--allow-drift <reason>] [--pool <dir>] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
 //   node scripts/quality-check.js --probe <browser|audit|models|review> --build <git-ref|tree>
 //   node scripts/quality-check.js --probe <mode-probe> --build <git-ref|tree> [--mode-word <m>]
@@ -115,6 +115,27 @@
 //     stable baseline catch, or the verdict is PAGE, because the bar the plan
 //     set for those arms cannot be applied.
 //   - With several --score sets, the cheapest passing set is named.
+//   - One thing moves per comparison (research plan item 2, P1-C1). Each run's
+//     setting is printed: a harness line (the build, as a hash of the plugin files
+//     the measured path reads; the session's model and effort; the Claude Code
+//     version; the fixture; for the mapper, the dispatch prompt's hash from the
+//     saved transcript and the chunk) and an arm line (each measured agent's model
+//     and effort). Each set must be uniform, and between the two sets either the
+//     arm moves with the harness held (a model A/B) or the build moves with the arm
+//     held (a harness A/B). Anything else is CONFOUNDED, naming the fields that
+//     differ, and only --allow-drift <reason> scores it anyway, printing the reason.
+//     A field a saved run cannot supply prints as unknown and never counts as a
+//     difference, so CONFOUNDED rests on recorded differences only.
+//   - A noise line per stable bug: how often the baseline's setting caught it across
+//     every saved valid run on that setting (under --pool, reports/quality-check by
+//     default). A FAIL on a bug that setting itself drops is marked weak.
+//   - Harness-lost (P1-C2). A planted bug that was raised and then killed is
+//     sorted by its Audited out line alone: refused (RECEIPT FAILED because the
+//     runner refused the check, so it never ran), refuted (a skeptic or the vote),
+//     or failed (the check ran and did not show the claim). A refused kill is
+//     harness-lost: that run is left out of the bug's miss count, the way an
+//     INVALID run is left out of the whole score, and a bug harness-lost in two
+//     runs gives HARNESS (fix the runner, then rerun) instead of failing the arm.
 //
 // Budget. reports/quality-check/budget.json holds the owner's approved total.
 // With no approval on record, only the first measured run may start (its cost
@@ -378,13 +399,15 @@ function rawToMatchable(f) {
 // Receipt row and the attachments (Expected, Actual, Screenshot, Evidence) are kept
 // apart as the entry's evidence, and a skeptic's split line as its split: they
 // quote code and output that name other findings' subjects, and are never matched.
+// Each entry also keeps `head`, its own entry line, which is where an Audited out
+// entry carries its verdict and the reason for it (auditVerdict).
 function parseReport(md) {
   const lines = String(md || '').split(/\r?\n/);
   const survivors = new Map();
   const killed = new Map();
   const refRe = /`?([A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)(?::(\d+))?`?/g;
   const entryOf = (map, id) => {
-    if (!map.has(id)) map.set(id, { id, refs: [], text: '', evidence: '', split: '' });
+    if (!map.has(id)) map.set(id, { id, refs: [], text: '', evidence: '', split: '', head: '' });
     return map.get(id);
   };
   const add = (map, id, text) => {
@@ -419,6 +442,7 @@ function parseReport(md) {
       const map = inKilled ? killed : survivors;
       current = { map, id: 'R' + m[2], indent: m[1].length };
       add(map, current.id, line);
+      if (!entryOf(map, current.id).head) entryOf(map, current.id).head = line;
       continue;
     }
     if (!inKilled && topRe.test(line)) {
@@ -473,6 +497,46 @@ function linkRaw(raws, entries) {
 function entryMatches(bug, entry) {
   const refs = entry.refs.length > 0 ? entry.refs : [{ file: '', line: null }];
   return refs.some(r => bugMatches(bug, { file: r.file, line: r.line, text: entry.text }));
+}
+
+// An Audited out line's verdict and why it killed the finding (research plan item
+// 3, P1-C2): { verdict, category, reason }. REFUTED, with or without a tally, is
+// refuted: a skeptic or the vote judged it. RECEIPT FAILED is refused when the
+// reason says the runner refused the check, which therefore never ran (the form
+// report-format.md fixes since 7.6.3 is "refused: <reason>, so the claim was not
+// tested"; run 2026-10-09-182657 wrote "the check was refused by the read-only
+// check filter"); any other RECEIPT FAILED is failed: the check ran and its output
+// did not show the claim, as when a check "could not run" because a folder it
+// made was denied (cb6eee1 R13). The reason is the line's last parenthesized text
+// after the verdict, where the report puts it, with parentheses inside a code span
+// ignored; the finding's own sentence before it is never read for the word, so a
+// finding about a refusal keeps the category its verdict gives. A line with no
+// verdict tag is 'unknown'.
+function auditVerdict(line) {
+  const text = String(line || '');
+  const tag = /`(RECEIPT FAILED|REFUTED(?: \d\/\d)?)`/i.exec(text);
+  if (!tag) return { verdict: null, category: 'unknown', reason: '' };
+  const after = text.slice(tag.index + tag[0].length);
+  const groups = [];
+  let depth = 0;
+  let inCode = false;
+  let cur = '';
+  for (const ch of after) {
+    if (ch === '`') inCode = !inCode;
+    if (!inCode && ch === '(') { if (depth > 0) cur += ch; depth++; continue; }
+    if (!inCode && ch === ')' && depth > 0) {
+      depth--;
+      if (depth === 0) { groups.push(cur); cur = ''; } else cur += ch;
+      continue;
+    }
+    if (depth > 0) cur += ch;
+  }
+  // A group the line never closed still holds the reason that opened it.
+  if (depth > 0 && cur) groups.push(cur);
+  const reason = (groups.length ? groups[groups.length - 1] : after).trim();
+  const verdict = tag[1].toUpperCase();
+  const category = /^REFUTED/.test(verdict) ? 'refuted' : /\brefus/i.test(reason) ? 'refused' : 'failed';
+  return { verdict, category, reason: reason.slice(0, 240) };
 }
 
 // The mapper's module blocks: heading, purpose, and the whole block text.
@@ -724,6 +788,40 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
     a.killedVia[b.id] = [...killedIds];
     a.killedRaised[b.id] = a.raised[b.id].length > 0 && a.survived[b.id].length === 0;
   }
+  // Why each raised-then-killed bug was killed (P1-C2), from its Audited out
+  // entries only: the ones its raw findings were formatted into, else the ones
+  // whose own words match it (an entry the orchestrator reworded). An Audited out
+  // line names no file, so that second look matches the bug's words alone, and
+  // only on an entry whose lens tag ([code, ux]) names a finder that raised the
+  // bug, which keeps another lens's kill from being taken for it. Survivors are
+  // never read for this, so a standing finding whose sentence says "refused"
+  // (cb6eee1 R19) is never a refusal. A bug is harness-lost only when every
+  // entry that killed it was refused: one a skeptic refuted, or whose check ran
+  // and failed, was lost on its merits. A raised bug no Audited out entry carries
+  // is 'unlinked' and stays an ordinary miss.
+  a.killedAs = {};
+  a.harnessLost = [];
+  for (const b of bugs) {
+    if (!a.killedRaised[b.id]) continue;
+    let entries = rep.killed.filter(e => a.killedVia[b.id].includes(e.id));
+    if (entries.length === 0) entries = rep.killed.filter(e => entryMatches(b, e));
+    if (entries.length === 0) {
+      const raisers = new Set(a.raised[b.id].map(r => r.kind));
+      entries = rep.killed.filter(e => {
+        const tag = /\*\*R\d+\*\*\s*\[([^\]]+)\]/.exec(e.head || '');
+        const lenses = tag ? tag[1].split(',').map(x => x.trim().toLowerCase()) : [];
+        return lenses.some(l => raisers.has(l)) && (b.match || []).some(all => all.every(re => new RegExp(re, 'i').test(e.text)));
+      });
+    }
+    const kills = entries.map(e => ({ id: e.id, ...auditVerdict(e.head) }));
+    let category = 'unlinked';
+    if (kills.length && kills.every(k => k.category === 'refused')) category = 'refused';
+    else if (kills.some(k => k.category === 'refuted')) category = 'refuted';
+    else if (kills.some(k => k.category === 'failed')) category = 'failed';
+    else if (kills.length) category = 'unknown';
+    a.killedAs[b.id] = { category, kills };
+    if (category === 'refused') a.harnessLost.push(b.id);
+  }
   const counted = new Set(Object.values(a.survived).flat().map(e => e.id));
   for (const e of rep.survivors) if (!counted.has(e.id)) a.unmatchedSurvivors.push({ id: e.id, text: short(e) });
   for (const r of raws) if (r.hits.length === 0) a.unmatchedRaw.push({ kind: r.kind, file: r.file, what: r.what.slice(0, 160) });
@@ -769,8 +867,198 @@ function mean(xs) {
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
 }
 
+// ---------------------------------------------------------------------------
+// The setting a run measured (research plan item 2, P1-C1)
+// ---------------------------------------------------------------------------
+//
+// A score means something only when one thing moved between its two sets. Both
+// issue 221 A/Bs and the 7.6.0 catch-rate check pooled baselines whose build,
+// finder effort and Claude Code version all moved, and their verdicts had to be
+// corrected by hand afterwards (ab-index-mapper.md, ab-review-deps-finder.md).
+// A run's setting is { dir, role, harness, arm, labels }:
+//   harness  build    the hash of the plugin files the role's path reads (pathHash)
+//            session  the session's model and effort
+//            claude   the Claude Code version
+//            fixture  the review fixture's hash, as run.json records it
+//            prompt   the mapper's dispatch prompt, hashed from the saved transcript
+//            chunk    the mapper's chunk: its source commit and file list
+//   arm      { agent: { model, effort } } for each measured agent
+// Every value may be null: a field the run's folder cannot supply is unknown,
+// printed so, and never counted as a difference.
+
+// The plugin files each role's measured path reads, relative to the plugin root.
+// For a review: the review command and its two runner scripts, the shared review
+// fragments, the criteria, each finder with the two skills it preloads, and the
+// skeptic (the review-path list of research item 7, P1-C4, plus the preloaded
+// skills, which are part of every finder's prompt). For the mapper: /index, whose
+// Step 3 template is the dispatch prompt, and the mapper's own file.
+const PATH_FILES = {
+  review: /^(scripts\/(run-checks|merge-findings)\.js|commands\/review\.md|skills\/shared\/(hitl-loop|report-format|dispatch-format|finding-contract|criteria-[a-z]+)\.md|skills\/(review-[a-z]+-criteria|dispatch-contract)\/SKILL\.md|agents\/(review-[a-z]+-finder|audit-skeptic)\.md)$/,
+  mapper: /^(commands\/index\.md|agents\/index-mapper\.md)$/,
+};
+
+// An agent file without its model and effort lines. Those lines are the arm,
+// which the arm line records, so a pin change alone never reads as a new build,
+// and a file hashes the same before and after the arm's patch (patchAgent only
+// rewrites or adds those two lines).
+function stripArmLines(text) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!fm) return text;
+  const kept = fm[1].split(/\r?\n/).filter(l => !/^(model|effort):/.test(l));
+  return '---\n' + kept.join('\n') + '\n---' + text.slice(fm[0].length);
+}
+
+// The hash of a role's path files, from { relPath: Buffer|string } (paths relative
+// to the plugin root, any other path ignored): 16 hex digits, or null when none of
+// the role's files is there.
+function pathHash(role, files) {
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const rels = Object.keys(files || {}).filter(r => re.test(r)).sort();
+  if (rels.length === 0) return null;
+  const h = crypto.createHash('sha256');
+  for (const rel of rels) {
+    const text = Buffer.isBuffer(files[rel]) ? files[rel].toString('utf8') : String(files[rel]);
+    h.update(rel + '\0' + (/^agents\//.test(rel) ? stripArmLines(text) : text) + '\0');
+  }
+  return h.digest('hex').slice(0, 16);
+}
+
+// The settings fields in print order, with the words a reader sees.
+const SETTING_FIELDS = [['build', 'build'], ['session', 'session model/effort'], ['claude', 'Claude Code'],
+  ['fixture', 'fixture'], ['prompt', 'mapper prompt hash'], ['chunk', 'mapper chunk']];
+function knownValues(values) {
+  return [...new Set(values.filter(v => v !== null && v !== undefined))];
+}
+
+// The short name of a measured agent: review-deps-finder -> deps.
+function agentShort(name) {
+  return String(name).replace(/^review-|-finder$/g, '');
+}
+
+// How a field's value reads, with the runs that carry it: a build hash is shown
+// with the commits (or tree builds) it was hashed from.
+function settingValue(field, value, runs) {
+  if (field !== 'build') return String(value);
+  const labels = knownValues(runs.filter(r => r.harness.build === value).map(r => (r.labels || {}).build));
+  return (labels.join('+') || 'build') + ' (path ' + String(value).slice(0, 8) + ')';
+}
+
+// The two sets' settings compared. Returns { kind, confounded, notUniform, differs,
+// armMoved, confounds, summary }: kind is 'same', 'model' (the arm moved, the harness
+// held), 'harness' (the build moved, and the mapper prompt with it, the arm held) or
+// 'confounded'; confounds names each field that makes it so ("baseline: build",
+// "between: Claude Code"); summary is the sentence the score prints.
+function compareSettings(candidate, baseline) {
+  const sets = { candidate, baseline };
+  const notUniform = [];
+  const one = {};
+  for (const [name, runs] of Object.entries(sets)) {
+    one[name] = { harness: {}, arm: {} };
+    for (const [field, label] of SETTING_FIELDS) {
+      const v = knownValues(runs.map(r => r.harness[field]));
+      if (v.length > 1) notUniform.push({ set: name, field, label, values: v.map(x => settingValue(field, x, runs)) });
+      one[name].harness[field] = v.length === 1 ? v[0] : null;
+    }
+    const agents = knownValues(runs.flatMap(r => Object.keys(r.arm || {})));
+    for (const ag of agents) one[name].arm[ag] = {};
+    for (const part of ['model', 'effort']) {
+      // Agents that share one spread read as one group: "8 finders high, medium".
+      const groups = new Map();
+      for (const ag of agents) {
+        const v = knownValues(runs.map(r => ((r.arm || {})[ag] || {})[part]));
+        one[name].arm[ag][part] = v.length === 1 ? v[0] : null;
+        if (v.length > 1) groups.set(v.join(', '), [...(groups.get(v.join(', ')) || []), agentShort(ag)]);
+      }
+      if (groups.size) {
+        const values = [...groups.entries()].map(([v, ags]) => (ags.length === 1 ? ags[0] : ags.length + ' agents (' + ags.join(', ') + ')') + ': ' + v);
+        notUniform.push({ set: name, field: 'arm ' + part, label: 'arm ' + part, values });
+      }
+    }
+  }
+  const differs = [];
+  for (const [field, label] of SETTING_FIELDS) {
+    const c = one.candidate.harness[field];
+    const b = one.baseline.harness[field];
+    if (c !== null && b !== null && c !== b) differs.push({ field, label, candidate: settingValue(field, c, candidate), baseline: settingValue(field, b, baseline) });
+  }
+  const armMoved = [];
+  for (const ag of knownValues([...Object.keys(one.candidate.arm), ...Object.keys(one.baseline.arm)])) {
+    for (const part of ['model', 'effort']) {
+      const c = (one.candidate.arm[ag] || {})[part];
+      const b = (one.baseline.arm[ag] || {})[part];
+      if (c !== null && c !== undefined && b !== null && b !== undefined && c !== b) armMoved.push({ agent: ag, part, candidate: c, baseline: b });
+    }
+  }
+  const confounds = notUniform.map(n => n.set + ': ' + n.label);
+  // The mapper prompt is read from the build, so it may move with the build (or
+  // where either build is unknown); on one recorded build, a new prompt is a
+  // second thing moving.
+  const buildHeld = one.candidate.harness.build !== null && one.candidate.harness.build === one.baseline.harness.build;
+  const buildField = f => f === 'build' || (f === 'prompt' && !buildHeld);
+  let kind;
+  if (armMoved.length) {
+    kind = 'model';
+    for (const d of differs) confounds.push('between: ' + d.label);
+  } else if (differs.length) {
+    kind = differs.some(d => buildField(d.field)) ? 'harness' : 'same';
+    for (const d of differs) if (!buildField(d.field)) confounds.push('between: ' + d.label);
+  } else kind = 'same';
+  const confounded = confounds.length > 0;
+  // The sentence: what kind of A/B it is, then whatever else moved.
+  const armWords = () => {
+    const groups = new Map();
+    for (const m of armMoved) {
+      const k = m.part + ' ' + m.candidate + ' vs ' + m.baseline;
+      groups.set(k, [...(groups.get(k) || []), agentShort(m.agent)]);
+    }
+    return [...groups.entries()].map(([k, ags]) => (ags.length === 1 ? ags[0] : ags.length + ' agents') + ' ' + k).join('; ');
+  };
+  const diffWords = list => list.map(d => d.label + ' ' + d.candidate + ' vs ' + d.baseline).join(', ');
+  // "Held" is said only when both sets are uniform, since otherwise nothing is.
+  const held = notUniform.length === 0;
+  const parts = [];
+  if (kind === 'model') {
+    parts.push('a model A/B, arm ' + armWords() + (differs.length ? ', with the harness moved too: ' + diffWords(differs) : held ? ', harness held' : ''));
+  } else if (kind === 'harness') {
+    const extra = differs.filter(d => !buildField(d.field));
+    parts.push('a harness A/B, ' + diffWords(differs.filter(d => buildField(d.field))) + (held ? ', arm held' : '') + (extra.length ? ', with more moved too: ' + diffWords(extra) : ''));
+  } else if (differs.length) {
+    parts.push('between the sets: ' + diffWords(differs));
+  } else if (held) parts.push('the same setting on both sides');
+  for (const n of notUniform) parts.push('the ' + n.set + ' set is not uniform in ' + n.label + ': ' + n.values.join(' | '));
+  return { kind: confounded ? 'confounded' : kind, confounded, notUniform, differs, armMoved, confounds, summary: parts.join('; ') };
+}
+
+// True unless a recorded field of x and y differs: two runs on one setting.
+function sameSetting(x, y) {
+  for (const [field] of SETTING_FIELDS) {
+    const a = x.harness[field];
+    const b = y.harness[field];
+    if (a !== null && a !== undefined && b !== null && b !== undefined && a !== b) return false;
+  }
+  for (const ag of knownValues([...Object.keys(x.arm || {}), ...Object.keys(y.arm || {})])) {
+    for (const part of ['model', 'effort']) {
+      const a = ((x.arm || {})[ag] || {})[part];
+      const b = ((y.arm || {})[ag] || {})[part];
+      if (a !== null && a !== undefined && b !== null && b !== undefined && a !== b) return false;
+    }
+  }
+  return true;
+}
+
+// Was `id` lost to the harness in analysis `a`: raised, then killed only by
+// checks the runner refused (P1-C2)? A caught bug never is.
+function harnessLostIn(a, id) {
+  return Array.isArray(a.harnessLost) && a.harnessLost.includes(id) && !caught(a, id);
+}
+
 // Scores one candidate set against a baseline set (arrays of analyses) per the
 // rules in the header. `ids` lists what can be caught: bug ids, or chunk files.
+// opts: knownId and requireKnown (the known-answer bar); allowDrift, the reason a
+// confounded comparison is scored anyway; pool, saved analyses to draw the noise
+// lines from. An analysis that carries `setting` (runSetting) takes part in the
+// comparison check; when any run lacks one, the check is skipped, as for runs
+// scored before the settings existed.
 function scoreSets(candidate, baseline, ids, opts) {
   const o = opts || {};
   const vb = baseline.filter(x => x.valid);
@@ -778,25 +1066,54 @@ function scoreSets(candidate, baseline, ids, opts) {
   const s = {
     baselineRuns: baseline.length, baselineValid: vb.length, candidateRuns: candidate.length, candidateValid: vc.length,
     invalid: [...baseline, ...candidate].filter(x => !x.valid).map(x => ({ dir: x.dir, reasons: x.reasons })),
-    stable: [], noisy: [], never: [], perId: {}, failed: [], single: [], verdict: '', why: [],
+    stable: [], noisy: [], never: [], perId: {}, failed: [], single: [], unjudged: [], harnessBugs: [], weak: [], noise: {},
+    compare: null, drift: null, verdict: '', why: [],
     costUsd: mean(vc.map(x => x.costUsd)), baselineCostUsd: mean(vb.map(x => x.costUsd)),
     wallMs: mean(vc.map(x => x.wallMs)), baselineWallMs: mean(vb.map(x => x.wallMs)),
   };
   if (vb.length === 0) { s.verdict = 'INVALID'; s.why.push('no valid baseline run'); return s; }
   if (vc.length === 0) { s.verdict = 'INVALID'; s.why.push('no valid candidate run'); return s; }
+  if (vc.every(x => x.setting) && vb.every(x => x.setting)) s.compare = compareSettings(vc.map(x => x.setting), vb.map(x => x.setting));
+  s.harnessLostRuns = vc.flatMap(x => (x.harnessLost || []).filter(id => harnessLostIn(x, id))
+    .map(id => ({ dir: x.dir, id, kills: ((x.killedAs || {})[id] || { kills: [] }).kills.map(k => k.id + ' ' + k.verdict) })));
   for (const id of ids) {
     const inB = vb.filter(x => caught(x, id)).length;
     const inC = vc.filter(x => caught(x, id)).length;
+    // A run that lost the bug to the harness is left out of its count, as an
+    // INVALID run is left out of the whole score.
+    const lostC = vc.filter(x => harnessLostIn(x, id)).length;
+    const counted = vc.length - lostC;
     const raisedC = vc.filter(x => x.raised && x.raised[id] && x.raised[id].length > 0).length;
-    s.perId[id] = { baseline: inB + '/' + vb.length, candidate: inC + '/' + vc.length, raisedCandidate: raisedC + '/' + vc.length };
+    s.perId[id] = { baseline: inB + '/' + vb.length, candidate: inC + '/' + counted, raisedCandidate: raisedC + '/' + vc.length, harnessLost: lostC };
     if (inB === vb.length) s.stable.push(id);
     else if (inB > 0) s.noisy.push(id);
     else s.never.push(id);
   }
   for (const id of s.stable) {
-    const misses = vc.length - vc.filter(x => caught(x, id)).length;
+    const lostC = vc.filter(x => harnessLostIn(x, id)).length;
+    const counted = vc.length - lostC;
+    const misses = counted - vc.filter(x => caught(x, id)).length;
     if (misses >= 2) s.failed.push(id);
-    else if (misses === 1 && vc.length === 1) s.single.push(id);
+    else if (lostC >= 2) s.harnessBugs.push(id);
+    // One miss in the only counted run, or no counted run at all: run once more.
+    else if (misses === 1 && counted === 1) s.single.push(id);
+    else if (counted === 0) s.unjudged.push(id);
+  }
+  // The noise lines: each stable bug against every saved valid run on the
+  // baseline's setting (any of its settings, when it is not uniform).
+  if (Array.isArray(o.pool) && vb.every(x => x.setting)) {
+    const role = vb[0].role;
+    const pool = o.pool.filter(p => p.valid && p.role === role && p.setting && vb.some(b => sameSetting(p.setting, b.setting)));
+    s.poolRuns = pool.length;
+    for (const id of s.stable) {
+      const runs = pool.filter(p => !harnessLostIn(p, id));
+      s.noise[id] = { caught: runs.filter(p => caught(p, id)).length, runs: runs.length };
+    }
+    s.weak = s.failed.filter(id => s.noise[id] && s.noise[id].caught < s.noise[id].runs);
+  }
+  if (s.compare && s.compare.confounded) {
+    if (o.allowDrift) s.drift = { reason: o.allowDrift, confounds: s.compare.confounds };
+    else { s.verdict = 'CONFOUNDED'; s.why.push(s.compare.summary); return s; }
   }
   const breakRuns = vc.filter(x => (x.contractBreaks || 0) > 0).length;
   if (o.knownId && o.requireKnown && !s.stable.includes(o.knownId)) {
@@ -804,12 +1121,19 @@ function scoreSets(candidate, baseline, ids, opts) {
     s.why.push('the known-answer case is not a stable baseline catch, so the bar for this arm cannot be applied');
     return s;
   }
-  if (s.failed.length) s.why.push('missed twice: ' + s.failed.join(', '));
+  if (s.failed.length) {
+    s.why.push('missed twice: ' + s.failed.map(id => s.weak.includes(id)
+      ? id + ' (weak: the baseline setting caught it in only ' + s.noise[id].caught + ' of ' + s.noise[id].runs + ' saved runs)'
+      : id).join(', '));
+  }
   if (breakRuns >= 2) s.why.push('contract breaks in ' + breakRuns + ' runs');
+  if (s.harnessBugs.length) s.why.push('harness-lost in two runs: ' + s.harnessBugs.join(', ') + ' (the runner refused the check; fix the runner, then rerun)');
   if (s.failed.length || breakRuns >= 2) { s.verdict = 'FAIL'; return s; }
-  if (s.single.length || (breakRuns === 1 && vc.length === 1)) {
+  if (s.harnessBugs.length) { s.verdict = 'HARNESS'; return s; }
+  if (s.single.length || s.unjudged.length || (breakRuns === 1 && vc.length === 1)) {
     s.verdict = 'RERUN';
     if (s.single.length) s.why.push('missed once in a single run: ' + s.single.join(', '));
+    if (s.unjudged.length) s.why.push('lost to the harness in its only run: ' + s.unjudged.join(', '));
     if (breakRuns === 1 && vc.length === 1) s.why.push('one contract break in a single run');
     return s;
   }
@@ -877,6 +1201,156 @@ function loadRun(dir) {
 
 function loadAnswers() {
   return JSON.parse(fs.readFileSync(ANSWERS_FILE, 'utf8'));
+}
+
+// A role's path files in a build folder, as { relPath: Buffer }. Read at run time,
+// so a tree build, which leaves no commit behind, still records its build hash.
+function dirPathFiles(dir, role) {
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const out = {};
+  for (const f of walk(dir)) {
+    const rel = path.relative(dir, f).split(path.sep).join('/');
+    if (re.test(rel)) out[rel] = fs.readFileSync(f);
+  }
+  return out;
+}
+
+// The same files at a commit of this repository, through git (one ls-tree, one
+// cat-file), or null when the commit is not in this clone. Cached per commit.
+// Only a commit id reaches git: run.json is data, never an option.
+const SHA_RE = /^[0-9a-f]{7,40}$/;
+const gitPathCache = new Map();
+function gitPathFiles(sha, role) {
+  const key = sha + ':' + role;
+  if (gitPathCache.has(key)) return gitPathCache.get(key);
+  if (!SHA_RE.test(String(sha))) return null;
+  let out = null;
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const ls = spawnSync('git', ['ls-tree', '-r', sha, '--', 'plugin/'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (ls.status === 0) {
+    const want = ls.stdout.split('\n').map(l => /^\d+ blob ([0-9a-f]+)\t(.+)$/.exec(l)).filter(Boolean)
+      .map(m => ({ oid: m[1], rel: m[2].replace(/^plugin\//, '') })).filter(e => re.test(e.rel));
+    out = {};
+    if (want.length) {
+      const cat = spawnSync('git', ['cat-file', '--batch'], { cwd: REPO, env: GIT_ENV, input: want.map(e => e.oid).join('\n') + '\n', maxBuffer: 64 * 1024 * 1024 });
+      const buf = cat.status === 0 ? cat.stdout : null;
+      let at = 0;
+      for (const e of want) {
+        // Each object comes back as "<oid> blob <size>\n<bytes>\n".
+        const nl = buf ? buf.indexOf(10, at) : -1;
+        const head = nl === -1 ? [] : buf.subarray(at, nl).toString('utf8').split(' ');
+        if (head[1] !== 'blob') { out = null; break; }
+        const size = Number(head[2]);
+        out[e.rel] = buf.subarray(nl + 1, nl + 1 + size);
+        at = nl + 1 + size + 1;
+      }
+    }
+  }
+  gitPathCache.set(key, out);
+  return out;
+}
+
+// One agent file's text at a commit, or null.
+const gitAgentCache = new Map();
+function gitAgentText(sha, name) {
+  const key = sha + ':' + name;
+  if (!SHA_RE.test(String(sha))) return null;
+  if (!gitAgentCache.has(key)) {
+    const r = spawnSync('git', ['show', sha + ':plugin/agents/' + name + '.md'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8' });
+    gitAgentCache.set(key, r.status === 0 ? r.stdout : null);
+  }
+  return gitAgentCache.get(key);
+}
+
+// The mapper's dispatch prompt as the session sent it, hashed with its whitespace
+// collapsed (the same reading the prompt-mismatch check makes), or null when the
+// transcript does not hold the dispatch.
+function mapperPromptHash(run) {
+  const sub = (run.subagents || []).find(x => /index-mapper$/.test((x.meta && x.meta.agentType) || ''));
+  if (!sub || !sub.meta || !sub.meta.toolUseId) return null;
+  const call = digestRecords(run.main || []).toolUses.find(t => (t.name === 'Agent' || t.name === 'Task') && t.id === sub.meta.toolUseId);
+  if (!call || typeof call.input.prompt !== 'string') return null;
+  return shortHash(call.input.prompt.replace(/\s+/g, ' ').trim());
+}
+
+// Each measured agent's { model, effort }: the arm's patch, else the agent as the
+// build shipped it (run.json's shipped list, else the agent file at the build's
+// commit, the way armSettings reads it: no effort line is high). The model is the
+// family the run expected the agent to answer on when run.json records one
+// (expect.finderModels, expect.mapper: they carry the review's mode, so a cheap run
+// reads as Sonnet), else the file's alias, else (inherit, no line) the session's.
+// Either part is null when the folder cannot supply it.
+function armOf(meta, role) {
+  const names = role === 'mapper' ? ['index-mapper'] : FINDER_KINDS.map(k => 'review-' + k + '-finder');
+  const expect = meta.expect || {};
+  const sessionFamily = familyOf((meta.session || {}).model);
+  const sha = meta.build && meta.build.sha;
+  const out = {};
+  for (const name of names) {
+    const rec = (meta.patch || []).find(x => x.agent === name) || (meta.shipped || []).find(x => x.agent === name);
+    let model = null;
+    let effort = null;
+    let fileKnown = false;
+    if (rec) { model = rec.model || null; effort = rec.effort || null; fileKnown = true; }
+    else if (sha) {
+      const text = gitAgentText(sha, name);
+      if (text !== null) { model = frontmatterValue(text, 'model'); effort = frontmatterValue(text, 'effort') || 'high'; fileKnown = true; }
+    }
+    const kind = /^review-([a-z]+)-finder$/.exec(name);
+    const expected = kind ? (expect.finderModels || {})[kind[1]] : (role === 'mapper' ? expect.mapper : null);
+    let family = expected || familyOf(model);
+    if (!family && fileKnown) family = sessionFamily;
+    out[name] = { model: family || null, effort: effort || null };
+  }
+  return out;
+}
+
+// A run's setting (see "The setting a run measured"), from its loaded folder.
+// The build hash is the one run.json recorded at run time (meta.build.pathHashes),
+// else the one git computes from the build's commit; a tree build from before the
+// hashes were recorded has neither, so its build is unknown.
+function runSetting(run) {
+  const meta = run.meta || {};
+  const role = meta.role === 'mapper' ? 'mapper' : 'review';
+  const build = meta.build || {};
+  const session = meta.session || {};
+  let buildHash = (build.pathHashes && build.pathHashes[role]) || null;
+  if (!buildHash && build.sha) {
+    const files = gitPathFiles(build.sha, role);
+    buildHash = files ? pathHash(role, files) : null;
+  }
+  const cc = /(\d+\.\d+\.\d+)/.exec(String(session.claude || ''));
+  const chunk = role === 'mapper' && meta.chunk ? String(meta.chunk.sourceRef || '?').slice(0, 7) + ':' + shortHash((meta.chunk.files || []).join('\n')).slice(0, 8) : null;
+  return {
+    dir: run.dir, role,
+    harness: {
+      build: buildHash,
+      session: session.model && session.effort ? session.model + '/' + session.effort : null,
+      claude: cc ? cc[1] : null,
+      fixture: meta.fixture || null,
+      prompt: role === 'mapper' ? mapperPromptHash(run) : null,
+      chunk,
+    },
+    arm: armOf(meta, role),
+    labels: { build: build.sha ? build.sha.slice(0, 7) : build.spec ? build.spec + (build.version ? ' ' + build.version : '') : null },
+  };
+}
+
+// The two lines a score prints for a run: its harness and its arm. A field the
+// folder could not supply reads "unknown".
+function settingLines(setting) {
+  const h = setting.harness;
+  const u = v => (v === null || v === undefined ? 'unknown' : v);
+  const parts = ['build ' + (h.build ? settingValue('build', h.build, [setting]) : 'unknown' + (setting.labels.build ? ' (' + setting.labels.build + ', no recorded hash)' : '')),
+    'session ' + u(h.session), 'Claude Code ' + u(h.claude), 'fixture ' + u(h.fixture)];
+  if (setting.role === 'mapper') parts.push('prompt ' + u(h.prompt), 'chunk ' + u(h.chunk));
+  const groups = new Map();
+  for (const [ag, v] of Object.entries(setting.arm || {})) {
+    const k = (v.model || 'unknown') + '/' + (v.effort || 'unknown');
+    groups.set(k, [...(groups.get(k) || []), agentShort(ag)]);
+  }
+  const arm = [...groups.entries()].map(([k, ags]) => ags.join(', ') + ' ' + k).join('; ');
+  return { harness: parts.join(', '), arm: arm || 'unknown' };
 }
 
 // ---------------------------------------------------------------------------
@@ -975,6 +1449,17 @@ function prepareBuild(spec, home, tmp) {
   // browse.js needs playwright-core; a real install has it at the plugin root.
   if (fs.existsSync(NODE_MODULES) && !fs.existsSync(path.join(dest, 'node_modules'))) fs.symlinkSync(NODE_MODULES, path.join(dest, 'node_modules'));
   return { dir: dest, version, sha };
+}
+
+// The build hash of each role's path files, taken before the arm's patch (the
+// patch touches only lines the hash leaves out anyway). A read that fails leaves
+// null, which the score prints as unknown; it never stops the run.
+function buildPathHashes(dir) {
+  const out = {};
+  for (const role of Object.keys(PATH_FILES)) {
+    try { out[role] = pathHash(role, dirPathFiles(dir, role)); } catch (e) { out[role] = null; }
+  }
+  return out;
 }
 
 // The arm's settings for the measured agents, read against the build's files.
@@ -1395,7 +1880,7 @@ async function commandRun(o) {
   const sessionFamily = familyOf(sessionModel);
   const meta = {
     version: 1, role, arm: o.arm || null, only: o.only || null, label: o.label || '', probe: o.probe || null,
-    build: { spec: o.build, sha: build.sha, version: build.version },
+    build: { spec: o.build, sha: build.sha, version: build.version, pathHashes: buildPathHashes(build.dir) },
     session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
     expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
@@ -1416,7 +1901,9 @@ async function commandRun(o) {
       const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only) : armSettings('review', 'a', build, null);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // The agents the arm left as shipped (all of them on the ship arm, the rest
+      // of the finders under --only), so the score's arm line reads them from here.
+      if (settings.some(s => s.shipped)) meta.shipped = settings.filter(s => s.shipped).map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
       // Where each finder should answer: the mode the review resolves (see Model modes).
       const mode = o.modeWord || o.planModels || 'fit';
       meta.expect.finderModels = finderModels(mode, build.dir, sessionFamily);
@@ -1438,7 +1925,9 @@ async function commandRun(o) {
       const settings = armSettings('mapper', o.arm, build, o.effort, o.only);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // The agents the arm left as shipped (all of them on the ship arm, the rest
+      // of the finders under --only), so the score's arm line reads them from here.
+      if (settings.some(s => s.shipped)) meta.shipped = settings.filter(s => s.shipped).map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
       // The dispatch below passes no model, so the mapper answers on its file's.
       meta.expect.mapper = mapperModel('fit', build.dir, sessionFamily);
       fs.mkdirSync(project, { recursive: true });
@@ -1613,12 +2102,16 @@ function printRunSummary(a, verbose) {
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
     for (const id of Object.keys(a.survived)) {
-      console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no'));
+      const k = a.killedAs && a.killedAs[id];
+      console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no')
+        + (k ? '  killed: ' + k.category + (k.kills.length ? ' (' + k.kills.map(x => x.id + ' ' + (x.verdict || '?')).join(', ') + ')' : '') : ''));
+      if (verbose && k) for (const x of k.kills) console.log('        audited out ' + x.id + ': ' + x.reason);
       if (verbose) {
         for (const r of a.raised[id]) console.log('        raised [' + r.kind + '] ' + r.what);
         for (const e of a.survived[id]) console.log('        report ' + e.text);
       }
     }
+    if (a.harnessLost) console.log('  harness-lost (the runner refused the check, so it never ran): ' + a.harnessLost.length + (a.harnessLost.length ? ' (' + a.harnessLost.join(', ') + ')' : ''));
     if (verbose) {
       console.log('  matched no planted bug (check by eye that none is a missed catch):');
       for (const r of a.unmatchedRaw) console.log('    raw [' + r.kind + '] ' + r.file + ' ' + r.what);
@@ -1628,31 +2121,75 @@ function printRunSummary(a, verbose) {
   if (a.role === 'mapper' && a.mapper) console.log('  mapper: ' + JSON.stringify(a.mapper));
 }
 
+// Every saved run under `root` whose role is `role`, analyzed with its setting:
+// the pool the noise lines draw from. A folder that does not load is skipped.
+function loadPool(root, role, answers) {
+  const out = [];
+  if (!root || !fs.existsSync(root)) return out;
+  for (const name of fs.readdirSync(root).sort()) {
+    const dir = path.join(root, name);
+    const meta = readJson(path.join(dir, 'run.json'));
+    if (!meta || meta.role !== role) continue;
+    try {
+      const run = loadRun(dir);
+      out.push(Object.assign(analyzeRun(run, answers), { setting: runSetting(run) }));
+    } catch (e) { /* a torn folder is not part of the pool */ }
+  }
+  return out;
+}
+
 function commandScore(o) {
   const answers = loadAnswers();
-  const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => analyzeRun(loadRun(path.resolve(d)), answers));
+  const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => {
+    const run = loadRun(path.resolve(d));
+    return Object.assign(analyzeRun(run, answers), { setting: runSetting(run) });
+  });
   const baseline = load(o.against);
   const role = baseline[0] && baseline[0].role;
   const ids = role === 'mapper'
     ? ((loadRun(path.resolve(o.against.split(',')[0])).meta.chunk || {}).files || [])
     : answers.bugs.map(b => b.id);
   const knownId = (answers.bugs.find(b => b.knownAnswer) || {}).id;
-  const results = o.score.map(set => ({ set, s: scoreSets(load(set), baseline, ids, { knownId, requireKnown: o.requireKnown }) }));
+  const poolRoot = path.resolve(o.pool || OUT_ROOT);
+  const pool = loadPool(poolRoot, role, answers);
+  const results = o.score.map(set => {
+    const candidate = load(set);
+    const s = scoreSets(candidate, baseline, ids, { knownId, requireKnown: o.requireKnown, allowDrift: o.allowDrift, pool });
+    s.settings = { candidate: candidate.map(x => x.setting), baseline: baseline.map(x => x.setting) };
+    return { set, s };
+  });
   if (o.json) { console.log(JSON.stringify(results, null, 2)); return; }
+  const short = d => path.basename(d);
   for (const { set, s } of results) {
     console.log('Candidate: ' + set);
     console.log('Baseline:  ' + o.against);
     console.log('  runs: baseline ' + s.baselineValid + '/' + s.baselineRuns + ' valid, candidate ' + s.candidateValid + '/' + s.candidateRuns + ' valid');
     for (const inv of s.invalid) console.log('  invalid: ' + path.relative(REPO, inv.dir) + ' (' + inv.reasons.join(', ') + ')');
+    for (const side of ['candidate', 'baseline']) {
+      for (const st of s.settings[side]) {
+        const l = settingLines(st);
+        console.log('  harness ' + side.padEnd(9) + ' ' + short(st.dir) + ': ' + l.harness);
+        console.log('  arm     ' + side.padEnd(9) + ' ' + short(st.dir) + ': ' + l.arm);
+      }
+    }
+    if (s.compare) console.log('  comparison: ' + (s.compare.confounded ? 'CONFOUNDED: ' : '') + s.compare.summary);
+    if (s.drift) console.log('  DRIFT ALLOWED (--allow-drift): ' + s.drift.reason + ' [confounds: ' + s.drift.confounds.join('; ') + ']');
+    else if (o.allowDrift && s.compare && !s.compare.confounded) console.log('  --allow-drift given (' + o.allowDrift + '), not needed: nothing confounds this comparison');
     console.log('  stable (' + s.stable.length + '): ' + (s.stable.join(', ') || 'none'));
     if (s.noisy.length) console.log('  noisy, not scored (' + s.noisy.length + '): ' + s.noisy.join(', '));
     if (s.never.length) console.log('  never caught by the baseline (' + s.never.length + '): ' + s.never.join(', '));
     if (role !== 'mapper') {
-      console.log('  ' + 'bug'.padEnd(26) + 'baseline  candidate  raised(candidate)');
-      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(26) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate);
+      console.log('  ' + 'bug'.padEnd(26) + 'baseline  candidate  raised(candidate)  harness-lost(candidate)');
+      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(26) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate.padEnd(19) + p.harnessLost);
+      // Which run lost which bug to the harness, and through which Audited out entry.
+      for (const l of s.harnessLostRuns) console.log('  harness-lost: ' + l.id + ' in ' + short(l.dir) + ' (' + l.kills.join(', ') + ')');
+    }
+    if (Object.keys(s.noise).length) {
+      console.log('  noise: each stable catch across the ' + s.poolRuns + ' saved valid run' + (s.poolRuns === 1 ? '' : 's') + ' on the baseline\'s setting (' + path.relative(REPO, poolRoot) + '):');
+      for (const [id, n] of Object.entries(s.noise)) console.log('    ' + id.padEnd(26) + n.caught + '/' + n.runs + (n.caught < n.runs ? '  (the baseline setting drops it)' : ''));
     }
     console.log('  cost per run: baseline ' + money(s.baselineCostUsd) + ', candidate ' + money(s.costUsd) + '; time: baseline ' + mins(s.baselineWallMs) + ', candidate ' + mins(s.wallMs));
-    console.log('  VERDICT: ' + s.verdict + (s.why.length ? ' - ' + s.why.join('; ') : ''));
+    console.log('  VERDICT: ' + s.verdict + (s.why.length ? ' - ' + s.why.join('; ') : '') + (s.drift ? ' (drift allowed: ' + s.drift.reason + ')' : ''));
     console.log('');
   }
   const passing = results.filter(r => r.s.verdict === 'PASS' && typeof r.s.costUsd === 'number').sort((x, y) => x.s.costUsd - y.s.costUsd);
@@ -1693,6 +2230,8 @@ function parseArgs(argv) {
     else if (a === '--score') o.score.push(val());
     else if (a === '--against') o.against = val();
     else if (a === '--require-known') o.requireKnown = true;
+    else if (a === '--allow-drift') { o.allowDrift = val().trim(); if (!o.allowDrift) usage('--allow-drift needs a reason, which the score prints'); }
+    else if (a === '--pool') o.pool = val();
     else if (a === '--json') o.json = true;
     else if (a === '--check') o.check = val();
     else if (a === '--probe') o.probe = val();
@@ -1789,6 +2328,8 @@ module.exports = {
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
+  auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
+  settingLines, mapperPromptHash, PATH_FILES,
 };
 
 if (require.main === module) {
