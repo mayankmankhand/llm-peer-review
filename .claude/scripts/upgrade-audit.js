@@ -52,8 +52,8 @@
 //   ### C-12: Criteria reach a worker by preload, not by paste
 //   - **Since:** 7.0.0
 //   - **Runs:** every upgrade            (optional: skip the range filter)
-//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | local-edits | review-kinds)
-//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
+//   - **Scope:** prompt-files            (prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds)
+//   - **Detector:** regex                (regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual)
 //   - **Severity:** suggest             (optional: warn, the default, or suggest; what a regex detector's findings carry)
 //   - **Looks behind:** `PASTE THE SKILL'S REVIEW CRITERIA`
 //   - **Looks behind:** `subagent_type=(tk:)?review-finder`
@@ -99,9 +99,11 @@
 // LESSONS.md and flags a bullet beyond one sentence or 300 characters while
 // LESSONS-detail.md is absent, and a bullet whose bold lead is in the plugin's
 // seed/toolkit-lesson-leads.txt, the toolkit's own lessons that the
-// copy-installers wrote into projects. `manual` is not run here at all: the
-// /tk:upgrade skill judges those by hand (a judgment no grep expresses) and
-// emits findings in the same shape.
+// copy-installers wrote into projects. lessons-merge (C-18) asks git for the
+// merge attribute of LESSONS.md and LESSONS-detail.md and flags a lessons file
+// the project has that git does not merge with union. `manual` is not run here
+// at all: the /tk:upgrade skill judges those by hand (a judgment no grep
+// expresses) and emits findings in the same shape.
 //
 // Every finding carries a stable `key` (issue #179): the same finding has the
 // same key on every run, so /tk:upgrade's rerun decides FIXED by the key.
@@ -1402,6 +1404,15 @@ b && $0 !~ /^[ \t]*$/ && $0 !~ /^[ \t]*#/ { x = $0; sub(/^[ \t]+/, "", x); t = t
 { flush() }
 END { flush(); exit !f }`;
 
+// --- the lessons files' merge rule (C-18) -----------------------------------------
+// Git's union driver keeps the lines both sides added, so two branches that
+// each add a lesson never conflict. The lines are the shipped seed's
+// (seed/gitattributes) and this repository's own .gitattributes, word for word;
+// scripts/test-upgrade-audit.js fails when the three drift.
+const LESSONS_MERGE_FILES = ['LESSONS.md', 'LESSONS-detail.md'];
+const LESSONS_MERGE_COMMENT = '# Lessons files keep both sides on a merge: two branches that each add a lesson never conflict';
+const lessonsMergeLine = (rel) => rel + ' merge=union';
+
 // Is this project the toolkit's own repository? The source tree is what the
 // plugin is built from, not something to seed or upgrade. The marketplace file
 // names the toolkit itself when the marketplace is named llm-peer-review or
@@ -2118,6 +2129,31 @@ function main() {
               fields: [{ label: 'Lines', value: inherited.map(b => String(b.start)).join(', ') }, { label: 'Leads', value: inherited.slice(0, 12).map(b => b.lead).join(' ; ') + (n > 12 ? ' ; and ' + (n - 12) + ' more' : '') }],
               // The leads as compared: a closing period or colon set aside, case ignored.
               receipt: { check: 'grep -v ' + shq('^#') + ' -- ' + shq(leadsPath) + ' | sed ' + shq('s/[.:!]*$//') + ' | grep -n -i -F -f - -- LESSONS.md', expect: 'each LESSONS.md line that holds a lead from the toolkit\'s own lessons list, numbered; the check exits 0 only while one remains' } });
+          }
+        }
+      }
+    } else if (c.detector === 'lessons-merge') {
+      // (C-18) The lessons files keep both sides on a merge. Git answers for
+      // both names, so a rule in any attributes file git reads counts; only a
+      // lessons file the project has raises the finding, and the fix lists a
+      // line for each name git does not merge with union, so a detail file that
+      // /tk:document creates later is covered too.
+      const present = LESSONS_MERGE_FILES.filter(rel => isFile(P(rel)));
+      if (present.length) {
+        const out = git(['check-attr', 'merge', '--'].concat(LESSONS_MERGE_FILES), project);
+        if (out === null) notes.push(c.id + ': git check-attr did not run (no git, or not a git repository), so the lessons files\' merge rule is not checked');
+        else {
+          const union = (rel) => out.split('\n').includes(rel + ': merge: union');
+          const flagged = present.filter(rel => !union(rel));
+          const add = LESSONS_MERGE_FILES.filter(rel => !union(rel)).map(lessonsMergeLine);
+          if (flagged.length) {
+            const n = flagged.length;
+            const attrs = isFile(P('.gitattributes'));
+            emit({ id: c.id, key: claim(c.id + ':.gitattributes:lessons-merge').key, severity: c.severity, convention: c.title, file: { relPath: '.gitattributes' },
+              what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + flagged.join(' and ') + (n === 1 ? ' is' : ' are') + ' not merged with git\'s union driver, so two branches that each add a lesson conflict there, and a conflict fixed by hand can drop either side.',
+              fix: 'append the listed lines to .gitattributes' + (attrs ? '' : ' (create the file)') + ', under the listed comment line, and leave every other line as it is', since: c.since,
+              fields: [{ label: 'Comment line', value: LESSONS_MERGE_COMMENT }, { label: 'Lines', value: add.join(' ; ') }],
+              receipt: { check: 'git check-attr merge -- ' + flagged.map(shq).join(' ') + ' | grep -v -e ' + shq(': merge: union$'), expect: 'one line per lessons file whose merge attribute is not union; the check exits 0 only while one remains' } });
           }
         }
       }
