@@ -26,6 +26,22 @@
 //   --role mapper  A git archive of a frozen source commit, and one dispatch of
 //                  the index-mapper agent on a frozen chunk of it, with /index's
 //                  Step 3 prompt template copied out of the build under test.
+//   --role skeptic A replay of the one known judge-input drift, session 1cefa1a7
+//                  (harness research plan Step 10): a git archive of the commit
+//                  that run reviewed, its finders' lines taken from the session
+//                  log, its saved receipts and scope, and the build's /tk:review
+//                  entered at Phase 4 with dedup and tier 1 done, to run the
+//                  skeptic tiers and stop before any fix. It has no arm: it
+//                  measures the build's prompts as they ship. See "The skeptic
+//                  replay" below.
+//   --role fix     The review role's run (same fixture, scratch project, server,
+//                  build install, cap, budget gate and token guard) without
+//                  "report only", so /review's auto-fix loop runs, and with "no
+//                  chaining", so it stops after the loop instead of handing off to
+//                  /document (harness research plan Step 11). It has no arm: the
+//                  build's prompts as they ship. The scratch project's final tree
+//                  is then judged by oracles the session never sees. See "The fix
+//                  role and its oracles" below.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -67,8 +83,22 @@
 //        [--plan-models <best|fit|cheap>] [--keep]
 //   node scripts/quality-check.js --role mapper --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
+//   node scripts/quality-check.js --role skeptic --build <git-ref|tree> [--evidence <dir>] [--receipts <dir>]
+//        [--max-usd <n>] [--label <text>] [--keep]
+//        --evidence is the folder holding the 1cefa1a7 session log (default: the main
+//        checkout's reports/harness-papers-2026-10-12/evidence), --receipts that run's
+//        receipts folder (default: the main checkout's reports/receipts/2026-09-22-002749)
+//   node scripts/quality-check.js --role fix --build <git-ref|tree> [--max-usd <n>] [--label <text>]
+//        [--oracle-port <n>] [--keep]
+//        --oracle-port is where the oracles start the judged tree's server after the
+//        session (default 3000, which the session's own fixture server has freed by then)
+//   node scripts/quality-check.js --judge <fix-run-dir> [--oracle-port <n>]   re-run the
+//        oracles on a saved fix run's final tree (no session, no cost)
+//   node scripts/quality-check.js --oracle-self-test [--oracle-port <n>]   the oracles on
+//        the change tree unfixed, then with hand-made correct and empty fixes (no session;
+//        a free port other than 3000 unless --oracle-port names one)
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
-//        --against <run[,run...]> [--require-known] [--json]
+//        --against <run[,run...]> [--require-known] [--allow-drift <reason>] [--pool <dir>] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
 //   node scripts/quality-check.js --probe <browser|audit|models|review> --build <git-ref|tree>
 //   node scripts/quality-check.js --probe <mode-probe> --build <git-ref|tree> [--mode-word <m>]
@@ -89,13 +119,20 @@
 // session and helper transcript), project-reports/ (the review's markdown
 // report and receipts), analysis.json (validity and catches), and a line in
 // reports/quality-check/ledger.jsonl. reports/ is gitignored and kept on disk.
+// A skeptic run adds replay-merge/ (the Phase 3 merge folder it was handed) and
+// scratchpad/ (the session's scratchpad, where a runner may write shards with
+// Bash, so no transcript holds their bytes). A fix run adds project-final/ (the
+// scratch project as the session left it, without .git, reports/ and artifacts/),
+// fix-diff.patch (git diff from the planted change to that tree, untracked files
+// included) and oracles.json (each oracle's verdict on project-final/).
 //
 // A run is INVALID, and is rerun once, when: the session did not end cleanly
 // (non-zero exit, an error result, a turn or budget stop), it hit a usage limit,
 // any session or helper answered on a model other than the one it should have,
 // any call was denied, a review lens was not dispatched, a finder or the mapper
 // returned nothing, the review wrote no report, the mapper dispatch did not carry
-// the expected prompt, or a tool read outside the scratch project, the scratch
+// the expected prompt, a skeptic replay made no skeptic dispatch, or a tool read
+// outside the scratch project, the scratch
 // home (which holds the plugin build and the stable plugin path) and /tmp. A
 // second invalid run, or a usage limit, pages the owner (M1).
 //
@@ -115,6 +152,27 @@
 //     stable baseline catch, or the verdict is PAGE, because the bar the plan
 //     set for those arms cannot be applied.
 //   - With several --score sets, the cheapest passing set is named.
+//   - One thing moves per comparison (research plan item 2, P1-C1). Each run's
+//     setting is printed: a harness line (the build, as a hash of the plugin files
+//     the measured path reads; the session's model and effort; the Claude Code
+//     version; the fixture; for the mapper, the dispatch prompt's hash from the
+//     saved transcript and the chunk) and an arm line (each measured agent's model
+//     and effort). Each set must be uniform, and between the two sets either the
+//     arm moves with the harness held (a model A/B) or the build moves with the arm
+//     held (a harness A/B). Anything else is CONFOUNDED, naming the fields that
+//     differ, and only --allow-drift <reason> scores it anyway, printing the reason.
+//     A field a saved run cannot supply prints as unknown and never counts as a
+//     difference, so CONFOUNDED rests on recorded differences only.
+//   - A noise line per stable bug: how often the baseline's setting caught it across
+//     every saved valid run on that setting (under --pool, reports/quality-check by
+//     default). A FAIL on a bug that setting itself drops is marked weak.
+//   - Harness-lost (P1-C2). A planted bug that was raised and then killed is
+//     sorted by its Audited out line alone: refused (RECEIPT FAILED because the
+//     runner refused the check, so it never ran), refuted (a skeptic or the vote),
+//     or failed (the check ran and did not show the claim). A refused kill is
+//     harness-lost: that run is left out of the bug's miss count, the way an
+//     INVALID run is left out of the whole score, and a bug harness-lost in two
+//     runs gives HARNESS (fix the runner, then rerun) instead of failing the arm.
 //
 // Budget. reports/quality-check/budget.json holds the owner's approved total.
 // With no approval on record, only the first measured run may start (its cost
@@ -153,6 +211,11 @@ const LEDGER = path.join(OUT_ROOT, 'ledger.jsonl');
 const BUDGET = path.join(OUT_ROOT, 'budget.json');
 const REAL_HOME = os.homedir();
 const NODE_MODULES = path.join(REPO, '.claude', 'scripts', 'node_modules');
+// This checkout's merge-findings.js: the skeptic replay checks every skeptic's
+// return with its checkVerdicts, whatever build the session ran.
+const MERGE_FINDINGS = path.join(REPO, '.claude', 'scripts', 'merge-findings.js');
+// The fix role's oracles: outside the scratch project, copied out only at judge time.
+const ORACLES = path.join(FIXTURE, 'oracles');
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODES = ['best', 'fit', 'cheap'];
@@ -163,7 +226,14 @@ const PORT = 3000;
 const SESSION_TIMEOUT_MS = 90 * 60 * 1000;
 // A stopped group gets SIGTERM, then SIGKILL for whatever is still running this long after.
 const KILL_GRACE_MS = 10 * 1000;
-const DEFAULT_MAX_USD = { review: 25, mapper: 8, probe: 5 };
+// The skeptic replay takes the review role's cap: it runs the same orchestrator
+// over a whole audit, without the finders. The fix role runs that whole review
+// (measured at $4.19 to $6.11 on this fixture, 2026-10-03 to 10-05) and then the
+// auto-fix loop over its 12 to 20 survivors: an edit, a re-check or a fix-verifier
+// shard per finding and a digest, so about two to three times the review's turns,
+// $12 to $18 expected. $40 is a little over twice the high end, so a slow loop is
+// not stopped mid-fix by its own cap.
+const DEFAULT_MAX_USD = { review: 25, mapper: 8, skeptic: 25, fix: 40, probe: 5 };
 // The two mode probes that run a whole command flow (a fan-out and its audit; an
 // /index, a plan and its critic) get a larger cap than a one-call probe.
 const PROBE_MAX_USD = { 'review-code-mode': 10, 'create-plan-cheap': 10 };
@@ -378,13 +448,15 @@ function rawToMatchable(f) {
 // Receipt row and the attachments (Expected, Actual, Screenshot, Evidence) are kept
 // apart as the entry's evidence, and a skeptic's split line as its split: they
 // quote code and output that name other findings' subjects, and are never matched.
+// Each entry also keeps `head`, its own entry line, which is where an Audited out
+// entry carries its verdict and the reason for it (auditVerdict).
 function parseReport(md) {
   const lines = String(md || '').split(/\r?\n/);
   const survivors = new Map();
   const killed = new Map();
   const refRe = /`?([A-Za-z0-9_.\/-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)(?::(\d+))?`?/g;
   const entryOf = (map, id) => {
-    if (!map.has(id)) map.set(id, { id, refs: [], text: '', evidence: '', split: '' });
+    if (!map.has(id)) map.set(id, { id, refs: [], text: '', evidence: '', split: '', head: '' });
     return map.get(id);
   };
   const add = (map, id, text) => {
@@ -419,6 +491,7 @@ function parseReport(md) {
       const map = inKilled ? killed : survivors;
       current = { map, id: 'R' + m[2], indent: m[1].length };
       add(map, current.id, line);
+      if (!entryOf(map, current.id).head) entryOf(map, current.id).head = line;
       continue;
     }
     if (!inKilled && topRe.test(line)) {
@@ -473,6 +546,46 @@ function linkRaw(raws, entries) {
 function entryMatches(bug, entry) {
   const refs = entry.refs.length > 0 ? entry.refs : [{ file: '', line: null }];
   return refs.some(r => bugMatches(bug, { file: r.file, line: r.line, text: entry.text }));
+}
+
+// An Audited out line's verdict and why it killed the finding (research plan item
+// 3, P1-C2): { verdict, category, reason }. REFUTED, with or without a tally, is
+// refuted: a skeptic or the vote judged it. RECEIPT FAILED is refused when the
+// reason says the runner refused the check, which therefore never ran (the form
+// report-format.md fixes since 7.6.3 is "refused: <reason>, so the claim was not
+// tested"; run 2026-10-09-182657 wrote "the check was refused by the read-only
+// check filter"); any other RECEIPT FAILED is failed: the check ran and its output
+// did not show the claim, as when a check "could not run" because a folder it
+// made was denied (cb6eee1 R13). The reason is the line's last parenthesized text
+// after the verdict, where the report puts it, with parentheses inside a code span
+// ignored; the finding's own sentence before it is never read for the word, so a
+// finding about a refusal keeps the category its verdict gives. A line with no
+// verdict tag is 'unknown'.
+function auditVerdict(line) {
+  const text = String(line || '');
+  const tag = /`(RECEIPT FAILED|REFUTED(?: \d\/\d)?)`/i.exec(text);
+  if (!tag) return { verdict: null, category: 'unknown', reason: '' };
+  const after = text.slice(tag.index + tag[0].length);
+  const groups = [];
+  let depth = 0;
+  let inCode = false;
+  let cur = '';
+  for (const ch of after) {
+    if (ch === '`') inCode = !inCode;
+    if (!inCode && ch === '(') { if (depth > 0) cur += ch; depth++; continue; }
+    if (!inCode && ch === ')' && depth > 0) {
+      depth--;
+      if (depth === 0) { groups.push(cur); cur = ''; } else cur += ch;
+      continue;
+    }
+    if (depth > 0) cur += ch;
+  }
+  // A group the line never closed still holds the reason that opened it.
+  if (depth > 0 && cur) groups.push(cur);
+  const reason = (groups.length ? groups[groups.length - 1] : after).trim();
+  const verdict = tag[1].toUpperCase();
+  const category = /^REFUTED/.test(verdict) ? 'refuted' : /\brefus/i.test(reason) ? 'refused' : 'failed';
+  return { verdict, category, reason: reason.slice(0, 240) };
 }
 
 // The mapper's module blocks: heading, purpose, and the whole block text.
@@ -643,8 +756,10 @@ function analyzeRun(run, answers) {
   a.turns = result && result.num_turns;
 
   if (meta.role === 'probe') a.probe = meta.probe || null;
-  if (meta.role === 'review' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
+  if (meta.role === 'review' || meta.role === 'fix' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
   else if (meta.role === 'mapper') analyzeMapper(a, run, main, subs, reasons);
+  else if (meta.role === 'skeptic') analyzeSkeptic(a, run, main, subs, reasons, warnings);
+  if (meta.role === 'fix') analyzeFix(a, run, subs, answers, warnings);
 
   // The model-mode checks (plan Step 7): failures do not void the run's catches,
   // so they are kept apart from validity and decide the exit code on their own.
@@ -724,10 +839,45 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
     a.killedVia[b.id] = [...killedIds];
     a.killedRaised[b.id] = a.raised[b.id].length > 0 && a.survived[b.id].length === 0;
   }
+  // Why each raised-then-killed bug was killed (P1-C2), from its Audited out
+  // entries only: the ones its raw findings were formatted into, else the ones
+  // whose own words match it (an entry the orchestrator reworded). An Audited out
+  // line names no file, so that second look matches the bug's words alone, and
+  // only on an entry whose lens tag ([code, ux]) names a finder that raised the
+  // bug, which keeps another lens's kill from being taken for it. Survivors are
+  // never read for this, so a standing finding whose sentence says "refused"
+  // (cb6eee1 R19) is never a refusal. A bug is harness-lost only when every
+  // entry that killed it was refused: one a skeptic refuted, or whose check ran
+  // and failed, was lost on its merits. A raised bug no Audited out entry carries
+  // is 'unlinked' and stays an ordinary miss.
+  a.killedAs = {};
+  a.harnessLost = [];
+  for (const b of bugs) {
+    if (!a.killedRaised[b.id]) continue;
+    let entries = rep.killed.filter(e => a.killedVia[b.id].includes(e.id));
+    if (entries.length === 0) entries = rep.killed.filter(e => entryMatches(b, e));
+    if (entries.length === 0) {
+      const raisers = new Set(a.raised[b.id].map(r => r.kind));
+      entries = rep.killed.filter(e => {
+        const tag = /\*\*R\d+\*\*\s*\[([^\]]+)\]/.exec(e.head || '');
+        const lenses = tag ? tag[1].split(',').map(x => x.trim().toLowerCase()) : [];
+        return lenses.some(l => raisers.has(l)) && (b.match || []).some(all => all.every(re => new RegExp(re, 'i').test(e.text)));
+      });
+    }
+    const kills = entries.map(e => ({ id: e.id, ...auditVerdict(e.head) }));
+    let category = 'unlinked';
+    if (kills.length && kills.every(k => k.category === 'refused')) category = 'refused';
+    else if (kills.some(k => k.category === 'refuted')) category = 'refuted';
+    else if (kills.some(k => k.category === 'failed')) category = 'failed';
+    else if (kills.length) category = 'unknown';
+    a.killedAs[b.id] = { category, kills };
+    if (category === 'refused') a.harnessLost.push(b.id);
+  }
   const counted = new Set(Object.values(a.survived).flat().map(e => e.id));
   for (const e of rep.survivors) if (!counted.has(e.id)) a.unmatchedSurvivors.push({ id: e.id, text: short(e) });
   for (const r of raws) if (r.hits.length === 0) a.unmatchedRaw.push({ kind: r.kind, file: r.file, what: r.what.slice(0, 160) });
-  if (run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
+  // A fix run is meant to change the project; a report-only run is not.
+  if ((run.meta || {}).role !== 'fix' && run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
 }
 
 function analyzeMapper(a, run, main, subs, reasons) {
@@ -758,6 +908,686 @@ function analyzeMapper(a, run, main, subs, reasons) {
   a.covered = cov.covered;
 }
 
+// ---------------------------------------------------------------------------
+// The skeptic replay (harness research plan Step 10, D2)
+// ---------------------------------------------------------------------------
+//
+// Session 1cefa1a7 is the one known judge-input drift (the evidence folder's
+// README, plan Step 1): at its Phase 4 audit the /review orchestrator wrote its
+// own skeptic shards, paraphrased all 16 findings, sent no receipt output, and
+// asked the skeptics for KEEP or KILL in place of M2's words. --role skeptic puts
+// a fresh session at that same point, with that run's own inputs, on the build
+// under test, and then reads back what each skeptic dispatch carried and what
+// came back. The run's inputs are read from the evidence at run time and never
+// copied into the repo: the session log is local-only (the README's privacy note).
+//
+// The fixed facts, from the README. firstDispatch is the drift's first
+// audit-skeptic call (log line 1128); the finder wave is every finder dispatch
+// between the judge call before it and that call. keyMerges is the run's one
+// judgment merge (its report: "two merged at pre-push-check.js:530"), which Phase
+// 3 makes by giving the later line the earlier line's key before merge-findings.js
+// runs. raw and merged are the report's counts, checked before a session starts.
+const SKEPTIC_REPLAY = {
+  session: '1cefa1a7-7fd0-4d50-adff-32d1b619b83c',
+  firstDispatch: 'toolu_01S1c7UTdhrREGzJocx5VwF5',
+  evidence: 'reports/harness-papers-2026-10-12/evidence',
+  receipts: 'reports/receipts/2026-09-22-002749',
+  keyMerges: [{ relPath: '.claude/scripts/pre-push-check.js', line: 530 }],
+  raw: 17,
+  merged: 16,
+};
+// The judges a skeptic replay scores: the typed skeptic, and its general-purpose fallback.
+const SKEPTIC_TYPE = /^(tk:)?audit-skeptic$/;
+// M2's skeptic verdict words (tiers 2 and 3); a request for any other word is the drift.
+const M2_SKEPTIC_WORDS = ['REFUTED', 'STANDS', 'DOWNGRADE'];
+// A tier 1 output file in a receipts folder (<lens>-<n>.txt), never a shard.
+const RECEIPT_FILE = /^[a-z][a-z-]*-\d+\.txt$/;
+
+// A hand-back message's report, as the subagent wrote it: the lines after the
+// harness's "[Subagent hand-back]" frame line, the agent-message tags dropped,
+// and the two spaces the harness indents every report line with removed.
+function handbackBody(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const frame = lines.findIndex(l => /^\[Subagent hand-back\]/.test(l));
+  return (frame === -1 ? lines : lines.slice(frame + 1))
+    .filter(l => !/^<\/?agent-message\b[^>]*>\s*$/.test(l))
+    .map(l => (l.startsWith('  ') ? l.slice(2) : l))
+    .join('\n');
+}
+
+// Each agent's return in a session log, by agentId: { at, text } of the first
+// record carrying it. A return reaches the log three ways (all three in 1cefa1a7):
+// a user message with an origin, an attachment with one, or a queue entry that
+// wraps it in <agent-message from="...">.
+function agentReturns(records) {
+  const out = new Map();
+  records.forEach((r, at) => {
+    if (!r || typeof r !== 'object') return;
+    let from = null;
+    let text = null;
+    const origin = r.type === 'attachment' && r.attachment ? r.attachment.origin : r.origin;
+    if (origin && typeof origin.body === 'string' && (origin.senderTaskId || origin.from)) {
+      from = origin.senderTaskId || origin.from;
+      text = origin.body;
+    } else if (r.type === 'queue-operation' && r.operation === 'enqueue' && typeof r.content === 'string') {
+      const m = /<agent-message from="([^"]+)">/.exec(r.content);
+      if (m) { from = m[1]; text = r.content; }
+    }
+    if (from && !out.has(from)) out.set(from, { at, text });
+  });
+  return out;
+}
+
+// The finder lines a session's audit was run over, from its log: the finder
+// dispatches between the judge call before `firstDispatch` and that call, and
+// each one's JSONL lines exactly as its report holds them (trimmed, the way
+// merge-findings.js reads a line), in the order the returns arrived, which is
+// the order the runner collected them in. Throws when the call is missing, the
+// wave is empty, a finder returned nothing before the audit, or the harness
+// neutralized a tag inside a finding line (its bytes could not be recovered).
+function finderLinesFromLog(records, firstDispatch) {
+  const calls = [];
+  const agentOf = new Map();
+  records.forEach((r, at) => {
+    const content = r && r.message && Array.isArray(r.message.content) ? r.message.content : [];
+    if (r && r.type === 'assistant') {
+      for (const c of content) if (c.type === 'tool_use' && (c.name === 'Agent' || c.name === 'Task')) calls.push({ at, id: c.id, type: String((c.input || {}).subagent_type || '') });
+    } else if (r && r.type === 'user' && r.toolUseResult && r.toolUseResult.agentId) {
+      for (const c of content) if (c.type === 'tool_result') agentOf.set(c.tool_use_id, r.toolUseResult.agentId);
+    }
+  });
+  const target = calls.find(c => c.id === firstDispatch);
+  if (!target) throw new Error('the session log has no Agent call ' + firstDispatch);
+  const before = calls.filter(c => c.at < target.at);
+  const lastJudge = before.filter(c => /(^|:)(audit-skeptic|fix-verifier)$/.test(c.type)).pop();
+  const wave = before.filter(c => /(^|:)review-[a-z]+-finder$/.test(c.type) && (!lastJudge || c.at > lastJudge.at));
+  if (!wave.length) throw new Error('no finder dispatch between the judge call before ' + firstDispatch + ' and it');
+  const returns = agentReturns(records);
+  const finders = wave.map(c => {
+    const agentId = agentOf.get(c.id) || null;
+    const ret = agentId ? returns.get(agentId) : null;
+    if (!ret || ret.at > target.at) throw new Error(c.type + ' (' + c.id + ') returned nothing before ' + firstDispatch);
+    const body = handbackBody(ret.text);
+    const neutralized = /Control tags below are neutralized/.test(ret.text);
+    const lines = [];
+    for (const line of body.split('\n')) {
+      const t = line.trim();
+      if (!t.startsWith('{')) continue;
+      let f = null;
+      try { f = JSON.parse(t); } catch (e) { f = null; }
+      if (!f || typeof f !== 'object' || typeof f.severity !== 'string' || typeof f.what !== 'string') continue;
+      if (neutralized && t.includes('<\\')) throw new Error(c.type + ' (' + c.id + '): the harness neutralized a tag inside a finding line, so its bytes are not the finder\'s');
+      lines.push(t);
+    }
+    return { agentId, type: c.type, toolUseId: c.id, at: ret.at, lines, noFindings: body.trim() === 'NO FINDINGS' };
+  }).sort((x, y) => x.at - y.at);
+  return {
+    finders: finders.map(f => ({ agentId: f.agentId, type: f.type, toolUseId: f.toolUseId, count: f.lines.length, noFindings: f.noFindings })),
+    lines: finders.flatMap(f => f.lines.map(text => ({ agentId: f.agentId, type: f.type, text }))),
+  };
+}
+
+// Phase 3's one judgment merge, as review.md words it: of the lines that cite the
+// same relPath and line, each later one is given the earliest one's `key`. Only
+// the key's bytes change; the rest of each line stays as its finder wrote it.
+// Returns { texts, notes }; throws when a merge does not find two lines.
+function shareKeys(texts, merges) {
+  const out = texts.slice();
+  const notes = [];
+  for (const m of merges || []) {
+    const at = [];
+    out.forEach((t, i) => {
+      const f = JSON.parse(t);
+      if (f.file && f.file.relPath === m.relPath && Number(f.file.line) === m.line) at.push(i);
+    });
+    if (at.length < 2) throw new Error('the merge at ' + m.relPath + ':' + m.line + ' found ' + at.length + ' line(s), not two or more');
+    const key = JSON.parse(out[at[0]]).key;
+    if (typeof key !== 'string') throw new Error('the first line at ' + m.relPath + ':' + m.line + ' carries no key');
+    for (const i of at.slice(1)) {
+      const old = JSON.parse(out[i]).key;
+      const from = '"key":' + JSON.stringify(old);
+      if (typeof old !== 'string' || out[i].split(from).length !== 2) throw new Error('line ' + (i + 1) + ' does not carry its key exactly once as ' + from);
+      out[i] = out[i].replace(from, () => '"key":' + JSON.stringify(key));
+    }
+    notes.push({ relPath: m.relPath, line: m.line, key, lines: at.map(i => i + 1) });
+  }
+  return { texts: out, notes };
+}
+
+// `text` with the old project root replaced by the scratch project wherever it
+// stands as a whole path (followed by a separator, a quote or the end), so a
+// sibling folder that shares its prefix is left alone.
+function rewriteRoot(text, from, to) {
+  if (!from) return String(text);
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(text).replace(new RegExp(esc + '(?![A-Za-z0-9._-])', 'g'), () => to);
+}
+
+// The text of each tool result in a transcript, by tool_use id.
+function toolResultTexts(records) {
+  const out = new Map();
+  for (const r of records || []) {
+    const content = r && r.type === 'user' && r.message && Array.isArray(r.message.content) ? r.message.content : [];
+    for (const c of content) {
+      if (c.type !== 'tool_result') continue;
+      out.set(c.tool_use_id, typeof c.content === 'string' ? c.content : Array.isArray(c.content) ? c.content.map(x => x.text || '').join('\n') : '');
+    }
+  }
+  return out;
+}
+
+// The first line of `text` that parses as a JSON object, or null.
+function jsonLine(text) {
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t.startsWith('{')) continue;
+    try { return JSON.parse(t); } catch (e) { /* the next line */ }
+  }
+  return null;
+}
+
+// The files a `merge-findings.js --shards` call wrote, from its stdout:
+// [{ file, tier, ids }], the tier 3 ballot included.
+function shardsOutput(text) {
+  const j = jsonLine(text);
+  if (!j || !Array.isArray(j.shards)) return [];
+  return j.shards.concat(j.tier3 ? [j.tier3] : [])
+    .filter(s => s && typeof s.file === 'string' && Array.isArray(s.ids))
+    .map(s => ({ file: s.file, tier: Number(s.tier) || 2, ids: s.ids }));
+}
+
+// The file paths a prompt names: tokens with a slash whose last part has an
+// extension, trailing punctuation dropped. A citation with a line number
+// (`a.js:12`) is a citation, not a file handed over, and is not returned.
+function namedFiles(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/[\s"'`()<>[\]{},;]+/)) {
+    const t = raw.replace(/[.:!?]+$/, '');
+    if (!t.includes('/') || /^[a-z]+:\/\//i.test(t) || !/[^/]\.[A-Za-z0-9]{1,8}$/.test(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
+// The finding IDs a text names that `known` holds, ranges expanded ("R1 to R6",
+// "R7-R11"), in number order.
+function idsIn(text, known) {
+  const s = String(text || '');
+  const ids = new Set(s.match(/\bR\d+\b/g) || []);
+  const range = /\bR(\d+)\s*(?:-|\u2013|\u2014|\.\.|to|through)\s*R?(\d+)\b/g;
+  let m;
+  while ((m = range.exec(s)) !== null) {
+    const lo = Number(m[1]);
+    const hi = Number(m[2]);
+    if (hi > lo && hi - lo < 200) for (let n = lo; n <= hi; n++) ids.add('R' + n);
+  }
+  return [...ids].filter(id => known.has(id)).sort((x, y) => Number(x.slice(1)) - Number(y.slice(1)));
+}
+
+// What a shard file tells its reader to do, without the bytes it carries: fenced
+// blocks, JSON finding lines and the receipt-output sections merge-findings.js
+// writes are dropped, so a verdict word quoted in a finding or a receipt is never
+// read as one the shard asks for.
+function instructionText(body) {
+  const out = [];
+  let fence = false;
+  let receipt = false;
+  for (const line of String(body || '').split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) { fence = !fence; continue; }
+    if (fence) continue;
+    if (/^Receipt output \(/.test(line)) { receipt = true; continue; }
+    if (/^(Finding \(|Citation check:|=====)/.test(line)) receipt = false;
+    // A finding's JSON line, or a line shaped like grep output (path:line: or, from
+    // one file, line:), is quoted content: its verdict words were never asked for.
+    if (receipt || /^\s*\{/.test(line) || /^(?:[\w.\/-]+:)?\d+:/.test(line)) continue;
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+// The verdict words a text asks for: the word after an ID and a colon,
+// `R1: KEEP`, `RN: REFUTED`, the first word only.
+function verdictAsks(text) {
+  const re = /\bR(?:N|\d+|<N>)[*_`]*\s*:\s*[*_`]*([A-Z]{2,})\b/g;
+  const out = [];
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+// A skeptic dispatch the replay scores: the typed skeptic, or a general-purpose
+// call (M2's fallback) whose prompt names a finding ID or a skeptic's job.
+function isSkepticDispatch(type, prompt) {
+  if (SKEPTIC_TYPE.test(type)) return true;
+  return type === 'general-purpose' && /\bR\d+\b|skeptic|refute/i.test(String(prompt || ''));
+}
+
+// One skeptic dispatch, scored from its prompt and what the session had written
+// by then. ctx: { project, known: Map(id -> { severity, lines }), writes:
+// Map(abs path -> content written with the Write tool), bash: [commands run],
+// shards: Map(abs path -> { tier, ids }) from merge-findings.js --shards,
+// readLocal(abs) -> the run folder's copy of a file, or null }. Every file the
+// prompt names is read, except a project source file (a citation the skeptic may
+// open, not an input handed over). The class is
+//   script      the prompt names a file merge-findings.js --shards wrote
+//   verbatim    every source line of every finding it covers is in the prompt or
+//               a file it names, byte for byte
+//   unknown     neither, and a file it names could not be read back
+//   paraphrase  neither, and everything it names was read
+// ids are the --shards file's, else the ones the prompt names, else the ones its
+// files name. asks are the verdict words the prompt and its files' instruction
+// lines ask for; m2Words is true when every one is M2's.
+function scoreDispatch(prompt, ctx) {
+  const project = ctx.project || '/';
+  const known = ctx.known || new Map();
+  const texts = [String(prompt || '')];
+  // The prompt is filtered like a named file: verdict words inside quoted receipt
+  // output or a pasted finding line are evidence, not words the runner asked for.
+  const askTexts = [instructionText(prompt)];
+  let script = null;
+  let unreadable = false;
+  let firstFile = null;
+  for (const named of namedFiles(prompt)) {
+    const abs = path.resolve(project, named);
+    const shard = ctx.shards ? ctx.shards.get(abs) : null;
+    if (shard && !script) script = { file: named, tier: shard.tier, ids: shard.ids };
+    if (!shard && isUnder(abs, project) && !isUnder(abs, path.join(project, 'reports'))) continue;
+    if (!firstFile) firstFile = named;
+    let body = ctx.writes && ctx.writes.has(abs) ? ctx.writes.get(abs) : null;
+    if (body === null && ctx.readLocal) body = ctx.readLocal(abs);
+    const mentions = (ctx.bash || []).filter(c => c.includes(named) || c.includes(abs));
+    if (body !== null) {
+      texts.push(body);
+      if (!RECEIPT_FILE.test(path.basename(abs)) && path.basename(abs) !== 'scope.json') askTexts.push(instructionText(body));
+    } else if (!shard && !mentions.some(c => c.includes('<<'))) unreadable = true;
+    texts.push(...mentions);
+  }
+  const fromPrompt = idsIn(prompt, known);
+  const ids = script ? script.ids.filter(id => known.has(id)) : fromPrompt.length ? fromPrompt : idsIn(texts.slice(1).join('\n'), known);
+  const all = texts.join('\n');
+  const found = ids.filter(id => {
+    const lines = (known.get(id) || {}).lines || [];
+    return lines.length > 0 && lines.every(l => all.includes(l));
+  });
+  let asks = verdictAsks(askTexts.join('\n'));
+  // A --shards file opens with M2's instruction for its tier by construction.
+  if (script && asks.length === 0) asks = Number(script.tier) === 3 ? M2_SKEPTIC_WORDS.slice() : ['REFUTED', 'STANDS'];
+  const tier = script ? Number(script.tier) : ids.length && ids.every(id => (known.get(id) || {}).severity === 'block') ? 3 : 2;
+  let cls = 'paraphrase';
+  if (script) cls = 'script';
+  else if (ids.length && found.length === ids.length) cls = 'verbatim';
+  else if (unreadable) cls = 'unknown';
+  return { ids, tier, class: cls, file: script ? script.file : firstFile, linesFound: found.length, asks, m2Words: asks.length > 0 && asks.every(w => M2_SKEPTIC_WORDS.includes(w)) };
+}
+
+// The run folder's copy of a file the session wrote: under the project's
+// reports/ (project-reports/), the replay's merge folder (replay-merge/), or the
+// session's scratchpad, <tmp>/claude-<uid>/<project slug>/ (scratchpad/<slug>/).
+function localCopyOf(abs, dir, meta) {
+  const paths = (meta && meta.paths) || {};
+  const replay = (meta && meta.replay) || {};
+  if (paths.project && isUnder(abs, path.join(paths.project, 'reports'))) return path.join(dir, 'project-reports', path.relative(path.join(paths.project, 'reports'), abs));
+  if (replay.mergeDir && isUnder(abs, replay.mergeDir)) return path.join(dir, 'replay-merge', path.relative(replay.mergeDir, abs));
+  const m = /\/claude-\d+\/([^/]+)\/(.+)$/.exec(abs);
+  return m ? path.join(dir, 'scratchpad', m[1], m[2]) : null;
+}
+
+// The verdict each finding was recorded with: the session's final message, one
+// `RN: <verdict>` line per finding as the replay's prompt asks. { id: word }.
+function recordedVerdicts(text, known) {
+  const out = {};
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const m = /^[\s>*_`-]*(R\d+)[*_`]*\s*:\s*[*_`]*\s*([A-Za-z][A-Za-z]*)/.exec(line);
+    if (m && known.has(m[1]) && !out[m[1]]) out[m[1]] = m[2];
+  }
+  return out;
+}
+
+// The skeptic replay's analysis: each skeptic dispatch scored (scoreDispatch),
+// its return checked with this checkout's merge-findings.js checkVerdicts, and
+// which dispatch each recorded verdict came from (the last one whose return ruled
+// on that ID, with a verdict word of any kind). A finding is ruled on from a
+// paraphrase when that dispatch is a paraphrase; one recorded as unaudited was
+// not ruled on.
+function analyzeSkeptic(a, run, main, subs, reasons, warnings) {
+  const meta = run.meta || {};
+  const replay = meta.replay || {};
+  const project = (meta.paths && meta.paths.project) || '/';
+  const lines = replay.lines || [];
+  const known = new Map((replay.merged || []).map(m => [m.id, { severity: m.severity, lines: (m.sources || []).map(i => lines[i]).filter(l => typeof l === 'string') }]));
+  const mf = require(MERGE_FINDINGS);
+  const results = toolResultTexts(run.main || []);
+  const readLocal = abs => {
+    const p = localCopyOf(abs, run.dir, meta);
+    if (!p) return null;
+    try { return fs.readFileSync(p, 'utf8'); } catch (e) { return null; }
+  };
+  const writes = new Map();
+  const bash = [];
+  const shards = new Map();
+  const bySub = new Map(subs.filter(s => s.meta && s.meta.toolUseId).map(s => [s.meta.toolUseId, s]));
+  const dispatches = [];
+  let verdictsCalls = 0;
+  let verdictsRejected = 0;
+  for (const t of main.toolUses) {
+    const input = t.input || {};
+    if (t.name === 'Write' && typeof input.file_path === 'string') writes.set(path.resolve(project, input.file_path), String(input.content || ''));
+    else if (t.name === 'Bash' && typeof input.command === 'string') {
+      bash.push(input.command);
+      if (/merge-findings\.js\b/.test(input.command) && /--shards\b/.test(input.command)) {
+        for (const s of shardsOutput(results.get(t.id))) shards.set(path.resolve(project, s.file), s);
+      }
+      if (/merge-findings\.js\b/.test(input.command) && /--verdicts\b/.test(input.command)) {
+        verdictsCalls++;
+        const j = jsonLine(results.get(t.id));
+        if (j && j.ok === false) verdictsRejected++;
+      }
+    } else if ((t.name === 'Agent' || t.name === 'Task') && isSkepticDispatch(String(input.subagent_type || ''), input.prompt)) {
+      const sc = scoreDispatch(input.prompt, { project, known, writes: new Map(writes), bash: bash.slice(), shards: new Map(shards), readLocal });
+      const sub = bySub.get(t.id);
+      const ret = sub ? (sub.d.handback !== null ? sub.d.handback : sub.d.lastText) : '';
+      let returnOk = null;
+      let problems = [];
+      let ruled = [];
+      if (sc.ids.length) {
+        const v = mf.checkVerdicts(String(sc.tier), sc.ids, [{ file: (sub && sub.agentId) || t.id, text: ret }]);
+        returnOk = v.ok;
+        problems = ((v.returns[0] || {}).problems || []).map(p => p.kind + ' ' + p.id + (p.word ? ' ' + p.word : ''));
+        const rr = mf.readReturn(ret, sc.ids, String(sc.tier));
+        ruled = [...new Set([...Object.keys(rr.decided), ...rr.problems.filter(p => p.kind === 'unknown').map(p => p.id)])];
+      }
+      dispatches.push({ n: dispatches.length + 1, toolUseId: t.id, agentId: sub ? sub.agentId : null, type: String(input.subagent_type || ''),
+        ...sc, returned: String(ret || '').trim() !== '', returnOk, problems, ruled });
+    }
+  }
+  const final = run.result && typeof run.result.result === 'string' ? run.result.result : main.lastText;
+  const recorded = recordedVerdicts(final, known);
+  const lastRuling = {};
+  for (const d of dispatches) for (const id of d.ruled) lastRuling[id] = d;
+  const judged = Object.keys(recorded).length ? Object.keys(recorded).filter(id => !/^unaudited$/i.test(recorded[id])) : Object.keys(lastRuling);
+  const byNum = (x, y) => Number(x.slice(1)) - Number(y.slice(1));
+  const count = cls => dispatches.filter(d => d.class === cls).length;
+  const summary = {
+    dispatches: dispatches.length,
+    byteForByte: count('script') + count('verbatim'),
+    script: count('script'),
+    verbatim: count('verbatim'),
+    paraphrased: count('paraphrase'),
+    unknown: count('unknown'),
+    returnsClean: dispatches.filter(d => d.returnOk === true).length,
+    returnsFlagged: dispatches.filter(d => d.returnOk === false).length,
+    returnsUnchecked: dispatches.filter(d => d.returnOk === null).length,
+    otherWords: dispatches.filter(d => d.asks.some(w => !M2_SKEPTIC_WORDS.includes(w))).length,
+    verdictsCalls,
+    verdictsRejected,
+    recorded: Object.keys(recorded).length,
+    ruledFromParaphrase: judged.filter(id => lastRuling[id] && lastRuling[id].class === 'paraphrase').sort(byNum),
+    ruledFromUnknown: judged.filter(id => lastRuling[id] && lastRuling[id].class === 'unknown').sort(byNum),
+    notJudged: judged.filter(id => !lastRuling[id]).sort(byNum),
+  };
+  summary.drift = summary.paraphrased > 0;
+  a.skeptic = { dispatches, recorded, summary };
+  if (!dispatches.length) reasons.push('no-skeptic-dispatch');
+  if (!summary.recorded) warnings.push('no-recorded-verdicts');
+}
+
+// ---------------------------------------------------------------------------
+// The fix role and its oracles (harness research plan Step 11, D3)
+// ---------------------------------------------------------------------------
+//
+// B1 (reports/harness-papers-2026-10-12/b1-fix-verifier.md) showed the fix
+// verifier judging only whether the defect a finding named is gone: a fix that
+// deleted the cited step passed it 3 of 3 times, and nothing asked whether the
+// step still worked. --role fix lets /review's own loop fix the fixture, then
+// judges the tree it left with two oracles per runnable planted bug, kept in
+// scripts/fixtures/quality-check/oracles/ (see its lib.js) and copied to a temp
+// folder only after the session has ended, so the fixer never sees them:
+//   gone   the bug's symptom no longer reproduces
+//   works  the feature the bug sat in still does its job
+// Per bug the run records whether the review raised it, what the run said of its
+// fix (the report's Digest line for each R-number that carries the bug, else the
+// fix verifiers' returns), and the two verdicts. A bug the run said was FIXED that
+// does not pass both oracles is a false FIXED: the miss B1 found, measured.
+
+// The planted bugs with no oracle pair, and why: no script can run them.
+const NOT_RUNNABLE = {
+  'commands-contradiction': 'a prompt file: whether its rule and its step 2 still contradict is a reading of the text, and what an agent does with it is not deterministic, so no script can run it',
+  'copy-unclear-headline': 'README wording: whether a newcomer learns what the app is is a reader\'s judgment, not a behaviour a script can run',
+};
+// The self-test's required pair: a correct fix for one bug and an empty fix (B1's
+// bad-R3 shape: the cited lines deleted, nothing in their place) for another.
+const SELF_TEST_PAIR = { correct: 'code-search-prefix', deletion: 'known-shell-glob' };
+const ORACLE_KINDS = ['gone', 'works'];
+const ORACLE_EXIT = { PASS: 0, FAIL: 1, UNJUDGED: 2 };
+const ORACLE_TIMEOUT_MS = 90 * 1000;
+
+// The oracle files for each planted bug, { id: { gone, works } }, in the answer
+// key's order. Throws on half a pair or an oracle that names no planted bug.
+function oracleSet(answers, dir) {
+  const files = fs.readdirSync(dir || ORACLES).filter(f => /\.(gone|works)\.js$/.test(f));
+  const known = new Set(answers.bugs.map(b => b.id));
+  const stray = files.filter(f => !known.has(f.replace(/\.(gone|works)\.js$/, '')));
+  if (stray.length) throw new Error('oracles that name no planted bug: ' + stray.join(', '));
+  const out = {};
+  for (const b of answers.bugs) {
+    const pair = Object.fromEntries(ORACLE_KINDS.map(k => [k, files.includes(b.id + '.' + k + '.js') ? b.id + '.' + k + '.js' : null]));
+    if (!pair.gone && !pair.works) continue;
+    if (!pair.gone || !pair.works) throw new Error(b.id + ' has a ' + (pair.gone ? 'gone' : 'works') + ' oracle and no ' + (pair.gone ? 'works' : 'gone') + ' oracle');
+    out[b.id] = pair;
+  }
+  return out;
+}
+
+// The report's Digest section (review.md, After the Report, step 6: "R3: FIXED -
+// <check>", "R5: NOT FIXED - <what was tried>", "R7: PAGED - <what needs the
+// human>"), as { R3: 'FIXED', ... }: the first upper-case verdict word after the
+// R-number that starts a line. A line naming no verdict is skipped.
+const DIGEST_VERDICT = /\b(NOT FIXED|FIXED|PAGED|DEFERRED|SKIPPED|UNAUDITED|REVERTED|LOGGED)\b/;
+function parseDigest(md) {
+  const out = {};
+  let inDigest = false;
+  let level = 0;
+  for (const line of String(md || '').split(/\r?\n/)) {
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) {
+      if (/^digest\b/i.test(h[2].replace(/[*_`]/g, '').trim())) { inDigest = true; level = h[1].length; continue; }
+      if (inDigest && h[1].length <= level) inDigest = false;
+      continue;
+    }
+    if (/^\s*[*_]*digest[*_]*\s*:?\s*$/i.test(line)) { inDigest = true; level = 6; continue; }
+    if (!inDigest) continue;
+    const m = /^\s*(?:[-*]\s+)?[`*_]*R(\d+)\b(.*)$/.exec(line);
+    if (!m) continue;
+    const v = DIGEST_VERDICT.exec(m[2]);
+    if (v) out['R' + m[1]] = v[1];
+  }
+  return out;
+}
+
+// What the fix verifiers returned (M3's "R3: FIXED" / "R3: NOT FIXED"), as
+// { verdicts: { R3: 'FIXED' }, dispatches }; a later verifier's word wins.
+function verifierVerdicts(subs) {
+  const started = s => ((s.records || []).find(r => r && r.timestamp) || {}).timestamp || '';
+  const verifiers = subs.filter(s => /(^|:)fix-verifier$/.test((s.meta && s.meta.agentType) || ''))
+    .sort((x, y) => started(x).localeCompare(started(y)));
+  const verdicts = {};
+  for (const s of verifiers) {
+    const text = s.d.handback !== null ? s.d.handback : s.d.lastText;
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const m = /^\s*(?:[-*]\s+)?[`*_]*R(\d+)[`*_]*\s*:\s*[`*_]*(NOT FIXED|FIXED)\b/.exec(line);
+      if (m) verdicts['R' + m[1]] = m[2];
+    }
+  }
+  return { verdicts, dispatches: verifiers.length };
+}
+
+// One bug's outcome from its two verdicts: fixed (gone and works), broken (gone,
+// and the feature no longer works: B1's fake fix), not-fixed (the symptom still
+// reproduces), or unjudged (an oracle could not judge).
+function fixOutcome(gone, works) {
+  if (gone === 'UNJUDGED' || works === 'UNJUDGED' || !gone || !works) return 'unjudged';
+  if (gone === 'FAIL') return 'not-fixed';
+  return works === 'PASS' ? 'fixed' : 'broken';
+}
+
+function analyzeFix(a, run, subs, answers, warnings) {
+  const digest = parseDigest(run.report);
+  const ver = verifierVerdicts(subs);
+  const judged = run.oracles && Array.isArray(run.oracles.oracles) ? run.oracles : null;
+  if (run.report && !Object.keys(digest).length) warnings.push('no-digest');
+  if (!judged) warnings.push('not-judged');
+  const left = ((run.meta || {}).leftovers || []).length;
+  if (left) warnings.push('left-running:' + left);
+  a.fix = { digestLines: Object.keys(digest).length, verifierDispatches: ver.dispatches, oraclePort: judged ? judged.port : null,
+    judgeError: run.oracles && run.oracles.error ? run.oracles.error : null, bugs: {}, falseFixed: [], unjudged: [] };
+  for (const b of answers.bugs) {
+    const rids = ((a.survived || {})[b.id] || []).map(e => e.id);
+    const reported = rids.map(id => ({ id, digest: digest[id] || null, verifier: ver.verdicts[id] || null }));
+    const said = [...new Set(reported.map(r => r.digest || r.verifier).filter(Boolean))];
+    const o = judged ? judged.oracles.find(x => x.id === b.id) : null;
+    const gone = o && o.gone ? o.gone.verdict : null;
+    const works = o && o.works ? o.works.verdict : null;
+    const outcome = NOT_RUNNABLE[b.id] ? 'not-runnable' : !o ? 'not-judged' : fixOutcome(gone, works);
+    const row = {
+      raised: ((a.raised || {})[b.id] || []).length > 0, inReport: rids, reported, said: said.join('/') || null,
+      gone, works, goneLine: o && o.gone ? o.gone.line : null, worksLine: o && o.works ? o.works.line : null, outcome,
+    };
+    row.falseFixed = said.includes('FIXED') && (outcome === 'broken' || outcome === 'not-fixed');
+    a.fix.bugs[b.id] = row;
+    if (row.falseFixed) a.fix.falseFixed.push(b.id);
+    if (outcome === 'unjudged') a.fix.unjudged.push(b.id);
+  }
+}
+
+// The fix run's prompt: no "report only", so the auto loop runs; "no chaining", so
+// it stops after the loop instead of chaining into /document (M14).
+function fixPrompt(lenses, base) {
+  return '/tk:review ' + lenses.join(',') + ' ' + base + '..HEAD no chaining';
+}
+
+// A project tree as the oracles judge it: all of it but .git and the review's own
+// output folders.
+const TREE_SKIP = new Set(['.git', 'reports', 'artifacts']);
+function copyTree(src, dest) {
+  fs.cpSync(src, dest, { recursive: true, dereference: false, verbatimSymlinks: true, filter: s => !TREE_SKIP.has(path.relative(src, s).split(path.sep)[0]) });
+}
+
+// Everything the session changed since the planted change, committed or not,
+// untracked files included, read through a throwaway index so the project's own
+// index is untouched.
+function fixDiff(project, from) {
+  const index = path.join(os.tmpdir(), 'qc-fix-diff-' + process.pid + '-' + Date.now() + '.index');
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    git(['read-tree', 'HEAD'], project, env);
+    git(['add', '-A'], project, env);
+    const r = sh('git', ['diff', '--cached', '--binary', from], { cwd: project, env: { ...GIT_ENV, ...env } });
+    if (r.status !== 0) throw new Error('git diff failed: ' + r.stderr);
+    return r.stdout;
+  } finally {
+    fs.rmSync(index, { force: true });
+  }
+}
+
+// Processes still running with their working folder inside `root` (read from
+// Linux /proc; none elsewhere): what a session left behind, such as a dev server
+// it restarted in the background to see its fix. Left alone, it would hold the
+// oracles' port and keep serving the tree, on every interface (it runs without
+// loopback.js), after the scratch folder is gone.
+function processesUnder(root) {
+  const out = [];
+  let entries;
+  try { entries = fs.readdirSync('/proc'); } catch (e) { return out; }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    let cwd;
+    try { cwd = fs.readlinkSync(path.join('/proc', name, 'cwd')); } catch (e) { continue; }
+    if (!isUnder(cwd, root)) continue;
+    let cmd = '';
+    try { cmd = fs.readFileSync(path.join('/proc', name, 'cmdline'), 'utf8').split('\0').join(' ').trim(); } catch (e) { cmd = ''; }
+    out.push({ pid: Number(name), cmd: cmd.slice(0, 200) });
+  }
+  return out;
+}
+
+// playwright-core for the two browser oracles: this checkout's, else the main
+// checkout's (a side worktree has no node_modules of its own); null when neither.
+function playwrightCore() {
+  for (const root of [...new Set([REPO, mainCheckout()])]) {
+    const p = path.join(root, '.claude', 'scripts', 'node_modules', 'playwright-core');
+    if (fs.existsSync(path.join(p, 'package.json'))) return p;
+  }
+  return null;
+}
+
+// Runs each oracle pair (only those named in opts.only, when given) one at a time,
+// each oracle on its own fresh copy of `tree`, starting servers on `port`. The
+// oracles go to a temp folder first, with loopback.js beside them. A verdict counts
+// only when the oracle's line and exit code agree; anything else is UNJUDGED.
+// Resolves { port, at, playwright, oracles: [{ id, gone, works }], notRunnable },
+// each verdict { verdict, line, exit }. opts: answers, only, onResult(id, kind,
+// verdict), and dir (another oracle folder, for the tests).
+async function judgeTree(tree, port, opts) {
+  const o = opts || {};
+  const src = o.dir || ORACLES;
+  const set = oracleSet(o.answers || loadAnswers(), src);
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-judge.'));
+  const pw = playwrightCore();
+  const env = { ...process.env, QC_PLAYWRIGHT_CORE: pw || '' };
+  const browsers = path.join(REAL_HOME, '.cache', 'ms-playwright');
+  if (!env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(browsers)) env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+  const results = [];
+  try {
+    const dir = path.join(work, 'oracles');
+    copyDir(src, dir);
+    fs.copyFileSync(LOOPBACK_PRELOAD, path.join(dir, 'loopback.js'));
+    for (const [id, files] of Object.entries(set)) {
+      if (o.only && !o.only.includes(id)) continue;
+      const row = { id };
+      for (const kind of ORACLE_KINDS) {
+        const copy = path.join(work, 'tree-' + id + '-' + kind);
+        copyTree(tree, copy);
+        const r = await runGroup(process.execPath, [path.join(dir, files[kind]), copy, String(port)], { cwd: work, env }, ORACLE_TIMEOUT_MS, 2000);
+        const line = (r.stdout.trim().split('\n').filter(Boolean).pop() || '').trim();
+        const said = /^(PASS|FAIL|UNJUDGED)\b/.exec(line);
+        const verdict = said && ORACLE_EXIT[said[1]] === r.status ? said[1] : 'UNJUDGED';
+        row[kind] = { verdict, line: said ? line : 'no verdict line (exit ' + r.status + (r.timedOut ? ', timed out' : '') + '): ' + (r.stderr.trim().split('\n').pop() || '').slice(0, 200), exit: r.status };
+        if (o.onResult) o.onResult(id, kind, row[kind]);
+        fs.rmSync(copy, { recursive: true, force: true });
+      }
+      results.push(row);
+    }
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+  return { port, at: new Date().toISOString(), playwright: pw, oracles: results, notRunnable: NOT_RUNNABLE };
+}
+
+// Applies self-test-fixes.js edits to a tree: { file, find, replace }, where the
+// text must be there exactly once, or { file, remove: true }.
+function applyEdits(tree, edits) {
+  for (const e of edits) {
+    const abs = path.join(tree, e.file);
+    if (e.remove) { fs.rmSync(abs); continue; }
+    const text = fs.readFileSync(abs, 'utf8');
+    const at = text.indexOf(e.find);
+    if (at === -1 || text.indexOf(e.find, at + 1) !== -1) throw new Error('a self-test edit to ' + e.file + ' does not match the tree exactly once: ' + JSON.stringify(e.find.slice(0, 80)));
+    fs.writeFileSync(abs, text.slice(0, at) + e.replace + text.slice(at + e.find.length));
+  }
+}
+
+// A free loopback port that is not PORT, the one a real run's server takes.
+async function freePort() {
+  for (;;) {
+    const p = await new Promise((resolve, reject) => {
+      const s = require('net').createServer();
+      s.once('error', reject);
+      s.listen(0, '127.0.0.1', () => { const n = s.address().port; s.close(() => resolve(n)); });
+    });
+    if (p !== PORT) return p;
+  }
+}
+
 // Was `id` caught in analysis `a`?
 function caught(a, id) {
   if (a.role === 'mapper') return (a.covered || []).includes(id);
@@ -769,8 +1599,198 @@ function mean(xs) {
   return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
 }
 
+// ---------------------------------------------------------------------------
+// The setting a run measured (research plan item 2, P1-C1)
+// ---------------------------------------------------------------------------
+//
+// A score means something only when one thing moved between its two sets. Both
+// issue 221 A/Bs and the 7.6.0 catch-rate check pooled baselines whose build,
+// finder effort and Claude Code version all moved, and their verdicts had to be
+// corrected by hand afterwards (ab-index-mapper.md, ab-review-deps-finder.md).
+// A run's setting is { dir, role, harness, arm, labels }:
+//   harness  build    the hash of the plugin files the role's path reads (pathHash)
+//            session  the session's model and effort
+//            claude   the Claude Code version
+//            fixture  the review fixture's hash, as run.json records it
+//            prompt   the mapper's dispatch prompt, hashed from the saved transcript
+//            chunk    the mapper's chunk: its source commit and file list
+//   arm      { agent: { model, effort } } for each measured agent
+// Every value may be null: a field the run's folder cannot supply is unknown,
+// printed so, and never counted as a difference.
+
+// The plugin files each role's measured path reads, relative to the plugin root.
+// For a review: the review command and its two runner scripts, the shared review
+// fragments, the criteria, each finder with the two skills it preloads, and the
+// skeptic (the review-path list of research item 7, P1-C4, plus the preloaded
+// skills, which are part of every finder's prompt). For the mapper: /index, whose
+// Step 3 template is the dispatch prompt, and the mapper's own file.
+const PATH_FILES = {
+  review: /^(scripts\/(run-checks|merge-findings)\.js|commands\/review\.md|skills\/shared\/(hitl-loop|report-format|dispatch-format|finding-contract|criteria-[a-z]+)\.md|skills\/(review-[a-z]+-criteria|dispatch-contract)\/SKILL\.md|agents\/(review-[a-z]+-finder|audit-skeptic)\.md)$/,
+  mapper: /^(commands\/index\.md|agents\/index-mapper\.md)$/,
+};
+
+// An agent file without its model and effort lines. Those lines are the arm,
+// which the arm line records, so a pin change alone never reads as a new build,
+// and a file hashes the same before and after the arm's patch (patchAgent only
+// rewrites or adds those two lines).
+function stripArmLines(text) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!fm) return text;
+  const kept = fm[1].split(/\r?\n/).filter(l => !/^(model|effort):/.test(l));
+  return '---\n' + kept.join('\n') + '\n---' + text.slice(fm[0].length);
+}
+
+// The hash of a role's path files, from { relPath: Buffer|string } (paths relative
+// to the plugin root, any other path ignored): 16 hex digits, or null when none of
+// the role's files is there.
+function pathHash(role, files) {
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const rels = Object.keys(files || {}).filter(r => re.test(r)).sort();
+  if (rels.length === 0) return null;
+  const h = crypto.createHash('sha256');
+  for (const rel of rels) {
+    const text = Buffer.isBuffer(files[rel]) ? files[rel].toString('utf8') : String(files[rel]);
+    h.update(rel + '\0' + (/^agents\//.test(rel) ? stripArmLines(text) : text) + '\0');
+  }
+  return h.digest('hex').slice(0, 16);
+}
+
+// The settings fields in print order, with the words a reader sees.
+const SETTING_FIELDS = [['build', 'build'], ['session', 'session model/effort'], ['claude', 'Claude Code'],
+  ['fixture', 'fixture'], ['prompt', 'mapper prompt hash'], ['chunk', 'mapper chunk']];
+function knownValues(values) {
+  return [...new Set(values.filter(v => v !== null && v !== undefined))];
+}
+
+// The short name of a measured agent: review-deps-finder -> deps.
+function agentShort(name) {
+  return String(name).replace(/^review-|-finder$/g, '');
+}
+
+// How a field's value reads, with the runs that carry it: a build hash is shown
+// with the commits (or tree builds) it was hashed from.
+function settingValue(field, value, runs) {
+  if (field !== 'build') return String(value);
+  const labels = knownValues(runs.filter(r => r.harness.build === value).map(r => (r.labels || {}).build));
+  return (labels.join('+') || 'build') + ' (path ' + String(value).slice(0, 8) + ')';
+}
+
+// The two sets' settings compared. Returns { kind, confounded, notUniform, differs,
+// armMoved, confounds, summary }: kind is 'same', 'model' (the arm moved, the harness
+// held), 'harness' (the build moved, and the mapper prompt with it, the arm held) or
+// 'confounded'; confounds names each field that makes it so ("baseline: build",
+// "between: Claude Code"); summary is the sentence the score prints.
+function compareSettings(candidate, baseline) {
+  const sets = { candidate, baseline };
+  const notUniform = [];
+  const one = {};
+  for (const [name, runs] of Object.entries(sets)) {
+    one[name] = { harness: {}, arm: {} };
+    for (const [field, label] of SETTING_FIELDS) {
+      const v = knownValues(runs.map(r => r.harness[field]));
+      if (v.length > 1) notUniform.push({ set: name, field, label, values: v.map(x => settingValue(field, x, runs)) });
+      one[name].harness[field] = v.length === 1 ? v[0] : null;
+    }
+    const agents = knownValues(runs.flatMap(r => Object.keys(r.arm || {})));
+    for (const ag of agents) one[name].arm[ag] = {};
+    for (const part of ['model', 'effort']) {
+      // Agents that share one spread read as one group: "8 finders high, medium".
+      const groups = new Map();
+      for (const ag of agents) {
+        const v = knownValues(runs.map(r => ((r.arm || {})[ag] || {})[part]));
+        one[name].arm[ag][part] = v.length === 1 ? v[0] : null;
+        if (v.length > 1) groups.set(v.join(', '), [...(groups.get(v.join(', ')) || []), agentShort(ag)]);
+      }
+      if (groups.size) {
+        const values = [...groups.entries()].map(([v, ags]) => (ags.length === 1 ? ags[0] : ags.length + ' agents (' + ags.join(', ') + ')') + ': ' + v);
+        notUniform.push({ set: name, field: 'arm ' + part, label: 'arm ' + part, values });
+      }
+    }
+  }
+  const differs = [];
+  for (const [field, label] of SETTING_FIELDS) {
+    const c = one.candidate.harness[field];
+    const b = one.baseline.harness[field];
+    if (c !== null && b !== null && c !== b) differs.push({ field, label, candidate: settingValue(field, c, candidate), baseline: settingValue(field, b, baseline) });
+  }
+  const armMoved = [];
+  for (const ag of knownValues([...Object.keys(one.candidate.arm), ...Object.keys(one.baseline.arm)])) {
+    for (const part of ['model', 'effort']) {
+      const c = (one.candidate.arm[ag] || {})[part];
+      const b = (one.baseline.arm[ag] || {})[part];
+      if (c !== null && c !== undefined && b !== null && b !== undefined && c !== b) armMoved.push({ agent: ag, part, candidate: c, baseline: b });
+    }
+  }
+  const confounds = notUniform.map(n => n.set + ': ' + n.label);
+  // The mapper prompt is read from the build, so it may move with the build (or
+  // where either build is unknown); on one recorded build, a new prompt is a
+  // second thing moving.
+  const buildHeld = one.candidate.harness.build !== null && one.candidate.harness.build === one.baseline.harness.build;
+  const buildField = f => f === 'build' || (f === 'prompt' && !buildHeld);
+  let kind;
+  if (armMoved.length) {
+    kind = 'model';
+    for (const d of differs) confounds.push('between: ' + d.label);
+  } else if (differs.length) {
+    kind = differs.some(d => buildField(d.field)) ? 'harness' : 'same';
+    for (const d of differs) if (!buildField(d.field)) confounds.push('between: ' + d.label);
+  } else kind = 'same';
+  const confounded = confounds.length > 0;
+  // The sentence: what kind of A/B it is, then whatever else moved.
+  const armWords = () => {
+    const groups = new Map();
+    for (const m of armMoved) {
+      const k = m.part + ' ' + m.candidate + ' vs ' + m.baseline;
+      groups.set(k, [...(groups.get(k) || []), agentShort(m.agent)]);
+    }
+    return [...groups.entries()].map(([k, ags]) => (ags.length === 1 ? ags[0] : ags.length + ' agents') + ' ' + k).join('; ');
+  };
+  const diffWords = list => list.map(d => d.label + ' ' + d.candidate + ' vs ' + d.baseline).join(', ');
+  // "Held" is said only when both sets are uniform, since otherwise nothing is.
+  const held = notUniform.length === 0;
+  const parts = [];
+  if (kind === 'model') {
+    parts.push('a model A/B, arm ' + armWords() + (differs.length ? ', with the harness moved too: ' + diffWords(differs) : held ? ', harness held' : ''));
+  } else if (kind === 'harness') {
+    const extra = differs.filter(d => !buildField(d.field));
+    parts.push('a harness A/B, ' + diffWords(differs.filter(d => buildField(d.field))) + (held ? ', arm held' : '') + (extra.length ? ', with more moved too: ' + diffWords(extra) : ''));
+  } else if (differs.length) {
+    parts.push('between the sets: ' + diffWords(differs));
+  } else if (held) parts.push('the same setting on both sides');
+  for (const n of notUniform) parts.push('the ' + n.set + ' set is not uniform in ' + n.label + ': ' + n.values.join(' | '));
+  return { kind: confounded ? 'confounded' : kind, confounded, notUniform, differs, armMoved, confounds, summary: parts.join('; ') };
+}
+
+// True unless a recorded field of x and y differs: two runs on one setting.
+function sameSetting(x, y) {
+  for (const [field] of SETTING_FIELDS) {
+    const a = x.harness[field];
+    const b = y.harness[field];
+    if (a !== null && a !== undefined && b !== null && b !== undefined && a !== b) return false;
+  }
+  for (const ag of knownValues([...Object.keys(x.arm || {}), ...Object.keys(y.arm || {})])) {
+    for (const part of ['model', 'effort']) {
+      const a = ((x.arm || {})[ag] || {})[part];
+      const b = ((y.arm || {})[ag] || {})[part];
+      if (a !== null && a !== undefined && b !== null && b !== undefined && a !== b) return false;
+    }
+  }
+  return true;
+}
+
+// Was `id` lost to the harness in analysis `a`: raised, then killed only by
+// checks the runner refused (P1-C2)? A caught bug never is.
+function harnessLostIn(a, id) {
+  return Array.isArray(a.harnessLost) && a.harnessLost.includes(id) && !caught(a, id);
+}
+
 // Scores one candidate set against a baseline set (arrays of analyses) per the
 // rules in the header. `ids` lists what can be caught: bug ids, or chunk files.
+// opts: knownId and requireKnown (the known-answer bar); allowDrift, the reason a
+// confounded comparison is scored anyway; pool, saved analyses to draw the noise
+// lines from. An analysis that carries `setting` (runSetting) takes part in the
+// comparison check; when any run lacks one, the check is skipped, as for runs
+// scored before the settings existed.
 function scoreSets(candidate, baseline, ids, opts) {
   const o = opts || {};
   const vb = baseline.filter(x => x.valid);
@@ -778,25 +1798,57 @@ function scoreSets(candidate, baseline, ids, opts) {
   const s = {
     baselineRuns: baseline.length, baselineValid: vb.length, candidateRuns: candidate.length, candidateValid: vc.length,
     invalid: [...baseline, ...candidate].filter(x => !x.valid).map(x => ({ dir: x.dir, reasons: x.reasons })),
-    stable: [], noisy: [], never: [], perId: {}, failed: [], single: [], verdict: '', why: [],
+    stable: [], noisy: [], never: [], perId: {}, failed: [], single: [], unjudged: [], harnessBugs: [], weak: [], noise: {},
+    compare: null, drift: null, verdict: '', why: [],
     costUsd: mean(vc.map(x => x.costUsd)), baselineCostUsd: mean(vb.map(x => x.costUsd)),
     wallMs: mean(vc.map(x => x.wallMs)), baselineWallMs: mean(vb.map(x => x.wallMs)),
   };
   if (vb.length === 0) { s.verdict = 'INVALID'; s.why.push('no valid baseline run'); return s; }
   if (vc.length === 0) { s.verdict = 'INVALID'; s.why.push('no valid candidate run'); return s; }
+  if (vc.every(x => x.setting) && vb.every(x => x.setting)) s.compare = compareSettings(vc.map(x => x.setting), vb.map(x => x.setting));
+  s.harnessLostRuns = vc.flatMap(x => (x.harnessLost || []).filter(id => harnessLostIn(x, id))
+    .map(id => ({ dir: x.dir, id, kills: ((x.killedAs || {})[id] || { kills: [] }).kills.map(k => k.id + ' ' + k.verdict) })));
   for (const id of ids) {
+    // A run that lost the bug to the harness is left out of its count, on either
+    // side, as an INVALID run is left out of the whole score: one refused check in
+    // a baseline run must not turn a stable bug noisy and so skip its bar.
+    const lostB = vb.filter(x => harnessLostIn(x, id)).length;
+    const countedB = vb.length - lostB;
     const inB = vb.filter(x => caught(x, id)).length;
     const inC = vc.filter(x => caught(x, id)).length;
+    const lostC = vc.filter(x => harnessLostIn(x, id)).length;
+    const counted = vc.length - lostC;
     const raisedC = vc.filter(x => x.raised && x.raised[id] && x.raised[id].length > 0).length;
-    s.perId[id] = { baseline: inB + '/' + vb.length, candidate: inC + '/' + vc.length, raisedCandidate: raisedC + '/' + vc.length };
-    if (inB === vb.length) s.stable.push(id);
+    s.perId[id] = { baseline: inB + '/' + countedB, baselineHarnessLost: lostB, candidate: inC + '/' + counted, raisedCandidate: raisedC + '/' + vc.length, harnessLost: lostC };
+    if (countedB > 0 && inB === countedB) s.stable.push(id);
     else if (inB > 0) s.noisy.push(id);
     else s.never.push(id);
   }
   for (const id of s.stable) {
-    const misses = vc.length - vc.filter(x => caught(x, id)).length;
+    const lostC = vc.filter(x => harnessLostIn(x, id)).length;
+    const counted = vc.length - lostC;
+    const misses = counted - vc.filter(x => caught(x, id)).length;
     if (misses >= 2) s.failed.push(id);
-    else if (misses === 1 && vc.length === 1) s.single.push(id);
+    else if (lostC >= 2) s.harnessBugs.push(id);
+    // One miss in the only counted run, or no counted run at all: run once more.
+    else if (misses === 1 && counted === 1) s.single.push(id);
+    else if (counted === 0) s.unjudged.push(id);
+  }
+  // The noise lines: each stable bug against every saved valid run on the
+  // baseline's setting (any of its settings, when it is not uniform).
+  if (Array.isArray(o.pool) && vb.every(x => x.setting)) {
+    const role = vb[0].role;
+    const pool = o.pool.filter(p => p.valid && p.role === role && p.setting && vb.some(b => sameSetting(p.setting, b.setting)));
+    s.poolRuns = pool.length;
+    for (const id of s.stable) {
+      const runs = pool.filter(p => !harnessLostIn(p, id));
+      s.noise[id] = { caught: runs.filter(p => caught(p, id)).length, runs: runs.length };
+    }
+    s.weak = s.failed.filter(id => s.noise[id] && s.noise[id].caught < s.noise[id].runs);
+  }
+  if (s.compare && s.compare.confounded) {
+    if (o.allowDrift) s.drift = { reason: o.allowDrift, confounds: s.compare.confounds };
+    else { s.verdict = 'CONFOUNDED'; s.why.push(s.compare.summary); return s; }
   }
   const breakRuns = vc.filter(x => (x.contractBreaks || 0) > 0).length;
   if (o.knownId && o.requireKnown && !s.stable.includes(o.knownId)) {
@@ -804,12 +1856,19 @@ function scoreSets(candidate, baseline, ids, opts) {
     s.why.push('the known-answer case is not a stable baseline catch, so the bar for this arm cannot be applied');
     return s;
   }
-  if (s.failed.length) s.why.push('missed twice: ' + s.failed.join(', '));
+  if (s.failed.length) {
+    s.why.push('missed twice: ' + s.failed.map(id => s.weak.includes(id)
+      ? id + ' (weak: the baseline setting caught it in only ' + s.noise[id].caught + ' of ' + s.noise[id].runs + ' saved runs)'
+      : id).join(', '));
+  }
   if (breakRuns >= 2) s.why.push('contract breaks in ' + breakRuns + ' runs');
+  if (s.harnessBugs.length) s.why.push('harness-lost in two runs: ' + s.harnessBugs.join(', ') + ' (the runner refused the check; fix the runner, then rerun)');
   if (s.failed.length || breakRuns >= 2) { s.verdict = 'FAIL'; return s; }
-  if (s.single.length || (breakRuns === 1 && vc.length === 1)) {
+  if (s.harnessBugs.length) { s.verdict = 'HARNESS'; return s; }
+  if (s.single.length || s.unjudged.length || (breakRuns === 1 && vc.length === 1)) {
     s.verdict = 'RERUN';
     if (s.single.length) s.why.push('missed once in a single run: ' + s.single.join(', '));
+    if (s.unjudged.length) s.why.push('lost to the harness in its only run: ' + s.unjudged.join(', '));
     if (breakRuns === 1 && vc.length === 1) s.why.push('one contract break in a single run');
     return s;
   }
@@ -872,11 +1931,163 @@ function loadRun(dir) {
     reportFile,
     projectGit: readJson(gitFile),
     plans,
+    // A fix run's oracle verdicts on its final tree (judgeTree), or null.
+    oracles: readJson(path.join(dir, 'oracles.json')),
   };
 }
 
 function loadAnswers() {
   return JSON.parse(fs.readFileSync(ANSWERS_FILE, 'utf8'));
+}
+
+// A role's path files in a build folder, as { relPath: Buffer }. Read at run time,
+// so a tree build, which leaves no commit behind, still records its build hash.
+function dirPathFiles(dir, role) {
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const out = {};
+  for (const f of walk(dir)) {
+    const rel = path.relative(dir, f).split(path.sep).join('/');
+    if (re.test(rel)) out[rel] = fs.readFileSync(f);
+  }
+  return out;
+}
+
+// The same files at a commit of this repository, through git (one ls-tree, one
+// cat-file), or null when the commit is not in this clone. Cached per commit.
+// Only a commit id reaches git: run.json is data, never an option.
+const SHA_RE = /^[0-9a-f]{7,40}$/;
+const gitPathCache = new Map();
+function gitPathFiles(sha, role) {
+  const key = sha + ':' + role;
+  if (gitPathCache.has(key)) return gitPathCache.get(key);
+  if (!SHA_RE.test(String(sha))) return null;
+  let out = null;
+  const re = PATH_FILES[role] || PATH_FILES.review;
+  const ls = spawnSync('git', ['ls-tree', '-r', sha, '--', 'plugin/'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (ls.status === 0) {
+    const want = ls.stdout.split('\n').map(l => /^\d+ blob ([0-9a-f]+)\t(.+)$/.exec(l)).filter(Boolean)
+      .map(m => ({ oid: m[1], rel: m[2].replace(/^plugin\//, '') })).filter(e => re.test(e.rel));
+    out = {};
+    if (want.length) {
+      const cat = spawnSync('git', ['cat-file', '--batch'], { cwd: REPO, env: GIT_ENV, input: want.map(e => e.oid).join('\n') + '\n', maxBuffer: 64 * 1024 * 1024 });
+      const buf = cat.status === 0 ? cat.stdout : null;
+      let at = 0;
+      for (const e of want) {
+        // Each object comes back as "<oid> blob <size>\n<bytes>\n".
+        const nl = buf ? buf.indexOf(10, at) : -1;
+        const head = nl === -1 ? [] : buf.subarray(at, nl).toString('utf8').split(' ');
+        if (head[1] !== 'blob') { out = null; break; }
+        const size = Number(head[2]);
+        out[e.rel] = buf.subarray(nl + 1, nl + 1 + size);
+        at = nl + 1 + size + 1;
+      }
+    }
+  }
+  gitPathCache.set(key, out);
+  return out;
+}
+
+// One agent file's text at a commit, or null.
+const gitAgentCache = new Map();
+function gitAgentText(sha, name) {
+  const key = sha + ':' + name;
+  if (!SHA_RE.test(String(sha))) return null;
+  if (!gitAgentCache.has(key)) {
+    const r = spawnSync('git', ['show', sha + ':plugin/agents/' + name + '.md'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8' });
+    gitAgentCache.set(key, r.status === 0 ? r.stdout : null);
+  }
+  return gitAgentCache.get(key);
+}
+
+// The mapper's dispatch prompt as the session sent it, hashed with its whitespace
+// collapsed (the same reading the prompt-mismatch check makes), or null when the
+// transcript does not hold the dispatch.
+function mapperPromptHash(run) {
+  const sub = (run.subagents || []).find(x => /index-mapper$/.test((x.meta && x.meta.agentType) || ''));
+  if (!sub || !sub.meta || !sub.meta.toolUseId) return null;
+  const call = digestRecords(run.main || []).toolUses.find(t => (t.name === 'Agent' || t.name === 'Task') && t.id === sub.meta.toolUseId);
+  if (!call || typeof call.input.prompt !== 'string') return null;
+  return shortHash(call.input.prompt.replace(/\s+/g, ' ').trim());
+}
+
+// Each measured agent's { model, effort }: the arm's patch, else the agent as the
+// build shipped it (run.json's shipped list, else the agent file at the build's
+// commit, the way armSettings reads it: no effort line is high). The model is the
+// family the run expected the agent to answer on when run.json records one
+// (expect.finderModels, expect.mapper: they carry the review's mode, so a cheap run
+// reads as Sonnet), else the file's alias, else (inherit, no line) the session's.
+// Either part is null when the folder cannot supply it.
+function armOf(meta, role) {
+  const names = role === 'mapper' ? ['index-mapper'] : FINDER_KINDS.map(k => 'review-' + k + '-finder');
+  const expect = meta.expect || {};
+  const sessionFamily = familyOf((meta.session || {}).model);
+  const sha = meta.build && meta.build.sha;
+  const out = {};
+  for (const name of names) {
+    const rec = (meta.patch || []).find(x => x.agent === name) || (meta.shipped || []).find(x => x.agent === name);
+    let model = null;
+    let effort = null;
+    let fileKnown = false;
+    if (rec) { model = rec.model || null; effort = rec.effort || null; fileKnown = true; }
+    else if (sha) {
+      const text = gitAgentText(sha, name);
+      if (text !== null) { model = frontmatterValue(text, 'model'); effort = frontmatterValue(text, 'effort') || 'high'; fileKnown = true; }
+    }
+    const kind = /^review-([a-z]+)-finder$/.exec(name);
+    const expected = kind ? (expect.finderModels || {})[kind[1]] : (role === 'mapper' ? expect.mapper : null);
+    let family = expected || familyOf(model);
+    if (!family && fileKnown) family = sessionFamily;
+    out[name] = { model: family || null, effort: effort || null };
+  }
+  return out;
+}
+
+// A run's setting (see "The setting a run measured"), from its loaded folder.
+// The build hash is the one run.json recorded at run time (meta.build.pathHashes),
+// else the one git computes from the build's commit; a tree build from before the
+// hashes were recorded has neither, so its build is unknown.
+function runSetting(run) {
+  const meta = run.meta || {};
+  const role = meta.role === 'mapper' ? 'mapper' : 'review';
+  const build = meta.build || {};
+  const session = meta.session || {};
+  let buildHash = (build.pathHashes && build.pathHashes[role]) || null;
+  if (!buildHash && build.sha) {
+    const files = gitPathFiles(build.sha, role);
+    buildHash = files ? pathHash(role, files) : null;
+  }
+  const cc = /(\d+\.\d+\.\d+)/.exec(String(session.claude || ''));
+  const chunk = role === 'mapper' && meta.chunk ? String(meta.chunk.sourceRef || '?').slice(0, 7) + ':' + shortHash((meta.chunk.files || []).join('\n')).slice(0, 8) : null;
+  return {
+    dir: run.dir, role,
+    harness: {
+      build: buildHash,
+      session: session.model && session.effort ? session.model + '/' + session.effort : null,
+      claude: cc ? cc[1] : null,
+      fixture: meta.fixture || null,
+      prompt: role === 'mapper' ? mapperPromptHash(run) : null,
+      chunk,
+    },
+    arm: armOf(meta, role),
+    labels: { build: build.sha ? build.sha.slice(0, 7) : build.spec ? build.spec + (build.version ? ' ' + build.version : '') : null },
+  };
+}
+
+// The two lines a score prints for a run: its harness and its arm. A field the
+// folder could not supply reads "unknown".
+function settingLines(setting) {
+  const h = setting.harness;
+  const u = v => (v === null || v === undefined ? 'unknown' : v);
+  const parts = ['build ' + (h.build ? settingValue('build', h.build, [setting]) : 'unknown' + (setting.labels.build ? ' (' + setting.labels.build + ', no recorded hash)' : '')),
+    'session ' + u(h.session), 'Claude Code ' + u(h.claude), 'fixture ' + u(h.fixture)];
+  if (setting.role === 'mapper') parts.push('prompt ' + u(h.prompt), 'chunk ' + u(h.chunk));
+  const groups = new Map();
+  for (const [ag, v] of Object.entries(setting.arm || {})) {
+    const k = (v.model || 'unknown') + '/' + (v.effort || 'unknown');
+    groups.set(k, [...(groups.get(k) || []), agentShort(ag)]);
+  }
+  const arm = [...groups.entries()].map(([k, ags]) => ags.join(', ') + ' ' + k).join('; ');
+  return { harness: parts.join(', '), arm: arm || 'unknown' };
 }
 
 // ---------------------------------------------------------------------------
@@ -975,6 +2186,17 @@ function prepareBuild(spec, home, tmp) {
   // browse.js needs playwright-core; a real install has it at the plugin root.
   if (fs.existsSync(NODE_MODULES) && !fs.existsSync(path.join(dest, 'node_modules'))) fs.symlinkSync(NODE_MODULES, path.join(dest, 'node_modules'));
   return { dir: dest, version, sha };
+}
+
+// The build hash of each role's path files, taken before the arm's patch (the
+// patch touches only lines the hash leaves out anyway). A read that fails leaves
+// null, which the score prints as unknown; it never stops the run.
+function buildPathHashes(dir) {
+  const out = {};
+  for (const role of Object.keys(PATH_FILES)) {
+    try { out[role] = pathHash(role, dirPathFiles(dir, role)); } catch (e) { out[role] = null; }
+  }
+  return out;
 }
 
 // The arm's settings for the measured agents, read against the build's files.
@@ -1266,7 +2488,7 @@ function budgetCheck(role, maxUsd) {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
-  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper');
+  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper' || r.role === 'skeptic' || r.role === 'fix');
   if (!approval) {
     if (measured.length === 0) return { ok: true, spent, note: 'first measured run: no approval needed yet; its cost sizes the request' };
     return { ok: false, spent, page: 'Budget stop: the first measured run is done and the owner has not approved a budget. Ask the owner, then record the answer with --approve <usd>.' };
@@ -1360,10 +2582,165 @@ const PLAN_SUMMARY = 'Exploration summary, approved by the owner; write the plan
   + 'Decisions: a word is a run of characters between spaces; an empty note shows "0 words" and a one-word note "1 word". '
   + 'Models: cheap. Open questions: none.';
 
+// The main checkout of this clone (the folder holding the shared .git), where the
+// gitignored evidence lives, whichever worktree runs this script; else this one.
+function mainCheckout() {
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: REPO, env: GIT_ENV, encoding: 'utf8' });
+  return r.status === 0 && r.stdout.trim() ? path.dirname(r.stdout.trim()) : REPO;
+}
+
+// The skeptic replay's two input folders, resolved and checked before anything
+// is spent: a missing one is a usage error (exit 2).
+function skepticInputs(o) {
+  const root = mainCheckout();
+  o.evidence = path.resolve(o.evidence || path.join(root, SKEPTIC_REPLAY.evidence));
+  o.receipts = path.resolve(o.receipts || path.join(root, SKEPTIC_REPLAY.receipts));
+  const log = path.join(o.evidence, SKEPTIC_REPLAY.session + '.jsonl');
+  if (!fs.existsSync(log)) usage('--role skeptic needs the evidence folder that holds ' + path.basename(log) + ' (--evidence <dir>); not found in ' + o.evidence);
+  if (!fs.existsSync(path.join(o.receipts, 'scope.json'))) usage('--role skeptic needs the replayed run\'s receipts folder with its scope.json (--receipts <dir>); not found in ' + o.receipts);
+}
+
+// The scratch project as the replayed review had it: a git checkout of the range
+// end, and the plans its findings and receipt outputs cite. Session 1cefa1a7's
+// skeptics ran `git log <base>..<end>` and read those plans; with a bare archive
+// and no plans (they are gitignored), the first replay's skeptics searched the
+// disk and read both from the owner's checkout. o { project, end, repo, plansFrom,
+// texts }: `project` already holds the end's tree. This fetches the end's own
+// history from `repo` into a fresh repo there (no remote, no tags, nothing after
+// the end), and copies each cited plan from `plansFrom` with its modified time,
+// since today's copy may postdate the dispatch. Returns what run.json records.
+function replayCheckout(o) {
+  const sha = git(['rev-parse', '--verify', o.end + '^{commit}'], o.repo);
+  git(['init', '-q'], o.project);
+  git(['fetch', '-q', '--no-tags', o.repo, sha], o.project);
+  git(['update-ref', 'refs/heads/main', sha], o.project);
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], o.project);
+  git(['reset', '-q'], o.project);
+  git(['checkout', '-q', '--', '.'], o.project); // restores any file the archive left out (export-ignore)
+  const cited = [...new Set(o.texts.join('\n').match(/plans\/PLAN-[A-Za-z0-9._-]+\.md/g) || [])].sort();
+  const plans = cited.map(rel => {
+    const src = path.join(o.plansFrom, rel);
+    if (!fs.existsSync(src)) return { path: rel, missing: true };
+    fs.mkdirSync(path.join(o.project, 'plans'), { recursive: true });
+    fs.copyFileSync(src, path.join(o.project, rel));
+    const st = fs.statSync(src);
+    return { path: rel, bytes: st.size, modified: st.mtime.toISOString() };
+  });
+  return { head: sha, commits: Number(git(['rev-list', '--count', 'HEAD'], o.project)), plans };
+}
+
+// The scratch project and the merge folder a skeptic replay hands the session,
+// built from the evidence: o { evidence, receipts, project, tmp, buildDir }.
+//   - the code the run reviewed: a git archive of its scope's range end, as the
+//     mapper role archives its source commit;
+//   - the finders' lines from the session log, Phase 3's one key merge applied,
+//     the old project root rewritten to the scratch project, in findings.jsonl;
+//   - the build's own merge-findings.js run on it (merged.jsonl, merge-stderr.txt),
+//     as that build's Phase 3 runs it, and its numbering checked against the run's;
+//   - tier 1's saved outputs for those lines and the scope, the root rewritten, in
+//     the scratch project's reports/receipts/<the run's stamp>/.
+//   - the range end's history and the cited plans, by replayCheckout above.
+// Returns what run.json records as `replay`; throws on any mismatch, before a
+// session starts.
+function prepareSkepticReplay(o) {
+  const scopeText = fs.readFileSync(path.join(o.receipts, 'scope.json'), 'utf8');
+  const scope = JSON.parse(scopeText);
+  const range = scope.range || {};
+  if (!SHA_RE.test(String(range.base)) || !SHA_RE.test(String(range.end))) throw new Error('the saved scope.json names no commit range');
+  const fromRoot = scope.root || scope.cwd;
+  if (!fromRoot) throw new Error('the saved scope.json names no project root to rewrite');
+  fs.mkdirSync(o.project, { recursive: true });
+  const tar = path.join(o.tmp, 'source.tar');
+  git(['archive', '-o', tar, range.end], REPO);
+  const x = sh('tar', ['-xf', tar, '-C', o.project]);
+  if (x.status !== 0) throw new Error('tar failed: ' + x.stderr);
+
+  const found = finderLinesFromLog(readJsonl(path.join(o.evidence, SKEPTIC_REPLAY.session + '.jsonl')), SKEPTIC_REPLAY.firstDispatch);
+  if (found.lines.length !== SKEPTIC_REPLAY.raw) throw new Error('the log gave ' + found.lines.length + ' finder lines, not the run\'s ' + SKEPTIC_REPLAY.raw);
+  const shared = shareKeys(found.lines.map(l => l.text), SKEPTIC_REPLAY.keyMerges);
+  const texts = shared.texts.map(t => rewriteRoot(t, fromRoot, o.project));
+
+  const mergeDir = path.join(o.tmp, 'review-merge');
+  fs.mkdirSync(mergeDir, { recursive: true });
+  const findingsFile = path.join(mergeDir, 'findings.jsonl');
+  fs.writeFileSync(findingsFile, texts.join('\n') + '\n');
+  const m = sh(process.execPath, [path.join(o.buildDir, 'scripts', 'merge-findings.js'), findingsFile], { cwd: o.project });
+  if (m.status !== 0) throw new Error('the build\'s merge-findings.js failed: ' + (m.stderr || m.stdout));
+  fs.writeFileSync(path.join(mergeDir, 'merged.jsonl'), m.stdout);
+  fs.writeFileSync(path.join(mergeDir, 'merge-stderr.txt'), m.stderr);
+  const mergeSummary = (m.stderr.split('\n').filter(l => /^merge-findings: \d+ raw/.test(l)).pop() || '').trim();
+  const canon = texts.map(t => JSON.stringify(JSON.parse(t)));
+  const merged = m.stdout.split('\n').filter(l => l.trim()).map(l => JSON.parse(l)).map(f => ({
+    id: f.id, severity: f.severity, specialist: f.specialist, sources: (f.sources || []).map(s => canon.indexOf(JSON.stringify(s))),
+  }));
+  if (merged.length !== SKEPTIC_REPLAY.merged || merged.some(f => !f.sources.length || f.sources.includes(-1))) {
+    throw new Error('the build\'s merge gave ' + merged.length + ' findings (want ' + SKEPTIC_REPLAY.merged + ') or a source line it was not given');
+  }
+
+  const stampName = path.basename(o.receipts);
+  const dest = path.join(o.project, 'reports', 'receipts', stampName);
+  fs.mkdirSync(dest, { recursive: true });
+  const stems = require(MERGE_FINDINGS).receiptStems(texts.map(t => JSON.parse(t)));
+  const receiptTexts = [];
+  for (const stem of stems) {
+    const src = path.join(o.receipts, stem + '.txt');
+    if (!fs.existsSync(src)) throw new Error('no saved receipt output ' + stem + '.txt in ' + o.receipts);
+    const out = rewriteRoot(fs.readFileSync(src, 'utf8'), fromRoot, o.project);
+    receiptTexts.push(out);
+    fs.writeFileSync(path.join(dest, stem + '.txt'), out);
+  }
+  fs.writeFileSync(path.join(dest, 'scope.json'), rewriteRoot(scopeText, fromRoot, o.project));
+  const checkout = replayCheckout({ project: o.project, end: range.end, repo: REPO, plansFrom: mainCheckout(), texts: texts.concat(receiptTexts) });
+  return {
+    session: SKEPTIC_REPLAY.session, firstDispatch: SKEPTIC_REPLAY.firstDispatch, evidence: o.evidence, receipts: o.receipts,
+    stamp: stampName, range: { base: range.base, end: range.end }, fromRoot, mergeDir, mergeSummary,
+    finders: found.finders, keyMerges: shared.notes, lines: texts, stems, merged, checkout,
+  };
+}
+
+// The replay's prompt: the build's /tk:review, entered at Phase 4 with what the
+// earlier phases left behind named, and a stop before the report and any fix.
+// The final message is the record of each finding's verdict.
+function skepticPrompt(r) {
+  const receipts = 'reports/receipts/' + r.stamp;
+  const short = s => String(s).slice(0, 7);
+  const ran = r.finders.map(f => f.type.replace(/^(tk:)?review-|-finder$/g, ''));
+  const none = r.finders.filter(f => f.noFindings).map(f => f.type.replace(/^(tk:)?review-|-finder$/g, ''));
+  const merges = (r.keyMerges || []).map(k => 'The lines at ' + k.relPath + ':' + k.line + ' describe one defect, so before the merge each later one was given the first one\'s key (dedup note: merged at ' + k.relPath + ':' + k.line + ').').join(' ');
+  const last = r.merged[r.merged.length - 1].id;
+  return '/tk:review ' + short(r.range.base) + '..' + short(r.range.end) + ' report only, no chaining\n\n'
+    + 'This run resumes a review at Phase 4; it is not a fresh review. Everything before Phase 4 is done, so do none of it again: no scope call, no detection, no finder dispatch, no tier 1 check.\n'
+    + '- Phase 0: the run stamp is ' + r.stamp + ', and the scope call\'s JSON is saved at ' + receipts + '/scope.json.\n'
+    + '- Phase 2: ' + ran.length + ' specialists ran (' + ran.join(', ') + ')' + (none.length ? '; ' + none.join(', ') + ' returned NO FINDINGS' : '') + '.\n'
+    + '- Phase 3: the merge folder is ' + r.mergeDir + '. Its findings.jsonl holds the ' + r.lines.length + ' finding lines the finders returned, as they wrote them. ' + merges
+    + ' merge-findings.js has run on that file: its stdout is merged.jsonl in the same folder (R1 to ' + last + '), and its summary line is: ' + r.mergeSummary + '\n'
+    + '- Tier 1 of the audit has run: each receipt\'s output is saved as ' + receipts + '/<lens>-<n>.txt, and every check showed its claim, so tier 1 killed nothing.\n\n'
+    + 'Run Phase 4 from here: the audit\'s remaining tiers, exactly as this command and M2 say, and decide every finding. Then stop: write no report, fix nothing, commit nothing. '
+    + 'Your final message is one line per finding, `RN: <verdict>`, from R1 to ' + last + ', and nothing else.';
+}
+
+// The session's scratchpad, which Claude Code keeps outside the scratch home at
+// <tmp>/claude-<uid>/<project slug>/: a runner may write its shards there with
+// Bash, and then no transcript holds their bytes. Copied, never removed.
+function copyScratchpads(home, out) {
+  const projects = path.join(home, '.claude', 'projects');
+  if (!fs.existsSync(projects) || typeof process.getuid !== 'function') return;
+  const bases = [...new Set([os.tmpdir(), '/tmp'])].map(t => path.join(t, 'claude-' + process.getuid()));
+  for (const slug of fs.readdirSync(projects)) {
+    const src = bases.map(b => path.join(b, slug)).find(p => fs.existsSync(p));
+    if (src) copyDir(src, path.join(out, 'scratchpad', slug));
+  }
+}
+
 async function commandRun(o) {
   const role = o.role;
-  if (!['review', 'mapper', 'probe'].includes(role)) usage('--role must be review or mapper');
-  if (role !== 'probe' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
+  if (!['review', 'mapper', 'skeptic', 'fix', 'probe'].includes(role)) usage('--role must be review, mapper or skeptic, or fix (the oracle-checked fix run)');
+  if (role === 'skeptic' || role === 'fix') {
+    if (o.arm !== undefined || o.only || o.effort || o.modeWord !== undefined || o.planModels !== undefined) usage('--role ' + role + (role === 'skeptic' ? ' replays' : ' runs') + ' the build as it ships: it takes no --arm, --only, --effort, --mode-word or --plan-models');
+    if (role === 'skeptic') skepticInputs(o);
+  }
+  if (o.oraclePort !== undefined && role !== 'fix') usage('--oracle-port applies to --role fix, --judge and --oracle-self-test');
+  if (role !== 'probe' && role !== 'skeptic' && role !== 'fix' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
   if (o.only && (role === 'probe' || o.arm === 'ship')) usage('--only applies to a measured arm (a, b, c or h) of the review or mapper role');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
@@ -1386,7 +2763,7 @@ async function commandRun(o) {
   // The mode a review run resolves, named in its folder when it was chosen.
   const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
   const onlyTag = o.only ? '-only-' + o.only.map(n => n.replace(/^review-|-finder$/g, '')).join('+') : '';
-  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role + '-' + o.arm + onlyTag + modeTag;
+  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' || role === 'fix' ? role : role + '-' + o.arm + onlyTag + modeTag;
   const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
   fs.mkdirSync(out, { recursive: true });
   // Opus, except the probe that checks /execute's note on a session running on
@@ -1395,12 +2772,16 @@ async function commandRun(o) {
   const sessionFamily = familyOf(sessionModel);
   const meta = {
     version: 1, role, arm: o.arm || null, only: o.only || null, label: o.label || '', probe: o.probe || null,
-    build: { spec: o.build, sha: build.sha, version: build.version },
+    build: { spec: o.build, sha: build.sha, version: build.version, pathHashes: buildPathHashes(build.dir) },
     session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
     expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
     fixture: fixtureHash(), startedAt: new Date().toISOString(),
   };
+  // Where the oracles start the judged tree's server, after the session's own
+  // fixture server has stopped.
+  const oraclePort = o.oraclePort || PORT;
+  if (role === 'fix') meta.oraclePort = oraclePort;
   let serverPid = null;
   let envExtra = {};
   // From the session's start the run may have spent money, so from then on a
@@ -1412,11 +2793,15 @@ async function commandRun(o) {
   const enterLedger = valid => appendLedger({ at: meta.endedAt || new Date().toISOString(), role, arm: meta.arm, probe: meta.probe,
     build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
   try {
-    if (role === 'review' || (role === 'probe' && o.probe === 'review')) {
-      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only) : armSettings('review', 'a', build, null);
+    if (role === 'review' || role === 'fix' || (role === 'probe' && o.probe === 'review')) {
+      // The fix role runs the finders as the build ships them (the ship arm's settings).
+      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only)
+        : role === 'fix' ? armSettings('review', 'ship', build, null) : armSettings('review', 'a', build, null);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // The agents the arm left as shipped (all of them on the ship arm, the rest
+      // of the finders under --only), so the score's arm line reads them from here.
+      if (settings.some(s => s.shipped)) meta.shipped = settings.filter(s => s.shipped).map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
       // Where each finder should answer: the mode the review resolves (see Model modes).
       const mode = o.modeWord || o.planModels || 'fit';
       meta.expect.finderModels = finderModels(mode, build.dir, sessionFamily);
@@ -1427,10 +2812,13 @@ async function commandRun(o) {
       }
       const commits = buildReviewProject(project, o.planModels || null);
       meta.commits = commits;
-      meta.lenses = role === 'review' ? FINDER_KINDS : ['code'];
+      meta.lenses = role === 'review' || role === 'fix' ? FINDER_KINDS : ['code'];
       const lensArg = meta.lenses.join(',');
       const modeWord = o.modeWord ? ' mode:' + o.modeWord : '';
-      meta.prompt = '/tk:review ' + lensArg + ' ' + commits.base + '..HEAD' + modeWord + ' report only, no chaining';
+      meta.prompt = role === 'fix' ? fixPrompt(meta.lenses, commits.base) : '/tk:review ' + lensArg + ' ' + commits.base + '..HEAD' + modeWord + ' report only, no chaining';
+      // The loop commits each green fix (M4); the scratch home has no git
+      // identity, so the project carries one, as a real project would.
+      if (role === 'fix') for (const [k, v] of [['user.name', 'Notebook Dev'], ['user.email', 'dev@example.com'], ['commit.gpgsign', 'false']]) git(['config', k, v], project);
       serverPid = await startServer(project);
     } else if (role === 'mapper') {
       const chunk = JSON.parse(fs.readFileSync(path.resolve(o.chunk), 'utf8'));
@@ -1438,7 +2826,9 @@ async function commandRun(o) {
       const settings = armSettings('mapper', o.arm, build, o.effort, o.only);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
-      if (o.arm === 'ship') meta.shipped = settings.map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
+      // The agents the arm left as shipped (all of them on the ship arm, the rest
+      // of the finders under --only), so the score's arm line reads them from here.
+      if (settings.some(s => s.shipped)) meta.shipped = settings.filter(s => s.shipped).map(s => ({ agent: s.name, model: s.model, effort: s.effort }));
       // The dispatch below passes no model, so the mapper answers on its file's.
       meta.expect.mapper = mapperModel('fit', build.dir, sessionFamily);
       fs.mkdirSync(project, { recursive: true });
@@ -1451,6 +2841,11 @@ async function commandRun(o) {
         + 'subagent_type "tk:index-mapper", description "Map chunk", and as its prompt the text between the two marker lines below, '
         + 'copied exactly, byte for byte. Pass no model. When the agent returns, reply with its full output and nothing else.\n'
         + '<<<PROMPT\n' + meta.expectedPrompt + '\nPROMPT>>>';
+    } else if (role === 'skeptic') {
+      // No arm: the skeptics run on the build's own agent file, which inherits
+      // the session model, so the expectation is the session's family.
+      meta.replay = prepareSkepticReplay({ evidence: o.evidence, receipts: o.receipts, project, tmp, buildDir: build.dir });
+      meta.prompt = skepticPrompt(meta.replay);
     } else if (o.probe === 'models-override') {
       fs.mkdirSync(project, { recursive: true });
       meta.expect.byType = { 'tk:plan-critic': 'sonnet' };
@@ -1531,6 +2926,14 @@ async function commandRun(o) {
   } finally {
     cleanupFailed = runSteps([
       ['stop the fixture server', () => stopServer(serverPid)],
+      ['stop what the session left running', () => {
+        if (role !== 'fix') return;
+        const left = processesUnder(tmp).filter(p => p.pid !== serverPid);
+        if (!left.length) return;
+        meta.leftovers = left;
+        for (const p of left) { try { process.kill(p.pid, 'SIGKILL'); } catch (e) { /* already gone */ } }
+        console.log('quality-check: stopped ' + left.length + ' process' + (left.length === 1 ? '' : 'es') + ' the session left running in the scratch folder: ' + left.map(p => p.cmd || p.pid).join(' | '));
+      }],
       ['copy the transcripts', () => copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'))],
       ['copy the project reports', () => copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'))],
       ['copy the project plans', () => copyDir(path.join(project, 'plans'), path.join(out, 'project-plans'))],
@@ -1543,11 +2946,36 @@ async function commandRun(o) {
         const lg = sh('git', ['log', '--oneline', '-5'], { cwd: project, env: GIT_ENV });
         fs.writeFileSync(path.join(out, 'project-git.json'), JSON.stringify({ status: st.stdout, log: lg.stdout }, null, 2) + '\n');
       }],
+      // A fix run's final tree, which the oracles judge below, and its fixes diff.
+      ['copy the final project tree', () => { if (role === 'fix' && fs.existsSync(project)) copyTree(project, path.join(out, 'project-final')); }],
+      ['record the fixes diff', () => {
+        if (role === 'fix' && meta.commits && fs.existsSync(path.join(project, '.git'))) fs.writeFileSync(path.join(out, 'fix-diff.patch'), fixDiff(project, meta.commits.change));
+      }],
+      // A skeptic replay's inputs outside the project, read back when it is scored.
+      ['copy the replay\'s merge folder', () => { if (role === 'skeptic' && meta.replay) copyDir(meta.replay.mergeDir, path.join(out, 'replay-merge')); }],
+      ['copy the session scratchpad', () => { if (role === 'skeptic') copyScratchpads(home, out); }],
       ['write run.json', () => fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n')],
       ['remove the scratch folder', () => { if (!o.keep) fs.rmSync(tmp, { recursive: true, force: true }); }],
       // A run that broke after its session started still enters its spend.
       ['enter the ledger line', () => { if (ran && !sessionDone) enterLedger(false); }],
     ]);
+  }
+  // The oracles judge the fix run's final tree. A judge that breaks is recorded,
+  // never thrown: the run's ledger line below must still be written, and --judge
+  // can judge the saved tree again.
+  if (role === 'fix' && !interrupted) {
+    let judged;
+    try {
+      const tree = path.join(out, 'project-final');
+      if (!fs.existsSync(tree)) throw new Error('no project-final/ was saved');
+      console.log('quality-check: judging the final tree with the oracles, servers on port ' + oraclePort);
+      judged = await judgeTree(tree, oraclePort);
+    } catch (e) {
+      judged = { port: oraclePort, at: new Date().toISOString(), error: String(e && e.message || e) };
+      console.error('quality-check: the oracles could not judge the run: ' + judged.error);
+    }
+    try { fs.writeFileSync(path.join(out, 'oracles.json'), JSON.stringify(judged, null, 2) + '\n'); }
+    catch (e) { console.error('quality-check: could not write oracles.json: ' + e.message); }
   }
   let analysis = null;
   try {
@@ -1613,12 +3041,16 @@ function printRunSummary(a, verbose) {
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
     for (const id of Object.keys(a.survived)) {
-      console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no'));
+      const k = a.killedAs && a.killedAs[id];
+      console.log('    ' + id.padEnd(26) + ' raised ' + String(a.raised[id].length).padEnd(2) + ' survived ' + (a.survived[id].length ? 'yes (' + a.survived[id].map(e => e.id).join(',') + ')' : 'no')
+        + (k ? '  killed: ' + k.category + (k.kills.length ? ' (' + k.kills.map(x => x.id + ' ' + (x.verdict || '?')).join(', ') + ')' : '') : ''));
+      if (verbose && k) for (const x of k.kills) console.log('        audited out ' + x.id + ': ' + x.reason);
       if (verbose) {
         for (const r of a.raised[id]) console.log('        raised [' + r.kind + '] ' + r.what);
         for (const e of a.survived[id]) console.log('        report ' + e.text);
       }
     }
+    if (a.harnessLost) console.log('  harness-lost (the runner refused the check, so it never ran): ' + a.harnessLost.length + (a.harnessLost.length ? ' (' + a.harnessLost.join(', ') + ')' : ''));
     if (verbose) {
       console.log('  matched no planted bug (check by eye that none is a missed catch):');
       for (const r of a.unmatchedRaw) console.log('    raw [' + r.kind + '] ' + r.file + ' ' + r.what);
@@ -1626,37 +3058,186 @@ function printRunSummary(a, verbose) {
     }
   }
   if (a.role === 'mapper' && a.mapper) console.log('  mapper: ' + JSON.stringify(a.mapper));
+  if (a.role === 'fix' && a.fix) {
+    const f = a.fix;
+    console.log('  fix loop: ' + f.digestLines + ' Digest line' + (f.digestLines === 1 ? '' : 's') + ', ' + f.verifierDispatches + ' fix-verifier dispatch' + (f.verifierDispatches === 1 ? '' : 'es')
+      + '; oracles: ' + (f.oraclePort ? 'judged with servers on port ' + f.oraclePort : 'NOT JUDGED' + (f.judgeError ? ' (' + f.judgeError + ')' : '')));
+    console.log('    ' + 'bug'.padEnd(26) + 'raised  report        run said     gone      works     outcome');
+    for (const [id, b] of Object.entries(f.bugs)) {
+      console.log('    ' + id.padEnd(26) + (b.raised ? 'yes' : 'no').padEnd(8) + (b.inReport.join(',') || '-').padEnd(14) + (b.said || '-').padEnd(13)
+        + (b.gone || '-').padEnd(10) + (b.works || '-').padEnd(10) + b.outcome + (b.falseFixed ? '  FALSE FIXED' : ''));
+      for (const l of [b.goneLine, b.worksLine]) if (l) console.log('        ' + l);
+    }
+    console.log('  false FIXED (the run said FIXED; the oracles do not pass both): ' + (f.falseFixed.length ? f.falseFixed.join(', ') : 'none'));
+    if (f.unjudged.length || !f.oraclePort) console.log('  judge again: node scripts/quality-check.js --judge ' + path.relative(REPO, a.dir) + ' [--oracle-port <n>]');
+  }
+  if (a.role === 'skeptic' && a.skeptic) {
+    const s = a.skeptic.summary;
+    const ids = list => (list.length ? list.join(', ') : 'none');
+    const span = d => (d.ids.length ? d.ids[0] + (d.ids.length > 1 ? '-' + d.ids[d.ids.length - 1] + ' (' + d.ids.length + ')' : '') : 'no IDs');
+    console.log('  skeptic dispatches:');
+    for (const d of a.skeptic.dispatches) {
+      console.log('    D' + d.n + ' ' + d.type + ' tier ' + d.tier + ' ' + span(d) + ': ' + d.class + (d.file ? ' (' + d.file + ')' : '')
+        + ', lines ' + d.linesFound + '/' + d.ids.length + ' byte for byte, asks ' + (d.asks.length ? d.asks.join('/') : 'no verdict words') + (d.m2Words ? ' (M2)' : ' (not M2)')
+        + '; return ' + (!d.returned ? 'none' : d.returnOk === null ? 'unchecked' : d.returnOk ? 'clean' : 'flagged: ' + d.problems.join(', ')));
+    }
+    console.log('  summary: ' + s.dispatches + ' dispatches, ' + s.byteForByte + ' byte for byte (' + s.script + ' script, ' + s.verbatim + ' verbatim), '
+      + s.paraphrased + ' paraphrased, ' + s.unknown + ' unknown; returns ' + s.returnsClean + ' clean, ' + s.returnsFlagged + ' flagged, ' + s.returnsUnchecked + ' unchecked; '
+      + s.otherWords + ' asked for words outside M2; --verdicts calls ' + s.verdictsCalls + ' (' + s.verdictsRejected + ' rejected)');
+    console.log('  recorded verdicts: ' + s.recorded + '; ruled on from a paraphrase: ' + ids(s.ruledFromParaphrase)
+      + (s.ruledFromUnknown.length ? '; from an unreadable dispatch: ' + ids(s.ruledFromUnknown) : '')
+      + (s.notJudged.length ? '; recorded with no skeptic ruling: ' + ids(s.notJudged) : ''));
+    console.log('  drift reproduced: ' + (s.drift ? 'yes (a paraphrased dispatch)' : 'no'));
+  }
+}
+
+// Every saved run under `root` whose role is `role`, analyzed with its setting:
+// the pool the noise lines draw from. A folder that does not load is skipped.
+function loadPool(root, role, answers) {
+  const out = [];
+  if (!root || !fs.existsSync(root)) return out;
+  for (const name of fs.readdirSync(root).sort()) {
+    const dir = path.join(root, name);
+    const meta = readJson(path.join(dir, 'run.json'));
+    if (!meta || meta.role !== role) continue;
+    try {
+      const run = loadRun(dir);
+      out.push(Object.assign(analyzeRun(run, answers), { setting: runSetting(run) }));
+    } catch (e) { /* a torn folder is not part of the pool */ }
+  }
+  return out;
 }
 
 function commandScore(o) {
   const answers = loadAnswers();
-  const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => analyzeRun(loadRun(path.resolve(d)), answers));
+  const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => {
+    const run = loadRun(path.resolve(d));
+    return Object.assign(analyzeRun(run, answers), { setting: runSetting(run) });
+  });
   const baseline = load(o.against);
   const role = baseline[0] && baseline[0].role;
   const ids = role === 'mapper'
     ? ((loadRun(path.resolve(o.against.split(',')[0])).meta.chunk || {}).files || [])
     : answers.bugs.map(b => b.id);
   const knownId = (answers.bugs.find(b => b.knownAnswer) || {}).id;
-  const results = o.score.map(set => ({ set, s: scoreSets(load(set), baseline, ids, { knownId, requireKnown: o.requireKnown }) }));
+  const poolRoot = path.resolve(o.pool || OUT_ROOT);
+  const pool = loadPool(poolRoot, role, answers);
+  const results = o.score.map(set => {
+    const candidate = load(set);
+    const s = scoreSets(candidate, baseline, ids, { knownId, requireKnown: o.requireKnown, allowDrift: o.allowDrift, pool });
+    s.settings = { candidate: candidate.map(x => x.setting), baseline: baseline.map(x => x.setting) };
+    return { set, s };
+  });
   if (o.json) { console.log(JSON.stringify(results, null, 2)); return; }
+  const short = d => path.basename(d);
   for (const { set, s } of results) {
     console.log('Candidate: ' + set);
     console.log('Baseline:  ' + o.against);
     console.log('  runs: baseline ' + s.baselineValid + '/' + s.baselineRuns + ' valid, candidate ' + s.candidateValid + '/' + s.candidateRuns + ' valid');
     for (const inv of s.invalid) console.log('  invalid: ' + path.relative(REPO, inv.dir) + ' (' + inv.reasons.join(', ') + ')');
+    for (const side of ['candidate', 'baseline']) {
+      for (const st of s.settings[side]) {
+        const l = settingLines(st);
+        console.log('  harness ' + side.padEnd(9) + ' ' + short(st.dir) + ': ' + l.harness);
+        console.log('  arm     ' + side.padEnd(9) + ' ' + short(st.dir) + ': ' + l.arm);
+      }
+    }
+    if (s.compare) console.log('  comparison: ' + (s.compare.confounded ? 'CONFOUNDED: ' : '') + s.compare.summary);
+    if (s.drift) console.log('  DRIFT ALLOWED (--allow-drift): ' + s.drift.reason + ' [confounds: ' + s.drift.confounds.join('; ') + ']');
+    else if (o.allowDrift && s.compare && !s.compare.confounded) console.log('  --allow-drift given (' + o.allowDrift + '), not needed: nothing confounds this comparison');
     console.log('  stable (' + s.stable.length + '): ' + (s.stable.join(', ') || 'none'));
     if (s.noisy.length) console.log('  noisy, not scored (' + s.noisy.length + '): ' + s.noisy.join(', '));
     if (s.never.length) console.log('  never caught by the baseline (' + s.never.length + '): ' + s.never.join(', '));
     if (role !== 'mapper') {
-      console.log('  ' + 'bug'.padEnd(26) + 'baseline  candidate  raised(candidate)');
-      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(26) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate);
+      console.log('  ' + 'bug'.padEnd(26) + 'baseline  candidate  raised(candidate)  harness-lost(candidate)');
+      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(26) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate.padEnd(19) + p.harnessLost);
+      // Which run lost which bug to the harness, and through which Audited out entry.
+      for (const l of s.harnessLostRuns) console.log('  harness-lost: ' + l.id + ' in ' + short(l.dir) + ' (' + l.kills.join(', ') + ')');
+    }
+    if (Object.keys(s.noise).length) {
+      console.log('  noise: each stable catch across the ' + s.poolRuns + ' saved valid run' + (s.poolRuns === 1 ? '' : 's') + ' on the baseline\'s setting (' + path.relative(REPO, poolRoot) + '):');
+      for (const [id, n] of Object.entries(s.noise)) console.log('    ' + id.padEnd(26) + n.caught + '/' + n.runs + (n.caught < n.runs ? '  (the baseline setting drops it)' : ''));
     }
     console.log('  cost per run: baseline ' + money(s.baselineCostUsd) + ', candidate ' + money(s.costUsd) + '; time: baseline ' + mins(s.baselineWallMs) + ', candidate ' + mins(s.wallMs));
-    console.log('  VERDICT: ' + s.verdict + (s.why.length ? ' - ' + s.why.join('; ') : ''));
+    console.log('  VERDICT: ' + s.verdict + (s.why.length ? ' - ' + s.why.join('; ') : '') + (s.drift ? ' (drift allowed: ' + s.drift.reason + ')' : ''));
     console.log('');
   }
   const passing = results.filter(r => r.s.verdict === 'PASS' && typeof r.s.costUsd === 'number').sort((x, y) => x.s.costUsd - y.s.costUsd);
   if (results.length > 1) console.log('Cheapest passing set: ' + (passing.length ? passing[0].set + ' (' + money(passing[0].s.costUsd) + ' per run)' : 'none'));
+}
+
+// --oracle-self-test: the oracles on the change tree with no fix (every gone oracle
+// must FAIL), then on one tree holding a correct fix for SELF_TEST_PAIR.correct and
+// an empty fix for SELF_TEST_PAIR.deletion (correct: gone and works PASS; empty:
+// gone PASS, works FAIL), then each runnable bug's correct and empty fix alone.
+// No session, no ledger line; servers on a free port other than PORT.
+async function commandOracleSelfTest(o) {
+  const answers = loadAnswers();
+  const set = oracleSet(answers);
+  const fixes = require(path.join(ORACLES, 'self-test-fixes.js'));
+  const port = o.oraclePort || await freePort();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-oracle-self-test.'));
+  let checks = 0;
+  const failed = [];
+  const want = (stage, id, kind, wanted, got) => {
+    const ok = wanted === null || got.verdict === wanted;
+    if (wanted !== null) { checks++; if (!ok) failed.push(stage + ' ' + id + ' ' + kind); }
+    console.log('  ' + (wanted === null ? '[ref]' : ok ? '[ok] ' : '[BAD]') + ' ' + stage.padEnd(9) + id.padEnd(24) + ' ' + kind.padEnd(6) + got.verdict.padEnd(9)
+      + (wanted === null ? '(reference)  ' : '(want ' + wanted + ')').padEnd(14) + got.line);
+  };
+  const judge = async (stage, tree, wants) => {
+    await judgeTree(tree, port, { answers, only: Object.keys(wants), onResult: (id, kind, r) => want(stage, id, kind, wants[id][kind], r) });
+  };
+  try {
+    console.log('Oracle self-test: servers on port ' + port + '; playwright-core: ' + (playwrightCore() || 'none (the browser oracles will be UNJUDGED)'));
+    const unfixed = path.join(work, 'unfixed');
+    copyFixture(path.join(FIXTURE, 'base'), unfixed);
+    copyFixture(path.join(FIXTURE, 'change'), unfixed);
+    for (const id of Object.keys(set)) if (!fixes[id] || !fixes[id].correct || !fixes[id].deletion) failed.push('no self-test fixes for ' + id);
+
+    console.log('\n1. The change tree with no fix: every gone oracle FAILs (works shown for reference)');
+    await judge('unfixed', unfixed, Object.fromEntries(Object.keys(set).map(id => [id, { gone: 'FAIL', works: null }])));
+
+    const pair = path.join(work, 'pair');
+    copyTree(unfixed, pair);
+    applyEdits(pair, fixes[SELF_TEST_PAIR.correct].correct);
+    applyEdits(pair, fixes[SELF_TEST_PAIR.deletion].deletion);
+    console.log('\n2. One tree: a correct fix for ' + SELF_TEST_PAIR.correct + ', an empty fix (the cited lines deleted) for ' + SELF_TEST_PAIR.deletion);
+    await judge('pair', pair, { [SELF_TEST_PAIR.correct]: { gone: 'PASS', works: 'PASS' }, [SELF_TEST_PAIR.deletion]: { gone: 'PASS', works: 'FAIL' } });
+
+    console.log('\n3. Each runnable bug alone: its correct fix passes both; its empty fix passes gone and fails works');
+    for (const id of Object.keys(set)) {
+      for (const [shape, wants] of [['correct', { gone: 'PASS', works: 'PASS' }], ['deletion', { gone: 'PASS', works: 'FAIL' }]]) {
+        if (!fixes[id] || !fixes[id][shape]) continue;
+        const tree = path.join(work, id + '-' + shape);
+        copyTree(unfixed, tree);
+        applyEdits(tree, fixes[id][shape]);
+        await judge(shape, tree, { [id]: wants });
+        fs.rmSync(tree, { recursive: true, force: true });
+      }
+    }
+    console.log('\nNot runnable (no oracle pair):');
+    for (const [id, why] of Object.entries(NOT_RUNNABLE)) console.log('  ' + id.padEnd(24) + ' ' + why);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+  console.log('\nOracle self-test: ' + (checks - failed.filter(f => !/^no self-test fixes/.test(f)).length) + ' of ' + checks + ' verdicts as wanted' + (failed.length ? '; FAILED: ' + failed.join(', ') : ''));
+  process.exit(failed.length ? 1 : 0);
+}
+
+// --judge: the oracles again on a saved fix run's final tree (a busy port, a
+// missing browser), then the run re-analyzed. No session, no cost.
+async function commandJudge(o) {
+  const dir = path.resolve(o.judge);
+  const meta = readJson(path.join(dir, 'run.json'));
+  if (!meta || meta.role !== 'fix') usage('--judge needs a fix run folder (its run.json says role fix): ' + dir);
+  const tree = path.join(dir, 'project-final');
+  if (!fs.existsSync(tree)) usage('--judge needs the run\'s project-final/ folder, not found in ' + dir);
+  const judged = await judgeTree(tree, o.oraclePort || PORT);
+  fs.writeFileSync(path.join(dir, 'oracles.json'), JSON.stringify(judged, null, 2) + '\n');
+  const a = analyzeRun(loadRun(dir), loadAnswers());
+  fs.writeFileSync(path.join(dir, 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
+  printRunSummary(a, false);
 }
 
 function commandBudget() {
@@ -1685,6 +3266,8 @@ function parseArgs(argv) {
     else if (a === '--build') o.build = val();
     else if (a === '--effort') o.effort = val();
     else if (a === '--chunk') o.chunk = val();
+    else if (a === '--evidence') o.evidence = val();
+    else if (a === '--receipts') o.receipts = val();
     else if (a === '--label') o.label = val();
     else if (a === '--max-usd') o.maxUsd = Number(val());
     else if (a === '--mode-word') o.modeWord = val();
@@ -1693,11 +3276,19 @@ function parseArgs(argv) {
     else if (a === '--score') o.score.push(val());
     else if (a === '--against') o.against = val();
     else if (a === '--require-known') o.requireKnown = true;
+    else if (a === '--allow-drift') { o.allowDrift = val().trim(); if (!o.allowDrift) usage('--allow-drift needs a reason, which the score prints'); }
+    else if (a === '--pool') o.pool = val();
     else if (a === '--json') o.json = true;
     else if (a === '--check') o.check = val();
     else if (a === '--probe') o.probe = val();
     else if (a === '--budget') o.budget = true;
     else if (a === '--approve') o.approve = Number(val());
+    else if (a === '--judge') o.judge = val();
+    else if (a === '--oracle-self-test') o.oracleSelfTest = true;
+    else if (a === '--oracle-port') {
+      o.oraclePort = Number(val());
+      if (!Number.isInteger(o.oraclePort) || o.oraclePort < 1 || o.oraclePort > 65535) usage('--oracle-port needs a port number');
+    }
     else usage('unknown argument ' + a);
   }
   return o;
@@ -1715,6 +3306,8 @@ async function main() {
     console.log('approved budget recorded: ' + money(o.approve));
     return;
   }
+  if (o.oracleSelfTest) return commandOracleSelfTest(o);
+  if (o.judge) return commandJudge(o);
   if (o.check) {
     const a = analyzeRun(loadRun(path.resolve(o.check)), loadAnswers());
     fs.writeFileSync(path.join(path.resolve(o.check), 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
@@ -1789,6 +3382,12 @@ module.exports = {
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
+  auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
+  settingLines, mapperPromptHash, PATH_FILES,
+  SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
+  verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
+  ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
+  copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
 };
 
 if (require.main === module) {

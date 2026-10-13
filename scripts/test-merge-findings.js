@@ -254,6 +254,229 @@ console.log('\n6. a finding that breaks a countable contract rule warns on stder
     typeof mod.contractWarning === 'function' && mod.contractWarning(CODE, 1) === null, String(mod.contractWarning && mod.contractWarning(CODE, 1)));
 }
 
+console.log('\n7. the citation check warns on a file or line that cannot be right, and stdout never changes');
+{
+  // A small git repository: a.md has 3 lines, gone.md is committed then
+  // deleted, later.md is added after the first commit.
+  const repo = path.join(sandbox, 'repo');
+  fs.mkdirSync(repo);
+  const g = (args) => spawnSync('git', ['-C', repo, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g(['init', '-q']);
+  fs.writeFileSync(path.join(repo, 'a.md'), 'one\ntwo\nthree\n');
+  fs.writeFileSync(path.join(repo, 'gone.md'), 'x\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'first']);
+  const first = g(['rev-parse', 'HEAD']).stdout.trim();
+  fs.rmSync(path.join(repo, 'gone.md'));
+  fs.writeFileSync(path.join(repo, 'later.md'), 'l1\nl2\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'second']);
+  const cite = (rel, line, extra) => Object.assign({ severity: 'warn', specialist: 'code', file: { relPath: rel, line }, what: 'Should fix. Cited ' + rel + ' line ' + line + ' breaks something real here.', key: rel + ':' + line }, extra || {});
+  const runIn = (args) => {
+    const r = spawnSync(process.execPath, [SCRIPT].concat(args), { cwd: repo, encoding: 'utf8' });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+  };
+  const citeLines = (r) => r.stderr.split('\n').filter((l) => /^merge-findings: citation R\d+ \(/.test(l));
+  const mod = require(SCRIPT);
+
+  const good = runIn([jsonl([cite('a.md', 3)])]);
+  check('a citation inside the file gives no citation line', good.status === 0 && citeLines(good).length === 0, good.stderr);
+  const past = runIn([jsonl([cite('a.md', 18)])]);
+  check('a line past the end warns with the file\'s line count', past.status === 0 && /^merge-findings: citation R1 \(a\.md:18\): line-out-of-range: line 18 is past the end of a\.md \(3 lines\)$/m.test(past.stderr), past.stderr);
+  const range = runIn([jsonl([cite('a.md', '2-9')])]);
+  check('a line range is checked by its last line', /line-out-of-range: line 9 is past the end of a\.md/.test(range.stderr), range.stderr);
+  const missing = runIn([jsonl([cite('execute.md', 79)])]);
+  check('a path git never had is missing-file', /citation R1 \(execute\.md:79\): missing-file: execute\.md does not exist$/m.test(missing.stderr), missing.stderr);
+  const deleted = runIn([jsonl([cite('gone.md', 1)])]);
+  check('a path deleted from the working copy but in git history is deleted-file', /citation R1 \(gone\.md:1\): deleted-file: gone\.md is not in the working copy, though git history has it$/m.test(deleted.stderr), deleted.stderr);
+  const inRange = runIn([jsonl([cite('gone.md', 1)]), '--base', first]);
+  check('with --base, a path present at the base and gone now is deleted-in-range', /citation R1 \(gone\.md:1\): deleted-in-range: gone\.md existed at /m.test(inRange.stderr), inRange.stderr);
+  const atRev = runIn([jsonl([cite('later.md', 1), cite('a.md', 2)]), '--rev', first]);
+  check('with --rev, a file added after that commit does not exist there, and a good citation stays quiet',
+    /citation R\d \(later\.md:1\): missing-file: later\.md does not exist at /m.test(atRev.stderr) && citeLines(atRev).length === 1, atRev.stderr);
+  const outside = runIn([jsonl([cite('../etc/passwd', 1)])]);
+  check('a path that climbs out of the root is outside-project and is never read', /citation R1 \(\.\.\/etc\/passwd:1\): outside-project: /m.test(outside.stderr), outside.stderr);
+  const noFile = runIn([jsonl([{ severity: 'suggest', specialist: 'copy', what: 'Optional. The intro never says who the guide is for, so readers stall early.', key: 'x' }])]);
+  check('a finding with no file slot is never checked', noFile.status === 0 && citeLines(noFile).length === 0, noFile.stderr);
+  const both = [cite('a.md', 18), cite('a.md', 2, { key: 'b' })];
+  const withWarn = runIn([jsonl(both)]);
+  const expected = mod.mergeFindings(both).map((m) => JSON.stringify(m)).join('\n') + '\n';
+  check('with a citation warning, stdout is byte for byte the merge output and the exit code is 0', withWarn.status === 0 && withWarn.stdout === expected && citeLines(withWarn).length === 1, withWarn.stderr);
+  const rootFlag = run([jsonl([cite('a.md', 18)]), '--root', repo]);
+  check('--root points the check at another folder', /line-out-of-range: line 18 is past the end of a\.md/.test(rootFlag.stderr), rootFlag.stderr);
+  const badFlag = run([jsonl([cite('a.md', 1)]), '--nope']);
+  const noValue = run([jsonl([cite('a.md', 1)]), '--rev']);
+  check('an unknown flag or a flag with no value exits 1 with the usage line and no stdout',
+    badFlag.status === 1 && badFlag.stdout === '' && /usage/.test(badFlag.stderr) && noValue.status === 1 && noValue.stdout === '' && /usage/.test(noValue.stderr), badFlag.stderr + noValue.stderr);
+  check('citationCheck is exported and returns null for a good citation', typeof mod.citationCheck === 'function' && mod.citationCheck({ relPath: 'a.md', line: 1 }, { root: repo }) === null);
+}
+
+// --- 8. --shards: the skeptics' bytes, written by the script ---------------------
+// Harness research, P5-C1: a runner once wrote its own shards, paraphrased every
+// finding, left out every receipt output and asked for KEEP or KILL. The shard
+// writer copies the finder's line and the saved receipt output byte for byte,
+// under M2's own instruction, so there is nothing left for a runner to retype.
+console.log('\n8. --shards writes each tier 2 shard and the tier 3 ballot from the bytes on disk');
+{
+  const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');
+  const SKEPTIC = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'agents', 'audit-skeptic.md'), 'utf8');
+  const extra = [];
+  for (let i = 2; i <= 7; i++) {
+    extra.push({ severity: 'warn', specialist: 'code', file: { relPath: 'src/m' + i + '.js', line: i },
+      what: 'Should fix. Module ' + i + ' swallows its own error and returns an empty list.', fix: 'Rethrow. Five minutes, or keep hiding it.',
+      key: 'src/m' + i + '.js:swallows-error', receipt: { check: 'grep -n catch src/m' + i + '.js', expect: { match: 'catch' } } });
+  }
+  const NOSPEC = { severity: 'suggest', file: { relPath: 'x.md', line: 1 }, what: 'Optional. A heading repeats its parent.', fix: 'Drop it. One minute, or keep the echo.',
+    key: 'x.md:heading-repeats', receipt: { check: 'sed -n 1p x.md', expect: 'the heading repeats' } };
+  // Merged: R1 the Block (browser + code), R2 to R9 the Warns, R10 and R11 the Suggests.
+  const rows = [BROWSER, CODE, UX, PLAN, NOKEY].concat(extra).concat([NOSPEC]);
+  const file = jsonl(rows);
+  const rawLines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+  const receipts = path.join(sandbox, 'receipts-8');
+  fs.mkdirSync(receipts);
+  const stems = ['browser-1', 'code-1', 'ux-1', 'plan-critic-1', 'copy-1', 'code-2', 'code-3', 'code-4', 'code-5', 'code-6', 'code-7', 'inline-1'];
+  for (const s of stems) fs.writeFileSync(path.join(receipts, s + '.txt'), 'saved output of ' + s + ' é\t[x]\nexit 0\n');
+  const out = path.join(sandbox, 'shards-8');
+  fs.mkdirSync(out);
+  const r = run(['--shards', file, '--receipts', receipts, '--out', out]);
+  let man = null;
+  try { man = JSON.parse(r.stdout); } catch (e) { man = null; }
+  check('--shards exits 0 and prints one JSON manifest', r.status === 0 && man !== null, r.stderr + r.stdout.slice(0, 200));
+  man = man || {};
+  const shards = man.shards || [];
+  check('10 Warns and Suggests make two tier 2 shards of at most 7, in R order',
+    shards.length === 2 && shards[0].ids.join() === 'R2,R3,R4,R5,R6,R7,R8' && shards[1].ids.join() === 'R9,R10,R11', JSON.stringify(shards.map((s) => s.ids)));
+  check('the Block goes to one tier 3 ballot for three voters', man.tier3 && man.tier3.ids.join() === 'R1' && man.tier3.voters === 3, JSON.stringify(man.tier3));
+  const s1 = shards[0] ? fs.readFileSync(shards[0].file, 'utf8') : '';
+  const s2 = shards[1] ? fs.readFileSync(shards[1].file, 'utf8') : '';
+  const t3 = man.tier3 ? fs.readFileSync(man.tier3.file, 'utf8') : '';
+  check('a shard opens with the header line --verdicts reads', s1.split('\n')[0] === 'M2 audit shard: tier 2, shard 1 of 2, ids R2 R3 R4 R5 R6 R7 R8', s1.split('\n')[0]);
+  check('the tier 3 ballot opens with its header line', t3.split('\n')[0] === 'M2 audit shard: tier 3, the ballot for all three voters, ids R1', t3.split('\n')[0]);
+  const quoted = (text) => { const m = text.match(/^"(Try to refute[^\n]*)"$/m); return m ? m[1] : null; };
+  check('the tier 2 instruction is M2\'s, word for word, as the skeptic agent quotes it',
+    quoted(s1) !== null && HITL.includes(quoted(s1)) && SKEPTIC.includes(quoted(s1)) && /RN: STANDS. - plus one line/.test(quoted(s1)) && !/DOWNGRADE/.test(quoted(s1)), String(quoted(s1)).slice(0, 120));
+  check('the tier 3 instruction is M2\'s, word for word, with DOWNGRADE', quoted(t3) !== null && HITL.includes(quoted(t3)) && SKEPTIC.includes(quoted(t3)) && /DOWNGRADE Suggest/.test(quoted(t3)), String(quoted(t3)).slice(0, 120));
+  check('every finding in a shard is its finder\'s line, byte for byte', [3, 4, 5, 6, 7, 8, 9].every((i) => s1.includes('\n' + rawLines[i] + '\n')),
+    'missing: ' + [3, 4, 5, 6, 7, 8, 9].filter((i) => !s1.includes(rawLines[i])).join());
+  check('every receipt output in a shard is the saved file, byte for byte', ['plan-critic-1', 'copy-1', 'code-2', 'code-6'].every((s) => s1.includes(fs.readFileSync(path.join(receipts, s + '.txt'), 'utf8'))));
+  check('a merged Block carries both finders\' lines and both receipt outputs',
+    t3.includes(rawLines[0]) && t3.includes(rawLines[1]) && t3.includes('saved output of browser-1') && t3.includes('saved output of code-1'));
+  check('a finding with no specialist reads the inline receipt', s2.includes('saved output of inline-1'), s2.slice(-300));
+  check('no shard file asks for KEEP or KILL', !/KEEP|KILL/.test(s1 + s2 + t3));
+
+  const out2 = path.join(sandbox, 'shards-8b');
+  fs.mkdirSync(out2);
+  const dropped = run(['--shards', file, '--receipts', receipts, '--out', out2, '--drop', 'R3,R1']);
+  let m2 = null; try { m2 = JSON.parse(dropped.stdout); } catch (e) { m2 = null; }
+  check('--drop leaves the tier 1 kills out of every shard and says so',
+    m2 && m2.dropped.join() === 'R1,R3' && m2.tier3 === null && m2.shards.every((s) => !s.ids.includes('R3')) && m2.shards.reduce((n, s) => n + s.ids.length, 0) === 9, dropped.stdout.slice(0, 300) + dropped.stderr);
+  const badDrop = run(['--shards', file, '--receipts', receipts, '--out', out2, '--drop', 'R40']);
+  check('--drop naming an ID the merge did not produce is a usage error', badDrop.status === 1 && /usage/.test(badDrop.stderr), badDrop.stderr);
+
+  const again = run(['--shards', file, '--receipts', receipts, '--out', out]);
+  check('an existing shard file is never overwritten', again.status === 1 && /"error":"exists"/.test(again.stderr) && fs.readFileSync(shards[0].file, 'utf8') === s1, again.stderr);
+
+  const thin = path.join(sandbox, 'receipts-8c');
+  fs.mkdirSync(thin);
+  fs.copyFileSync(path.join(receipts, 'browser-1.txt'), path.join(thin, 'browser-1.txt'));
+  fs.copyFileSync(path.join(receipts, 'code-1.txt'), path.join(thin, 'code-1.txt'));
+  const out3 = path.join(sandbox, 'shards-8c');
+  fs.mkdirSync(out3);
+  const missing = run(['--shards', file, '--receipts', thin, '--out', out3]);
+  check('a finding with no saved receipt output at all stops the run, names the file, and writes no shard',
+    missing.status === 1 && /"error":"missing_receipt"/.test(missing.stderr) && /plan-critic-1\.txt/.test(missing.stderr) && fs.readdirSync(out3).length === 0, missing.stderr);
+  // Review R2: the checks runner saves no file for a check it refused, and a merged
+  // finding stands if any one of its checks passes, so one refused source is a note.
+  const half = path.join(sandbox, 'receipts-8e');
+  fs.mkdirSync(half);
+  for (const s of stems) if (s !== 'code-1') fs.copyFileSync(path.join(receipts, s + '.txt'), path.join(half, s + '.txt'));
+  const out5 = path.join(sandbox, 'shards-8e');
+  fs.mkdirSync(out5);
+  const partial = run(['--shards', file, '--receipts', half, '--out', out5]);
+  const t5 = fs.existsSync(path.join(out5, 'audit-tier3.txt')) ? fs.readFileSync(path.join(out5, 'audit-tier3.txt'), 'utf8') : '';
+  check('a merged finding with one source\'s output missing is written, that source marked untested (review R2)',
+    partial.status === 0 && t5.includes('saved output of browser-1') && /Receipt output \(code-1\.txt\): none saved; tier 1 refused or did not run this check, so this source is untested\./.test(t5), partial.stderr + t5.slice(0, 300));
+
+  // Step 3's replay found right bugs with wrong lines, so the shard says which is wrong.
+  const repo = path.join(sandbox, 'cite-8');
+  fs.mkdirSync(repo);
+  fs.writeFileSync(path.join(repo, 'short.md'), 'one\ntwo\n');
+  const off = Object.assign({}, UX, { key: 'short.md:off', file: { relPath: 'short.md', line: 9 } });
+  const offFile = jsonl([off]);
+  const rc = path.join(sandbox, 'receipts-8d');
+  fs.mkdirSync(rc);
+  fs.writeFileSync(path.join(rc, 'ux-1.txt'), 'x\nexit 0\n');
+  const out4 = path.join(sandbox, 'shards-8d');
+  fs.mkdirSync(out4);
+  const cited = run(['--shards', offFile, '--receipts', rc, '--out', out4, '--root', repo]);
+  const s4 = fs.existsSync(path.join(out4, 'audit-tier2-1.txt')) ? fs.readFileSync(path.join(out4, 'audit-tier2-1.txt'), 'utf8') : '';
+  check('a bad citation rides into the shard as a note that the line is wrong, not the claim',
+    /Citation check: line 9 is past the end of short\.md \(2 lines\)/.test(s4) && /not that the claim is wrong/.test(s4), s4.slice(0, 400) + cited.stderr);
+  const bare = run(['--shards', file]);
+  check('--shards without --receipts and --out is a usage error', bare.status === 1 && /usage/.test(bare.stderr), bare.stderr);
+}
+
+// --- 9. --verdicts: a return checked against its shard -------------------------
+console.log('\n9. --verdicts checks each return against its IDs and the closed set, and tallies tier 3');
+{
+  const ret = (text) => { const f = path.join(sandbox, 'return-' + (++counter) + '.txt'); fs.writeFileSync(f, text); return f; };
+  const shard = path.join(sandbox, 'shard-9.txt');
+  fs.writeFileSync(shard, 'M2 audit shard: tier 2, shard 1 of 1, ids R2 R3 R4 R5 R6\n\nbody\n');
+  const parse = (r) => { try { return JSON.parse(r.stdout); } catch (e) { return null; } };
+  const good = ret('[Subagent hand-back] frame line\n  Tier 2 verdicts.\n  R2: STANDS\n  The grep shows it.\n  - **R3: REFUTED** the receipt shows nothing.\n  split: the heading is still wrong\n  **R4:** STANDS. Read the file.\n  `R5`: REFUTED - no such call\n  R6: STANDS\n  reason\n  R6: STANDS\n  Summary: R2 STANDS, R3 REFUTED.\n');
+  const g = run(['--verdicts', shard, good]);
+  const gj = parse(g) || {};
+  check('a clean return exits 0 with one decided verdict per ID', g.status === 0 && gj.ok === true && JSON.stringify(gj.verdicts) === JSON.stringify({ R2: 'STANDS', R3: 'REFUTED', R4: 'STANDS', R5: 'REFUTED', R6: 'STANDS' }), g.stdout + g.stderr);
+  check('a split line is kept with the ID it follows', gj.splits && gj.splits.R3 && gj.splits.R3[0] === 'the heading is still wrong', JSON.stringify(gj.splits));
+
+  const keepKill = ret('R2: KEEP\nfine\nR3: KILL\nno\nR4: KEEP\nR5: KEEP\nR6: KILL\n');
+  const kk = run(['--verdicts', shard, keepKill]);
+  const kj = parse(kk) || {};
+  check('a KEEP/KILL return exits 1, one unknown-word problem per ID, and decides nothing',
+    kk.status === 1 && kj.ok === false && kj.verdicts === undefined && kj.returns[0].problems.filter((p) => p.kind === 'unknown').length === 5 && kj.returns[0].problems[0].word === 'KEEP', kk.stdout);
+  const gaps = run(['--verdicts', shard, ret('R2: STANDS\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR99: STANDS\nR2: REFUTED\n')]);
+  const gp = ((parse(gaps) || {}).returns || [{ problems: [] }])[0].problems.map((p) => p.kind + ':' + p.id).sort().join();
+  check('a missing ID, an extra ID and a conflicting second line are each a problem', gaps.status === 1 && gp === 'conflict:R2,extra:R99,missing:R6', gp);
+  const prose = run(['--verdicts', shard, ret('Report delivered. Summary of verdicts: R2 STANDS, R3 REFUTED, R4 STANDS, R5 STANDS, R6 STANDS.\n')]);
+  check('a prose summary is not a verdict line: every ID is missing', prose.status === 1 && ((parse(prose) || {}).returns || [{ problems: [] }])[0].problems.filter((p) => p.kind === 'missing').length === 5, prose.stdout);
+  // A real verifier return put an evidence list after its verdicts, each line
+  // opening with the ID and a colon; a fixture voter put one before them.
+  const evidence = run(['--verdicts', shard, ret('- **R2:** two GET requests returned the file.\nR2: STANDS\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: STANDS\n**R4:** The false sentence is gone from x.md:62.\nR5: I sent a request.\n')]);
+  check('prose after an ID and a colon is evidence, not a second verdict', evidence.status === 0 && ((parse(evidence) || {}).verdicts || {}).R4 === 'STANDS', evidence.stdout);
+  const onlyProse = run(['--verdicts', shard, ret('R2: STANDS\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: the receipt shows the call.\n')]);
+  const op = ((parse(onlyProse) || {}).returns || [{ problems: [] }])[0].problems;
+  check('an ID named only in prose is missing, and the problem says so', onlyProse.status === 1 && op.length === 1 && op[0].kind === 'missing' && op[0].id === 'R6' && /prose/.test(op[0].note || ''), JSON.stringify(op));
+  const keepBeside = run(['--verdicts', shard, ret('R2: STANDS\nR2: KEEP\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
+  check('an all-capitals word outside the set is a problem even beside a valid verdict', keepBeside.status === 1 && /"word":"KEEP"/.test(keepBeside.stdout), keepBeside.stdout);
+  const t2down = run(['--verdicts', shard, ret('R2: DOWNGRADE Warn\nR3: STANDS\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
+  check('DOWNGRADE is not a tier 2 word', t2down.status === 1 && /"word":"DOWNGRADE"/.test(t2down.stdout), t2down.stdout);
+
+  // Tier 3: the tally in M2's order, the condition rule, and the two-ballot rule.
+  const T3 = ['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3,R4'];
+  const b1 = ret('R1: REFUTED\nr\nR2: STANDS\nr\nR3: DOWNGRADE Warn\nnot reachable through a normal user action\nR4: DOWNGRADE Suggest\nlooks minor\n');
+  const b2 = ret('R1: REFUTED\nr\nR2: STANDS\nr\nR3: DOWNGRADE Suggest - a workaround exists\nR4: DOWNGRADE Suggest\nit harms only the user who triggers it\n');
+  const b3 = ret('R1: STANDS\nr\nR2: REFUTED\nr\nR3: STANDS\nr\nR4: STANDS\nr\n');
+  const v3 = run(T3.concat([b1, b2, b3]));
+  const vj = parse(v3) || {};
+  check('three ballots tally in M2\'s order: 2 refutes kill, 2 stands keep, else the higher downgrade',
+    v3.status === 0 && vj.verdicts && vj.verdicts.R1 === 'REFUTED 2/3' && vj.verdicts.R2 === 'STANDS' && vj.verdicts.R3 === 'DOWNGRADE Warn', JSON.stringify(vj.verdicts) + v3.stderr);
+  check('a DOWNGRADE that names no Block condition counts as STANDS', vj.verdicts && vj.verdicts.R4 === 'STANDS' && JSON.stringify(vj.ballots.R4) === JSON.stringify(['STANDS', 'DOWNGRADE Suggest', 'STANDS']), JSON.stringify(vj.ballots && vj.ballots.R4));
+  const all3 = run(['--verdicts', '--tier', '3', '--ids', 'R1', ret('R1: REFUTED\n'), ret('R1: REFUTED\n'), ret('R1: REFUTED\n')]);
+  check('three refutes read REFUTED 3/3', ((parse(all3) || {}).verdicts || {}).R1 === 'REFUTED 3/3', all3.stdout);
+  const two = run(['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3', ret('R1: REFUTED\nR2: REFUTED\nR3: DOWNGRADE Warn - a workaround exists\n'), ret('R1: REFUTED\nR2: STANDS\nR3: DOWNGRADE Suggest - a workaround exists\n')]);
+  const tj = parse(two) || {};
+  check('two valid ballots kill only when both refute, downgrade only when both downgrade',
+    two.status === 0 && tj.verdicts && tj.verdicts.R1 === 'REFUTED 2/3' && tj.verdicts.R2 === 'STANDS' && tj.verdicts.R3 === 'DOWNGRADE Warn', JSON.stringify(tj.verdicts));
+  const one = run(['--verdicts', '--tier', '3', '--ids', 'R1', ret('R1: REFUTED\n')]);
+  const oj = parse(one) || {};
+  check('one valid ballot leaves the Block unaudited', one.status === 0 && oj.unaudited && oj.unaudited.join() === 'R1' && oj.verdicts && oj.verdicts.R1 === undefined, one.stdout);
+
+  const ver = run(['--verdicts', '--tier', 'verify', '--ids', 'R1,R2', ret('R1: FIXED\nthe line is gone\nR2: NOT FIXED\nstill there\n')]);
+  check('a verifier return decides FIXED and NOT FIXED', ver.status === 0 && JSON.stringify((parse(ver) || {}).verdicts) === JSON.stringify({ R1: 'FIXED', R2: 'NOT FIXED' }), ver.stdout + ver.stderr);
+  const noHeader = run(['--verdicts', ret('no header\n'), ret('R1: STANDS\n')]);
+  check('a shard file with no header line and no --ids is a usage error', noHeader.status === 1 && /usage/.test(noHeader.stderr), noHeader.stderr);
+  const tooMany = run(['--verdicts', shard, good, good]);
+  check('a tier 2 shard takes exactly one return', tooMany.status === 1 && /usage/.test(tooMany.stderr), tooMany.stderr);
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }

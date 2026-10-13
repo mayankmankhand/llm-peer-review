@@ -141,7 +141,7 @@
 ### M11 tripwire hardening (issue #149)
 
 - **A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.**
-- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.**
+- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.** (see the harness-research refinement in detail)
 - **Masking the match that triggered the report is not masking the line.**
 
 ### Stage chaining (M14)
@@ -386,6 +386,13 @@
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
 - **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+
+## Harness research (after v7.6.5)
+
+- **A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.**
+- **A cap on each part is not a cap on the whole: measure the total against the budget.**
+- **An exclusion applied to one arm of a comparison must apply to the other arm too.**
+- **A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.**
 
 ## Issue 229 (the ledger loop)
 

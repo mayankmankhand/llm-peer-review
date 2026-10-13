@@ -14,6 +14,17 @@
 //     A missing piece is reported as exists:false / empty, not an error, so callers
 //     degrade gracefully. The only hard requirement is a working git checkout.
 //   - Zero dependencies: only Node built-ins (child_process, fs, path).
+//   - Size budget (harness research, P6-C1): Claude Code replaces a Bash result
+//     over about 30 KB with a 2 KB preview and a saved file, so a command reading
+//     this output loses everything past the preview. The session-start object
+//     is kept under 16,000 characters, half that cut, wherever trimming can do it: a LESSONS.md over 8 KB comes
+//     back as a handle instead of its content, and only the newest plans are listed
+//     in full (both below); the total is then measured, and parts that add up past
+//     it are trimmed in a fixed order (fitSessionStart). --scope cannot promise a size, since it lists every
+//     file in the range, so it puts the fields a command acts on first: scopeLine
+//     and uncommitted.baseline land inside the first 2,000 bytes, and each file
+//     list comes after the fields that describe it. Every mode leads with the
+//     fields a command reads first and ends with cwd, which it rarely needs.
 //   - git always runs with an argument ARRAY, never a shell string, so nothing a
 //     caller passes (a range typed into /review) can reach a shell.
 //
@@ -55,8 +66,16 @@
 //   above its own, so its judges never sit below the finders they audit. buildModel is "session" for best and
 //   "opus" for fit and cheap.
 //
-// Session-start object: generatedAt, cwd, worktree, map, lessons, plans, newestPlan.
-// Each plans[] entry is { name, progress, status, startCommit, models }. startCommit (#182)
+// Session-start object, in this order: generatedAt, newestPlan, models, worktree,
+// map, lessons, plans, plansOmitted (only when plans were left out), cwd.
+// lessons is { exists, path, hasDetail, content } while LESSONS.md is 8 KB or less.
+// Over that, content is left out and the object carries a handle instead:
+// { exists, path, hasDetail, bytes, lines, head, note }, where head is the file's
+// opening (at most 1,500 characters, cut at a line end) and note says to read the
+// file itself. map.overview over 8 KB is cut the same way, to its opening, and
+// map.overviewCut (only then) says so. plans lists the newest 10 plans in full and the next 40 by name only
+// ({ name }); plansOmitted counts the older ones beyond those 50.
+// Each full plans[] entry is { name, progress, status, startCommit, models }. startCommit (#182)
 // is the sha on the plan's `**Start commit:** <sha>` line (exactly that spelling, at
 // the start of a line, 7 to 40 hex characters, nothing after it), which /execute
 // writes into the plan header once when it starts; null when the plan has none.
@@ -209,8 +228,38 @@ function readFileSafe(relPath) {
   }
 }
 
-function emit(payload) {
-  process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+// A copy of obj with the named keys first, in that order, then every other key in
+// its original order. Key order is all this changes: the values are the same.
+function ordered(obj, keys) {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return obj;
+  const out = {};
+  for (const k of keys) if (Object.prototype.hasOwnProperty.call(obj, k)) out[k] = obj[k];
+  for (const k of Object.keys(obj)) if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = obj[k];
+  return out;
+}
+
+// The key order each mode prints in (see "Size budget" above): what a command acts
+// on first, long lists after the fields that describe them, cwd and root last.
+const SESSION_START_ORDER = ["generatedAt", "error", "newestPlan", "models", "worktree", "map", "lessons", "plans", "plansOmitted", "cwd"];
+const SCOPE_ORDER = ["generatedAt", "error", "scopeLine", "source", "reason", "message", "head", "totals", "plan", "uncommitted", "range", "models", "cwd", "root"];
+const UNCOMMITTED_ORDER = ["baseline", "baselineError", "staged", "unstaged", "untracked"];
+const FILE_GROUP_ORDER = ["added", "deleted", "files"];
+const RANGE_ORDER = ["base", "end", "baseFrom", "baseRef", "endRef", "commitCount", "capped", "omitted", "fullBase", "added", "deleted", "commits", "files"];
+
+function layoutScope(payload) {
+  const out = ordered(payload, SCOPE_ORDER);
+  if (out.uncommitted && typeof out.uncommitted === "object") {
+    const u = ordered(out.uncommitted, UNCOMMITTED_ORDER);
+    for (const k of ["staged", "unstaged", "untracked"]) u[k] = ordered(u[k], FILE_GROUP_ORDER);
+    out.uncommitted = u;
+  }
+  if (out.range && typeof out.range === "object") out.range = ordered(out.range, RANGE_ORDER);
+  return out;
+}
+
+function emit(payload, layout) {
+  const shaped = layout ? layout(payload) : payload;
+  process.stdout.write(JSON.stringify(shaped, null, 2) + "\n");
 }
 
 // ==========================================================================
@@ -279,6 +328,14 @@ function sessionStart() {
     let overview = null;
     const ovMatch = mapRaw.match(/##\s*System Overview\s*\n+([\s\S]*?)(?:\n#{2,3}\s|\s*$)/i);
     if (ovMatch) overview = ovMatch[1].trim();
+    // A very long overview would cost the output its budget (Size budget, above):
+    // over 8 KB it is cut to its opening, and overviewCut says so in one sentence.
+    let overviewCut = null;
+    const overviewBytes = overview === null ? 0 : Buffer.byteLength(overview, "utf8");
+    if (overviewBytes > LESSONS_INLINE_BYTES) {
+      overview = headAtLineEnd(overview, LESSONS_HEAD_CHARS).trimEnd();
+      overviewCut = "overview holds the opening of a " + overviewBytes + "-byte System Overview; read CODEBASE_MAP.md for the rest.";
+    }
 
     // Malformed: the three byte tests generate-index.js --finalize runs on the
     // temp file (over 200 bytes, a "<!-- Generated:" first line, a "# Codebase
@@ -304,36 +361,122 @@ function sessionStart() {
       malformed,
       overview,
     };
+    if (overviewCut) map.overviewCut = overviewCut;
   }
 
   // --- Lessons index --------------------------------------------------------
-  // LESSONS.md is already the short index (one line per lesson); the full write-ups
-  // live in LESSONS-detail.md and are opened on demand by the command, not here.
-  // The index is small, so its full content is bundled to save the separate read.
+  // LESSONS.md is meant to be the short index (one line per lesson); the full
+  // write-ups live in LESSONS-detail.md and are opened on demand by the command, not
+  // here. A small index is bundled whole to save the separate read. A long one is
+  // not: it alone could push this output past the host's cut (Size budget, above),
+  // so it comes back as a handle and the command reads the file itself.
   const LESSONS_FILE = "LESSONS.md";
   const lessonsRaw = readFileSafe(LESSONS_FILE);
-  const lessons =
-    lessonsRaw === null
-      ? { exists: false }
-      : {
-          exists: true,
-          path: LESSONS_FILE,
-          hasDetail: fs.existsSync(path.join(cwd, "LESSONS-detail.md")),
-          content: lessonsRaw,
-        };
+  let lessons = { exists: false };
+  if (lessonsRaw !== null) {
+    lessons = {
+      exists: true,
+      path: LESSONS_FILE,
+      hasDetail: fs.existsSync(path.join(cwd, "LESSONS-detail.md")),
+    };
+    const bytes = Buffer.byteLength(lessonsRaw, "utf8");
+    if (bytes <= LESSONS_INLINE_BYTES) {
+      lessons.content = lessonsRaw;
+    } else {
+      Object.assign(lessons, {
+        bytes,
+        lines: countLines(lessonsRaw),
+        head: headAtLineEnd(lessonsRaw, LESSONS_HEAD_CHARS),
+        note: "LESSONS.md is over 8 KB, so its content is left out here; read the file itself.",
+      });
+    }
+  }
 
   // --- Plans ----------------------------------------------------------------
-  const { plans, newestPlan } = readPlans(cwd);
+  // Newest first. The newest few in full, the next ones by name (enough to see
+  // which names are taken), and a count for the rest.
+  const all = readPlans(cwd);
+  const plans = all.plans
+    .slice(0, PLANS_IN_FULL)
+    .concat(all.plans.slice(PLANS_IN_FULL, PLANS_IN_FULL + PLANS_BY_NAME).map((x) => ({ name: x.name })));
+  const plansOmitted = all.plans.length - plans.length;
 
-  return {
+  const out = {
     generatedAt: new Date().toISOString(),
     cwd,
     worktree,
     map,
     lessons,
     plans,
-    newestPlan,
+    newestPlan: all.newestPlan,
   };
+  if (plansOmitted > 0) out.plansOmitted = plansOmitted;
+  return out;
+}
+
+// LESSONS.md is bundled whole up to this size; over it, a handle (above). The map's
+// System Overview is cut at the same size.
+const LESSONS_INLINE_BYTES = 8 * 1024;
+const LESSONS_HEAD_CHARS = 1500;
+// Plans listed in full, then by name only; any older ones are counted.
+const PLANS_IN_FULL = 10;
+const PLANS_BY_NAME = 40;
+
+// Lines as git counts them: one per newline, plus an unterminated last line.
+// The session-start budget (Size budget, above), measured on the object as it is
+// printed, models included. Each part has its own cap, but parts under their caps
+// can still add up past the budget, so the total is checked and the object shrinks
+// in a fixed order until it fits: the lessons index becomes a handle, then the map
+// overview is cut to its opening, then name-only plan entries move to plansOmitted.
+// The newest 10 plans, the models and the worktree are never trimmed, so an object
+// whose untrimmable parts alone exceed the budget is printed as it is.
+const SESSION_START_BUDGET = 16000;
+function fitSessionStart(payload) {
+  const size = (o) => JSON.stringify(ordered(o, SESSION_START_ORDER), null, 2).length + 1;
+  if (size(payload) <= SESSION_START_BUDGET) return payload;
+  const lessons = payload.lessons;
+  if (lessons && typeof lessons.content === "string") {
+    const raw = lessons.content;
+    delete lessons.content;
+    Object.assign(lessons, {
+      bytes: Buffer.byteLength(raw, "utf8"),
+      lines: countLines(raw),
+      head: headAtLineEnd(raw, LESSONS_HEAD_CHARS),
+      note: "LESSONS.md is left out here to keep this output under its size budget; read the file itself.",
+    });
+    if (size(payload) <= SESSION_START_BUDGET) return payload;
+  }
+  const map = payload.map;
+  if (map && typeof map.overview === "string" && !map.overviewCut) {
+    const bytes = Buffer.byteLength(map.overview, "utf8");
+    const cut = headAtLineEnd(map.overview, LESSONS_HEAD_CHARS).trimEnd();
+    if (cut.length < map.overview.length) {
+      map.overview = cut;
+      map.overviewCut = "overview holds the opening of a " + bytes + "-byte System Overview; read CODEBASE_MAP.md for the rest.";
+      if (size(payload) <= SESSION_START_BUDGET) return payload;
+    }
+  }
+  while (Array.isArray(payload.plans) && payload.plans.length > PLANS_IN_FULL && size(payload) > SESSION_START_BUDGET) {
+    payload.plans.pop();
+    payload.plansOmitted = (payload.plansOmitted || 0) + 1;
+  }
+  return payload;
+}
+
+function countLines(text) {
+  if (text === "") return 0;
+  const newlines = (text.match(/\n/g) || []).length;
+  return text.endsWith("\n") ? newlines : newlines + 1;
+}
+
+// The opening of text, at most max characters, cut after the last whole line that
+// fits. A first line longer than max is cut at max (never inside a character pair).
+function headAtLineEnd(text, max) {
+  if (text.length <= max) return text;
+  const cut = text.lastIndexOf("\n", max - 1);
+  if (cut !== -1) return text.slice(0, cut + 1);
+  const code = text.charCodeAt(max - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
 }
 
 // List plans/PLAN-*.md newest-first by mtime, each with its progress percentage,
@@ -1234,9 +1377,9 @@ function withModels(payload) {
   return payload;
 }
 if (cliArgs.length === 0) {
-  emit(withModels(sessionStart()));
+  emit(fitSessionStart(withModels(sessionStart())), (o) => ordered(o, SESSION_START_ORDER));
 } else if (cliArgs[0] === "--models" && cliArgs.length === 1) {
-  emit(withModels({ generatedAt: new Date().toISOString(), cwd }));
+  emit(withModels({ generatedAt: new Date().toISOString(), cwd }), (o) => ordered(o, ["generatedAt", "models", "cwd"]));
 } else if (cliArgs[0] === "--scope") {
   let result;
   try {
@@ -1245,7 +1388,7 @@ if (cliArgs.length === 0) {
     // Fail soft on anything unforeseen too: the caller always gets one JSON object.
     result = { generatedAt: new Date().toISOString(), cwd, source: "none", reason: "error", message: String(e && e.message), error: String(e && e.message) };
   }
-  emit(withScopeLine(withModels(result), cliArgs.length > 1 && String(cliArgs[1]).trim() !== ""));
+  emit(withScopeLine(withModels(result), cliArgs.length > 1 && String(cliArgs[1]).trim() !== ""), layoutScope);
 } else {
-  emit({ generatedAt: new Date().toISOString(), cwd, error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)" });
+  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)", cwd });
 }

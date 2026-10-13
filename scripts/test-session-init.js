@@ -1164,6 +1164,96 @@ section('17. worktree.isWorktree from a subfolder (#226)', function () {
   check('a linked worktree is a worktree from a subfolder', at(path.join(wt, 'sub')).isWorktree === true, JSON.stringify(at(path.join(wt, 'sub'))));
 });
 
+section('The 16,000-character budget holds as a total (review R13)', function () {
+  // Each part under its own 8 KB cap can still sum past the budget: an inline
+  // LESSONS.md and a long map overview together. The total is measured, and the
+  // output shrinks in a fixed order until it fits.
+  const repo = newRepo('budget-total');
+  let lessons = '# Lessons Learned (Index)\n\n';
+  while (Buffer.byteLength(lessons) < 7900) lessons += '- **A one-line lesson with "quotes" and a path like src/a/b.js, written the long way.**\n';
+  write(repo, 'LESSONS.md', lessons);
+  let overview = '';
+  while (Buffer.byteLength(overview) < 7900) overview += 'The system reads its plans and lessons at startup and hands commands one JSON object to act on.\n';
+  write(repo, 'CODEBASE_MAP.md', '<!-- Generated: 2026-10-13 | Commit: abc1234 -->\n# Codebase Map\n\n## System Overview\n\n' + overview + '\n## Module Guide\n\n- x\n');
+  for (let i = 1; i <= 50; i++) write(repo, 'plans/PLAN-issue-' + (300 + i) + '.md', '# Plan ' + i + '\n\n**Overall Progress:** `100%`\n**Models:** fit\n');
+  commitAll(repo, 'init');
+  const out = runScript([], repo);
+  check('output parses', out.parsed, out.stderr.slice(0, 200));
+  check('stdout stays under 16,000 characters when lessons and overview are each just under 8 KB', out.stdout.length < 16000, 'length ' + out.stdout.length);
+  const L = out.json.lessons || {};
+  check('the budget turns the inline lessons into a handle first, and the note says why',
+    L.content === undefined && L.bytes === Buffer.byteLength(lessons) && typeof L.head === 'string' && /size budget/.test(L.note || ''), JSON.stringify({ content: typeof L.content, bytes: L.bytes, note: L.note }));
+});
+
+section('Output fits under the host\'s cut (harness research, P6-C1)', function () {
+  // Claude Code replaces a Bash result over about 30 KB with a 2 KB preview, so a
+  // command that reads this script's stdout loses everything past the preview. The
+  // budget is half that cut, and the fields a command acts on come first.
+  const repo = newRepo('budget');
+  let lessons = '# Lessons Learned (Index)\n\n## What I Learned\n\n';
+  for (let i = 1; i <= 400; i++) lessons += '- **Lesson ' + i + ': a one-line takeaway written the way the real index writes them.**\n';
+  write(repo, 'LESSONS.md', lessons);
+  write(repo, 'LESSONS-detail.md', 'detail\n');
+  for (let i = 1; i <= 80; i++) {
+    write(repo, 'plans/PLAN-issue-' + (100 + i) + '.md', '# Plan ' + i + '\n\n**Overall Progress:** `' + (i % 3 === 0 ? 50 : 100) + '%`\n**Models:** fit\n\n## Tasks\n- [x] 🟩 **Step 1: x**\n');
+    const when = new Date((clock + i * 60) * 1000);
+    fs.utimesSync(path.join(repo, 'plans', 'PLAN-issue-' + (100 + i) + '.md'), when, when);
+  }
+  const base = commitAll(repo, 'init');
+  for (let i = 1; i <= 260; i++) write(repo, 'src/module-' + i + '/file-with-a-long-enough-name-' + i + '.js', 'export const x' + i + ' = ' + i + ';\n');
+  commitAll(repo, 'add 260 files');
+  write(repo, 'src/module-1/uncommitted.js', 'pending\n');
+  write(repo, 'LESSONS-detail.md', 'detail, edited\n'); // a tracked change, so the snapshot is made
+
+  const start = runScript([], repo);
+  check('default output parses', start.parsed, start.stderr.slice(0, 200));
+  check('default stdout is under 16,000 characters with 80 plans and a 400-line LESSONS.md', start.stdout.length < 16000, 'length ' + start.stdout.length);
+  const at = (key) => start.stdout.indexOf('"' + key + '"');
+  check('newestPlan and models come before lessons and plans', at('newestPlan') > -1 && at('models') > -1 && at('newestPlan') < at('lessons') && at('models') < at('lessons') && at('models') < at('plans'),
+    'offsets newestPlan ' + at('newestPlan') + ', models ' + at('models') + ', lessons ' + at('lessons') + ', plans ' + at('plans'));
+  const L = start.json.lessons || {};
+  check('a LESSONS.md over 8 KB becomes a handle: path, bytes, lines and head, no content',
+    L.exists === true && L.path === 'LESSONS.md' && L.content === undefined && L.bytes === Buffer.byteLength(lessons) && L.lines === 404 && typeof L.head === 'string' && lessons.startsWith(L.head) && L.head.length <= 1500 && L.head.endsWith('\n'),
+    JSON.stringify({ path: L.path, bytes: L.bytes, lines: L.lines, head: (L.head || '').length, content: typeof L.content }));
+  const plans = start.json.plans || [];
+  check('the newest 10 plans keep full entries, the next 40 keep names, the rest are counted',
+    plans.length === 50 && plans.slice(0, 10).every((x) => typeof x.progress === 'number' && typeof x.status === 'string') && plans.slice(10).every((x) => Object.keys(x).join() === 'name') && start.json.plansOmitted === 30 && plans[0].name === 'PLAN-issue-180.md',
+    'count ' + plans.length + ', omitted ' + start.json.plansOmitted + ', first ' + (plans[0] && plans[0].name));
+  check('newestPlan still names the newest plan', start.json.newestPlan === 'PLAN-issue-180.md', String(start.json.newestPlan));
+
+  const sc = scope(repo, base + '..HEAD');
+  const head = sc.stdout.slice(0, 2000);
+  check('--scope output parses with a 260-file range', sc.parsed && sc.json.range && sc.json.range.files && sc.json.range.files.length === 260, sc.stderr.slice(0, 200));
+  check('scopeLine sits inside the first 2,000 bytes of --scope', head.indexOf('"scopeLine"') > -1, 'scopeLine at ' + sc.stdout.indexOf('"scopeLine"'));
+  check('uncommitted.baseline sits inside the first 2,000 bytes of --scope', head.indexOf('"baseline"') > -1 && sc.json.uncommitted && typeof sc.json.uncommitted.baseline === 'string',
+    'baseline at ' + sc.stdout.indexOf('"baseline"'));
+  const rangeAt = sc.stdout.indexOf('"range"');
+  const rangeFiles = sc.stdout.indexOf('"files"', rangeAt);
+  check('the range\'s base and end sit inside the first 2,000 bytes, its file list after them',
+    rangeAt > -1 && head.indexOf('"base"', rangeAt) > -1 && head.indexOf('"end"', rangeAt) > -1 && rangeFiles > sc.stdout.indexOf('"end"', rangeAt),
+    'range ' + rangeAt + ', base ' + sc.stdout.indexOf('"base"', rangeAt) + ', end ' + sc.stdout.indexOf('"end"', rangeAt) + ', files ' + rangeFiles);
+  const small = newRepo('budget-small');
+  write(small, 'LESSONS.md', '# Lessons\n\n- **one**\n');
+  commitAll(small, 'init');
+  const s2 = runScript([], small);
+  check('a small LESSONS.md still comes back whole as content', s2.json.lessons && s2.json.lessons.content === '# Lessons\n\n- **one**\n', JSON.stringify(s2.json.lessons));
+  check('a short map overview comes back whole, with no cut note', s2.json.map && s2.json.map.exists === false, JSON.stringify(s2.json.map));
+
+  // The map's System Overview is the other field that carries a file's text.
+  const big = newRepo('budget-map');
+  write(big, 'README.md', 'x\n');
+  const bigHead = commitAll(big, 'init');
+  let overview = '';
+  for (let i = 1; i <= 120; i++) overview += 'Overview line ' + i + ' describes one part of a large system in a sentence of ordinary length.\n';
+  write(big, 'CODEBASE_MAP.md', '<!-- Generated: 2026-01-01 -->\n<!-- Commit: ' + bigHead + ' -->\n\n# Codebase Map\n\n## System Overview\n\n' + overview + '\n## Module Guide\n\n- README.md: the one file.\n');
+  const m = runScript([], big);
+  const mo = (m.json.map || {}).overview || '';
+  check('a map overview over 8 KB is cut to its opening, at a line end, with one sentence saying so',
+    Buffer.byteLength(overview) > 8192 && mo.length <= 1500 && overview.startsWith(mo) && typeof m.json.map.overviewCut === 'string' && /CODEBASE_MAP\.md/.test(m.json.map.overviewCut),
+    'overview ' + mo.length + ' chars, overviewCut ' + JSON.stringify(m.json.map.overviewCut));
+  check('the cut map is still sound and fresh', m.json.map.malformed === false && m.json.map.commitsBehind === 0, JSON.stringify(m.json.map).slice(0, 200));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');

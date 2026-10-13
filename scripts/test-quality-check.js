@@ -87,7 +87,12 @@ function reportLine(n, bugId) {
 // o.models: { main, finder, judge }; o.result: result.json overrides;
 // o.mainTools: extra tool uses in the main transcript; o.meta: run.json overrides;
 // o.mainTexts: the session's own text, written before its dispatches;
-// o.plans: { name: text } left in the scratch project's plans/ folder.
+// o.plans: { name: text } left in the scratch project's plans/ folder;
+// o.whats: { bugId: sentence } replaces a canned finding's `what`, in the finder's
+// output and in its report line alike; o.killVerdict: { bugId: { tag, reason } }
+// gives a killed bug's Audited out verdict and reason (default REFUTED by a
+// skeptic); o.extraSurvivors and o.extraKilled: report lines for findings that
+// match no planted bug, '{n}' standing for the next R-number.
 function makeReviewRun(o) {
   const dir = tmp('qc-test-run-');
   const home = '/tmp/qc-run.TEST/home';
@@ -96,6 +101,7 @@ function makeReviewRun(o) {
   const caughtIds = o.caught || [];
   const killed = o.killed || [];
   const raised = o.raised || [...caughtIds, ...killed];
+  const findOf = id => (o.whats && o.whats[id] ? JSON.stringify({ ...JSON.parse(FINDS[id]()), what: o.whats[id] }) : FINDS[id]());
   const sid = 'sess-' + Math.random().toString(36).slice(2, 8);
   const slugDir = path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project');
   const mainRecords = [];
@@ -104,7 +110,7 @@ function makeReviewRun(o) {
   kinds.forEach((kind, i) => {
     const toolId = 'toolu_finder_' + i;
     toolUses.push({ type: 'tool_use', id: toolId, name: 'Agent', input: { subagent_type: 'tk:review-' + kind + '-finder', description: kind, prompt: '...' } });
-    let out = raised.filter(id => KIND_OF[id] === kind).map(id => FINDS[id]()).join('\n') || 'NO FINDINGS';
+    let out = raised.filter(id => KIND_OF[id] === kind).map(findOf).join('\n') || 'NO FINDINGS';
     if (o.finderOut && o.finderOut[kind] !== undefined) out = o.finderOut[kind];
     const recs = [
       { type: 'user', message: { role: 'user', content: 'review prompt' } },
@@ -125,9 +131,14 @@ function makeReviewRun(o) {
   let n = 0;
   const lines = ['# Review', '', 'Verdict: changes-requested - see below', '', '### Findings', ''];
   for (const id of caughtIds) lines.push(reportLine(++n, id), '  - **Fix:** One line. Ten minutes, or leave it.', '');
+  for (const l of o.extraSurvivors || []) lines.push(l.replace('{n}', String(++n)), '');
   lines.push('### Audited out', '');
-  for (const id of killed) lines.push('- **R' + (++n) + '** [' + KIND_OF[id] + '] `REFUTED` - ' + JSON.parse(FINDS[id]()).what + ' (skeptic: not reachable)');
-  if (killed.length === 0) lines.push('Audited out: none - all findings survived the audit.');
+  for (const id of killed) {
+    const k = (o.killVerdict || {})[id] || { tag: 'REFUTED', reason: 'skeptic: not reachable' };
+    lines.push('- **R' + (++n) + '** [' + KIND_OF[id] + '] `' + k.tag + '` - ' + JSON.parse(findOf(id)).what + ' (' + k.reason + ')');
+  }
+  for (const l of o.extraKilled || []) lines.push(l.replace('{n}', String(++n)));
+  if (killed.length === 0 && !(o.extraKilled || []).length) lines.push('Audited out: none - all findings survived the audit.');
   lines.push('', '### Summary', '- Specialists run: 8 of 8');
   if (!o.noReport) write(path.join(dir, 'project-reports', 'review-orchestrator-2026-10-03-120000.md'), (o.report || lines.join('\n')) + '\n');
   for (const [name, text] of Object.entries(o.plans || {})) write(path.join(dir, 'project-plans', name), text);
@@ -619,6 +630,673 @@ section('the fixture server listens on loopback only (review R2)', () => {
   check('the fixture itself is untouched: server.js still passes no host', /server\.listen\(PORT, \(\) =>/.test(fixture));
 });
 
+// ---------------------------------------------------------------------------
+// Research plan item 2 (P1-C1): the scorer refuses a comparison where more than
+// one thing moved. Item 3 (P1-C2): a check the runner refused is harness-lost,
+// not a model miss.
+
+// A run's setting in the shape runSetting returns: o.harness and o.arm override
+// the defaults (one build, Opus high everywhere, Claude Code 2.1.288).
+const FINDER_NAMES = QC.FINDER_KINDS.map(k => 'review-' + k + '-finder');
+function setting(o) {
+  const x = o || {};
+  const arm = Object.fromEntries(FINDER_NAMES.map(n => [n, { model: 'opus', effort: 'high', ...(x.arm || {}), ...((x.agents || {})[n] || {}) }]));
+  return {
+    dir: '/runs/' + (x.name || 'run'), role: x.role || 'review',
+    harness: { build: 'b1', session: 'opus/high', claude: '2.1.288', fixture: 'fx', prompt: null, chunk: null, ...(x.harness || {}) },
+    arm, labels: { build: x.label || 'aaaaaaa' },
+  };
+}
+function mapperSetting(o) {
+  const x = o || {};
+  return { dir: '/runs/m', role: 'mapper', harness: { build: 'm1', session: 'opus/high', claude: '2.1.288', fixture: 'fx', prompt: 'p1', chunk: 'c1', ...(x.harness || {}) },
+    arm: { 'index-mapper': { model: 'opus', effort: 'medium', ...(x.arm || {}) } }, labels: { build: x.label || 'bbbbbbb' } };
+}
+
+section('setting comparison (P1-C1)', () => {
+  const base = [setting(), setting()];
+  const model = QC.compareSettings([setting({ arm: { model: 'sonnet', effort: 'medium' } })], base);
+  check('a clean model A/B: only the arm moved', model.kind === 'model' && !model.confounded && /model A\/B/.test(model.summary) && /harness held/.test(model.summary), JSON.stringify(model));
+  const harness = QC.compareSettings([setting({ harness: { build: 'b2' }, label: 'ccccccc' }), setting({ harness: { build: 'b2' }, label: 'ccccccc' })], base);
+  check('a clean harness A/B: only the build moved', harness.kind === 'harness' && !harness.confounded && /harness A\/B, build ccccccc .* vs aaaaaaa/.test(harness.summary) && /arm held/.test(harness.summary), JSON.stringify(harness));
+  const pair = QC.compareSettings([setting({ arm: { model: 'haiku', effort: 'medium' }, harness: { build: 'b2', claude: '2.1.296' } })], base);
+  check('a confounded pair: the arm and the harness both moved, and the moved harness fields are named',
+    pair.confounded && pair.kind === 'confounded' && pair.confounds.includes('between: build') && pair.confounds.includes('between: Claude Code')
+    && /harness moved too: build .* Claude Code 2\.1\.296 vs 2\.1\.288/.test(pair.summary), JSON.stringify(pair));
+  const cc = QC.compareSettings([setting({ harness: { build: 'b2', claude: '2.1.289' } })], base);
+  check('a harness A/B on another Claude Code version is confounded, naming only Claude Code', cc.confounded && cc.confounds.join() === 'between: Claude Code', JSON.stringify(cc.confounds));
+  const sess = QC.compareSettings([setting({ harness: { session: 'sonnet/high' } })], base);
+  check('a moved session model is confounded even with nothing else moved', sess.confounded && sess.confounds.join() === 'between: session model/effort', JSON.stringify(sess));
+  const mapper = QC.compareSettings([mapperSetting({ harness: { build: 'm2', prompt: 'p2' } })], [mapperSetting(), mapperSetting()]);
+  check('a mapper harness A/B: the prompt moves with the build and is allowed', mapper.kind === 'harness' && !mapper.confounded, JSON.stringify(mapper));
+  const promptOnly = QC.compareSettings([mapperSetting({ harness: { prompt: 'p2' } })], [mapperSetting()]);
+  check('a mapper prompt that moved on the same build is confounded', promptOnly.confounded && promptOnly.confounds.join() === 'between: mapper prompt hash', JSON.stringify(promptOnly));
+  const mapperH = QC.compareSettings([mapperSetting({ arm: { model: 'haiku' }, harness: { build: 'm2', prompt: 'p2', claude: '2.1.296' } })], [mapperSetting({ arm: { model: 'sonnet' } })]);
+  check('the mapper-h shape: arm, build, prompt and Claude Code all moved, and the three harness fields are named',
+    mapperH.confounded && ['between: build', 'between: mapper prompt hash', 'between: Claude Code'].every(f => mapperH.confounds.includes(f)), JSON.stringify(mapperH.confounds));
+  // A field a saved run cannot supply is unknown and never a difference.
+  const unknownBuild = QC.compareSettings([setting({ arm: { model: 'haiku' }, harness: { build: null, claude: null } })], base);
+  check('an unknown field is not counted: a model A/B whose candidate build and Claude Code are unknown stays clean', unknownBuild.kind === 'model' && !unknownBuild.confounded, JSON.stringify(unknownBuild));
+  const halfKnown = QC.compareSettings([setting(), setting({ harness: { build: null } })], base);
+  check('a set with one unknown build and one known is still uniform', !halfKnown.confounded && halfKnown.kind === 'same', JSON.stringify(halfKnown));
+  // The deps-h shape: a baseline over several builds, efforts and Claude Code versions.
+  const mixed = [setting(), setting({ harness: { build: 'b3', claude: '2.1.289' }, arm: { effort: 'medium' }, label: 'ddddddd' })];
+  const depsH = QC.compareSettings([setting({ harness: { build: 'b9', claude: '2.1.296' }, agents: { 'review-deps-finder': { model: 'haiku', effort: 'medium' } } })], mixed);
+  check('a baseline that is not uniform is confounded, naming its build, Claude Code and arm effort spread',
+    depsH.confounded && ['baseline: build', 'baseline: Claude Code', 'baseline: arm effort'].every(f => depsH.confounds.includes(f))
+    && /baseline set is not uniform in arm effort: 8 agents/.test(depsH.summary) && /baseline set is not uniform in build: aaaaaaa .* \| ddddddd/.test(depsH.summary), depsH.summary);
+  check('sameSetting: unknown fields match, recorded ones must agree',
+    QC.sameSetting(setting(), setting({ harness: { build: null } })) && !QC.sameSetting(setting(), setting({ harness: { claude: '2.1.289' } })) && !QC.sameSetting(setting(), setting({ arm: { effort: 'low' } })));
+});
+
+section('scoring with settings: CONFOUNDED, --allow-drift, noise (P1-C1)', () => {
+  const run = (o, st) => Object.assign(analyze(makeReviewRun(o)), { setting: st });
+  const base = [run({ caught: IDS }, setting()), run({ caught: IDS }, setting())];
+  const confounded = QC.scoreSets([run({ caught: IDS }, setting({ arm: { model: 'sonnet' }, harness: { build: 'b2' } }))], base, IDS, { knownId: KNOWN });
+  check('a confounded comparison returns CONFOUNDED and names the fields', confounded.verdict === 'CONFOUNDED' && /build/.test(confounded.why.join()) && confounded.perId[KNOWN].candidate === '1/1', confounded.verdict + ' ' + confounded.why);
+  const drift = QC.scoreSets([run({ caught: IDS }, setting({ arm: { model: 'sonnet' }, harness: { build: 'b2' } }))], base, IDS, { knownId: KNOWN, allowDrift: 'baseline rerun is not affordable today' });
+  check('--allow-drift scores it anyway and keeps the reason and the confounds', drift.verdict === 'PASS' && drift.drift.reason === 'baseline rerun is not affordable today' && drift.drift.confounds.includes('between: build'), JSON.stringify(drift.drift));
+  const clean = QC.scoreSets([run({ caught: IDS }, setting({ arm: { model: 'sonnet', effort: 'medium' } }))], base, IDS, { knownId: KNOWN });
+  check('a clean model A/B is scored as before', clean.verdict === 'PASS' && clean.compare.kind === 'model' && clean.drift === null, clean.verdict);
+  check('runs without a setting skip the check, as before', QC.scoreSets([analyze(makeReviewRun({ caught: IDS }))], [analyze(makeReviewRun({ caught: IDS }))], IDS, {}).compare === null);
+  // Noise: the baseline setting dropped the traversal in one of three saved runs;
+  // a run on another setting that dropped the search bug is not part of the pool.
+  const noTraversal = IDS.filter(id => id !== 'security-path-traversal');
+  const pool = [...base, run({ caught: noTraversal }, setting({ name: 'third' })), run({ caught: IDS.filter(id => id !== 'code-search-prefix') }, setting({ harness: { build: 'b7' } })),
+    run({ caught: [], meta: { exitCode: 1 } }, setting())];
+  const weak = QC.scoreSets([run({ caught: noTraversal }, setting({ arm: { model: 'sonnet' } })), run({ caught: noTraversal }, setting({ arm: { model: 'sonnet' } }))], base, IDS, { knownId: KNOWN, pool });
+  check('noise: the pool is every valid saved run on the baseline\'s setting', weak.poolRuns === 3 && weak.noise['security-path-traversal'].caught === 2 && weak.noise['security-path-traversal'].runs === 3 && weak.noise['code-search-prefix'].caught === 3, JSON.stringify({ n: weak.poolRuns, noise: weak.noise }));
+  check('a 2-run FAIL on a bug the baseline setting itself drops is marked weak', weak.verdict === 'FAIL' && weak.weak.join() === 'security-path-traversal' && /weak: the baseline setting caught it in only 2 of 3 saved runs/.test(weak.why.join()), weak.why.join());
+  const firm = QC.scoreSets([run({ caught: noTraversal }, setting({ arm: { model: 'sonnet' } })), run({ caught: noTraversal }, setting({ arm: { model: 'sonnet' } }))], base, IDS, { knownId: KNOWN, pool: base });
+  check('a FAIL on a bug the baseline setting always catches is not weak', firm.verdict === 'FAIL' && firm.weak.length === 0 && !/weak/.test(firm.why.join()), firm.why.join());
+});
+
+section('run settings from saved folders (P1-C1)', () => {
+  // Hashing the build: the arm's lines never count, the prompts do.
+  const agent = '---\nname: review-code-finder\ntools: Read\nmodel: inherit\neffort: high\nskills:\n  - review-code-criteria\n---\n\nYou are a Staff Engineer.\n';
+  check('stripArmLines: only the model and effort lines go', QC.stripArmLines(agent) === '---\nname: review-code-finder\ntools: Read\nskills:\n  - review-code-criteria\n---\n\nYou are a Staff Engineer.\n', QC.stripArmLines(agent));
+  const files = { 'agents/review-code-finder.md': agent, 'commands/review.md': 'review steps', 'commands/index.md': 'not on the review path' };
+  const h = QC.pathHash('review', files);
+  check('pathHash: the arm\'s patch leaves the build hash alone', h === QC.pathHash('review', { ...files, 'agents/review-code-finder.md': QC.patchAgent(agent, { model: 'haiku', effort: 'medium' }) }));
+  check('pathHash: a prompt change moves it', h !== QC.pathHash('review', { ...files, 'agents/review-code-finder.md': agent.replace('Staff Engineer', 'Principal Engineer') }) && h !== QC.pathHash('review', { ...files, 'commands/review.md': 'review steps, reworded' }));
+  check('pathHash: files off the role\'s path are ignored, and none at all is unknown', h === QC.pathHash('review', { ...files, 'commands/index.md': 'changed' }) && QC.pathHash('review', { 'commands/index.md': 'x' }) === null);
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' }).stdout.trim();
+  const gitFiles = QC.gitPathFiles(head, 'review');
+  const copy = tmp('qc-test-build-copy-');
+  for (const [rel, buf] of Object.entries(gitFiles || {})) write(path.join(copy, rel), buf);
+  write(path.join(copy, 'commands', 'index.md'), 'off the review path');
+  check('git and a build folder give one hash for the same files', gitFiles && Object.keys(gitFiles).length > 10 && QC.pathHash('review', gitFiles) === QC.pathHash('review', QC.dirPathFiles(copy, 'review')), Object.keys(gitFiles || {}).length);
+  check('a commit this clone does not have is unknown, not an error', QC.gitPathFiles('0'.repeat(40), 'review') === null);
+  check('a build id that is not a commit id never reaches git', QC.gitPathFiles('--output=/tmp/x', 'review') === null && QC.gitPathFiles('HEAD', 'review') === null);
+
+  // A review run recorded with --only: the patched finder from run.json, the rest
+  // read from the build's commit; the build hash from git.
+  const onlyDir = makeReviewRun({ caught: IDS, meta: { build: { spec: 'HEAD', sha: head, version: '7.6.5' }, session: { model: 'opus', effort: 'high', claude: '2.1.296 (Claude Code)' }, fixture: 'fx',
+    patch: [{ agent: 'review-deps-finder', model: 'haiku', effort: 'medium' }] } });
+  const only = QC.runSetting(QC.loadRun(onlyDir));
+  const shippedCode = fs.readFileSync(path.join(copy, 'agents', 'review-code-finder.md'), 'utf8');
+  check('an --only run: the patched finder from run.json, the others as the commit ships them',
+    only.arm['review-deps-finder'].model === 'haiku' && only.arm['review-deps-finder'].effort === 'medium'
+    && only.arm['review-code-finder'].effort === (QC.frontmatterValue(shippedCode, 'effort') || 'high') && only.arm['review-code-finder'].model === 'opus', JSON.stringify(only.arm));
+  check('the build hash of a commit comes from git, and Claude Code is read from its version line', only.harness.build === QC.pathHash('review', gitFiles) && only.harness.claude === '2.1.296' && only.harness.session === 'opus/high', JSON.stringify(only.harness));
+  // A tree build from before the hashes were recorded: its build is unknown.
+  const tree = QC.runSetting(QC.loadRun(makeReviewRun({ caught: IDS, meta: { build: { spec: 'tree', sha: null, version: '7.5.1' }, session: { model: 'opus', effort: 'high' } } })));
+  const lines = QC.settingLines(tree);
+  check('a field the folder cannot supply prints as unknown', tree.harness.build === null && /build unknown \(tree 7\.5\.1, no recorded hash\)/.test(lines.harness) && /Claude Code unknown/.test(lines.harness) && /fixture unknown/.test(lines.harness), lines.harness);
+  const recorded = QC.runSetting(QC.loadRun(makeReviewRun({ caught: IDS, meta: { build: { spec: 'tree', sha: null, version: '7.6.5', pathHashes: { review: 'feedfacefeedface', mapper: null } } } })));
+  check('a build hash recorded at run time is used as it stands (tree builds)', recorded.harness.build === 'feedfacefeedface');
+
+  // The mapper's prompt hash, from the dispatch in the saved transcript.
+  const mapperRun = prompt => {
+    const dir = tmp('qc-test-mapper-');
+    const slug = path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project');
+    write(path.join(slug, 'sid.jsonl'), JSON.stringify({ type: 'assistant', message: { model: OPUS, role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_m', name: 'Agent', input: { subagent_type: 'tk:index-mapper', prompt } }] } }) + '\n');
+    write(path.join(slug, 'sid', 'subagents', 'agent-m.jsonl'), JSON.stringify({ type: 'assistant', message: { model: 'claude-haiku-4-5', role: 'assistant', content: [{ type: 'text', text: '## a.js\n**Purpose:** x' }] } }) + '\n');
+    write(path.join(slug, 'sid', 'subagents', 'agent-m.meta.json'), JSON.stringify({ agentType: 'tk:index-mapper', toolUseId: 'toolu_m' }));
+    write(path.join(dir, 'run.json'), JSON.stringify({ role: 'mapper', arm: 'h', chunk: { sourceRef: 'abcdef1234', files: ['a.js'] }, patch: [{ agent: 'index-mapper', model: 'haiku', effort: 'medium' }], expect: { main: 'opus', mapper: 'haiku' } }));
+    write(path.join(dir, 'result.json'), JSON.stringify({ session_id: 'sid' }));
+    return QC.runSetting(QC.loadRun(dir));
+  };
+  const m1 = mapperRun('Map these files:\n- a.js');
+  const m2 = mapperRun('Map these files:\n\n- a.js  ');
+  const m3 = mapperRun('Map these files, briefly:\n- a.js');
+  check('mapper: the prompt hash comes from the transcript, whitespace aside', m1.harness.prompt && m1.harness.prompt === m2.harness.prompt && m1.harness.prompt !== m3.harness.prompt, JSON.stringify([m1.harness.prompt, m3.harness.prompt]));
+  check('mapper: the arm is the mapper\'s patch, and the chunk is recorded', m1.arm['index-mapper'].model === 'haiku' && m1.arm['index-mapper'].effort === 'medium' && /^abcdef1:/.test(m1.harness.chunk), JSON.stringify(m1));
+});
+
+section('kill categories (P1-C2)', () => {
+  const v = QC.auditVerdict;
+  check('REFUTED and a vote tally are refuted', v('- **R5** [copy] `REFUTED 2/3` - Blocks. X. (two skeptics: unreachable)').category === 'refuted' && v('- **R13** [deps] `REFUTED` - Y. (skeptic: only uniqBy runs)').category === 'refuted');
+  check('a check the filter refused is refused (run 2026-10-09-182657 R1)',
+    v('- **R1** [security] `RECEIPT FAILED` - Blocks. Static file serving leaks any file on the machine. (the check was refused by the read-only check filter, a two-range sed, so it never ran; the claim was not disproven)').category === 'refused');
+  check('the fixed form since 7.6.3 is refused', v('- **R7** `RECEIPT FAILED` - X. (refused: not a read-only command, so the claim was not tested)').category === 'refused');
+  check('a check whose output did not show the claim is failed', v('- **R24** [plan] `RECEIPT FAILED` - X. (check `sed -n \'215,222p\' scripts/import-notes.js` printed nothing: the file has 34 lines)').category === 'failed');
+  const cb = v('- **R13** [code] `RECEIPT FAILED` - Failglob takes priority over nullglob. (The check could not run: `$TMPDIR` is unset, so `mkdir /rb` was denied and nothing about globbing was shown.) Orchestrator side note, not a receipt: the probe printed `no match` and exit 1.');
+  check('"could not run ... denied" (cb6eee1 R13) is failed, not refused, and text after the reason is not the reason', cb.category === 'failed' && /could not run/.test(cb.reason), JSON.stringify(cb));
+  check('a finding sentence that says "refused" does not make its kill a refusal', v('- **R9** [copy] `RECEIPT FAILED` - Most user files are probably refused. (check output did not show the claim)').category === 'failed');
+  check('parentheses inside a code span do not end the reason', v('- **R2** [code] `RECEIPT FAILED` - X. (check `grep -n "f(" a.js` was refused: an unbalanced pattern)').category === 'refused');
+  check('a line with no verdict tag is unknown', v('- **R3** [ux] something').category === 'unknown');
+
+  // One run: the traversal refused, the contradiction refuted, the export failed
+  // (its sentence says "refused", its reason does not); a surviving copy finding
+  // and a non-planted Audited out line both say "refused" (cb6eee1 R19, 183430 R8).
+  const traps = analyze(makeReviewRun({
+    caught: ['code-search-prefix', 'copy-unclear-headline'],
+    killed: ['security-path-traversal', 'commands-contradiction', 'plan-export-json'],
+    whats: { 'plan-export-json': 'Should fix. Export skips the plan: it sends JSON where the plan decided CSV, so a spreadsheet import is refused.' },
+    killVerdict: {
+      'security-path-traversal': { tag: 'RECEIPT FAILED', reason: 'the check was refused by the read-only check filter, a two-range sed, so it never ran; the claim was not disproven' },
+      'plan-export-json': { tag: 'RECEIPT FAILED', reason: 'check output did not show the claim' },
+    },
+    extraSurvivors: ['- **R{n}** [copy] ⚠️ `README.md:13` - Should fix. The import instruction never names the columns, so most user files are probably refused or misread.'],
+    extraKilled: ['- **R{n}** [security] `RECEIPT FAILED` - Should fix. The clear-all request needs no authentication. (check refused: multi-part sed script `86,90p;124p`)'],
+  }));
+  check('the three kill categories, each from its own Audited out line',
+    traps.killedAs['security-path-traversal'].category === 'refused' && traps.killedAs['commands-contradiction'].category === 'refuted' && traps.killedAs['plan-export-json'].category === 'failed',
+    JSON.stringify(traps.killedAs));
+  check('only the refused planted bug is harness-lost: neither a survivor nor a non-planted kill that says "refused" counts',
+    traps.harnessLost.join() === 'security-path-traversal' && !traps.killedAs['copy-unclear-headline'] && traps.survived['copy-unclear-headline'].length === 1, JSON.stringify(traps.harnessLost));
+  const reworded = analyze(makeReviewRun({ caught: [], killed: ['ux-clear-all-no-confirm'],
+    report: '# Review\n\n### Findings\n\n### Audited out\n\n- **R4** [code, ux] `REFUTED` - One click on Clear all deletes every note, with no confirmation. (skeptic: the handler never attaches)\n- **R5** [copy] `RECEIPT FAILED` - The Clear all label deletes every note with no confirmation. (check refused: a backtick)\n' }));
+  check('a reworded kill is found by its words, on an entry whose lens raised the bug only',
+    reworded.killedAs['ux-clear-all-no-confirm'].category === 'refuted' && reworded.killedAs['ux-clear-all-no-confirm'].kills.map(k => k.id).join() === 'R4', JSON.stringify(reworded.killedAs));
+});
+
+section('harness-lost in the score (P1-C2)', () => {
+  const refused = { tag: 'RECEIPT FAILED', reason: 'refused: two-range sed, so the claim was not tested' };
+  const all = IDS.filter(id => id !== 'copy-unclear-headline');
+  const base = [analyze(makeReviewRun({ caught: all })), analyze(makeReviewRun({ caught: all }))];
+  const rest = all.filter(id => id !== 'security-path-traversal');
+  const lostRun = () => analyze(makeReviewRun({ caught: rest, killed: ['security-path-traversal'], killVerdict: { 'security-path-traversal': refused } }));
+  const twice = QC.scoreSets([lostRun(), lostRun()], base, IDS, { knownId: KNOWN });
+  check('a bug harness-lost in two runs gives HARNESS, not FAIL', twice.verdict === 'HARNESS' && twice.harnessBugs.join() === 'security-path-traversal' && twice.failed.length === 0 && /fix the runner, then rerun/.test(twice.why.join()), twice.verdict + ' ' + twice.why);
+  check('the harness-lost runs are left out of the candidate count', twice.perId['security-path-traversal'].candidate === '0/0' && twice.perId['security-path-traversal'].harnessLost === 2, JSON.stringify(twice.perId['security-path-traversal']));
+  const once = QC.scoreSets([lostRun(), analyze(makeReviewRun({ caught: all }))], base, IDS, { knownId: KNOWN });
+  check('one harness-lost run beside a catch passes, shown as 1/1 plus 1 harness-lost (the deps score shape)', once.verdict === 'PASS' && once.perId['security-path-traversal'].candidate === '1/1' && once.perId['security-path-traversal'].harnessLost === 1, JSON.stringify(once.perId['security-path-traversal']));
+  const lostAndMissed = QC.scoreSets([lostRun(), analyze(makeReviewRun({ caught: rest }))], base, IDS, { knownId: KNOWN });
+  check('one harness-lost run beside a real miss leaves one counted miss: RERUN, not FAIL', lostAndMissed.verdict === 'RERUN' && lostAndMissed.single.join() === 'security-path-traversal', lostAndMissed.verdict + ' ' + lostAndMissed.why);
+  const onlyRun = QC.scoreSets([lostRun()], base, IDS, { knownId: KNOWN });
+  check('harness-lost in a single run: nothing to judge, so RERUN', onlyRun.verdict === 'RERUN' && onlyRun.unjudged.join() === 'security-path-traversal' && /lost to the harness in its only run/.test(onlyRun.why.join()), onlyRun.verdict + ' ' + onlyRun.why);
+  const lostBase = [lostRun(), analyze(makeReviewRun({ caught: all }))];
+  const missedTwice = QC.scoreSets([analyze(makeReviewRun({ caught: rest })), analyze(makeReviewRun({ caught: rest }))], lostBase, IDS, { knownId: KNOWN });
+  check('a baseline run that lost the bug to the harness is left out of the baseline count: the bug stays stable, and two misses fail',
+    missedTwice.verdict === 'FAIL' && missedTwice.failed.includes('security-path-traversal') && missedTwice.perId['security-path-traversal'].baseline === '1/1' && missedTwice.perId['security-path-traversal'].baselineHarnessLost === 1,
+    missedTwice.verdict + ' ' + JSON.stringify(missedTwice.perId['security-path-traversal']));
+  const refuted = QC.scoreSets([analyze(makeReviewRun({ caught: rest, killed: ['security-path-traversal'] })), analyze(makeReviewRun({ caught: rest, killed: ['security-path-traversal'] }))], base, IDS, { knownId: KNOWN });
+  check('a bug a skeptic refuted twice still fails the arm', refuted.verdict === 'FAIL' && refuted.failed.join() === 'security-path-traversal', refuted.verdict);
+});
+
+section('score command: settings, CONFOUNDED and --allow-drift end to end', () => {
+  const pool = tmp('qc-test-pool-');
+  const patch = (model, effort) => QC.FINDER_KINDS.map(k => ({ agent: 'review-' + k + '-finder', model, effort }));
+  const meta = (hash, cc, model) => ({ build: { spec: 'x', sha: null, version: '7.6.5', pathHashes: { review: hash, mapper: null } }, session: { model: 'opus', effort: 'high', claude: cc + ' (Claude Code)' }, fixture: 'fx', patch: patch(model, 'high') });
+  const a = makeReviewRun({ caught: IDS, meta: meta('1111111111111111', '2.1.300', 'opus') });
+  const b = makeReviewRun({ caught: IDS, meta: meta('1111111111111111', '2.1.300', 'opus') });
+  const c = makeReviewRun({ caught: IDS, meta: meta('2222222222222222', '2.1.301', 'sonnet') });
+  const r = spawnSync('node', [SCRIPT, '--score', c, '--against', a + ',' + b, '--pool', pool], { encoding: 'utf8' });
+  check('--score prints a harness line and an arm line for every run', (r.stdout.match(/^  harness (candidate|baseline) /mg) || []).length === 3 && (r.stdout.match(/^  arm     (candidate|baseline) /mg) || []).length === 3
+    && /build x 7\.6\.5 \(path 22222222\)/.test(r.stdout) && /code, security, ux, plan, commands, browser, deps, copy sonnet\/high/.test(r.stdout), r.stdout);
+  check('a confounded pair: VERDICT CONFOUNDED naming the build and Claude Code', /VERDICT: CONFOUNDED - a model A\/B, arm 8 agents model sonnet vs opus, with the harness moved too: build .* Claude Code 2\.1\.301 vs 2\.1\.300/.test(r.stdout) && r.status === 0, r.stdout);
+  const d = spawnSync('node', [SCRIPT, '--score', c, '--against', a + ',' + b, '--pool', pool, '--allow-drift', 'measuring the build and model together on purpose'], { encoding: 'utf8' });
+  check('--allow-drift prints its reason and scores the comparison', /DRIFT ALLOWED \(--allow-drift\): measuring the build and model together on purpose/.test(d.stdout) && /VERDICT: PASS \(drift allowed: measuring the build and model together on purpose\)/.test(d.stdout), d.stdout);
+  const blank = spawnSync('node', [SCRIPT, '--score', c, '--against', a, '--allow-drift', '  '], { encoding: 'utf8' });
+  check('--allow-drift without a reason is a usage error', blank.status === 2 && /needs a reason/.test(blank.stderr), blank.stderr);
+  const lost = makeReviewRun({ caught: IDS.filter(id => id !== 'security-path-traversal'), killed: ['security-path-traversal'], meta: meta('1111111111111111', '2.1.300', 'sonnet'),
+    killVerdict: { 'security-path-traversal': { tag: 'RECEIPT FAILED', reason: 'the check was refused by the read-only check filter, so it never ran' } } });
+  const caughtAll = makeReviewRun({ caught: IDS, meta: meta('1111111111111111', '2.1.300', 'sonnet') });
+  const h = spawnSync('node', [SCRIPT, '--score', lost + ',' + caughtAll, '--against', a + ',' + b, '--pool', pool], { encoding: 'utf8' });
+  check('the score prints a harness-lost column and names the run and entry', /harness-lost\(candidate\)/.test(h.stdout) && /security-path-traversal\s+2\/2\s+1\/1\s+2\/2\s+1/.test(h.stdout) && /harness-lost: security-path-traversal in qc-test-run-\S+ \(R\d+ RECEIPT FAILED\)/.test(h.stdout) && /comparison: a model A\/B/.test(h.stdout), h.stdout);
+});
+
+// ---------------------------------------------------------------------------
+// Harness research plan Step 10: the skeptic replay of session 1cefa1a7. Nothing
+// here reads the real session log: every log and run folder below is made up, in
+// the shapes that log and a saved run hold.
+
+const MF = require(path.resolve(__dirname, '..', '.claude', 'scripts', 'merge-findings.js'));
+const HANDBACK_FRAME = '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:';
+const handback = lines => HANDBACK_FRAME + '\n' + lines.map(l => '  ' + l).join('\n');
+const agentCall = (id, type) => ({ type: 'assistant', message: { model: OPUS, role: 'assistant', content: [{ type: 'tool_use', id, name: 'Agent', input: { subagent_type: type, prompt: '...' } }] } });
+const launched = (id, agentId) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: 'Async agent launched' }] }] }, toolUseResult: { isAsync: true, status: 'async_launched', agentId } });
+const peer = (agentId, body) => ({ type: 'user', isMeta: true, message: { role: 'user', content: body }, origin: { kind: 'peer', from: agentId, senderTaskId: agentId, body } });
+// Four finder lines: two security, one code on the same line as the second
+// security one (the run's one judgment merge), one plan.
+const SK = [
+  finding('security', 'seed/settings.json', 152, 'Should fix. An allowed remote-add can make a remote a mirror, so a plain push deletes branches.'),
+  finding('security', 'scripts/check.js', 530, 'Optional. Reading every media file in full blocks the push past the read limit.', { severity: 'suggest' }),
+  finding('code', 'scripts/check.js', 530, 'Should fix. A media file over 64 MB now refuses the push as unreadable.'),
+  finding('plan', 'plans/PLAN-a.md', 11, 'Should fix. Both plans still say nothing was pushed, so the record misses the push.'),
+];
+
+section('skeptic replay: finder lines from the session log', () => {
+  const log = [
+    agentCall('toolu_old', 'review-code-finder'), launched('toolu_old', 'old1'),
+    peer('old1', handback([finding('code', 'a.js', 1, 'Should fix. An earlier review in the same session found this.')])),
+    agentCall('toolu_judge', 'audit-skeptic'), launched('toolu_judge', 'judge1'),
+    agentCall('toolu_f1', 'review-security-finder'), launched('toolu_f1', 'sec'),
+    agentCall('toolu_f2', 'review-code-finder'), launched('toolu_f2', 'code'),
+    agentCall('toolu_f3', 'review-plan-finder'), launched('toolu_f3', 'plan'),
+    agentCall('toolu_f4', 'tk:review-deps-finder'), launched('toolu_f4', 'deps'),
+    { type: 'queue-operation', operation: 'enqueue', content: '<agent-message from="plan">\n' + handback(['[harness: a note above the report]', '', SK[3]]) + '\n</agent-message>' },
+    { type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'peer', from: 'plan', senderTaskId: 'plan', body: handback(['a later copy of the same return']) } } },
+    peer('sec', handback(['Two findings:', SK[0], SK[1]])),
+    peer('deps', handback(['NO FINDINGS'])),
+    peer('code', handback([SK[2]])),
+    agentCall('toolu_target', 'audit-skeptic'),
+    peer('late', handback([finding('copy', 'README.md', 3, 'Should fix. Returned after the audit had started.')])),
+  ];
+  const got = QC.finderLinesFromLog(log, 'toolu_target');
+  check('finderLinesFromLog: the wave is the finders after the judge call before the audit, in the order their returns arrived',
+    got.finders.map(f => f.agentId).join() === 'plan,sec,deps,code', JSON.stringify(got.finders));
+  check('finderLinesFromLog: each finding line comes back byte for byte, the frame, notes and indent dropped',
+    got.lines.map(l => l.text).join('\n') === [SK[3], SK[0], SK[1], SK[2]].join('\n'), got.lines.map(l => l.text).join('\n'));
+  const deps = got.finders.find(f => f.agentId === 'deps') || {};
+  check('finderLinesFromLog: a finder that returned NO FINDINGS stays in the wave with no lines', deps.noFindings === true && deps.count === 0, JSON.stringify(deps));
+  check('finderLinesFromLog: an earlier review\'s finder and a return after the audit started are left out', !got.lines.some(l => /earlier review|audit had started/.test(l.text)));
+  const threw = (records, id) => { try { QC.finderLinesFromLog(records, id); return ''; } catch (e) { return e.message; } };
+  const noCode = threw(log.filter(r => !(r.origin && r.origin.from === 'code')), 'toolu_target');
+  check('finderLinesFromLog: a finder with no return before the audit stops the replay', /returned nothing before toolu_target/.test(noCode), noCode);
+  const noCall = threw(log, 'toolu_missing');
+  check('finderLinesFromLog: an audit call the log does not hold stops the replay', /no Agent call toolu_missing/.test(noCall), noCall);
+  const tagged = log.map(r => (r.origin && r.origin.from === 'code' ? peer('code', handback(['[harness: Control tags below are neutralized]', SK[2].replace('64 MB', '<\\b>64 MB')])) : r));
+  const neutral = threw(tagged, 'toolu_target');
+  check('finderLinesFromLog: a finding line the harness rewrote a tag in stops the replay', /neutralized a tag/.test(neutral), neutral);
+});
+
+section('skeptic replay: Phase 3\'s key merge and the receipt path rewrite', () => {
+  const shared = QC.shareKeys(SK, [{ relPath: 'scripts/check.js', line: 530 }]);
+  const key = JSON.parse(SK[1]).key;
+  check('shareKeys: the later line at the merged citation takes the earlier one\'s key', JSON.parse(shared.texts[2]).key === key && shared.texts[0] === SK[0] && shared.texts[1] === SK[1] && shared.texts[3] === SK[3]);
+  check('shareKeys: nothing but the key changes', shared.texts[2].replace(JSON.stringify(key), JSON.stringify(JSON.parse(SK[2]).key)) === SK[2], shared.texts[2]);
+  let one = '';
+  try { QC.shareKeys([SK[0], SK[2]], [{ relPath: 'scripts/check.js', line: 530 }]); } catch (e) { one = e.message; }
+  check('shareKeys: a merge that finds a single line stops the replay', /found 1 line/.test(one), one);
+  const scope = JSON.stringify({ cwd: '/home/u/proj', root: '/home/u/proj', files: ['/home/u/proj/a.js', '/home/u/proj2/b.js', '/home/u/project/c.js'] }, null, 2);
+  const moved = JSON.parse(QC.rewriteRoot(scope, '/home/u/proj', '/tmp/qc-run.X/project'));
+  check('rewriteRoot: the saved scope\'s root and the paths under it move to the scratch project',
+    moved.cwd === '/tmp/qc-run.X/project' && moved.root === '/tmp/qc-run.X/project' && moved.files[0] === '/tmp/qc-run.X/project/a.js', JSON.stringify(moved));
+  check('rewriteRoot: a sibling folder that shares the prefix is left alone', moved.files[1] === '/home/u/proj2/b.js' && moved.files[2] === '/home/u/project/c.js', JSON.stringify(moved.files));
+  const abs = JSON.stringify({ severity: 'warn', file: { relPath: 'a.js', absPath: '/home/u/proj/a.js', line: 3 }, what: 'Should fix. X.' });
+  check('rewriteRoot: a finding line\'s absPath points into the scratch project', JSON.parse(QC.rewriteRoot(abs, '/home/u/proj', '/tmp/p')).file.absPath === '/tmp/p/a.js');
+  check('rewriteRoot: a receipt output with no root in it stays byte for byte', QC.rewriteRoot('421:  maxBuffer: 64,\nexit 0\n', '/home/u/proj', '/tmp/p') === '421:  maxBuffer: 64,\nexit 0\n');
+  const p = QC.skepticPrompt({ stamp: '2026-09-22-002749', range: { base: 'c3cfff8c129a', end: 'df408f0cdc9e' }, mergeDir: '/tmp/qc-run.X/review-merge', lines: SK,
+    finders: [{ type: 'review-security-finder', noFindings: false }, { type: 'tk:review-deps-finder', noFindings: true }],
+    keyMerges: [{ relPath: 'scripts/check.js', line: 530 }], merged: [{ id: 'R1' }, { id: 'R2' }, { id: 'R3' }], mergeSummary: 'merge-findings: 4 raw, 3 merged (1 merge)' });
+  check('skepticPrompt: the build\'s /tk:review, entered at Phase 4 with the earlier phases\' files named and a stop before any fix',
+    p.startsWith('/tk:review c3cfff8..df408f0 report only, no chaining\n') && /resumes a review at Phase 4/.test(p) && p.includes('/tmp/qc-run.X/review-merge') && p.includes('reports/receipts/2026-09-22-002749/scope.json')
+    && /deps returned NO FINDINGS/.test(p) && /merged at scripts\/check\.js:530/.test(p) && /fix nothing/.test(p) && /from R1 to R3/.test(p), p);
+});
+
+section('skeptic replay: the scratch checkout and the cited plans', () => {
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
+  const g = (args, cwd) => {
+    const r = spawnSync('git', args, { cwd, env, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error('git ' + args.join(' ') + ': ' + r.stderr);
+    return r.stdout.trim();
+  };
+  // A source repo: two commits up to the range end, a later commit and a tag
+  // after it, and a gitignored plan, as the owner's checkout holds them.
+  const src = tmp('qc-test-src-');
+  g(['init', '-q'], src);
+  write(path.join(src, '.gitignore'), 'plans/\n');
+  write(path.join(src, 'a.js'), 'one\n');
+  g(['add', '-A'], src); g(['commit', '-q', '-m', 'one'], src);
+  write(path.join(src, 'a.js'), 'two\n');
+  write(path.join(src, 'b.js'), 'kept out of the archive\n');
+  g(['add', '-A'], src); g(['commit', '-q', '-m', 'two'], src);
+  const end = g(['rev-parse', 'HEAD'], src);
+  write(path.join(src, 'a.js'), 'three\n');
+  g(['commit', '-q', '-am', 'later'], src);
+  g(['tag', 'v9'], src);
+  write(path.join(src, 'plans', 'PLAN-x.md'), '# plan x\n');
+  // The scratch project holds the end's tree as an archive leaves it, one file short.
+  const project = tmp('qc-test-proj-');
+  write(path.join(project, '.gitignore'), 'plans/\n');
+  write(path.join(project, 'a.js'), 'two\n');
+  const texts = ['{"what":"Should fix. The plan at plans/PLAN-x.md:4 says so."}', 'receipt: /tmp/p/plans/PLAN-x.md and plans/PLAN-gone.md'];
+  const c = QC.replayCheckout({ project, end: end.slice(0, 7), repo: src, plansFrom: src, texts });
+  check('replayCheckout: the scratch project is a clean checkout of the range end',
+    c.head === end && g(['rev-parse', 'HEAD'], project) === end && g(['symbolic-ref', 'HEAD'], project) === 'refs/heads/main' && g(['status', '--porcelain'], project) === '', JSON.stringify(c));
+  check('replayCheckout: it holds the end\'s own history and nothing after it (no later commit, tag or remote)',
+    c.commits === 2 && g(['rev-list', '--all', '--count'], project) === '2' && g(['tag'], project) === '' && g(['remote'], project) === '', g(['rev-list', '--all', '--count'], project));
+  check('replayCheckout: a tracked file the archive left out is restored', fs.existsSync(path.join(project, 'b.js')) && fs.readFileSync(path.join(project, 'a.js'), 'utf8') === 'two\n');
+  check('replayCheckout: each cited plan is copied once, with its size and modified time recorded',
+    fs.readFileSync(path.join(project, 'plans', 'PLAN-x.md'), 'utf8') === '# plan x\n' && c.plans.length === 2
+    && c.plans[1].path === 'plans/PLAN-x.md' && c.plans[1].bytes === 9 && !isNaN(Date.parse(c.plans[1].modified)), JSON.stringify(c.plans));
+  check('replayCheckout: a cited plan the checkout lacks is recorded as missing, not invented',
+    c.plans[0].path === 'plans/PLAN-gone.md' && c.plans[0].missing === true && !fs.existsSync(path.join(project, 'plans', 'PLAN-gone.md')), JSON.stringify(c.plans[0]));
+  let bad = '';
+  try { QC.replayCheckout({ project: tmp('qc-test-proj-'), end: 'f'.repeat(40), repo: src, plansFrom: src, texts: [] }); } catch (e) { bad = e.message; }
+  check('replayCheckout: a range end the repo does not hold stops the replay', /rev-parse/.test(bad), bad);
+});
+
+// A canned skeptic replay run folder. Four dispatches: D1 a paraphrased shard the
+// session wrote with the Write tool, asking KEEP or KILL; D2 the --shards file,
+// whose copy sits in project-reports; D3 a redispatch of R3 carrying its line byte
+// for byte; D4 a general-purpose paraphrase of R3 asking KEEP or KILL, the last
+// to rule on it. o.drop: dispatch ids left out; o.final: the session's last text.
+function makeSkepticRun(o) {
+  o = o || {};
+  const dir = tmp('qc-test-skeptic-');
+  const project = '/tmp/qc-run.TEST/project';
+  const mergeDir = '/tmp/qc-run.TEST/review-merge';
+  const stamp = '2026-09-22-002749';
+  const sid = 'sess-skeptic';
+  const slug = '-tmp-qc-run-TEST-project';
+  const pad = '/tmp/claude-1000/' + slug + '/' + sid + '/scratchpad';
+  const shardFile = 'reports/receipts/' + stamp + '/audit-tier2-1.txt';
+  const plugin = 'node /tmp/qc-run.TEST/home/.claude/plugins/cache/llm-peer-review/tk/7.6.5/scripts/merge-findings.js';
+  const drop = o.drop || [];
+  const said = content => ({ type: 'assistant', message: { model: OPUS, role: 'assistant', content } });
+  const tool = (id, name, input) => said([{ type: 'tool_use', id, name, input }]);
+  const result = (id, text) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } });
+  const dispatch = {
+    d1: { type: 'audit-skeptic', prompt: 'Tier-2 skeptic shard. Read ' + pad + '/audit-shard-A.md: two Warn findings (R1 to R2). Return exactly one verdict line per ID (R1: KEEP or R1: KILL) plus one line of reasoning each.', ret: 'R1: KEEP\nthe mirror route is real\nR2: KILL\nalready handled' },
+    d2: { type: 'tk:audit-skeptic', prompt: 'Tier 2. Your findings and M2\'s instruction for this tier are in ' + shardFile + '; read it in full and follow it exactly.', ret: 'R1: STANDS\nthe mirror route is real\nR2: REFUTED\nalready handled\nR3: STANDS\nthe plans still say so' },
+    d3: { type: 'tk:audit-skeptic', prompt: 'Tier 2, a redispatch for R3. The finding, byte for byte:\n' + SK[3] + '\nReturn `RN: REFUTED` or `RN: STANDS` plus one line of reasoning.', ret: 'R3: STANDS\nthe plans still say so' },
+    d4: { type: 'general-purpose', prompt: 'Skeptic pass on R3: the plans still say nothing was pushed. Answer R3: KEEP or R3: KILL.', ret: 'R3: KILL\nthe push is recorded elsewhere' },
+  };
+  const main = [
+    tool('w1', 'Write', { file_path: pad + '/audit-shard-A.md', content: '# Audit shard A: R1 to R2\n\n## R1 (security, warn)\nwhat: An allowed remote-add can make a remote a mirror.\n\n## R2 (code + security, merged; warn)\nwhat: A media file over 64 MB refuses the push.\n' }),
+    result('w1', 'File created'),
+    tool('d1', 'Agent', { subagent_type: dispatch.d1.type, description: 'Audit shard A', prompt: dispatch.d1.prompt }),
+    tool('b1', 'Bash', { command: plugin + ' --shards ' + mergeDir + ' --receipts reports/receipts/' + stamp + ' --out reports/receipts/' + stamp }),
+    result('b1', JSON.stringify({ shards: [{ tier: 2, file: shardFile, ids: ['R1', 'R2', 'R3'] }], tier3: null, dropped: [] })),
+    tool('d2', 'Agent', { subagent_type: dispatch.d2.type, description: 'Tier 2 shard 1', prompt: dispatch.d2.prompt }),
+    tool('b2', 'Bash', { command: plugin + ' --verdicts ' + shardFile + ' ' + pad + '/d1-return.txt' }),
+    result('b2', JSON.stringify({ tier: '2', ids: ['R1', 'R2'], ok: false, returns: [{ file: 'd1-return.txt', problems: [] }] })),
+    tool('d3', 'Agent', { subagent_type: dispatch.d3.type, description: 'R3 again', prompt: dispatch.d3.prompt }),
+    tool('d4', 'Agent', { subagent_type: dispatch.d4.type, description: 'R3 skeptic', prompt: dispatch.d4.prompt }),
+  ].filter(r => !r.message.content.some(c => drop.includes(c.id)));
+  const final = o.final || 'R1: STANDS\nR2: REFUTED\nR3: REFUTED';
+  main.push(said([{ type: 'text', text: final }]));
+  const slugDir = path.join(dir, 'transcripts', slug);
+  write(path.join(slugDir, sid + '.jsonl'), main.map(r => JSON.stringify(r)).join('\n') + '\n');
+  for (const [id, d] of Object.entries(dispatch)) {
+    if (drop.includes(id)) continue;
+    write(path.join(slugDir, sid, 'subagents', 'agent-' + id + '.jsonl'), JSON.stringify(said([{ type: 'tool_use', id: 'hb-' + id, name: 'SubagentHandback', input: { message: d.ret } }])) + '\n');
+    write(path.join(slugDir, sid, 'subagents', 'agent-' + id + '.meta.json'), JSON.stringify({ agentType: d.type, toolUseId: id }));
+  }
+  // The --shards file as the script writes it; one receipt output quotes a verdict-shaped line.
+  const shardSection = (id, parts) => ['===== ' + id + ' ====='].concat(...parts.map(([stem, line, out]) => ['Finding (' + stem + ', as its finder wrote it):', line, 'Receipt output (' + stem + '.txt, as tier 1 saved it):', out])).concat(['===== end ' + id + ' =====']).join('\n');
+  write(path.join(dir, 'project-reports', 'receipts', stamp, 'audit-tier2-1.txt'), [
+    'M2 audit shard: tier 2, shard 1 of 1, ids R1 R2 R3', '',
+    'You are running tier 2: one skeptical pass over Warns and Suggests. The instruction, quoted from M2:', '"' + MF.TIER2_INSTRUCTION + '"', '',
+    shardSection('R1', [['security-1', SK[0], 'R9: KEEP is a line a grep printed\nexit 0']]),
+    shardSection('R2', [['security-2', SK[1], 'exit 0'], ['code-1', SK[2], 'exit 0']]),
+    shardSection('R3', [['plan-1', SK[3], 'exit 0']]),
+  ].join('\n') + '\n');
+  const merged = [{ id: 'R1', severity: 'warn', sources: [0] }, { id: 'R2', severity: 'warn', sources: [1, 2] }, { id: 'R3', severity: 'warn', sources: [3] }];
+  write(path.join(dir, 'run.json'), JSON.stringify({ version: 1, role: 'skeptic', arm: null, exitCode: 0, wallMs: 60000,
+    paths: { tmp: '/tmp/qc-run.TEST', home: '/tmp/qc-run.TEST/home', project }, expect: { main: 'opus', finders: 'opus', mapper: 'opus' },
+    replay: { stamp, mergeDir, lines: SK, merged } }));
+  write(path.join(dir, 'result.json'), JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid, total_cost_usd: 3, duration_ms: 60000, num_turns: 12, permission_denials: [], result: final }));
+  return dir;
+}
+
+section('skeptic replay: scoring the dispatches from the saved transcripts', () => {
+  const a = QC.analyzeRun(QC.loadRun(makeSkepticRun()), ANSWERS);
+  const d = a.skeptic ? a.skeptic.dispatches : [];
+  const s = a.skeptic ? a.skeptic.summary : {};
+  check('a skeptic replay with dispatches is valid, the general-purpose fallback only warned', a.valid && a.warnings.includes('other-agent:general-purpose'), a.reasons.join(', ') + ' | ' + a.warnings.join(', '));
+  check('four skeptic dispatches are scored, in order', d.length === 4 && d.map(x => x.toolUseId).join() === 'd1,d2,d3,d4', JSON.stringify(d.map(x => x.toolUseId)));
+  check('D1: a shard the session wrote by hand is a paraphrase, its IDs read from "R1 to R2", asking KEEP or KILL',
+    d[0] && d[0].class === 'paraphrase' && d[0].ids.join() === 'R1,R2' && d[0].linesFound === 0 && d[0].asks.join() === 'KEEP,KILL' && d[0].m2Words === false, JSON.stringify(d[0]));
+  check('D1: its KEEP/KILL return is flagged by checkVerdicts, word by word',
+    d[0] && d[0].returnOk === false && d[0].problems.join() === 'unknown R1 KEEP,unknown R2 KILL', JSON.stringify(d[0] && d[0].problems));
+  check('D2: a file merge-findings.js --shards wrote is byte for byte, its IDs from the script, M2\'s words from its preface only',
+    d[1] && d[1].class === 'script' && d[1].ids.join() === 'R1,R2,R3' && d[1].linesFound === 3 && d[1].asks.join() === 'REFUTED,STANDS' && d[1].m2Words === true, JSON.stringify(d[1]));
+  check('D2: a clean return is clean', d[1] && d[1].returnOk === true && d[1].problems.length === 0, JSON.stringify(d[1] && d[1].problems));
+  check('D3: a prompt carrying the finder\'s line byte for byte is verbatim, and its clean return is clean',
+    d[2] && d[2].class === 'verbatim' && d[2].ids.join() === 'R3' && d[2].linesFound === 1 && d[2].m2Words && d[2].returnOk === true, JSON.stringify(d[2]));
+  check('D4: a general-purpose paraphrase is scored as a skeptic dispatch, and flagged',
+    d[3] && d[3].type === 'general-purpose' && d[3].class === 'paraphrase' && d[3].returnOk === false, JSON.stringify(d[3]));
+  check('summary: dispatches, byte for byte, paraphrased, returns clean and flagged, --verdicts calls',
+    s.dispatches === 4 && s.byteForByte === 2 && s.script === 1 && s.verbatim === 1 && s.paraphrased === 2 && s.unknown === 0
+    && s.returnsClean === 2 && s.returnsFlagged === 2 && s.otherWords === 2 && s.verdictsCalls === 1 && s.verdictsRejected === 1 && s.drift === true, JSON.stringify(s));
+  check('summary: a finding whose last ruling came from a paraphrase is named; one a byte-for-byte dispatch re-ruled is not',
+    s.recorded === 3 && (s.ruledFromParaphrase || []).join() === 'R3', JSON.stringify(s.ruledFromParaphrase));
+  const replaced = QC.analyzeRun(QC.loadRun(makeSkepticRun({ drop: ['d4'] })), ANSWERS).skeptic.summary;
+  check('a paraphrased dispatch whose findings were dispatched again byte for byte rules on nothing (the wired arm\'s bar)',
+    replaced.paraphrased === 1 && replaced.ruledFromParaphrase.length === 0 && replaced.drift === true, JSON.stringify(replaced));
+  const unaudited = QC.analyzeRun(QC.loadRun(makeSkepticRun({ final: 'R1: STANDS\nR2: REFUTED\nR3: unaudited' })), ANSWERS).skeptic.summary;
+  check('a finding recorded as unaudited was not ruled on, whatever asked about it', unaudited.ruledFromParaphrase.length === 0 && unaudited.recorded === 3, JSON.stringify(unaudited));
+  const known = new Map([['R1', { severity: 'warn', lines: [SK[0]] }]]);
+  const ctx = { project: '/tmp/qc-run.TEST/project', known, writes: new Map(), bash: [], shards: new Map(), readLocal: () => null };
+  const lost = QC.scoreDispatch('Judge R1 in /tmp/review-audit.Q/shard.md and reply R1: KEEP or R1: KILL.', ctx);
+  check('scoreDispatch: a named file nothing can read back is unknown, not a paraphrase', lost.class === 'unknown' && lost.ids.join() === 'R1', JSON.stringify(lost));
+  const heredoc = QC.scoreDispatch('Judge R1 in /tmp/review-audit.Q/shard.md.', { ...ctx, bash: ["cat > /tmp/review-audit.Q/shard.md <<'EOF'\n" + SK[0] + '\nEOF'] });
+  check('scoreDispatch: a file written by a heredoc is read from the command, byte for byte', heredoc.class === 'verbatim' && heredoc.asks.length === 0 && heredoc.m2Words === false, JSON.stringify(heredoc));
+  const cited = QC.scoreDispatch('Refute R1; the cited file is plans/PLAN-a.md and seed/settings.json:152.', ctx);
+  check('scoreDispatch: a project source file the prompt cites is not an input, so the dispatch is a paraphrase', cited.class === 'paraphrase' && cited.file === null, JSON.stringify(cited));
+  const pasted = QC.scoreDispatch('Tier 2. Try to refute each finding; return exactly one line per ID, `RN: REFUTED` or `RN: STANDS`.\n\nR1:\n'
+    + SK[0] + '\nReceipt output (code-1.txt, as tier 1 saved it):\n```\n.claude/commands/review.md:260: the "R3: FIXED" / "R3: NOT FIXED" verdict format\nexit 0\n```', ctx);
+  check('scoreDispatch: verdict words quoted in receipt output pasted into the prompt are not words it asked for (review R12)',
+    pasted.class === 'verbatim' && pasted.asks.join() === 'REFUTED,STANDS' && pasted.m2Words === true, JSON.stringify(pasted));
+  const runnerShard = '/tmp/claude-1000/-tmp-qc-run-TEST-project/sess/scratchpad/shard2.txt';
+  const quotedFile = QC.scoreDispatch('Judge the findings in ' + runnerShard + ' and return R1: REFUTED or R1: STANDS.',
+    { ...ctx, writes: new Map([[runnerShard, 'R1:\n' + SK[0] + '\nreceipt:\n.claude/commands/review.md:260:3. Re-verify per the "R3: FIXED" / "R3: NOT FIXED" format\n70:- **M3.** each returns "R3: FIXED" or "R3: NOT FIXED"\n']]) });
+  check('scoreDispatch: a grep line quoted in a runner-written shard is file content, not a verdict word asked for (D2\'s false positive)',
+    quotedFile.asks.join() === 'REFUTED,STANDS' && quotedFile.m2Words === true, JSON.stringify(quotedFile));
+  const c = spawnSync('node', [SCRIPT, '--check', makeSkepticRun()], { encoding: 'utf8' });
+  check('--check prints one line per dispatch and the summary of a skeptic replay',
+    c.status === 0 && /D1 audit-skeptic tier 2 R1-R2 \(2\): paraphrase .*asks KEEP\/KILL \(not M2\); return flagged: unknown R1 KEEP, unknown R2 KILL/.test(c.stdout)
+    && /D2 tk:audit-skeptic tier 2 R1-R3 \(3\): script \(reports\/receipts\/2026-09-22-002749\/audit-tier2-1\.txt\), lines 3\/3 byte for byte/.test(c.stdout)
+    && /summary: 4 dispatches, 2 byte for byte \(1 script, 1 verbatim\), 2 paraphrased, 0 unknown; returns 2 clean, 2 flagged/.test(c.stdout)
+    && /ruled on from a paraphrase: R3/.test(c.stdout) && /drift reproduced: yes/.test(c.stdout), c.stdout + c.stderr);
+});
+
+section('skeptic replay: the usage line', () => {
+  const header = fs.readFileSync(SCRIPT, 'utf8').split('\n').slice(0, 140).join('\n');
+  check('the header\'s usage names the skeptic role and its two folders', /node scripts\/quality-check\.js --role skeptic --build <git-ref\|tree> \[--evidence <dir>\] \[--receipts <dir>\]/.test(header));
+  const role = spawnSync('node', [SCRIPT, '--role', 'judge', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('an unknown role is a usage error that names the skeptic role', role.status === 2 && /review, mapper or skeptic/.test(role.stderr), role.stderr);
+  const arm = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--arm', 'ship', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('--role skeptic with an arm is a usage error', arm.status === 2 && /takes no --arm/.test(arm.stderr), arm.stderr);
+  const empty = tmp('qc-test-no-evidence-');
+  const ev = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--build', 'HEAD', '--evidence', empty], { encoding: 'utf8' });
+  check('--role skeptic without the session log is a usage error (exit 2) that starts nothing', ev.status === 2 && /needs the evidence folder/.test(ev.stderr) && ev.stdout === '', ev.stdout + ev.stderr);
+  const withLog = tmp('qc-test-evidence-');
+  write(path.join(withLog, QC.SKEPTIC_REPLAY.session + '.jsonl'), '');
+  const rc = spawnSync('node', [SCRIPT, '--role', 'skeptic', '--build', 'HEAD', '--evidence', withLog, '--receipts', empty], { encoding: 'utf8' });
+  check('--role skeptic without the run\'s receipts and scope is a usage error (exit 2) that starts nothing', rc.status === 2 && /receipts folder with its scope\.json/.test(rc.stderr) && rc.stdout === '', rc.stdout + rc.stderr);
+});
+
+// ---------------------------------------------------------------------------
+// The fix role and its oracles (harness research plan Step 11): /review's own
+// fix loop runs, then two oracles per runnable planted bug judge the final tree.
+
+const FIXES = require(path.join(FIXTURE, 'oracles', 'self-test-fixes.js'));
+
+section('fix role: every planted bug has an oracle pair or a reason', () => {
+  const set = QC.oracleSet(ANSWERS);
+  const runnable = Object.keys(set);
+  const not = Object.keys(QC.NOT_RUNNABLE);
+  check('oracles: each planted bug is runnable or listed as not runnable, never both', IDS.every(id => runnable.includes(id) !== not.includes(id)), JSON.stringify({ runnable, not }));
+  check('oracles: the not-runnable list names only planted bugs, each with a reason', not.every(id => IDS.includes(id) && QC.NOT_RUNNABLE[id].length > 20));
+  check('oracles: seven runnable bugs, the prompt file and the README wording are not', runnable.length === 7 && not.sort().join() === 'commands-contradiction,copy-unclear-headline', runnable.join());
+  check('oracles: every runnable bug has a correct and an empty self-test fix', runnable.every(id => FIXES[id] && FIXES[id].correct.length && FIXES[id].deletion.length));
+  check('oracles: the self-test pair is two different runnable bugs', QC.SELF_TEST_PAIR.correct !== QC.SELF_TEST_PAIR.deletion && runnable.includes(QC.SELF_TEST_PAIR.correct) && runnable.includes(QC.SELF_TEST_PAIR.deletion));
+  const half = tmp('qc-test-oracles-half-');
+  write(path.join(half, 'code-search-prefix.gone.js'), '');
+  let threw = '';
+  try { QC.oracleSet(ANSWERS, half); } catch (e) { threw = e.message; }
+  check('oracleSet: half a pair is refused', /code-search-prefix has a gone oracle and no works oracle/.test(threw), threw);
+  const stray = tmp('qc-test-oracles-stray-');
+  write(path.join(stray, 'no-such-bug.gone.js'), '');
+  threw = '';
+  try { QC.oracleSet(ANSWERS, stray); } catch (e) { threw = e.message; }
+  check('oracleSet: an oracle that names no planted bug is refused', /no-such-bug\.gone\.js/.test(threw), threw);
+});
+
+section('fix role: the oracles stay out of the scratch project', () => {
+  const rel = path.relative(FIXTURE, QC.ORACLES);
+  check('the oracles folder sits beside base/ and change/, not inside either', rel === 'oracles');
+  const dest = tmp('qc-test-fix-project-');
+  QC.copyFixture(path.join(FIXTURE, 'base'), dest);
+  QC.copyFixture(path.join(FIXTURE, 'change'), dest);
+  const files = [];
+  (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else files.push(path.relative(dest, p)); } })(dest);
+  check('the scratch project built from base/ and change/ holds no oracle file', !files.some(f => /\.(gone|works|shared)\.js$|self-test-fixes|(^|\/)lib\.js$/.test(f)), files.join(', '));
+  const tells = files.filter(f => /oracle/i.test(fs.readFileSync(path.join(dest, f), 'utf8')));
+  check('no project file mentions an oracle', tells.length === 0, tells.join(', '));
+});
+
+section('fix role: the prompt, the cap and the usage line', () => {
+  const p = QC.fixPrompt(QC.FINDER_KINDS, 'abc1234');
+  check('fixPrompt: all eight lenses over the planted change, "no chaining", and no "report only"',
+    p === '/tk:review code,security,ux,plan,commands,browser,deps,copy abc1234..HEAD no chaining' && !/report only/.test(p), p);
+  check('the fix role has its own default cap, $40', QC.DEFAULT_MAX_USD.fix === 40 && QC.budgetEstimate([], 'fix', null) === 40 && QC.budgetEstimate([], 'fix', 30) === 30);
+  check('the other roles\' caps are unchanged', QC.DEFAULT_MAX_USD.review === 25 && QC.DEFAULT_MAX_USD.mapper === 8 && QC.DEFAULT_MAX_USD.skeptic === 25 && QC.DEFAULT_MAX_USD.probe === 5);
+  const header = fs.readFileSync(SCRIPT, 'utf8').split('\n').slice(0, 160).join('\n');
+  check('the header\'s usage names the fix role, --judge and --oracle-self-test',
+    /node scripts\/quality-check\.js --role fix --build <git-ref\|tree>/.test(header) && /--judge <fix-run-dir>/.test(header) && /--oracle-self-test/.test(header));
+  const arm = spawnSync('node', [SCRIPT, '--role', 'fix', '--arm', 'ship', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('--role fix with an arm is a usage error (exit 2) that starts nothing', arm.status === 2 && /--role fix runs the build as it ships: it takes no --arm/.test(arm.stderr) && arm.stdout === '', arm.stdout + arm.stderr);
+  const port = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'a', '--build', 'HEAD', '--oracle-port', '3100'], { encoding: 'utf8' });
+  check('--oracle-port on another role is a usage error (exit 2) that starts nothing', port.status === 2 && /--oracle-port applies to --role fix/.test(port.stderr) && port.stdout === '', port.stdout + port.stderr);
+  const bad = spawnSync('node', [SCRIPT, '--oracle-self-test', '--oracle-port', 'abc'], { encoding: 'utf8' });
+  check('a bad --oracle-port is a usage error', bad.status === 2 && /--oracle-port needs a port number/.test(bad.stderr), bad.stderr);
+  const role = spawnSync('node', [SCRIPT, '--role', 'judge', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('an unknown role is a usage error that names the fix role too', role.status === 2 && /or fix \(the oracle-checked fix run\)/.test(role.stderr), role.stderr);
+  const notFix = tmp('qc-test-judge-');
+  write(path.join(notFix, 'run.json'), JSON.stringify({ role: 'review' }));
+  const judge = spawnSync('node', [SCRIPT, '--judge', notFix], { encoding: 'utf8' });
+  check('--judge on a folder that is not a fix run is a usage error', judge.status === 2 && /--judge needs a fix run folder/.test(judge.stderr), judge.stderr);
+});
+
+section('fix role: the Digest and the fix verifiers\' returns', () => {
+  const md = ['# Review', '', '### Findings', '- **R1** [code] ⚠️ `server.js:61` - x', '', '## Digest', '',
+    '- R1: FIXED - the re-check passed', '- **R2**: NOT FIXED - tried a containment check, the receipt still matched',
+    '- `R3` [commands]: PAGED - a prompt file needs approval (M9)', '- R4 [ux]: FIXED', '- R6: fixed in the loop, no verdict word',
+    'R7: NOT FIXED', '', '## What I could not check', '- R5: FIXED (outside the Digest)'].join('\n');
+  const d = QC.parseDigest(md);
+  check('parseDigest: one verdict per R-number line, NOT FIXED kept apart from FIXED', JSON.stringify(d) === JSON.stringify({ R1: 'FIXED', R2: 'NOT FIXED', R3: 'PAGED', R4: 'FIXED', R7: 'NOT FIXED' }), JSON.stringify(d));
+  check('parseDigest: a report with no Digest gives nothing', Object.keys(QC.parseDigest('# Review\n- R1: FIXED\n')).length === 0);
+  const sub = (type, ts, text) => ({ meta: { agentType: type }, records: [{ timestamp: ts }], d: { handback: text, lastText: '' } });
+  const v = QC.verifierVerdicts([
+    sub('tk:fix-verifier', '2026-10-12T10:05:00Z', 'R2: FIXED\nreceipt: the second round'),
+    sub('tk:fix-verifier', '2026-10-12T10:00:00Z', 'R1: FIXED\nreceipt: grep is empty\nR2: NOT FIXED\nreceipt: still there'),
+    sub('tk:audit-skeptic', '2026-10-12T09:00:00Z', 'R9: FIXED'),
+  ]);
+  check('verifierVerdicts: fix-verifier returns only, a later round winning', JSON.stringify(v.verdicts) === JSON.stringify({ R1: 'FIXED', R2: 'FIXED' }) && v.dispatches === 2, JSON.stringify(v));
+  check('fixOutcome: fixed, broken (the fake fix), not fixed, unjudged',
+    QC.fixOutcome('PASS', 'PASS') === 'fixed' && QC.fixOutcome('PASS', 'FAIL') === 'broken' && QC.fixOutcome('FAIL', 'PASS') === 'not-fixed'
+    && QC.fixOutcome('FAIL', 'FAIL') === 'not-fixed' && QC.fixOutcome('PASS', 'UNJUDGED') === 'unjudged' && QC.fixOutcome(null, null) === 'unjudged');
+});
+
+// A canned fix run: a review run (makeReviewRun) whose role is fix, its report
+// with o.digest appended, o.verifier as one fix-verifier's return, o.oracles as
+// oracles.json ({ id: [gone, works] }), o.gitStatus as the project's git status.
+function makeFixRun(o) {
+  const dir = makeReviewRun({ ...o, meta: { role: 'fix', arm: null, ...(o.meta || {}) } });
+  const report = path.join(dir, 'project-reports', 'review-orchestrator-2026-10-03-120000.md');
+  if (o.digest) fs.appendFileSync(report, '\n## Digest\n\n' + o.digest.join('\n') + '\n');
+  if (o.verifier) {
+    const sessionDir = fs.readdirSync(path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project')).find(n => !/\.jsonl$/.test(n));
+    const base = path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project', sessionDir, 'subagents', 'agent-v1');
+    write(base + '.jsonl', JSON.stringify({ type: 'assistant', timestamp: '2026-10-12T10:00:00Z', message: { model: OPUS, role: 'assistant', content: [{ type: 'text', text: o.verifier }] } }) + '\n');
+    write(base + '.meta.json', JSON.stringify({ agentType: 'tk:fix-verifier', toolUseId: 'toolu_verifier' }));
+  }
+  if (o.oracles) {
+    const v = (id, kind, verdict) => ({ verdict, line: verdict + ' ' + id + ' ' + kind + ': canned', exit: { PASS: 0, FAIL: 1, UNJUDGED: 2 }[verdict] });
+    write(path.join(dir, 'oracles.json'), JSON.stringify({ port: 3000, oracles: Object.entries(o.oracles).map(([id, [g, w]]) => ({ id, gone: v(id, 'gone', g), works: v(id, 'works', w) })) }));
+  }
+  if (o.gitStatus !== undefined) write(path.join(dir, 'project-git.json'), JSON.stringify({ status: o.gitStatus, log: '' }));
+  return dir;
+}
+
+section('fix role: one record per planted bug, from a canned run', () => {
+  // R1..R5 in caught order: code-search-prefix, security-path-traversal, plan-export-json, known-shell-glob, browser-search-id.
+  const caught = ['code-search-prefix', 'security-path-traversal', 'plan-export-json', 'known-shell-glob', 'browser-search-id'];
+  const a = analyze(makeFixRun({
+    caught,
+    digest: ['- R1: FIXED - the search re-check passed', '- R2: FIXED - containment added', '- R3: NOT FIXED - left for the owner', '- R4: FIXED - the cited block removed'],
+    verifier: 'R5: FIXED\nreceipt: the lookup now names #search',
+    oracles: {
+      'code-search-prefix': ['PASS', 'PASS'], 'security-path-traversal': ['PASS', 'PASS'], 'plan-export-json': ['FAIL', 'FAIL'],
+      'known-shell-glob': ['PASS', 'FAIL'], 'browser-search-id': ['PASS', 'UNJUDGED'], 'ux-clear-all-no-confirm': ['FAIL', 'PASS'], 'deps-lodash-cve': ['FAIL', 'PASS'],
+    },
+    gitStatus: ' M server.js\n?? backups/\n',
+  }));
+  const b = a.fix && a.fix.bugs;
+  check('a canned fix run is valid and reads like a review run', a.valid && a.role === 'fix' && a.survived['code-search-prefix'].length === 1, a.reasons.join(', '));
+  check('a fix run that changed the project is not warned for it', !a.warnings.includes('project-changed'), a.warnings.join(', '));
+  check('fix record: raised, in the report, said FIXED, gone and works PASS: fixed', b['code-search-prefix'].raised && b['code-search-prefix'].inReport.join() === 'R1'
+    && b['code-search-prefix'].said === 'FIXED' && b['code-search-prefix'].outcome === 'fixed' && !b['code-search-prefix'].falseFixed, JSON.stringify(b['code-search-prefix']));
+  check('fix record: said FIXED, gone PASS, works FAIL: broken, and a false FIXED (B1\'s miss)', b['known-shell-glob'].outcome === 'broken' && b['known-shell-glob'].falseFixed === true, JSON.stringify(b['known-shell-glob']));
+  check('fix record: said NOT FIXED and the symptom reproduces: not fixed, and no false FIXED', b['plan-export-json'].said === 'NOT FIXED' && b['plan-export-json'].outcome === 'not-fixed' && !b['plan-export-json'].falseFixed);
+  check('fix record: no Digest line, the fix verifier\'s FIXED is what the run said', b['browser-search-id'].said === 'FIXED' && b['browser-search-id'].reported[0].verifier === 'FIXED' && b['browser-search-id'].reported[0].digest === null);
+  check('fix record: an oracle that could not judge makes the bug unjudged, never a false FIXED', b['browser-search-id'].outcome === 'unjudged' && !b['browser-search-id'].falseFixed && a.fix.unjudged.join() === 'browser-search-id');
+  check('fix record: a bug the review never raised keeps its oracle verdicts', !b['ux-clear-all-no-confirm'].raised && b['ux-clear-all-no-confirm'].said === null && b['ux-clear-all-no-confirm'].outcome === 'not-fixed');
+  check('fix record: the prompt file and the README wording are not runnable', b['commands-contradiction'].outcome === 'not-runnable' && b['copy-unclear-headline'].gone === null);
+  check('fix record: the false FIXED list and the counts', a.fix.falseFixed.join() === 'known-shell-glob' && a.fix.digestLines === 4 && a.fix.verifierDispatches === 1 && a.fix.oraclePort === 3000, JSON.stringify({ f: a.fix.falseFixed, d: a.fix.digestLines, v: a.fix.verifierDispatches }));
+  check('a fix-verifier on the session model is expected, not another agent', !a.warnings.some(w => /other-agent/.test(w)), a.warnings.join(', '));
+
+  const leftover = analyze(makeFixRun({ caught: ['code-search-prefix'], digest: ['- R1: FIXED'], meta: { leftovers: [{ pid: 4242, cmd: 'node server.js' }] } }));
+  check('a fix run that left a process running is warned, and stays valid', leftover.valid && leftover.warnings.includes('left-running:1'), leftover.warnings.join(', '));
+  const unjudged = analyze(makeFixRun({ caught: ['code-search-prefix'], digest: ['- R1: FIXED'] }));
+  check('a fix run with no oracles.json is warned not-judged, and stays valid', unjudged.valid && unjudged.warnings.includes('not-judged') && unjudged.fix.bugs['code-search-prefix'].outcome === 'not-judged', unjudged.warnings.join(', '));
+  const noDigest = analyze(makeFixRun({ caught: ['code-search-prefix'], oracles: { 'code-search-prefix': ['PASS', 'PASS'] } }));
+  check('a fix run whose report has no Digest is warned no-digest', noDigest.warnings.includes('no-digest') && noDigest.fix.bugs['code-search-prefix'].said === null);
+  const review = analyze(makeReviewRun({ caught: ['code-search-prefix'] }));
+  check('a review run gets no fix record', review.fix === undefined);
+});
+
+section('fix role: applyEdits and copyTree', () => {
+  const t = tmp('qc-test-edits-');
+  write(path.join(t, 'a.txt'), 'one two two\n');
+  write(path.join(t, 'gone.txt'), 'x');
+  QC.applyEdits(t, [{ file: 'a.txt', find: 'one', replace: '1' }, { file: 'gone.txt', remove: true }]);
+  check('applyEdits: replaces text found once and removes a file', fs.readFileSync(path.join(t, 'a.txt'), 'utf8') === '1 two two\n' && !fs.existsSync(path.join(t, 'gone.txt')));
+  let twice = '';
+  try { QC.applyEdits(t, [{ file: 'a.txt', find: 'two', replace: '2' }]); } catch (e) { twice = e.message; }
+  let missing = '';
+  try { QC.applyEdits(t, [{ file: 'a.txt', find: 'three', replace: '3' }]); } catch (e) { missing = e.message; }
+  check('applyEdits: text found twice or not at all is refused', /exactly once/.test(twice) && /exactly once/.test(missing));
+  const unfixed = tmp('qc-test-unfixed-');
+  QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
+  QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
+  for (const [id, f] of Object.entries(FIXES)) {
+    for (const shape of ['correct', 'deletion']) {
+      const copy = tmp('qc-test-fix-shape-');
+      QC.copyTree(unfixed, copy);
+      let err = '';
+      try { QC.applyEdits(copy, f[shape]); } catch (e) { err = e.message; }
+      check('self-test fix ' + id + ' ' + shape + ' applies to the change tree', err === '', err);
+    }
+  }
+  const src = tmp('qc-test-tree-');
+  for (const f of ['.git/HEAD', 'reports/r.md', 'artifacts/html/review.html', 'node_modules/lodash/index.js', '.claude/commands/x.md', 'server.js']) write(path.join(src, f), 'x');
+  const dest = path.join(tmp('qc-test-tree-dest-'), 'copy');
+  QC.copyTree(src, dest);
+  check('copyTree: .git, reports/ and artifacts/ stay behind; node_modules, .claude and the code come along',
+    !fs.existsSync(path.join(dest, '.git')) && !fs.existsSync(path.join(dest, 'reports')) && !fs.existsSync(path.join(dest, 'artifacts'))
+    && fs.existsSync(path.join(dest, 'node_modules', 'lodash', 'index.js')) && fs.existsSync(path.join(dest, '.claude', 'commands', 'x.md')) && fs.existsSync(path.join(dest, 'server.js')));
+});
+
+section('fix role: the fixes diff', () => {
+  const repo = tmp('qc-test-fix-diff-');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const g = args => spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, env, encoding: 'utf8' });
+  write(path.join(repo, 'server.js'), 'planted\n');
+  write(path.join(repo, 'app.js'), 'app\n');
+  write(path.join(repo, '.gitignore'), 'reports/\n');
+  g(['init', '-q', '-b', 'main']); g(['add', '-A']); g(['commit', '-q', '-m', 'change']);
+  const change = g(['rev-parse', 'HEAD']).stdout.trim();
+  write(path.join(repo, 'server.js'), 'fixed and committed\n');
+  g(['commit', '-q', '-am', 'fix one']);
+  write(path.join(repo, 'app.js'), 'fixed, not committed\n');
+  write(path.join(repo, 'new-test.js'), 'untracked\n');
+  write(path.join(repo, 'reports', 'r.md'), 'ignored\n');
+  const statusBefore = g(['status', '--porcelain']).stdout;
+  const diff = QC.fixDiff(repo, change);
+  check('fixDiff: a committed fix, an uncommitted one and an untracked file are all in the diff',
+    /\+fixed and committed/.test(diff) && /\+fixed, not committed/.test(diff) && /new-test\.js/.test(diff) && /\+untracked/.test(diff), diff);
+  check('fixDiff: an ignored folder stays out', !/reports\/r\.md/.test(diff));
+  check('fixDiff: the project\'s own index is untouched', g(['status', '--porcelain']).stdout === statusBefore, g(['status', '--porcelain']).stdout);
+});
+
 // A process that no longer runs, or a zombie waiting for its parent to reap it.
 function gone(pid) {
   try { process.kill(pid, 0); } catch (e) { return e.code === 'ESRCH'; }
@@ -647,6 +1325,58 @@ async function asyncSection(name, fn) {
     check('runGroup: what the command leaves running in its group is stopped when it exits', left.status === 0 && cleared, JSON.stringify(left));
     const missing = await QC.runGroup('/nonexistent/bin', [], {}, 10000);
     check('runGroup: a command that cannot start resolves, never hangs', missing.status === 124 && /ENOENT/.test(missing.stderr), JSON.stringify(missing));
+  });
+
+  await asyncSection('fix role: a verdict counts only when the oracle\'s line and exit code agree', async () => {
+    const dir = tmp('qc-test-fake-oracles-');
+    write(path.join(dir, 'code-search-prefix.gone.js'), "console.log('PASS code-search-prefix gone: says pass'); process.exit(1);\n");
+    write(path.join(dir, 'code-search-prefix.works.js'), "throw new Error('the oracle broke');\n");
+    write(path.join(dir, 'known-shell-glob.gone.js'), "console.log('FAIL known-shell-glob gone: still aborts'); process.exit(1);\n");
+    write(path.join(dir, 'known-shell-glob.works.js'), "console.log('PASS known-shell-glob works: rotates'); process.exit(0);\n");
+    const tree = tmp('qc-test-fake-tree-');
+    write(path.join(tree, 'server.js'), '');
+    const port = await QC.freePort();
+    const j = await QC.judgeTree(tree, port, { answers: ANSWERS, dir });
+    const by = Object.fromEntries(j.oracles.map(r => [r.id, r]));
+    check('judgeTree: a PASS line with exit 1 is UNJUDGED, not a pass or a fail', by['code-search-prefix'].gone.verdict === 'UNJUDGED', JSON.stringify(by['code-search-prefix'].gone));
+    check('judgeTree: an oracle that crashes is UNJUDGED, not a FAIL', by['code-search-prefix'].works.verdict === 'UNJUDGED' && /no verdict line \(exit 1\)/.test(by['code-search-prefix'].works.line), JSON.stringify(by['code-search-prefix'].works));
+    check('judgeTree: a line and exit code that agree are the verdict', by['known-shell-glob'].gone.verdict === 'FAIL' && by['known-shell-glob'].works.verdict === 'PASS');
+    check('judgeTree: the port is never the real run\'s 3000 in a test', port !== QC.PORT && j.port === port);
+  });
+
+  await asyncSection('fix role: what the session left running in the scratch folder is found', async () => {
+    if (process.platform !== 'linux') { check('processesUnder: no /proc here, so nothing is found', QC.processesUnder(os.tmpdir()).length === 0); return; }
+    const scratch = tmp('qc-test-leftover-');
+    const { spawn } = require('child_process');
+    const child = spawn('sleep', ['30'], { cwd: scratch, stdio: 'ignore' });
+    try {
+      await new Promise(res => setTimeout(res, 200));
+      const found = QC.processesUnder(scratch);
+      check('processesUnder: a process whose working folder is inside the scratch folder is listed', found.some(p => p.pid === child.pid && /sleep 30/.test(p.cmd)), JSON.stringify(found));
+      check('processesUnder: nothing outside it is listed', QC.processesUnder(tmp('qc-test-empty-')).length === 0);
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  await asyncSection('fix role: the oracles separate a correct fix from an empty one (no browser)', async () => {
+    // The self-test's required case for the two bugs a test can run without a
+    // browser: the full one, browser oracles included, is --oracle-self-test.
+    const unfixed = tmp('qc-test-oracle-unfixed-');
+    QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
+    QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
+    const only = [QC.SELF_TEST_PAIR.correct, QC.SELF_TEST_PAIR.deletion];
+    const port = await QC.freePort();
+    const before = await QC.judgeTree(unfixed, port, { answers: ANSWERS, only });
+    for (const r of before.oracles) check('unfixed: the ' + r.id + ' gone oracle FAILs', r.gone.verdict === 'FAIL', r.gone.line);
+    const pair = tmp('qc-test-oracle-pair-');
+    QC.copyTree(unfixed, pair);
+    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.correct].correct);
+    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.deletion].deletion);
+    const after = await QC.judgeTree(pair, port, { answers: ANSWERS, only });
+    const by = Object.fromEntries(after.oracles.map(r => [r.id, r]));
+    const c = by[QC.SELF_TEST_PAIR.correct];
+    const d = by[QC.SELF_TEST_PAIR.deletion];
+    check('a correct fix (' + c.id + ') passes gone and works', c.gone.verdict === 'PASS' && c.works.verdict === 'PASS', c.gone.line + ' | ' + c.works.line);
+    check('an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
   });
 
   console.log('');

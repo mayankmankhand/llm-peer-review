@@ -535,6 +535,50 @@ function releaseRepo(version, tag, opt) {
     r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
 }
 
+// --- info: the catch-rate line (harness research, item 7) prints, is never counted, never fails
+// It names the newest valid ship-arm review run in the fixture ledger and the
+// review-path files plugin/ changed since that run's build, so a release whose
+// review path moved since its last measurement says so in every gate run.
+{
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  write(repo, 'plugin/commands/review.md', '# Review\n');
+  write(repo, 'plugin/README.md', '# Plugin\n');
+  commitAll(repo, 'review path');
+  const built = git(repo, ['rev-parse', 'HEAD']).trim();
+  let r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('no ledger: no catch-rate line at all', r.status === 0 && !/catch rate/.test(r.out), r.out);
+
+  // The harness's file list, stubbed the way the prompt-load case stubs its script.
+  write(repo, 'scripts/quality-check.js', 'module.exports = { PATH_FILES: { review: /^(commands\\/review\\.md|agents\\/audit-skeptic\\.md)$/ } };\n');
+  const runDir = (name, meta, valid) => {
+    write(repo, 'reports/quality-check/' + name + '/run.json', JSON.stringify(meta));
+    write(repo, 'reports/quality-check/' + name + '/analysis.json', JSON.stringify({ valid }));
+  };
+  runDir('2026-10-01-000000-review-a-x', { role: 'review', arm: 'a', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-03T00:00:00Z' }, true);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a ledger with no valid ship-arm run says so in one info line',
+    r.status === 0 && /^ {2}info catch rate - no valid ship-arm review run in reports\/quality-check yet/m.test(r.out), r.out);
+
+  runDir('2026-10-02-000000-review-ship-x', { role: 'review', arm: 'ship', build: { sha: built, version: '1.0.0' }, session: { claude: '2.1.296 (Claude Code)' }, startedAt: '2026-10-02T00:00:00Z' }, true);
+  runDir('2026-10-04-000000-review-ship-y', { role: 'review', arm: 'ship', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-04T00:00:00Z' }, false);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('the newest valid ship-arm run is named with its build and Claude Code version, and nothing has changed since',
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-02-000000-review-ship-x: build [0-9a-f]{7} \(1\.0\.0\), Claude Code 2\.1\.296 \(Claude Code\); 0 review-path files changed in plugin\/ since that build/.test(r.out), r.out);
+
+  write(repo, 'plugin/commands/review.md', '# Review, edited\n');
+  write(repo, 'plugin/README.md', '# Plugin, edited\n');
+  commitAll(repo, 'move the review path');
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a review-path file changed since the build is listed; a file off the path is not',
+    r.status === 0 && /; 1 review-path file changed in plugin\/ since that build/.test(r.out) && /^ {7}commands\/review\.md$/m.test(r.out) && !/^ {7}README\.md$/m.test(r.out), r.out);
+  check('the catch-rate line is not counted as a check', /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+
+  runDir('2026-10-05-000000-review-ship-z', { role: 'review', arm: 'ship', build: { sha: '0123456789abcdef0123456789abcdef01234567', version: '1.0.0' }, startedAt: '2026-10-05T00:00:00Z' }, true);
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('a build this repository does not have is said plainly, and the run still exits 0',
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-05-000000-review-ship-z: build 0123456 is not in this repository's history/.test(r.out), r.out);
+}
+
 // --- hook routing ------------------------------------------------------------------
 const stubDir = tmp('release-hook-stubs-');
 // The tripwire stub records its arguments and the stdin it received, one JSON
