@@ -3,7 +3,8 @@
 // Tests that the sentences several prompt files must carry word for word still
 // agree (review fix R5, 2026-10-05): the disclosure line a dispatched finder may
 // return (`NOT CHECKED: <one sentence>`), the eight project seam files under
-// `.claude/toolkit/`, and the reload-then-fallback sentence the commands share.
+// `.claude/toolkit/`, the reload-then-fallback sentence the commands share, and
+// the PR parts, the kept-on-purpose key and the decisions file /merge relies on.
 // Each of these lives in more than one file on purpose (an inlined fragment, a
 // seed, a command that parses what another file tells a finder to emit), so an
 // edit to one copy and not the others is exactly the drift this suite catches.
@@ -85,7 +86,7 @@ check('no prompt file still counts the loop rules to M15', staleRule.length === 
 
 console.log('\n3. the reload-then-fallback sentence');
 const SENTENCE = 'run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload)';
-const SITES = [['.claude/commands/review.md', 2], ['.claude/commands/create-plan.md', 1], ['.claude/commands/index.md', 1], ['.claude/commands/execute.md', 1], ['.claude/commands/document.md', 1], ['.claude/skills/shared/design-rules.md', 2]];
+const SITES = [['.claude/commands/review.md', 2], ['.claude/commands/create-plan.md', 1], ['.claude/commands/index.md', 1], ['.claude/commands/execute.md', 1], ['.claude/commands/document.md', 1], ['.claude/commands/merge.md', 1], ['.claude/skills/shared/design-rules.md', 2]];
 for (const [file, n] of SITES) check(file + ' carries the sentence word for word, ' + n + ' time' + (n === 1 ? '' : 's'), count(read(file), SENTENCE) === n, count(read(file), SENTENCE) + ' found');
 check('model-routing.md, which every site points at, states the registration rule the sentence summarizes', /`\/reload-plugins`/.test(read('.claude/skills/shared/model-routing.md')) && /added by a plugin install or update/.test(read('.claude/skills/shared/model-routing.md')));
 
@@ -106,6 +107,31 @@ check('no prompt file keeps the old by-hand wording of the pass', byHand.length 
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
 check('the three fragments that describe the pass name the helper', describers.every(f => read(f).includes('merge-findings.js')), describers.filter(f => !read(f).includes('merge-findings.js')).join(', '));
 check('the helper exists where the sentence points', fs.existsSync(path.join(REPO, '.claude/scripts/merge-findings.js')));
+
+console.log('\n5. the merge parts (#232)');
+// /document writes the PR body parts, merge-rules.md defines them, and /merge
+// reads them back through merge-check.js; /merge writes the kept-on-purpose key
+// merge-rules.md defines and merge-check.js reads; and the decisions file the
+// script writes has the two headings the decision-checker agent is told to read.
+const RULES = read('.claude/skills/shared/merge-rules.md');
+const DOC = read('.claude/commands/document.md');
+const MERGE_CMD = read('.claude/commands/merge.md');
+const CHECKER = read('.claude/agents/decision-checker.md');
+const MC_SRC = read('.claude/scripts/merge-check.js');
+const mc = require(path.join(REPO, '.claude', 'scripts', 'merge-check.js'));
+const PARTS = ['## Decisions', '## Changelog', 'Cut from:'];
+for (const [file, text] of [['merge-rules.md', RULES], ['document.md', DOC]]) check(file + ' names the three PR parts', PARTS.every(p => text.includes(p)), PARTS.filter(p => !text.includes(p)).join(', '));
+check('merge.md inlines merge-rules.md and host-cli.md, so it reads the parts and the host rows from their one home', MERGE_CMD.includes('!`cat .claude/skills/shared/merge-rules.md`') && MERGE_CMD.includes('!`cat .claude/skills/shared/host-cli.md`'));
+const SHA = 'a'.repeat(40);
+const body = 'Summary.\n\n## Decisions\n- Go right - the map says so\n\n## Changelog\n````markdown\n- Right turns.\n````\n\nCut from: ' + SHA + '\n';
+const got = mc.parseBody(body);
+check('merge-check.js reads back the three parts written the way merge-rules.md lays them out', got.decisions === '- Go right - the map says so' && got.changelog === '- Right turns.' && got.cutFrom === SHA, JSON.stringify(got));
+const KEY = 'Kept on purpose: <short sha of the commit that added the line> <file>: <line text>';
+check('merge-rules.md defines the kept-on-purpose key, and merge.md writes it into the landing message', RULES.includes(KEY) && MERGE_CMD.includes('`Kept on purpose:` line'));
+const kept = mc.parseKept('Kept on purpose: abc1234 src/app.js: return \'alpha v2 (A: faster)\';');
+check('merge-check.js reads a kept line in that key, file and text apart', kept.length === 1 && kept[0].sha === 'abc1234' && kept[0].file === 'src/app.js' && kept[0].text === 'return \'alpha v2 (A: faster)\';', JSON.stringify(kept));
+for (const [file, text] of [['decision-checker.md', CHECKER], ['merge-rules.md', RULES], ['merge-check.js', MC_SRC]]) check(file + ' names the decisions file\'s two headings', text.includes('## This PR') && text.includes('## Landing '), file);
+check('merge.md dispatches the decision-checker by name with no model, and document.md names /merge', /subagent_type=decision-checker/.test(MERGE_CMD) && /no model parameter/.test(MERGE_CMD) && DOC.includes('`/merge <N>`'));
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }
