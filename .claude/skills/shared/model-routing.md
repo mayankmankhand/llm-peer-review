@@ -62,7 +62,7 @@ Cheap runs the finders on Sonnet, which missed a planted bug that every Opus run
 
 1. **Structured output contracts.** Every worker in the roster returns a checkable format (JSONL findings, fixed module blocks), so weak or malformed output is visible rather than silent. This holds whether or not the worker is pinned: a malformed return is the cheapest signal either way, and the A/B that revoked the review pin caught one.
 2. **Bounded re-dispatch.** When a roster worker's output is weak or malformed, re-dispatch that one worker once - on the session model when it ran on a cheaper one (a pin, or its mode's `sonnet`), on the same model when it already ran on the session model (there is nothing above it to escalate to). Bounded worst case: one extra spawn.
-3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
+3. **A/B receipt before a new pin ships.** Any new pin is validated once: the same diff reviewed twice in report-only mode (pinned and inherited, same session model, same build and same Claude Code version in both runs), post-audit survivors compared. The pin ships only when the pinned run misses nothing real.
 4. **Rollback is one line.** Change the agent file's `model:` or `effort:` line, and its roster row with it; `model: inherit` puts a helper back on the session model. `scripts/test-model-roster.js` fails when the two disagree or the `model:` line is missing.
 
 ## Fallback
