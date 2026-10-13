@@ -117,7 +117,7 @@ An id is letters, digits, `.`, `_` and `-`. A command is one read-only line the 
 
 **Explain why, in one line.** Directly under the Verify step (and under the optional setup step, if present), add a short plain-English note so a non-technical reader knows why it appeared and whether it is safe to drop. Format it as an italic sub-line, e.g. `_Why this step: this plan changes pricing math, so we confirm the numbers come out right._`
 
-**When the project has no way to run tests yet** (no test framework in dependencies, no `tests/` directory) AND a test step is warranted:
+**When the project has no way to run tests yet** (no test framework in dependencies, no `tests/` directory) AND the plan changes logic (so it ends with a Verify step):
 - Add a flagged, optional setup step before the code steps, named like "Set up <framework> (optional - recommended)".
 - Auto-detect the idiomatic framework from the project: Vitest or Jest for JavaScript/TypeScript (`package.json`), pytest for Python (`pyproject.toml` or `requirements.txt`), and so on. If the ecosystem is unclear, use generic wording: "Set up a test framework (optional - recommended)".
 - Give it a why-note that says it is safe to delete, e.g. `_Why this step: optional. Delete it if you do not want to add a test tool now; the Verify step still works, it just runs manually._`

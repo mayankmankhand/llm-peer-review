@@ -95,7 +95,7 @@ This copies:
 - `.claude/settings.local.json` (permission config - preserved if it already exists; new toolkit permissions are merged in on re-run)
 - `.claude/scripts/generate-index.js` (codebase scanner used by `/index` to build `CODEBASE_MAP.md` - always updated)
 - `.claude/scripts/session-init.js` (aggregates command-startup reads - map freshness, lessons index, plan statuses, worktree state - into one JSON; always updated)
-- `.claude/scripts/run-checks.js` (the guarded checks runner behind review receipts and the `/execute` test step: runs read-only checks from the project root and decides pass or fail by machine - always updated)
+- `.claude/scripts/run-checks.js` (the guarded checks runner behind review receipts, the `/execute` test step, and a plan's own check lines, which it lints for `/create-plan`, runs before and after each step for `/execute`, and tallies for `/review`: runs read-only checks from the project root and decides pass or fail by machine - always updated)
 - `.claude/scripts/pre-push-check.js` (the pre-push tripwire that scans every outgoing commit for secrets, never-push files, and shared-settings changes - always updated)
 - `.claude/scripts/correction-ledger.js` (correction ledger capture and rollup helper behind `/document` and `/error-analysis` - always updated)
 - `.claude/scripts/gen-media.js` (the design workflow's seed and media helper: seeds, images, video, matting behind the user's own keys - always updated)
@@ -135,7 +135,7 @@ Note: Setup scripts (setup.sh, setup.ps1, install-alias.*) stay in the toolkit r
 - `.claude/rules/toolkit.md`, `.claude/skills/shared/toolkit-reference.md`, and `.claude/skills/shared/html-outputs.md` - the three version-stamped files
 - `.claude/scripts/generate-index.js` - codebase scanner used by `/index`
 - `.claude/scripts/session-init.js` - command-startup aggregator (map freshness, lessons, plan statuses, worktree state) for `/explore`, `/create-plan`, `/pair-debug`, `/execute`
-- `.claude/scripts/run-checks.js` - the guarded checks runner (review receipts, the `/execute` test step, a project's `checks.json`)
+- `.claude/scripts/run-checks.js` - the guarded checks runner (review receipts, the `/execute` test step, a project's `checks.json`, a plan's own check lines)
 - `.claude/scripts/render-html.js` and `.claude/scripts/open-artifact.sh` - HTML renderer + artifact opener
 - `.claude/scripts/pre-push-check.js`, `.claude/scripts/correction-ledger.js`, `.claude/scripts/gen-media.js`, and `.claude/scripts/merge-findings.js` - the pre-push tripwire, the correction ledger helper, the design workflow's media helper, and the review's merge helper
 - `.claude/scripts/ask-gpt.js`, `.claude/scripts/env-local.js`, `.claude/scripts/ask-gemini.js`, `.claude/scripts/browse.js`, and `.claude/scripts/package.json` + `package-lock.json` - runtime scripts and their quarantined deps
