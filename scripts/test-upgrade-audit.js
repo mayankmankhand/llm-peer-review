@@ -83,8 +83,9 @@
 //     file name and line (no canary runs), a missing or foreign link (the run
 //     prints its findings with their own checks and fails with a line saying
 //     why; a run with no finding, --stamp, --receipt and an explicit
-//     --plugin-root do not), the refusals of --receipt, and a call-back that
-//     needs the run's --from.
+//     --plugin-root do not), the refusals of --receipt and --release, a
+//     call-back that needs the run's --from, and one another release wrote,
+//     which runs nothing (the link moved after the run).
 // Every receipt an explicit run emits is run through `bash -c` from its fixture
 // project and must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise. Mutation checks prove the
@@ -197,10 +198,11 @@ const HOME_228 = sessionHome(PLUGIN);
 const ENV_228 = homeEnv(HOME_228);
 const RUNNER = path.join(REPO, '.claude', 'scripts', 'run-checks.js');
 const RC = require(RUNNER);
-// The receipt a default run writes for a finding: its key's ID, and the run's
-// --from when it was given one.
+// The receipt a default run writes for a finding: its key's ID, the version of
+// the build that wrote it, and the run's --from when it was given one.
 const receiptIdOf = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
-const callBackOf = (key, from) => 'node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --receipt ' + receiptIdOf(key) + (from ? ' --from ' + from : '');
+const callBackOf = (key, from, release) => 'node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --receipt ' + receiptIdOf(key) + ' --release ' + release + (from ? ' --from ' + from : '');
+const buildVersion = (root) => JSON.parse(read(path.join(root, '.claude-plugin', 'plugin.json'))).version;
 const DEFAULT_RUNS = { runs: 0, findings: 0, seen: new Set(), mismatches: [], refusals: [], e2e: { checks: 0, shapes: new Set(), bad: [] } };
 
 function audit(proj, args, opts) {
@@ -238,6 +240,7 @@ function compareDefaultRun(proj, args, explicit, root) {
     return;
   }
   const from = args[0] === '--from' ? args[1] : '';
+  const release = buildVersion(root);
   const bare = (f) => JSON.stringify(Object.assign({}, f, { receipt: f.receipt && f.receipt.expect }));
   const fresh = [];
   found.forEach((f, i) => {
@@ -245,7 +248,7 @@ function compareDefaultRun(proj, args, explicit, root) {
     DEFAULT_RUNS.findings++;
     DEFAULT_RUNS.seen.add(f.id);
     const check = f.receipt ? f.receipt.check : '';
-    if (check !== callBackOf(e.key, from) || bare(f) !== bare(e)) DEFAULT_RUNS.mismatches.push(where + ': ' + e.key + ' -> ' + check.slice(0, 160));
+    if (check !== callBackOf(e.key, from, release) || bare(f) !== bare(e)) DEFAULT_RUNS.mismatches.push(where + ': ' + e.key + ' -> ' + check.slice(0, 160));
     const why = RC.guardCheck(check, proj, homeEnv(home));
     if (why) DEFAULT_RUNS.refusals.push(where + ': ' + f.id + ' ' + why);
     const shape = f.id + ' ' + e.receipt.check.replace(/'[^']*'/g, 'Q').replace(/\d+/g, 'N');
@@ -2955,7 +2958,7 @@ console.log('\n11b. a name and a line the project controls never reach the call-
   audit(HOSTILE);   // the explicit run, with the session's run beside it
   const run = sessionRun(HOSTILE);
   const f = parseFindings(run.stdout).find(x => x.id === 'C-11' && x.file.relPath === NAME);
-  check('the session run flags the line, and its call-back names only the ID', !!f && /^node ~\/\S+ --receipt [0-9a-f]{16}$/.test(f.receipt.check), (f ? f.receipt.check : run.stdout.slice(0, 300)) + ' ' + run.stderr.slice(0, 300));
+  check('the session run flags the line, and its call-back names only the ID and the release', !!f && /^node ~\/\S+ --receipt [0-9a-f]{16} --release \d+\.\d+\.\d+$/.test(f.receipt.check), (f ? f.receipt.check : run.stdout.slice(0, 300)) + ' ' + run.stderr.slice(0, 300));
   const out = f ? viaRunner(HOSTILE, HOME_228, [{ check: f.receipt.check, expect: { exit: 0 } }]) : { error: 'no finding' };
   const v = out.results ? out.results[0] : null;
   check('through the runner it passes, and its saved output shows the flagged line as written', !!v && v.verdict === 'pass' && v.body.includes('3:' + LINE), out.error || (v && v.body));
@@ -2977,8 +2980,8 @@ console.log('\n11c. a default run whose stable link leads elsewhere writes no ca
   for (const [label, home] of [['no link at all', noLink], ['a link to another copy of the script', linkHome(path.join(TMP, 'home-elsewhere'), OTHER)]]) {
     const res = runAs(home);
     const lines = res.stderr.trim().split('\n');
-    check('with ' + label + ': the findings print, each receipt the finding\'s own check, and the last stderr line says a new session moves the link, exit 1',
-      res.status === 1 && res.stdout === explicitRun.stdout && /new session/.test(lines[lines.length - 1]) && lines.filter(l => /new session/.test(l)).length === 1, res.status + ' ' + res.stderr);
+    check('with ' + label + ': the findings print, each receipt the finding\'s own check, and the last stderr line says a new session moves the link, and to report a toolkit issue when one does not, exit 1',
+      res.status === 1 && res.stdout === explicitRun.stdout && /new session.*toolkit issue/.test(lines[lines.length - 1]) && lines.filter(l => /new session/.test(l)).length === 1, res.status + ' ' + res.stderr);
   }
   const clean = runAs(noLink, [], CURRENT);
   check('with no finding there is no receipt to fail: exit 0 and no line about the link', clean.status === 0 && clean.stdout === '' && !/new session/.test(clean.stderr), clean.status + ' ' + clean.stderr);
@@ -2990,12 +2993,15 @@ console.log('\n11c. a default run whose stable link leads elsewhere writes no ca
   check('--receipt is not stopped either: an ID no finding carries means the finding no longer stands (one stderr line, exit 1)', gone.status === 1 && gone.stdout === '' && /no longer stands/.test(gone.stderr) && gone.stderr.trim().split('\n').length === 1, gone.status + ' ' + gone.stderr);
 }
 
-console.log('\n11d. --receipt refuses what it cannot do');
+console.log('\n11d. --receipt and --release refuse what they cannot do');
 for (const [label, args, line] of [
   ['an ID that is not 16 hex characters', ['--receipt', 'C-1:CLAUDE.md'], /--receipt takes/],
   ['no ID', ['--receipt'], /--receipt takes/],
   ['--stamp beside it', ['--receipt', '0123456789abcdef', '--stamp'], /--receipt.*--stamp/],
   ['--rollback-to beside it', ['--receipt', '0123456789abcdef', '--rollback-to', '7.1.0'], /--receipt.*--rollback-to/],
+  ['--release without --receipt', ['--release', '7.1.0'], /--release names/],
+  ['--release with no usable version', ['--receipt', '0123456789abcdef', '--release', 'seven'], /--release takes/],
+  ['--release with no version at all', ['--receipt', '0123456789abcdef', '--release'], /--release takes/],
 ]) {
   const res = sessionRun(SMALL, args);
   check('refused with nothing on stdout, exit 1: ' + label, res.status === 1 && res.stdout === '' && line.test(res.stderr), res.status + ' ' + res.stderr);
@@ -3010,6 +3016,21 @@ console.log('\n11e. a call-back carries the run\'s --from, which decides what it
   const [withFrom, without] = out.results || [];
   check('through the runner the call-back finds its finding and shows the line', !!withFrom && withFrom.verdict === 'pass' && /hitl-loop\.md/.test(withFrom.body), out.error || (withFrom && withFrom.body));
   check('  and without --from it does not: the project\'s record starts at 7.0.0, after C-1, so the finding no longer stands', !!without && without.verdict === 'pass' && /no longer stands/.test(without.body), out.error || (without && without.body));
+}
+
+console.log('\n11f. a call-back another release wrote runs nothing: the link moved after the run');
+{
+  // A session started on another release between the run and its receipts
+  // relinks the stable path: the call-back reaches a build whose version is
+  // not the one it names, and must not let that build's detection decide.
+  const res = sessionRun(SMALL, ['--from', '6.3.3']);
+  const c1 = parseFindings(res.stdout).find(f => f.id === 'C-1');
+  const elsewhere = c1 ? c1.receipt.check.replace(/ --release \S+/, ' --release 7.0.0') : '';
+  const out = c1 ? viaRunner(SMALL, HOME_228, [{ check: elsewhere, expect: { exit: 3 } }]) : { error: 'no C-1 finding' };
+  const v = out.results ? out.results[0] : null;
+  check('through the runner it exits 3 and saves one line: not run, both releases, then a new session and a toolkit issue',
+    !!v && v.verdict === 'pass' && /^upgrade-audit: not run: .*the 7\.0\.0 audit.*the 7\.1\.0 audit.*new session.*toolkit issue/.test(v.body) && v.body.split('\n').filter(Boolean).length === 2, out.error || (v && v.body));
+  check('  and it shows none of the evidence: no check ran', !!v && !/hitl-loop/.test(v.body), v && v.body);
 }
 
 finish();

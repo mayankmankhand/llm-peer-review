@@ -7,7 +7,7 @@
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--project <dir>]
 //        [--plugin-root <dir>] [--conventions <file>] [--from <version>]
 //        [--stamp [--refuted <file>]]
-//   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--from <version>] --receipt <id>
+//   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--from <version>] --receipt <id> [--release <version>]
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js --rollback-to <x.y.z>
 //
 // Reads the conventions document (the plugin's skills/shared/conventions.md by
@@ -123,7 +123,8 @@
 // prints each finding's receipt as a call-back the runner already allows: this
 // script at the stable path ~/.claude/plugins/data/tk-llm-peer-review/current/
 // scripts/, with `--receipt <id>` (the first 16 hex characters of the SHA-256
-// of the finding's key) and the run's own --from when it was given one.
+// of the finding's key), `--release <version>` (this plugin's version) and the
+// run's own --from when it was given one.
 // `--receipt` reruns the detection, finds the one finding whose key has that
 // ID, and runs that finding's own check with bash in the project root, passing
 // its output and exit code through, so the runner saves exactly what the check
@@ -144,6 +145,15 @@
 // still counts them right, and, when it found anything, ends with one more
 // stderr line saying a new session moves the link, and exit 1. --stamp,
 // --rollback-to and --receipt write no call-back and never look at the link.
+//
+// The link can also move after the run, before its receipts are checked: a
+// session started on another release relinks it. So a call-back names the
+// release that wrote it, and a --receipt run of any other version runs
+// nothing: one stderr line says the receipt was not run and why, and exit 3,
+// where that release's detection might have called a true finding one that
+// no longer stands. Both stop lines end with the same steps: start a new
+// session, and if the upgrade stops the same way there, report the line as a
+// toolkit issue, because then the hook could not make the link.
 //
 // The toolkit's own repository is never a project: when .claude-plugin/
 // marketplace.json at the project root names the toolkit (see
@@ -521,11 +531,11 @@ function referenceVersion(state) {
 // record (see recordRefutedKeys). It is read before anything is written, so a
 // path that cannot be read stops the run with the state file untouched.
 const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--refuted <file>]]\n'
-  + '       node upgrade-audit.js [--project <dir>] [--from <version>] --receipt <id>\n'
+  + '       node upgrade-audit.js [--project <dir>] [--from <version>] --receipt <id> [--release <version>]\n'
   + '       node upgrade-audit.js [--project <dir>] --rollback-to <x.y.z>';
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
@@ -536,6 +546,7 @@ function parseArgs(argv) {
     else if (a === '--refuted') o.refuted = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--rollback-to') o.rollbackTo = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--receipt') o.receipt = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--release') o.release = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else { console.error('upgrade-audit: unknown argument ' + a + '\n' + USAGE); process.exit(1); }
   }
@@ -544,6 +555,8 @@ function parseArgs(argv) {
   if (o.refuted === '') { console.error('upgrade-audit: --refuted takes the path of a file with one finding key per line\n' + USAGE); process.exit(1); }
   if (o.receipt !== null && (o.stamp || o.rollbackTo !== null)) { console.error('upgrade-audit: --receipt reruns one finding\'s check and writes nothing, so it does not run with ' + (o.stamp ? '--stamp' : '--rollback-to') + '\n' + USAGE); process.exit(1); }
   if (o.receipt !== null && !RECEIPT_ID.test(o.receipt)) { console.error('upgrade-audit: --receipt takes the 16-character ID a call-back receipt names\n' + USAGE); process.exit(1); }
+  if (o.release !== null && o.receipt === null) { console.error('upgrade-audit: --release names the release that wrote a call-back receipt; run it with --receipt\n' + USAGE); process.exit(1); }
+  if (o.release !== null && validVersion(o.release) === null) { console.error('upgrade-audit: --release takes a version such as 7.6.5\n' + USAGE); process.exit(1); }
   return o;
 }
 function git(args, cwd) {
@@ -973,16 +986,21 @@ function keyMaker() {
 const STABLE_AUDIT = '~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js';
 function stableAuditPath() { return path.join(os.homedir(), '.claude', 'plugins', 'data', 'tk-llm-peer-review', 'current', 'scripts', 'upgrade-audit.js'); }
 function realpathOrNull(p) { try { return fs.realpathSync(p); } catch (e) { return null; } }
+// The steps both link stops end with: a new session moves the link, and when
+// one does not, the plugin's hook could not make it, which only the toolkit can
+// fix, so starting yet another session would never help.
+const LINK_STEPS = 'start a new session and run the upgrade again, and if it stops the same way there, the plugin\'s session hook could not make the link: report this line as a toolkit issue';
 // A finding's receipt ID: the first 16 hex characters of its key's SHA-256.
 // Keys are unique within a run (keyMaker), so an ID names one finding, and only
 // these 16 characters of the key ever reach the call-back's text.
 function receiptId(key) { return crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16); }
 const RECEIPT_ID = /^[0-9a-f]{16}$/;
 // The finding as a default run prints it: its receipt's check is the call-back,
-// with `from` (the run's validated --from, or '' when the range came from the
-// state file, which the call-back reads again) so the rerun covers the same range.
-function withCallBack(f, from) {
-  const check = 'node ' + STABLE_AUDIT + ' --receipt ' + receiptId(f.key) + (from ? ' --from ' + from : '');
+// with `release` (this plugin's version, which the call-back must match) and
+// `from` (the run's validated --from, or '' when the range came from the state
+// file, which the call-back reads again) so the rerun covers the same range.
+function withCallBack(f, from, release) {
+  const check = 'node ' + STABLE_AUDIT + ' --receipt ' + receiptId(f.key) + ' --release ' + release + (from ? ' --from ' + from : '');
   return Object.assign({}, f, { receipt: Object.assign({}, f.receipt, { check }) });
 }
 // --receipt <id>: run that reported finding's own check with bash in the
@@ -1511,6 +1529,13 @@ function main() {
   const conventionsPath = opts.conventions || path.join(pluginRoot, 'skills', 'shared', 'conventions.md');
   const toVersion = validVersion(readJson(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), {}).version);
   if (toVersion === null) { console.error('upgrade-audit: no usable version in ' + path.join(pluginRoot, '.claude-plugin', 'plugin.json')); process.exit(1); }
+  // A call-back written by another release came through a link that moved
+  // after its run (issue #228): this release's detection could miss the
+  // finding and call it one that no longer stands, so nothing runs.
+  if (opts.release !== null && compareVersions(validVersion(opts.release), toVersion) !== 0) {
+    console.error('upgrade-audit: not run: this receipt was written by the ' + validVersion(opts.release) + ' audit, but ' + STABLE_AUDIT + ' now leads to the ' + toVersion + ' audit, because a session started on another release moved the link during this upgrade; ' + LINK_STEPS);
+    process.exit(3);
+  }
   const state = readJson(P(STATE_REL), null);
   if (opts.stamp) {
     // The --refuted file is read before anything is written, so a bad path
@@ -1555,7 +1580,7 @@ function main() {
     const linked = realpathOrNull(stableAuditPath());
     if (own === null || linked !== own) {
       callBacks = false;
-      staleLink = 'upgrade-audit: these receipts are each finding\'s own check, not call-backs, because ' + STABLE_AUDIT + ' leads to ' + (linked || 'nothing') + ' rather than to this audit (' + (own || __filename) + '), and the checks runner refuses most of them; the link moves when a new session starts, so start a new session and run the upgrade again';
+      staleLink = 'upgrade-audit: these receipts are each finding\'s own check, not call-backs, because ' + STABLE_AUDIT + ' leads to ' + (linked || 'nothing') + ' rather than to this audit (' + (own || __filename) + '), and the checks runner refuses most of them; the link moves when a new session starts, so ' + LINK_STEPS;
     }
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
@@ -2295,7 +2320,7 @@ function main() {
   // finding lines, no notes, no summary.
   if (opts.receipt !== null) { runOneReceipt(project, reported, opts.receipt); return; }
   const from = opts.from ? validVersion(opts.from) : '';
-  for (const f of reported) process.stdout.write(JSON.stringify(callBacks ? withCallBack(f, from) : f) + '\n');
+  for (const f of reported) process.stdout.write(JSON.stringify(callBacks ? withCallBack(f, from, toVersion) : f) + '\n');
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
   for (const n of notes) console.error('upgrade-audit: ' + n);
   console.error('upgrade-audit: ' + reported.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s); ' + suppressed + ' suppressed by the refuted record');
