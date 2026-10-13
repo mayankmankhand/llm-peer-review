@@ -982,11 +982,23 @@ section('13. third round: a reader that follows the links it discovers while wal
   const noFileHolds = (r, needle) => fs.readdirSync(r.out).every((f) => outputText(path.join(r.out, f)).indexOf(needle) === -1);
   const walkRe = /follows symbolic links while walking/;
 
-  // The leak is real: the raw command, outside the runner, reads the outside file through the link.
-  const raw = spawnSync('grep', ['-R', CANARY3, '.'], { cwd: proj, encoding: 'utf8', env: ENV });
+  // The leak is real: the raw command, outside the runner, reads the outside
+  // file through a link it finds while walking. It walks a folder of its own
+  // holding the same two links, because the project also holds earlier
+  // sections' links to a folder outside every root (the home folder first),
+  // and a raw walk of the project read that whole tree: 213 of the suite's
+  // 223 seconds (review of #231, R13). The project's own link is checked to be
+  // the same link, so the fixture the runner checks below use is live too.
+  const walk = path.join(sandbox, 'walk-r17');
+  fs.mkdirSync(path.join(walk, 'sub'), { recursive: true });
+  try { fs.symlinkSync(outside, path.join(walk, 'dir-out')); } catch (e) { /* exists */ }
+  try { fs.symlinkSync(path.join(outside, 'canary.txt'), path.join(walk, 'sub', 'link.txt')); } catch (e) { /* exists */ }
+  const raw = spawnSync('grep', ['-R', CANARY3, '.'], { cwd: walk, encoding: 'utf8', env: ENV });
   check('fixture is live: a raw grep -R reads the outside canary through the directory link', raw.stdout.indexOf(CANARY3) !== -1, JSON.stringify(raw.stdout).slice(0, 200) + ' ' + raw.stderr.slice(0, 200));
-  const rawFind = spawnSync('find', ['-L', '.', '-name', 'canary.txt'], { cwd: proj, encoding: 'utf8', env: ENV });
+  const rawFind = spawnSync('find', ['-L', '.', '-name', 'canary.txt'], { cwd: walk, encoding: 'utf8', env: ENV });
   check('fixture is live: a raw find -L names the outside file through the link', /dir-out\/canary\.txt/.test(rawFind.stdout), JSON.stringify(rawFind.stdout).slice(0, 200));
+  const projLink = path.join(proj, 'dir-out');
+  check('fixture is live: the project holds the same directory link to the outside folder', fs.lstatSync(projLink).isSymbolicLink() && fs.realpathSync(projLink) === fs.realpathSync(outside), projLink);
 
   // --- refused: each with a reason naming the flag, nothing run, nothing saved ---
   const refused = [
