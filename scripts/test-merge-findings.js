@@ -377,11 +377,23 @@ console.log('\n8. --shards writes each tier 2 shard and the tier 3 ballot from t
   const thin = path.join(sandbox, 'receipts-8c');
   fs.mkdirSync(thin);
   fs.copyFileSync(path.join(receipts, 'browser-1.txt'), path.join(thin, 'browser-1.txt'));
+  fs.copyFileSync(path.join(receipts, 'code-1.txt'), path.join(thin, 'code-1.txt'));
   const out3 = path.join(sandbox, 'shards-8c');
   fs.mkdirSync(out3);
   const missing = run(['--shards', file, '--receipts', thin, '--out', out3]);
-  check('a missing receipt file stops the run, names the file, and writes no shard',
-    missing.status === 1 && /"error":"missing_receipt"/.test(missing.stderr) && /code-1\.txt/.test(missing.stderr) && fs.readdirSync(out3).length === 0, missing.stderr);
+  check('a finding with no saved receipt output at all stops the run, names the file, and writes no shard',
+    missing.status === 1 && /"error":"missing_receipt"/.test(missing.stderr) && /plan-critic-1\.txt/.test(missing.stderr) && fs.readdirSync(out3).length === 0, missing.stderr);
+  // Review R2: the checks runner saves no file for a check it refused, and a merged
+  // finding stands if any one of its checks passes, so one refused source is a note.
+  const half = path.join(sandbox, 'receipts-8e');
+  fs.mkdirSync(half);
+  for (const s of stems) if (s !== 'code-1') fs.copyFileSync(path.join(receipts, s + '.txt'), path.join(half, s + '.txt'));
+  const out5 = path.join(sandbox, 'shards-8e');
+  fs.mkdirSync(out5);
+  const partial = run(['--shards', file, '--receipts', half, '--out', out5]);
+  const t5 = fs.existsSync(path.join(out5, 'audit-tier3.txt')) ? fs.readFileSync(path.join(out5, 'audit-tier3.txt'), 'utf8') : '';
+  check('a merged finding with one source\'s output missing is written, that source marked untested (review R2)',
+    partial.status === 0 && t5.includes('saved output of browser-1') && /Receipt output \(code-1\.txt\): none saved; tier 1 refused or did not run this check, so this source is untested\./.test(t5), partial.stderr + t5.slice(0, 300));
 
   // Step 3's replay found right bugs with wrong lines, so the shard says which is wrong.
   const repo = path.join(sandbox, 'cite-8');

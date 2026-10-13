@@ -391,24 +391,36 @@ function buildShards(parsed, opts) {
   const drop = (opts.drop || []).slice().sort(byNumber);
   for (const id of drop) if (!ids.includes(id)) throw badInput('usage', null, '--drop names ' + id + ', which the merge did not produce (R1 to R' + ids.length + ')');
 
+  // Each source's saved receipt output, or null when tier 1 saved none. The checks
+  // runner writes no file for a check it refused, and a merged finding stands if
+  // any one of its checks passed, so a missing output stops the run only when no
+  // source of the finding has one.
+  const saved = (src, i, stem) => {
+    if (/[\\/]|^\.\.?$/.test(stem)) throw badInput('missing_receipt', parsed.lines[i], 'line ' + parsed.lines[i] + ': specialist ' + JSON.stringify(src.specialist) + ' cannot name a receipt file');
+    try { return fs.readFileSync(path.join(opts.receipts, stem + '.txt'), 'utf8'); } catch (e) { return null; }
+  };
   const section = (m) => {
     const parts = ['===== ' + m.id + ' ====='];
-    for (const src of m.sources) {
+    const outputs = m.sources.map((src) => {
+      const i = indexOf.get(src);
+      return src.receipt === undefined ? undefined : saved(src, i, stems[i]);
+    });
+    const anySaved = outputs.some((b) => typeof b === 'string');
+    m.sources.forEach((src, k) => {
       const i = indexOf.get(src);
       const stem = stems[i];
       parts.push('Finding (' + stem + ', as its finder wrote it):', parsed.texts[i]);
-      if (src.receipt === undefined) {
+      const bytes = outputs[k];
+      if (bytes === undefined) {
         parts.push('Receipt output: none; this line carries no receipt.');
-        continue;
+      } else if (bytes === null) {
+        const file = path.join(opts.receipts, stem + '.txt');
+        if (!anySaved) throw badInput('missing_receipt', parsed.lines[i], 'no saved receipt output for ' + m.id + ' at ' + file + ' (line ' + parsed.lines[i] + ', id ' + stem + ')');
+        parts.push('Receipt output (' + stem + '.txt): none saved; tier 1 refused or did not run this check, so this source is untested.');
+      } else {
+        parts.push('Receipt output (' + stem + '.txt, as tier 1 saved it):', bytes.endsWith('\n') ? bytes.slice(0, -1) : bytes);
       }
-      if (/[\\/]|^\.\.?$/.test(stem)) throw badInput('missing_receipt', parsed.lines[i], 'line ' + parsed.lines[i] + ': specialist ' + JSON.stringify(src.specialist) + ' cannot name a receipt file');
-      const file = path.join(opts.receipts, stem + '.txt');
-      let bytes;
-      try { bytes = fs.readFileSync(file, 'utf8'); } catch (e) {
-        throw badInput('missing_receipt', parsed.lines[i], 'no saved receipt output for ' + m.id + ' at ' + file + ' (line ' + parsed.lines[i] + ', id ' + stem + ')');
-      }
-      parts.push('Receipt output (' + stem + '.txt, as tier 1 saved it):', bytes.endsWith('\n') ? bytes.slice(0, -1) : bytes);
-    }
+    });
     const c = citationCheck(m.file, opts);
     if (c) {
       parts.push('Citation check: ' + c.detail + '. This says the citation is wrong, not that the claim is wrong: judge the claim against the file itself.');
