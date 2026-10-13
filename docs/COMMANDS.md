@@ -10,7 +10,7 @@ You don't have to use every command every time. Following the order prevents the
 
 > **Want to see this in action?** Follow the 5-minute walkthrough in **[DEMO-SCRIPT.md](../DEMO-SCRIPT.md)**.
 
-> **Working on multiple things at once?** Use `/worktree` first to create an isolated copy, then open it in a new Cursor window and run `/explore` there.
+> **Working on multiple things at once?** Use `/worktree` first to create an isolated copy, then open it in a new Cursor window and run `/explore` there. When the PRs are ready, `/merge` lands them, checked for lost work.
 
 ---
 
@@ -47,6 +47,29 @@ Looks at what changed (the commits `/execute` made, which it hands over as a ran
 Directly-typed `/review-*` runs are audited the same way before their reports - expect a few extra sub-agents (a skeptic per 7 findings, plus three voters for Block-severity findings) after the review itself, announced before they run. Loop rules: `.claude/skills/shared/hitl-loop.md`.
 
 Full prompt: [`.claude/commands/review.md`](../.claude/commands/review.md)
+
+### `/merge` - Land finished worktree PRs without losing work
+
+When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing one of them can quietly drop work it never saw, or its own work, and a squash merge hides the fix. `/merge 241 242` lands PR #241 and then PR #242, in the order you give, one at a time. For each one it brings the branch up to date with main and fixes the conflicts (the lessons files keep both sides, generated files are rebuilt, the changelog block goes back where new entries go), then lands it only when four checks pass:
+
+- your tests (your `checks.json`, or `npm test` or `pytest`);
+- **nothing other work added after the cut is removed** (rule 1);
+- **every line the PR added makes it in** (rule 2);
+- **no decision contradicts one that landed after the cut** (rule 3): a fresh reviewer compares this PR's decisions with theirs, even across files, so "go right" in one PR and "always go left" in another's guide is caught.
+
+All four key on the branch's **cut point**, the commit it was cut from, which `/worktree` records when it makes the branch. Git's merge-base cannot stand in for it: once a branch is updated from main, the merge-base moves past every line the branch never saw. `/document` writes the cut, the plan's decisions and the changelog block into the PR, and the landing commit repeats them, so they survive a squash and a deleted worktree.
+
+**What stops it.** The first flag, failing test or contradiction stops that PR before anything lands, and tells you in plain English what would be lost and who wrote it. You choose: Claude fixes it, you keep it on purpose, or you stop.
+
+**Keeping a removal on purpose.** Sometimes removing a line is right. Say "keep it" and the landing commit records `Kept on purpose: <sha> <file>: <line>`; after the fact, an empty commit on main carrying the same line does the same. The record names the commit that wrote the line, so the same text written by another commit is still checked.
+
+**How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash.
+
+**Landings made another way.** Each run first checks every landing since its last run, and the release gate checks every landing since the last release, so a PR merged with the host's button is still checked, one step later.
+
+It is human-triggered and never chained into: which PR lands first is your call.
+
+Full prompt: [`.claude/commands/merge.md`](../.claude/commands/merge.md) | Rules: [`.claude/skills/shared/merge-rules.md`](../.claude/skills/shared/merge-rules.md)
 
 ### `/ask-gpt` and `/ask-gemini` - Debate with another AI
 

@@ -120,6 +120,7 @@ When you set up the toolkit in a project, it creates several files. Here's how t
 | `DESIGN-PROFILE.md` | **You** | Your repo's design answers: whether a design system exists and where, what exploration may vary, taste notes, directions tried, prompts to retry. Read by `/explore` and `/execute`, written by `/explore` and `/document`. Seeded once from `.claude/skills/shared/design-profile-template.md`, never overwritten. |
 | `.claude/scripts/generate-index.js` | **Toolkit** | Scans the project and emits a manifest used by `/index` to build `CODEBASE_MAP.md`. Always updated on setup. |
 | `.claude/scripts/render-html.js` | **Toolkit** | Injects a JSON payload plus the shared `tokens.css` into a prebuilt shell (`.claude/skills/shared/shells/`) to render HTML artifacts (review, document, explore, debate, audit, plan, audit static view), naming each page from the payload's own title. Also keeps the artifact index (`--index-add` / `--index-url`) that records every artifact published to a hosted page, stamps each published file's hosted URL onto its line 1 as `<!-- hosted: <url> -->`, and regenerates those stamps from the index with `--index-sync`. Always updated on setup. |
+| `.claude/scripts/merge-check.js` | **Toolkit** | The lost-work check behind `/merge`: records a branch's cut point, and at each landing flags lines that landed after the cut and were removed, and the branch's own lines that did not land; it also writes the decision reviewer's input file and checks the landings made without `/merge`. Uses only Node built-ins and git. |
 | `.claude/scripts/merge-findings.js` | **Toolkit** | Merges, sorts and numbers the findings a review run collected: findings that share a key become one at the highest severity with every receipt kept, and the set comes back as R1 onward with no gaps. Every runner calls it on a file it wrote. Always updated on setup. |
 | `.claude/scripts/session-init.js` | **Toolkit** | Emits one JSON with codebase-map freshness, the lessons index, plan statuses, and worktree state, so `/explore`, `/create-plan`, `/pair-debug`, and `/execute` make one startup call instead of several reads. Always updated on setup. |
 | `.claude/scripts/pre-push-check.js` | **Toolkit** | The pre-push tripwire: before any push it scans every outgoing commit for secrets, blocks never-push files (`.env`, `.env.local`, `.netrc`, your local settings), and shows any shared-settings change. Silent when clean; a hit blocks the push and asks you. Always updated on setup. |
@@ -147,7 +148,9 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 **What the toolkit does automatically:**
 - `/worktree` creates the worktree, installs `npm` dependencies, and copies `.env.local`
 - `/explore` and `/create-plan` detect worktree sessions and rename the branch to `worktree-<issue-number>-<short-label>` when an issue is referenced
-- `/document` creates a PR from the worktree branch and offers to clean up the worktree folder when you're done
+- `/worktree` records the branch's cut point (the commit it was cut from), and the rename steps record it when it is missing
+- `/document` creates a PR from the worktree branch, with the plan's decisions, the changelog block and the cut point in its body, and offers to clean up the worktree folder when you're done
+- `/merge` lands the finished PRs in the order you give, each one updated from main and checked against what landed after its cut before it lands (see [COMMANDS.md](COMMANDS.md#merge---land-finished-worktree-prs-without-losing-work))
 - The branch and PR stay alive even after the worktree folder is deleted; you can always re-create a worktree if fixes are needed
 
 **What `/worktree` does:**
