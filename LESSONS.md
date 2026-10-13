@@ -385,3 +385,10 @@
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
 - **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+
+## Issue 229 (the ledger loop)
+
+- **Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.**
+- **An audit agent with Bash can open the real ledger: when the work under review is the ledger, say in the dispatch that its files are off limits.**
+- **A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.**
+- **A second mode that needs the same context as an existing walk should call that walk, not copy it.**
