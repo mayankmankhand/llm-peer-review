@@ -1164,6 +1164,27 @@ section('17. worktree.isWorktree from a subfolder (#226)', function () {
   check('a linked worktree is a worktree from a subfolder', at(path.join(wt, 'sub')).isWorktree === true, JSON.stringify(at(path.join(wt, 'sub'))));
 });
 
+section('The 16,000-character budget holds as a total (review R13)', function () {
+  // Each part under its own 8 KB cap can still sum past the budget: an inline
+  // LESSONS.md and a long map overview together. The total is measured, and the
+  // output shrinks in a fixed order until it fits.
+  const repo = newRepo('budget-total');
+  let lessons = '# Lessons Learned (Index)\n\n';
+  while (Buffer.byteLength(lessons) < 7900) lessons += '- **A one-line lesson with "quotes" and a path like src/a/b.js, written the long way.**\n';
+  write(repo, 'LESSONS.md', lessons);
+  let overview = '';
+  while (Buffer.byteLength(overview) < 7900) overview += 'The system reads its plans and lessons at startup and hands commands one JSON object to act on.\n';
+  write(repo, 'CODEBASE_MAP.md', '<!-- Generated: 2026-10-13 | Commit: abc1234 -->\n# Codebase Map\n\n## System Overview\n\n' + overview + '\n## Module Guide\n\n- x\n');
+  for (let i = 1; i <= 50; i++) write(repo, 'plans/PLAN-issue-' + (300 + i) + '.md', '# Plan ' + i + '\n\n**Overall Progress:** `100%`\n**Models:** fit\n');
+  commitAll(repo, 'init');
+  const out = runScript([], repo);
+  check('output parses', out.parsed, out.stderr.slice(0, 200));
+  check('stdout stays under 16,000 characters when lessons and overview are each just under 8 KB', out.stdout.length < 16000, 'length ' + out.stdout.length);
+  const L = out.json.lessons || {};
+  check('the budget turns the inline lessons into a handle first, and the note says why',
+    L.content === undefined && L.bytes === Buffer.byteLength(lessons) && typeof L.head === 'string' && /size budget/.test(L.note || ''), JSON.stringify({ content: typeof L.content, bytes: L.bytes, note: L.note }));
+});
+
 section('Output fits under the host\'s cut (harness research, P6-C1)', function () {
   // Claude Code replaces a Bash result over about 30 KB with a 2 KB preview, so a
   // command that reads this script's stdout loses everything past the preview. The

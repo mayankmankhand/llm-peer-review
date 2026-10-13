@@ -19,7 +19,8 @@
 //     this output loses everything past the preview. The session-start object
 //     stays under 16,000 characters, half that cut: a LESSONS.md over 8 KB comes
 //     back as a handle instead of its content, and only the newest plans are listed
-//     in full (both below). --scope cannot promise a size, since it lists every
+//     in full (both below); the total is then measured, and parts that add up past
+//     it are trimmed in a fixed order (fitSessionStart). --scope cannot promise a size, since it lists every
 //     file in the range, so it puts the fields a command acts on first: scopeLine
 //     and uncommitted.baseline land inside the first 2,000 bytes, and each file
 //     list comes after the fields that describe it. Every mode leads with the
@@ -422,6 +423,44 @@ const PLANS_IN_FULL = 10;
 const PLANS_BY_NAME = 40;
 
 // Lines as git counts them: one per newline, plus an unterminated last line.
+// The session-start budget (Size budget, above), measured on the object as it is
+// printed, models included. Each part has its own cap, but parts under their caps
+// can still add up past the budget, so the total is checked and the object shrinks
+// in a fixed order until it fits: the lessons index becomes a handle, then the map
+// overview is cut to its opening, then name-only plan entries move to plansOmitted.
+const SESSION_START_BUDGET = 16000;
+function fitSessionStart(payload) {
+  const size = (o) => JSON.stringify(ordered(o, SESSION_START_ORDER), null, 2).length + 1;
+  if (size(payload) <= SESSION_START_BUDGET) return payload;
+  const lessons = payload.lessons;
+  if (lessons && typeof lessons.content === "string") {
+    const raw = lessons.content;
+    delete lessons.content;
+    Object.assign(lessons, {
+      bytes: Buffer.byteLength(raw, "utf8"),
+      lines: countLines(raw),
+      head: headAtLineEnd(raw, LESSONS_HEAD_CHARS),
+      note: "LESSONS.md is left out here to keep this output under its size budget; read the file itself.",
+    });
+    if (size(payload) <= SESSION_START_BUDGET) return payload;
+  }
+  const map = payload.map;
+  if (map && typeof map.overview === "string" && !map.overviewCut) {
+    const bytes = Buffer.byteLength(map.overview, "utf8");
+    const cut = headAtLineEnd(map.overview, LESSONS_HEAD_CHARS).trimEnd();
+    if (cut.length < map.overview.length) {
+      map.overview = cut;
+      map.overviewCut = "overview holds the opening of a " + bytes + "-byte System Overview; read CODEBASE_MAP.md for the rest.";
+      if (size(payload) <= SESSION_START_BUDGET) return payload;
+    }
+  }
+  while (Array.isArray(payload.plans) && payload.plans.length > PLANS_IN_FULL && size(payload) > SESSION_START_BUDGET) {
+    payload.plans.pop();
+    payload.plansOmitted = (payload.plansOmitted || 0) + 1;
+  }
+  return payload;
+}
+
 function countLines(text) {
   if (text === "") return 0;
   const newlines = (text.match(/\n/g) || []).length;
@@ -1336,7 +1375,7 @@ function withModels(payload) {
   return payload;
 }
 if (cliArgs.length === 0) {
-  emit(withModels(sessionStart()), (o) => ordered(o, SESSION_START_ORDER));
+  emit(fitSessionStart(withModels(sessionStart())), (o) => ordered(o, SESSION_START_ORDER));
 } else if (cliArgs[0] === "--models" && cliArgs.length === 1) {
   emit(withModels({ generatedAt: new Date().toISOString(), cwd }), (o) => ordered(o, ["generatedAt", "models", "cwd"]));
 } else if (cliArgs[0] === "--scope") {
