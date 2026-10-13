@@ -13,6 +13,7 @@ A JSON escape for an apostrophe does not survive a model typing the command: the
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
 A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.
+A cap on each part is not a cap on the whole: measure the total against the budget.
 A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.
 A caveat in release notes is a deferred defect, not a resolution.
 A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.
@@ -41,6 +42,7 @@ A gate that lists the signals it cares about is another silent middle; read the 
 A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
 A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
+A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.
 A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
 A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.
 A live check on the friendliest fixture proves the friendly case; write the check against the row the rules actually allow.
@@ -67,6 +69,7 @@ A prose sweep needs the wordings that actually occur, not the one you remember w
 A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
 A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.
 A release needs one review of the whole range, not the sum of its per-issue reviews.
+A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
 A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
@@ -104,6 +107,7 @@ An assertion for ABSENCE cannot go red before the fix, so it guards against late
 An audit with only pass and kill discards correct findings that carry the wrong label.
 An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.
 An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.
+An exclusion applied to one arm of a comparison must apply to the other arm too.
 An inherited CSS property belongs on the shared root, not copied into each file.
 An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
 Ask what a change means for repos that already installed the last version, before writing the plan.
