@@ -94,6 +94,13 @@ const OPT_OUT_MARKER = path.join('.claude', '.no-correction-log');
 // because a prompt's user-facing message is not enforcement.
 const MAX_PRIVATE_FIELD = 300;
 const MAX_OPEN_CODE = 400;
+// The owner's own rewrite is the one private field copied rather than summarized
+// (#229), and a reworded paragraph or a set of bullets runs longer than a summary:
+// 1,200 is the limit the scan already reads a human message at.
+const MAX_REWRITE = 1200;
+// What the human had asked for, as the scan hands it to the extractor: the same
+// context limit as the assistant output beside it.
+const MAX_ASKED = 800;
 
 // The stages a row can name: the extractor's own list (correction-extractor.md),
 // plus `unknown` for a row that names none (#229). `stage` is on the shareable
@@ -305,6 +312,15 @@ function truncate(value, max) {
   return s.length <= max ? s : s.slice(0, max - 3) + '...';
 }
 
+// Like truncate(), but keeps line breaks (#229): a rewrite's structure, a bullet
+// list or a reworded paragraph, is part of what the owner wrote. Runs of spaces
+// still collapse, CRLF becomes LF, and three or more breaks become two.
+function truncateText(value, max) {
+  const s = String(value == null ? '' : value)
+    .replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return s.length <= max ? s : s.slice(0, max - 3) + '...';
+}
+
 // Accept a timestamp only when it really is one, otherwise fall back.
 //
 // This matters more than it looks. `at` is the one whitelisted field whose value
@@ -458,6 +474,18 @@ function isSlashCommand(entry, text) {
   return (raw !== null && /<command-name>/.test(raw)) || (text !== null && isCommandExpansion(text));
 }
 
+// The request a slash command carried (#229): its invocation is harness tags,
+// which humanText() strips to nothing, so the words are read from the tags
+// themselves. Returns "/name args", or '' for an expansion or any other entry.
+function commandRequest(entry) {
+  const raw = rawUserText(entry);
+  if (!raw) return '';
+  const name = /<command-name>([\s\S]*?)<\/command-name>/.exec(raw);
+  if (!name) return '';
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(raw);
+  return (name[1] + (args ? ' ' + args[1] : '')).replace(/\s+/g, ' ').trim();
+}
+
 // This filter is NEGATIVE by design: it removes what is definitely not a human
 // intervention and keeps everything else. It does not try to guess which turns are
 // interventions, because that guess is exactly what fails.
@@ -596,6 +624,11 @@ function runCandidates() {
     let lines;
     try { lines = fs.readFileSync(files[i], 'utf-8').split('\n'); } catch (e) { continue; }
     let lastAssistant = '';
+    // What the human asked for (#229): the newest request, and the one that came
+    // before lastAssistant, which is the request behind the output a correction
+    // reacts to. A fix needs the ask, not only the answer and the pushback.
+    let lastHuman = '';
+    let askedForLast = '';
     let pending = null;  // the latest interrupt no human text has answered yet
     let opened = false;  // whether this file's first human words have gone by
     for (let j = 0; j < lines.length; j++) {
@@ -606,7 +639,7 @@ function runCandidates() {
 
       if (entry.type === 'assistant') {
         const t = assistantText(entry);
-        if (t) lastAssistant = t;
+        if (t) { lastAssistant = t; askedForLast = lastHuman; }
         continue;
       }
       if (entry.type !== 'user') continue;
@@ -624,11 +657,16 @@ function runCandidates() {
       const marker = !command && INTERRUPT.test(text);
       const opener = !marker && !opened;
       if (!marker) opened = true;
+      // Remember the request before the window check, so the first candidate
+      // inside the window still knows what came before it. A command's expansion
+      // is machine text: only its invocation names a request.
+      const request = command ? commandRequest(entry) : (marker ? '' : text);
+      if (request) lastHuman = request;
       if (since && entry.timestamp && entry.timestamp < since) continue;
       if (marker) {
         // A second marker before any human text replaces the first: the
         // downstream case had two, two seconds apart, around one turn.
-        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant };
+        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant, asked: askedForLast };
         continue;
       }
       if (command) {
@@ -663,6 +701,7 @@ function runCandidates() {
         after_interrupt: false,
         // Context for the extractor to read. These are NOT the stored row: the row's
         // private fields are short summaries the extractor writes, capped on --add.
+        asked: truncate(askedForLast, MAX_ASKED),
         assistant_said: truncate(lastAssistant, 800),
         human_said: truncate(text, 1200)
       };
@@ -671,6 +710,7 @@ function runCandidates() {
         // with the turn that was cut off rather than anything said since.
         candidate.after_interrupt = true;
         candidate.assistant_said = truncate(pending.assistant_said, 800);
+        candidate.asked = truncate(pending.asked, MAX_ASKED);
         pending = null;
         result.candidates.push(candidate);
         continue;
@@ -705,6 +745,7 @@ function runCandidates() {
     if (best.command) { result.interruptsWithoutFollowUp += 1; return; }
     best.candidate.after_interrupt = true;
     best.candidate.assistant_said = truncate(p.assistant_said, 800);
+    best.candidate.asked = truncate(p.asked, MAX_ASKED);
     if (!best.kept) { best.kept = true; result.candidates.push(best.candidate); }
   });
 
@@ -772,6 +813,10 @@ function runAdd() {
       // PRIVATE LAYER. Capped here so a long pasted block cannot land wholesale.
       produced: truncate(r.produced, MAX_PRIVATE_FIELD),
       correction: truncate(r.correction, MAX_PRIVATE_FIELD),
+      // What had been asked, and the owner's own wording of what they wanted when
+      // they wrote one (#229). The rewrite keeps its line breaks.
+      trigger: truncate(r.trigger, MAX_PRIVATE_FIELD),
+      rewrite: truncateText(r.rewrite, MAX_REWRITE),
       // SHAREABLE LAYER.
       open_code: truncate(r.open_code, MAX_OPEN_CODE),
       axial_code: null,                      // assigned later, via the axial map

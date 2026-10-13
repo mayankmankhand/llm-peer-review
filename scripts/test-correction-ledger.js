@@ -1004,6 +1004,91 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: a candidate carries the request behind the output -------------
+// A fix needs to know what was asked, not only what came back and what the human
+// said about it. The scan kept only the assistant's last output; it now also keeps
+// the human words that came before that output, as `asked`.
+{
+  const sb = makeSandbox('asked229');
+  const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: 'sess-a', message: { content: t } }); };
+  fs.writeFileSync(path.join(dir, 'sess-a.jsonl'), [
+    user('Please write the README intro for the install page.', '2026-09-20T10:00:00.000Z'),
+    asst('Here is an intro that opens with the project history.'),
+    user("That's not right, it should lead with the install step.", '2026-09-20T10:01:00.000Z'),
+    // A request made by running a slash command: its words are harness tags.
+    user('<command-message>explore</command-message><command-name>/explore</command-name><command-args>issue 9</command-args>', '2026-09-20T10:02:00.000Z'),
+    user('# Initial Exploration Stage\n**Use this when:** Starting a new feature.', '2026-09-20T10:02:01.000Z'),
+    asst('Going with scoping mode.'),
+    user('Actually I wanted vision mode for this one, please switch.', '2026-09-20T10:03:00.000Z'),
+    // A request whose answer the human cut off.
+    user('Rename the config loader to settings loader everywhere.', '2026-09-20T10:04:00.000Z'),
+    asst('Renaming in the tests first.'),
+    user('[Request interrupted by user]', '2026-09-20T10:04:30.000Z'),
+    user('no', '2026-09-20T10:04:40.000Z')
+  ].join('\n') + '\n', 'utf-8');
+  const out = JSON.parse(run(sb, ['--candidates', '--since', '2026-09-20T00:00:00.000Z']));
+  const at = function (ts) { return out.candidates.filter(function (c) { return c.at === ts; })[0] || {}; };
+  check('a candidate carries the human request that came before the output',
+    at('2026-09-20T10:01:00.000Z').asked === 'Please write the README intro for the install page.',
+    JSON.stringify(at('2026-09-20T10:01:00.000Z').asked));
+  check('a request made by a slash command is carried as the command and its arguments',
+    at('2026-09-20T10:03:00.000Z').asked === '/explore issue 9',
+    JSON.stringify(at('2026-09-20T10:03:00.000Z').asked));
+  check('the message after an interrupt carries the request whose answer was cut off',
+    at('2026-09-20T10:04:40.000Z').after_interrupt === true &&
+    at('2026-09-20T10:04:40.000Z').asked === 'Rename the config loader to settings loader everywhere.',
+    JSON.stringify(at('2026-09-20T10:04:40.000Z')));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the request and the rewrite are capped, private fields ---------
+{
+  const sb = makeSandbox('rewrite229');
+  const longLines = Array.from({ length: 60 }, function (_, i) { return '- bullet line ' + i + ' of the owner rewrite'; }).join('\n');
+  run(sb, ['--add', '--data', writeRows(sb, [{
+    scope: 'project', stage: 'execute', open_code: 'cap probe',
+    trigger: 'T'.repeat(500), rewrite: longLines
+  }])]);
+  const row = JSON.parse(fs.readFileSync(ledgerFile(sb), 'utf-8').trim());
+  check('the request is capped at 300 characters', typeof row.trigger === 'string' && row.trigger.length === 300, String(row.trigger && row.trigger.length));
+  check('the rewrite is capped at 1,200 characters', typeof row.rewrite === 'string' && row.rewrite.length === 1200, String(row.rewrite && row.rewrite.length));
+  check('the rewrite keeps its line breaks, which carry its structure',
+    typeof row.rewrite === 'string' && row.rewrite.indexOf('\n- bullet line 1 ') !== -1,
+    JSON.stringify(String(row.rewrite).slice(0, 80)));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: no private field reaches the rollup, and its shape is pinned ----
+// The earlier privacy check planted a marker in `correction` only. Every private
+// field gets one now, and the bucket's field list is asserted exactly, so a new
+// field cannot join the rollup without this test changing too.
+{
+  const sb = makeSandbox('privacy229');
+  run(sb, ['--add', '--data', writeRows(sb, [{
+    scope: 'toolkit', stage: 'review', open_code: 'privacy probe',
+    produced: 'PRODUCED_LEAK_MARKER', correction: 'CORRECTION_LEAK_MARKER',
+    trigger: 'TRIGGER_LEAK_MARKER', rewrite: 'REWRITE_LEAK_MARKER'
+  }])]);
+  const markers = ['PRODUCED_LEAK_MARKER', 'CORRECTION_LEAK_MARKER', 'TRIGGER_LEAK_MARKER', 'REWRITE_LEAK_MARKER'];
+  const stdout = run(sb, ['--rollup']);
+  const file = fs.readFileSync(rollupFile(sb), 'utf-8');
+  const ledger = fs.readFileSync(ledgerFile(sb), 'utf-8');
+  markers.forEach(function (m) {
+    check('no ' + m.split('_')[0].toLowerCase() + ' text reaches the rollup',
+      stdout.indexOf(m) === -1 && file.indexOf(m) === -1, m + ' leaked');
+  });
+  check('the ledger itself holds all four private fields (control)',
+    markers.every(function (m) { return ledger.indexOf(m) !== -1; }));
+  const bucket = JSON.parse(stdout).kinds.human.buckets[0];
+  const expected = ['axial_code', 'count', 'last_seen', 'open_codes', 'repos', 'scope_split'];
+  check('a rollup bucket carries exactly the expected fields',
+    JSON.stringify(Object.keys(bucket).sort()) === JSON.stringify(expected), JSON.stringify(Object.keys(bucket).sort()));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- issue #229: stage is checked against the extractor's list -------------------
 // `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
 // free-text channel through the projection, the hole `at` had before isoOrNull().
