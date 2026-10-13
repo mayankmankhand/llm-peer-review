@@ -11,6 +11,7 @@
 A "nothing defines X" finding must first refute the generic rule that already covers X.
 A "nothing reads this file" claim must check every grep hit, test suites included.
 A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.
+A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
@@ -75,6 +76,7 @@ A receipt that checks a record exists can be closed by making the record late; c
 A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
 A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.
 A release needs one review of the whole range, not the sum of its per-issue reviews.
+A removal that makes a consumer refuse a form breaks every producer of that form: sweep the producers before it lands.
 A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.

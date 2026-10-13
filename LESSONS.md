@@ -174,7 +174,7 @@
 - **Tokenising the shared layer does not tokenise its consumers.**
 - **A prose sweep needs the wordings that actually occur, not the one you remember writing.** (see the #206 and #208 refinements in detail)
 - **A measurable claim in a commit message is a claim until you measure it.**
-- **A pipeline's exit status is the last command's, so `grep | head` always succeeds.**
+- **A pipeline's exit status is the last command's, so `grep | head` always succeeds.** (second occurrence in detail: a landing gate)
 - **"Falls back" is not "degrades to nothing" - read what the fallback actually produces.**
 - **An audit with only pass and kill discards correct findings that carry the wrong label.**
 
@@ -420,3 +420,8 @@
 - **A lone `cd` call, then plain commands, matches the permission rows; a subshell, a `cd` joined with `&&`, `git -C` and `env -C` ask every time.**
 - **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
 - **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**
+
+## Release 8.0.0 (five landings, two removals)
+
+- **A removal that makes a consumer refuse a form breaks every producer of that form: sweep the producers before it lands.**
+- **A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.**
