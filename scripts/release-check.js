@@ -324,6 +324,65 @@ function infoPromptLoad() {
   for (const l of lines.slice(1)) console.log('       ' + l);
 }
 
+// --- info: catch rate (harness research, item 7) ---------------------------------------
+// Not a check either: never counted, never fails. It names the newest valid
+// ship-arm review run in the fixture ledger (reports/quality-check/, gitignored),
+// that run's build and Claude Code version, and the review-path files plugin/
+// changed since that build, so a release whose review path moved after its last
+// measured run says so in every gate run. The review path is the harness's own
+// list (PATH_FILES.review in scripts/quality-check.js), read rather than copied,
+// so the two cannot drift. Silent when the ledger or the harness is absent (CI,
+// fresh clones, the tests' scratch repos).
+function infoCatchRate() {
+  const ledger = path.join(REPO, 'reports', 'quality-check');
+  const harness = path.join(REPO, 'scripts', 'quality-check.js');
+  if (!fs.existsSync(ledger) || !fs.existsSync(harness)) return;
+  let reviewPath;
+  try {
+    reviewPath = require(harness).PATH_FILES.review;
+    if (!(reviewPath instanceof RegExp)) throw new Error('PATH_FILES.review is not a pattern');
+  } catch (e) {
+    console.log('  info catch rate - unavailable: ' + e.message);
+    return;
+  }
+  const runs = [];
+  for (const name of fs.readdirSync(ledger)) {
+    let meta;
+    let analysis;
+    try {
+      meta = JSON.parse(fs.readFileSync(path.join(ledger, name, 'run.json'), 'utf8'));
+      analysis = JSON.parse(fs.readFileSync(path.join(ledger, name, 'analysis.json'), 'utf8'));
+    } catch (e) {
+      continue; // not a run folder, or a run still going
+    }
+    if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;
+    if (!meta.build || typeof meta.build.sha !== 'string' || !/^[0-9a-f]{7,64}$/.test(meta.build.sha)) continue;
+    runs.push({ name, meta, at: String(meta.startedAt || name) });
+  }
+  if (!runs.length) {
+    console.log('  info catch rate - no valid ship-arm review run in reports/quality-check yet');
+    return;
+  }
+  runs.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  const newest = runs[0];
+  const sha = newest.meta.build.sha;
+  const head = 'newest valid ship-arm run ' + newest.name + ': build ' + sha.slice(0, 7);
+  if (git(['cat-file', '-e', sha + '^{commit}']).status !== 0) {
+    console.log('  info catch rate - ' + head + " is not in this repository's history");
+    return;
+  }
+  const diff = git(['diff', '--name-only', sha, 'HEAD', '--', 'plugin/']);
+  const changed = diff.status === 0 && diff.out
+    ? diff.out.split('\n').map((f) => f.replace(/^plugin\//, '')).filter((f) => reviewPath.test(f))
+    : [];
+  const version = newest.meta.build.version ? ' (' + newest.meta.build.version + ')' : '';
+  const claude = newest.meta.session && newest.meta.session.claude ? newest.meta.session.claude : 'unknown';
+  console.log('  info catch rate - ' + head + version + ', Claude Code ' + claude + '; ' + changed.length
+    + ' review-path file' + (changed.length === 1 ? '' : 's') + ' changed in plugin/ since that build');
+  for (const f of changed.slice(0, 20)) console.log('       ' + f);
+  if (changed.length > 20) console.log('       ... and ' + (changed.length - 20) + ' more');
+}
+
 // The commit a revision names (peeling an annotated tag), or null.
 function resolveCommit(rev) {
   const r = git(['rev-parse', '--verify', '-q', rev + '^{commit}']);
@@ -576,6 +635,7 @@ checkSuites();
 checkBuild();
 checkReadmeBudget();
 infoPromptLoad();
+infoCatchRate();
 if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref and release tag judge a release, not an everyday test run; run without the flag for the full gate');
 else checkCommits();
 const failedCount = results.filter(ok => !ok).length;
