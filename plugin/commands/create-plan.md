@@ -6,6 +6,8 @@ allowed-tools:
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -84,24 +86,34 @@ For plans with fewer than 3 steps, skip the tags.
 
 </conditions>
 
-## Test Steps (conditional)
+## Checks (every step, M17)
 
 <conditions>
 
-Decide whether this plan needs a dedicated test step. This is dynamic, not blanket - a plan that changes real logic usually gets one; a plan that does not should not get one. **When in doubt, skip it** - a missing test step is cheaper than a plan cluttered with tests nobody needed.
+Every step proves itself the way M17 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` defines: a target check that fails before the step's work, for a reason stated in advance, and passes after it, plus a guard on anything the step could break. `/tk:execute` runs each step's checks before and after its work through the runner, so write them in the one shape the runner reads, as lines indented under the step:
 
-**Add a "Verify" test step when the plan changes verifiable logic:**
-- New business logic with defined inputs and outputs (e.g., a pricing calculator): WRITE new tests that assert the correct outputs.
-- A refactor of code that already has test coverage (e.g., a parser): RUN the existing tests to confirm behavior is unchanged.
-- Anything with a checkable result: pure functions, parsers, calculations, data transforms, business rules.
+```
+  - Check target `<id>`: `<command>` - before `<expect>` - after `<expect>`
+  - Check guard `<id>`: `<command>` - `<expect>`
+  - Check: no target - <reason>
+```
 
-**Skip the test step when there is nothing to verify:**
-- Config, docs, comments, copy, or styling only.
-- Exploratory or research work (investigating a bug, reading code) with no code change yet.
+An id is letters, digits, `.`, `_` and `-`. A command is one read-only line the runner allows: the project's test entry point (`npm test -- <args>`, `pytest -q <path>`; the runner refuses `node <file>` by design), a `grep`, a `test -f`. An expect is the runner's JSON object: `{"exit": 0}`, `{"match": "regex"}`, `{"noMatch": "regex"}` or `{"lines": {"min": 1, "max": 3}}`. A span that holds a backtick is fenced with two.
 
-**How to decide (no heavy scanning):** infer from the task descriptions you just wrote, plus `CODEBASE_MAP.md` signals - is there a `tests/` directory? a test framework in the project's dependencies? Both signals are one command (M16): `test -d tests && echo tests/; test -d test && echo test/; grep -nE '"test":|"(jest|vitest|mocha|ava|tap|playwright|cypress)":' package.json 2>/dev/null; grep -nE 'pytest' pyproject.toml requirements.txt 2>/dev/null` prints one line per test folder or framework found, and no output means the project has no way to run tests yet. Do NOT scan the codebase for per-function coverage.
+**Pick the kind of check that shows the step's change:**
+- **Example:** this input gives this output (a unit test of a function, a parser, a calculation, a data transform).
+- **User flow:** a real path through the product, end to end; the final word on whether a feature works.
+- **Must-never:** name what must never happen, and try many generated inputs to break it.
+- **Old vs new:** when a step replaces something, run both on the same inputs and compare.
+- **Must and must-not lines** for text and prompt edits: a grep that counts a line the step adds (0 before, 1 or more after) or removes (the reverse), and a guard on each sentence the edit must keep.
 
-**Where it goes:** one dedicated step named "Verify" near the end of the Tasks list. It runs existing tests and/or adds new ones, whichever fits. It `depends on` the code steps it verifies (never on the optional setup step below), so the plan stays valid even if that optional step is deleted. Because it is a step, it counts toward the 3-or-more-step threshold for Execution Order Tags above; tag it `[sequential]` when that threshold applies.
+**The stated failure.** A target's before expect is a result only the missing behavior can produce. A test target names its new case: the before expect matches both the suite's failing exit line and the case's name in the failure list, for example `{"match": "(?=[\\s\\S]*test-pricing\\.js: exit 1)(?=[\\s\\S]*- the discount rounds down)"}`, so neither a passing run nor some other failure satisfies it. A check that already passes before the work, or an absence check for something new, proves nothing: pick another. A refactor has guards only, with the line `- Check: no target - a refactor: behavior must not change`; a step with truly nothing to fail first (pure config, research) says why on its no-target line too, and the plan critic challenges every reason.
+
+**Guards** cover what the step could break and pass both before and after: the suite of a module the step touches, a must line for a sentence a rewrite has to keep.
+
+**How to find the test entry point (no heavy scanning):** infer from the task descriptions you just wrote, plus `CODEBASE_MAP.md` signals - is there a `tests/` directory? a test framework in the project's dependencies? Both signals are one command (M16): `test -d tests && echo tests/; test -d test && echo test/; grep -nE '"test":|"(jest|vitest|mocha|ava|tap|playwright|cypress)":' package.json 2>/dev/null; grep -nE 'pytest' pyproject.toml requirements.txt 2>/dev/null` prints one line per test folder or framework found, and no output means the project has no way to run tests yet. Do NOT scan the codebase for per-function coverage.
+
+**The Verify step keeps the whole-system checks.** A plan that changes logic ends with one dedicated step named "Verify": the project's full test step, a user flow end to end, and old against new when the plan replaces a system. Its check line is usually `- Check: no target - the whole-system step; its proofs are the runs it lists`. A docs-only or config-only plan needs no Verify step. It `depends on` the code steps it verifies (never on the optional setup step below), so the plan stays valid even if that optional step is deleted. Because it is a step, it counts toward the 3-or-more-step threshold for Execution Order Tags above; tag it `[sequential]` when that threshold applies.
 
 **Explain why, in one line.** Directly under the Verify step (and under the optional setup step, if present), add a short plain-English note so a non-technical reader knows why it appeared and whether it is safe to drop. Format it as an italic sub-line, e.g. `_Why this step: this plan changes pricing math, so we confirm the numbers come out right._`
 
@@ -153,25 +165,29 @@ Key architectural/implementation choices made during exploration:
 <!-- For 3+ steps: tag each step [parallel] or [sequential]. See "Execution Order Tags" above. -->
 
 - [ ] 🟥 **Step 1: [Name]** `[parallel]` → delivers: [what this step produces]
-  - [ ] 🟥 Subtask 1
+  - [ ] 🟥 Write the target first: [the new test case, or the line the step adds]
   - [ ] 🟥 Subtask 2
+  - Check target `[id]`: `[command]` - before `[expect: the stated failure]` - after `[expect: the pass]`
+  - Check guard `[id]`: `[command]` - `[expect: holds before and after]`
 
 - [ ] 🟥 **Step 2: [Name]** `[parallel]` → delivers: [what this step produces]
   - [ ] 🟥 Subtask 1
-  - [ ] 🟥 Subtask 2
+  - Check: no target - [why nothing can fail first, e.g. a refactor: behavior must not change]
+  - Check guard `[id]`: `[command]` - `[expect]`
 
 - [ ] 🟥 **Step 3: [Name]** `[sequential]` → depends on: Steps 1, 2
   - [ ] 🟥 Subtask 1
-  - [ ] 🟥 Subtask 2
+  - Check target `[id]`: `[command]` - before `[expect]` - after `[expect]`
 
 - [ ] 🟥 **Step N: Verify** `[sequential]` → depends on: the code steps it verifies
-  <!-- Conditional step (see "Test Steps (conditional)" above). Include ONLY when the plan changes verifiable logic; omit entirely for docs/config/exploratory plans. If the project has no test runner, add a flagged optional "Set up <framework> (optional - recommended)" step before the code steps. This Verify step depends on the CODE steps, not the optional setup step, so deleting the optional step never breaks it. -->
+  <!-- The whole-system step (see "Checks (every step, M17)" above). Include it when the plan changes logic; omit it for docs-only or config-only plans. If the project has no test runner, add a flagged optional "Set up <framework> (optional - recommended)" step before the code steps. This Verify step depends on the CODE steps, not the optional setup step, so deleting the optional step never breaks it. -->
   - _Why this step: [one plain-English line, e.g. "this plan changes pricing math, so we confirm the numbers come out right"]_
-  - [ ] 🟥 Run existing tests for [module], confirm behavior unchanged
-  - [ ] 🟥 Add tests for [new logic]: assert [input] produces [expected output]
+  - [ ] 🟥 Run the project's full test step
+  - [ ] 🟥 [A user flow end to end; old against new when the plan replaces a system]
+  - Check: no target - the whole-system step; its proofs are the runs it lists
 
 ## Must-check for review (optional - only when a judge left gaps open)
-<!-- One line per item, in the shapes M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md gives. /tk:create-plan writes [plan] lines from the plan critic's round 2; /tk:execute design steps add [design], [interaction] and [behaviour] lines. /tk:review enters each into its audit. Omit the section when nothing is carried. -->
+<!-- One line per item, in the shapes M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md gives. /tk:create-plan writes [plan] lines from the plan critic's round 2; /tk:execute design steps add [design], [interaction] and [behaviour] lines, and /tk:execute adds a [check] line for each check M17 lets a step carry on past (flaky, slow, broken before). /tk:review enters each into its audit. Omit the section when nothing is carried. -->
 - [plan] [Category]: [the gap, verbatim]
 
 ## Outcomes
@@ -198,7 +214,7 @@ The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
 <procedure>
 
-1. Before dispatching, test the paths the plan names (M16): `grep -oE '[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+' plans/<plan>.md | sort -u | while read -r p; do test -e "$p" || echo "not found: $p"; done` prints one `not found:` line per path (a token with at least one `/`) that is not a file under the project root, and nothing when every path exists; skip a path the step creates, check a root-level file such as `package.json` by eye since it carries no slash, and fix every other line in the plan first. Then dispatch `subagent_type=tk:plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
+1. Before dispatching, test the paths the plan names (M16): `grep -oE '[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+' plans/<plan>.md | sort -u | while read -r p; do test -e "$p" || echo "not found: $p"; done` prints one `not found:` line per path (a token with at least one `/`) that is not a file under the project root, and nothing when every path exists; skip a path the step creates, check a root-level file such as `package.json` by eye since it carries no slash, and fix every other line in the plan first. Then lint the plan's check lines (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --plan plans/<plan>.md --lint` prints one JSON object whose `problems` list names, by line, every check line that would not run (a step with neither a target nor a no-target line, a near miss of the shape, a command the runner would refuse, a target whose before and after expects are the same); fix each one until its `summary.problems` is 0. Then dispatch `subagent_type=tk:plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the exploration's closing summary (direction, decisions, open questions), pasted verbatim. Never the round number and never earlier critiques.
 2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
 3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
 4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`), so `/tk:review` checks it against the delivered work.
