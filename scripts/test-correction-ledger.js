@@ -1089,6 +1089,105 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: the evidence read shows a repo's rows only inside that repo ----
+// The one read path back to the private fields. Each case below states what it
+// must show: its own repo's rows, or nothing. The canary sits in a second repo
+// that has the same folder name, which is the case a label comparison would get
+// wrong; identity is the main working copy's real path.
+{
+  const sb = makeSandbox('evidence229');
+  const work = path.join(sb.root, 'work', 'api');
+  const personal = path.join(sb.root, 'personal', 'api');
+  const initRepo = function (dir) {
+    const g = function (args) { return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    fs.mkdirSync(dir, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    return g;
+  };
+  const evidence = function (cwd, env) {
+    return runRaw(sb, ['--evidence', '--category', 'probe category'], { cwd: cwd, env: env });
+  };
+  const rowsOf = function (r) { try { return JSON.parse(r.stdout).rows; } catch (e) { return null; } };
+  try {
+    const gw = initRepo(work);
+    initRepo(personal);
+    const wt = path.join(work, '.claude', 'worktrees', 'wt-a');
+    gw(['worktree', 'add', wt, '-b', 'side']);
+    fs.mkdirSync(path.join(work, 'src', 'deep'), { recursive: true });
+    fs.mkdirSync(path.join(sb.home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(sb.home, '.claude', 'correction-axial-map.json'),
+      JSON.stringify({ 'evidence probe': 'probe category' }), 'utf-8');
+    const row = function (marker) {
+      return writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: 'evidence probe',
+        produced: marker + ' produced', correction: marker + ' correction', trigger: marker + ' trigger', rewrite: marker + ' rewrite' }]);
+    };
+    run(sb, ['--add', '--data', row('WORK_ROW')], { cwd: work });
+    run(sb, ['--add', '--data', row('WORKTREE_ROW')], { cwd: wt });
+    run(sb, ['--add', '--data', row('EVIDENCE_CANARY')], { cwd: personal });
+    // A stored path that starts inside work/api and resolves into personal/api.
+    // Joined by hand: path.join would normalize the `..` away before it is stored,
+    // and the test would then never plant the climbing path it exists to check.
+    const climbing = [work, '..', '..', 'personal', 'api'].join(path.sep);
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-09-21T10:00:00.000Z', repo: 'api', repo_path: climbing,
+      kind: 'human', scope: 'project', stage: 'review', produced: 'DOTDOT_CANARY', correction: '', open_code: 'evidence probe', axial_code: null
+    }) + '\n', 'utf-8');
+    // A row from before repo_path existed: it cannot prove where it came from.
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-08-01T10:00:00.000Z', repo: 'api', kind: 'human', scope: 'project', stage: 'review',
+      produced: 'NOPATH_CANARY', correction: '', open_code: 'evidence probe', axial_code: null
+    }) + '\n', 'utf-8');
+
+    const fromWork = evidence(work);
+    const seen = JSON.stringify(rowsOf(fromWork));
+    check('evidence from a repo shows its own rows and its worktree\'s',
+      fromWork.status === 0 && seen.indexOf('WORK_ROW') !== -1 && seen.indexOf('WORKTREE_ROW') !== -1, seen.slice(0, 200));
+    check('evidence never shows a same-named sibling repo\'s rows',
+      fromWork.stdout.indexOf('EVIDENCE_CANARY') === -1 && fromWork.stdout.indexOf('DOTDOT_CANARY') === -1,
+      'the canary reached the wrong repo');
+    check('evidence leaves out, and counts, a row with no stored path',
+      fromWork.stdout.indexOf('NOPATH_CANARY') === -1 && JSON.parse(fromWork.stdout).left_out.no_repo_path === 1,
+      fromWork.stdout.slice(0, 200));
+    const fromPersonal = evidence(personal);
+    check('the sibling repo sees its own rows, including the path that climbs into it with ..',
+      fromPersonal.stdout.indexOf('EVIDENCE_CANARY') !== -1 && fromPersonal.stdout.indexOf('DOTDOT_CANARY') !== -1 &&
+      fromPersonal.stdout.indexOf('WORK_ROW') === -1, fromPersonal.stdout.slice(0, 200));
+    const fromDeep = evidence(path.join(work, 'src', 'deep'));
+    check('evidence from a subdirectory shows the same rows as the repo root',
+      JSON.stringify(rowsOf(fromDeep)) === JSON.stringify(rowsOf(fromWork)), fromDeep.stdout.slice(0, 200));
+    const link = path.join(sb.root, 'link-to-api');
+    fs.symlinkSync(work, link);
+    const fromLink = evidence(link);
+    check('evidence through a symlinked path shows the same rows as the real path',
+      JSON.stringify(rowsOf(fromLink)) === JSON.stringify(rowsOf(fromWork)), fromLink.stdout.slice(0, 200));
+    const fromWorktree = evidence(wt);
+    check('evidence from a worktree shows its main copy\'s rows, by design',
+      JSON.stringify(rowsOf(fromWorktree)) === JSON.stringify(rowsOf(fromWork)), fromWorktree.stdout.slice(0, 200));
+    const plain = path.join(sb.root, 'not-a-repo');
+    fs.mkdirSync(plain);
+    const fromPlain = evidence(plain);
+    check('evidence refuses outside a git repository and prints no rows',
+      fromPlain.status !== 0 && fromPlain.stdout.indexOf('_ROW') === -1 && fromPlain.stdout.indexOf('CANARY') === -1,
+      'exit ' + fromPlain.status + ' ' + fromPlain.stdout.slice(0, 120));
+    const moved = path.join(sb.root, 'moved-ledger');
+    fs.mkdirSync(moved);
+    const fromMoved = evidence(work, { TK_LEDGER_DIR: moved });
+    check('under TK_LEDGER_DIR evidence reads only the moved ledger, which holds none of these rows',
+      fromMoved.status === 0 && JSON.stringify(rowsOf(fromMoved)) === '[]', fromMoved.stdout.slice(0, 200));
+    fs.mkdirSync(path.join(personal, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(personal, '.claude', '.no-correction-log'), '', 'utf-8');
+    const fromOptedOut = evidence(personal);
+    check('evidence in an opted-out repo prints no rows',
+      fromOptedOut.stdout.indexOf('CANARY') === -1 && JSON.parse(fromOptedOut.stdout).optedOut === true,
+      fromOptedOut.stdout.slice(0, 200));
+  } catch (e) {
+    check('evidence test set up its repos', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- issue #229: stage is checked against the extractor's list -------------------
 // `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
 // free-text channel through the projection, the hole `at` had before isoOrNull().

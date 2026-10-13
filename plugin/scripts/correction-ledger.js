@@ -24,13 +24,16 @@
 //      patterns are actually visible.
 //
 // PRIVACY - the single most important property of this file:
-//   `produced` and `correction` are the PRIVATE LAYER. They hold near-verbatim
-//   quotes and can contain anything the user typed. They are never included in a
-//   rollup, never rendered into an artifact, and never sent anywhere. The rollup is
-//   built from shareable(), an explicit whitelist projection, so reading a private
-//   field into a rollup is not expressible rather than merely discouraged. Both
-//   fields are also hard-truncated on write, so a long pasted block can never land
-//   in the ledger wholesale.
+//   `produced`, `correction`, `trigger` and `rewrite` are the PRIVATE LAYER (the
+//   last two since #229: what had been asked, and the user's own wording of what
+//   they wanted). They hold near-verbatim quotes and can contain anything the user
+//   typed. They are never included in a rollup, never rendered into an artifact,
+//   and never sent anywhere. The rollup is built from shareable(), an explicit
+//   whitelist projection, so reading a private field into a rollup is not
+//   expressible rather than merely discouraged. All four are hard-truncated on
+//   write, so a long pasted block can never land in the ledger wholesale. The ONE
+//   read path back to them is --evidence, which prints one category's rows only
+//   for the repo it runs in; runEvidence() says how that is enforced.
 //
 // Storage is PER MACHINE, outside any repo, under ~/.claude/ (or the absolute folder
 // named by TK_LEDGER_DIR, for test runs; see the storage paths below). Every row
@@ -115,8 +118,8 @@ const TOOLKIT_STAGES = ['explore', 'create-plan', 'execute', 'review', 'document
 const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
-  rollup: false, showRollup: false, setAxial: false,
-  data: '', since: '', session: '', candidateCount: '', addedCount: ''
+  rollup: false, showRollup: false, setAxial: false, evidence: false,
+  data: '', since: '', session: '', candidateCount: '', addedCount: '', category: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -126,6 +129,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--rollup') opts.rollup = true;
   else if (a === '--show-rollup') opts.showRollup = true;
   else if (a === '--set-axial') opts.setAxial = true;
+  else if (a === '--evidence') opts.evidence = true;
+  else if (a === '--category') opts.category = argv[++i] || '';
   else if (a === '--data') opts.data = argv[++i] || '';
   else if (a === '--since') opts.since = argv[++i] || '';
   else if (a === '--session') opts.session = argv[++i] || '';
@@ -134,9 +139,9 @@ for (let i = 0; i < argv.length; i++) {
   else die('unknown argument: ' + a);
 }
 
-const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial']
+const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence']
   .filter(function (m) { return opts[m]; });
-if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial');
+if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence');
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
@@ -233,6 +238,17 @@ function repoLabelOf(record) {
 const repoName = path.basename(repoRoot);
 const repoPath = repoRoot;
 const repoLabel = repoLabelOf({ repo_path: repoPath }) || repoName;
+
+// This folder's main working copy as a real path, or null outside a git
+// repository (#229). The evidence read compares every row's resolved root with
+// this one value, so it can only ever print the rows of the repo it runs in.
+function thisMainRoot() {
+  const common = git(['rev-parse', '--git-common-dir']);
+  if (!common) return null;
+  const lines = common.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!lines.length) return null;
+  return realOr(path.dirname(path.resolve(cwd, lines[lines.length - 1])));
+}
 
 // ==========================================================================
 // Shared helpers
@@ -343,9 +359,11 @@ function normStage(value) {
 }
 
 // THE privacy boundary. Everything downstream of the ledger reads rows through
-// this projection, so `produced` and `correction` cannot reach a rollup, a report,
-// or anything that gets displayed. Adding a field here is a deliberate act, and
-// every field added must be derived in this script or validated on write.
+// this projection, so the private fields (`produced`, `correction`, `trigger`,
+// `rewrite`) cannot reach a rollup, a report, or anything that gets displayed.
+// --evidence is the one reader that does not go through it, on purpose and under
+// its own same-repo check. Adding a field here is a deliberate act, and every field
+// added must be derived in this script or validated on write.
 //
 // `repo_path` is deliberately NOT here. It is an absolute path on this machine,
 // which is exactly the kind of thing that should not travel into a rendered view.
@@ -899,6 +917,60 @@ function readAxialMap() {
   return current.map;
 }
 
+// A row's category: its own axial code, else the map's entry for its open code,
+// else "(unlabeled)". One definition, so the rollup and the evidence read can
+// never disagree about which bucket a row is in.
+function labelOf(row, axial) {
+  return row.axial_code || axial[row.open_code] || '(unlabeled)';
+}
+
+// ==========================================================================
+// Mode: --evidence --category <name>  (the one read path back to the private layer)
+//
+// A ranking names a category; a fix needs what actually happened in it: what was
+// asked, what was produced, what the human said, and their own rewrite (#229). This
+// prints exactly that, for ONE category and for the rows of the repo this runs in,
+// to stdout only. It never writes a file.
+//
+// The boundary is enforced here, not requested in a prompt. A row is printed only
+// when its stored working copy resolves (mainRootOf) to the same real path as this
+// folder's main working copy (thisMainRoot): a worktree reads its main copy's rows,
+// a same-named sibling repo reads none of them, and a stored path that climbs out
+// with `..` lands where it resolves, not where it starts. Outside a git repository
+// the read refuses, in an opted-out repo it prints nothing, and a row written
+// before `repo_path` existed is left out and counted, because it cannot prove
+// which repo it came from. The honest limit: the script can check the folder, not
+// which session is asking, so the skill's rule that only a session opened in the
+// repo runs this is what covers a session stepping into another repo's folder.
+// ==========================================================================
+
+function runEvidence() {
+  if (!opts.category) die('--evidence requires --category <name>, one category from the rollup');
+  const here = thisMainRoot();
+  if (!here) {
+    die('--evidence reads a repo\'s rows only from inside that repo, and ' + cwd + ' is not in a git repository. Nothing was printed.');
+  }
+  const out = { repo: path.basename(here), category: opts.category, rows: [], left_out: { no_repo_path: 0 } };
+  if (optedOut()) {
+    out.optedOut = true;
+    process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+    return;
+  }
+  const axial = readAxialMap();
+  readJsonl(LEDGER_PATH).forEach(function (r) {
+    if (labelOf(r, axial) !== opts.category) return;
+    if (!r.repo_path) { out.left_out.no_repo_path++; return; }
+    if (mainRootOf(r.repo_path) !== here) return;
+    out.rows.push({
+      at: r.at, stage: normStage(r.stage), scope: r.scope, open_code: r.open_code,
+      produced: r.produced || '', correction: r.correction || '',
+      trigger: r.trigger || '', rewrite: r.rewrite || ''
+    });
+  });
+  out.rows.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
 function buildRollup() {
   // Rows are projected through shareable() immediately. Nothing below this line can
   // see a private field, which is what makes the privacy guarantee structural.
@@ -928,7 +1000,7 @@ function buildRollup() {
     const kind = r.kind || 'human';
     // An unlabeled row is counted honestly as unlabeled rather than folded into a
     // neighbouring bucket, so a ranking never borrows confidence it has not earned.
-    const label = r.axial_code || axial[r.open_code] || '(unlabeled)';
+    const label = labelOf(r, axial);
     if (!out.kinds[kind]) out.kinds[kind] = { total: 0, buckets: {} };
     const k = out.kinds[kind];
     k.total++;
@@ -1178,3 +1250,4 @@ else if (opts.heartbeat) runHeartbeat();
 else if (opts.rollup) runRollup(true);
 else if (opts.showRollup) runRollup(false);
 else if (opts.setAxial) runSetAxial();
+else if (opts.evidence) runEvidence();
