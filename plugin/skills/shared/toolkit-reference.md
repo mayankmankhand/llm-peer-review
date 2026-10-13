@@ -168,7 +168,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 
 ### Project Extensions
 
-A project adds its own rules to the toolkit through seven files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
+A project adds its own rules to the toolkit through eight files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
 
 | File | Read by | Carries |
 |---|---|---|
@@ -179,6 +179,7 @@ A project adds its own rules to the toolkit through seven files in `.claude/tool
 | `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
 | `checks.json` | `/tk:execute`, at its test step, through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines` (a prose string is judged by the stage from the saved output); when the file exists it replaces the default test run, so it must name the project's test command, and a failed or refused check fails the step |
+| `generated.json` | `/merge`, when it checks and lands a PR | The files the project rebuilds rather than merges, as a JSON array of `{paths, rebuild}`: the lost-work checks skip those paths, and a landing rebuilds them with `rebuild`, run as an ordinary command under the project's permission rules (`${CLAUDE_PLUGIN_ROOT}/skills/shared/merge-rules.md`) |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/tk:review-full` says in its charter that project kinds are not in its fan-out. `/tk:upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
