@@ -1069,6 +1069,15 @@ section('skeptic replay: scoring the dispatches from the saved transcripts', () 
   check('scoreDispatch: a file written by a heredoc is read from the command, byte for byte', heredoc.class === 'verbatim' && heredoc.asks.length === 0 && heredoc.m2Words === false, JSON.stringify(heredoc));
   const cited = QC.scoreDispatch('Refute R1; the cited file is plans/PLAN-a.md and seed/settings.json:152.', ctx);
   check('scoreDispatch: a project source file the prompt cites is not an input, so the dispatch is a paraphrase', cited.class === 'paraphrase' && cited.file === null, JSON.stringify(cited));
+  const pasted = QC.scoreDispatch('Tier 2. Try to refute each finding; return exactly one line per ID, `RN: REFUTED` or `RN: STANDS`.\n\nR1:\n'
+    + SK[0] + '\nReceipt output (code-1.txt, as tier 1 saved it):\n```\n.claude/commands/review.md:260: the "R3: FIXED" / "R3: NOT FIXED" verdict format\nexit 0\n```', ctx);
+  check('scoreDispatch: verdict words quoted in receipt output pasted into the prompt are not words it asked for (review R12)',
+    pasted.class === 'verbatim' && pasted.asks.join() === 'REFUTED,STANDS' && pasted.m2Words === true, JSON.stringify(pasted));
+  const runnerShard = '/tmp/claude-1000/-tmp-qc-run-TEST-project/sess/scratchpad/shard2.txt';
+  const quotedFile = QC.scoreDispatch('Judge the findings in ' + runnerShard + ' and return R1: REFUTED or R1: STANDS.',
+    { ...ctx, writes: new Map([[runnerShard, 'R1:\n' + SK[0] + '\nreceipt:\n.claude/commands/review.md:260:3. Re-verify per the "R3: FIXED" / "R3: NOT FIXED" format\n70:- **M3.** each returns "R3: FIXED" or "R3: NOT FIXED"\n']]) });
+  check('scoreDispatch: a grep line quoted in a runner-written shard is file content, not a verdict word asked for (D2\'s false positive)',
+    quotedFile.asks.join() === 'REFUTED,STANDS' && quotedFile.m2Words === true, JSON.stringify(quotedFile));
   const c = spawnSync('node', [SCRIPT, '--check', makeSkepticRun()], { encoding: 'utf8' });
   check('--check prints one line per dispatch and the summary of a skeptic replay',
     c.status === 0 && /D1 audit-skeptic tier 2 R1-R2 \(2\): paraphrase .*asks KEEP\/KILL \(not M2\); return flagged: unknown R1 KEEP, unknown R2 KILL/.test(c.stdout)

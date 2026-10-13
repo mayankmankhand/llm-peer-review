@@ -1137,7 +1137,9 @@ function instructionText(body) {
     if (fence) continue;
     if (/^Receipt output \(/.test(line)) { receipt = true; continue; }
     if (/^(Finding \(|Citation check:|=====)/.test(line)) receipt = false;
-    if (receipt || /^\s*\{/.test(line)) continue;
+    // A finding's JSON line, or a line shaped like grep output (path:line: or, from
+    // one file, line:), is quoted content: its verdict words were never asked for.
+    if (receipt || /^\s*\{/.test(line) || /^(?:[\w.\/-]+:)?\d+:/.test(line)) continue;
     out.push(line);
   }
   return out.join('\n');
@@ -1179,7 +1181,9 @@ function scoreDispatch(prompt, ctx) {
   const project = ctx.project || '/';
   const known = ctx.known || new Map();
   const texts = [String(prompt || '')];
-  const askTexts = [String(prompt || '')];
+  // The prompt is filtered like a named file: verdict words inside quoted receipt
+  // output or a pasted finding line are evidence, not words the runner asked for.
+  const askTexts = [instructionText(prompt)];
   let script = null;
   let unreadable = false;
   let firstFile = null;
