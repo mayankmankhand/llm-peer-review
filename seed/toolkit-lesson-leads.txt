@@ -16,6 +16,7 @@ A build that scopes names and permissions for one distribution leaves the other 
 A capability-shaped gate can be the honest option for a toolkit shipped to installs you do not control.
 A caveat in release notes is a deferred defect, not a resolution.
 A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.
+A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.
 A check that defers to another check must ask whether that other check runs in this range.
 A checked subtask means its wording shipped, not that the nearby diff did.
 A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
@@ -77,6 +78,7 @@ A sentence that must read the same in several prompt files gets a parity test; a
 A sentence-break rule needs its abbreviation exception before it ships: when a critic names the false positive, that input goes into the test first.
 A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.
 A standing page published in an earlier session is read in full before it is updated; the publish is refused until then.
+A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.
 A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
@@ -220,6 +222,7 @@ When a worker gains a capability, sweep the dispatcher's conditions too: the bro
 When changing user-facing copy, grep for the same description elsewhere.
 When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.
 When inserting a numbered step, grep for every "step N" reference before and after the insertion.
+When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.
 When storage is append-only, validate the whole batch before writing any of it.
 When the owner changes a decision at a page, sweep what was already written under the old decision.
 When the plan's wording drifts from the exploration summary the owner approved, the summary wins.
