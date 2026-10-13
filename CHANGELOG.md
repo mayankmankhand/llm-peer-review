@@ -2,6 +2,27 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Receipts That Call Back
+
+**A patch on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issues #228 and #230. `/tk:upgrade` could not prove any script finding, because the checks runner refused nearly every receipt the audit wrote, and the correction scan offered subagent reports and skill loads as things you had said.
+
+### Fixed
+
+- **`/tk:upgrade` receipts run through the checks runner.** A default run of `upgrade-audit.js` writes each finding's receipt as a call-back the runner already allows: `node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/upgrade-audit.js --receipt <id> --release <version>`, plus the run's `--from` when it had one. The ID is the first 16 hex characters of the SHA-256 of the finding's key, so no file name or line from your project reaches the command. The call-back reruns the detection and runs that one finding's own check, so the runner saves exactly what the check prints. Before, the runner refused nearly every check the audit wrote (awk programs, brace groups, `node -e`, environment assignments), so the audit's first tier killed every script finding as RECEIPT FAILED. On five local installs, 24 of 24 receipts were refused before and none after, and every saved output matched the finding's own check byte for byte.
+- **A moved plugin link stops the upgrade instead of letting another release vouch.** The stable link moves when a session starts. When it does not lead to the running audit, the audit still prints its findings, writes each receipt as the finding's own check, and ends with one stderr line and exit 1: start a new session, and if it stops the same way there, report the line as a toolkit issue. A call-back that reaches a release other than the one that wrote it runs nothing and says `upgrade-audit: not run:` (exit 3); a release from before call-backs answers `unknown argument --receipt`. The upgrade skill's rule 5 says neither output is a kill: relay the line and stop.
+- **The correction scan skips messages Claude Code stamps as machine-sent.** `correction-ledger.js --candidates` drops subagent reports, background task notices, a skill's text as it loads, compaction summaries and other harness notes, by the sender stamps Claude Code writes on each transcript entry. The list is closed and fails open: an entry with no stamp, or a stamp the scan does not know, stays a candidate. Across this machine's transcripts since 2026-10-01, the 219 machine-stamped candidates of 537 are gone, nothing else was dropped, and one person's reply to an interrupt, which a machine note used to take, is now paired with it.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. The restart matters more than before: the stable link moves at session start, and an upgrade run in the session that took the update stops on the stale link. No new permission rows: a call-back is a `node` call to `upgrade-audit.js` at the stable path, which the checks runner already allows.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated `correction-ledger.js`.
+
+### Why
+
+The 7.6.3 runner made every receipt pass a guard that refuses programs, and the audit's receipts were programs, so the upgrade's audit could prove nothing; moving each check behind the audit itself keeps the runner strict. The scan guessed who wrote a message from its text, while Claude Code already records the sender on every entry, so the scan now reads that.
+
+---
+
 ## Unreleased - Land Without Losing Work
 
 **Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #232. When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing it can quietly drop that work, or the branch's own, and a squash then hides the fix. `/tk:merge` lands finished worktree PRs in the order you give and checks each one before it lands.
