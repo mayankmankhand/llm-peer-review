@@ -259,7 +259,7 @@ The user can now open their project in Cursor or Claude Code and type `/` to see
                                                        /ask-gpt or /ask-gemini
 ```
 
-The user types `/explore` (on the Claude Code plugin every command above takes the `tk:` prefix, so `/tk:explore`) and approves the plan; the rest chain automatically (rule M14 in the toolkit's `hitl-loop` fragment). Saying "no chaining" on any run stops after that stage. The AI debates are never chained into - the user starts one deliberately.
+The user types `/explore` (on the Claude Code plugin every command above takes the `tk:` prefix, so `/tk:explore`) and approves the plan; the rest chain automatically (rule M14 in the toolkit's `hitl-stages` fragment). Saying "no chaining" on any run stops after that stage. The AI debates are never chained into - the user starts one deliberately.
 
 On any install or update, `/audit-html` (`/tk:audit-html` on the plugin) can scan the user's own markdown for files that would benefit from an HTML view (report-only). Toolkit outputs already render HTML automatically.
 

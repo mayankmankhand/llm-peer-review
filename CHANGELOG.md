@@ -2,6 +2,32 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Two Removals, Rules That Fit
+
+**Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** This range ships as 8.0.0 because two promised removals land: the generic `review-finder` agent and prose receipt expectations. It also fixes the loop rules, which reviews and upgrades since 7.6.3 received truncated at Claude Code's paste limit.
+
+### Removed
+
+- **The `review-finder` agent.** It was deprecated in 7.0 in favor of the per-kind finders (`review-code-finder`, `review-ux-finder` and the rest). Setup still sweeps old copies, and `/tk:upgrade`'s C-2 now runs on every upgrade, so a project whose own command still dispatches `review-finder` hears that the dispatch reaches nothing.
+- **Prose receipt expectations.** A receipt's `expect` must be an object with exactly one of `exit`, `match`, `noMatch` or `lines`. A plain sentence is now refused like any malformed expect: the check still runs and saves its output, but it proves nothing, so a review finding reads as untested and a `.claude/toolkit/checks.json` entry turns the test step red.
+
+### Fixed
+
+- **The loop rules arrive whole.** Claude Code swaps any pasted output over about 30,000 bytes for a 2 KB preview, and `hitl-loop.md` had been over that since 7.6.3, so `/tk:review`, the review skills and `/tk:upgrade` read only the start of the loop rules. Rules M9 to M17 move unchanged into `hitl-stages.md`, pasted beside `hitl-loop.md` everywhere, and every citation points at the file that holds the rule. `/tk:upgrade` reads `conventions.md` instead of pasting it, and a test fails any pasted file over 28,500 bytes.
+- **`/tk:upgrade` findings survive the new rule.** Every receipt the upgrade audit writes now expects exit 0, which each check gives only while its finding stands, and keeps its sentence in a `shows` field for the reader. The locally-edited-script receipt (C-6) now exits 0 only while your backup copy still differs from the installed hash. The upgrade steps tell the runner to write a `match` expect for the findings it judges by hand.
+- **Docs follow.** The seeded `.claude/toolkit/README.md` no longer promises that a prose expect is judged, and the install manual lists `merge-check.js` in its script lists, as setup copies it.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. It reports any of your own commands that still dispatch `review-finder`. A `.claude/toolkit/checks.json` entry with a sentence as its `expect` must become an object, for example `{"exit": 0}` for a test command. The rules file seed names both rules files, so the upgrade offers that one changed line.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the new `hitl-stages.md` and the updated scripts. A copy-install keeps its old `.claude/agents/review-finder.md`: delete it by hand once none of your own commands dispatch it.
+
+### Why
+
+7.0 promised both removals for 8.0, and keeping a prose expect meant keeping a model judgment inside a step that is meant to be decided by machine. The paste limit was found while landing this release's PRs: the rules file had grown past it two releases earlier, and nothing failed loudly, because a truncated paste still looks like a file.
+
+---
+
 ## Unreleased - Every Step Proves Itself
 
 **Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #231. A plan now says how each step proves itself before the work starts: a check that fails before the work, for a reason stated in advance, and passes after it. `/tk:execute` runs those checks around every step, and `/tk:review` reads the saved records back instead of trusting a summary of them (new loop rule M17).
@@ -51,6 +77,29 @@ A step used to be called done when the whole test suite passed, and new tests we
 ### Why
 
 The startup size was a live defect the research found on the way, and it grows with `LESSONS.md`, so every install with a long lesson index was losing its startup fields. Script-written shards remove the one step where the model retyped what a skeptic judges; M2's own rule is that a reviewer can only judge the bytes it is given. The citation check warns rather than drops because a wrong line number does not make a finding wrong: in the replay, real findings also cited a line past the end.
+
+---
+
+## Unreleased - The Ledger Closes Its Loop
+
+**Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #229. The correction ledger counted the times you stepped in, but nothing turned a count into a fix, and nothing showed whether a fix helped. `/tk:error-analysis` now gives each category a home, drafts the fix there with your approval, and shows the category's rate before and after.
+
+### Added
+
+- **Rows keep what you asked and how you would have put it.** A ledger row now also holds what you had asked and, when you wrote one, your own rewrite of what you wanted (capped at 1,200 characters). Like the other private fields, these stay on your machine: never summarized, published or sent to another model.
+- **Each category gets a home.** A category seen in one repo belongs in that project's own files. One seen in several repos belongs in `~/.claude/CLAUDE.md`, unless most of its rows came up during the toolkit's own stages; then it belongs in the toolkit.
+- **A fix loop that reads evidence only where it came from.** Acting on a category reads its rows from inside the repo they came from, drafts the fix for its home, and waits for your approval. A global or toolkit fix is written in generic words, and a toolkit fix leaves its repo only as a generic note you approve, filed as a toolkit issue.
+- **Before-and-after rates.** Once a fix lands you record it, and later rankings show the category's rate per `/tk:document` cycle before and after. A change counts as real only once each side has at least five cycles.
+- **Older rows can be filled in.** On request, rows recorded before the new fields existed get them from transcripts still on disk, without adding any row. Rows from a worktree count with its main repository.
+
+### Upgrading
+
+- Update the plugin, restart Claude Code, then run `/tk:upgrade` in each project. The seeded `.gitignore` gains two lines for the new private files, `correction-fixes.jsonl` and `correction-backfill.jsonl`, and the pre-push check blocks them like the ledger itself. No new permission rows.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy the updated `correction-ledger.js` and `pre-push-check.js`.
+
+### Why
+
+The first coding of the ledger showed which kinds of correction repeat, but the count stopped there: no step turned it into a change, and no number showed whether a change worked. Reading a category's private text only from inside its own repo keeps one project's words out of another's fix.
 
 ---
 
