@@ -72,8 +72,10 @@ A record that suppresses findings must be keyed on the text a finding is about; 
 A release needs one review of the whole range, not the sum of its per-issue reviews.
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
+A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.
 A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
 A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.
+A second mode that needs the same context as an existing walk should call that walk, not copy it.
 A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.
 A self-run consistency check passes while the scoped thing is missing entirely.
 A sentence that must read the same in several prompt files gets a parity test; a reviewer found the one site of nine that kept the old wording.
@@ -106,6 +108,7 @@ After a security fix, spend one adversarial round on it with a canary outside th
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
 An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.
+An audit agent with Bash can open the real ledger: when the work under review is the ledger, say in the dispatch that its files are off limits.
 An audit with only pass and kill discards correct findings that carry the wrong label.
 An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.
 An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.
@@ -177,6 +180,7 @@ Numbers quoted in release notes mid-cycle go stale; fill counts in the last veri
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
 Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.
 Permission approvals can land in the wrong settings file.
+Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.
 Pin subagents freely; never switch the main-loop model mid-session.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
