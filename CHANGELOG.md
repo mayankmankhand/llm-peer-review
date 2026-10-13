@@ -2,6 +2,34 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Fits the Cut, Copied by Script
+
+**Not released; on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** From a research pass that held six agent-harness papers up against this toolkit, kept the changes that survived three skeptics, and measured each one. The loop runs as before. Two things were really wrong and are fixed: the startup output was too large for Claude Code to show in full, and the audit's skeptics received findings the model had retyped rather than copied.
+
+### Changed
+
+- **The startup output fits what Claude Code shows.** Claude Code replaces a command output over about 30 KB with a short preview, and `session-init.js` printed about 42 KB in this repository, so a command reading it lost the lessons, the plan list and the model settings. The output is now held under 16,000 characters wherever trimming can do it: a `LESSONS.md` over 8 KB comes back as a handle (its size and a note to read the file), a map overview over 8 KB is cut at a line end (`map.overviewCut`), and only the newest 10 plans are listed in full. When the total is still over, the object shrinks in a fixed order: lessons to a handle, then the overview, then the name-only plan entries, which move to `plansOmitted`. The newest 10 plans, the models and the worktree are never trimmed. Every mode leads with the fields a command acts on, so `--scope` puts `scopeLine` and the baseline in its first 2 KB.
+- **Commands read what the startup output leaves out.** `/explore`, `/create-plan`, `/execute` and `/pair-debug` read `LESSONS.md` directly when the JSON carries a handle instead of the content, `/create-plan` reads the trimmed plan list, and `/review` reads its saved scope back with `head -c 2000` instead of `cat`.
+- **Skeptics get shards a script wrote.** `merge-findings.js --shards` writes each M2 tier-2 shard and the tier-3 ballot from the finder lines and the saved receipt outputs, byte for byte, so a skeptic's whole prompt is one line naming its tier and its shard file. `--verdicts` checks each return against its IDs and the closed verdict set and tallies the tier-3 vote; a line that opens with an ID but carries prose decides nothing. A merged finding with one source whose check was refused is still sharded, with that source marked untested; a finding with no saved output at all still stops the run.
+- **A finding's citation is checked.** After the merge, `merge-findings.js` warns on stderr when a finding cites a missing or deleted file or a line past the end; `--rev` and `--base` check a saved review at the commit it covered. Warnings only: stdout and the exit code are unchanged.
+- **Model-routing guardrail 3 holds the build fixed.** The A/B receipt a new model pin needs now runs both arms on the same build and the same Claude Code version, as well as the same session model.
+
+### For maintainers
+
+- `scripts/quality-check.js` gains `--role skeptic`, which replays one review's audit dispatch in a scratch project holding that range's own git history and the plans its findings cite, and `--role fix`, which runs `/review` with its fix loop and judges the final tree with a "gone" and a "works" oracle per planted bug, so a fix that deletes the feature reads as broken, not fixed. The scorer calls a comparison CONFOUNDED when the build and the arm both moved, sorts each lost planted bug into refused, refuted or failed, and leaves a refused check out of the count as harness-lost, in the baseline runs as well as the candidate runs.
+- `scripts/release-check.js` prints one info line naming the newest valid measured fixture run, its build and Claude Code version, and the review-path files changed since. It never fails the gate and is silent without the measurement ledger.
+
+### Upgrading
+
+- Not released yet. When a release carries it: update the plugin, restart Claude Code, then run `/tk:upgrade` in each project. No permission rows were added; `/review` now reads its saved scope with `head -c`, which no seeded row names, so a default-mode session may ask once.
+- Other editors: re-running `setup.sh` or `setup.ps1` copies the updated `merge-findings.js` and `session-init.js`.
+
+### Why
+
+The startup size was a live defect the research found on the way, and it grows with `LESSONS.md`, so every install with a long lesson index was losing its startup fields. Script-written shards remove the one step where the model retyped what a skeptic judges; M2's own rule is that a reviewer can only judge the bytes it is given. The citation check warns rather than drops because a wrong line number does not make a finding wrong: in the replay, real findings also cited a line past the end.
+
+---
+
 ## v7.6.5 - Name the Command (2026-10-10)
 
 **A patch on top of v7.6.4, which stays additive on v7.0.0 and v6.0.0.** Issue #226, merged as PR #227. The four spots the #221 triage left for a later cycle now name their command and its pass signal (M16), and the work turned up a worktree check that misread a subfolder of the main copy.

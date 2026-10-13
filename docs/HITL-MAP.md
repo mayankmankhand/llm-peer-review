@@ -77,7 +77,7 @@ Raw findings are deduplicated across specialists (two reporting the same issue i
 2. **One skeptical pass** (surviving Warns and Suggests; Blocks skip it for the three-vote refute, so no lone skeptic can kill a Block): a fresh agent tries to refute the finding using the receipts. Default prior is rejection (E2: this pass kills 5-55% of raw findings).
 3. **Three-vote majority refute** (Blocks only): three independent skeptics; majority refute kills it. Reserved for the tier where a wrong drop or a wrong page is costly (E3: voting gains plateau; spend where stakes are highest).
 
-Dispatch hygiene: all content handed to audit and verify agents is passed as verbatim bytes, never paraphrased or summarized. A reviewer can only judge the bytes it is given, so a paraphrase manufactures findings about the paraphrase, not the artifact (E1: findings born from paraphrased dispatch content).
+Dispatch hygiene: all content handed to audit and verify agents is passed as verbatim bytes, never paraphrased or summarized. A reviewer can only judge the bytes it is given, so a paraphrase manufactures findings about the paraphrase, not the artifact (E1: findings born from paraphrased dispatch content). Since the harness research (unreleased, after v7.6.5), a script writes the skeptics' shards (`merge-findings.js --shards`) and checks their returns (`--verdicts`), so the copy is never the model's.
 
 Maximum-depth review (the opt-in mode that fans out many parallel reviewers with multi-vote verification, at several times the default token cost) stays opt-in and is not part of the default loop.
 
