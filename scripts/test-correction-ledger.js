@@ -541,6 +541,83 @@ console.log('\ncorrection-ledger.js\n');
     optOut.optedOut === true && optOut.interruptsWithoutFollowUp === 0, JSON.stringify([noScan, optOut]));
 }
 
+// --- issue #230: messages Claude Code stamps as machine-sent are never candidates ---
+// Real transcripts stamp each user entry with its sender. The stamp fields below
+// are the ones real files carry (observed 2026-10-12), with made-up text only: a
+// subagent's report (origin peer, isMeta too), a skill's text as it loads
+// (isMeta with the Skill call's sourceToolUseID), another meta note, a
+// compaction summary, a task notice whose text has no tag wrapper, and a turn
+// stamped by turnOrigin alone. Every text passes the length gate and carries a
+// pushback word, so the stamp is the only thing that can keep it out.
+{
+  const BASE = Date.parse('2026-10-01T10:00:00.000Z');
+  const at = function (sec) { return new Date(BASE + sec * 1000).toISOString(); };
+  const asstE = function (t, sec) { return { type: 'assistant', timestamp: at(sec), message: { content: [{ type: 'text', text: t }] } }; };
+  const userE = function (text, sec, sid, stamp) {
+    return Object.assign({ type: 'user', timestamp: at(sec), sessionId: sid, message: { content: [{ type: 'text', text: text }] } }, stamp || {});
+  };
+  const markE = function (sec, sid) { return userE('[Request interrupted by user]', sec, sid); };
+  const HUMAN = { origin: { kind: 'human' }, promptSource: 'sdk', turnOrigin: 'human' };
+  const PEER = { isMeta: true, origin: { kind: 'peer', from: 'a0123456789abcdef', senderTaskId: 'a0123456789abcdef' }, promptSource: 'system', turnOrigin: 'peer' };
+  const SKILL = { isMeta: true, sourceToolUseID: 'toolu_01EXAMPLE', turnCompanion: true };
+  const META = { isMeta: true };
+  const COMPACT = { isCompactSummary: true, isVisibleInTranscriptOnly: true, turnOrigin: 'human' };
+  const TASK = { origin: { kind: 'task-notification', producer: 'session-task' }, promptSource: 'system', turnOrigin: 'task_notification' };
+  function scan(label, sessions) {
+    const sb = makeSandbox('stamp-' + label);
+    const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+    fs.mkdirSync(dir, { recursive: true });
+    Object.keys(sessions).forEach(function (sid) {
+      fs.writeFileSync(path.join(dir, sid + '.jsonl'),
+        sessions[sid].map(function (e) { return JSON.stringify(e); }).join('\n') + '\n', 'utf-8');
+    });
+    const out = JSON.parse(run(sb, ['--candidates', '--since', '2026-10-01T00:00:00.000Z']));
+    fs.rmSync(sb.root, { recursive: true, force: true });
+    return out;
+  }
+  const said = function (out, marker) { return out.candidates.filter(function (c) { return (c.human_said || '').indexOf(marker) !== -1; }); };
+  const opening = function (out) { return JSON.stringify(out.candidates.map(function (c) { return c.human_said.slice(0, 40); })); };
+
+  const machine = scan('machine', { s1: [asstE('Dispatching the reviewers now.', 0),
+    userE('PEER_STAMP_MARKER the reviewer reports that this is not correct and should be undone', 10, 's1', PEER),
+    userE('SKILL_STAMP_MARKER Base directory for this skill: actually, do not run it this way', 20, 's1', SKILL),
+    userE('META_STAMP_MARKER [Image: original 1100x3637, displayed at 605x2000] that is wrong', 30, 's1', META),
+    userE('COMPACT_STAMP_MARKER This session is being continued from a previous conversation; do not repeat it', 40, 's1', COMPACT),
+    userE('TASK_STAMP_MARKER background task finished: the agent says that is not right', 50, 's1', TASK),
+    userE('TURN_PEER_STAMP_MARKER a peer turn with no origin field says this is wrong', 60, 's1', { turnOrigin: 'peer' })] });
+  check('no message stamped as machine-sent is a candidate: a subagent report, a skill load, a meta note, a compaction summary, a task notice, a peer turn (#230)',
+    machine.candidates.length === 0, opening(machine));
+
+  const kept = scan('kept', { s1: [asstE('Here is the draft.', 0),
+    userE('HUMAN_STAMP_MARKER that is not what I asked for, use the short version', 10, 's1', HUMAN),
+    userE('UNSTAMPED_MARKER an older transcript with no stamp at all, please redo it', 20, 's1'),
+    userE('VOICE_STAMP_MARKER a sender kind this scan does not know yet, keep the old name', 30, 's1', { origin: { kind: 'voice' } }),
+    userE('SDK_TURN_MARKER a turn stamped sdk with no origin, do not merge it yet', 40, 's1', { promptSource: 'sdk', turnOrigin: 'sdk' })] });
+  check('a human-stamped message, an unstamped one and unknown stamps all stay candidates: only the known machine stamps are dropped (#230)',
+    kept.candidates.length === 4 && ['HUMAN_STAMP_MARKER', 'UNSTAMPED_MARKER', 'VOICE_STAMP_MARKER', 'SDK_TURN_MARKER'].every(function (m) { return said(kept, m).length === 1; }),
+    opening(kept));
+
+  // A subagent's report that lands between the interrupt and the human's
+  // reply is not the reply: before #230 it took the interrupt, and the human's
+  // "no" was then dropped as a bare acknowledgment.
+  const inter = scan('interrupt', { s1: [asstE('INTERRUPTED_S rewriting the parser', 0), markE(5, 's1'),
+    userE('PEER_AFTER_MARKER the background reviewer finished and reports no blockers at all', 8, 's1', PEER),
+    userE('no', 12, 's1', HUMAN)] });
+  check('after an interrupt a subagent report is skipped, and the human\'s "no" is the tagged follow-up (#230)',
+    inter.candidates.length === 1 && inter.candidates[0].human_said === 'no' && inter.candidates[0].after_interrupt === true &&
+    inter.candidates[0].assistant_said.indexOf('INTERRUPTED_S') !== -1 && inter.interruptsWithoutFollowUp === 0, JSON.stringify(inter));
+
+  // A session that ends at the interrupt, and a next session whose first entry
+  // is a skill loading: the human's first words there are the opener.
+  const cross = scan('cross', { s1: [asstE('INTERRUPTED_X summarizing the log', 0), markE(5, 's1')],
+    s2: [userE('SKILL_OPENER_MARKER Base directory for this skill: this is not the reply', 9, 's2', SKILL),
+      userE('FOLLOWUP_X read it in full this time', 14, 's2', HUMAN)] });
+  const fx = said(cross, 'FOLLOWUP_X');
+  check('a stamped machine entry opening the next session does not take an earlier interrupt; the human\'s first words do (#230)',
+    fx.length === 1 && fx[0].after_interrupt === true && fx[0].assistant_said.indexOf('INTERRUPTED_X') !== -1 &&
+    said(cross, 'SKILL_OPENER_MARKER').length === 0 && cross.interruptsWithoutFollowUp === 0, JSON.stringify(cross));
+}
+
 // --- the axial map merges instead of overwriting ----------------------------
 {
   const sb = makeSandbox('axial');

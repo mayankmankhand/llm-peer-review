@@ -29,7 +29,7 @@ const ROUTING = path.join(REPO, '.claude', 'skills', 'shared', 'model-routing.md
 const INDEX = path.join(REPO, '.claude', 'commands', 'index.md');
 // Judges by rule (model-routing.md, "Judges and synthesis inherit"): a verdict
 // that is final never runs below the tier of the work it judges.
-const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
+const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'decision-checker'];
 
 let passed = 0;
 const failures = [];
