@@ -1232,10 +1232,12 @@ function markCycleChanged(data, prior) {
 // The seeded must-check findings (review.md Phase 3) carry the judge that
 // raised the gap as their specialist. They are re-read from the plan the Plan
 // Compliance row selects, so they belong to the plan lens; before issue #219
-// no lens token ever matched them and they were carried forever. Hyphenated
-// tokens are otherwise matched whole on purpose: `security-audit` must never
-// be resolved by a `security` run (security-audit/SKILL.md).
-const SEEDED_SPECIALISTS = ['plan-critic', 'design-critic', 'interaction-pass'];
+// no lens token ever matched them and they were carried forever. Since #231
+// the plan's tally and its [check] lines seed `check-first` findings, re-read
+// the same way. Hyphenated tokens are otherwise matched whole on purpose:
+// `security-audit` must never be resolved by a `security` run
+// (security-audit/SKILL.md).
+const SEEDED_SPECIALISTS = ['plan-critic', 'design-critic', 'interaction-pass', 'check-first'];
 function isSeeded(specs) {
   return specs.some(function (sp) { return SEEDED_SPECIALISTS.indexOf(sp) !== -1; });
 }

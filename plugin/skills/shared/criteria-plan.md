@@ -15,7 +15,7 @@ Read the plan file, then read the implementation files. Compare them. Pick one o
 | **Feature Completeness** | Every plan task implemented? Subtasks done? Placeholders remaining? |
 | **Spec Compliance** | Implementation matches UI/UX Design section and critical decisions in plan? |
 | **Scope Management** | Unplanned additions? Cuts justified and documented? Scope creep? |
-| **Quality Gates** | Success criteria met? Tests written (when the plan warranted them)? Docs updated? |
+| **Quality Gates** | Success criteria met? Did each step's target fail before its work for the reason it states, then pass (M17): no target written after the code, no stated failure the old code could not have produced, no `Check: no target` reason that does not hold? Docs updated? |
 
 Each sub-agent returns JSONL per the dispatch contract, or the literal `NO FINDINGS`, so you can see it ran. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js` on that file, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one's `key` and record the merge in the report's dedup notes.
 

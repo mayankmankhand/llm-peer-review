@@ -9,7 +9,12 @@
 // machine-readable expectation, so pass or fail is the machine's verdict and
 // the saved output is the evidence the review page shows.
 //
-//   node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>]
+//   node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>] [--rerun-failures]
+//   node run-checks.js --plan <plan.md> --lint
+//   node run-checks.js --plan <plan.md> --step <N> --phase before|after [--timeout <ms>]
+//   node run-checks.js --plan <plan.md> --tally
+//
+// (The --plan forms read a plan's own check lines; see "Plan mode" below.)
 //
 // <file.json> is a JSON array of { id, check, expect }:
 //   id      a filename stem: letters, digits, . _ - only, unique in the file
@@ -37,14 +42,108 @@
 // output is working data, never a tracked file.
 //
 // Output, on stdout: exactly one JSON object
-//   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail" } ... ],
-//     "summary": { "pass", "fail", "model", "error" } }
+//   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail",
+//                   "ms", "slow", "flaky" } ... ],
+//     "summary": { "pass", "fail", "model", "error" },
+//     "flags": { "slow", "flaky" } }
 // verdict is pass, fail, model or error. `exit` is the check's exit code (124
 // on a timeout, 143 when the output passed the 16 MB buffer and the check was
 // stopped, null when nothing ran); `stdoutFile` is the saved file's path
 // relative to the project root (absolute when the out folder sits outside it,
 // null when nothing was written); `detail` is the last lines of the output for
-// a fail, the reason for an error, and empty otherwise.
+// a fail, the reason for an error, and empty otherwise. `summary` counts
+// verdicts only; `flags` counts the two marks below.
+//
+// Time, slow and re-run (issue #231, rule M17). A plan step's check runs before
+// the work and after it, and that loop needs three facts a verdict alone does
+// not carry:
+//   ms      the wall time of the run whose output is saved (null when nothing
+//           ran). A slow suite is a finding to fix, not a reason to wait.
+//   slow    true when a run took over half of --timeout.
+//   flaky   true when --rerun-failures re-ran a fail and the second run
+//           passed. The verdict stays `fail`: a flip-flop must never read as
+//           green to a caller that only counts summary.fail (M5). The failing
+//           first run is kept as <out>/first-run/<id>.txt, the second run is
+//           <id>.txt. A fail that fails again is a plain fail, its first run
+//           kept the same way. A timeout or an overflow is never re-run: that
+//           would spend the whole limit again, and slowness is what `slow`
+//           reports. Without the flag nothing is re-run, so review receipts
+//           behave exactly as before.
+// The printed object is also saved as <out>/results.json, with `at` (when the
+// run started, ISO time) and `head` (the commit HEAD named, null outside a
+// repository) added, and each row's `check` and `expect` (what ran, so a tally
+// can tell a check edited after its run), so a later tally can read the
+// verdicts and their order. It is saved only when at least one check ran, so a
+// run whose every check was refused still writes nothing. A folder several
+// runs share (a review's receipts) holds the last run's.
+//
+// Plan mode (issue #231, rule M17). A plan step names its own checks in one
+// fixed shape, and the runner reads that shape itself, so no model copies a
+// plan line into a checks file between the plan and the run:
+//   - Check target `<id>`: `<command>` - before `<expect>` - after `<expect>`
+//   - Check guard `<id>`: `<command>` - `<expect>`
+//   - Check: no target - <reason>
+// A span holding a backtick is fenced with two (`` a`b ``). <expect> is the
+// runner's own JSON object; a plan check never takes a prose expect, because a
+// tally cannot read one. A target fails before the step's work for the reason
+// its before expect states and passes after; a guard passes both times; a step
+// with no target (a refactor, say) may still carry guards. A step's lines are
+// the ones indented under its `- [ ] 🟥 **Step N: name**` line: the next line
+// at the left margin (another step, a heading, any other text) ends it. Lines
+// in a code fence or an HTML comment are never read, as the page shows them as
+// code or not at all (CommonMark's reading: a backtick fence's info string
+// holds no backtick, and a fence in a list item ends with its item). No check
+// is dropped in silence. Inside a step, a line that looks meant as a check
+// line but does not parse (a [ ] box, a * bullet or none, a quote mark,
+// lowercase, bold, a missing Check, target or guard) is a lint problem; so is
+// a well-formed check line outside every step, a line in the Tasks section or
+// under a step that reads like a step line but does not parse (not bold, no
+// colon, an [X] box, a missing or other status mark, indented), a step number
+// used twice (the two would share one record folder), and a fence or comment
+// never closed.
+//   --lint    every problem above, and every line that would not run: a step
+//             with neither a target nor a no-target line, an id used twice in
+//             a step, an expect the runner would refuse (or a lines expect
+//             with a key other than min and max, which a run would ignore), a
+//             command the guard would refuse (judged the same way a run
+//             judges it, without running it), a target whose before and after
+//             expects are the same (in any key order).
+//   --phase   runs one step's checks with that phase's expects. It refuses
+//             (nothing runs) while that step, or the plan outside its steps,
+//             has a lint problem, re-runs a failure once (the --rerun-failures
+//             rule), and writes to reports/checks/<plan file name>/step-<N>/
+//             <phase>/, cleared first. Every folder on that path from
+//             reports/ down must be a real folder: a link anywhere on it is
+//             refused before anything is cleared or written, so a record never
+//             lands outside reports/ or in another step's folder. Each row
+//             carries its `role`. In a before phase a target's output is
+//             also held against its after expect: one that already meets it
+//             fails ("it already meets its after expect"), not retried,
+//             because a pass after the work would then prove nothing (M17).
+//   --tally   reads each step's two results.json files and gives each step a
+//             status: proved (every target passed its before expect and its
+//             after expect without a flake, every guard that passed before
+//             passed after, and the before record is older than the after
+//             one), unproved (with its reasons), noTarget (with its reason;
+//             unproved instead when it has guards whose records do not hold
+//             up), missing (no target and no no-target line) or problem (any
+//             other lint problem). A record counts only when it was written for
+//             this plan, step and phase, and a row only when it ran the
+//             command, expect and role the plan names now, so neither a check
+//             edited after its run nor another plan with the same file name
+//             ever proves a step. A record a --checks run wrote names no plan,
+//             step or phase and counts on its rows alone; a row with no
+//             command recorded (an older runner's) is matched by its id, and
+//             the step's `notes` say so. A flaky guard and a guard already
+//             failing before are listed, not counted against the step: they
+//             are older checks, a finding for review (M17). The plan's
+//             problems outside any step are listed, and summary.problems
+//             counts them.
+// The plan must be a regular file inside the project, read through realpath.
+// Exit 0 once the plan was read (the statuses and problems are the result);
+// exit 1, with one line on stderr, for a plan outside the project, unreadable
+// or not a regular file, an unknown step, a lint problem (phase runs), a link
+// on the record path, or a bad argument.
 //
 // Exit code 0 whenever the checks file validated, fails and errors included:
 // the verdicts are the result. Exit 1, with one line on stderr and nothing run
@@ -1210,24 +1309,37 @@ function loadChecks(file) {
     seen.add(c.id);
     if (typeof c.check !== 'string' || c.check === '') throw new Error(at + '.check must be a non-empty string');
   });
-  return data;
+  // Only the three fields: a `role` is plan mode's to give, never a file's.
+  return data.map((c) => ({ id: c.id, check: c.check, expect: c.expect }));
 }
 
-const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>]\n'
-  + '  --checks   a JSON array of { id, check, expect }\n'
-  + '  --out      where <id>.txt is saved; must be under reports/ or the system temp folder\n'
-  + '  --timeout  per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + ')\n'
-  + '  expect     a prose string (verdict model), or exactly one of\n'
-  + '             {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
-  + '             (regexes are tested with the multiline flag against the saved output)\n'
-  + '  stdout     one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail }], summary }\n'
-  + '  exit code  0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n';
+const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>] [--rerun-failures]\n'
+  + '  --checks          a JSON array of { id, check, expect }\n'
+  + '  --out             where <id>.txt and results.json are saved; must be under reports/ or the system temp folder\n'
+  + '  --timeout         per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + '); a run over half of it is flagged slow\n'
+  + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
+  + '  expect            a prose string (verdict model), or exactly one of\n'
+  + '                    {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
+  + '                    (regexes are tested with the multiline flag against the saved output)\n'
+  + '  stdout            one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail, ms, slow, flaky }], summary, flags }\n'
+  + '  exit code         0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n'
+  + 'plan mode: node run-checks.js --plan <plan.md> (--lint | --tally | --step <N> --phase before|after [--timeout <ms>])\n'
+  + '  --lint            every check line in the plan that would not run, as problems\n'
+  + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/\n'
+  + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n';
 
 function parseArgs(argv) {
-  const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, help: false };
+  const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, rerunFailures: false, help: false,
+    plan: '', lint: false, tally: false, step: '', phase: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
+    else if (a === '--rerun-failures') opts.rerunFailures = true;
+    else if (a === '--plan') opts.plan = argv[++i] || '';
+    else if (a === '--lint') opts.lint = true;
+    else if (a === '--tally') opts.tally = true;
+    else if (a === '--step') opts.step = argv[++i] || '';
+    else if (a === '--phase') opts.phase = argv[++i] || '';
     else if (a === '--checks') opts.checks = argv[++i] || '';
     else if (a === '--out') opts.out = argv[++i] || '';
     else if (a === '--timeout') {
@@ -1239,66 +1351,583 @@ function parseArgs(argv) {
   return opts;
 }
 
+// ---------------------------------------------------------------------------
+// Running the list. attempt() runs a rebuilt line once and decides it; runOne()
+// judges a check and, with --rerun-failures, gives a fail its second run;
+// runAll() runs the list, counts it and saves results.json.
+// ---------------------------------------------------------------------------
+// The saved file's path as rows report it: relative to the project root, or
+// absolute when the out folder sits outside it.
+function shownPath(cwd, file) {
+  const rel = path.relative(cwd, file);
+  return (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) ? file : rel;
+}
+
+// One run of a judged line: run it, time it, save its output to `file`, decide
+// it. A save that fails leaves the verdict `error`, as a refusal does.
+// `notYet` (a before-phase target only) is the target's after expect: output
+// that already meets it fails, because passing after the work would then prove
+// nothing (M17). The same output would show the same, so it is not retried.
+function attempt(line, expect, opts, cwd, env, file, notYet) {
+  const started = Date.now();
+  const run = runCheck(line, cwd, opts.timeout, env);
+  const ms = Date.now() - started;
+  if (run.failed) return { verdict: 'error', exit: null, detail: run.failed, ms, saved: false };
+  const out = { verdict: 'error', exit: run.exit, detail: '', ms, saved: false, retry: !run.timedOut && !run.overflow };
+  try {
+    fs.writeFileSync(file, run.body + 'exit ' + run.exit + '\n');
+    out.saved = true;
+  } catch (e) {
+    out.detail = 'could not save the output to ' + file + ': ' + e.message;
+    return out;
+  }
+  if (run.timedOut || run.overflow) {
+    out.verdict = 'fail';
+    out.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
+  } else {
+    const parts = { stdout: run.stdout, stderr: run.stderr };
+    const d = decide(expect, run.exit, run.body, parts);
+    out.verdict = d.verdict;
+    out.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
+    if (out.verdict === 'pass' && notYet !== undefined && decide(notYet, run.exit, run.body, parts).verdict === 'pass') {
+      out.verdict = 'fail';
+      out.detail = 'it already meets its after expect, so passing after the work would prove nothing (M17): fix the check or its stated failure';
+      out.retry = false;
+    }
+  }
+  return out;
+}
+
+function runOne(c, opts, cwd, outDir, root, env) {
+  const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '', ms: null, slow: false, flaky: false };
+  // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
+  const parsed = tokenize(c.check);
+  let refusal = parsed.error || guardParsed(parsed, root, env);
+  let line = null;
+  if (!refusal) {
+    const built = rebuildCommand(parsed, env);
+    if (built.error) refusal = built.error; else line = built.line;
+  }
+  if (refusal) { row.detail = refusal; return row; }
+
+  const file = path.join(outDir, c.id + '.txt');
+  let a = attempt(line, c.expect, opts, cwd, env, file, c.notYet);
+  let slow = a.ms > opts.timeout / 2;
+  if (opts.rerunFailures && a.verdict === 'fail' && a.retry) {
+    // Keep the failing run where the review and the tally can read it, then
+    // run the same judged line again into <id>.txt.
+    const firstDir = path.join(outDir, 'first-run');
+    let kept = false;
+    try {
+      fs.mkdirSync(firstDir, { recursive: true });
+      fs.renameSync(file, path.join(firstDir, c.id + '.txt'));
+      kept = true;
+    } catch (e) {
+      process.stderr.write('run-checks: ' + c.id + ': could not keep the first run: ' + e.message + '\n');
+    }
+    const second = attempt(line, c.expect, opts, cwd, env, file, c.notYet);
+    slow = slow || second.ms > opts.timeout / 2;
+    if (second.verdict === 'pass') {
+      row.flaky = true;
+      a = Object.assign({}, second, {
+        verdict: 'fail',
+        detail: 'failed, then passed when run again' + (kept ? ' (the failing run is first-run/' + c.id + '.txt)' : ''),
+      });
+    } else {
+      a = second;
+    }
+  }
+  row.verdict = a.verdict;
+  row.exit = a.exit;
+  row.detail = a.detail;
+  row.ms = a.ms;
+  row.slow = slow;
+  if (a.saved) row.stdoutFile = shownPath(cwd, file);
+  return row;
+}
+
+// The commit the run saw, for results.json; null outside a repository.
+function headCommit(cwd) {
+  const r = spawnSync('git', ['rev-parse', '--verify', '-q', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const sha = (r.stdout || '').trim();
+  return r.status === 0 && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}
+
+// `extra` (plan mode: plan, step, phase) leads both the printed object and
+// results.json; a check's `role` (target or guard, plan mode only) is copied
+// onto its row. results.json rows also carry the check's command and expect.
+function runAll(checks, opts, cwd, outDir, extra) {
+  const env = checkEnv();              // the same environment the guard judges with
+  const root = realpathOrNull(cwd);
+  const at = new Date().toISOString();
+  const results = [];
+  const summary = { pass: 0, fail: 0, model: 0, error: 0 };
+  const flags = { slow: 0, flaky: 0 };
+  for (const c of checks) {
+    const row = runOne(c, opts, cwd, outDir, root, env);
+    if (c.role) row.role = c.role;
+    if (row.verdict === 'error') process.stderr.write('run-checks: ' + c.id + ': ' + row.detail + '\n');
+    summary[row.verdict]++;
+    if (row.slow) flags.slow++;
+    if (row.flaky) flags.flaky++;
+    results.push(row);
+  }
+  const result = Object.assign({}, extra || {}, { checks: results, summary, flags });
+  // Saved only when a check ran: a run whose every check was refused writes
+  // nothing at all, as it always has, so a refusal never leaves a record that
+  // looks like evidence.
+  if (results.some((r) => r.stdoutFile !== null)) {
+    const file = path.join(outDir, 'results.json');
+    const rows = results.map((r, i) => Object.assign({}, r, { check: checks[i].check, expect: checks[i].expect }));
+    try {
+      fs.writeFileSync(file, JSON.stringify(Object.assign({ at, head: headCommit(cwd) }, result, { checks: rows })) + '\n');
+    } catch (e) {
+      process.stderr.write('run-checks: could not save ' + file + ': ' + e.message + '\n');
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Plan mode: reading a plan's check lines, linting them, running one step's
+// phase, and tallying the records (see "Plan mode" in the header).
+// ---------------------------------------------------------------------------
+const STEP_RE = /^- \[[ x]\] (?:🟥|🟨|🟩) \*\*Step ([0-9]+[a-z]?): (.+?)\*\*/;
+// A line that reads like a step line but is not one: at the left margin, a
+// list line on "Step N" (not bold, no colon, no space, an [X] box, a missing
+// or other status mark); indented, one on a bold "**Step N:". It is a lint
+// problem and ends the step above it, so its check lines never run as that
+// step's. It is looked for only in the Tasks section or under a step, so an
+// Outcomes note such as "- **Step 2:** done" is never one.
+const LOOSE_STEP_RE = /^(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(?:[^\w\s`*]+\s*)?(?:\*\*)?Step\s*[0-9]+[a-z]?\b/i;
+const INDENTED_STEP_RE = /^\s+(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(?:[^\w\s`*]+\s*)?\*\*Step\s*[0-9]+[a-z]?\s*:/i;
+const STEP_ARG_RE = /^[0-9]+[a-z]?$/;
+// One code span: fenced with two backticks when it holds a backtick, else one.
+const SPAN = '(?:``\\s?(.+?)\\s?``|`([^`]+)`)';
+const TARGET_LINE_RE = new RegExp('^\\s*- Check target ' + SPAN + ': ' + SPAN + ' - before ' + SPAN + ' - after ' + SPAN + '\\s*$');
+const GUARD_LINE_RE = new RegExp('^\\s*- Check guard ' + SPAN + ': ' + SPAN + ' - ' + SPAN + '\\s*$');
+const NO_TARGET_RE = /^\s*- Check: no target - (\S.*?)\s*$/;
+// A line that may be meant as a check line. Either it starts the way the three
+// shapes do (`- Check target`, `- Check guard`, `- Check:`), or it is a near
+// miss of their skeleton, in any case and with or without a bullet, a [ ] box,
+// a status mark, bold or a quote mark: Check and/or target or guard, then the
+// id in a code span and a colon, or "Check: no target". One the shapes do not
+// parse is a lint problem, so a near miss never drops a check in silence,
+// while "Check that the page loads" or "Check `npm test` passes" is not one.
+const CHECK_START_RE = /^\s*- Check(?:\s+(?:target|guard)\b|\s*:)/;
+const NEAR_CHECK_RE = new RegExp('^\\s*(?:>\\s*)*(?:(?:[-*+]|\\d+[.)])\\s+)?(?:\\[[ xX]\\]\\s*)?(?:[^\\w\\s`*>]+\\s*)?(?:\\*\\*)?'
+  + '(?:checks?(?:\\*\\*)?\\s*:?\\s*(?:\\*\\*)?\\s*no[\\s-]+target'
+  + '|checks?(?:\\*\\*)?\\s+(?:(?:target|guard)s?(?:\\*\\*)?\\s*)?`[^`]+`\\s*:'
+  + '|(?:target|guard)s?(?:\\*\\*)?\\s*`[^`]+`\\s*:)', 'i');
+// A code fence opens on three or more backticks or tildes at the start of a
+// line; a backtick fence's info string holds no backtick, so a line such as
+// "```npm test``` runs it" is inline code, as CommonMark reads it.
+const FENCE_RE = /^(\s*)(`{3,}|~{3,})(.*)$/;
+const PLAN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
+
+// The span texts of a match, in order (each SPAN has two capture groups).
+function spanTexts(m) {
+  const out = [];
+  for (let i = 1; i < m.length; i += 2) out.push(m[i] !== undefined ? m[i] : m[i + 1]);
+  return out;
+}
+function parseExpect(text) {
+  try { return { value: JSON.parse(text) }; } catch (e) { return { error: 'is not JSON: ' + e.message }; }
+}
+// null when the expect is a machine object the runner would decide, else why not.
+function expectProblem(e) {
+  if (e.error) return e.error;
+  const v = e.value;
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+    return 'needs a machine expect ({"exit": 0}, {"match": ...}, {"noMatch": ...} or {"lines": ...}), not ' + JSON.stringify(v);
+  }
+  const d = decide(v, 0, '', { stdout: '', stderr: '' });
+  if (d.verdict === 'error') return d.detail;
+  // A key decide() would ignore (a misspelled "mx") makes a weaker check than
+  // the plan reads as, and two expects look different when they are not.
+  if (v.lines && Object.keys(v.lines).some((k) => k !== 'min' && k !== 'max')) return 'expect.lines takes only min and max';
+  return null;
+}
+// The same three judgments a run makes before anything executes: tokenize,
+// guard, rebuild. null when the run would accept the command.
+function judgeCommand(text, root, env) {
+  const parsed = tokenize(text);
+  if (parsed.error) return parsed.error;
+  const refusal = guardParsed(parsed, root, env);
+  if (refusal) return refusal;
+  const built = rebuildCommand(parsed, env);
+  return built.error || null;
+}
+
+// Whether an HTML comment is still open at the end of `text`, given whether
+// one was open at its start: read left to right, each `<!--` opens one and
+// each `-->` closes it, and `<!-->` and `<!--->` are whole comments.
+function commentOpenAfter(text, open) {
+  let i = 0;
+  for (;;) {
+    if (open) {
+      const close = text.indexOf('-->', i);
+      if (close === -1) return true;
+      open = false;
+      i = close + 3;
+    } else {
+      const start = text.indexOf('<!--', i);
+      if (start === -1) return false;
+      if (text.startsWith('<!-->', start)) { i = start + 5; continue; }
+      if (text.startsWith('<!--->', start)) { i = start + 6; continue; }
+      open = true;
+      i = start + 4;
+    }
+  }
+}
+
+// The plan's steps in order, each { step, name, line, targets, guards,
+// noTarget, problems }, and its problems outside any step, each { line,
+// problem }. A step's lines are the ones indented under its step line: the
+// next line at the left margin (another step, a heading, any text) ends it.
+// Lines in a code fence or an HTML comment are skipped, as the page shows
+// them as code or not at all.
+function parsePlan(text) {
+  const steps = [];
+  const problems = [];
+  let cur = null;
+  let inTasks = false;   // under a "## Tasks" heading
+  let fence = null;      // { mark, indent, line } while inside a code fence
+  let comment = null;    // { line } while inside a comment that spans lines
+  text.split(/\r?\n/).forEach((line, i) => {
+    const n = i + 1;
+    const t = line.trim();
+    const indent = line.length - line.trimStart().length;
+    const f = FENCE_RE.exec(line);
+    if (fence) {
+      // Closed by a bare run of the same character, at least as long. A
+      // fence inside a list item also ends with its item, at the first line
+      // less indented than the fence, which is then read as usual.
+      if (f && f[2][0] === fence.mark[0] && f[2].length >= fence.mark.length && f[3].trim() === '') { fence = null; return; }
+      if (t === '' || indent >= fence.indent) return;
+      fence = null;
+    }
+    if (comment) { if (!commentOpenAfter(line, true)) comment = null; return; }
+    if (f && !(f[2][0] === '`' && f[3].includes('`'))) { fence = { mark: f[2], indent: f[1].length, line: n }; return; }
+    if (t.startsWith('<!--')) { if (commentOpenAfter(t, false)) comment = { line: n }; return; }
+    const s = STEP_RE.exec(line);
+    if (s) {
+      cur = { step: s[1], name: s[2].trim(), line: n, targets: [], guards: [], noTarget: null, problems: [] };
+      steps.push(cur);
+      return;
+    }
+    if ((cur || inTasks) && (LOOSE_STEP_RE.test(line) || INDENTED_STEP_RE.test(line))) {
+      problems.push({ line: n, problem: 'a step line that does not parse (a step line reads - [ ] 🟥 **Step N: name**): ' + t });
+      cur = null;
+      return;
+    }
+    if (/^##\s/.test(line)) inTasks = /^##\s+Tasks\b/i.test(line);
+    if (t !== '' && indent === 0) cur = null;
+    if (!cur) {
+      if (TARGET_LINE_RE.test(line) || GUARD_LINE_RE.test(line) || NO_TARGET_RE.test(line)) {
+        problems.push({ line: n, problem: 'a check line outside any step (a step\'s check lines are indented under it), so it never runs: ' + t });
+      }
+      return;
+    }
+    if (!CHECK_START_RE.test(line) && !NEAR_CHECK_RE.test(line)) return;
+    let m;
+    if ((m = TARGET_LINE_RE.exec(line))) {
+      const [id, check, before, after] = spanTexts(m);
+      cur.targets.push({ id, check, before: parseExpect(before), after: parseExpect(after), line: n });
+    } else if ((m = GUARD_LINE_RE.exec(line))) {
+      const [id, check, expect] = spanTexts(m);
+      cur.guards.push({ id, check, expect: parseExpect(expect), line: n });
+    } else if ((m = NO_TARGET_RE.exec(line))) {
+      if (cur.noTarget === null) cur.noTarget = m[1];
+      else cur.problems.push({ line: n, problem: 'a second "Check: no target" line' });
+    } else {
+      cur.problems.push({ line: n, problem: 'a check line that does not parse: ' + t });
+    }
+  });
+  if (fence) problems.push({ line: fence.line, problem: 'a code fence that is never closed, so no line after it is read' });
+  if (comment) problems.push({ line: comment.line, problem: 'an HTML comment that is never closed, so no line after it is read' });
+  // Two steps with one number would share one record folder, and a phase run
+  // would only ever find the first: each is a problem, so neither runs.
+  const at = {};
+  for (const st of steps) (at[st.step] = at[st.step] || []).push(st.line);
+  for (const st of steps) {
+    if (at[st.step].length > 1) st.problems.push({ line: st.line, problem: 'step ' + st.step + ' is used more than once in this plan (lines ' + at[st.step].join(', ') + ')' });
+  }
+  return { steps, problems };
+}
+
+// Every problem in one step, as { line, problem }; the one for a step with no
+// check line at all also carries `missing`, which the tally reports as its own
+// status.
+function lintStep(st, root, env) {
+  const problems = st.problems.slice();
+  const add = (line, problem) => problems.push({ line, problem });
+  if (st.targets.length && st.noTarget !== null) add(st.line, 'has both a target and a "Check: no target" line');
+  if (!st.targets.length && st.noTarget === null) problems.push({ line: st.line, problem: 'has no target and no "Check: no target - <reason>" line', missing: true });
+  const seen = new Set();
+  for (const c of st.targets.concat(st.guards)) {
+    if (!ID_RE.test(c.id)) add(c.line, "the id '" + c.id + "' is not a valid id (letters, digits, . _ - only, starting with a letter or digit)");
+    if (seen.has(c.id)) add(c.line, "the id '" + c.id + "' is used more than once in this step");
+    seen.add(c.id);
+    const refusal = judgeCommand(c.check, root, env);
+    if (refusal) add(c.line, "'" + c.id + "' " + refusal);
+  }
+  for (const t of st.targets) {
+    for (const k of ['before', 'after']) {
+      const p = expectProblem(t[k]);
+      if (p) add(t.line, "'" + t.id + "' " + k + ' expect ' + p);
+    }
+    if (!t.before.error && !t.after.error && canonical(t.before.value) === canonical(t.after.value)) {
+      add(t.line, "'" + t.id + "' has the same expect before and after, so it cannot show a change");
+    }
+  }
+  for (const g of st.guards) {
+    const p = expectProblem(g.expect);
+    if (p) add(g.line, "'" + g.id + "' expect " + p);
+  }
+  return problems;
+}
+
+// The plan, read through realpath and fenced to the project: { text, base, rel }.
+function readPlan(planArg, cwd) {
+  const root = realpathOrNull(cwd);
+  const real = realpathOrNull(path.resolve(cwd, planArg));
+  if (real === null) throw new Error('--plan ' + planArg + ' could not be found');
+  if (!root || real === root || !isUnder(real, root)) throw new Error('--plan ' + planArg + ' must be a file inside the project (' + (root || cwd) + ')');
+  // A folder, a pipe or a device is never read: a pipe would wait forever.
+  let isFile = false;
+  try { isFile = fs.statSync(real).isFile(); } catch (e) { throw new Error('--plan ' + planArg + ' could not be read: ' + e.message); }
+  if (!isFile) throw new Error('--plan ' + planArg + ' must be a regular file');
+  let text;
+  try { text = fs.readFileSync(real, 'utf8'); } catch (e) { throw new Error('--plan ' + planArg + ' could not be read: ' + e.message); }
+  const base = path.basename(real).replace(/\.md$/i, '');
+  if (!PLAN_BASE_RE.test(base)) throw new Error('--plan ' + planArg + ': the file name must be letters, digits, . _ - only, start with a letter or digit, and be at most 121 characters before .md');
+  return { text: text.replace(/^﻿/, ''), base, rel: path.relative(root, real), root };
+}
+const recordRel = (base, step, phase) => path.join('reports', 'checks', base, 'step-' + step, phase);
+
+// The first part of a record path, from reports/ down, that is a link or not a
+// folder (project-relative), or null when every part that exists is a real
+// folder. Records are read, cleared and written only through such a path, so a
+// link can never send a write or a delete outside the project's reports/, or
+// into another step's folder.
+function linkOnRecordPath(cwd, rel) {
+  let cur = cwd;
+  for (const part of rel.split(path.sep)) {
+    cur = path.join(cur, part);
+    let st;
+    try { st = fs.lstatSync(cur); } catch (e) { return null; }   // the rest is not there yet
+    if (st.isSymbolicLink() || !st.isDirectory()) return path.relative(cwd, cur);
+  }
+  return null;
+}
+
+// Empty a phase's record folder and make it again, so no file from an earlier
+// run stays behind looking like this run's. Returns the folder. A link on its
+// path is refused before anything is cleared or written.
+function freshRecordDir(rel, cwd) {
+  const refuse = (part) => new Error('the record folder ' + rel + ' was not used: ' + part + ' is a link or not a folder');
+  const bad = linkOnRecordPath(cwd, rel);
+  if (bad) throw refuse(bad);
+  const abs = path.join(cwd, rel);
+  fs.rmSync(abs, { recursive: true, force: true });
+  fs.mkdirSync(abs, { recursive: true });
+  const root = realpathOrNull(cwd);
+  if (linkOnRecordPath(cwd, rel) || !root || realpathOrNull(abs) !== path.join(root, rel)) throw refuse(rel);
+  return abs;
+}
+
+function lintPlan(opts, cwd) {
+  const plan = readPlan(opts.plan, cwd);
+  const parsed = parsePlan(plan.text);
+  const env = checkEnv();
+  const problems = parsed.problems.map((p) => ({ step: null, line: p.line, problem: p.problem }));
+  if (!parsed.steps.length) problems.push({ step: null, line: null, problem: 'no step lines found (a step line reads - [ ] 🟥 **Step N: name**)' });
+  const list = parsed.steps.map((st) => {
+    for (const p of lintStep(st, plan.root, env)) problems.push({ step: st.step, line: p.line, problem: p.problem });
+    return { step: st.step, name: st.name, targets: st.targets.map((t) => t.id), guards: st.guards.map((g) => g.id), noTarget: st.noTarget };
+  });
+  problems.sort((x, y) => (x.line === null ? Infinity : x.line) - (y.line === null ? Infinity : y.line));
+  return { plan: plan.rel, steps: list, problems, summary: { steps: parsed.steps.length, problems: problems.length } };
+}
+
+function runPlanPhase(opts, cwd) {
+  const plan = readPlan(opts.plan, cwd);
+  const parsed = parsePlan(plan.text);
+  const st = parsed.steps.find((s) => s.step === opts.step);
+  if (!st) throw new Error('step ' + opts.step + ' is not in ' + plan.rel);
+  const env = checkEnv();
+  // A problem outside the steps (a step line that does not parse, a fence
+  // never closed) means the plan may not say what it seems to, so it stops
+  // every step's run, not only its own.
+  const problems = parsed.problems.concat(lintStep(st, plan.root, env));
+  if (problems.length) {
+    throw new Error((parsed.problems.length ? 'the plan' : 'step ' + st.step) + ' has lint problems, so nothing ran (fix the plan, then run --lint): '
+      + problems.map((p) => 'line ' + p.line + ': ' + p.problem).join('; '));
+  }
+  // A before run also holds each target's output against its after expect,
+  // which must not hold yet (`notYet`, see attempt).
+  const checks = st.targets.map((t) => ({ id: t.id, check: t.check, expect: opts.phase === 'before' ? t.before.value : t.after.value, role: 'target',
+    notYet: opts.phase === 'before' ? t.after.value : undefined }))
+    .concat(st.guards.map((g) => ({ id: g.id, check: g.check, expect: g.expect.value, role: 'guard' })));
+  const outDir = freshRecordDir(recordRel(plan.base, st.step, opts.phase), cwd);
+  return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, { plan: plan.rel, step: st.step, phase: opts.phase });
+}
+
+// A phase's results.json: null when the phase never ran, { why } when a file
+// is there but cannot count (a link on its path, not this plan's, step's or
+// phase's, or not a record), else { rec }.
+function readRecord(cwd, rel, want) {
+  const bad = linkOnRecordPath(cwd, rel);
+  if (bad) return { why: bad + ' is a link or not a folder' };
+  const file = path.join(cwd, rel, 'results.json');
+  let st;
+  try { st = fs.lstatSync(file); } catch (e) { return null; }
+  if (!st.isFile()) return { why: 'its results.json is a link or not a file' };
+  let r;
+  try { r = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return { why: 'its results.json is not valid JSON' }; }
+  const isRow = (c) => c !== null && typeof c === 'object' && typeof c.id === 'string' && typeof c.verdict === 'string';
+  if (r === null || typeof r !== 'object' || !Array.isArray(r.checks) || !r.checks.every(isRow)) return { why: 'its results.json does not hold check rows' };
+  if (typeof r.at !== 'string' || isNaN(Date.parse(r.at))) return { why: 'its results.json has no valid time (at)' };
+  for (const k of ['plan', 'step', 'phase']) {
+    if (r[k] !== undefined && String(r[k]) !== want[k]) return { why: 'it was written for ' + k + ' ' + JSON.stringify(r[k]) + ', not ' + JSON.stringify(want[k]) };
+  }
+  return { rec: r };
+}
+
+// JSON with sorted keys, so key order never decides whether two expects match.
+function canonical(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+  if (v !== null && typeof v === 'object') return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+// True when a recorded row ran another command, expect or role than the plan
+// names now. A row with no command recorded (an older runner's) is matched by
+// its id alone, and the tally says so in the step's notes.
+function drifted(row, check, expect, role) {
+  if (row.check === undefined) return false;
+  return row.check !== check || canonical(row.expect) !== canonical(expect) || (row.role !== undefined && row.role !== role);
+}
+
+// Judge one step's two records into row.reasons, row.brokenBefore and
+// row.notes: each target showed its stated failure before and passed after,
+// each guard that passed before passed after, every row ran what the plan
+// names now, and the before run is older than the after run.
+function judgeRecords(st, before, after, row) {
+  const reasons = row.reasons;
+  // A Map, so an id such as "constructor" or "__proto__" is never read off a
+  // plain object's prototype as a result that never ran.
+  const byId = (rec) => new Map(rec.checks.map((c) => [c.id, c]));
+  const recorded = { before: byId(before), after: byId(after) };
+  for (const phase of ['before', 'after']) {
+    const bare = st.targets.concat(st.guards).filter((c) => recorded[phase].has(c.id) && recorded[phase].get(c.id).check === undefined).map((c) => c.id);
+    if (bare.length) row.notes.push('the ' + phase + ' record names no command for ' + bare.join(', ') + ' (an older runner wrote it), so those are matched by id alone');
+  }
+  const b = recorded.before;
+  const a = recorded.after;
+  const changed = (kind, id, phase) => kind + " '" + id + "' ran a different command, expect or role " + phase + ' than the plan names now (run the phase again)';
+  const flake = (c) => (c.flaky ? ', flaky' : '');
+  for (const t of st.targets) {
+    const bt = b.get(t.id);
+    const at = a.get(t.id);
+    if (!bt) reasons.push("target '" + t.id + "' has no before result");
+    else if (drifted(bt, t.check, t.before.value, 'target')) reasons.push(changed('target', t.id, 'before'));
+    else if (bt.verdict !== 'pass') reasons.push("target '" + t.id + "' did not show its stated failure before (" + bt.verdict + flake(bt) + ')');
+    if (!at) reasons.push("target '" + t.id + "' has no after result");
+    else if (drifted(at, t.check, t.after.value, 'target')) reasons.push(changed('target', t.id, 'after'));
+    else if (at.verdict !== 'pass') reasons.push("target '" + t.id + "' did not pass after (" + at.verdict + flake(at) + ')');
+  }
+  for (const g of st.guards) {
+    const bg = b.get(g.id);
+    const ag = a.get(g.id);
+    if (!bg) { reasons.push("guard '" + g.id + "' has no before result"); continue; }
+    if (drifted(bg, g.check, g.expect.value, 'guard')) { reasons.push(changed('guard', g.id, 'before')); continue; }
+    if (bg.verdict !== 'pass') { row.brokenBefore.push(g.id); continue; }
+    if (!ag) reasons.push("guard '" + g.id + "' has no after result");
+    else if (drifted(ag, g.check, g.expect.value, 'guard')) reasons.push(changed('guard', g.id, 'after'));
+    else if (ag.verdict !== 'pass' && !ag.flaky) reasons.push("guard '" + g.id + "' failed after");
+  }
+  if (!(Date.parse(before.at) < Date.parse(after.at))) reasons.push('the before record is not older than the after record');
+}
+
+function tallyPlan(opts, cwd) {
+  const plan = readPlan(opts.plan, cwd);
+  const parsed = parsePlan(plan.text);
+  const env = checkEnv();
+  // The plan's problems outside any step, as the lint lists them, counted in
+  // the summary too: a caller that reads only the counts still sees them.
+  const problems = parsed.problems.map((p) => ({ step: null, line: p.line, problem: p.problem }));
+  if (!parsed.steps.length) problems.push({ step: null, line: null, problem: 'no step lines found (a step line reads - [ ] 🟥 **Step N: name**)' });
+  const summary = { steps: parsed.steps.length, proved: 0, unproved: 0, noTarget: 0, missing: 0, problem: 0, flaky: 0, slow: 0, problems: problems.length };
+  const out = parsed.steps.map((st) => {
+    const row = { step: st.step, name: st.name, status: '', reasons: [], notes: [], flaky: [], slow: [], brokenBefore: [] };
+    const want = (phase) => ({ plan: plan.rel, step: st.step, phase });
+    const before = readRecord(cwd, recordRel(plan.base, st.step, 'before'), want('before'));
+    const after = readRecord(cwd, recordRel(plan.base, st.step, 'after'), want('after'));
+    for (const r of [before, after]) {
+      for (const c of (r && r.rec ? r.rec.checks : [])) {
+        if (c.flaky && row.flaky.indexOf(c.id) === -1) row.flaky.push(c.id);
+        if (c.slow && row.slow.indexOf(c.id) === -1) row.slow.push(c.id);
+      }
+    }
+    const problems = lintStep(st, plan.root, env);
+    if (problems.some((p) => !p.missing)) {
+      row.status = 'problem';
+      row.reasons = problems.map((p) => 'line ' + p.line + ': ' + p.problem);
+    } else if (problems.length) {
+      row.status = 'missing';
+    } else {
+      // A step with checks needs both records, whether its checks are targets
+      // or only guards (a refactor); a no-target step with no guard needs none.
+      if (st.targets.length || st.guards.length) {
+        for (const [phase, r] of [['before', before], ['after', after]]) {
+          if (!r) row.reasons.push('no ' + phase + ' record');
+          else if (r.why) row.reasons.push('the ' + phase + ' record cannot count: ' + r.why);
+        }
+        if (before && before.rec && after && after.rec) judgeRecords(st, before.rec, after.rec, row);
+      }
+      if (st.noTarget !== null) {
+        row.reason = st.noTarget;
+        row.status = row.reasons.length ? 'unproved' : 'noTarget';
+      } else {
+        row.status = row.reasons.length ? 'unproved' : 'proved';
+      }
+    }
+    summary[row.status]++;
+    if (row.flaky.length) summary.flaky++;
+    if (row.slow.length) summary.slow++;
+    return row;
+  });
+  return { plan: plan.rel, steps: out, problems, summary };
+}
+
 function main(argv) {
   const fail = (reason) => { process.stderr.write('run-checks: ' + reason + '\n'); process.exit(1); };
   let opts;
   try { opts = parseArgs(argv); } catch (e) { fail(e.message + '\n' + USAGE.trimEnd()); }
   if (opts.help) { process.stdout.write(USAGE); return; }
-  if (!opts.checks || !opts.out) fail('--checks and --out are both required\n' + USAGE.trimEnd());
   const cwd = process.cwd();
+  if (opts.plan || opts.lint || opts.tally || opts.step || opts.phase) {
+    // Plan mode writes its own records, so it takes no --checks and no --out.
+    if (!opts.plan) fail('--lint, --tally, --step and --phase go with --plan <plan.md>\n' + USAGE.trimEnd());
+    if (opts.checks || opts.out) fail('--plan cannot be combined with --checks or --out (a plan run keeps its own records)');
+    const phaseRun = !!(opts.step || opts.phase);
+    if ([opts.lint, opts.tally, phaseRun].filter(Boolean).length !== 1) fail('--plan needs exactly one of --lint, --tally, or --step <N> --phase before|after');
+    if (phaseRun && (!STEP_ARG_RE.test(opts.step) || (opts.phase !== 'before' && opts.phase !== 'after'))) {
+      fail('--step takes a step number such as 3 or 5a, and --phase takes before or after');
+    }
+    let result;
+    try { result = opts.lint ? lintPlan(opts, cwd) : opts.tally ? tallyPlan(opts, cwd) : runPlanPhase(opts, cwd); } catch (e) { fail(e.message); }
+    process.stdout.write(JSON.stringify(result) + '\n');
+    return;
+  }
+  if (!opts.checks || !opts.out) fail('--checks and --out are both required\n' + USAGE.trimEnd());
   let checks;
   try { checks = loadChecks(opts.checks); } catch (e) { fail(e.message); }
   let outDir;
   try { outDir = prepareOutDir(opts.out, cwd); } catch (e) { fail(e.message); }
-  const env = checkEnv();              // the same environment the guard judges with
-  const root = realpathOrNull(cwd);
-
-  const results = [];
-  const summary = { pass: 0, fail: 0, model: 0, error: 0 };
-  for (const c of checks) {
-    const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '' };
-    // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
-    const parsed = tokenize(c.check);
-    let refusal = parsed.error || guardParsed(parsed, root, env);
-    let line = null;
-    if (!refusal) {
-      const built = rebuildCommand(parsed, env);
-      if (built.error) refusal = built.error; else line = built.line;
-    }
-    if (refusal) {
-      row.detail = refusal;
-    } else {
-      const run = runCheck(line, cwd, opts.timeout, env);
-      if (run.failed) {
-        row.detail = run.failed;
-      } else {
-        const file = path.join(outDir, c.id + '.txt');
-        try {
-          fs.writeFileSync(file, run.body + 'exit ' + run.exit + '\n');
-          const rel = path.relative(cwd, file);
-          row.stdoutFile = (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) ? file : rel;
-        } catch (e) {
-          row.detail = 'could not save the output to ' + file + ': ' + e.message;
-        }
-        row.exit = run.exit;
-        if (!row.detail) {
-          if (run.timedOut || run.overflow) {
-            row.verdict = 'fail';
-            row.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
-          } else {
-            const d = decide(c.expect, run.exit, run.body, { stdout: run.stdout, stderr: run.stderr });
-            row.verdict = d.verdict;
-            row.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
-          }
-        }
-      }
-    }
-    if (row.verdict === 'error') process.stderr.write('run-checks: ' + c.id + ': ' + row.detail + '\n');
-    summary[row.verdict]++;
-    results.push(row);
-  }
-  process.stdout.write(JSON.stringify({ checks: results, summary }) + '\n');
+  process.stdout.write(JSON.stringify(runAll(checks, opts, cwd, outDir)) + '\n');
 }
 
-module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main };
+module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main, parsePlan };
 if (require.main === module) main(process.argv.slice(2));

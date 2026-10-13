@@ -24,7 +24,10 @@
 //                    passes, so no output is ever parsed. --suites overrides
 //                    the set (a comma list of paths, repo-relative or
 //                    absolute, each may use * or ? in its file name);
-//                    --skip-suites skips the check.
+//                    --skip-suites skips the check. Each suite prints one
+//                    line, its exit code then its wall time
+//                    (`scripts/test-x.js: exit 0 (12.3 s)`), so a slow suite
+//                    is found in the gate's own output (#231).
 //   2. Build       - `node scripts/build-plugin.js --check` exits 0 (plugin/
 //                    matches its source). Skipped with a note when the repo has
 //                    no build-plugin.js (the tests' scratch repos).
@@ -270,14 +273,16 @@ function checkSuites() {
   for (const rel of suites) {
     const abs = path.resolve(REPO, rel);
     if (!fs.existsSync(abs)) { failed.push(rel); console.log('         ' + rel + ': missing'); continue; }
+    const started = Date.now();
     const r = spawnSync('node', [abs], {
       cwd: REPO, env: CHILD_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 256 * 1024 * 1024, timeout: SUITE_TIMEOUT_MS,
     });
+    const seconds = ((Date.now() - started) / 1000).toFixed(1);
     // status is null when the suite was killed (timeout, signal) or never
     // started; that is a failure, never a pass.
     const code = r.status === null ? (r.error ? 'error ' + r.error.code : 'signal ' + r.signal) : r.status;
-    console.log('         ' + rel + ': exit ' + code);
+    console.log('         ' + rel + ': exit ' + code + ' (' + seconds + ' s)');
     if (r.status !== 0) {
       failed.push(rel);
       const out = (r.stdout || '') + (r.stderr || '');

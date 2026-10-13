@@ -410,6 +410,11 @@ function releaseRepo(version, tag, opt) {
 
   r = run(repo, ['--suites', 'stubs/pass.js,stubs/fail.js']);
   check('comma list with one failure: suites FAIL naming only the failing suite', r.status === 1 && /1 of 2 suites exited non-zero: stubs\/fail\.js$/.test(line(r.out, 'suites')), r.out);
+  // Each suite's line ends with its wall time, so a slow suite can be found in
+  // the gate's own output (#231). The detail stays on one line: the gate shows
+  // only the last 15 lines of a failing suite.
+  const timed = r.out.split('\n').filter((l) => /stubs\/(pass|fail)\.js: exit/.test(l));
+  check("the gate prints each suite's wall time", timed.length === 2 && timed.every((l) => /: exit \d+ \(\d+\.\d s\)$/.test(l)), JSON.stringify(timed));
 
   write(repo, 'stubs/test-a.js', 'process.exit(0);\n');
   write(repo, 'stubs/test-b.js', 'process.exit(0);\n');

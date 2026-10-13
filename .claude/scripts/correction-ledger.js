@@ -985,7 +985,29 @@ function runHeartbeat() {
 // The rollup groups by `kind` FIRST, even though only one kind exists today, so a
 // second kind added later cannot be silently pooled into the same ranking. Pooling
 // human-labeled and machine-labeled rows would make a count meaningless.
+//
+// Each group also counts its rows by month (`by_month`) and each kind totals its
+// rows by month (`months`), so a group's share of its kind is two numbers for any
+// month (#231). The month view reads whitelisted fields only: the month comes from
+// `at` alone, validated on write, and only its digits reach the key, so a month
+// can never carry text from a row. A row with no date counts under "unknown".
 // ==========================================================================
+
+// The month a row counts under: "YYYY-MM" from its own date, else "unknown".
+function monthOf(at) {
+  const m = /^(\d{4}-\d{2})-\d{2}T/.exec(typeof at === 'string' ? at : '');
+  return m ? m[1] : 'unknown';
+}
+
+// Month counts with their keys in time order, "unknown" last.
+function inMonthOrder(counts) {
+  const out = {};
+  Object.keys(counts).sort(function (x, y) {
+    if (x === 'unknown' || y === 'unknown') return x === 'unknown' ? 1 : -1;
+    return x < y ? -1 : 1;
+  }).forEach(function (m) { out[m] = counts[m]; });
+  return out;
+}
 
 // The axial map as it is on disk, as { map } or { error }. A missing file is an
 // empty map, and so is a file holding only whitespace: there is nothing in it to
@@ -1499,9 +1521,11 @@ function buildRollup() {
     // An unlabeled row is counted honestly as unlabeled rather than folded into a
     // neighbouring bucket, so a ranking never borrows confidence it has not earned.
     const label = labelOf(r, axial);
-    if (!out.kinds[kind]) out.kinds[kind] = { total: 0, buckets: {} };
+    if (!out.kinds[kind]) out.kinds[kind] = { total: 0, months: {}, buckets: {} };
     const k = out.kinds[kind];
+    const month = monthOf(r.at);
     k.total++;
+    k.months[month] = (k.months[month] || 0) + 1;
     if (!k.buckets[label]) {
       k.buckets[label] = {
         axial_code: label, count: 0, scope_split: { toolkit: 0, project: 0 },
@@ -1515,11 +1539,13 @@ function buildRollup() {
         // a first run every label is "(unlabeled)". They are on the shareable
         // whitelist already, so surfacing them costs nothing and stays inside the
         // privacy boundary; `produced` and `correction` remain unreachable.
-        open_codes: {}
+        open_codes: {},
+        by_month: {}
       };
     }
     const b = k.buckets[label];
     b.count++;
+    b.by_month[month] = (b.by_month[month] || 0) + 1;
     if (r.scope === 'toolkit') b.scope_split.toolkit++; else b.scope_split.project++;
     if (TOOLKIT_STAGES.indexOf(r.stage) !== -1) b.stage_split.toolkit++; else b.stage_split.other++;
     if (b.repos.indexOf(r.repo) === -1) b.repos.push(r.repo);
@@ -1531,9 +1557,11 @@ function buildRollup() {
   // codes become a ranked array too so the most frequent wording leads.
   Object.keys(out.kinds).forEach(function (kind) {
     const k = out.kinds[kind];
+    k.months = inMonthOrder(k.months);
     k.buckets = Object.keys(k.buckets)
       .map(function (label) {
         const b = k.buckets[label];
+        b.by_month = inMonthOrder(b.by_month);
         b.open_codes = Object.keys(b.open_codes)
           .map(function (text) { return { open_code: text, count: b.open_codes[text] }; })
           .sort(function (x, y) { return y.count - x.count; });

@@ -314,6 +314,32 @@ console.log('\ncorrection-ledger.js\n');
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- the rollup counts by month (issue #231) --------------------------------
+// A group's share of its kind, month by month, is how the error analysis sees
+// whether a change moved anything, so the rollup carries both numbers: each
+// group's count per month (by_month) and each kind's total per month (months),
+// from the row's own date. --add always stamps a date, so the one row with
+// none, which counts under "unknown", is written straight into the ledger.
+{
+  const sb = makeSandbox('months');
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', at: '2026-08-14T10:00:00.000Z', open_code: 'missed a case' },
+    { scope: 'toolkit', at: '2026-09-02T10:00:00.000Z', open_code: 'missed a case' },
+    { scope: 'project', at: '2026-09-20T10:00:00.000Z', open_code: 'missed a case' }
+  ])]);
+  fs.appendFileSync(ledgerFile(sb), JSON.stringify({ kind: 'human', repo: 'month-test', scope: 'project', open_code: 'missed a case' }) + '\n');
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  const human = r.kinds && r.kinds.human;
+  const want = JSON.stringify({ '2026-08': 1, '2026-09': 2, unknown: 1 });
+  check('the rollup counts each group by month',
+    !!human && human.buckets.length === 1 && JSON.stringify(human.buckets[0].by_month) === want,
+    JSON.stringify(human && human.buckets.map(function (b) { return b.by_month; })));
+  check('the rollup totals each kind by month',
+    !!human && JSON.stringify(human.months) === want && human.total === 4,
+    JSON.stringify(human && { months: human.months, total: human.total }));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- --add is all-or-nothing -----------------------------------------------
 {
   const sb = makeSandbox('atomic');
@@ -1161,7 +1187,9 @@ function outsideRoots(dir, roots) {
   check('the ledger itself holds all four private fields (control)',
     markers.every(function (m) { return ledger.indexOf(m) !== -1; }));
   const bucket = JSON.parse(stdout).kinds.human.buckets[0];
-  const expected = ['axial_code', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
+  // by_month (#231) is counts keyed by month, no row text, so it may sit beside
+  // the privacy-checked fields (#229); both landed in 8.0.0.
+  const expected = ['axial_code', 'by_month', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
   check('a rollup bucket carries exactly the expected fields',
     JSON.stringify(Object.keys(bucket).sort()) === JSON.stringify(expected), JSON.stringify(Object.keys(bucket).sort()));
   fs.rmSync(sb.root, { recursive: true, force: true });

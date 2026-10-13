@@ -96,6 +96,7 @@ Present the ranked buckets in chat:
 - Show the capture-time `scope_split` beside the home as a hint only, and say so when `hint_disagrees` is true. The home comes from the spread, because a tag chosen at capture time sees one row and the spread sees them all.
 - Name the single bucket you would act on, and say why it is that one rather than the next.
 - Flag anything still in `(unlabeled)`.
+- Show each group's share by month: its `by_month` count over its kind's `months` total for the same month, both read from the rollup, never estimated. Put first the groups a check written before the work would catch (M17); this toolkit's own coding names four: "plan missed a case or a stakeholder", "claimed done without proof", "never tried it as the reader would", "fixed one spot and left the rest". A month with only a few rows is noise, the same as a small bucket.
 - When the rollup carries `fixes`, list each with its rate before and after and the cycle counts behind them. Call a change real only when `enough_cycles` is true (at least 5 cycles on each side); otherwise say it is too early to read.
 - Remind the user that a toolkit note filed from an earlier ranking still needs `--record-fix --home toolkit --version <x.y.z>` once the release that ships it is out; until then its category has no before and after.
 
@@ -171,4 +172,5 @@ Rows recorded before the request and rewrite fields existed can have them filled
 ## What this command does not do
 
 - **It does not fix anything on its own.** The fix loop is a separate, deliberate choice, and every fix waits for the user's approval.
+- **The month view shows when, not why.** A group's share falling in the months after a change is the signal to look for, not proof the change caused it: the mix of work, the projects captured and how closely you were watching all move a share too. Name the change and the months on either side, and call it a share that moved, never a fix that worked.
 - **It does not see what you never corrected.** Anything Claude got wrong that you accepted is invisible to this data, and those are concentrated in whatever you scrutinize least. Say so when presenting, if a ranking is about to be treated as the complete picture.

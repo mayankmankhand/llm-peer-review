@@ -55,7 +55,7 @@ If the diagram does not render: you type `/explore`, `/create-plan` writes the p
 |---|---|
 | `/tk:explore` | Understand the problem and pressure-test the idea before any code, in scoping or vision mode |
 | `/tk:create-plan` | Write a step-by-step plan with status tracking, judged by a fresh-context critic before you see it |
-| `/tk:execute` | Build it, commit each green step, and update the plan as it goes |
+| `/tk:execute` | Build it check-first: each step's check fails before the work and passes after it; commit each green step and update the plan as it goes |
 | `/tk:review` | Detect what changed, run the right specialists, audit their findings, fix the survivors, re-verify every fix |
 | `/tk:document` | Update the docs, lessons, and changelog to match what was built, with a standing cycle summary |
 | `/tk:ask-gpt` | Debate a plan or a change with ChatGPT, up to three rounds, verdict at the end |

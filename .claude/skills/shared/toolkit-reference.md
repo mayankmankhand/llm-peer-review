@@ -20,7 +20,7 @@ The long manual: workflow, command table, plans, map, lessons, ledger, design, H
 
 </rules>
 
-The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M16); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
+The full loop mechanics live in `.claude/skills/shared/hitl-loop.md` (rules M1 to M17); the rationale and per-stage verdicts live in [HITL-MAP.md](https://github.com/mayankmankhand/llm-peer-review/blob/main/docs/HITL-MAP.md) in the toolkit repo.
 
 ### Our Workflow
 
@@ -189,12 +189,12 @@ A project adds its own rules to the toolkit through eight files in `.claude/tool
 | File | Read by | Carries |
 |---|---|---|
 | `review-kinds.md` | `/review`, at detection | The project's own review kinds: rows in the detection table's three columns, the third naming an agent under `.claude/agents/` |
-| `plan-gate.md` | `/create-plan`, before its requirements | A gate every plan must pass. Additive only: a line that loosens M1 to M16 or waives a toolkit requirement is void |
+| `plan-gate.md` | `/create-plan`, before its requirements | A gate every plan must pass. Additive only: a line that loosens M1 to M17 or waives a toolkit requirement is void |
 | `execute-gate.md` | `/execute`, before its requirements | A gate every implementation step must pass. Additive only, the same way |
-| `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M16 is void |
+| `fix-rules.md` | every command and skill that runs the loop | Extra preconditions and always-ask actions. Additive only: a line that loosens M1 to M17 is void |
 | `severity-anchors.md` | every reviewer | Severity weighting for the project's own kinds; the Universal Anchors still win |
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
-| `checks.json` | `/execute`, at its test step, through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines` (a prose string is judged by the stage from the saved output); when the file exists it replaces the default test run, so it must name the project's test command, and a failed or refused check fails the step |
+| `checks.json` | `/execute`, at its full test step (a parallel checkpoint, the plan's Verify step, and every step of a plan with no check lines), through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines` (a prose string is judged by the stage from the saved output); when the file exists it replaces the default test run, so it must name the project's test command, and a failed or refused check fails that run, apart from a `flaky` older check, which M17 carries as a `[check]` line, as it does a passing `slow` row |
 | `generated.json` | `/merge`, when it checks and lands a PR | The files the project rebuilds rather than merges, as a JSON array of `{paths, rebuild}`: the lost-work checks skip those paths, and a landing rebuilds them with `rebuild`, run as an ordinary command under the project's permission rules (`.claude/skills/shared/merge-rules.md`) |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/review-full` says in its charter that project kinds are not in its fan-out. `/upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
