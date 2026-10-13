@@ -2,6 +2,30 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Land Without Losing Work
+
+**Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #232. When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing it can quietly drop that work, or the branch's own, and a squash then hides the fix. `/tk:merge` lands finished worktree PRs in the order you give and checks each one before it lands.
+
+### Added
+
+- **`/tk:merge` lands worktree PRs, checked for lost work.** `/tk:merge 241 242` lands PR #241 and then PR #242, one at a time. For each it brings the branch up to date with main, fixes the conflicts, and lands it only when four checks pass: your tests; nothing other work added after the branch's cut is removed (rule 1); every line the PR added makes it in (rule 2); and no decision of the PR contradicts one that landed after its cut (rule 3). The first problem stops that PR and tells you in plain English what would be lost, who wrote it, and what you can do. It is human-triggered and never chained into, and a landing on the host always asks first.
+- **A fresh reviewer judges the decisions.** The new `decision-checker` agent reads one file, this PR's decisions beside those of every landing since its cut, and names each pair that cannot both hold, even across files. `merge-check.js` builds that file, so the reviewer never sees the conflict fix or the line checks.
+- **The cut point is recorded.** `/tk:worktree`, and the branch renames in `/tk:explore`, `/tk:create-plan` and `/tk:document`, record the commit each branch was cut from. Git's merge-base cannot stand in for it: once a branch is updated from main, the merge-base moves past every line the branch never saw.
+- **PRs carry their decisions, changelog block and cut.** `/tk:document` writes `## Decisions`, `## Changelog` and a `Cut from:` line into the PR body, and the landing commit repeats them, so they outlive a squash and a deleted worktree. PRs opened before this update still land: their cut comes from git's branch log, and their decisions from the PR text and changes.
+- **Landings made another way are checked on the next run.** Each `/tk:merge` run first checks every landing since its last run: a merge commit fully, and a squash for removed work when its PR carries a `Cut from:` line. A rebase made with the host's button, and a squash made with GitLab's button, are not checked.
+- **The lessons files keep both sides on a merge (C-18).** `/tk:upgrade` offers two `.gitattributes` lines, `LESSONS.md merge=union` and `LESSONS-detail.md merge=union`, so two branches that each add a lesson no longer conflict there, and `/tk:merge` merges a lesson written twice. `CHANGELOG.md` gets no such line on purpose: its block goes back in by rule instead.
+
+### Upgrading
+
+- Update the plugin (`claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`), restart Claude Code, then run `/tk:upgrade` in each project. Eight new permission rows: four allow rows for `merge-check.js` (at the plugin cache path and the stable `current` path, each with and without arguments), `Bash(git merge *)` and `Bash(glab mr view *)`, and two ask rows, `Bash(gh pr merge *)` and `Bash(glab mr merge *)`, because a merge on the host leaves the machine. `/tk:upgrade`'s C-9 reports the rows a project lacks, and re-running `/tk:setup` merges them.
+- Other editors: re-run `setup.sh` or `setup.ps1` to copy `merge-check.js`, the `decision-checker` agent and the new permission rows.
+
+### Why
+
+Issue #232 asked what happens when four worktrees are cut from main, two land, two more are cut, and then the first batch's other two land. Replayed in scratch repositories, one whole-file "keep mine" conflict fix dropped 9 lines of two earlier landings, including changes that never conflicted, and git reported nothing. The checks key on the recorded cut point because it is the one fact that does not move when a branch is updated. Rule 3 exists because two PRs can each be right alone and contradict once both land: in the live dry run it stopped two landings that both line checks passed.
+
+---
+
 ## v7.6.5 - Name the Command (2026-10-10)
 
 **A patch on top of v7.6.4, which stays additive on v7.0.0 and v6.0.0.** Issue #226, merged as PR #227. The four spots the #221 triage left for a later cycle now name their command and its pass signal (M16), and the work turned up a worktree check that misread a subfolder of the main copy.

@@ -371,7 +371,7 @@
 - **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.**
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
@@ -385,3 +385,10 @@
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
 - **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+
+## Issue 232 (land without losing work)
+
+- **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.**
+- **A lone `cd` call, then plain commands, matches the permission rows; a subshell, a `cd` joined with `&&`, `git -C` and `env -C` ask every time.**
+- **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
+- **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**
