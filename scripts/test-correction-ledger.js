@@ -1583,9 +1583,76 @@ function tripwireBinaryTest() {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: the tripwire refuses the fix records and the backfill file too --
+// The backfill side file carries filled-in private text; the fix records are a
+// per-machine record. Both join the never-push list, which also catches `git add -f`.
+function tripwireNewFilesTest() {
+  const sb = makeSandbox('tripwire229');
+  const repo = path.join(sb.root, 'repo');
+  fs.mkdirSync(path.join(repo, 'notes'), { recursive: true });
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    fs.writeFileSync(path.join(repo, 'notes', 'correction-fixes.jsonl'), '{"category":"x"}\n', 'utf-8');
+    fs.writeFileSync(path.join(repo, 'notes', 'correction-backfill.jsonl'), '{"trigger":"x"}\n', 'utf-8');
+    g(['add', '-f', 'notes']); g(['commit', '-qm', 'oops']);
+    const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8' });
+    const said = (r.stdout || '') + (r.stderr || '');
+    check('tripwire blocks a pushed fix record or backfill side file', r.status !== 0, 'exit ' + r.status);
+    check('tripwire names both new ledger files',
+      said.indexOf('correction-fixes.jsonl') !== -1 && said.indexOf('correction-backfill.jsonl') !== -1, said.slice(0, 300));
+  } catch (e) {
+    check('tripwire new-files test set up a git repo', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: TK_LEDGER_DIR also moves the fix records and the backfill file ---
+// A guard, not a fail-first check: both paths are built from the same folder.
+function ledgerDirNewFilesTest() {
+  const sb = makeSandbox('ledgerdir229');
+  const repo = path.join(sb.root, 'repo229');
+  const moved = path.join(sb.root, 'moved229');
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    fs.mkdirSync(repo, { recursive: true });
+    fs.mkdirSync(moved, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    fs.writeFileSync(path.join(moved, 'correction-axial-map.json'), JSON.stringify({ 'moved code': 'cat-moved' }), 'utf-8');
+    fs.writeFileSync(path.join(moved, 'correction-ledger.jsonl'), JSON.stringify({
+      at: '2026-09-23T10:00:00.000Z', repo: 'repo229', repo_path: fs.realpathSync(repo), kind: 'human', scope: 'project',
+      stage: 'execute', produced: '', correction: '', open_code: 'moved code', axial_code: null, session: 'sess-m'
+    }) + '\n', 'utf-8');
+    const env = { TK_LEDGER_DIR: moved };
+    run(sb, ['--record-fix', '--category', 'cat-moved', '--home', 'global', '--label', 'moved fix'], { cwd: repo, env: env });
+    run(sb, ['--add-backfill', '--data', writeRows(sb, [{ at: '2026-09-23T10:00:00.000Z', session: 'sess-m', trigger: 'moved trigger', rewrite: '' }])],
+      { cwd: repo, env: env });
+    const names = ['correction-fixes.jsonl', 'correction-backfill.jsonl'];
+    check('TK_LEDGER_DIR holds the fix records and the backfill side file',
+      names.every(function (n) { return fs.existsSync(path.join(moved, n)); }), fs.readdirSync(moved).join(', '));
+    check('TK_LEDGER_DIR leaves neither under HOME',
+      names.every(function (n) { return !fs.existsSync(path.join(sb.home, '.claude', n)); }));
+  } catch (e) {
+    check('TK_LEDGER_DIR new-files test ran', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 function finish() {
   tripwireTest();
   tripwireBinaryTest();
+  tripwireNewFilesTest();
+  ledgerDirNewFilesTest();
   console.log('');
   if (failures.length === 0) {
     console.log(passed + ' checks passed.\n');
