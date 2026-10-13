@@ -9,7 +9,7 @@
 // machine-readable expectation, so pass or fail is the machine's verdict and
 // the saved output is the evidence the review page shows.
 //
-//   node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>]
+//   node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>] [--rerun-failures]
 //
 // <file.json> is a JSON array of { id, check, expect }:
 //   id      a filename stem: letters, digits, . _ - only, unique in the file
@@ -37,14 +37,39 @@
 // output is working data, never a tracked file.
 //
 // Output, on stdout: exactly one JSON object
-//   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail" } ... ],
-//     "summary": { "pass", "fail", "model", "error" } }
+//   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail",
+//                   "ms", "slow", "flaky" } ... ],
+//     "summary": { "pass", "fail", "model", "error" },
+//     "flags": { "slow", "flaky" } }
 // verdict is pass, fail, model or error. `exit` is the check's exit code (124
 // on a timeout, 143 when the output passed the 16 MB buffer and the check was
 // stopped, null when nothing ran); `stdoutFile` is the saved file's path
 // relative to the project root (absolute when the out folder sits outside it,
 // null when nothing was written); `detail` is the last lines of the output for
-// a fail, the reason for an error, and empty otherwise.
+// a fail, the reason for an error, and empty otherwise. `summary` counts
+// verdicts only; `flags` counts the two marks below.
+//
+// Time, slow and re-run (issue #231, rule M17). A plan step's check runs before
+// the work and after it, and that loop needs three facts a verdict alone does
+// not carry:
+//   ms      the wall time of the run whose output is saved (null when nothing
+//           ran). A slow suite is a finding to fix, not a reason to wait.
+//   slow    true when a run took over half of --timeout.
+//   flaky   true when --rerun-failures re-ran a fail and the second run
+//           passed. The verdict stays `fail`: a flip-flop must never read as
+//           green to a caller that only counts summary.fail (M5). The failing
+//           first run is kept as <out>/first-run/<id>.txt, the second run is
+//           <id>.txt. A fail that fails again is a plain fail, its first run
+//           kept the same way. A timeout or an overflow is never re-run: that
+//           would spend the whole limit again, and slowness is what `slow`
+//           reports. Without the flag nothing is re-run, so review receipts
+//           behave exactly as before.
+// The printed object is also saved as <out>/results.json, with `at` (when the
+// run started, ISO time) and `head` (the commit HEAD named, null outside a
+// repository) added, so a later tally can read the verdicts and their order.
+// It is saved only when at least one check ran, so a run whose every check was
+// refused still writes nothing. A folder several runs share (a review's
+// receipts) holds the last run's.
 //
 // Exit code 0 whenever the checks file validated, fails and errors included:
 // the verdicts are the result. Exit 1, with one line on stderr and nothing run
@@ -1213,21 +1238,23 @@ function loadChecks(file) {
   return data;
 }
 
-const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>]\n'
-  + '  --checks   a JSON array of { id, check, expect }\n'
-  + '  --out      where <id>.txt is saved; must be under reports/ or the system temp folder\n'
-  + '  --timeout  per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + ')\n'
-  + '  expect     a prose string (verdict model), or exactly one of\n'
-  + '             {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
-  + '             (regexes are tested with the multiline flag against the saved output)\n'
-  + '  stdout     one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail }], summary }\n'
-  + '  exit code  0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n';
+const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--timeout <ms>] [--rerun-failures]\n'
+  + '  --checks          a JSON array of { id, check, expect }\n'
+  + '  --out             where <id>.txt and results.json are saved; must be under reports/ or the system temp folder\n'
+  + '  --timeout         per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + '); a run over half of it is flagged slow\n'
+  + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
+  + '  expect            a prose string (verdict model), or exactly one of\n'
+  + '                    {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
+  + '                    (regexes are tested with the multiline flag against the saved output)\n'
+  + '  stdout            one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail, ms, slow, flaky }], summary, flags }\n'
+  + '  exit code         0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n';
 
 function parseArgs(argv) {
-  const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, help: false };
+  const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, rerunFailures: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
+    else if (a === '--rerun-failures') opts.rerunFailures = true;
     else if (a === '--checks') opts.checks = argv[++i] || '';
     else if (a === '--out') opts.out = argv[++i] || '';
     else if (a === '--timeout') {
@@ -1237,6 +1264,129 @@ function parseArgs(argv) {
     } else throw new Error("unknown argument '" + a + "'");
   }
   return opts;
+}
+
+// ---------------------------------------------------------------------------
+// Running the list. attempt() runs a rebuilt line once and decides it; runOne()
+// judges a check and, with --rerun-failures, gives a fail its second run;
+// runAll() runs the list, counts it and saves results.json.
+// ---------------------------------------------------------------------------
+// The saved file's path as rows report it: relative to the project root, or
+// absolute when the out folder sits outside it.
+function shownPath(cwd, file) {
+  const rel = path.relative(cwd, file);
+  return (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) ? file : rel;
+}
+
+// One run of a judged line: run it, time it, save its output to `file`, decide
+// it. A save that fails leaves the verdict `error`, as a refusal does.
+function attempt(line, expect, opts, cwd, env, file) {
+  const started = Date.now();
+  const run = runCheck(line, cwd, opts.timeout, env);
+  const ms = Date.now() - started;
+  if (run.failed) return { verdict: 'error', exit: null, detail: run.failed, ms, saved: false };
+  const out = { verdict: 'error', exit: run.exit, detail: '', ms, saved: false, retry: !run.timedOut && !run.overflow };
+  try {
+    fs.writeFileSync(file, run.body + 'exit ' + run.exit + '\n');
+    out.saved = true;
+  } catch (e) {
+    out.detail = 'could not save the output to ' + file + ': ' + e.message;
+    return out;
+  }
+  if (run.timedOut || run.overflow) {
+    out.verdict = 'fail';
+    out.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
+  } else {
+    const d = decide(expect, run.exit, run.body, { stdout: run.stdout, stderr: run.stderr });
+    out.verdict = d.verdict;
+    out.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
+  }
+  return out;
+}
+
+function runOne(c, opts, cwd, outDir, root, env) {
+  const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '', ms: null, slow: false, flaky: false };
+  // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
+  const parsed = tokenize(c.check);
+  let refusal = parsed.error || guardParsed(parsed, root, env);
+  let line = null;
+  if (!refusal) {
+    const built = rebuildCommand(parsed, env);
+    if (built.error) refusal = built.error; else line = built.line;
+  }
+  if (refusal) { row.detail = refusal; return row; }
+
+  const file = path.join(outDir, c.id + '.txt');
+  let a = attempt(line, c.expect, opts, cwd, env, file);
+  let slow = a.ms > opts.timeout / 2;
+  if (opts.rerunFailures && a.verdict === 'fail' && a.retry) {
+    // Keep the failing run where the review and the tally can read it, then
+    // run the same judged line again into <id>.txt.
+    const firstDir = path.join(outDir, 'first-run');
+    let kept = false;
+    try {
+      fs.mkdirSync(firstDir, { recursive: true });
+      fs.renameSync(file, path.join(firstDir, c.id + '.txt'));
+      kept = true;
+    } catch (e) {
+      process.stderr.write('run-checks: ' + c.id + ': could not keep the first run: ' + e.message + '\n');
+    }
+    const second = attempt(line, c.expect, opts, cwd, env, file);
+    slow = slow || second.ms > opts.timeout / 2;
+    if (second.verdict === 'pass') {
+      row.flaky = true;
+      a = Object.assign({}, second, {
+        verdict: 'fail',
+        detail: 'failed, then passed when run again' + (kept ? ' (the failing run is first-run/' + c.id + '.txt)' : ''),
+      });
+    } else {
+      a = second;
+    }
+  }
+  row.verdict = a.verdict;
+  row.exit = a.exit;
+  row.detail = a.detail;
+  row.ms = a.ms;
+  row.slow = slow;
+  if (a.saved) row.stdoutFile = shownPath(cwd, file);
+  return row;
+}
+
+// The commit the run saw, for results.json; null outside a repository.
+function headCommit(cwd) {
+  const r = spawnSync('git', ['rev-parse', '--verify', '-q', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const sha = (r.stdout || '').trim();
+  return r.status === 0 && /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}
+
+function runAll(checks, opts, cwd, outDir) {
+  const env = checkEnv();              // the same environment the guard judges with
+  const root = realpathOrNull(cwd);
+  const at = new Date().toISOString();
+  const results = [];
+  const summary = { pass: 0, fail: 0, model: 0, error: 0 };
+  const flags = { slow: 0, flaky: 0 };
+  for (const c of checks) {
+    const row = runOne(c, opts, cwd, outDir, root, env);
+    if (row.verdict === 'error') process.stderr.write('run-checks: ' + c.id + ': ' + row.detail + '\n');
+    summary[row.verdict]++;
+    if (row.slow) flags.slow++;
+    if (row.flaky) flags.flaky++;
+    results.push(row);
+  }
+  const result = { checks: results, summary, flags };
+  // Saved only when a check ran: a run whose every check was refused writes
+  // nothing at all, as it always has, so a refusal never leaves a record that
+  // looks like evidence.
+  if (results.some((r) => r.stdoutFile !== null)) {
+    const file = path.join(outDir, 'results.json');
+    try {
+      fs.writeFileSync(file, JSON.stringify(Object.assign({ at, head: headCommit(cwd) }, result)) + '\n');
+    } catch (e) {
+      process.stderr.write('run-checks: could not save ' + file + ': ' + e.message + '\n');
+    }
+  }
+  return result;
 }
 
 function main(argv) {
@@ -1250,54 +1400,7 @@ function main(argv) {
   try { checks = loadChecks(opts.checks); } catch (e) { fail(e.message); }
   let outDir;
   try { outDir = prepareOutDir(opts.out, cwd); } catch (e) { fail(e.message); }
-  const env = checkEnv();              // the same environment the guard judges with
-  const root = realpathOrNull(cwd);
-
-  const results = [];
-  const summary = { pass: 0, fail: 0, model: 0, error: 0 };
-  for (const c of checks) {
-    const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '' };
-    // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
-    const parsed = tokenize(c.check);
-    let refusal = parsed.error || guardParsed(parsed, root, env);
-    let line = null;
-    if (!refusal) {
-      const built = rebuildCommand(parsed, env);
-      if (built.error) refusal = built.error; else line = built.line;
-    }
-    if (refusal) {
-      row.detail = refusal;
-    } else {
-      const run = runCheck(line, cwd, opts.timeout, env);
-      if (run.failed) {
-        row.detail = run.failed;
-      } else {
-        const file = path.join(outDir, c.id + '.txt');
-        try {
-          fs.writeFileSync(file, run.body + 'exit ' + run.exit + '\n');
-          const rel = path.relative(cwd, file);
-          row.stdoutFile = (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) ? file : rel;
-        } catch (e) {
-          row.detail = 'could not save the output to ' + file + ': ' + e.message;
-        }
-        row.exit = run.exit;
-        if (!row.detail) {
-          if (run.timedOut || run.overflow) {
-            row.verdict = 'fail';
-            row.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
-          } else {
-            const d = decide(c.expect, run.exit, run.body, { stdout: run.stdout, stderr: run.stderr });
-            row.verdict = d.verdict;
-            row.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
-          }
-        }
-      }
-    }
-    if (row.verdict === 'error') process.stderr.write('run-checks: ' + c.id + ': ' + row.detail + '\n');
-    summary[row.verdict]++;
-    results.push(row);
-  }
-  process.stdout.write(JSON.stringify({ checks: results, summary }) + '\n');
+  process.stdout.write(JSON.stringify(runAll(checks, opts, cwd, outDir)) + '\n');
 }
 
 module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main };

@@ -1127,6 +1127,68 @@ section('13. third round: a reader that follows the links it discovers while wal
   fs.rmSync(outside, { recursive: true, force: true });
 });
 
+// --- 14. check first: run time, slow flag, re-run, results file (issue #231) ---
+// A plan step's check runs before the work and after it (M17), and that loop
+// needs three things the runner did not report: how long each check took (a
+// slow suite is a finding, not a reason to wait), whether a failure survives a
+// second run (a flip-flop must never read as green, M5), and a saved copy of
+// the verdicts that a later tally can read. The flaky fixture is a project
+// whose `npm test` fails on its first run and passes on its second, through a
+// marker file its own script writes: the runner allows `npm test`, and no
+// check may write a file itself. Every detail below is one line, because the
+// release gate shows only the last 15 lines of a failing suite.
+section('14. check first: run time, slow flag, re-run and results file (issue #231)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const firstRun = (r, id) => path.join(r.out, 'first-run', id + '.txt');
+
+  // Run time and the slow flag: `sleep 1` under a 1500 ms limit is over half of it.
+  const t = runChecks([
+    { id: 'quick', check: 'true', expect: { exit: 0 } },
+    { id: 'nap', check: 'sleep 1', expect: { exit: 0 } },
+  ], 'timing', ['--timeout', '1500']);
+  const quick = t.byId.quick || {};
+  const nap = t.byId.nap || {};
+  check('a check reports its run time in ms', Number.isInteger(quick.ms) && quick.ms >= 0 && Number.isInteger(nap.ms) && nap.ms >= 900, one(JSON.stringify([quick, nap])));
+  check('a check over half its time limit is flagged slow', nap.slow === true && quick.slow === false && !!t.json && !!t.json.flags && t.json.flags.slow === 1, one(JSON.stringify(t.json)));
+
+  // The flaky project: fails on its first run, passes on its second.
+  const flakyProj = path.join(sandbox, 'flaky');
+  fs.mkdirSync(path.join(flakyProj, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(flakyProj, 'package.json'), JSON.stringify({ name: 'flaky', version: '1.0.0', private: true, scripts: { test: 'node toggle.js' } }) + '\n');
+  fs.writeFileSync(path.join(flakyProj, 'toggle.js'), "const fs = require('fs');\nif (fs.existsSync('.ran')) process.exit(0);\nfs.writeFileSync('.ran', 'x');\nconsole.log('first run fails');\nprocess.exit(1);\n");
+  const flakyOut = path.join(flakyProj, 'reports', 'out-flaky');
+  const f = run(['--checks', checksFile([{ id: 'suite', check: 'npm test', expect: { exit: 0 } }]), '--out', flakyOut, '--rerun-failures', '--timeout', '60000'], flakyProj);
+  f.out = flakyOut;
+  const suite = f.byId.suite || {};
+  const finalRun = savedFile(f, 'suite');
+  check('a failure that passes on re-run stays a fail, flagged flaky', suite.verdict === 'fail' && suite.flaky === true && !!f.json && f.json.summary.fail === 1 && f.json.summary.pass === 0 && !!f.json.flags && f.json.flags.flaky === 1 && finalRun !== null && lastLine(finalRun) === 'exit 0', one(JSON.stringify(f.json) + ' ' + f.stderr));
+  const kept = fs.existsSync(firstRun(f, 'suite')) ? fs.readFileSync(firstRun(f, 'suite'), 'utf8') : null;
+  check('the failing first run is kept under first-run', kept !== null && lastLine(kept) === 'exit 1' && /first run fails/.test(kept), one(String(kept)));
+
+  // A failure that fails again is a plain fail, its first run kept too.
+  const twice = runChecks([{ id: 'gone', check: 'test -f missing.txt', expect: { exit: 0 } }], 'rerun-twice', ['--rerun-failures']);
+  const gone = twice.byId.gone || {};
+  check('a failure that fails again on re-run is a plain fail, not flaky', gone.verdict === 'fail' && gone.flaky === false && fs.existsSync(firstRun(twice, 'gone')) && !!twice.json && !!twice.json.flags && twice.json.flags.flaky === 0, one(JSON.stringify(twice.json)));
+
+  // A timed-out check is not re-run: that would spend the whole limit again.
+  const started = Date.now();
+  const late = runChecks([{ id: 'late', check: 'sleep 3', expect: { exit: 0 } }], 'rerun-timeout', ['--rerun-failures', '--timeout', '500']);
+  const lateMs = Date.now() - started;
+  const lateRow = late.byId.late || {};
+  check('a timed-out check is not re-run', lateRow.verdict === 'fail' && lateRow.exit === 124 && lateRow.flaky === false && !fs.existsSync(firstRun(late, 'late')) && lateMs < 2500, one(JSON.stringify(lateRow) + ' in ' + lateMs + ' ms'));
+
+  // Without the flag, nothing is re-run: review receipts keep their behavior.
+  const plain = runChecks([{ id: 'gone', check: 'test -f missing.txt', expect: { exit: 0 } }], 'no-rerun');
+  check('without --rerun-failures a failure is not re-run', !!plain.byId.gone && plain.byId.gone.verdict === 'fail' && plain.byId.gone.flaky !== true && !fs.existsSync(path.join(plain.out, 'first-run')), one(JSON.stringify(plain.json)));
+
+  // The saved result: the printed JSON plus when it ran and at which commit.
+  const resultsFile = path.join(t.out, 'results.json');
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(resultsFile, 'utf8')); } catch (e) { saved = null; }
+  const headNow = git(['rev-parse', 'HEAD']).trim();
+  check('the result is also saved as results.json', !!saved && !!t.json && JSON.stringify(saved.checks) === JSON.stringify(t.json.checks) && JSON.stringify(saved.summary) === JSON.stringify(t.json.summary) && typeof saved.at === 'string' && !isNaN(Date.parse(saved.at)) && saved.head === headNow, one(saved ? JSON.stringify({ at: saved.at, head: saved.head }) : 'no results.json'));
+});
+
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
 console.log(failures.length + ' FAILED, ' + passed + ' passed:');
