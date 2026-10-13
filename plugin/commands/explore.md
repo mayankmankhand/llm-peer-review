@@ -4,6 +4,8 @@ allowed-tools:
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/gen-media.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"

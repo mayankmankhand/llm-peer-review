@@ -8,6 +8,8 @@ allowed-tools:
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"

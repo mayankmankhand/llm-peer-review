@@ -1620,8 +1620,19 @@ console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, 
   // each push-family seed row (the git push forms and the mirror remote) is
   // proven on its own: with only that row missing, the finding still names a
   // force push. Row by row, not the rows the #192 fixture happens to omit.
-  const pushRows = SEED_ASK.filter(x => x !== 'Bash(npm install *)');
-  check('#216 fixture: the seed ask list is the npm row plus at least one push-family row', pushRows.length > 0 && pushRows.every(r => /^Bash\(git (push|remote add) /.test(r)), JSON.stringify(pushRows));
+  // The rows outside the push family guard commands the seed does not allow
+  // (the named npm install, and since #232 the two host merges), so their
+  // clause is the conditional one.
+  const pushRows = SEED_ASK.filter(x => /^Bash\(git (push|remote add) /.test(x));
+  const CONDITIONAL_ROWS = ['Bash(npm install *)', 'Bash(gh pr merge *)', 'Bash(glab mr merge *)'];
+  check('#216 fixture: the seed ask list is the push-family rows plus the npm row and the two host merge rows', pushRows.length > 0 && SEED_ASK.filter(x => !pushRows.includes(x)).sort().join('|') === CONDITIONAL_ROWS.slice().sort().join('|'), JSON.stringify(SEED_ASK));
+  CONDITIONAL_ROWS.filter(x => x !== 'Bash(npm install *)').forEach((row, i) => {
+    const one = path.join(TMP, 'merge-row-' + i);
+    write(one, '.claude/.toolkit-state.json', STATE_701);
+    write(one, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== row) } }, null, 2) + '\n');
+    const g = audit(one).findings.find(x => /:missing-ask-rows$/.test(x.key));
+    check('#232 with only ' + row + ' missing, the ask-row finding lists it, names no force push and is conditional on an allow row matching', !!g && JSON.stringify(g.fields[0].value.split(' ; ')) === JSON.stringify([row]) && !/force push/.test(g.what) && /any allow row that matches/.test(g.what), g ? g.what : 'no finding');
+  });
   pushRows.forEach((row, i) => {
     const one = path.join(TMP, 'push-row-' + i);
     write(one, '.claude/.toolkit-state.json', STATE_701);
