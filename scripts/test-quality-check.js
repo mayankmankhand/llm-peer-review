@@ -1045,6 +1045,201 @@ section('skeptic replay: the usage line', () => {
   check('--role skeptic without the run\'s receipts and scope is a usage error (exit 2) that starts nothing', rc.status === 2 && /receipts folder with its scope\.json/.test(rc.stderr) && rc.stdout === '', rc.stdout + rc.stderr);
 });
 
+// ---------------------------------------------------------------------------
+// The fix role and its oracles (harness research plan Step 11): /review's own
+// fix loop runs, then two oracles per runnable planted bug judge the final tree.
+
+const FIXES = require(path.join(FIXTURE, 'oracles', 'self-test-fixes.js'));
+
+section('fix role: every planted bug has an oracle pair or a reason', () => {
+  const set = QC.oracleSet(ANSWERS);
+  const runnable = Object.keys(set);
+  const not = Object.keys(QC.NOT_RUNNABLE);
+  check('oracles: each planted bug is runnable or listed as not runnable, never both', IDS.every(id => runnable.includes(id) !== not.includes(id)), JSON.stringify({ runnable, not }));
+  check('oracles: the not-runnable list names only planted bugs, each with a reason', not.every(id => IDS.includes(id) && QC.NOT_RUNNABLE[id].length > 20));
+  check('oracles: seven runnable bugs, the prompt file and the README wording are not', runnable.length === 7 && not.sort().join() === 'commands-contradiction,copy-unclear-headline', runnable.join());
+  check('oracles: every runnable bug has a correct and an empty self-test fix', runnable.every(id => FIXES[id] && FIXES[id].correct.length && FIXES[id].deletion.length));
+  check('oracles: the self-test pair is two different runnable bugs', QC.SELF_TEST_PAIR.correct !== QC.SELF_TEST_PAIR.deletion && runnable.includes(QC.SELF_TEST_PAIR.correct) && runnable.includes(QC.SELF_TEST_PAIR.deletion));
+  const half = tmp('qc-test-oracles-half-');
+  write(path.join(half, 'code-search-prefix.gone.js'), '');
+  let threw = '';
+  try { QC.oracleSet(ANSWERS, half); } catch (e) { threw = e.message; }
+  check('oracleSet: half a pair is refused', /code-search-prefix has a gone oracle and no works oracle/.test(threw), threw);
+  const stray = tmp('qc-test-oracles-stray-');
+  write(path.join(stray, 'no-such-bug.gone.js'), '');
+  threw = '';
+  try { QC.oracleSet(ANSWERS, stray); } catch (e) { threw = e.message; }
+  check('oracleSet: an oracle that names no planted bug is refused', /no-such-bug\.gone\.js/.test(threw), threw);
+});
+
+section('fix role: the oracles stay out of the scratch project', () => {
+  const rel = path.relative(FIXTURE, QC.ORACLES);
+  check('the oracles folder sits beside base/ and change/, not inside either', rel === 'oracles');
+  const dest = tmp('qc-test-fix-project-');
+  QC.copyFixture(path.join(FIXTURE, 'base'), dest);
+  QC.copyFixture(path.join(FIXTURE, 'change'), dest);
+  const files = [];
+  (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else files.push(path.relative(dest, p)); } })(dest);
+  check('the scratch project built from base/ and change/ holds no oracle file', !files.some(f => /\.(gone|works|shared)\.js$|self-test-fixes|(^|\/)lib\.js$/.test(f)), files.join(', '));
+  const tells = files.filter(f => /oracle/i.test(fs.readFileSync(path.join(dest, f), 'utf8')));
+  check('no project file mentions an oracle', tells.length === 0, tells.join(', '));
+});
+
+section('fix role: the prompt, the cap and the usage line', () => {
+  const p = QC.fixPrompt(QC.FINDER_KINDS, 'abc1234');
+  check('fixPrompt: all eight lenses over the planted change, "no chaining", and no "report only"',
+    p === '/tk:review code,security,ux,plan,commands,browser,deps,copy abc1234..HEAD no chaining' && !/report only/.test(p), p);
+  check('the fix role has its own default cap, $40', QC.DEFAULT_MAX_USD.fix === 40 && QC.budgetEstimate([], 'fix', null) === 40 && QC.budgetEstimate([], 'fix', 30) === 30);
+  check('the other roles\' caps are unchanged', QC.DEFAULT_MAX_USD.review === 25 && QC.DEFAULT_MAX_USD.mapper === 8 && QC.DEFAULT_MAX_USD.skeptic === 25 && QC.DEFAULT_MAX_USD.probe === 5);
+  const header = fs.readFileSync(SCRIPT, 'utf8').split('\n').slice(0, 160).join('\n');
+  check('the header\'s usage names the fix role, --judge and --oracle-self-test',
+    /node scripts\/quality-check\.js --role fix --build <git-ref\|tree>/.test(header) && /--judge <fix-run-dir>/.test(header) && /--oracle-self-test/.test(header));
+  const arm = spawnSync('node', [SCRIPT, '--role', 'fix', '--arm', 'ship', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('--role fix with an arm is a usage error (exit 2) that starts nothing', arm.status === 2 && /--role fix runs the build as it ships: it takes no --arm/.test(arm.stderr) && arm.stdout === '', arm.stdout + arm.stderr);
+  const port = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'a', '--build', 'HEAD', '--oracle-port', '3100'], { encoding: 'utf8' });
+  check('--oracle-port on another role is a usage error (exit 2) that starts nothing', port.status === 2 && /--oracle-port applies to --role fix/.test(port.stderr) && port.stdout === '', port.stdout + port.stderr);
+  const bad = spawnSync('node', [SCRIPT, '--oracle-self-test', '--oracle-port', 'abc'], { encoding: 'utf8' });
+  check('a bad --oracle-port is a usage error', bad.status === 2 && /--oracle-port needs a port number/.test(bad.stderr), bad.stderr);
+  const role = spawnSync('node', [SCRIPT, '--role', 'judge', '--build', 'HEAD'], { encoding: 'utf8' });
+  check('an unknown role is a usage error that names the fix role too', role.status === 2 && /or fix \(the oracle-checked fix run\)/.test(role.stderr), role.stderr);
+  const notFix = tmp('qc-test-judge-');
+  write(path.join(notFix, 'run.json'), JSON.stringify({ role: 'review' }));
+  const judge = spawnSync('node', [SCRIPT, '--judge', notFix], { encoding: 'utf8' });
+  check('--judge on a folder that is not a fix run is a usage error', judge.status === 2 && /--judge needs a fix run folder/.test(judge.stderr), judge.stderr);
+});
+
+section('fix role: the Digest and the fix verifiers\' returns', () => {
+  const md = ['# Review', '', '### Findings', '- **R1** [code] ⚠️ `server.js:61` - x', '', '## Digest', '',
+    '- R1: FIXED - the re-check passed', '- **R2**: NOT FIXED - tried a containment check, the receipt still matched',
+    '- `R3` [commands]: PAGED - a prompt file needs approval (M9)', '- R4 [ux]: FIXED', '- R6: fixed in the loop, no verdict word',
+    'R7: NOT FIXED', '', '## What I could not check', '- R5: FIXED (outside the Digest)'].join('\n');
+  const d = QC.parseDigest(md);
+  check('parseDigest: one verdict per R-number line, NOT FIXED kept apart from FIXED', JSON.stringify(d) === JSON.stringify({ R1: 'FIXED', R2: 'NOT FIXED', R3: 'PAGED', R4: 'FIXED', R7: 'NOT FIXED' }), JSON.stringify(d));
+  check('parseDigest: a report with no Digest gives nothing', Object.keys(QC.parseDigest('# Review\n- R1: FIXED\n')).length === 0);
+  const sub = (type, ts, text) => ({ meta: { agentType: type }, records: [{ timestamp: ts }], d: { handback: text, lastText: '' } });
+  const v = QC.verifierVerdicts([
+    sub('tk:fix-verifier', '2026-10-12T10:05:00Z', 'R2: FIXED\nreceipt: the second round'),
+    sub('tk:fix-verifier', '2026-10-12T10:00:00Z', 'R1: FIXED\nreceipt: grep is empty\nR2: NOT FIXED\nreceipt: still there'),
+    sub('tk:audit-skeptic', '2026-10-12T09:00:00Z', 'R9: FIXED'),
+  ]);
+  check('verifierVerdicts: fix-verifier returns only, a later round winning', JSON.stringify(v.verdicts) === JSON.stringify({ R1: 'FIXED', R2: 'FIXED' }) && v.dispatches === 2, JSON.stringify(v));
+  check('fixOutcome: fixed, broken (the fake fix), not fixed, unjudged',
+    QC.fixOutcome('PASS', 'PASS') === 'fixed' && QC.fixOutcome('PASS', 'FAIL') === 'broken' && QC.fixOutcome('FAIL', 'PASS') === 'not-fixed'
+    && QC.fixOutcome('FAIL', 'FAIL') === 'not-fixed' && QC.fixOutcome('PASS', 'UNJUDGED') === 'unjudged' && QC.fixOutcome(null, null) === 'unjudged');
+});
+
+// A canned fix run: a review run (makeReviewRun) whose role is fix, its report
+// with o.digest appended, o.verifier as one fix-verifier's return, o.oracles as
+// oracles.json ({ id: [gone, works] }), o.gitStatus as the project's git status.
+function makeFixRun(o) {
+  const dir = makeReviewRun({ ...o, meta: { role: 'fix', arm: null, ...(o.meta || {}) } });
+  const report = path.join(dir, 'project-reports', 'review-orchestrator-2026-10-03-120000.md');
+  if (o.digest) fs.appendFileSync(report, '\n## Digest\n\n' + o.digest.join('\n') + '\n');
+  if (o.verifier) {
+    const sessionDir = fs.readdirSync(path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project')).find(n => !/\.jsonl$/.test(n));
+    const base = path.join(dir, 'transcripts', '-tmp-qc-run-TEST-project', sessionDir, 'subagents', 'agent-v1');
+    write(base + '.jsonl', JSON.stringify({ type: 'assistant', timestamp: '2026-10-12T10:00:00Z', message: { model: OPUS, role: 'assistant', content: [{ type: 'text', text: o.verifier }] } }) + '\n');
+    write(base + '.meta.json', JSON.stringify({ agentType: 'tk:fix-verifier', toolUseId: 'toolu_verifier' }));
+  }
+  if (o.oracles) {
+    const v = (id, kind, verdict) => ({ verdict, line: verdict + ' ' + id + ' ' + kind + ': canned', exit: { PASS: 0, FAIL: 1, UNJUDGED: 2 }[verdict] });
+    write(path.join(dir, 'oracles.json'), JSON.stringify({ port: 3000, oracles: Object.entries(o.oracles).map(([id, [g, w]]) => ({ id, gone: v(id, 'gone', g), works: v(id, 'works', w) })) }));
+  }
+  if (o.gitStatus !== undefined) write(path.join(dir, 'project-git.json'), JSON.stringify({ status: o.gitStatus, log: '' }));
+  return dir;
+}
+
+section('fix role: one record per planted bug, from a canned run', () => {
+  // R1..R5 in caught order: code-search-prefix, security-path-traversal, plan-export-json, known-shell-glob, browser-search-id.
+  const caught = ['code-search-prefix', 'security-path-traversal', 'plan-export-json', 'known-shell-glob', 'browser-search-id'];
+  const a = analyze(makeFixRun({
+    caught,
+    digest: ['- R1: FIXED - the search re-check passed', '- R2: FIXED - containment added', '- R3: NOT FIXED - left for the owner', '- R4: FIXED - the cited block removed'],
+    verifier: 'R5: FIXED\nreceipt: the lookup now names #search',
+    oracles: {
+      'code-search-prefix': ['PASS', 'PASS'], 'security-path-traversal': ['PASS', 'PASS'], 'plan-export-json': ['FAIL', 'FAIL'],
+      'known-shell-glob': ['PASS', 'FAIL'], 'browser-search-id': ['PASS', 'UNJUDGED'], 'ux-clear-all-no-confirm': ['FAIL', 'PASS'], 'deps-lodash-cve': ['FAIL', 'PASS'],
+    },
+    gitStatus: ' M server.js\n?? backups/\n',
+  }));
+  const b = a.fix && a.fix.bugs;
+  check('a canned fix run is valid and reads like a review run', a.valid && a.role === 'fix' && a.survived['code-search-prefix'].length === 1, a.reasons.join(', '));
+  check('a fix run that changed the project is not warned for it', !a.warnings.includes('project-changed'), a.warnings.join(', '));
+  check('fix record: raised, in the report, said FIXED, gone and works PASS: fixed', b['code-search-prefix'].raised && b['code-search-prefix'].inReport.join() === 'R1'
+    && b['code-search-prefix'].said === 'FIXED' && b['code-search-prefix'].outcome === 'fixed' && !b['code-search-prefix'].falseFixed, JSON.stringify(b['code-search-prefix']));
+  check('fix record: said FIXED, gone PASS, works FAIL: broken, and a false FIXED (B1\'s miss)', b['known-shell-glob'].outcome === 'broken' && b['known-shell-glob'].falseFixed === true, JSON.stringify(b['known-shell-glob']));
+  check('fix record: said NOT FIXED and the symptom reproduces: not fixed, and no false FIXED', b['plan-export-json'].said === 'NOT FIXED' && b['plan-export-json'].outcome === 'not-fixed' && !b['plan-export-json'].falseFixed);
+  check('fix record: no Digest line, the fix verifier\'s FIXED is what the run said', b['browser-search-id'].said === 'FIXED' && b['browser-search-id'].reported[0].verifier === 'FIXED' && b['browser-search-id'].reported[0].digest === null);
+  check('fix record: an oracle that could not judge makes the bug unjudged, never a false FIXED', b['browser-search-id'].outcome === 'unjudged' && !b['browser-search-id'].falseFixed && a.fix.unjudged.join() === 'browser-search-id');
+  check('fix record: a bug the review never raised keeps its oracle verdicts', !b['ux-clear-all-no-confirm'].raised && b['ux-clear-all-no-confirm'].said === null && b['ux-clear-all-no-confirm'].outcome === 'not-fixed');
+  check('fix record: the prompt file and the README wording are not runnable', b['commands-contradiction'].outcome === 'not-runnable' && b['copy-unclear-headline'].gone === null);
+  check('fix record: the false FIXED list and the counts', a.fix.falseFixed.join() === 'known-shell-glob' && a.fix.digestLines === 4 && a.fix.verifierDispatches === 1 && a.fix.oraclePort === 3000, JSON.stringify({ f: a.fix.falseFixed, d: a.fix.digestLines, v: a.fix.verifierDispatches }));
+  check('a fix-verifier on the session model is expected, not another agent', !a.warnings.some(w => /other-agent/.test(w)), a.warnings.join(', '));
+
+  const leftover = analyze(makeFixRun({ caught: ['code-search-prefix'], digest: ['- R1: FIXED'], meta: { leftovers: [{ pid: 4242, cmd: 'node server.js' }] } }));
+  check('a fix run that left a process running is warned, and stays valid', leftover.valid && leftover.warnings.includes('left-running:1'), leftover.warnings.join(', '));
+  const unjudged = analyze(makeFixRun({ caught: ['code-search-prefix'], digest: ['- R1: FIXED'] }));
+  check('a fix run with no oracles.json is warned not-judged, and stays valid', unjudged.valid && unjudged.warnings.includes('not-judged') && unjudged.fix.bugs['code-search-prefix'].outcome === 'not-judged', unjudged.warnings.join(', '));
+  const noDigest = analyze(makeFixRun({ caught: ['code-search-prefix'], oracles: { 'code-search-prefix': ['PASS', 'PASS'] } }));
+  check('a fix run whose report has no Digest is warned no-digest', noDigest.warnings.includes('no-digest') && noDigest.fix.bugs['code-search-prefix'].said === null);
+  const review = analyze(makeReviewRun({ caught: ['code-search-prefix'] }));
+  check('a review run gets no fix record', review.fix === undefined);
+});
+
+section('fix role: applyEdits and copyTree', () => {
+  const t = tmp('qc-test-edits-');
+  write(path.join(t, 'a.txt'), 'one two two\n');
+  write(path.join(t, 'gone.txt'), 'x');
+  QC.applyEdits(t, [{ file: 'a.txt', find: 'one', replace: '1' }, { file: 'gone.txt', remove: true }]);
+  check('applyEdits: replaces text found once and removes a file', fs.readFileSync(path.join(t, 'a.txt'), 'utf8') === '1 two two\n' && !fs.existsSync(path.join(t, 'gone.txt')));
+  let twice = '';
+  try { QC.applyEdits(t, [{ file: 'a.txt', find: 'two', replace: '2' }]); } catch (e) { twice = e.message; }
+  let missing = '';
+  try { QC.applyEdits(t, [{ file: 'a.txt', find: 'three', replace: '3' }]); } catch (e) { missing = e.message; }
+  check('applyEdits: text found twice or not at all is refused', /exactly once/.test(twice) && /exactly once/.test(missing));
+  const unfixed = tmp('qc-test-unfixed-');
+  QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
+  QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
+  for (const [id, f] of Object.entries(FIXES)) {
+    for (const shape of ['correct', 'deletion']) {
+      const copy = tmp('qc-test-fix-shape-');
+      QC.copyTree(unfixed, copy);
+      let err = '';
+      try { QC.applyEdits(copy, f[shape]); } catch (e) { err = e.message; }
+      check('self-test fix ' + id + ' ' + shape + ' applies to the change tree', err === '', err);
+    }
+  }
+  const src = tmp('qc-test-tree-');
+  for (const f of ['.git/HEAD', 'reports/r.md', 'artifacts/html/review.html', 'node_modules/lodash/index.js', '.claude/commands/x.md', 'server.js']) write(path.join(src, f), 'x');
+  const dest = path.join(tmp('qc-test-tree-dest-'), 'copy');
+  QC.copyTree(src, dest);
+  check('copyTree: .git, reports/ and artifacts/ stay behind; node_modules, .claude and the code come along',
+    !fs.existsSync(path.join(dest, '.git')) && !fs.existsSync(path.join(dest, 'reports')) && !fs.existsSync(path.join(dest, 'artifacts'))
+    && fs.existsSync(path.join(dest, 'node_modules', 'lodash', 'index.js')) && fs.existsSync(path.join(dest, '.claude', 'commands', 'x.md')) && fs.existsSync(path.join(dest, 'server.js')));
+});
+
+section('fix role: the fixes diff', () => {
+  const repo = tmp('qc-test-fix-diff-');
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const g = args => spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, env, encoding: 'utf8' });
+  write(path.join(repo, 'server.js'), 'planted\n');
+  write(path.join(repo, 'app.js'), 'app\n');
+  write(path.join(repo, '.gitignore'), 'reports/\n');
+  g(['init', '-q', '-b', 'main']); g(['add', '-A']); g(['commit', '-q', '-m', 'change']);
+  const change = g(['rev-parse', 'HEAD']).stdout.trim();
+  write(path.join(repo, 'server.js'), 'fixed and committed\n');
+  g(['commit', '-q', '-am', 'fix one']);
+  write(path.join(repo, 'app.js'), 'fixed, not committed\n');
+  write(path.join(repo, 'new-test.js'), 'untracked\n');
+  write(path.join(repo, 'reports', 'r.md'), 'ignored\n');
+  const statusBefore = g(['status', '--porcelain']).stdout;
+  const diff = QC.fixDiff(repo, change);
+  check('fixDiff: a committed fix, an uncommitted one and an untracked file are all in the diff',
+    /\+fixed and committed/.test(diff) && /\+fixed, not committed/.test(diff) && /new-test\.js/.test(diff) && /\+untracked/.test(diff), diff);
+  check('fixDiff: an ignored folder stays out', !/reports\/r\.md/.test(diff));
+  check('fixDiff: the project\'s own index is untouched', g(['status', '--porcelain']).stdout === statusBefore, g(['status', '--porcelain']).stdout);
+});
+
 // A process that no longer runs, or a zombie waiting for its parent to reap it.
 function gone(pid) {
   try { process.kill(pid, 0); } catch (e) { return e.code === 'ESRCH'; }
@@ -1073,6 +1268,58 @@ async function asyncSection(name, fn) {
     check('runGroup: what the command leaves running in its group is stopped when it exits', left.status === 0 && cleared, JSON.stringify(left));
     const missing = await QC.runGroup('/nonexistent/bin', [], {}, 10000);
     check('runGroup: a command that cannot start resolves, never hangs', missing.status === 124 && /ENOENT/.test(missing.stderr), JSON.stringify(missing));
+  });
+
+  await asyncSection('fix role: a verdict counts only when the oracle\'s line and exit code agree', async () => {
+    const dir = tmp('qc-test-fake-oracles-');
+    write(path.join(dir, 'code-search-prefix.gone.js'), "console.log('PASS code-search-prefix gone: says pass'); process.exit(1);\n");
+    write(path.join(dir, 'code-search-prefix.works.js'), "throw new Error('the oracle broke');\n");
+    write(path.join(dir, 'known-shell-glob.gone.js'), "console.log('FAIL known-shell-glob gone: still aborts'); process.exit(1);\n");
+    write(path.join(dir, 'known-shell-glob.works.js'), "console.log('PASS known-shell-glob works: rotates'); process.exit(0);\n");
+    const tree = tmp('qc-test-fake-tree-');
+    write(path.join(tree, 'server.js'), '');
+    const port = await QC.freePort();
+    const j = await QC.judgeTree(tree, port, { answers: ANSWERS, dir });
+    const by = Object.fromEntries(j.oracles.map(r => [r.id, r]));
+    check('judgeTree: a PASS line with exit 1 is UNJUDGED, not a pass or a fail', by['code-search-prefix'].gone.verdict === 'UNJUDGED', JSON.stringify(by['code-search-prefix'].gone));
+    check('judgeTree: an oracle that crashes is UNJUDGED, not a FAIL', by['code-search-prefix'].works.verdict === 'UNJUDGED' && /no verdict line \(exit 1\)/.test(by['code-search-prefix'].works.line), JSON.stringify(by['code-search-prefix'].works));
+    check('judgeTree: a line and exit code that agree are the verdict', by['known-shell-glob'].gone.verdict === 'FAIL' && by['known-shell-glob'].works.verdict === 'PASS');
+    check('judgeTree: the port is never the real run\'s 3000 in a test', port !== QC.PORT && j.port === port);
+  });
+
+  await asyncSection('fix role: what the session left running in the scratch folder is found', async () => {
+    if (process.platform !== 'linux') { check('processesUnder: no /proc here, so nothing is found', QC.processesUnder(os.tmpdir()).length === 0); return; }
+    const scratch = tmp('qc-test-leftover-');
+    const { spawn } = require('child_process');
+    const child = spawn('sleep', ['30'], { cwd: scratch, stdio: 'ignore' });
+    try {
+      await new Promise(res => setTimeout(res, 200));
+      const found = QC.processesUnder(scratch);
+      check('processesUnder: a process whose working folder is inside the scratch folder is listed', found.some(p => p.pid === child.pid && /sleep 30/.test(p.cmd)), JSON.stringify(found));
+      check('processesUnder: nothing outside it is listed', QC.processesUnder(tmp('qc-test-empty-')).length === 0);
+    } finally { child.kill('SIGKILL'); }
+  });
+
+  await asyncSection('fix role: the oracles separate a correct fix from an empty one (no browser)', async () => {
+    // The self-test's required case for the two bugs a test can run without a
+    // browser: the full one, browser oracles included, is --oracle-self-test.
+    const unfixed = tmp('qc-test-oracle-unfixed-');
+    QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
+    QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
+    const only = [QC.SELF_TEST_PAIR.correct, QC.SELF_TEST_PAIR.deletion];
+    const port = await QC.freePort();
+    const before = await QC.judgeTree(unfixed, port, { answers: ANSWERS, only });
+    for (const r of before.oracles) check('unfixed: the ' + r.id + ' gone oracle FAILs', r.gone.verdict === 'FAIL', r.gone.line);
+    const pair = tmp('qc-test-oracle-pair-');
+    QC.copyTree(unfixed, pair);
+    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.correct].correct);
+    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.deletion].deletion);
+    const after = await QC.judgeTree(pair, port, { answers: ANSWERS, only });
+    const by = Object.fromEntries(after.oracles.map(r => [r.id, r]));
+    const c = by[QC.SELF_TEST_PAIR.correct];
+    const d = by[QC.SELF_TEST_PAIR.deletion];
+    check('a correct fix (' + c.id + ') passes gone and works', c.gone.verdict === 'PASS' && c.works.verdict === 'PASS', c.gone.line + ' | ' + c.works.line);
+    check('an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
   });
 
   console.log('');

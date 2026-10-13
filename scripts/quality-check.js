@@ -34,6 +34,14 @@
 //                  skeptic tiers and stop before any fix. It has no arm: it
 //                  measures the build's prompts as they ship. See "The skeptic
 //                  replay" below.
+//   --role fix     The review role's run (same fixture, scratch project, server,
+//                  build install, cap, budget gate and token guard) without
+//                  "report only", so /review's auto-fix loop runs, and with "no
+//                  chaining", so it stops after the loop instead of handing off to
+//                  /document (harness research plan Step 11). It has no arm: the
+//                  build's prompts as they ship. The scratch project's final tree
+//                  is then judged by oracles the session never sees. See "The fix
+//                  role and its oracles" below.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -80,6 +88,15 @@
 //        --evidence is the folder holding the 1cefa1a7 session log (default: the main
 //        checkout's reports/harness-papers-2026-10-12/evidence), --receipts that run's
 //        receipts folder (default: the main checkout's reports/receipts/2026-09-22-002749)
+//   node scripts/quality-check.js --role fix --build <git-ref|tree> [--max-usd <n>] [--label <text>]
+//        [--oracle-port <n>] [--keep]
+//        --oracle-port is where the oracles start the judged tree's server after the
+//        session (default 3000, which the session's own fixture server has freed by then)
+//   node scripts/quality-check.js --judge <fix-run-dir> [--oracle-port <n>]   re-run the
+//        oracles on a saved fix run's final tree (no session, no cost)
+//   node scripts/quality-check.js --oracle-self-test [--oracle-port <n>]   the oracles on
+//        the change tree unfixed, then with hand-made correct and empty fixes (no session;
+//        a free port other than 3000 unless --oracle-port names one)
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--allow-drift <reason>] [--pool <dir>] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
@@ -104,7 +121,10 @@
 // reports/quality-check/ledger.jsonl. reports/ is gitignored and kept on disk.
 // A skeptic run adds replay-merge/ (the Phase 3 merge folder it was handed) and
 // scratchpad/ (the session's scratchpad, where a runner may write shards with
-// Bash, so no transcript holds their bytes).
+// Bash, so no transcript holds their bytes). A fix run adds project-final/ (the
+// scratch project as the session left it, without .git, reports/ and artifacts/),
+// fix-diff.patch (git diff from the planted change to that tree, untracked files
+// included) and oracles.json (each oracle's verdict on project-final/).
 //
 // A run is INVALID, and is rerun once, when: the session did not end cleanly
 // (non-zero exit, an error result, a turn or budget stop), it hit a usage limit,
@@ -194,6 +214,8 @@ const NODE_MODULES = path.join(REPO, '.claude', 'scripts', 'node_modules');
 // This checkout's merge-findings.js: the skeptic replay checks every skeptic's
 // return with its checkVerdicts, whatever build the session ran.
 const MERGE_FINDINGS = path.join(REPO, '.claude', 'scripts', 'merge-findings.js');
+// The fix role's oracles: outside the scratch project, copied out only at judge time.
+const ORACLES = path.join(FIXTURE, 'oracles');
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODES = ['best', 'fit', 'cheap'];
@@ -205,8 +227,13 @@ const SESSION_TIMEOUT_MS = 90 * 60 * 1000;
 // A stopped group gets SIGTERM, then SIGKILL for whatever is still running this long after.
 const KILL_GRACE_MS = 10 * 1000;
 // The skeptic replay takes the review role's cap: it runs the same orchestrator
-// over a whole audit, without the finders.
-const DEFAULT_MAX_USD = { review: 25, mapper: 8, skeptic: 25, probe: 5 };
+// over a whole audit, without the finders. The fix role runs that whole review
+// (measured at $4.19 to $6.11 on this fixture, 2026-10-03 to 10-05) and then the
+// auto-fix loop over its 12 to 20 survivors: an edit, a re-check or a fix-verifier
+// shard per finding and a digest, so about two to three times the review's turns,
+// $12 to $18 expected. $40 is a little over twice the high end, so a slow loop is
+// not stopped mid-fix by its own cap.
+const DEFAULT_MAX_USD = { review: 25, mapper: 8, skeptic: 25, fix: 40, probe: 5 };
 // The two mode probes that run a whole command flow (a fan-out and its audit; an
 // /index, a plan and its critic) get a larger cap than a one-call probe.
 const PROBE_MAX_USD = { 'review-code-mode': 10, 'create-plan-cheap': 10 };
@@ -729,9 +756,10 @@ function analyzeRun(run, answers) {
   a.turns = result && result.num_turns;
 
   if (meta.role === 'probe') a.probe = meta.probe || null;
-  if (meta.role === 'review' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
+  if (meta.role === 'review' || meta.role === 'fix' || (meta.role === 'probe' && meta.probe === 'review')) analyzeReview(a, run, subs, answers, reasons, warnings);
   else if (meta.role === 'mapper') analyzeMapper(a, run, main, subs, reasons);
   else if (meta.role === 'skeptic') analyzeSkeptic(a, run, main, subs, reasons, warnings);
+  if (meta.role === 'fix') analyzeFix(a, run, subs, answers, warnings);
 
   // The model-mode checks (plan Step 7): failures do not void the run's catches,
   // so they are kept apart from validity and decide the exit code on their own.
@@ -848,7 +876,8 @@ function analyzeReview(a, run, subs, answers, reasons, warnings) {
   const counted = new Set(Object.values(a.survived).flat().map(e => e.id));
   for (const e of rep.survivors) if (!counted.has(e.id)) a.unmatchedSurvivors.push({ id: e.id, text: short(e) });
   for (const r of raws) if (r.hits.length === 0) a.unmatchedRaw.push({ kind: r.kind, file: r.file, what: r.what.slice(0, 160) });
-  if (run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
+  // A fix run is meant to change the project; a report-only run is not.
+  if ((run.meta || {}).role !== 'fix' && run.projectGit && /^\s*[MADRC?]/m.test(run.projectGit.status || '')) warnings.push('project-changed');
 }
 
 function analyzeMapper(a, run, main, subs, reasons) {
@@ -1298,6 +1327,263 @@ function analyzeSkeptic(a, run, main, subs, reasons, warnings) {
   if (!summary.recorded) warnings.push('no-recorded-verdicts');
 }
 
+// ---------------------------------------------------------------------------
+// The fix role and its oracles (harness research plan Step 11, D3)
+// ---------------------------------------------------------------------------
+//
+// B1 (reports/harness-papers-2026-10-12/b1-fix-verifier.md) showed the fix
+// verifier judging only whether the defect a finding named is gone: a fix that
+// deleted the cited step passed it 3 of 3 times, and nothing asked whether the
+// step still worked. --role fix lets /review's own loop fix the fixture, then
+// judges the tree it left with two oracles per runnable planted bug, kept in
+// scripts/fixtures/quality-check/oracles/ (see its lib.js) and copied to a temp
+// folder only after the session has ended, so the fixer never sees them:
+//   gone   the bug's symptom no longer reproduces
+//   works  the feature the bug sat in still does its job
+// Per bug the run records whether the review raised it, what the run said of its
+// fix (the report's Digest line for each R-number that carries the bug, else the
+// fix verifiers' returns), and the two verdicts. A bug the run said was FIXED that
+// does not pass both oracles is a false FIXED: the miss B1 found, measured.
+
+// The planted bugs with no oracle pair, and why: no script can run them.
+const NOT_RUNNABLE = {
+  'commands-contradiction': 'a prompt file: whether its rule and its step 2 still contradict is a reading of the text, and what an agent does with it is not deterministic, so no script can run it',
+  'copy-unclear-headline': 'README wording: whether a newcomer learns what the app is is a reader\'s judgment, not a behaviour a script can run',
+};
+// The self-test's required pair: a correct fix for one bug and an empty fix (B1's
+// bad-R3 shape: the cited lines deleted, nothing in their place) for another.
+const SELF_TEST_PAIR = { correct: 'code-search-prefix', deletion: 'known-shell-glob' };
+const ORACLE_KINDS = ['gone', 'works'];
+const ORACLE_EXIT = { PASS: 0, FAIL: 1, UNJUDGED: 2 };
+const ORACLE_TIMEOUT_MS = 90 * 1000;
+
+// The oracle files for each planted bug, { id: { gone, works } }, in the answer
+// key's order. Throws on half a pair or an oracle that names no planted bug.
+function oracleSet(answers, dir) {
+  const files = fs.readdirSync(dir || ORACLES).filter(f => /\.(gone|works)\.js$/.test(f));
+  const known = new Set(answers.bugs.map(b => b.id));
+  const stray = files.filter(f => !known.has(f.replace(/\.(gone|works)\.js$/, '')));
+  if (stray.length) throw new Error('oracles that name no planted bug: ' + stray.join(', '));
+  const out = {};
+  for (const b of answers.bugs) {
+    const pair = Object.fromEntries(ORACLE_KINDS.map(k => [k, files.includes(b.id + '.' + k + '.js') ? b.id + '.' + k + '.js' : null]));
+    if (!pair.gone && !pair.works) continue;
+    if (!pair.gone || !pair.works) throw new Error(b.id + ' has a ' + (pair.gone ? 'gone' : 'works') + ' oracle and no ' + (pair.gone ? 'works' : 'gone') + ' oracle');
+    out[b.id] = pair;
+  }
+  return out;
+}
+
+// The report's Digest section (review.md, After the Report, step 6: "R3: FIXED -
+// <check>", "R5: NOT FIXED - <what was tried>", "R7: PAGED - <what needs the
+// human>"), as { R3: 'FIXED', ... }: the first upper-case verdict word after the
+// R-number that starts a line. A line naming no verdict is skipped.
+const DIGEST_VERDICT = /\b(NOT FIXED|FIXED|PAGED|DEFERRED|SKIPPED|UNAUDITED|REVERTED|LOGGED)\b/;
+function parseDigest(md) {
+  const out = {};
+  let inDigest = false;
+  let level = 0;
+  for (const line of String(md || '').split(/\r?\n/)) {
+    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (h) {
+      if (/^digest\b/i.test(h[2].replace(/[*_`]/g, '').trim())) { inDigest = true; level = h[1].length; continue; }
+      if (inDigest && h[1].length <= level) inDigest = false;
+      continue;
+    }
+    if (/^\s*[*_]*digest[*_]*\s*:?\s*$/i.test(line)) { inDigest = true; level = 6; continue; }
+    if (!inDigest) continue;
+    const m = /^\s*(?:[-*]\s+)?[`*_]*R(\d+)\b(.*)$/.exec(line);
+    if (!m) continue;
+    const v = DIGEST_VERDICT.exec(m[2]);
+    if (v) out['R' + m[1]] = v[1];
+  }
+  return out;
+}
+
+// What the fix verifiers returned (M3's "R3: FIXED" / "R3: NOT FIXED"), as
+// { verdicts: { R3: 'FIXED' }, dispatches }; a later verifier's word wins.
+function verifierVerdicts(subs) {
+  const started = s => ((s.records || []).find(r => r && r.timestamp) || {}).timestamp || '';
+  const verifiers = subs.filter(s => /(^|:)fix-verifier$/.test((s.meta && s.meta.agentType) || ''))
+    .sort((x, y) => started(x).localeCompare(started(y)));
+  const verdicts = {};
+  for (const s of verifiers) {
+    const text = s.d.handback !== null ? s.d.handback : s.d.lastText;
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const m = /^\s*(?:[-*]\s+)?[`*_]*R(\d+)[`*_]*\s*:\s*[`*_]*(NOT FIXED|FIXED)\b/.exec(line);
+      if (m) verdicts['R' + m[1]] = m[2];
+    }
+  }
+  return { verdicts, dispatches: verifiers.length };
+}
+
+// One bug's outcome from its two verdicts: fixed (gone and works), broken (gone,
+// and the feature no longer works: B1's fake fix), not-fixed (the symptom still
+// reproduces), or unjudged (an oracle could not judge).
+function fixOutcome(gone, works) {
+  if (gone === 'UNJUDGED' || works === 'UNJUDGED' || !gone || !works) return 'unjudged';
+  if (gone === 'FAIL') return 'not-fixed';
+  return works === 'PASS' ? 'fixed' : 'broken';
+}
+
+function analyzeFix(a, run, subs, answers, warnings) {
+  const digest = parseDigest(run.report);
+  const ver = verifierVerdicts(subs);
+  const judged = run.oracles && Array.isArray(run.oracles.oracles) ? run.oracles : null;
+  if (run.report && !Object.keys(digest).length) warnings.push('no-digest');
+  if (!judged) warnings.push('not-judged');
+  const left = ((run.meta || {}).leftovers || []).length;
+  if (left) warnings.push('left-running:' + left);
+  a.fix = { digestLines: Object.keys(digest).length, verifierDispatches: ver.dispatches, oraclePort: judged ? judged.port : null,
+    judgeError: run.oracles && run.oracles.error ? run.oracles.error : null, bugs: {}, falseFixed: [], unjudged: [] };
+  for (const b of answers.bugs) {
+    const rids = ((a.survived || {})[b.id] || []).map(e => e.id);
+    const reported = rids.map(id => ({ id, digest: digest[id] || null, verifier: ver.verdicts[id] || null }));
+    const said = [...new Set(reported.map(r => r.digest || r.verifier).filter(Boolean))];
+    const o = judged ? judged.oracles.find(x => x.id === b.id) : null;
+    const gone = o && o.gone ? o.gone.verdict : null;
+    const works = o && o.works ? o.works.verdict : null;
+    const outcome = NOT_RUNNABLE[b.id] ? 'not-runnable' : !o ? 'not-judged' : fixOutcome(gone, works);
+    const row = {
+      raised: ((a.raised || {})[b.id] || []).length > 0, inReport: rids, reported, said: said.join('/') || null,
+      gone, works, goneLine: o && o.gone ? o.gone.line : null, worksLine: o && o.works ? o.works.line : null, outcome,
+    };
+    row.falseFixed = said.includes('FIXED') && (outcome === 'broken' || outcome === 'not-fixed');
+    a.fix.bugs[b.id] = row;
+    if (row.falseFixed) a.fix.falseFixed.push(b.id);
+    if (outcome === 'unjudged') a.fix.unjudged.push(b.id);
+  }
+}
+
+// The fix run's prompt: no "report only", so the auto loop runs; "no chaining", so
+// it stops after the loop instead of chaining into /document (M14).
+function fixPrompt(lenses, base) {
+  return '/tk:review ' + lenses.join(',') + ' ' + base + '..HEAD no chaining';
+}
+
+// A project tree as the oracles judge it: all of it but .git and the review's own
+// output folders.
+const TREE_SKIP = new Set(['.git', 'reports', 'artifacts']);
+function copyTree(src, dest) {
+  fs.cpSync(src, dest, { recursive: true, dereference: false, verbatimSymlinks: true, filter: s => !TREE_SKIP.has(path.relative(src, s).split(path.sep)[0]) });
+}
+
+// Everything the session changed since the planted change, committed or not,
+// untracked files included, read through a throwaway index so the project's own
+// index is untouched.
+function fixDiff(project, from) {
+  const index = path.join(os.tmpdir(), 'qc-fix-diff-' + process.pid + '-' + Date.now() + '.index');
+  const env = { GIT_INDEX_FILE: index };
+  try {
+    git(['read-tree', 'HEAD'], project, env);
+    git(['add', '-A'], project, env);
+    const r = sh('git', ['diff', '--cached', '--binary', from], { cwd: project, env: { ...GIT_ENV, ...env } });
+    if (r.status !== 0) throw new Error('git diff failed: ' + r.stderr);
+    return r.stdout;
+  } finally {
+    fs.rmSync(index, { force: true });
+  }
+}
+
+// Processes still running with their working folder inside `root` (read from
+// Linux /proc; none elsewhere): what a session left behind, such as a dev server
+// it restarted in the background to see its fix. Left alone, it would hold the
+// oracles' port and keep serving the tree, on every interface (it runs without
+// loopback.js), after the scratch folder is gone.
+function processesUnder(root) {
+  const out = [];
+  let entries;
+  try { entries = fs.readdirSync('/proc'); } catch (e) { return out; }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+    let cwd;
+    try { cwd = fs.readlinkSync(path.join('/proc', name, 'cwd')); } catch (e) { continue; }
+    if (!isUnder(cwd, root)) continue;
+    let cmd = '';
+    try { cmd = fs.readFileSync(path.join('/proc', name, 'cmdline'), 'utf8').split('\0').join(' ').trim(); } catch (e) { cmd = ''; }
+    out.push({ pid: Number(name), cmd: cmd.slice(0, 200) });
+  }
+  return out;
+}
+
+// playwright-core for the two browser oracles: this checkout's, else the main
+// checkout's (a side worktree has no node_modules of its own); null when neither.
+function playwrightCore() {
+  for (const root of [...new Set([REPO, mainCheckout()])]) {
+    const p = path.join(root, '.claude', 'scripts', 'node_modules', 'playwright-core');
+    if (fs.existsSync(path.join(p, 'package.json'))) return p;
+  }
+  return null;
+}
+
+// Runs each oracle pair (only those named in opts.only, when given) one at a time,
+// each oracle on its own fresh copy of `tree`, starting servers on `port`. The
+// oracles go to a temp folder first, with loopback.js beside them. A verdict counts
+// only when the oracle's line and exit code agree; anything else is UNJUDGED.
+// Resolves { port, at, playwright, oracles: [{ id, gone, works }], notRunnable },
+// each verdict { verdict, line, exit }. opts: answers, only, onResult(id, kind,
+// verdict), and dir (another oracle folder, for the tests).
+async function judgeTree(tree, port, opts) {
+  const o = opts || {};
+  const src = o.dir || ORACLES;
+  const set = oracleSet(o.answers || loadAnswers(), src);
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-judge.'));
+  const pw = playwrightCore();
+  const env = { ...process.env, QC_PLAYWRIGHT_CORE: pw || '' };
+  const browsers = path.join(REAL_HOME, '.cache', 'ms-playwright');
+  if (!env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(browsers)) env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+  const results = [];
+  try {
+    const dir = path.join(work, 'oracles');
+    copyDir(src, dir);
+    fs.copyFileSync(LOOPBACK_PRELOAD, path.join(dir, 'loopback.js'));
+    for (const [id, files] of Object.entries(set)) {
+      if (o.only && !o.only.includes(id)) continue;
+      const row = { id };
+      for (const kind of ORACLE_KINDS) {
+        const copy = path.join(work, 'tree-' + id + '-' + kind);
+        copyTree(tree, copy);
+        const r = await runGroup(process.execPath, [path.join(dir, files[kind]), copy, String(port)], { cwd: work, env }, ORACLE_TIMEOUT_MS, 2000);
+        const line = (r.stdout.trim().split('\n').filter(Boolean).pop() || '').trim();
+        const said = /^(PASS|FAIL|UNJUDGED)\b/.exec(line);
+        const verdict = said && ORACLE_EXIT[said[1]] === r.status ? said[1] : 'UNJUDGED';
+        row[kind] = { verdict, line: said ? line : 'no verdict line (exit ' + r.status + (r.timedOut ? ', timed out' : '') + '): ' + (r.stderr.trim().split('\n').pop() || '').slice(0, 200), exit: r.status };
+        if (o.onResult) o.onResult(id, kind, row[kind]);
+        fs.rmSync(copy, { recursive: true, force: true });
+      }
+      results.push(row);
+    }
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+  return { port, at: new Date().toISOString(), playwright: pw, oracles: results, notRunnable: NOT_RUNNABLE };
+}
+
+// Applies self-test-fixes.js edits to a tree: { file, find, replace }, where the
+// text must be there exactly once, or { file, remove: true }.
+function applyEdits(tree, edits) {
+  for (const e of edits) {
+    const abs = path.join(tree, e.file);
+    if (e.remove) { fs.rmSync(abs); continue; }
+    const text = fs.readFileSync(abs, 'utf8');
+    const at = text.indexOf(e.find);
+    if (at === -1 || text.indexOf(e.find, at + 1) !== -1) throw new Error('a self-test edit to ' + e.file + ' does not match the tree exactly once: ' + JSON.stringify(e.find.slice(0, 80)));
+    fs.writeFileSync(abs, text.slice(0, at) + e.replace + text.slice(at + e.find.length));
+  }
+}
+
+// A free loopback port that is not PORT, the one a real run's server takes.
+async function freePort() {
+  for (;;) {
+    const p = await new Promise((resolve, reject) => {
+      const s = require('net').createServer();
+      s.once('error', reject);
+      s.listen(0, '127.0.0.1', () => { const n = s.address().port; s.close(() => resolve(n)); });
+    });
+    if (p !== PORT) return p;
+  }
+}
+
 // Was `id` caught in analysis `a`?
 function caught(a, id) {
   if (a.role === 'mapper') return (a.covered || []).includes(id);
@@ -1638,6 +1924,8 @@ function loadRun(dir) {
     reportFile,
     projectGit: readJson(gitFile),
     plans,
+    // A fix run's oracle verdicts on its final tree (judgeTree), or null.
+    oracles: readJson(path.join(dir, 'oracles.json')),
   };
 }
 
@@ -2193,7 +2481,7 @@ function budgetCheck(role, maxUsd) {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
-  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper' || r.role === 'skeptic');
+  const measured = rows.filter(r => r.role === 'review' || r.role === 'mapper' || r.role === 'skeptic' || r.role === 'fix');
   if (!approval) {
     if (measured.length === 0) return { ok: true, spent, note: 'first measured run: no approval needed yet; its cost sizes the request' };
     return { ok: false, spent, page: 'Budget stop: the first measured run is done and the owner has not approved a budget. Ask the owner, then record the answer with --approve <usd>.' };
@@ -2405,12 +2693,13 @@ function copyScratchpads(home, out) {
 
 async function commandRun(o) {
   const role = o.role;
-  if (!['review', 'mapper', 'skeptic', 'probe'].includes(role)) usage('--role must be review, mapper or skeptic');
-  if (role === 'skeptic') {
-    if (o.arm !== undefined || o.only || o.effort || o.modeWord !== undefined || o.planModels !== undefined) usage('--role skeptic replays the build as it ships: it takes no --arm, --only, --effort, --mode-word or --plan-models');
-    skepticInputs(o);
+  if (!['review', 'mapper', 'skeptic', 'fix', 'probe'].includes(role)) usage('--role must be review, mapper or skeptic, or fix (the oracle-checked fix run)');
+  if (role === 'skeptic' || role === 'fix') {
+    if (o.arm !== undefined || o.only || o.effort || o.modeWord !== undefined || o.planModels !== undefined) usage('--role ' + role + (role === 'skeptic' ? ' replays' : ' runs') + ' the build as it ships: it takes no --arm, --only, --effort, --mode-word or --plan-models');
+    if (role === 'skeptic') skepticInputs(o);
   }
-  if (role !== 'probe' && role !== 'skeptic' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
+  if (o.oraclePort !== undefined && role !== 'fix') usage('--oracle-port applies to --role fix, --judge and --oracle-self-test');
+  if (role !== 'probe' && role !== 'skeptic' && role !== 'fix' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
   if (o.only && (role === 'probe' || o.arm === 'ship')) usage('--only applies to a measured arm (a, b, c or h) of the review or mapper role');
   if (!o.build) usage('--build <git-ref|tree> is required');
   if (role === 'mapper' && !o.chunk) usage('--role mapper needs --chunk <manifest.json>');
@@ -2433,7 +2722,7 @@ async function commandRun(o) {
   // The mode a review run resolves, named in its folder when it was chosen.
   const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
   const onlyTag = o.only ? '-only-' + o.only.map(n => n.replace(/^review-|-finder$/g, '')).join('+') : '';
-  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' ? 'skeptic' : role + '-' + o.arm + onlyTag + modeTag;
+  const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' || role === 'fix' ? role : role + '-' + o.arm + onlyTag + modeTag;
   const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
   fs.mkdirSync(out, { recursive: true });
   // Opus, except the probe that checks /execute's note on a session running on
@@ -2448,6 +2737,10 @@ async function commandRun(o) {
     expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
     fixture: fixtureHash(), startedAt: new Date().toISOString(),
   };
+  // Where the oracles start the judged tree's server, after the session's own
+  // fixture server has stopped.
+  const oraclePort = o.oraclePort || PORT;
+  if (role === 'fix') meta.oraclePort = oraclePort;
   let serverPid = null;
   let envExtra = {};
   // From the session's start the run may have spent money, so from then on a
@@ -2459,8 +2752,10 @@ async function commandRun(o) {
   const enterLedger = valid => appendLedger({ at: meta.endedAt || new Date().toISOString(), role, arm: meta.arm, probe: meta.probe,
     build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
   try {
-    if (role === 'review' || (role === 'probe' && o.probe === 'review')) {
-      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only) : armSettings('review', 'a', build, null);
+    if (role === 'review' || role === 'fix' || (role === 'probe' && o.probe === 'review')) {
+      // The fix role runs the finders as the build ships them (the ship arm's settings).
+      const settings = role === 'review' ? armSettings('review', o.arm, build, o.effort, o.only)
+        : role === 'fix' ? armSettings('review', 'ship', build, null) : armSettings('review', 'a', build, null);
       applyArm(settings);
       meta.patch = settings.filter(s => !s.shipped).map(s => ({ agent: s.name, before: s.before, model: s.model, effort: s.effort }));
       // The agents the arm left as shipped (all of them on the ship arm, the rest
@@ -2476,10 +2771,13 @@ async function commandRun(o) {
       }
       const commits = buildReviewProject(project, o.planModels || null);
       meta.commits = commits;
-      meta.lenses = role === 'review' ? FINDER_KINDS : ['code'];
+      meta.lenses = role === 'review' || role === 'fix' ? FINDER_KINDS : ['code'];
       const lensArg = meta.lenses.join(',');
       const modeWord = o.modeWord ? ' mode:' + o.modeWord : '';
-      meta.prompt = '/tk:review ' + lensArg + ' ' + commits.base + '..HEAD' + modeWord + ' report only, no chaining';
+      meta.prompt = role === 'fix' ? fixPrompt(meta.lenses, commits.base) : '/tk:review ' + lensArg + ' ' + commits.base + '..HEAD' + modeWord + ' report only, no chaining';
+      // The loop commits each green fix (M4); the scratch home has no git
+      // identity, so the project carries one, as a real project would.
+      if (role === 'fix') for (const [k, v] of [['user.name', 'Notebook Dev'], ['user.email', 'dev@example.com'], ['commit.gpgsign', 'false']]) git(['config', k, v], project);
       serverPid = await startServer(project);
     } else if (role === 'mapper') {
       const chunk = JSON.parse(fs.readFileSync(path.resolve(o.chunk), 'utf8'));
@@ -2587,6 +2885,14 @@ async function commandRun(o) {
   } finally {
     cleanupFailed = runSteps([
       ['stop the fixture server', () => stopServer(serverPid)],
+      ['stop what the session left running', () => {
+        if (role !== 'fix') return;
+        const left = processesUnder(tmp).filter(p => p.pid !== serverPid);
+        if (!left.length) return;
+        meta.leftovers = left;
+        for (const p of left) { try { process.kill(p.pid, 'SIGKILL'); } catch (e) { /* already gone */ } }
+        console.log('quality-check: stopped ' + left.length + ' process' + (left.length === 1 ? '' : 'es') + ' the session left running in the scratch folder: ' + left.map(p => p.cmd || p.pid).join(' | '));
+      }],
       ['copy the transcripts', () => copyDir(path.join(home, '.claude', 'projects'), path.join(out, 'transcripts'))],
       ['copy the project reports', () => copyDir(path.join(project, 'reports'), path.join(out, 'project-reports'))],
       ['copy the project plans', () => copyDir(path.join(project, 'plans'), path.join(out, 'project-plans'))],
@@ -2599,6 +2905,11 @@ async function commandRun(o) {
         const lg = sh('git', ['log', '--oneline', '-5'], { cwd: project, env: GIT_ENV });
         fs.writeFileSync(path.join(out, 'project-git.json'), JSON.stringify({ status: st.stdout, log: lg.stdout }, null, 2) + '\n');
       }],
+      // A fix run's final tree, which the oracles judge below, and its fixes diff.
+      ['copy the final project tree', () => { if (role === 'fix' && fs.existsSync(project)) copyTree(project, path.join(out, 'project-final')); }],
+      ['record the fixes diff', () => {
+        if (role === 'fix' && meta.commits && fs.existsSync(path.join(project, '.git'))) fs.writeFileSync(path.join(out, 'fix-diff.patch'), fixDiff(project, meta.commits.change));
+      }],
       // A skeptic replay's inputs outside the project, read back when it is scored.
       ['copy the replay\'s merge folder', () => { if (role === 'skeptic' && meta.replay) copyDir(meta.replay.mergeDir, path.join(out, 'replay-merge')); }],
       ['copy the session scratchpad', () => { if (role === 'skeptic') copyScratchpads(home, out); }],
@@ -2607,6 +2918,23 @@ async function commandRun(o) {
       // A run that broke after its session started still enters its spend.
       ['enter the ledger line', () => { if (ran && !sessionDone) enterLedger(false); }],
     ]);
+  }
+  // The oracles judge the fix run's final tree. A judge that breaks is recorded,
+  // never thrown: the run's ledger line below must still be written, and --judge
+  // can judge the saved tree again.
+  if (role === 'fix' && !interrupted) {
+    let judged;
+    try {
+      const tree = path.join(out, 'project-final');
+      if (!fs.existsSync(tree)) throw new Error('no project-final/ was saved');
+      console.log('quality-check: judging the final tree with the oracles, servers on port ' + oraclePort);
+      judged = await judgeTree(tree, oraclePort);
+    } catch (e) {
+      judged = { port: oraclePort, at: new Date().toISOString(), error: String(e && e.message || e) };
+      console.error('quality-check: the oracles could not judge the run: ' + judged.error);
+    }
+    try { fs.writeFileSync(path.join(out, 'oracles.json'), JSON.stringify(judged, null, 2) + '\n'); }
+    catch (e) { console.error('quality-check: could not write oracles.json: ' + e.message); }
   }
   let analysis = null;
   try {
@@ -2689,6 +3017,19 @@ function printRunSummary(a, verbose) {
     }
   }
   if (a.role === 'mapper' && a.mapper) console.log('  mapper: ' + JSON.stringify(a.mapper));
+  if (a.role === 'fix' && a.fix) {
+    const f = a.fix;
+    console.log('  fix loop: ' + f.digestLines + ' Digest line' + (f.digestLines === 1 ? '' : 's') + ', ' + f.verifierDispatches + ' fix-verifier dispatch' + (f.verifierDispatches === 1 ? '' : 'es')
+      + '; oracles: ' + (f.oraclePort ? 'judged with servers on port ' + f.oraclePort : 'NOT JUDGED' + (f.judgeError ? ' (' + f.judgeError + ')' : '')));
+    console.log('    ' + 'bug'.padEnd(26) + 'raised  report        run said     gone      works     outcome');
+    for (const [id, b] of Object.entries(f.bugs)) {
+      console.log('    ' + id.padEnd(26) + (b.raised ? 'yes' : 'no').padEnd(8) + (b.inReport.join(',') || '-').padEnd(14) + (b.said || '-').padEnd(13)
+        + (b.gone || '-').padEnd(10) + (b.works || '-').padEnd(10) + b.outcome + (b.falseFixed ? '  FALSE FIXED' : ''));
+      for (const l of [b.goneLine, b.worksLine]) if (l) console.log('        ' + l);
+    }
+    console.log('  false FIXED (the run said FIXED; the oracles do not pass both): ' + (f.falseFixed.length ? f.falseFixed.join(', ') : 'none'));
+    if (f.unjudged.length || !f.oraclePort) console.log('  judge again: node scripts/quality-check.js --judge ' + path.relative(REPO, a.dir) + ' [--oracle-port <n>]');
+  }
   if (a.role === 'skeptic' && a.skeptic) {
     const s = a.skeptic.summary;
     const ids = list => (list.length ? list.join(', ') : 'none');
@@ -2784,6 +3125,80 @@ function commandScore(o) {
   if (results.length > 1) console.log('Cheapest passing set: ' + (passing.length ? passing[0].set + ' (' + money(passing[0].s.costUsd) + ' per run)' : 'none'));
 }
 
+// --oracle-self-test: the oracles on the change tree with no fix (every gone oracle
+// must FAIL), then on one tree holding a correct fix for SELF_TEST_PAIR.correct and
+// an empty fix for SELF_TEST_PAIR.deletion (correct: gone and works PASS; empty:
+// gone PASS, works FAIL), then each runnable bug's correct and empty fix alone.
+// No session, no ledger line; servers on a free port other than PORT.
+async function commandOracleSelfTest(o) {
+  const answers = loadAnswers();
+  const set = oracleSet(answers);
+  const fixes = require(path.join(ORACLES, 'self-test-fixes.js'));
+  const port = o.oraclePort || await freePort();
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-oracle-self-test.'));
+  let checks = 0;
+  const failed = [];
+  const want = (stage, id, kind, wanted, got) => {
+    const ok = wanted === null || got.verdict === wanted;
+    if (wanted !== null) { checks++; if (!ok) failed.push(stage + ' ' + id + ' ' + kind); }
+    console.log('  ' + (wanted === null ? '[ref]' : ok ? '[ok] ' : '[BAD]') + ' ' + stage.padEnd(9) + id.padEnd(24) + ' ' + kind.padEnd(6) + got.verdict.padEnd(9)
+      + (wanted === null ? '(reference)  ' : '(want ' + wanted + ')').padEnd(14) + got.line);
+  };
+  const judge = async (stage, tree, wants) => {
+    await judgeTree(tree, port, { answers, only: Object.keys(wants), onResult: (id, kind, r) => want(stage, id, kind, wants[id][kind], r) });
+  };
+  try {
+    console.log('Oracle self-test: servers on port ' + port + '; playwright-core: ' + (playwrightCore() || 'none (the browser oracles will be UNJUDGED)'));
+    const unfixed = path.join(work, 'unfixed');
+    copyFixture(path.join(FIXTURE, 'base'), unfixed);
+    copyFixture(path.join(FIXTURE, 'change'), unfixed);
+    for (const id of Object.keys(set)) if (!fixes[id] || !fixes[id].correct || !fixes[id].deletion) failed.push('no self-test fixes for ' + id);
+
+    console.log('\n1. The change tree with no fix: every gone oracle FAILs (works shown for reference)');
+    await judge('unfixed', unfixed, Object.fromEntries(Object.keys(set).map(id => [id, { gone: 'FAIL', works: null }])));
+
+    const pair = path.join(work, 'pair');
+    copyTree(unfixed, pair);
+    applyEdits(pair, fixes[SELF_TEST_PAIR.correct].correct);
+    applyEdits(pair, fixes[SELF_TEST_PAIR.deletion].deletion);
+    console.log('\n2. One tree: a correct fix for ' + SELF_TEST_PAIR.correct + ', an empty fix (the cited lines deleted) for ' + SELF_TEST_PAIR.deletion);
+    await judge('pair', pair, { [SELF_TEST_PAIR.correct]: { gone: 'PASS', works: 'PASS' }, [SELF_TEST_PAIR.deletion]: { gone: 'PASS', works: 'FAIL' } });
+
+    console.log('\n3. Each runnable bug alone: its correct fix passes both; its empty fix passes gone and fails works');
+    for (const id of Object.keys(set)) {
+      for (const [shape, wants] of [['correct', { gone: 'PASS', works: 'PASS' }], ['deletion', { gone: 'PASS', works: 'FAIL' }]]) {
+        if (!fixes[id] || !fixes[id][shape]) continue;
+        const tree = path.join(work, id + '-' + shape);
+        copyTree(unfixed, tree);
+        applyEdits(tree, fixes[id][shape]);
+        await judge(shape, tree, { [id]: wants });
+        fs.rmSync(tree, { recursive: true, force: true });
+      }
+    }
+    console.log('\nNot runnable (no oracle pair):');
+    for (const [id, why] of Object.entries(NOT_RUNNABLE)) console.log('  ' + id.padEnd(24) + ' ' + why);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+  console.log('\nOracle self-test: ' + (checks - failed.filter(f => !/^no self-test fixes/.test(f)).length) + ' of ' + checks + ' verdicts as wanted' + (failed.length ? '; FAILED: ' + failed.join(', ') : ''));
+  process.exit(failed.length ? 1 : 0);
+}
+
+// --judge: the oracles again on a saved fix run's final tree (a busy port, a
+// missing browser), then the run re-analyzed. No session, no cost.
+async function commandJudge(o) {
+  const dir = path.resolve(o.judge);
+  const meta = readJson(path.join(dir, 'run.json'));
+  if (!meta || meta.role !== 'fix') usage('--judge needs a fix run folder (its run.json says role fix): ' + dir);
+  const tree = path.join(dir, 'project-final');
+  if (!fs.existsSync(tree)) usage('--judge needs the run\'s project-final/ folder, not found in ' + dir);
+  const judged = await judgeTree(tree, o.oraclePort || PORT);
+  fs.writeFileSync(path.join(dir, 'oracles.json'), JSON.stringify(judged, null, 2) + '\n');
+  const a = analyzeRun(loadRun(dir), loadAnswers());
+  fs.writeFileSync(path.join(dir, 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
+  printRunSummary(a, false);
+}
+
 function commandBudget() {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
@@ -2827,6 +3242,12 @@ function parseArgs(argv) {
     else if (a === '--probe') o.probe = val();
     else if (a === '--budget') o.budget = true;
     else if (a === '--approve') o.approve = Number(val());
+    else if (a === '--judge') o.judge = val();
+    else if (a === '--oracle-self-test') o.oracleSelfTest = true;
+    else if (a === '--oracle-port') {
+      o.oraclePort = Number(val());
+      if (!Number.isInteger(o.oraclePort) || o.oraclePort < 1 || o.oraclePort > 65535) usage('--oracle-port needs a port number');
+    }
     else usage('unknown argument ' + a);
   }
   return o;
@@ -2844,6 +3265,8 @@ async function main() {
     console.log('approved budget recorded: ' + money(o.approve));
     return;
   }
+  if (o.oracleSelfTest) return commandOracleSelfTest(o);
+  if (o.judge) return commandJudge(o);
   if (o.check) {
     const a = analyzeRun(loadRun(path.resolve(o.check)), loadAnswers());
     fs.writeFileSync(path.join(path.resolve(o.check), 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
@@ -2922,6 +3345,8 @@ module.exports = {
   settingLines, mapperPromptHash, PATH_FILES,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt,
+  ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
+  copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
 };
 
 if (require.main === module) {
