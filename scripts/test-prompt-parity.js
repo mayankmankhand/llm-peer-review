@@ -72,14 +72,15 @@ check('the three security reviewers read do-not-report.md, right after the toolk
 // The sentence moved from README.md to docs/EXTENDING.md on 2026-10-09, when the README became a front door and the manual moved into docs/.
 check('the toolkit reference and the extending guide count the same seven files', /seven files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Seven files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
 check('the extending guide lists checks.json', /^\| `checks\.json` \|/m.test(read('docs/EXTENDING.md')));
-// Issue #221 added rule M16, so the fix-rules sentence every loop stage carries counts to M16. It is
+// Issue #231 added rule M17, so the fix-rules sentence every loop stage carries counts to M17. It is
 // pinned word for word so the next rule's sweep is one grep and a drift in one file is caught here.
-const FIX_RULES = 'Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M16 is void.';
+const FIX_RULES = 'Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void.';
 const FIX_RULES_SITES = prompts.filter(([, text]) => /\*\*Project fix rules\*\* \(from/.test(text)).map(([file]) => file);
 check('eighteen prompt files carry the project fix rules paragraph', FIX_RULES_SITES.length === 18, FIX_RULES_SITES.length + ' found');
 for (const file of FIX_RULES_SITES) check(file + ' carries the fix-rules sentence word for word, once', count(read(file), FIX_RULES) === 1, count(read(file), FIX_RULES) + ' found');
-const staleRule = prompts.filter(([, text]) => /M1 to M15|M1-M15/.test(text)).map(([file]) => file);
-check('no prompt file still counts the loop rules to M15', staleRule.length === 0, staleRule.join(', '));
+// Written as a class, so this file never holds the old range as a literal a sweep would find.
+const staleRule = prompts.filter(([, text]) => /M1 to M1[56]|M1-M1[56]/.test(text)).map(([file]) => file);
+check('no prompt file still counts the loop rules to M15 or M16', staleRule.length === 0, staleRule.join(', '));
 
 console.log('\n3. the reload-then-fallback sentence');
 const SENTENCE = 'run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload)';
