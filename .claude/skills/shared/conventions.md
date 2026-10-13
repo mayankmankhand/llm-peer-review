@@ -45,11 +45,12 @@ Why: the plugin's files live in a versioned cache folder, not in the project, so
 
 ### C-2: A dispatch names a typed agent
 - **Since:** 7.0.0
+- **Runs:** every upgrade
 - **Scope:** prompt-files
 - **Detector:** regex
 - **Looks behind:** `subagent_type\s*[=:]\s*["'`]?(tk:)?review-finder\b`
 - **Looks behind:** `subagent_type\s*[=:]\s*["'`]?general-purpose\b.*(review|criteria|findings|skeptic|verif)`
-- **Fix:** dispatch `subagent_type=tk:review-<kind>-finder` (code, ux, copy, security, plan, deps, commands, browser), `tk:audit-skeptic`, `tk:fix-verifier`, or `tk:plan-critic`; `review-finder` is deprecated in 7.0 and removed in 8.0
+- **Fix:** dispatch `subagent_type=tk:review-<kind>-finder` (code, ux, copy, security, plan, deps, commands, browser), `tk:audit-skeptic`, `tk:fix-verifier`, or `tk:plan-critic`; `review-finder` was deprecated in 7.0 and removed in 8.0.0, so a dispatch that still names it reaches nothing
 
 Why: the per-kind finders preload their criteria and the dispatch contract, so a dispatch carries only the run's context; a `general-purpose` worker doing review work carries every tool, Edit included, and can change files before the M2 audit ever judges its findings.
 

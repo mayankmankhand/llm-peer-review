@@ -14,7 +14,6 @@
     "agents/review-commands-finder.md": 5617,
     "agents/review-copy-finder.md": 5457,
     "agents/review-deps-finder.md": 5096,
-    "agents/review-finder.md": 143,
     "agents/review-plan-finder.md": 5339,
     "agents/review-security-finder.md": 6147,
     "agents/review-ux-finder.md": 5360,
@@ -33,7 +32,7 @@
     "commands/peer-review.md": 2148,
     "commands/review.md": 22825,
     "commands/worktree.md": 1078,
-    "session": 2436,
+    "session": 2382,
     "skills/audit-html/SKILL.md": 3446,
     "skills/design-rules/SKILL.md": 4379,
     "skills/dispatch-contract/SKILL.md": 1097,
@@ -61,6 +60,6 @@
     "skills/review-ux/SKILL.md": 17570,
     "skills/security-audit/SKILL.md": 18271,
     "skills/setup/SKILL.md": 1398,
-    "skills/upgrade/SKILL.md": 21491
+    "skills/upgrade/SKILL.md": 21505
   }
 }

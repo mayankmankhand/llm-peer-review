@@ -491,6 +491,11 @@ let bad = allReceiptsShow(MIG, r.findings);
 check('every receipt runs through bash and shows its evidence (' + r.findings.length + ' findings)', bad.length === 0, bad.join(' | '));
 const c2Shows = (res) => { const f = res.findings.find(x => x.id === 'C-2'); return !!f && receiptShows(f, runReceipt(MIG, f)); };
 check('C-2\'s shipped pattern (it carries a backtick and a quote) yields a receipt that runs', /`/.test(by('C-2')[0].receipt.check) && c2Shows(r));
+// 8.0.0 removed review-finder, so C-2 runs on every upgrade: a project last
+// audited at 7.6.5, past C-2's 7.0.0 arrival, must still hear that its
+// review-finder dispatch now reaches nothing.
+const lateAudit = audit(MIG, ['--from', '7.6.5']);
+check('C-2 runs on every upgrade: a project audited at 7.6.5 still gets its review-finder dispatch flagged', lateAudit.findings.some(f => f.id === 'C-2' && f.file.line === 3), lateAudit.summary);
 
 console.log('\n2. C-5 receipts accept every list shape the detector does');
 const c5 = (rel) => by('C-5').find(f => f.file.relPath === rel);
@@ -598,7 +603,7 @@ check('the fixture rows are really in the shipped retired list, and the missing 
 check('the artifacts fixture really carries the old script path', read(path.join(STALE, 'artifacts/README.md')).includes('node .claude/scripts/render-html.js'));
 r = audit(STALE);
 by = (id) => r.findings.filter(f => f.id === id);
-check('the range is 7.0.0 -> 7.1.0 with C-7, C-9, C-10 and C-11 each in it', /7\.0\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(r.summary), r.summary);
+check('the range is 7.0.0 -> 7.1.0 with C-2, C-7, C-9, C-10 and C-11 each in it', /7\.0\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(r.summary), r.summary);
 check('C-7 reports the 7.0.0 rules stamp', by('C-7').length === 1 && /stamped 7\.0\.0/.test(by('C-7')[0].what));
 const c9Missing = by('C-9').find(f => (f.fields || []).some(x => x.label === 'Missing rows'));
 const c9RetiredAll = by('C-9').filter(f => (f.fields || []).some(x => x.label === 'Retired rows'));
@@ -1383,7 +1388,7 @@ const recordedQuiet = (res) => res.status === 0 && missingOf(res) === null && JS
   check('--stamp records both lost-row candidates in the offered-rows record, present or declined, and says so', st.status === 0 && JSON.stringify(recordRowsOf(dir)) === JSON.stringify(keys) && /recorded 2 permission rows of the project's own that C-9 offers back in the offered-rows record/.test(st.stderr), st.stderr + JSON.stringify(recordRowsOf(dir)));
   res = audit(dir);
   // C-9 still runs after the stamp (it runs on every upgrade), so the record alone keeps the row out.
-  const c9InRange = (x) => /7\.1\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(x.summary);
+  const c9InRange = (x) => /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(x.summary);
   check('  after the stamp C-9 still runs, and the declined row is not offered again', res.status === 0 && c9InRange(res) && lostOf(res) === null, res.summary + JSON.stringify(lostOf(res)));
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW } }, null, 2) + '\n');
   res = audit(dir);
@@ -1634,7 +1639,7 @@ function audited710(name) {
   return dir;
 }
 // The check the conventions mutation below must break.
-const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7, C-9, C-10, C-11\]/.test(res.summary) && ['C-9', 'C-10', 'C-11'].every(id => res.findings.some(f => f.id === id));
+const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(res.summary) && ['C-9', 'C-10', 'C-11'].every(id => res.findings.some(f => f.id === id));
 {
   const b72 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN72, '--version', '7.2.0'], { cwd: REPO, encoding: 'utf8' });
   check('build-plugin.js builds a 7.2.0 plugin root', b72.status === 0 && fs.existsSync(path.join(PLUGIN72, '.claude-plugin', 'plugin.json')), b72.stdout + b72.stderr);
@@ -1643,7 +1648,7 @@ const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7,
   check('fixture: the old ledger comment ends on the line naming .claude/scripts/pre-push-check.js, and Bash(git config *) is retired', AUDITED_710_GITIGNORE[flaggedLine - 1] === V633_GITIGNORE[53] && RETIRED.includes('Bash(git config *)'), AUDITED_710_GITIGNORE[flaggedLine - 1]);
   const res = audit(dir, [], { pluginRoot: PLUGIN72 });
   const of = (id) => res.findings.filter(f => f.id === id);
-  check('the range is 7.1.0 -> 7.2.0 with C-7, C-9, C-10 and C-11 in it, and each of C-9, C-10 and C-11 reports', audited710Ranges(res), res.summary);
+  check('the range is 7.1.0 -> 7.2.0 with C-2, C-7, C-9, C-10 and C-11 in it, and each of C-9, C-10 and C-11 reports', audited710Ranges(res), res.summary);
   check('C-9 reports the missing seed row and the retired Bash(git config *), and asks nothing about acceptEdits again', JSON.stringify(fieldOf(res, 'C-9', 'Missing rows')) === JSON.stringify([MISSING_ROW]) && JSON.stringify(fieldOf(res, 'C-9', 'Retired rows')) === JSON.stringify(['Bash(git config *)']) && JSON.stringify(fieldOf(res, 'C-9', 'Missing ask rows')) === JSON.stringify(SEED_ASK) && !of('C-9').some(f => /defaultMode/.test(f.what)) && of('C-9').length === 3, JSON.stringify(of('C-9').map(f => f.key)));
   check('C-10 reports the ledger comment line naming pre-push-check.js, with the comment lines above it', of('C-10').length === 1 && of('C-10')[0].file.line === flaggedLine && of('C-10')[0].what.includes('names .claude/scripts/pre-push-check.js') && of('C-10')[0].what.includes('Lines ' + (flaggedLine - 4) + ' to ' + (flaggedLine - 1) + ' directly above it'), JSON.stringify(of('C-10')));
   check('C-11 reports /review in the command at Warn and leaves the /ask-gpt lesson in LESSONS.md alone (history, issue #187)', of('C-11').length === 1 && of('C-11').some(f => f.file.relPath === '.claude/commands/myteam-ship.md' && f.severity === 'warn') && !of('C-11').some(f => f.file.relPath === 'LESSONS.md'), JSON.stringify(of('C-11').map(f => [f.file.relPath, f.severity])));
@@ -1656,7 +1661,7 @@ const audited710Ranges = (res) => res.status === 0 && /7\.1\.0 -> 7\.2\.0 \[C-7,
   check('  with every fix applied the rerun has no finding, and every receipt agrees with it', fixed.length === 5 && after.findings.length === 0 && disagree.length === 0, JSON.stringify(after.findings.map(f => f.key)) + ' | ' + disagree.join(' | '));
   const st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN72, '--stamp'], { encoding: 'utf8' });
   const next = audit(dir, [], { pluginRoot: PLUGIN72 });
-  check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
+  check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
 }
 
 // --- 4m. npm install kept, ask rows, history lines (issues #198, #187, #192) ----
@@ -1974,7 +1979,7 @@ let st = spawnSync('node', [SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN,
 let stamped = JSON.parse(read(path.join(STAMP, '.claude', '.toolkit-state.json')));
 check('--stamp raises the audited version and keeps the rest of the state', st.status === 0 && stamped.auditedVersion === '7.1.0' && stamped.version === '7.1.0' && stamped.previousVersion === '6.3.3' && stamped.path === 'copy-migrated' && /stamped/.test(st.stderr), st.stderr);
 r = audit(STAMP);
-check('after the stamp only the conventions that run on every upgrade are in range (C-7, C-9, C-10, C-11), with nothing to report', /7\.1\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(r.summary) && r.findings.length === 0, r.summary);
+check('after the stamp only the conventions that run on every upgrade are in range (C-2, C-7, C-9, C-10, C-11), with nothing to report', /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(r.summary) && r.findings.length === 0, r.summary);
 const NEWER = JSON.stringify({ version: '7.2.0', auditedVersion: '7.2.0', path: 'plugin' });
 write(STAMP, '.claude/.toolkit-state.json', NEWER);
 st = spawnSync('node', [SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
@@ -1988,7 +1993,7 @@ const stampRun = (proj, o) => spawnSync('node', [(o && o.script) || SCRIPT, '--p
 const c7Of = (res) => res.findings.filter(f => f.id === 'C-7');
 const rulesOf = (dir) => read(path.join(dir, RULES_REL));
 // A project audited at 7.1.0, so only the conventions that run on every upgrade
-// (C-7, C-9, C-10 and C-11) are in range, with the given rules text (null: no
+// (C-2, C-7, C-9, C-10 and C-11) are in range, with the given rules text (null: no
 // rules file).
 function rulesCase(name, rules, state) {
   const dir = path.join(TMP, 'rules-' + name);
@@ -2022,7 +2027,7 @@ const migratedCleanQuiet = (res) => res.status === 0 && res.findings.length === 
   const want = before.replace('<!-- Toolkit version: 7.0.0 |', '<!-- Toolkit version: 7.1.0 |');
   const dir = rulesCase('equal-lf', before);
   const res = audit(dir);
-  check('text equal to the seed with an older stamp: no C-7 finding, with C-7 still in range', res.status === 0 && c7Of(res).length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(res.summary), res.stdout + res.summary);
+  check('text equal to the seed with an older stamp: no C-7 finding, with C-7 still in range', res.status === 0 && c7Of(res).length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(res.summary), res.stdout + res.summary);
   let st1 = stampRun(dir);
   check('--stamp rewrites only the version in the stamp line (every other byte identical) and says so on stderr', st1.status === 0 && want !== before && rulesOf(dir) === want && /restamped \.claude\/rules\/toolkit\.md from 7\.0\.0 to 7\.1\.0/.test(st1.stderr), st1.stderr);
   const st2 = stampRun(dir);
@@ -2094,7 +2099,7 @@ const migratedCleanQuiet = (res) => res.status === 0 && res.findings.length === 
   check('a migrated project whose files match the seed and whose rules stamp alone is behind reports 0 candidates over C-1 to C-11', migratedCleanQuiet(before7), before7.stdout.slice(0, 400) + before7.summary);
   const mst = stampRun(mc);
   const after7 = audit(mc);
-  check('  --stamp records 7.1.0 and restamps the rules file; the next audit runs C-7, C-9, C-10 and C-11 with 0 candidates', mst.status === 0 && /restamped/.test(mst.stderr) && rulesOf(mc) === stampRules('7.1.0') && after7.status === 0 && after7.findings.length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-7, C-9, C-10, C-11\]/.test(after7.summary), mst.stderr + after7.summary);
+  check('  --stamp records 7.1.0 and restamps the rules file; the next audit runs C-2, C-7, C-9, C-10 and C-11 with 0 candidates', mst.status === 0 && /restamped/.test(mst.stderr) && rulesOf(mc) === stampRules('7.1.0') && after7.status === 0 && after7.findings.length === 0 && /7\.1\.0 -> 7\.1\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(after7.summary), mst.stderr + after7.summary);
 }
 
 // --- 7c. --rollback-to (issue #183) -----------------------------------------------------------

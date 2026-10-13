@@ -10,6 +10,7 @@
 #   git log main -m --first-parent --name-only --format= -- .claude/commands \
 #     .claude/agents .claude/skills .claude/scripts .claude/rules | grep -v '^$' | sort -u
 # and keep the lines whose file no longer exists under .claude/.
+.claude/agents/review-finder.md
 .claude/commands/dev-lead-1.md
 .claude/commands/dev-lead-gemini.md
 .claude/commands/dev-lead-gpt.md
