@@ -81,8 +81,10 @@
 //     first call-back of each receipt shape goes through the real runner and
 //     must exit and print exactly as its own check does. Beside that: a hostile
 //     file name and line (no canary runs), a missing or foreign link (the run
-//     stops; --stamp, --receipt and an explicit --plugin-root do not), the
-//     refusals of --receipt, and a call-back that needs the run's --from.
+//     prints its findings with their own checks and fails with a line saying
+//     why; a run with no finding, --stamp, --receipt and an explicit
+//     --plugin-root do not), the refusals of --receipt, and a call-back that
+//     needs the run's --from.
 // Every receipt an explicit run emits is run through `bash -c` from its fixture
 // project and must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise. Mutation checks prove the
@@ -2960,19 +2962,26 @@ console.log('\n11b. a name and a line the project controls never reach the call-
   check('nothing in the name or the line ran: no canary file', !fs.existsSync(path.join(HOSTILE, 'canary-name')) && !fs.existsSync(path.join(HOSTILE, 'canary-line')));
 }
 
-console.log('\n11c. a default run whose stable link leads elsewhere stops before it audits');
+console.log('\n11c. a default run whose stable link leads elsewhere writes no call-back and fails loudly');
 {
   const built = path.join(PLUGIN, 'scripts', 'upgrade-audit.js');
   const OTHER = path.join(TMP, 'other-release');
   write(OTHER, 'scripts/upgrade-audit.js', read(built));
   const noLink = linkHome(path.join(TMP, 'home-no-link'), null);
   const runAs = (home, args, cwd) => spawnSync('node', [built].concat(args || []), { cwd: cwd || SMALL, env: homeEnv(home), encoding: 'utf8' });
+  const explicitRun = runAs(noLink, ['--plugin-root', PLUGIN]);
+  check('a run given --plugin-root does not look at the link, and each of its receipts is the finding\'s own check', explicitRun.status === 0 && parseFindings(explicitRun.stdout).length > 0 && !/--receipt/.test(explicitRun.stdout) && !/new session/.test(explicitRun.stderr), explicitRun.stderr);
+  // The findings print exactly as the explicit run prints them, so a rerun that
+  // only counts a key (how /tk:upgrade decides FIXED) still counts it right when
+  // the link moved while the upgrade ran.
   for (const [label, home] of [['no link at all', noLink], ['a link to another copy of the script', linkHome(path.join(TMP, 'home-elsewhere'), OTHER)]]) {
     const res = runAs(home);
-    check('with ' + label + ': no findings, one stderr line saying a new session moves the link, exit 1', res.status === 1 && res.stdout === '' && res.stderr.trim().split('\n').length === 1 && /new session/.test(res.stderr), res.status + ' ' + res.stderr);
+    const lines = res.stderr.trim().split('\n');
+    check('with ' + label + ': the findings print, each receipt the finding\'s own check, and the last stderr line says a new session moves the link, exit 1',
+      res.status === 1 && res.stdout === explicitRun.stdout && /new session/.test(lines[lines.length - 1]) && lines.filter(l => /new session/.test(l)).length === 1, res.status + ' ' + res.stderr);
   }
-  const explicitRun = runAs(noLink, ['--plugin-root', PLUGIN]);
-  check('a run given --plugin-root is not stopped, and each of its receipts is the finding\'s own check', explicitRun.status === 0 && parseFindings(explicitRun.stdout).length > 0 && !/--receipt/.test(explicitRun.stdout), explicitRun.stderr);
+  const clean = runAs(noLink, [], CURRENT);
+  check('with no finding there is no receipt to fail: exit 0 and no line about the link', clean.status === 0 && clean.stdout === '' && !/new session/.test(clean.stderr), clean.status + ' ' + clean.stderr);
   const stampDir = path.join(TMP, 'stamp-228');
   write(stampDir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }));
   const stamped = runAs(noLink, ['--stamp'], stampDir);

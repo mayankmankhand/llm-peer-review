@@ -137,10 +137,13 @@
 // The stable path is a link the plugin's SessionStart hook moves, so after an
 // update taken mid-session it still leads to the previous release (or, before
 // any session ran, nowhere). A default run checks first that the link leads to
-// this very file and, when it does not, prints no finding and stops with one
-// line saying a new session moves the link, because every receipt it wrote
-// would fail at the runner. --stamp, --rollback-to and --receipt write no
-// call-back and are never stopped.
+// this very file. When it does not, the run writes each receipt as the
+// finding's own check, as an explicit run does (the runner refuses most of
+// those: a loud RECEIPT FAILED rather than a finding vouched for by another
+// release), prints its findings as usual, so a rerun that only counts keys
+// still counts them right, and, when it found anything, ends with one more
+// stderr line saying a new session moves the link, and exit 1. --stamp,
+// --rollback-to and --receipt write no call-back and never look at the link.
 //
 // The toolkit's own repository is never a project: when .claude-plugin/
 // marketplace.json at the project root names the toolkit (see
@@ -1537,17 +1540,22 @@ function main() {
     return;
   }
   // A default run prints call-back receipts, which reach this script through
-  // the stable link (issue #228). When the link leads anywhere else, every one
-  // of them would fail at the checks runner, so the run stops here, before it
-  // audits. --receipt is the call-back itself, and a run given --plugin-root or
-  // --conventions keeps each finding's own check, so neither is stopped.
-  const callBacks = !opts.pluginRoot && !opts.conventions;
+  // the stable link (issue #228). When the link leads anywhere else, a call-back
+  // would run another release or nothing, so this run writes each receipt as
+  // the finding's own check instead (the runner refuses most of those: a loud
+  // RECEIPT FAILED rather than a finding vouched for by another release), still
+  // prints its findings, so a rerun that only counts keys counts them right,
+  // and ends with one more stderr line and exit 1 when it found anything.
+  // --receipt is the call-back itself, and a run given --plugin-root or
+  // --conventions keeps each finding's own check anyway, so neither looks.
+  let callBacks = !opts.pluginRoot && !opts.conventions;
+  let staleLink = null;
   if (callBacks && opts.receipt === null) {
     const own = realpathOrNull(__filename);
     const linked = realpathOrNull(stableAuditPath());
     if (own === null || linked !== own) {
-      console.error('upgrade-audit: this run\'s receipts call the audit back through ' + STABLE_AUDIT + ', which leads to ' + (linked || 'nothing') + ' rather than to this audit (' + (own || __filename) + '), so the checks runner could not run them; the link moves when a new session starts, so start a new session and run the upgrade again');
-      process.exit(1);
+      callBacks = false;
+      staleLink = 'upgrade-audit: these receipts are each finding\'s own check, not call-backs, because ' + STABLE_AUDIT + ' leads to ' + (linked || 'nothing') + ' rather than to this audit (' + (own || __filename) + '), and the checks runner refuses most of them; the link moves when a new session starts, so start a new session and run the upgrade again';
     }
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
@@ -2304,6 +2312,9 @@ function main() {
   if (reported.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
     console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
   }
+  // Last, so it is the line a reader sees: these receipts will not pass the
+  // checks runner. With no finding there is no receipt to fail, and no stop.
+  if (staleLink !== null && reported.length) { console.error(staleLink); process.exit(1); }
 }
 
 // The seeded-block and lessons readers, for scripts/seed-history.js (the
