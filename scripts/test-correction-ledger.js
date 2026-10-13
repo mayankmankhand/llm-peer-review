@@ -1187,7 +1187,9 @@ function outsideRoots(dir, roots) {
   check('the ledger itself holds all four private fields (control)',
     markers.every(function (m) { return ledger.indexOf(m) !== -1; }));
   const bucket = JSON.parse(stdout).kinds.human.buckets[0];
-  const expected = ['axial_code', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
+  // by_month (#231) is counts keyed by month, no row text, so it may sit beside
+  // the privacy-checked fields (#229); both landed in 8.0.0.
+  const expected = ['axial_code', 'by_month', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
   check('a rollup bucket carries exactly the expected fields',
     JSON.stringify(Object.keys(bucket).sort()) === JSON.stringify(expected), JSON.stringify(Object.keys(bucket).sort()));
   fs.rmSync(sb.root, { recursive: true, force: true });
