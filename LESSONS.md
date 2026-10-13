@@ -385,3 +385,11 @@
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
 - **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+
+## Issue 231 (check first)
+
+- **Profile a slow suite by section before speeding it up: one fixture check can be the whole cost.**
+- **Set shell variables before a backgrounded `&&` chain, never inside it.**
+- **A batch approval covers the edits it listed; a later correction to the same prompt text asks again.**
+- **A receipt that checks a record exists can be closed by making the record late; check what the record says.**
+- **"Fails before, passes after" needs the after expect held against the before output too.**
