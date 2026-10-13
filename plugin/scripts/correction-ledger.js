@@ -62,7 +62,8 @@ function die(msg) {
 // --- storage paths (per machine, outside every repo) ---
 //
 // TK_LEDGER_DIR moves the files this script writes (ledger, heartbeat, rollup,
-// axial map, and since #229 the fix records) into another folder (#182). A chained /document in a scratch or test
+// axial map, and since #229 the fix records and the backfill side file) into
+// another folder (#182). A chained /document in a scratch or test
 // project otherwise records its heartbeat in the real ~/.claude/, and the rollup
 // then reports that capture has run on a machine where no real project ever
 // captured. Only an absolute path is used: a relative one would land wherever the
@@ -88,6 +89,10 @@ const AXIAL_MAP_PATH = path.join(LEDGER_DIR, 'correction-axial-map.json');
 // Fix records (#229): one line per fix that landed, shareable fields only, read by
 // the rollup to put a rate before and after each one.
 const FIXES_PATH = path.join(LEDGER_DIR, 'correction-fixes.jsonl');
+// Filled-in request and rewrite fields for rows written before those fields
+// existed (#229). PRIVATE, like the ledger's own private layer: keyed by a row's
+// `at` and `session`, joined back on only by --evidence, never by the rollup.
+const BACKFILL_PATH = path.join(LEDGER_DIR, 'correction-backfill.jsonl');
 const TRANSCRIPT_ROOT = path.join(HOME_CLAUDE_DIR, 'projects');
 
 // Presence of this file in a repo means: never log anything from this repo. Checked
@@ -131,6 +136,7 @@ const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
   rollup: false, showRollup: false, setAxial: false, evidence: false, recordFix: false,
+  backfillCandidates: false, addBackfill: false,
   data: '', since: '', session: '', candidateCount: '', addedCount: '', category: '',
   home: '', label: '', version: ''
 };
@@ -144,6 +150,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--set-axial') opts.setAxial = true;
   else if (a === '--evidence') opts.evidence = true;
   else if (a === '--record-fix') opts.recordFix = true;
+  else if (a === '--backfill-candidates') opts.backfillCandidates = true;
+  else if (a === '--add-backfill') opts.addBackfill = true;
   else if (a === '--category') opts.category = argv[++i] || '';
   else if (a === '--home') opts.home = argv[++i] || '';
   else if (a === '--label') opts.label = argv[++i] || '';
@@ -156,9 +164,13 @@ for (let i = 0; i < argv.length; i++) {
   else die('unknown argument: ' + a);
 }
 
-const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix']
+const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix',
+  'backfillCandidates', 'addBackfill']
   .filter(function (m) { return opts[m]; });
-if (modes.length === 0) die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, --record-fix');
+if (modes.length === 0) {
+  die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, ' +
+    '--record-fix, --backfill-candidates, --add-backfill');
+}
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
@@ -988,14 +1000,18 @@ function runEvidence() {
     return;
   }
   const axial = readAxialMap();
+  const fills = fillsFor(here);
   readJsonl(LEDGER_PATH).forEach(function (r) {
     if (labelOf(r, axial) !== opts.category) return;
     if (!r.repo_path) { out.left_out.no_repo_path++; return; }
     if (mainRootOf(r.repo_path) !== here) return;
+    // An older row's request and rewrite come from the backfill side file.
+    const fill = predatesFields(r) ? fills.get(backfillKey(r)) : null;
     out.rows.push({
       at: r.at, stage: normStage(r.stage), scope: r.scope, open_code: r.open_code,
       produced: r.produced || '', correction: r.correction || '',
-      trigger: r.trigger || '', rewrite: r.rewrite || ''
+      trigger: r.trigger || (fill && fill.trigger) || '', rewrite: r.rewrite || (fill && fill.rewrite) || '',
+      backfilled: !!fill
     });
   });
   out.rows.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
@@ -1050,6 +1066,194 @@ function runRecordFix() {
   const shown = shareableFix(record);
   shown.before = before;
   process.stdout.write(JSON.stringify({ recorded: true, fix: shown, fixes: FIXES_PATH }, null, 2) + '\n');
+}
+
+// ==========================================================================
+// Modes: --backfill-candidates / --add-backfill  (filling in older rows)
+//
+// A row written before the request and rewrite fields existed can have them
+// filled in from its transcript while the transcript is still on disk (#229).
+// This never adds a row: a duplicated row is indistinguishable afterwards from a
+// genuine recurrence, which is the one number this ledger exists to produce. The
+// fill goes to a PRIVATE side file keyed by the row's `at` and `session`, and only
+// --evidence joins it back on.
+//
+// Both modes work on the rows of the repo they run in, by the same real-path
+// identity as --evidence, and look for a transcript only under that row's own
+// working copy's projects folder: another project's transcripts are never opened.
+// ==========================================================================
+
+const BACKFILL_LOCK_PATH = BACKFILL_PATH + '.lock';
+// A session id names a transcript file, so a stored value is used only when it is
+// a plain id. A value that is not (empty, a path, a "..") is never joined into a
+// path; the row is counted as having no session.
+const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+function backfillKey(record) {
+  return String(record.at) + '\u0000' + String(record.session);
+}
+
+// A row that predates the two fields: it carries neither key at all. A newer row
+// whose extractor left both empty is not one; it was asked and had nothing.
+function predatesFields(row) {
+  return !Object.prototype.hasOwnProperty.call(row, 'trigger') && !Object.prototype.hasOwnProperty.call(row, 'rewrite');
+}
+
+// This repo's filled-in entries, first one per key (a race between two runs is
+// resolved the same way every time).
+function fillsFor(here) {
+  const fills = new Map();
+  readJsonl(BACKFILL_PATH).forEach(function (e) {
+    if (!e.repo_path || mainRootOf(e.repo_path) !== here) return;
+    const key = backfillKey(e);
+    if (!fills.has(key)) fills.set(key, e);
+  });
+  return fills;
+}
+
+function transcriptFileFor(repoPath, session) {
+  if (!SESSION_ID.test(String(session || ''))) return null;
+  const encodings = [repoPath.replace(/[/\\]/g, '-'), repoPath.replace(/[^A-Za-z0-9]/g, '-')];
+  for (let i = 0; i < encodings.length; i++) {
+    const file = path.join(TRANSCRIPT_ROOT, encodings[i], session + '.jsonl');
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}
+
+// The exchange around the human message at exactly `at`. A row's `at` is that
+// message's own timestamp, copied verbatim from the candidate the row was drafted
+// from, so the join is exact: no nearest match, no guess between turns. The walk
+// mirrors --candidates: the request behind the output, the output, the reply.
+function exchangeAt(file, at) {
+  let lines;
+  try { lines = fs.readFileSync(file, 'utf-8').split('\n'); } catch (e) { return null; }
+  let lastAssistant = '';
+  let lastHuman = '';
+  let askedForLast = '';
+  for (let j = 0; j < lines.length; j++) {
+    const line = lines[j].trim();
+    if (!line) continue;
+    let entry;
+    try { entry = JSON.parse(line); } catch (e) { continue; }
+    if (entry.type === 'assistant') {
+      const t = assistantText(entry);
+      if (t) { lastAssistant = t; askedForLast = lastHuman; }
+      continue;
+    }
+    if (entry.type !== 'user') continue;
+    const text = humanText(entry);
+    const command = isSlashCommand(entry, text);
+    if (!text && !command) continue;
+    const marker = !command && INTERRUPT.test(text);
+    if (entry.timestamp === at && text && !command && !marker) {
+      return {
+        asked: truncate(askedForLast, MAX_ASKED),
+        assistant_said: truncate(lastAssistant, 800),
+        human_said: truncate(text, 1200)
+      };
+    }
+    const request = command ? commandRequest(entry) : (marker ? '' : text);
+    if (request) lastHuman = request;
+  }
+  return null;
+}
+
+function inThisRepoOrDie(mode) {
+  const here = thisMainRoot();
+  if (!here) die(mode + ' works on the rows of the repo it runs in, and ' + cwd + ' is not in a git repository. Nothing was done.');
+  return here;
+}
+
+function runBackfillCandidates() {
+  const here = inThisRepoOrDie('--backfill-candidates');
+  const result = {
+    repo: path.basename(here),
+    counts: { repo_rows: 0, not_needed: 0, already_filled: 0, no_session: 0, transcript_gone: 0, no_match: 0, candidates: 0 },
+    candidates: []
+  };
+  if (optedOut()) {
+    result.optedOut = true;
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+    return;
+  }
+  const fills = fillsFor(here);
+  readJsonl(LEDGER_PATH).forEach(function (r) {
+    if (!r.repo_path || mainRootOf(r.repo_path) !== here) return;
+    const n = result.counts;
+    n.repo_rows++;
+    if (!predatesFields(r)) { n.not_needed++; return; }
+    if (fills.has(backfillKey(r))) { n.already_filled++; return; }
+    if (!SESSION_ID.test(String(r.session || ''))) { n.no_session++; return; }
+    const file = transcriptFileFor(r.repo_path, r.session);
+    if (!file) { n.transcript_gone++; return; }
+    const ex = exchangeAt(file, r.at);
+    if (!ex) { n.no_match++; return; }
+    n.candidates++;
+    result.candidates.push({
+      at: r.at, session: r.session, backfill: true, open_code: r.open_code,
+      asked: ex.asked, assistant_said: ex.assistant_said, human_said: ex.human_said
+    });
+  });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+function runAddBackfill() {
+  if (!opts.data) die('--add-backfill requires --data <file> containing a JSON array of {at, session, trigger, rewrite}');
+  const here = inThisRepoOrDie('--add-backfill');
+  if (optedOut()) {
+    console.error('correction-ledger.js: ' + OPT_OUT_MARKER + ' present, wrote nothing for ' + repoLabel);
+    process.stdout.write(JSON.stringify({ added: 0, optedOut: true }) + '\n');
+    return;
+  }
+  let items;
+  try { items = JSON.parse(fs.readFileSync(opts.data, 'utf-8')); }
+  catch (e) { die('could not read --data as JSON: ' + e.message); }
+  if (!Array.isArray(items)) die('--data must contain a JSON array of {at, session, trigger, rewrite}');
+
+  fs.mkdirSync(path.dirname(BACKFILL_PATH), { recursive: true });
+  let token;
+  try { token = acquireLock(BACKFILL_LOCK_PATH); }
+  catch (e) { die('could not take the backfill lock ' + BACKFILL_LOCK_PATH + ': ' + e.message + '. Nothing was written.'); }
+  if (token === null) die('another run has held the backfill lock for over ' + (LOCK_WAIT_MS / 1000) + ' seconds. Nothing was written.');
+
+  // Check the WHOLE batch before writing any of it, under the lock, so "already
+  // filled" means filled by any run. die() skips finally, so a failure is
+  // collected and reported only once the lock is released.
+  let failure = null;
+  const records = [];
+  try {
+    const rowsByKey = new Map();
+    readJsonl(LEDGER_PATH).forEach(function (r) {
+      if (!r.repo_path || mainRootOf(r.repo_path) !== here || !predatesFields(r)) return;
+      rowsByKey.set(backfillKey(r), r);
+    });
+    const fills = fillsFor(here);
+    const seen = new Set();
+    for (let i = 0; i < items.length && !failure; i++) {
+      const it = items[i] || {};
+      const key = backfillKey(it);
+      const row = rowsByKey.get(key);
+      const trigger = truncate(it.trigger, MAX_PRIVATE_FIELD);
+      const rewrite = truncateText(it.rewrite, MAX_REWRITE);
+      if (!row) failure = 'entry ' + i + ' does not match a row of this repo that predates the request and rewrite fields';
+      else if (fills.has(key) || seen.has(key)) failure = 'entry ' + i + ' fills a row that is already filled';
+      else if (!trigger && !rewrite) failure = 'entry ' + i + ' has neither a trigger nor a rewrite';
+      else {
+        seen.add(key);
+        records.push({ at: row.at, session: row.session, repo_path: row.repo_path, trigger: trigger, rewrite: rewrite, added: new Date().toISOString() });
+      }
+    }
+    if (!failure) records.forEach(function (rec) { appendJsonl(BACKFILL_PATH, rec); });
+  } catch (e) {
+    failure = 'could not write the backfill side file: ' + e.message;
+  } finally {
+    releaseLock(BACKFILL_LOCK_PATH, token);
+  }
+  if (failure) die(failure + '. Nothing was written.');
+
+  removeHandoff(opts.data); // temp directory only, same guard as --add
+  process.stdout.write(JSON.stringify({ added: records.length, backfill: BACKFILL_PATH }) + '\n');
 }
 
 // ==========================================================================
@@ -1305,6 +1509,9 @@ function buildRollup() {
   const rolled = rolledFixes(rateRows, cycles);
   out.fixes = rolled.fixes;
   out.fixes_skipped = rolled.skipped;
+  // How many older rows have their request and rewrite filled in: a count of
+  // keys, projected the moment each entry is read, so no filled text can follow.
+  out.backfilled = new Set(readJsonl(BACKFILL_PATH).map(backfillKey)).size;
 
   return out;
 }
@@ -1518,3 +1725,5 @@ else if (opts.showRollup) runRollup(false);
 else if (opts.setAxial) runSetAxial();
 else if (opts.evidence) runEvidence();
 else if (opts.recordFix) runRecordFix();
+else if (opts.backfillCandidates) runBackfillCandidates();
+else if (opts.addBackfill) runAddBackfill();

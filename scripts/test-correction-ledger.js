@@ -1360,6 +1360,90 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: older rows are filled in through a side file, never re-added ----
+// A row written before the request and rewrite fields existed can have them
+// filled in from its transcript, if the transcript is still on disk. The fill goes
+// to correction-backfill.jsonl, keyed by the row's `at` and `session`; the ledger
+// is never rewritten and no row is added. Each row the backfill cannot use is
+// counted, by reason.
+{
+  const sb = makeSandbox('backfill229');
+  const bf = path.join(sb.root, 'bf');
+  const bf2 = path.join(sb.root, 'bf2');
+  [bf, bf2].forEach(function (dir) {
+    const g = function (args) { return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    fs.mkdirSync(dir, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+  });
+  const claudeDir = path.join(sb.home, '.claude');
+  const tdir = path.join(claudeDir, 'projects', fs.realpathSync(bf).replace(/[/\\]/g, '-'));
+  fs.mkdirSync(tdir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: 'sess-b1', message: { content: t } }); };
+  fs.writeFileSync(path.join(tdir, 'sess-b1.jsonl'), [
+    user('Draft the release note for the CLI.', '2026-09-22T10:00:00.000Z'),
+    asst('Here is a note about the history of the CLI.'),
+    user('No, I want it to say: Install with one command, then run it.', '2026-09-22T10:01:00.000Z')
+  ].join('\n') + '\n', 'utf-8');
+  const real = fs.realpathSync(bf);
+  const old = function (at, session, extra) {
+    return JSON.stringify(Object.assign({ at: at, repo: 'bf', repo_path: real, kind: 'human', scope: 'project',
+      stage: 'document', produced: 'p', correction: 'c', open_code: 'bf code', axial_code: null, session: session }, extra || {}));
+  };
+  fs.writeFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), [
+    old('2026-09-22T10:01:00.000Z', 'sess-b1'),                          // fillable
+    old('2026-09-22T11:00:00.000Z', 'sess-b1'),                          // no message at that time
+    old('2026-09-22T12:00:00.000Z', ''),                                 // no session recorded
+    old('2026-09-22T12:30:00.000Z', '../../etc/passwd'),                 // not a plain session id
+    old('2026-09-22T13:00:00.000Z', 'sess-gone'),                        // transcript gone
+    old('2026-09-22T14:00:00.000Z', 'sess-b1', { trigger: '', rewrite: '' }), // already has the fields
+    JSON.stringify({ at: '2026-09-22T15:00:00.000Z', repo: 'bf2', repo_path: fs.realpathSync(bf2), kind: 'human',
+      scope: 'project', stage: 'document', produced: '', correction: '', open_code: 'bf code', axial_code: null, session: 'sess-x' })
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(claudeDir, 'correction-axial-map.json'), JSON.stringify({ 'bf code': 'cat-bf' }), 'utf-8');
+  const sidefile = path.join(claudeDir, 'correction-backfill.jsonl');
+  try {
+    const c = JSON.parse(run(sb, ['--backfill-candidates'], { cwd: bf }));
+    check('backfill lists only the row it can fill, with the exchange around it',
+      c.candidates.length === 1 && c.candidates[0].backfill === true &&
+      c.candidates[0].asked === 'Draft the release note for the CLI.' &&
+      c.candidates[0].human_said.indexOf('Install with one command') !== -1, JSON.stringify(c.candidates).slice(0, 200));
+    check('backfill counts each row it could not use, by reason',
+      JSON.stringify(c.counts) === JSON.stringify({ repo_rows: 6, not_needed: 1, already_filled: 0, no_session: 2, transcript_gone: 1, no_match: 1, candidates: 1 }),
+      JSON.stringify(c.counts));
+    const fill = function (entries) { return runRaw(sb, ['--add-backfill', '--data', writeRows(sb, entries)], { cwd: bf }); };
+    const good = { at: '2026-09-22T10:01:00.000Z', session: 'sess-b1', trigger: 'asked for a CLI release note', rewrite: 'Install with one command, then run it.' };
+    let r = fill([{ at: '2026-09-22T15:00:00.000Z', session: 'sess-x', trigger: 'x', rewrite: '' }]);
+    check('backfill refuses an entry for another repo\'s row', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    r = fill([good, { at: '2026-09-22T11:00:00.000Z', session: 'nope', trigger: 'x', rewrite: '' }]);
+    check('a backfill batch with one bad entry writes nothing', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    r = fill([{ at: good.at, session: good.session, trigger: '', rewrite: '' }]);
+    check('backfill refuses an entry with neither field', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    const handoff = writeRows(sb, [good]);
+    r = runRaw(sb, ['--add-backfill', '--data', handoff], { cwd: bf });
+    check('backfill writes an accepted entry to the side file and deletes the hand-off file',
+      r.status === 0 && fs.existsSync(sidefile) && !fs.existsSync(handoff), 'exit ' + r.status + ' ' + r.stderr);
+    r = fill([good]);
+    check('backfill refuses to fill the same row twice',
+      r.status !== 0 && fs.readFileSync(sidefile, 'utf-8').trim().split('\n').length === 1, 'exit ' + r.status);
+    const ev = JSON.parse(run(sb, ['--evidence', '--category', 'cat-bf'], { cwd: bf }));
+    const filled = ev.rows.filter(function (x) { return x.at === good.at; })[0] || {};
+    check('the evidence read joins the filled-in fields onto their row',
+      filled.backfilled === true && filled.trigger === good.trigger && filled.rewrite === good.rewrite, JSON.stringify(filled));
+    check('the ledger itself is never rewritten by a backfill',
+      fs.readFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), 'utf-8').indexOf('asked for a CLI release note') === -1);
+    const roll = run(sb, ['--show-rollup']);
+    check('the rollup counts filled rows and carries none of their text',
+      JSON.parse(roll).backfilled === 1 && roll.indexOf('asked for a CLI release note') === -1 && roll.indexOf('Install with one command') === -1,
+      roll.slice(0, 120));
+  } catch (e) {
+    check('backfill test ran end to end', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- issue #229: stage is checked against the extractor's list -------------------
 // `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
 // free-text channel through the projection, the hole `at` had before isoOrNull().
