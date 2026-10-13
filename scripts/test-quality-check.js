@@ -817,6 +817,11 @@ section('harness-lost in the score (P1-C2)', () => {
   check('one harness-lost run beside a real miss leaves one counted miss: RERUN, not FAIL', lostAndMissed.verdict === 'RERUN' && lostAndMissed.single.join() === 'security-path-traversal', lostAndMissed.verdict + ' ' + lostAndMissed.why);
   const onlyRun = QC.scoreSets([lostRun()], base, IDS, { knownId: KNOWN });
   check('harness-lost in a single run: nothing to judge, so RERUN', onlyRun.verdict === 'RERUN' && onlyRun.unjudged.join() === 'security-path-traversal' && /lost to the harness in its only run/.test(onlyRun.why.join()), onlyRun.verdict + ' ' + onlyRun.why);
+  const lostBase = [lostRun(), analyze(makeReviewRun({ caught: all }))];
+  const missedTwice = QC.scoreSets([analyze(makeReviewRun({ caught: rest })), analyze(makeReviewRun({ caught: rest }))], lostBase, IDS, { knownId: KNOWN });
+  check('a baseline run that lost the bug to the harness is left out of the baseline count: the bug stays stable, and two misses fail',
+    missedTwice.verdict === 'FAIL' && missedTwice.failed.includes('security-path-traversal') && missedTwice.perId['security-path-traversal'].baseline === '1/1' && missedTwice.perId['security-path-traversal'].baselineHarnessLost === 1,
+    missedTwice.verdict + ' ' + JSON.stringify(missedTwice.perId['security-path-traversal']));
   const refuted = QC.scoreSets([analyze(makeReviewRun({ caught: rest, killed: ['security-path-traversal'] })), analyze(makeReviewRun({ caught: rest, killed: ['security-path-traversal'] }))], base, IDS, { knownId: KNOWN });
   check('a bug a skeptic refuted twice still fails the arm', refuted.verdict === 'FAIL' && refuted.failed.join() === 'security-path-traversal', refuted.verdict);
 });

@@ -1805,15 +1805,18 @@ function scoreSets(candidate, baseline, ids, opts) {
   s.harnessLostRuns = vc.flatMap(x => (x.harnessLost || []).filter(id => harnessLostIn(x, id))
     .map(id => ({ dir: x.dir, id, kills: ((x.killedAs || {})[id] || { kills: [] }).kills.map(k => k.id + ' ' + k.verdict) })));
   for (const id of ids) {
+    // A run that lost the bug to the harness is left out of its count, on either
+    // side, as an INVALID run is left out of the whole score: one refused check in
+    // a baseline run must not turn a stable bug noisy and so skip its bar.
+    const lostB = vb.filter(x => harnessLostIn(x, id)).length;
+    const countedB = vb.length - lostB;
     const inB = vb.filter(x => caught(x, id)).length;
     const inC = vc.filter(x => caught(x, id)).length;
-    // A run that lost the bug to the harness is left out of its count, as an
-    // INVALID run is left out of the whole score.
     const lostC = vc.filter(x => harnessLostIn(x, id)).length;
     const counted = vc.length - lostC;
     const raisedC = vc.filter(x => x.raised && x.raised[id] && x.raised[id].length > 0).length;
-    s.perId[id] = { baseline: inB + '/' + vb.length, candidate: inC + '/' + counted, raisedCandidate: raisedC + '/' + vc.length, harnessLost: lostC };
-    if (inB === vb.length) s.stable.push(id);
+    s.perId[id] = { baseline: inB + '/' + countedB, baselineHarnessLost: lostB, candidate: inC + '/' + counted, raisedCandidate: raisedC + '/' + vc.length, harnessLost: lostC };
+    if (countedB > 0 && inB === countedB) s.stable.push(id);
     else if (inB > 0) s.noisy.push(id);
     else s.never.push(id);
   }
