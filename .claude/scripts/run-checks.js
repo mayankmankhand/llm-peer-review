@@ -19,8 +19,8 @@
 // <file.json> is a JSON array of { id, check, expect }:
 //   id      a filename stem: letters, digits, . _ - only, unique in the file
 //   check   one shell line, read-only (the allow-list below decides)
-//   expect  a string (prose; the verdict is `model` and the caller judges), or
-//           an object with exactly one of
+//   expect  an object with exactly one of (a prose string, accepted until
+//           8.0.0, is now an error like any malformed expect)
 //             { "exit": 0 }              the exit code must equal this integer
 //             { "match": "regex" }       the saved output must match (multiline)
 //             { "noMatch": "regex" }     the saved output must not match
@@ -44,9 +44,9 @@
 // Output, on stdout: exactly one JSON object
 //   { "checks": [ { "id", "verdict", "exit", "stdoutFile", "detail",
 //                   "ms", "slow", "flaky" } ... ],
-//     "summary": { "pass", "fail", "model", "error" },
+//     "summary": { "pass", "fail", "error" },
 //     "flags": { "slow", "flaky" } }
-// verdict is pass, fail, model or error. `exit` is the check's exit code (124
+// verdict is pass, fail or error. `exit` is the check's exit code (124
 // on a timeout, 143 when the output passed the 16 MB buffer and the check was
 // stopped, null when nothing ran); `stdoutFile` is the saved file's path
 // relative to the project root (absolute when the out folder sits outside it,
@@ -1139,9 +1139,11 @@ function decide(expect, exitCode, body, parts) {
   // is as clean as exit 0 (review of 7.6.3, R6).
   const ran = exitCode === 0 || (exitCode === 1 && quiet) || (exitCode === SIGPIPE_EXIT && quiet);
   const err = (reason) => ({ verdict: 'error', detail: reason });
-  if (typeof expect === 'string') return { verdict: 'model', detail: '' };
+  // A prose expect was model-judged until 8.0.0; it is refused now, like any
+  // malformed expect, so the check still runs and saves but proves nothing.
+  if (typeof expect === 'string') return err('a prose expect was removed in 8.0.0; use an object with exactly one of exit, match, noMatch, lines');
   if (expect === null || typeof expect !== 'object' || Array.isArray(expect)) {
-    return err('expect must be a string or an object with exactly one of exit, match, noMatch, lines');
+    return err('expect must be an object with exactly one of exit, match, noMatch, lines');
   }
   const keys = Object.keys(expect);
   if (keys.length !== 1 || EXPECT_KEYS.indexOf(keys[0]) === -1) {
@@ -1318,7 +1320,7 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  --out             where <id>.txt and results.json are saved; must be under reports/ or the system temp folder\n'
   + '  --timeout         per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + '); a run over half of it is flagged slow\n'
   + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
-  + '  expect            a prose string (verdict model), or exactly one of\n'
+  + '  expect            exactly one of (a prose string is an error since 8.0.0)\n'
   + '                    {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
   + '                    (regexes are tested with the multiline flag against the saved output)\n'
   + '  stdout            one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail, ms, slow, flaky }], summary, flags }\n'
@@ -1461,7 +1463,7 @@ function runAll(checks, opts, cwd, outDir, extra) {
   const root = realpathOrNull(cwd);
   const at = new Date().toISOString();
   const results = [];
-  const summary = { pass: 0, fail: 0, model: 0, error: 0 };
+  const summary = { pass: 0, fail: 0, error: 0 };
   const flags = { slow: 0, flaky: 0 };
   for (const c of checks) {
     const row = runOne(c, opts, cwd, outDir, root, env);

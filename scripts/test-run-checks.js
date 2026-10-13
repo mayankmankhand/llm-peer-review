@@ -158,19 +158,20 @@ section('1. pass and fail for exit, match, noMatch and lines, with real commands
   check('lines: pass and fail', r.byId['lines-pass'].verdict === 'pass' && r.byId['lines-fail'].verdict === 'fail', verdicts(r, all) + ' ' + JSON.stringify(savedFile(r, 'lines-pass')));
   check('a pipeline of allowed filters runs: pass and fail', r.byId['pipe-pass'].verdict === 'pass' && r.byId['pipe-fail'].verdict === 'fail', verdicts(r, all) + ' ' + JSON.stringify(savedFile(r, 'pipe-pass')));
   check('a fail carries the last lines of the output as detail; a pass carries none', r.byId['match-fail'].detail === '2' && r.byId['match-pass'].detail === '' && r.byId['exit-fail'].detail === '', JSON.stringify([r.byId['match-fail'].detail, r.byId['match-pass'].detail]));
-  check('the summary counts add up', JSON.stringify(r.json.summary) === JSON.stringify({ pass: 5, fail: 5, model: 0, error: 0 }), JSON.stringify(r.json.summary));
+  check('the summary counts add up', JSON.stringify(r.json.summary) === JSON.stringify({ pass: 5, fail: 5, error: 0 }), JSON.stringify(r.json.summary));
   check('stdoutFile is the saved path relative to the project root', r.byId['exit-pass'].stdoutFile === path.relative(proj, path.join(r.out, 'exit-pass.txt')) && fs.existsSync(path.join(proj, r.byId['exit-pass'].stdoutFile)), r.byId['exit-pass'].stdoutFile);
   check('the saved file is written for a fail too and ends with the exit line', savedFile(r, 'exit-fail') !== null && lastLine(savedFile(r, 'exit-fail')) === 'exit 1', JSON.stringify(savedFile(r, 'exit-fail')));
   check('no stderr line for a pass or a fail', r.stderr === '', r.stderr);
 });
 
-// --- 2. prose expectation -> model ---------------------------------------------
-section('2. a prose expectation is model-judged and its output is still saved', function () {
+// --- 2. prose expectation -> error (removed in 8.0.0) -----------------------------
+section('2. a prose expectation is an error since 8.0.0, and the check still runs and saves', function () {
   const r = runChecks([{ id: 'prose', check: 'grep -n hello f.txt', expect: 'both hello lines are listed' }], 'prose');
-  check('verdict model, exit 0, empty detail', r.status === 0 && r.byId.prose.verdict === 'model' && r.byId.prose.exit === 0 && r.byId.prose.detail === '', JSON.stringify(r.byId.prose));
+  check('verdict error, exit 0', r.status === 0 && r.byId.prose.verdict === 'error' && r.byId.prose.exit === 0, JSON.stringify(r.byId.prose));
+  check('the reason names 8.0.0 and the four machine forms', /8\.0\.0/.test(r.byId.prose.detail) && /exit, match, noMatch, lines/.test(r.byId.prose.detail), r.byId.prose.detail);
   const f = savedFile(r, 'prose');
-  check('the file holds the output then the exit line', f === '1:hello\n3:hello\nexit 0\n', JSON.stringify(f));
-  check('the summary counts it as model', r.json.summary.model === 1 && r.json.summary.pass === 0, JSON.stringify(r.json.summary));
+  check('the file still holds the output then the exit line', f === '1:hello\n3:hello\nexit 0\n', JSON.stringify(f));
+  check('the summary counts it as error and has no model count', JSON.stringify(r.json.summary) === JSON.stringify({ pass: 0, fail: 0, error: 1 }), JSON.stringify(r.json.summary));
 });
 
 // --- 3. invalid expectations -> error, the check still runs --------------------
@@ -259,7 +260,7 @@ section('6. a malformed checks file exits 1 with nothing run and nothing written
   const help = run(['--help']);
   check('--help prints usage and exits 0', help.status === 0 && /usage: node run-checks.js/.test(help.stdout), help.stdout + help.stderr);
   const empty = runChecks([], 'empty');
-  check('an empty array is valid: zero checks, zero counts, exit 0', empty.status === 0 && empty.json && empty.json.checks.length === 0 && JSON.stringify(empty.json.summary) === JSON.stringify({ pass: 0, fail: 0, model: 0, error: 0 }), empty.stdout + empty.stderr);
+  check('an empty array is valid: zero checks, zero counts, exit 0', empty.status === 0 && empty.json && empty.json.checks.length === 0 && JSON.stringify(empty.json.summary) === JSON.stringify({ pass: 0, fail: 0, error: 0 }), empty.stdout + empty.stderr);
 });
 
 // --- 7. the --out folder ---------------------------------------------------------
@@ -377,7 +378,7 @@ section('8. a check that is not read-only is refused before anything runs', func
   }
   check('one stderr line per refusal', r.stderr.trim().split('\n').length === hostile.length && hostile.every(([id]) => new RegExp('^run-checks: ' + id + ': refused: ', 'm').test(r.stderr)), r.stderr.split('\n').length + ' lines');
   check('no output file was written for any refused check', fs.readdirSync(r.out).length === 0, fs.readdirSync(r.out).join(','));
-  check('the summary counts every one as error', r.json.summary.error === hostile.length && r.json.summary.pass === 0 && r.json.summary.fail === 0 && r.json.summary.model === 0, JSON.stringify(r.json.summary));
+  check('the summary counts every one as error', r.json.summary.error === hostile.length && r.json.summary.pass === 0 && r.json.summary.fail === 0 && !('model' in r.json.summary), JSON.stringify(r.json.summary));
   check('canary: no `canary` file exists', !exists('canary'));
   check('canary: no `f` file exists (echo x > f)', !exists('f'));
   check('canary: the `x` folder survived rm -rf', exists('x'));
@@ -507,8 +508,8 @@ section('9c. reads stay inside the project root', function () {
   // A path that names nothing on this machine passes to the shell, which fails on its own; that is not a leak, so it is not refused.
   const allowed = ["grep -c '/api/' f.txt", 'cat /dev/null', 'cat ./f.txt', 'test -f f.txt', 'grep -n hello ./notes.md', "sed -n '/hello/p' f.txt", 'git log -1 --format=%H -- f.txt'];
   for (const c of allowed) check('allowed read: ' + c, guardCheck(c, proj) === null, guardCheck(c, proj));
-  const ra = runChecks(allowed.map((c, i) => ({ id: 'ok-' + i, check: c, expect: 'ran' })), 'reads-ok');
-  check('every allowed read ran (verdict model, never error)', allowed.every((c, i) => ra.byId['ok-' + i] && ra.byId['ok-' + i].verdict === 'model'), JSON.stringify(ra.json && ra.json.summary));
+  const ra = runChecks(allowed.map((c, i) => ({ id: 'ok-' + i, check: c, expect: { exit: 0 } })), 'reads-ok');
+  check('every allowed read ran (verdict pass or fail, never error)', allowed.every((c, i) => ra.byId['ok-' + i] && (ra.byId['ok-' + i].verdict === 'pass' || ra.byId['ok-' + i].verdict === 'fail')), JSON.stringify(ra.json && ra.json.summary));
   // The node script path is nodeRule's, so the plugin folder's copies still run.
   check('the stable plugin path form is still allowed', guardCheck('node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models', proj) === null, guardCheck('node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models', proj));
   check('the plugin root form is still allowed', guardCheck('node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models', proj) === null, guardCheck('node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models', proj));
@@ -942,14 +943,15 @@ section('12. second round: a symlink then .., sort exec flags, option prefixes, 
     ['grep-cluster-count', 'grep -nm1 alpha a.txt', { match: '^1:alpha$' }],
     ['sort-plain', 'sort a.txt', { match: '^alpha$' }],
     ['sort-random', 'sort --random-source=/dev/urandom -R a.txt', { exit: 0 } ],
-    ['sort-fieldsep', 'sort --field-separator=, a.txt', 'the --fie prefix is not --fil (--files0-from, refused in section 13)'],
+    // the --fie prefix is not --fil (--files0-from, refused in section 13)
+    ['sort-fieldsep', 'sort --field-separator=, a.txt', { exit: 0 }],
     ['dev-null', 'cat /dev/null', { exit: 0 }],
     ['dev-stdin', 'cat /dev/stdin', { exit: 0 }],
   ];
   const rc = runChecks(controls.map(([id, cmd, expect]) => ({ id, check: cmd, expect })), 'round2-controls', [], ENV_NO_PLUGIN);
   for (const [id, cmd, expect] of controls) {
     const row = rc.byId[id];
-    const want = typeof expect === 'string' ? 'model' : 'pass';
+    const want = 'pass';
     check('control: ' + cmd + ' is ' + want, !!row && row.verdict === want, row ? JSON.stringify(row) + ' ' + JSON.stringify(savedFile(rc, id)) : 'no row');
   }
   check('canary: no control read the canary', noFileHolds(rc, CANARY2));
