@@ -1,5 +1,8 @@
 ---
 description: "Create a Parallel Worktree"
+allowed-tools:
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
 ---
 # Create a Parallel Worktree
 
@@ -46,6 +49,8 @@ Run: `git worktree add -b worktree-N .claude/worktrees/worktree-N HEAD`
 
 If it fails because the branch name is taken, increment N and try again.
 
+Then record the branch's cut point, the commit it was cut from: `node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js --record-cut worktree-N` (M16). It writes the commit into the branch's git config, where `/tk:merge` reads it when the branch lands, and prints it as `cut`. When `HEAD` was not on main, the cut is not on main either, and `/tk:merge` will say so before landing. If the record fails, warn the user but do NOT stop: `/tk:merge` then finds the cut another way, as a weaker check.
+
 ### Step 5: Install dependencies
 
 Install host project deps; toolkit deps depend on how the toolkit is installed. Decide every install and copy step here and in Step 6 by command (M16): `W=.claude/worktrees/worktree-N; for p in $W/package.json $W/.claude/scripts/package.json .env.local $W/.env.local CODEBASE_MAP.md $W/CODEBASE_MAP.md; do test -e "$p" && echo "present $p" || echo "absent $p"; done` prints one `present` or `absent` line per file, in the order the steps read them.
@@ -90,12 +95,14 @@ Worktree ready!
   Toolkit npm:  plugin - nothing to install (or: installed / failed - run manually / skipped - no .claude/scripts/package.json)
   .env:         copied (or: skipped - not found / already exists)
   Map:          copied (or: skipped - not found / already exists)
+  Cut:          <short sha> recorded (or: not recorded - <why>)
 
 Next steps:
   1. Open that path in a new editor window, or start Claude Code there
   2. Use /tk:explore to start working on your issue
      (/tk:explore will rename the branch once an issue is identified)
   3. When done, run /tk:document to create a PR and clean up
+  4. Then /tk:merge <PR number> lands it on main, checked for lost work
 ```
 
 </reference>

@@ -85,7 +85,13 @@
 //     why; a run with no finding, --stamp, --receipt and an explicit
 //     --plugin-root do not), the refusals of --receipt and --release, a
 //     call-back that needs the run's --from, and one another release wrote,
-//     which runs nothing (the link moved after the run).
+//     which runs nothing (the link moved after the run);
+//   - C-18 (the lessons files keep both sides on a merge, issue #232): a lessons
+//     file git does not merge with union is one suggest finding whose lines are
+//     the shipped seed's, a missing detail-file rule is listed but raises
+//     nothing alone, the fix clears it with its receipt agreeing, and a project
+//     with the seed's attributes, a rule only in .git/info/attributes, no
+//     lessons files, or no git repository is no finding.
 // Every receipt an explicit run emits is run through `bash -c` from its fixture
 // project and must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise. Mutation checks prove the
@@ -308,6 +314,9 @@ function receiptShows(f, r) {
     return named && (!/hash/.test(f.receipt.expect) || (hashes.length === 2 && hashes[0] !== hashes[1]));
   }
   if (/^absent: /.test(f.receipt.expect)) return r.stdout.trim() === f.receipt.expect;
+  // The lessons merge rule (C-18): git prints one line per lessons file the
+  // finding names, and none of them says union.
+  if (f.id === 'C-18') { const got = outLines(r.stdout); return got.length > 0 && got.every(l => /^LESSONS(-detail)?\.md: merge: /.test(l) && !/: merge: union$/.test(l)); }
   // A tracked migration record: git prints the record's path and nothing else.
   if (/because it tracks the file/.test(f.receipt.expect)) return r.stdout.trim() === f.file.relPath;
   const marker = /reading ([a-z]+): </.exec(f.receipt.expect);
@@ -1736,8 +1745,19 @@ console.log('\n4m. npm install kept, seed ask rows, history lines (issues #198, 
   // each push-family seed row (the git push forms and the mirror remote) is
   // proven on its own: with only that row missing, the finding still names a
   // force push. Row by row, not the rows the #192 fixture happens to omit.
-  const pushRows = SEED_ASK.filter(x => x !== 'Bash(npm install *)');
-  check('#216 fixture: the seed ask list is the npm row plus at least one push-family row', pushRows.length > 0 && pushRows.every(r => /^Bash\(git (push|remote add) /.test(r)), JSON.stringify(pushRows));
+  // The rows outside the push family guard commands the seed does not allow
+  // (the named npm install, and since #232 the two host merges), so their
+  // clause is the conditional one.
+  const pushRows = SEED_ASK.filter(x => /^Bash\(git (push|remote add) /.test(x));
+  const CONDITIONAL_ROWS = ['Bash(npm install *)', 'Bash(gh pr merge *)', 'Bash(glab mr merge *)'];
+  check('#216 fixture: the seed ask list is the push-family rows plus the npm row and the two host merge rows', pushRows.length > 0 && SEED_ASK.filter(x => !pushRows.includes(x)).sort().join('|') === CONDITIONAL_ROWS.slice().sort().join('|'), JSON.stringify(SEED_ASK));
+  CONDITIONAL_ROWS.filter(x => x !== 'Bash(npm install *)').forEach((row, i) => {
+    const one = path.join(TMP, 'merge-row-' + i);
+    write(one, '.claude/.toolkit-state.json', STATE_701);
+    write(one, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== row) } }, null, 2) + '\n');
+    const g = audit(one).findings.find(x => /:missing-ask-rows$/.test(x.key));
+    check('#232 with only ' + row + ' missing, the ask-row finding lists it, names no force push and is conditional on an allow row matching', !!g && JSON.stringify(g.fields[0].value.split(' ; ')) === JSON.stringify([row]) && !/force push/.test(g.what) && /any allow row that matches/.test(g.what), g ? g.what : 'no finding');
+  });
   pushRows.forEach((row, i) => {
     const one = path.join(TMP, 'push-row-' + i);
     write(one, '.claude/.toolkit-state.json', STATE_701);
@@ -2607,7 +2627,7 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   // lists are updated with it.
   const repoAgents = fs.readdirSync(path.join(REPO, '.claude', 'agents')).filter(n => n.endsWith('.md')).map(n => { const m = /^name:\s*(\S+)/m.exec(read(path.join(REPO, '.claude', 'agents', n))); return m ? m[1] : n.slice(0, -3); });
   const rosterJudges = (/const JUDGES = \[([^\]]*)\]/.exec(read(path.join(REPO, 'scripts', 'test-model-roster.js'))) || ['', ''])[1].match(/[a-z-]+/g) || [];
-  check('test-model-roster.js names five judges, each a toolkit agent', rosterJudges.length === 5 && rosterJudges.every(j => repoAgents.includes(j)), rosterJudges.join(','));
+  check('test-model-roster.js names six judges, each a toolkit agent', rosterJudges.length === 6 && rosterJudges.every(j => repoAgents.includes(j)), rosterJudges.join(','));
   c = calls('drift', cmd(...repoAgents.flatMap(n => ['Dispatch `subagent_type=tk:' + n + '` for the work.', 'Dispatch `subagent_type=tk:' + n + '` with model: sonnet.'])));
   const wantFinders = repoAgents.filter(n => /^review-[a-z]+-finder$/.test(n) || n === 'index-mapper').sort();
   const gotFinders = c.fs14.filter(f => f.key.split(':')[2] === 'finder-call').map(f => f.key.split(':')[3]).sort();
@@ -2724,12 +2744,12 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
 
   // ---- (e) the extension README: one paragraph still v7.4.0's beside one the project rewrote ----
   const README_NOW = seed760('toolkit-README.md');
-  check('the current extension README says seven files', README_NOW.includes('## The seven files'));
-  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The seven files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
+  check('the current extension README says eight files', README_NOW.includes('## The eight files'));
+  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The eight files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
   r = audit760(d);
   f = c15(r);
   out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
-  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The seven files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
+  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The eight files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
 
   // ---- (f) a whole file that is an older seed's ----
   const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md - this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).');
@@ -2910,6 +2930,73 @@ console.log('\n9f. a check step names its command (C-17), the Severity field, an
   const m = mutant('no-marketplace-guard', 'if (marketplaceNamesToolkit(project)) {', 'if (false && marketplaceNamesToolkit(project)) {');
   check('  the guard mutation applies to the source', m.applied);
   check('  with the guard skipped, the named-marketplace project is audited, so the refusal checks above bite', audit763(mkt('named-mutant', NAMED), [], { script: m.path }).status === 0);
+}
+
+console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
+{
+  // C-18 arrives in 7.7.0, so it needs a plugin root at that version; every
+  // root above shows it out of range. Each fixture is a git repository, because
+  // the detector asks git for the merge attribute.
+  const PLUGIN770 = path.join(TMP, 'plugin770');
+  const b770 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN770, '--version', '7.7.0'], { cwd: REPO, encoding: 'utf8' });
+  check('build-plugin.js builds a 7.7.0 plugin root', b770.status === 0 && fs.existsSync(path.join(PLUGIN770, '.claude-plugin', 'plugin.json')), b770.stdout + b770.stderr);
+  const audit770 = (d, args, o) => audit(d, args || [], Object.assign({ pluginRoot: PLUGIN770 }, o || {}));
+  const c18 = (res) => res.findings.filter(f => f.id === 'C-18');
+  const LESSON = '# Lessons\n\n- **Keep it simple.** One line.\n';
+  // A project audited at 7.6.5 (the range is 7.6.5 -> 7.7.0) with the files
+  // given; attrs null leaves .gitattributes out; git false skips git init.
+  const c18Case = (name, o) => {
+    const dir = path.join(TMP, 'c18-' + name);
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.6.5', path: 'plugin', auditedVersion: '7.6.5' }, null, 2));
+    for (const rel of o.lessons || []) write(dir, rel, LESSON);
+    if (o.attrs != null) write(dir, '.gitattributes', o.attrs);
+    if (o.git !== false) gitIn(dir, ['init', '-q']);
+    return dir;
+  };
+  // The seed's comment and union lines, as the plugin ships them.
+  const seedAttrs = read(path.join(PLUGIN770, 'seed', 'gitattributes')).split(/\r?\n/);
+  const at = seedAttrs.indexOf('LESSONS.md merge=union');
+  const SEED_UNION = seedAttrs.slice(at - 1, at + 2);
+  check('the shipped seed carries the comment line, then LESSONS.md and LESSONS-detail.md merged with union', at > 0 && /^# /.test(SEED_UNION[0]) && SEED_UNION[2] === 'LESSONS-detail.md merge=union', JSON.stringify(SEED_UNION));
+  const own = read(path.join(REPO, '.gitattributes')).split(/\r?\n/);
+  check('this repository\'s own .gitattributes carries the same three lines', own.join('\n').includes(SEED_UNION.join('\n')), own.join(' | '));
+  const lines = (f) => ((f.fields || []).find(x => x.label === 'Lines') || { value: '' }).value.split(' ; ');
+  const comment = (f) => ((f.fields || []).find(x => x.label === 'Comment line') || { value: '' }).value;
+
+  let d = c18Case('hit', { lessons: ['LESSONS.md'] });
+  let r = audit770(d);
+  let f = c18(r);
+  check('C-18 is in range for a project audited at 7.6.5 on a 7.7.0 build, and out of range on the 7.6.3 build', r.status === 0 && /C-18/.test(r.summary) && !/C-18/.test(audit(d, [], { pluginRoot: path.join(TMP, 'plugin763') }).summary), r.summary);
+  check('C-18: LESSONS.md with no .gitattributes is one suggest finding on .gitattributes that opens with Optional and carries Since 7.7.0', f.length === 1 && f[0].severity === 'suggest' && /^Optional\. LESSONS\.md is not merged with git's union driver/.test(f[0].what) && f[0].since === '7.7.0' && f[0].file.relPath === '.gitattributes' && f[0].key === 'C-18:.gitattributes:lessons-merge', JSON.stringify(f).slice(0, 500));
+  check('C-18: its lines are the seed\'s, both files listed while the detail file is absent, and the fix says to create the file', f.length === 1 && comment(f[0]) === SEED_UNION[0] && lines(f[0]).join('\n') === SEED_UNION.slice(1).join('\n') && /\(create the file\)/.test(f[0].fix), JSON.stringify(f[0] && f[0].fields) + (f[0] && f[0].fix));
+  check('C-18: its receipt passes, printing the lessons file\'s attribute', allReceiptsShow(d, f).length === 0, allReceiptsShow(d, f).join(' | '));
+  const before = { findings: f };
+  write(d, '.gitattributes', [comment(f[0])].concat(lines(f[0])).join('\n') + '\n');
+  const after = audit770(d);
+  check('C-18: appending the listed lines clears it, and the old receipt agrees with the rerun', c18(after).length === 0 && receiptsAgree(d, before, after).length === 0, receiptsAgree(d, before, after).join(' | '));
+
+  d = c18Case('detail-only', { lessons: ['LESSONS.md', 'LESSONS-detail.md'], attrs: '* text=auto\nLESSONS.md merge=union\n' });
+  f = c18(audit770(d));
+  check('C-18: with LESSONS.md already union, only LESSONS-detail.md is named and listed, and the fix keeps the existing file', f.length === 1 && /^Optional\. LESSONS-detail\.md is not merged/.test(f[0].what) && lines(f[0]).join('|') === 'LESSONS-detail.md merge=union' && !/create the file/.test(f[0].fix) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 500));
+  d = c18Case('both', { lessons: ['LESSONS.md', 'LESSONS-detail.md'] });
+  f = c18(audit770(d));
+  check('C-18: both lessons files without the rule are one finding naming both', f.length === 1 && /^Optional\. LESSONS\.md and LESSONS-detail\.md are not merged/.test(f[0].what) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 400));
+
+  const clean = (name, o) => { const res = audit770(c18Case(name, o)); return res.status === 0 && c18(res).length === 0 && /C-18/.test(res.summary); };
+  check('C-18: a project whose .gitattributes is the shipped seed is no finding', clean('seed', { lessons: ['LESSONS.md', 'LESSONS-detail.md'], attrs: seedAttrs.join('\n') }));
+  check('C-18: a missing detail-file rule raises nothing while there is no detail file', clean('no-detail', { lessons: ['LESSONS.md'], attrs: 'LESSONS.md merge=union\n' }));
+  check('C-18: no lessons files is no finding', clean('no-lessons', { lessons: [] }));
+  d = c18Case('info', { lessons: ['LESSONS.md'] });
+  write(d, '.git/info/attributes', 'LESSONS.md merge=union\nLESSONS-detail.md merge=union\n');
+  r = audit770(d);
+  check('C-18: a rule git reads from .git/info/attributes counts, since git is asked', r.status === 0 && c18(r).length === 0, JSON.stringify(c18(r)).slice(0, 300));
+  r = audit770(c18Case('nogit', { lessons: ['LESSONS.md'], git: false }));
+  check('C-18: outside a git repository there is no finding, and a note says the rule was not checked', r.status === 0 && c18(r).length === 0 && /C-18: git check-attr did not run/.test(r.summary), r.summary);
+  const m = mutant('c18-every-file', 'const flagged = present.filter(rel => !union(rel));', 'const flagged = present;');
+  check('  the C-18 mutation that ignores git\'s answer applies to the source', m.applied);
+  check('  with it, the seed-attributes project is flagged, so the clean checks above bite', c18(audit770(c18Case('seed-mutant', { lessons: ['LESSONS.md'], attrs: seedAttrs.join('\n') }), [], { script: m.path })).length === 1);
+  const entry = read(REAL_CONVENTIONS).split(/^### /m).find(b => /^C-18:/.test(b)) || '';
+  check('the real C-18 entry is a lessons-merge convention since 7.7.0 at Severity suggest, not run on every upgrade', /^- \*\*Since:\*\* 7\.7\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && !/^- \*\*Runs:\*\*/m.test(entry), entry.slice(0, 300));
 }
 
 console.log('\n10. errors and usage');

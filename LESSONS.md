@@ -372,6 +372,7 @@
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
 - **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.**
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
@@ -390,3 +391,10 @@
 
 - **A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.**
 - **When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.**
+
+## Issue 232 (land without losing work)
+
+- **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.**
+- **A lone `cd` call, then plain commands, matches the permission rows; a subshell, a `cd` joined with `&&`, `git -C` and `env -C` ask every time.**
+- **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
+- **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**

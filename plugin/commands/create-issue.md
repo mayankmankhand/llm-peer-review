@@ -4,6 +4,8 @@ allowed-tools:
   - "Bash(gh issue create *)"
   - "Bash(glab issue create *)"
   - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
 ---
 # Create Issue
 
