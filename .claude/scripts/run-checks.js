@@ -116,7 +116,10 @@
 //             reports/ down must be a real folder: a link anywhere on it is
 //             refused before anything is cleared or written, so a record never
 //             lands outside reports/ or in another step's folder. Each row
-//             carries its `role`.
+//             carries its `role`. In a before phase a target's output is
+//             also held against its after expect: one that already meets it
+//             fails ("it already meets its after expect"), not retried,
+//             because a pass after the work would then prove nothing (M17).
 //   --tally   reads each step's two results.json files and gives each step a
 //             status: proved (every target passed its before expect and its
 //             after expect without a flake, every guard that passed before
@@ -1362,7 +1365,10 @@ function shownPath(cwd, file) {
 
 // One run of a judged line: run it, time it, save its output to `file`, decide
 // it. A save that fails leaves the verdict `error`, as a refusal does.
-function attempt(line, expect, opts, cwd, env, file) {
+// `notYet` (a before-phase target only) is the target's after expect: output
+// that already meets it fails, because passing after the work would then prove
+// nothing (M17). The same output would show the same, so it is not retried.
+function attempt(line, expect, opts, cwd, env, file, notYet) {
   const started = Date.now();
   const run = runCheck(line, cwd, opts.timeout, env);
   const ms = Date.now() - started;
@@ -1379,9 +1385,15 @@ function attempt(line, expect, opts, cwd, env, file) {
     out.verdict = 'fail';
     out.detail = run.overflow ? 'output passed the ' + (MAX_BUFFER / 1048576) + ' MB buffer and the check was stopped' : tailDetail(run.body);
   } else {
-    const d = decide(expect, run.exit, run.body, { stdout: run.stdout, stderr: run.stderr });
+    const parts = { stdout: run.stdout, stderr: run.stderr };
+    const d = decide(expect, run.exit, run.body, parts);
     out.verdict = d.verdict;
     out.detail = d.verdict === 'fail' ? tailDetail(run.body) : d.detail;
+    if (out.verdict === 'pass' && notYet !== undefined && decide(notYet, run.exit, run.body, parts).verdict === 'pass') {
+      out.verdict = 'fail';
+      out.detail = 'it already meets its after expect, so passing after the work would prove nothing (M17): fix the check or its stated failure';
+      out.retry = false;
+    }
   }
   return out;
 }
@@ -1399,7 +1411,7 @@ function runOne(c, opts, cwd, outDir, root, env) {
   if (refusal) { row.detail = refusal; return row; }
 
   const file = path.join(outDir, c.id + '.txt');
-  let a = attempt(line, c.expect, opts, cwd, env, file);
+  let a = attempt(line, c.expect, opts, cwd, env, file, c.notYet);
   let slow = a.ms > opts.timeout / 2;
   if (opts.rerunFailures && a.verdict === 'fail' && a.retry) {
     // Keep the failing run where the review and the tally can read it, then
@@ -1413,7 +1425,7 @@ function runOne(c, opts, cwd, outDir, root, env) {
     } catch (e) {
       process.stderr.write('run-checks: ' + c.id + ': could not keep the first run: ' + e.message + '\n');
     }
-    const second = attempt(line, c.expect, opts, cwd, env, file);
+    const second = attempt(line, c.expect, opts, cwd, env, file, c.notYet);
     slow = slow || second.ms > opts.timeout / 2;
     if (second.verdict === 'pass') {
       row.flaky = true;
@@ -1753,7 +1765,10 @@ function runPlanPhase(opts, cwd) {
     throw new Error((parsed.problems.length ? 'the plan' : 'step ' + st.step) + ' has lint problems, so nothing ran (fix the plan, then run --lint): '
       + problems.map((p) => 'line ' + p.line + ': ' + p.problem).join('; '));
   }
-  const checks = st.targets.map((t) => ({ id: t.id, check: t.check, expect: opts.phase === 'before' ? t.before.value : t.after.value, role: 'target' }))
+  // A before run also holds each target's output against its after expect,
+  // which must not hold yet (`notYet`, see attempt).
+  const checks = st.targets.map((t) => ({ id: t.id, check: t.check, expect: opts.phase === 'before' ? t.before.value : t.after.value, role: 'target',
+    notYet: opts.phase === 'before' ? t.after.value : undefined }))
     .concat(st.guards.map((g) => ({ id: g.id, check: g.check, expect: g.expect.value, role: 'guard' })));
   const outDir = freshRecordDir(recordRel(plan.base, st.step, opts.phase), cwd);
   return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, { plan: plan.rel, step: st.step, phase: opts.phase });

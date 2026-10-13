@@ -1479,6 +1479,33 @@ section('16. plan mode holds up: near misses, repeated steps, fences, links (iss
   check('a check id named like an object property is never read as a result that ran', st(p3t, '1').status === 'unproved' && /guard 'constructor' has no before result/.test(String(st(p3t, '1').reasons)), one(JSON.stringify(st(p3t, '1'))));
 });
 
+// --- 17. a target that already passes proves nothing (review of #231, R1) ---
+// A before expect and an after expect that both hold on one output let a step
+// read as proved with no work done, which M17 says proves nothing. The before
+// run judges each target's output against its after expect too, and a target
+// that already meets it fails there, so the tally can never prove that step.
+section('17. a target that already meets its after expect fails the before run (review of #231)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  write('greet4.txt', 'hello\n');
+  write('plans/PLAN-already.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Already** `[sequential]`',
+    '  - Check target `loose`: `grep -c hello greet4.txt` - before `{"match": "^[0-9]"}` - after `{"match": "^1$"}`',
+    '',
+    '- [ ] 🟥 **Step 2: Exclusive** `[sequential]`',
+    '  - Check target `tight`: `grep -c hello greet4.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`',
+    ''].join('\n'));
+  const ap = ['--plan', 'plans/PLAN-already.md'];
+  const b1 = run(ap.concat(['--step', '1', '--phase', 'before']));
+  const loose = b1.byId.loose || {};
+  check('a target whose output already meets its after expect fails the before run', loose.verdict === 'fail' && /already meets its after expect/.test(loose.detail) && !loose.flaky, one(b1.stdout + b1.stderr));
+  const b2 = run(ap.concat(['--step', '2', '--phase', 'before']));
+  check('a target whose after expect does not hold yet still passes the before run', (b2.byId.tight || {}).verdict === 'pass', one(b2.stdout + b2.stderr));
+  run(ap.concat(['--step', '1', '--phase', 'after']));
+  const t = run(ap.concat(['--tally']));
+  const s1 = (t.json && Array.isArray(t.json.steps) ? t.json.steps : []).find((s) => String(s.step) === '1') || {};
+  check('the tally leaves a step whose target already passed unproved', s1.status === 'unproved' && /did not show its stated failure before/.test(String(s1.reasons)), one(JSON.stringify(s1)));
+});
+
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
 console.log(failures.length + ' FAILED, ' + passed + ' passed:');
