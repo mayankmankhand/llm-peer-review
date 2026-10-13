@@ -71,7 +71,8 @@
 // Over that, content is left out and the object carries a handle instead:
 // { exists, path, hasDetail, bytes, lines, head, note }, where head is the file's
 // opening (at most 1,500 characters, cut at a line end) and note says to read the
-// file itself. plans lists the newest 10 plans in full and the next 40 by name only
+// file itself. map.overview over 8 KB is cut the same way, to its opening, and
+// map.overviewCut (only then) says so. plans lists the newest 10 plans in full and the next 40 by name only
 // ({ name }); plansOmitted counts the older ones beyond those 50.
 // Each full plans[] entry is { name, progress, status, startCommit, models }. startCommit (#182)
 // is the sha on the plan's `**Start commit:** <sha>` line (exactly that spelling, at
@@ -326,6 +327,14 @@ function sessionStart() {
     let overview = null;
     const ovMatch = mapRaw.match(/##\s*System Overview\s*\n+([\s\S]*?)(?:\n#{2,3}\s|\s*$)/i);
     if (ovMatch) overview = ovMatch[1].trim();
+    // A very long overview would cost the output its budget (Size budget, above):
+    // over 8 KB it is cut to its opening, and overviewCut says so in one sentence.
+    let overviewCut = null;
+    const overviewBytes = overview === null ? 0 : Buffer.byteLength(overview, "utf8");
+    if (overviewBytes > LESSONS_INLINE_BYTES) {
+      overview = headAtLineEnd(overview, LESSONS_HEAD_CHARS).trimEnd();
+      overviewCut = "overview holds the opening of a " + overviewBytes + "-byte System Overview; read CODEBASE_MAP.md for the rest.";
+    }
 
     // Malformed: the three byte tests generate-index.js --finalize runs on the
     // temp file (over 200 bytes, a "<!-- Generated:" first line, a "# Codebase
@@ -351,6 +360,7 @@ function sessionStart() {
       malformed,
       overview,
     };
+    if (overviewCut) map.overviewCut = overviewCut;
   }
 
   // --- Lessons index --------------------------------------------------------
@@ -403,7 +413,8 @@ function sessionStart() {
   return out;
 }
 
-// LESSONS.md is bundled whole up to this size; over it, a handle (above).
+// LESSONS.md is bundled whole up to this size; over it, a handle (above). The map's
+// System Overview is cut at the same size.
 const LESSONS_INLINE_BYTES = 8 * 1024;
 const LESSONS_HEAD_CHARS = 1500;
 // Plans listed in full, then by name only; any older ones are counted.

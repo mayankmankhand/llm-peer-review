@@ -1216,6 +1216,21 @@ section('Output fits under the host\'s cut (harness research, P6-C1)', function 
   commitAll(small, 'init');
   const s2 = runScript([], small);
   check('a small LESSONS.md still comes back whole as content', s2.json.lessons && s2.json.lessons.content === '# Lessons\n\n- **one**\n', JSON.stringify(s2.json.lessons));
+  check('a short map overview comes back whole, with no cut note', s2.json.map && s2.json.map.exists === false, JSON.stringify(s2.json.map));
+
+  // The map's System Overview is the other field that carries a file's text.
+  const big = newRepo('budget-map');
+  write(big, 'README.md', 'x\n');
+  const bigHead = commitAll(big, 'init');
+  let overview = '';
+  for (let i = 1; i <= 120; i++) overview += 'Overview line ' + i + ' describes one part of a large system in a sentence of ordinary length.\n';
+  write(big, 'CODEBASE_MAP.md', '<!-- Generated: 2026-01-01 -->\n<!-- Commit: ' + bigHead + ' -->\n\n# Codebase Map\n\n## System Overview\n\n' + overview + '\n## Module Guide\n\n- README.md: the one file.\n');
+  const m = runScript([], big);
+  const mo = (m.json.map || {}).overview || '';
+  check('a map overview over 8 KB is cut to its opening, at a line end, with one sentence saying so',
+    Buffer.byteLength(overview) > 8192 && mo.length <= 1500 && overview.startsWith(mo) && typeof m.json.map.overviewCut === 'string' && /CODEBASE_MAP\.md/.test(m.json.map.overviewCut),
+    'overview ' + mo.length + ' chars, overviewCut ' + JSON.stringify(m.json.map.overviewCut));
+  check('the cut map is still sound and fresh', m.json.map.malformed === false && m.json.map.commitsBehind === 0, JSON.stringify(m.json.map).slice(0, 200));
 });
 
 console.log('');
