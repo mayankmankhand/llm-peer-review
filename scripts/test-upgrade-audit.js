@@ -85,7 +85,7 @@
 //     why; a run with no finding, --stamp, --receipt and an explicit
 //     --plugin-root do not), the refusals of --receipt and --release, a
 //     call-back that needs the run's --from, and one another release wrote,
-//     which runs nothing (the link moved after the run);
+//     which runs nothing (the link moved after the run).
 //   - C-18 (the lessons files keep both sides on a merge, issue #232): a lessons
 //     file git does not merge with union is one suggest finding whose lines are
 //     the shipped seed's, a missing detail-file rule is listed but raises

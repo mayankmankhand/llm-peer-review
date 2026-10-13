@@ -21,6 +21,8 @@
 
 The 7.6.3 runner made every receipt pass a guard that refuses programs, and the audit's receipts were programs, so the upgrade's audit could prove nothing; moving each check behind the audit itself keeps the runner strict. The scan guessed who wrote a message from its text, while Claude Code already records the sender on every entry, so the scan now reads that.
 
+---
+
 ## Unreleased - Land Without Losing Work
 
 **Additive on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0.** Issue #232. When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing it can quietly drop that work, or the branch's own, and a squash then hides the fix. `/tk:merge` lands finished worktree PRs in the order you give and checks each one before it lands.
