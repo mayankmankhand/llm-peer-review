@@ -133,7 +133,7 @@ State one of:
 
 <rules>
 
-## REMEMBER: The review phase reports and never edits files; findings are audited before the report (M2) and the auto loop applies fixes after it, both governed by `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` (the release itself always asks, M9).
+## REMEMBER: The review phase reports and never edits files; findings are audited before the report (M2) and the auto loop applies fixes after it, both governed by `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md` and `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md` (the release itself always asks, M9).
 
 </rules>
 

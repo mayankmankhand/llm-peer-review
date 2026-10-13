@@ -190,7 +190,7 @@ Why: `LESSONS.md` is read at the start of every session, which is why it is an i
 Why: a step that says check, verify or confirm and names no command leaves the model to read the files and reason its way to a verdict, which is slower than the command and wrong more often. The toolkit now runs before it reasons (M16), and every check step of its own names the command and the signal that passes it; this entry flags the project's own commands and skills that have not caught up: a list item or numbered step that opens with one of those verbs, a bold label such as `**Verify:**` allowed first, and carries no backtick span, which is where a command would sit. It ships at `suggest` because a regular expression over prose will hit some ordinary sentences, and the audit, not the detector, decides each hit; a release of real hits is the evidence for promoting it to `warn`.
 
 ### C-18: The lessons files keep both sides on a merge
-- **Since:** 7.7.0
+- **Since:** 8.0.0
 - **Scope:** gitattributes
 - **Detector:** lessons-merge
 - **Severity:** suggest

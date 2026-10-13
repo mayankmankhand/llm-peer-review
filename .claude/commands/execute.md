@@ -26,7 +26,7 @@ The text below is this project's own gate, read from `.claude/toolkit/execute-ga
 - As you implement each step:
   - Update the markdown tracking document with emoji status and the overall progress percentage, counted as Status Updates says (M16)
 - After each step's work is green, make a checkpoint commit of that logical unit (M4) before moving on. Green is the step's after run, per "Checks per step (M17)" below; the project's full test step (Integration Checkpoint item 2) runs at a parallel checkpoint and at the plan's Verify step, not after every step, except in a plan with no check lines, where it still decides each step's green
-- Always-ask actions page for approval before applying, per M9 - during /execute that is most often an edit to a prompt file; the full list lives in `.claude/skills/shared/hitl-loop.md`
+- Always-ask actions page for approval before applying, per M9 - during /execute that is most often an edit to a prompt file; the full list lives in `.claude/skills/shared/hitl-stages.md`
 </rules>
 
 ## Checks per step (M17)

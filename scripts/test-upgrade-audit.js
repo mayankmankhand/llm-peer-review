@@ -2953,16 +2953,16 @@ console.log('\n9f. a check step names its command (C-17), the Severity field, an
 
 console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
 {
-  // C-18 arrives in 7.7.0, so it needs a plugin root at that version; every
+  // C-18 arrives in 8.0.0, so it needs a plugin root at that version; every
   // root above shows it out of range. Each fixture is a git repository, because
   // the detector asks git for the merge attribute.
-  const PLUGIN770 = path.join(TMP, 'plugin770');
-  const b770 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN770, '--version', '7.7.0'], { cwd: REPO, encoding: 'utf8' });
-  check('build-plugin.js builds a 7.7.0 plugin root', b770.status === 0 && fs.existsSync(path.join(PLUGIN770, '.claude-plugin', 'plugin.json')), b770.stdout + b770.stderr);
-  const audit770 = (d, args, o) => audit(d, args || [], Object.assign({ pluginRoot: PLUGIN770 }, o || {}));
+  const PLUGIN800 = path.join(TMP, 'plugin800');
+  const b800 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN800, '--version', '8.0.0'], { cwd: REPO, encoding: 'utf8' });
+  check('build-plugin.js builds a 8.0.0 plugin root', b800.status === 0 && fs.existsSync(path.join(PLUGIN800, '.claude-plugin', 'plugin.json')), b800.stdout + b800.stderr);
+  const audit800 = (d, args, o) => audit(d, args || [], Object.assign({ pluginRoot: PLUGIN800 }, o || {}));
   const c18 = (res) => res.findings.filter(f => f.id === 'C-18');
   const LESSON = '# Lessons\n\n- **Keep it simple.** One line.\n';
-  // A project audited at 7.6.5 (the range is 7.6.5 -> 7.7.0) with the files
+  // A project audited at 7.6.5 (the range is 7.6.5 -> 8.0.0) with the files
   // given; attrs null leaves .gitattributes out; git false skips git init.
   const c18Case = (name, o) => {
     const dir = path.join(TMP, 'c18-' + name);
@@ -2973,7 +2973,7 @@ console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
     return dir;
   };
   // The seed's comment and union lines, as the plugin ships them.
-  const seedAttrs = read(path.join(PLUGIN770, 'seed', 'gitattributes')).split(/\r?\n/);
+  const seedAttrs = read(path.join(PLUGIN800, 'seed', 'gitattributes')).split(/\r?\n/);
   const at = seedAttrs.indexOf('LESSONS.md merge=union');
   const SEED_UNION = seedAttrs.slice(at - 1, at + 2);
   check('the shipped seed carries the comment line, then LESSONS.md and LESSONS-detail.md merged with union', at > 0 && /^# /.test(SEED_UNION[0]) && SEED_UNION[2] === 'LESSONS-detail.md merge=union', JSON.stringify(SEED_UNION));
@@ -2983,39 +2983,39 @@ console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
   const comment = (f) => ((f.fields || []).find(x => x.label === 'Comment line') || { value: '' }).value;
 
   let d = c18Case('hit', { lessons: ['LESSONS.md'] });
-  let r = audit770(d);
+  let r = audit800(d);
   let f = c18(r);
-  check('C-18 is in range for a project audited at 7.6.5 on a 7.7.0 build, and out of range on the 7.6.3 build', r.status === 0 && /C-18/.test(r.summary) && !/C-18/.test(audit(d, [], { pluginRoot: path.join(TMP, 'plugin763') }).summary), r.summary);
-  check('C-18: LESSONS.md with no .gitattributes is one suggest finding on .gitattributes that opens with Optional and carries Since 7.7.0', f.length === 1 && f[0].severity === 'suggest' && /^Optional\. LESSONS\.md is not merged with git's union driver/.test(f[0].what) && f[0].since === '7.7.0' && f[0].file.relPath === '.gitattributes' && f[0].key === 'C-18:.gitattributes:lessons-merge', JSON.stringify(f).slice(0, 500));
+  check('C-18 is in range for a project audited at 7.6.5 on a 8.0.0 build, and out of range on the 7.6.3 build', r.status === 0 && /C-18/.test(r.summary) && !/C-18/.test(audit(d, [], { pluginRoot: path.join(TMP, 'plugin763') }).summary), r.summary);
+  check('C-18: LESSONS.md with no .gitattributes is one suggest finding on .gitattributes that opens with Optional and carries Since 8.0.0', f.length === 1 && f[0].severity === 'suggest' && /^Optional\. LESSONS\.md is not merged with git's union driver/.test(f[0].what) && f[0].since === '8.0.0' && f[0].file.relPath === '.gitattributes' && f[0].key === 'C-18:.gitattributes:lessons-merge', JSON.stringify(f).slice(0, 500));
   check('C-18: its lines are the seed\'s, both files listed while the detail file is absent, and the fix says to create the file', f.length === 1 && comment(f[0]) === SEED_UNION[0] && lines(f[0]).join('\n') === SEED_UNION.slice(1).join('\n') && /\(create the file\)/.test(f[0].fix), JSON.stringify(f[0] && f[0].fields) + (f[0] && f[0].fix));
   check('C-18: its receipt passes, printing the lessons file\'s attribute', allReceiptsShow(d, f).length === 0, allReceiptsShow(d, f).join(' | '));
   const before = { findings: f };
   write(d, '.gitattributes', [comment(f[0])].concat(lines(f[0])).join('\n') + '\n');
-  const after = audit770(d);
+  const after = audit800(d);
   check('C-18: appending the listed lines clears it, and the old receipt agrees with the rerun', c18(after).length === 0 && receiptsAgree(d, before, after).length === 0, receiptsAgree(d, before, after).join(' | '));
 
   d = c18Case('detail-only', { lessons: ['LESSONS.md', 'LESSONS-detail.md'], attrs: '* text=auto\nLESSONS.md merge=union\n' });
-  f = c18(audit770(d));
+  f = c18(audit800(d));
   check('C-18: with LESSONS.md already union, only LESSONS-detail.md is named and listed, and the fix keeps the existing file', f.length === 1 && /^Optional\. LESSONS-detail\.md is not merged/.test(f[0].what) && lines(f[0]).join('|') === 'LESSONS-detail.md merge=union' && !/create the file/.test(f[0].fix) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 500));
   d = c18Case('both', { lessons: ['LESSONS.md', 'LESSONS-detail.md'] });
-  f = c18(audit770(d));
+  f = c18(audit800(d));
   check('C-18: both lessons files without the rule are one finding naming both', f.length === 1 && /^Optional\. LESSONS\.md and LESSONS-detail\.md are not merged/.test(f[0].what) && allReceiptsShow(d, f).length === 0, JSON.stringify(f).slice(0, 400));
 
-  const clean = (name, o) => { const res = audit770(c18Case(name, o)); return res.status === 0 && c18(res).length === 0 && /C-18/.test(res.summary); };
+  const clean = (name, o) => { const res = audit800(c18Case(name, o)); return res.status === 0 && c18(res).length === 0 && /C-18/.test(res.summary); };
   check('C-18: a project whose .gitattributes is the shipped seed is no finding', clean('seed', { lessons: ['LESSONS.md', 'LESSONS-detail.md'], attrs: seedAttrs.join('\n') }));
   check('C-18: a missing detail-file rule raises nothing while there is no detail file', clean('no-detail', { lessons: ['LESSONS.md'], attrs: 'LESSONS.md merge=union\n' }));
   check('C-18: no lessons files is no finding', clean('no-lessons', { lessons: [] }));
   d = c18Case('info', { lessons: ['LESSONS.md'] });
   write(d, '.git/info/attributes', 'LESSONS.md merge=union\nLESSONS-detail.md merge=union\n');
-  r = audit770(d);
+  r = audit800(d);
   check('C-18: a rule git reads from .git/info/attributes counts, since git is asked', r.status === 0 && c18(r).length === 0, JSON.stringify(c18(r)).slice(0, 300));
-  r = audit770(c18Case('nogit', { lessons: ['LESSONS.md'], git: false }));
+  r = audit800(c18Case('nogit', { lessons: ['LESSONS.md'], git: false }));
   check('C-18: outside a git repository there is no finding, and a note says the rule was not checked', r.status === 0 && c18(r).length === 0 && /C-18: git check-attr did not run/.test(r.summary), r.summary);
   const m = mutant('c18-every-file', 'const flagged = present.filter(rel => !union(rel));', 'const flagged = present;');
   check('  the C-18 mutation that ignores git\'s answer applies to the source', m.applied);
-  check('  with it, the seed-attributes project is flagged, so the clean checks above bite', c18(audit770(c18Case('seed-mutant', { lessons: ['LESSONS.md'], attrs: seedAttrs.join('\n') }), [], { script: m.path })).length === 1);
+  check('  with it, the seed-attributes project is flagged, so the clean checks above bite', c18(audit800(c18Case('seed-mutant', { lessons: ['LESSONS.md'], attrs: seedAttrs.join('\n') }), [], { script: m.path })).length === 1);
   const entry = read(REAL_CONVENTIONS).split(/^### /m).find(b => /^C-18:/.test(b)) || '';
-  check('the real C-18 entry is a lessons-merge convention since 7.7.0 at Severity suggest, not run on every upgrade', /^- \*\*Since:\*\* 7\.7\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && !/^- \*\*Runs:\*\*/m.test(entry), entry.slice(0, 300));
+  check('the real C-18 entry is a lessons-merge convention since 8.0.0 at Severity suggest, not run on every upgrade', /^- \*\*Since:\*\* 8\.0\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && !/^- \*\*Runs:\*\*/m.test(entry), entry.slice(0, 300));
 }
 
 console.log('\n10. errors and usage');
