@@ -24,7 +24,7 @@ The split exists because a category invented at n=1 is a guess. You cannot see a
 <rules>
 
 1. **Never publish, and never send anything off this machine.** No HTML artifact, no hosted-page publish, never fed to `/ask-gpt`, `/ask-gemini`, or any other external model. This is a flat rule with no consent path and no "ask the user first" exception. The ledger is a private per-machine record of things the user said, and a consent prompt would be an invitation to leak it. If a future session finds a reason this rule should not apply, the reason is wrong. The no-ask publish rule in `.claude/skills/shared/html-viewing.md` does not apply here: this skill renders nothing.
-2. **The ranking prints only the shareable layer.** Open codes, counts, repo names, dates, and the homes and rates the helper computes. Never `produced`, `correction`, `trigger` or `rewrite`: read the rollup, which the helper builds from a whitelist that cannot reach them. Each bucket carries an `open_codes` array of `{open_code, count}`, so everything the coding below needs is in the rollup. The one exception is the fix loop's evidence step, which reads one repo's private fields from inside that repo only; they stay in that step and never enter a commit message, a PR body, `LESSONS.md`, an artifact, or an outside model.
+2. **The ranking prints only the shareable layer.** Open codes, counts, repo names, dates, and the homes and rates the helper computes. Never `produced`, `correction`, `trigger` or `rewrite`: read the rollup, which the helper builds from a whitelist that cannot reach them. Each bucket carries an `open_codes` array of `{open_code, count}`, so everything the coding below needs is in the rollup. The one exception is the fix loop's evidence step, which reads one repo's private fields from inside that repo only; they stay in that step and never enter a committed file, a commit message, a PR body, `LESSONS.md`, an artifact, or an outside model.
 3. **Rank within a kind, never across kinds.** Pooling human-labeled rows with machine-labeled ones makes a count meaningless, so each kind gets its own ranking; while every row is `human`, that is one ranking.
 4. **Never invent a count.** Every number you show, rates and cycle counts included, comes from the helper. If you find yourself estimating, stop and run the helper.
 5. **User-triggered only.** This command is never chained into (M14). Running it is a deliberate choice.
@@ -97,6 +97,7 @@ Present the ranked buckets in chat:
 - Name the single bucket you would act on, and say why it is that one rather than the next.
 - Flag anything still in `(unlabeled)`.
 - When the rollup carries `fixes`, list each with its rate before and after and the cycle counts behind them. Call a change real only when `enough_cycles` is true (at least 5 cycles on each side); otherwise say it is too early to read.
+- Remind the user that a toolkit note filed from an earlier ranking still needs `--record-fix --home toolkit --version <x.y.z>` once the release that ships it is out; until then its category has no before and after.
 
 Keep it short. The point of the ranking is to make one decision obvious, not to produce a report.
 
@@ -113,7 +114,7 @@ Acting on a bucket is a separate, deliberate choice, made one bucket at a time, 
 
    It prints that repo's rows for the category with their private fields (what was asked, what was produced, the correction, and the user's own rewrite when there is one) and nothing from any other repo. It matches each row's main working copy against this folder's by real path, refuses outside a git repository, and prints nothing in an opted-out repo. Run it only from a session opened in that repo, never by stepping into another repo's folder from elsewhere: the script can check the folder, not which session is asking.
 3. **Draft the fix for its home.**
-   - `project`: that repo's own `CLAUDE.md`, or a rules file it already uses. It may describe this project's own case.
+   - `project`: that repo's own `CLAUDE.md`, or a rules file it already uses. It may describe this project's own case in its own words, but never quotes a row's private fields: that file is committed.
    - `global`: the user's global instructions file, `~/.claude/CLAUDE.md`. Every project's sessions read it, so write it in generic words: no quotes, no project names.
    - `toolkit`: a toolkit prompt or rule. It leaves the repo only as a generic note (the pattern, with no quotes and no project names) that the user approves before it is filed as an issue in the toolkit's repository.
 4. **The user approves the drafted text before it lands.** These files are the user's.
@@ -124,7 +125,7 @@ Acting on a bucket is a separate, deliberate choice, made one bucket at a time, 
    ```
 
    A project fix is recorded from inside its repo. A toolkit fix is recorded once the release that ships it is out, with `--version <x.y.z>` naming that release; filing its note is not landing it. The helper stamps the exact time and stores the category's rate so far as the fix's `before`.
-6. **Read the result on later rankings.** The rollup's `fixes` show each fix's rate before and after: rows per `/document` cycle, where a cycle is the stretch between two heartbeats of one working copy. Before counts the cycles that ended by the fix's time; after counts the cycles that began after it; the cycle in progress when it landed counts in neither. A project fix is measured in its own repo, a global or toolkit fix across every repo, and a toolkit fix only over cycles that ran the fixed version.
+6. **Read the result on later rankings.** The rollup's `fixes` show each fix's rate before and after: rows per `/document` cycle, where a cycle is the stretch between two heartbeats of one working copy. Before counts the cycles that ended by the fix's time; after counts the cycles that began after it; the cycle in progress when it landed counts in neither. A project fix is measured in its own repo, a global or toolkit fix across every repo, and a toolkit fix only over cycles that recorded a version: an older release before the fix, the fixed one or later after it.
 
 What the measurement cannot see: each working copy's first cycle and rows marked `backfill:` are left out, because their scan window differs (`rates_left_out` counts them); running `/document` twice in one stretch adds a cycle; a cycle closed through an older document command writes no heartbeat, so it is invisible; and a heartbeat with no recorded version never counts toward a toolkit fix.
 
