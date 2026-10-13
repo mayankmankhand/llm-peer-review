@@ -1634,7 +1634,11 @@ function main() {
   const migrationName = () => { const to = migration ? validVersion(migration.to) : null; return to ? 'the ' + to + ' migration' : 'the migration from the copy-install'; };
 
   const findings = [];
-  const emit = (f) => findings.push(f);
+  // Every receipt is decided by the checks runner, which since 8.0.0 refuses a
+  // prose expect (review R1 of the 8.0.0 cycle). Each check below exits 0 only
+  // while its finding stands, so the expect is that exit code; the sentence a
+  // site writes as `shows` says what the output holds, for the reader.
+  const emit = (f) => findings.push(f.receipt ? Object.assign({}, f, { receipt: Object.assign({}, f.receipt, { expect: { exit: 0 } }) }) : f);
   const claim = keyMaker();
   for (const c of inRange) {
     if (c.detector === 'regex') {
@@ -1649,7 +1653,7 @@ function main() {
             emit({ id: c.id, key, severity: c.severity, convention: c.title, file: { relPath: rel, line: i + 1 },
               what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + rel + ' line ' + (i + 1) + ' is behind convention ' + c.id + ' (' + c.title + ').',
               fix: c.fix, since: c.since,
-              receipt: { check: regexCheck(rel, line, n, pat), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
+              receipt: { check: regexCheck(rel, line, n, pat), shows: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
           });
         }
       }
@@ -1683,11 +1687,11 @@ function main() {
             // receipt instead of confirming the finding.
             receipt: { check: 'if test -f ' + shq(seedAbs) + ' && test -r ' + shq(seedAbs) + ' && test -f ' + shq(SEED_RULES) + ' && test -r ' + shq(SEED_RULES)
                 + ' ; then ' + stampBehindCheck(toVersion) + ' && { diff <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(seedAbs) + ') <(awk ' + shq(RULES_BODY_AWK) + ' ' + shq(SEED_RULES) + ') ; test $? -eq 1 ; } ; else echo ' + shq('receipt: cannot read the shipped seed or the project rules file') + ' >&2 ; false ; fi',
-              expect: 'line ' + at + ' shows the stamp ' + stamped + ', below ' + toVersion + ' (the stamp check passes only while the stamp is below it); diff then prints the lines where the shipped seed (<) and the project copy (>) differ, with the stamp line and everything from the project marker down left out of both, trailing blanks and CR ignored; the check exits 0 only when they differ, and exits non-zero when either file cannot be read' } });
+              shows: 'line ' + at + ' shows the stamp ' + stamped + ', below ' + toVersion + ' (the stamp check passes only while the stamp is below it); diff then prints the lines where the shipped seed (<) and the project copy (>) differ, with the stamp line and everything from the project marker down left out of both, trailing blanks and CR ignored; the check exits 0 only when they differ, and exits non-zero when either file cannot be read' } });
         } else if (behind) emit({ id: c.id, key: claim(c.id + ':' + SEED_RULES + ':stamp').key, severity: 'warn', convention: c.title, file: { relPath: SEED_RULES, line: 3 },
           what: 'Should fix. The seeded rules file is stamped ' + (stamped || 'with no usable version') + ' while the plugin is ' + toVersion + '.',
           fix: c.fix || 'delete the rules file and run /tk:setup for a fresh seed, or merge the new seed text by hand and update the stamp', since: c.since,
-          receipt: { check: stampBehindCheck(toVersion), expect: 'the stamp line, whose version is below ' + toVersion + ' or not a usable version (or a line saying no line carries the stamp); the check exits 0 only then' } });
+          receipt: { check: stampBehindCheck(toVersion), shows: 'the stamp line, whose version is below ' + toVersion + ' or not a usable version (or a line saying no line carries the stamp); the check exits 0 only then' } });
       }
     } else if (c.detector === 'dead-permissions') {
       const dead = localAllow.filter(p => deadPermission(p, exists));
@@ -1698,7 +1702,7 @@ function main() {
         what: 'Optional. ' + dead.length + ' permission entr' + (dead.length === 1 ? 'y points' : 'ies point') + ' at scripts the plugin no longer places in the project.',
         fix: c.fix || 'remove them; the plugin commands carry their own allowed-tools', since: c.since,
         fields: [{ label: 'Entries', value: dead.join(' ; ') }],
-        receipt: { check: allowRowsCheck('dead', dead.map(p => [p, scriptOf(p)])), expect: dead.length + ' line(s) reading dead: <row>, one per listed entry still in "permissions.allow" whose script is still gone' } });
+        receipt: { check: allowRowsCheck('dead', dead.map(p => [p, scriptOf(p)])), shows: dead.length + ' line(s) reading dead: <row>, one per listed entry still in "permissions.allow" whose script is still gone' } });
     } else if (c.detector === 'permission-rows') {
       if (localExists && local === null) { notes.push(c.id + ' skipped: ' + LOCAL_SETTINGS + ' is not readable JSON'); continue; }
       // Rows compare by permissionRowKey (issue #179): Claude Code matches
@@ -1727,13 +1731,13 @@ function main() {
         if (!localExists) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':no-file').key, severity: 'suggest', convention: c.title, file: { relPath: LOCAL_SETTINGS },
           what: 'Optional. The project has no ' + LOCAL_SETTINGS + ', so none of the toolkit\'s ' + seedAllow.length + ' permission rows are granted.',
           fix: 're-run /tk:setup, which writes the file from the shipped seed', since: c.since,
-          receipt: { check: 'test ! -e ' + shq(LOCAL_SETTINGS) + ' && echo ' + shq('absent: ' + LOCAL_SETTINGS), expect: 'absent: ' + LOCAL_SETTINGS } });
+          receipt: { check: 'test ! -e ' + shq(LOCAL_SETTINGS) + ' && echo ' + shq('absent: ' + LOCAL_SETTINGS), shows: 'absent: ' + LOCAL_SETTINGS } });
         else if (missing.length) emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':missing-rows').key, severity: 'suggest', convention: c.title, file: { relPath: LOCAL_SETTINGS },
           what: 'Optional. ' + LOCAL_SETTINGS + ' lacks ' + missing.length + ' permission row' + (missing.length === 1 ? '' : 's') + ' the shipped toolkit seed carries, so those steps ask for permission.',
           fix: 're-run /tk:setup, which merges the missing toolkit rows into ' + LOCAL_SETTINGS + ' and keeps every row of yours', since: c.since,
           fields: [{ label: 'Missing rows', value: missing.join(' ; ') }],
           receipt: { check: absentRowsCheck('missing', missing.map(p => [p, ''])),
-            expect: missing.length + ' line(s) reading missing: <row>, one per toolkit row that no permissions list (allow, ask or deny) holds in either spelling' } });
+            shows: missing.length + ' line(s) reading missing: <row>, one per toolkit row that no permissions list (allow, ask or deny) holds in either spelling' } });
         // Seed ask rows the project lacks (issue #192): without them the broad
         // `Bash(git push *)` allow row lets a force push run unasked, so this is
         // its own Should fix finding, filtered like the allow rows above. The
@@ -1758,7 +1762,7 @@ function main() {
           fix: 're-run /tk:setup, which merges the missing rows into "permissions.ask" in ' + LOCAL_SETTINGS + ' and keeps every row of yours', since: c.since,
           fields: [{ label: 'Missing ask rows', value: missingAsk.join(' ; ') }],
           receipt: { check: absentRowsCheck('missing', missingAsk.map(p => [p, ''])),
-            expect: missingAsk.length + ' line(s) reading missing: <row>, one per toolkit ask row that no permissions list (allow, ask or deny) holds in either spelling' } });
+            shows: missingAsk.length + ' line(s) reading missing: <row>, one per toolkit ask row that no permissions list (allow, ask or deny) holds in either spelling' } });
       }
       // (b) Rows the shipped retired list names, in either spelling:
       //     maintainer-only grants, old copy-install script rows and unscoped
@@ -1777,7 +1781,7 @@ function main() {
           what: 'Should fix. ' + LOCAL_SETTINGS + ' still carries ' + still.length + ' permission row' + (still.length === 1 ? '' : 's') + ' the toolkit seed retired: grants for the toolkit\'s own repository or rows that no longer match anything.',
           fix: 'remove the listed rows from ' + LOCAL_SETTINGS + '; the current seed does not carry them and the plugin commands carry their own permissions', since: c.since,
           fields: [{ label: 'Retired rows', value: still.join(' ; ') }],
-          receipt: { check: allowRowsCheck('retired', still.map(p => [p, ''])), expect: still.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
+          receipt: { check: allowRowsCheck('retired', still.map(p => [p, ''])), shows: still.length + ' line(s) reading retired: <row>, one per listed row still in "permissions.allow"' } });
       }
       // (c) acceptEdits: a question, never an auto-fix, worded for where the key
       //     sits. The 7.0.x seed wrote it at the top level, where Claude Code
@@ -1799,7 +1803,7 @@ function main() {
           const at = lineOf[where];
           emit({ id: c.id, key: claim(c.id + ':' + LOCAL_SETTINGS + ':default-mode-' + where).key, severity: 'suggest', convention: c.title, file: Object.assign({ relPath: LOCAL_SETTINGS }, at ? { line: at } : {}),
             what, fix, since: c.since,
-            receipt: { check: defaultModeCheck(where), expect: 'the defaultMode line' + (at ? ' (line ' + at + ')' : '') + ', then "' + (where === 'top' ? 'top level' : 'under permissions') + ': acceptEdits"; the check exits 0 only while the key there still reads acceptEdits' } });
+            receipt: { check: defaultModeCheck(where), shows: 'the defaultMode line' + (at ? ' (line ' + at + ')' : '') + ', then "' + (where === 'top' ? 'top level' : 'under permissions') + ': acceptEdits"; the check exits 0 only while the key there still reads acceptEdits' } });
         }
       }
       // (d) Rows of the project's own a migration removed although their script
@@ -1831,7 +1835,7 @@ function main() {
             fix: 'add each listed row back to "permissions.allow" in ' + LOCAL_SETTINGS + ', exactly as listed (' + source + '); leave every other row as it is', since: c.since,
             fields: [{ label: 'Lost rows', value: lostRows.map(x => x.row).join(' ; ') }],
             receipt: { check: absentRowsCheck('restorable', lostRows.map(x => [x.row, x.rel])),
-              expect: n + ' line(s) reading restorable: <row>, one per lost row whose script file exists and which no permissions list holds in either spelling' } });
+              shows: n + ' line(s) reading restorable: <row>, one per lost row whose script file exists and which no permissions list holds in either spelling' } });
         }
       }
     } else if (c.detector === 'seed-lines') {
@@ -1881,7 +1885,7 @@ function main() {
               since: c.since, fields: [{ label: 'Negation line', value: NEGATION }],
               // The fix keeps the line, so the line alone proves nothing after
               // it (issue #179): the receipt also judges the whole .gitignore.
-              receipt: { check: stateFileCheck(sf.rel, line, n), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) + '; the check exits 0 only while the .gitignore as a whole still ignores ' + STATE_REL } });
+              receipt: { check: stateFileCheck(sf.rel, line, n), shows: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) + '; the check exits 0 only while the .gitignore as a whole still ignores ' + STATE_REL } });
             return;
           }
           const w = why[i];
@@ -1926,7 +1930,7 @@ function main() {
             since: c.since,
             fields: replacement !== null ? [{ label: plural ? 'Seed lines' : 'Seed line', value: replacement.map(s => s.trim()).join(' ; ') }] : undefined,
             receipt: { check: lineCheck(sf.rel, line, n) + (reasons.length ? ' && { ' + reasons.join(' || ') + ' ; }' : ''),
-              expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) + (reasons.length ? '; the check exits 0 only while ' + [w.named.length ? 'a toolkit path it names is still missing' : null, w.scripts ? '.claude/scripts/ still holds no files' : null].filter(Boolean).join(' or ') : '') } });
+              shows: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) + (reasons.length ? '; the check exits 0 only while ' + [w.named.length ? 'a toolkit path it names is still missing' : null, w.scripts ? '.claude/scripts/ still holds no files' : null].filter(Boolean).join(' or ') : '') } });
         });
       }
       // Lines of the project's own a 7.0.x migration dropped from a file it
@@ -1947,7 +1951,7 @@ function main() {
           fix: 'append the listed line' + (n === 1 ? '' : 's') + ' back to ' + rel + ', exactly as listed; keep every line the file has now', since: c.since,
           fields: [{ label: 'Lost lines', value: lost.join(' ; ') }, { label: 'Backup copy', value: backup }],
           receipt: { check: "b=$(printf '\\357\\273\\277'); s=1; for l in " + lost.map(shq).join(' ') + '; do if ' + norm(backup) + ' && ! { ' + norm(rel) + '; }; then printf \'lost: %s\\n\' "$l"; s=0; fi; done; test "$s" -eq 0',
-            expect: n + ' line(s) reading lost: <line>, one per listed line the backup copy has and ' + rel + ' lacks; the check exits 0 only while one is still lacking' } });
+            shows: n + ' line(s) reading lost: <line>, one per listed line the backup copy has and ' + rel + ' lacks; the check exits 0 only while one is still lacking' } });
       }
       // A migration record git still tracks. A 7.0.x migration wrote the record
       // and projects committed it; 7.0.0 and 7.0.1 records list the permission
@@ -2003,7 +2007,7 @@ function main() {
                   + (ignoredElsewhere ? ' for every collaborator (git ignores it here only through this machine\'s own settings, .git/info/exclude or a global excludes file, which collaborators never get)' : ''))
             + '. Earlier commits keep their copy of the file; rewriting git history to remove it is a separate step the owner decides, never part of this fix.',
           since: c.since, fields: [{ label: 'Command', value: 'git rm --cached ' + MIGRATION_REL }],
-          receipt: { check: 'git ls-files --error-unmatch -- ' + shq(MIGRATION_REL), expect: 'one line, ' + MIGRATION_REL + ', which git prints only because it tracks the file' } });
+          receipt: { check: 'git ls-files --error-unmatch -- ' + shq(MIGRATION_REL), shows: 'one line, ' + MIGRATION_REL + ', which git prints only because it tracks the file' } });
       }
     } else if (c.detector === 'unscoped-names') {
       const owned = new Set(piecesUnder(P('.claude')));
@@ -2027,7 +2031,7 @@ function main() {
             fix: c.fix || 'scope the name with tk:', since: c.since,
             // The line itself (issue #179): a whole-file grep for the name also
             // matched docs/review.md on another line and outlived the fix.
-            receipt: { check: lineCheck(rel, line, n), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
+            receipt: { check: lineCheck(rel, line, n), shows: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
         });
       }
       // Bare Skill rows in the permissions list never match a tk: skill. A row
@@ -2039,7 +2043,7 @@ function main() {
         what: 'Should fix. ' + LOCAL_SETTINGS + ' carries ' + bare.length + ' Skill permission row' + (bare.length === 1 ? '' : 's') + ' without the tk: scope, which never match a plugin skill.',
         fix: 'scope each row with tk: (Skill(tk:<name>)), or drop it when the tk: row is already in the list', since: c.since,
         fields: [{ label: 'Rows', value: bare.join(' ; ') }],
-        receipt: { check: allowRowsCheck('unscoped', bare.map(p => [p, ''])), expect: bare.length + ' line(s) reading unscoped: <row>, one per listed row still in "permissions.allow"' } });
+        receipt: { check: allowRowsCheck('unscoped', bare.map(p => [p, ''])), shows: bare.length + ' line(s) reading unscoped: <row>, one per listed row still in "permissions.allow"' } });
     } else if (c.detector === 'agent-tools') {
       for (const rel of promptFiles.filter(r => r.startsWith('.claude/agents/'))) {
         const { name, description, toolsIdx, edits } = agentFrontmatter(fs.readFileSync(P(rel), 'utf8'));
@@ -2052,8 +2056,8 @@ function main() {
           what: 'Should fix. ' + rel + (toolsIdx >= 0 ? ' grants ' + edits.join(', ') + ' to a finder or judge role, so it can change files before any audit judges its output.' : ' declares no tools list, so its finder or judge role gets every tool, Edit included.'),
           fix: c.fix || 'declare tools: Read, Grep, Glob (Bash only for read-only checks); a finder or judge never edits', since: c.since,
           receipt: toolsIdx >= 0
-            ? { check: 'awk ' + shq(TOOLS_EDIT_AWK) + ' < ' + shq(rel), expect: 'the frontmatter tools line and its list items, then an edit tool line naming Edit, Write or NotebookEdit; the check exits 0 only while an edit tool is in the list' }
-            : { check: 'awk ' + shq(TOOLS_NONE_AWK) + ' < ' + shq(rel), expect: 'the frontmatter lines, none of them a tools: line; the check exits 0 only while the frontmatter has no tools line' } });
+            ? { check: 'awk ' + shq(TOOLS_EDIT_AWK) + ' < ' + shq(rel), shows: 'the frontmatter tools line and its list items, then an edit tool line naming Edit, Write or NotebookEdit; the check exits 0 only while an edit tool is in the list' }
+            : { check: 'awk ' + shq(TOOLS_NONE_AWK) + ' < ' + shq(rel), shows: 'the frontmatter lines, none of them a tools: line; the check exits 0 only while the frontmatter has no tools line' } });
       }
     } else if (c.detector === 'review-kinds') {
       // Absent means the project adds no review kind: nothing to check.
@@ -2070,7 +2074,7 @@ function main() {
             const { key, n } = claim(c.id + ':' + REVIEW_KINDS + ':' + slug + ':' + digest(line));
             emit({ id: c.id, key, severity: 'warn', convention: c.title, file: at, what: 'Should fix. ' + REVIEW_KINDS + ' line ' + (i + 1) + ' ' + what,
               fix: c.fix || 'add the agent under .claude/agents/ with an output contract and no edit tools, fix the row\'s three cells, or remove the row', since: c.since,
-              receipt: { check: lineCheck(REVIEW_KINDS, line, n) + (check ? ' && ' + check : ''), expect: 'line ' + (i + 1) + ' as written: ' + line.trim().slice(0, 120) + (expect ? '; ' + expect : '') } });
+              receipt: { check: lineCheck(REVIEW_KINDS, line, n) + (check ? ' && ' + check : ''), shows: 'line ' + (i + 1) + ' as written: ' + line.trim().slice(0, 120) + (expect ? '; ' + expect : '') } });
           };
           const cells = tableCells(line);
           if (cells.length !== 3) return row('cells', 'has ' + cells.length + ' cell(s), not the three /tk:review reads (What changed, Specialist, Finder agent), so the kind is never dispatched.');
@@ -2110,7 +2114,7 @@ function main() {
         emit({ id: c.id, key: claim(c.id + ':' + a.rel + ':no-model').key, severity: 'warn', convention: c.title, file: { relPath: a.rel, line: 1 },
           what: 'Should fix. ' + a.rel + ' declares no model, so ' + (role ? 'this finder or judge role' : 'the agent a review kind in ' + REVIEW_KINDS + ' names') + ' follows CLAUDE_CODE_SUBAGENT_MODEL whenever a user sets it, which can move it below the session model whose work it judges.',
           fix: 'add model: inherit to its frontmatter to keep it on the session model, or name the model you want', since: c.since,
-          receipt: { check: 'awk ' + shq(MODEL_NONE_AWK) + ' < ' + shq(a.rel), expect: 'the frontmatter lines, none of them a model: line with a value; the check exits 0 only while the frontmatter declares no model' } });
+          receipt: { check: 'awk ' + shq(MODEL_NONE_AWK) + ' < ' + shq(a.rel), shows: 'the frontmatter lines, none of them a model: line with a value; the check exits 0 only while the frontmatter declares no model' } });
       }
       // Dispatch lines. A bare name an agent of the project's own answers to is
       // that agent, never the toolkit's, so it is left alone.
@@ -2139,7 +2143,7 @@ function main() {
                 ? 'take the model off the call; the judge stays on the session model through its own model: inherit'
                 : 'pass model set to its models.perRole value from node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models, where session, or a model above your own, means your own model family\'s alias',
               since: c.since,
-              receipt: { check: c14CallCheck(rel, line, occurrence, judge), expect: 'the dispatch\'s block, one numbered line each; the check exits 0 only while the block ' + (judge ? 'names a model for the judge' : 'names no model for the finder') } });
+              receipt: { check: c14CallCheck(rel, line, occurrence, judge), shows: 'the dispatch\'s block, one numbered line each; the check exits 0 only while the block ' + (judge ? 'names a model for the judge' : 'names no model for the finder') } });
           }
         });
       }
@@ -2174,7 +2178,7 @@ function main() {
             what: 'Optional. ' + sf.rel + ' is, line for line, the file the ' + wholeHit.release + ' seed wrote, and the current seed\'s text differs.',
             fix: 'replace the file with the current seed, ' + seedPath + ', or keep it as it is: nothing in it is yours yet; ' + waits, since: c.since,
             fields: [{ label: 'Seed file', value: seedPath }],
-            receipt: { check: blockCheck(sf.rel, 0, 0, whole), expect: 'the file\'s lines, numbered, then "hash ' + whole + '", the hash of the file as the ' + wholeHit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
+            receipt: { check: blockCheck(sf.rel, 0, 0, whole), shows: 'the file\'s lines, numbered, then "hash ' + whole + '", the hash of the file as the ' + wholeHit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
           continue;
         }
         for (const b of blocksOf(sf.kind, lines)) {
@@ -2198,7 +2202,7 @@ function main() {
             fields: near
               ? [{ label: 'Seed file', value: seedPath + ' ' + lineRange(near) }, { label: 'Seed block', value: near.lines.map(s => s.trim()).join(' ; ') }]
               : [{ label: 'Seed file', value: seedPath }],
-            receipt: { check: blockCheck(sf.rel, b.start, b.end, h), expect: range + ', numbered, then "hash ' + h + '", the hash of the block as the ' + hit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
+            receipt: { check: blockCheck(sf.rel, b.start, b.end, h), shows: range + ', numbered, then "hash ' + h + '", the hash of the block as the ' + hit.release + ' seed wrote it; the check exits 0 only while the hash still matches' } });
         }
       }
       // ${CLAUDE_PLUGIN_ROOT} outside the plugin: Claude Code expands it only in
@@ -2217,7 +2221,7 @@ function main() {
           emit({ id: c.id, key, severity, convention: c.title, file: { relPath: rel, line: i + 1 },
             what: (severity === 'warn' ? 'Should fix. ' : 'Optional. ') + rel + ' line ' + (i + 1) + ' names ' + PLUGIN_ROOT_VAR + ', which Claude Code expands only inside the plugin\'s own files, so from this file it points at nothing.',
             fix: 'replace ' + PLUGIN_ROOT_VAR + ' with the stable path ' + STABLE_PLUGIN_PATH + (prompt ? '' : '; ' + waits), since: c.since,
-            receipt: { check: lineCheck(rel, line, n), expect: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
+            receipt: { check: lineCheck(rel, line, n), shows: 'line ' + (i + 1) + ' matches: ' + line.trim().slice(0, 120) } });
         });
       }
     } else if (c.detector === 'lessons-shape') {
@@ -2234,7 +2238,7 @@ function main() {
             what: 'Should fix. LESSONS.md holds ' + (n === 1 ? 'a bullet' : n + ' bullets') + ' beyond one sentence or over ' + LONG_BULLET_CHARS + ' characters while LESSONS-detail.md is absent, so every session reads the write-ups instead of a one-line index.',
             fix: 'create LESSONS-detail.md from the plugin seed (' + path.join(pluginRoot, 'seed', 'LESSONS-detail.md') + ') and move each listed bullet\'s write-up there under the same bold lead, leaving one bold line in the index; ' + waits, since: c.since,
             fields: [{ label: 'Lines', value: long.map(b => String(b.start)).join(', ') }],
-            receipt: { check: 'test ! -e LESSONS-detail.md && awk ' + shq(LONG_BULLETS_AWK) + ' < LESSONS.md', expect: 'one line per bullet beyond one sentence or over ' + LONG_BULLET_CHARS + ' characters, as <line>: <text>; the check exits 0 only while LESSONS-detail.md is absent and such a bullet remains' } });
+            receipt: { check: 'test ! -e LESSONS-detail.md && awk ' + shq(LONG_BULLETS_AWK) + ' < LESSONS.md', shows: 'one line per bullet beyond one sentence or over ' + LONG_BULLET_CHARS + ' characters, as <line>: <text>; the check exits 0 only while LESSONS-detail.md is absent and such a bullet remains' } });
         }
         // The toolkit's own lessons, carried in by a copy-install.
         const leadsPath = path.join(pluginRoot, 'seed', LEADS_FILE);
@@ -2250,7 +2254,7 @@ function main() {
               fix: 'remove each listed bullet, and its write-up under the same bold lead in LESSONS-detail.md when it is there; keep any you rely on; ' + waits, since: c.since,
               fields: [{ label: 'Lines', value: inherited.map(b => String(b.start)).join(', ') }, { label: 'Leads', value: inherited.slice(0, 12).map(b => b.lead).join(' ; ') + (n > 12 ? ' ; and ' + (n - 12) + ' more' : '') }],
               // The leads as compared: a closing period or colon set aside, case ignored.
-              receipt: { check: 'grep -v ' + shq('^#') + ' -- ' + shq(leadsPath) + ' | sed ' + shq('s/[.:!]*$//') + ' | grep -n -i -F -f - -- LESSONS.md', expect: 'each LESSONS.md line that holds a lead from the toolkit\'s own lessons list, numbered; the check exits 0 only while one remains' } });
+              receipt: { check: 'grep -v ' + shq('^#') + ' -- ' + shq(leadsPath) + ' | sed ' + shq('s/[.:!]*$//') + ' | grep -n -i -F -f - -- LESSONS.md', shows: 'each LESSONS.md line that holds a lead from the toolkit\'s own lessons list, numbered; the check exits 0 only while one remains' } });
           }
         }
       }
@@ -2275,7 +2279,7 @@ function main() {
               what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + flagged.join(' and ') + (n === 1 ? ' is' : ' are') + ' not merged with git\'s union driver, so two branches that each add a lesson conflict there, and a conflict fixed by hand can drop either side.',
               fix: 'append the listed lines to .gitattributes' + (attrs ? '' : ' (create the file)') + ', under the listed comment line, and leave every other line as it is', since: c.since,
               fields: [{ label: 'Comment line', value: LESSONS_MERGE_COMMENT }, { label: 'Lines', value: add.join(' ; ') }],
-              receipt: { check: 'git check-attr merge -- ' + flagged.map(shq).join(' ') + ' | grep -v -e ' + shq(': merge: union$'), expect: 'one line per lessons file whose merge attribute is not union; the check exits 0 only while one remains' } });
+              receipt: { check: 'git check-attr merge -- ' + flagged.map(shq).join(' ') + ' | grep -v -e ' + shq(': merge: union$'), shows: 'one line per lessons file whose merge attribute is not union; the check exits 0 only while one remains' } });
           }
         }
       }
@@ -2304,7 +2308,12 @@ function main() {
         const hashes = backup && manifestBackup && fs.existsSync(P(backup)) && fs.existsSync(P(manifestBackup));
         if (hashes) {
           checks.push('grep -n -F -e ' + shq('"' + recorded + '": "') + ' -- ' + shq(manifestBackup));
-          checks.push("tr -d '\\r' < " + shq(backup) + ' | { sha256sum 2>/dev/null || shasum -a 256; }');
+          // The backup's hash line, kept only while it differs from the hash
+          // the manifest recorded, so the chain exits 0 only while the edit is
+          // still there: the expect is an exit code, never a judged sentence.
+          const files = (readJson(P(manifestBackup), null) || {}).files;
+          const installed = files && typeof files === 'object' && typeof files[m.rel] === 'string' && /^[0-9a-f]{64}$/.test(files[m.rel]) ? files[m.rel] : null;
+          checks.push("tr -d '\\r' < " + shq(backup) + ' | { sha256sum 2>/dev/null || shasum -a 256; }' + (installed ? ' | grep -v -F -e ' + shq(installed) : ''));
         }
         // The convention's fix and the tagged base are two sentences.
         const baseFix = c.fix || 'compare your backup with the toolkit file at the tag it came from, never with the current plugin copy';
@@ -2342,8 +2351,8 @@ function main() {
           fix: replaced ? ownFix : tagged ? baseFix.replace(/[.\s]+$/, '') + '. Base for your backup: ' + tagged : baseFix, since: c.since,
           fields: [{ label: 'Your copy', value: backup || '(no backup recorded)' },
             { label: 'Toolkit copy it came from', value: tagged || '(no usable copy-install version recorded)' }],
-          receipt: { check: checks.join(' ; '),
-            expect: hashes ? 'the migration record lists the file; the manifest line holds the hash the copy-install wrote, and the hash of your backup copy printed after it differs, which is the local edit'
+          receipt: { check: checks.join(' && '),
+            shows: hashes ? 'the migration record lists the file; the manifest line holds the hash the copy-install wrote, and the hash of your backup copy printed after it differs, which is the local edit'
               : 'the migration record lists the file as locally modified' } });
       }
       if (skipped) notes.push(c.id + ': skipped ' + skipped + ' migration record(s) whose path is not a plain project path');

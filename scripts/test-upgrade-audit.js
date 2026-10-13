@@ -247,7 +247,7 @@ function compareDefaultRun(proj, args, explicit, root) {
   }
   const from = args[0] === '--from' ? args[1] : '';
   const release = buildVersion(root);
-  const bare = (f) => JSON.stringify(Object.assign({}, f, { receipt: f.receipt && f.receipt.expect }));
+  const bare = (f) => JSON.stringify(Object.assign({}, f, { receipt: f.receipt && [f.receipt.expect, f.receipt.shows] }));
   const fresh = [];
   found.forEach((f, i) => {
     const e = explicit.findings[i];
@@ -311,15 +311,15 @@ function receiptShows(f, r) {
     const hashes = (r.stdout.match(/\b[0-9a-f]{64}\b/g) || []);
     // The record may spell the path with Windows backslashes (doubled in JSON).
     const named = r.stdout.includes(f.file.relPath) || r.stdout.includes(f.file.relPath.split('/').join('\\\\'));
-    return named && (!/hash/.test(f.receipt.expect) || (hashes.length === 2 && hashes[0] !== hashes[1]));
+    return named && (!/hash/.test(f.receipt.shows) || (hashes.length === 2 && hashes[0] !== hashes[1]));
   }
-  if (/^absent: /.test(f.receipt.expect)) return r.stdout.trim() === f.receipt.expect;
+  if (/^absent: /.test(f.receipt.shows)) return r.stdout.trim() === f.receipt.shows;
   // The lessons merge rule (C-18): git prints one line per lessons file the
   // finding names, and none of them says union.
   if (f.id === 'C-18') { const got = outLines(r.stdout); return got.length > 0 && got.every(l => /^LESSONS(-detail)?\.md: merge: /.test(l) && !/: merge: union$/.test(l)); }
   // A tracked migration record: git prints the record's path and nothing else.
-  if (/because it tracks the file/.test(f.receipt.expect)) return r.stdout.trim() === f.file.relPath;
-  const marker = /reading ([a-z]+): </.exec(f.receipt.expect);
+  if (/because it tracks the file/.test(f.receipt.shows)) return r.stdout.trim() === f.file.relPath;
+  const marker = /reading ([a-z]+): </.exec(f.receipt.shows);
   if (marker) {
     const field = (f.fields || []).find(x => /rows|entries|lost lines/i.test(x.label));
     const listed = field ? field.value.split(' ; ') : [];
@@ -327,9 +327,9 @@ function receiptShows(f, r) {
     return got.every(l => l.startsWith(marker[1] + ': ')) && got.map(l => l.slice(marker[1].length + 2)).sort().join('\n') === listed.slice().sort().join('\n');
   }
   // A rules text finding: the stamp line, and diff prints at least one differing line.
-  if (/exits 0 only when they differ/.test(f.receipt.expect)) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout) && /^[<>]/m.test(r.stdout);
+  if (/exits 0 only when they differ/.test(f.receipt.shows)) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout) && /^[<>]/m.test(r.stdout);
   // A rules file with no stamp line at all says so instead of showing one.
-  if (/no line carries the stamp/.test(f.receipt.expect) && /no line carries the stamp/.test(r.stdout)) return true;
+  if (/no line carries the stamp/.test(f.receipt.shows) && /no line carries the stamp/.test(r.stdout)) return true;
   if (f.file.line) return new RegExp('(^|\\n)' + f.file.line + ':').test(r.stdout);
   return false;
 }
@@ -476,7 +476,7 @@ check('the range runs from the copy-install version and names C-1 to C-11', /6\.
 check('#203 a run WITH findings stays quiet about the plugin', !/nothing changed here/.test(r.summary), r.summary);
 check('the default conventions path (the plugin copy) gives the same findings', audit(MIG, [], { defaultConventions: true }).stdout === r.stdout);
 check('C-1 flags a shared fragment read by path', by('C-1').some(f => f.file.relPath === '.claude/commands/myteam-presend.md' && f.file.line === 7));
-check('C-1 flags a script called by path', by('C-1').some(f => /browse\.js/.test(f.receipt.expect)));
+check('C-1 flags a script called by path', by('C-1').some(f => /browse\.js/.test(f.receipt.shows)));
 check('C-1 reaches CLAUDE.md', by('C-1').some(f => f.file.relPath === 'CLAUDE.md'));
 check('no prompt-file convention flags the seeded rules file', !r.findings.some(f => f.file.relPath === '.claude/rules/toolkit.md' && f.id !== 'C-7'));
 check('C-2 flags the untyped review-finder dispatch', by('C-2').length === 1 && by('C-2')[0].file.line === 3);
@@ -486,6 +486,11 @@ check('C-7 flags the old rules text under its stale stamp, worded as text that c
 check('C-8 lists the dead permission entries and leaves a live custom script row', by('C-8').length === 1 && by('C-8')[0].fields[0].value.includes('render-html.js') && by('C-8')[0].fields[0].value.includes('browse.js') && !by('C-8')[0].fields[0].value.includes('our-report.js') && !by('C-8')[0].fields[0].value.includes('git add'));
 check('the clean custom rule yields nothing', !r.findings.some(f => f.file.relPath === '.claude/rules/bank-safety.md'));
 check('every finding has a receipt with a check and an expectation', r.findings.every(f => f.receipt && f.receipt.check && f.receipt.expect));
+// The checks runner refuses a prose expect from 8.0.0 on, so a receipt that
+// carried one died at the audit's first tier on every upgrade (review R1 of the
+// 8.0.0 cycle). Each expect is the exit code the check gives while the finding
+// stands, which the runner decides itself; the sentence moved to `shows`.
+check('every receipt expect is exit 0, which the checks runner decides, and its sentence is under shows', r.findings.every(f => JSON.stringify(f.receipt.expect) === '{"exit":0}' && RC.decide(f.receipt.expect, 0, '').verdict === 'pass' && typeof f.receipt.shows === 'string' && f.receipt.shows.length > 0), r.findings.filter(f => JSON.stringify(f.receipt.expect) !== '{"exit":0}' || typeof f.receipt.shows !== 'string').map(f => f.id).join(' '));
 check('every finding opens with its severity phrase', r.findings.every(f => /^(Should fix\.|Optional\.|Blocks\.)/.test(f.what)));
 let bad = allReceiptsShow(MIG, r.findings);
 check('every receipt runs through bash and shows its evidence (' + r.findings.length + ' findings)', bad.length === 0, bad.join(' | '));
@@ -517,6 +522,15 @@ console.log('\n3. C-6 evidence is the copy-install record, never a diff against 
   check('one C-6 finding; the record with an unsafe path is skipped', by('C-6').length === 1 && /skipped 1 migration record/.test(r.summary) && !r.stdout.includes('escape.js') && !r.stdout.includes('/etc/passwd'), r.summary);
   check('the receipt shows the record line, the manifest hash and the backup copy\'s different hash', !!f && out.status === 0 && out.stdout.includes(sha(ORIGINAL)) && out.stdout.includes(sha(EDITED)) && sha(ORIGINAL) !== sha(EDITED) && /"rel": "\.claude\/scripts\/render-html\.js"/.test(out.stdout), out.out);
   check('the receipt diffs nothing against the plugin root', !!f && !/\bdiff\b/.test(f.receipt.check) && !f.receipt.check.includes(PLUGIN));
+  // The expect is exit 0 (8.0.0), so the chain itself must stop standing once
+  // the backup copy matches the hash the manifest recorded: put the installed
+  // bytes back, run the same check, then restore the edited copy.
+  if (f) {
+    write(MIG, BACKUP_DIR + '/.claude/scripts/render-html.js', ORIGINAL);
+    const same = runReceipt(MIG, f);
+    write(MIG, BACKUP_DIR + '/.claude/scripts/render-html.js', EDITED);
+    check('the receipt exits non-zero once the backup copy matches the installed hash', same.status !== 0, same.status + ' ' + same.out);
+  }
   check('the fix names the tagged file the backup came from', !!f && f.fix.includes('https://github.com/mayankmankhand/llm-peer-review/blob/v6.3.3/.claude/scripts/render-html.js') && /never against the current plugin copy/.test(f.fix), f && f.fix);
   check('the convention\'s fix and the tagged base are separate sentences', !!f && /[a-z]\. Base for your backup: https:\/\//.test(f.fix) && !/\.\. Base/.test(f.fix), f && f.fix);
   check('the fields carry the backup and its base, not the current plugin copy', !!f && f.fields.some(x => x.label === 'Your copy' && x.value.endsWith('render-html.js')) && f.fields.some(x => x.label === 'Toolkit copy it came from' && /blob\/v6\.3\.3\//.test(x.value)) && !f.fields.some(x => /Plugin copy/.test(x.label)));
@@ -549,11 +563,11 @@ console.log('\n3b. C-6 on a migration recorded on native Windows (backslash path
   const media = one('.claude/scripts/gen-media.js');
   const shows = (f) => { const out = f ? runReceipt(WIN, f) : { status: -1, stdout: '' }; return { ok: !!f && receiptShows(f, out), out }; };
   let s = shows(render);
-  check('a backslash backup path keeps the evidence: both hashes appear in the receipt', s.ok && s.out.stdout.includes(sha(ORIGINAL)) && s.out.stdout.includes(sha(EDITED)) && /hash/.test(render.receipt.expect), s.out.stdout);
+  check('a backslash backup path keeps the evidence: both hashes appear in the receipt', s.ok && s.out.stdout.includes(sha(ORIGINAL)) && s.out.stdout.includes(sha(EDITED)) && /hash/.test(render.receipt.shows), s.out.stdout);
   check('  and the Your copy field names the backup with forward slashes', !!render && render.fields.some(x => x.label === 'Your copy' && x.value === WIN_DIR + '/.claude/scripts/render-html.js'), render && JSON.stringify(render.fields));
   s = shows(gpt);
   check('a backslash rel is normalized, and its receipt finds the record and manifest spelling and both hashes', s.ok && s.out.stdout.includes(sha(GPT_ORIGINAL)) && s.out.stdout.includes(sha(GPT_EDITED)) && /blob\/v6\.3\.3\/\.claude\/scripts\/ask-gpt\.js/.test(gpt.fix), s.out.stdout);
-  check('a drive-letter backup is still refused and never echoed', !!media && media.fields.some(x => x.label === 'Your copy' && x.value === '(no backup recorded)') && !/hash/.test(media.receipt.expect) && !/C:|Users/.test(res.stdout), media && JSON.stringify(media));
+  check('a drive-letter backup is still refused and never echoed', !!media && media.fields.some(x => x.label === 'Your copy' && x.value === '(no backup recorded)') && !/hash/.test(media.receipt.shows) && !/C:|Users/.test(res.stdout), media && JSON.stringify(media));
   check('a `..` segment after normalization is still skipped and never echoed', c6.length === 3 && /skipped 1 migration record/.test(res.summary) && !/escape\.js|outside/.test(res.stdout), res.summary);
   const badWin = allReceiptsShow(WIN, c6);
   check('every C-6 receipt over the Windows record runs and shows its evidence', badWin.length === 0, badWin.join(' | '));
