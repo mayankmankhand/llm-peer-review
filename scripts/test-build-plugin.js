@@ -578,6 +578,16 @@ const HOST_MERGES = ['gh pr merge', 'glab mr merge'];
 const hostRowOk = (c) => HOST_MERGES.includes(c) ? seedAskRows.includes('Bash(' + c + ' *)') && !seedAllowRows.includes('Bash(' + c + ' *)') : seedAllowRows.includes('Bash(' + c + ' *)');
 check('live: every gh and glab issue, PR and MR command in host-cli.md has its seed row, an ask row for the two host merges', hostCommands.includes('glab mr list') && hostCommands.includes('gh issue create') && HOST_MERGES.every(c => hostCommands.includes(c)) && hostCommands.every(hostRowOk),
   hostCommands.filter(c => !hostRowOk(c)).join(', ') + ' of ' + hostCommands.join(', '));
+// A copy-install takes its rows from this repository's own
+// .claude/settings.local.json (setup.sh and setup.ps1 merge its allow and ask
+// lists), so the rows /merge needs sit in both seeds, in the same list (issue
+// #232, review R14): without them every local landing there asks.
+const copySeed = JSON.parse(read(REPO, '.claude/settings.local.json')).permissions;
+const MERGE_ROWS = { allow: ['Bash(git merge *)', 'Bash(glab mr view *)'], ask: ['Bash(gh pr merge *)', 'Bash(glab mr merge *)'] };
+const mergeRowGaps = [].concat(...Object.entries(MERGE_ROWS).map(([list, rows]) => rows
+  .filter(r => !(list === 'allow' ? seedAllowRows : seedAskRows).includes(r) || !(copySeed[list] || []).includes(r))
+  .map(r => list + ' ' + r)));
+check('live: both seeds carry the rows /merge needs, in the same list', mergeRowGaps.length === 0, mergeRowGaps.join(', '));
 // Claude Code matches `Bash(x:*)` exactly as `Bash(x *)`, so two such rows are one rule written twice.
 const spellingKey = (row) => row.replace(/^(Bash|PowerShell)\(([\s\S]*):\*\)$/, '$1($2 *)');
 check('live: no two seed rows are the same rule in two spellings', new Set(seedAllowRows.map(spellingKey)).size === seedAllowRows.length);

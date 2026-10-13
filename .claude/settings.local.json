@@ -8,6 +8,7 @@
       "Bash(git push *)",
       "Bash(git pull *)",
       "Bash(git fetch *)",
+      "Bash(git merge *)",
       "Bash(git branch *)",
       "Bash(git checkout *)",
       "Bash(git stash *)",
@@ -37,6 +38,7 @@
       "Bash(gh pr create *)",
       "Bash(gh pr view *)",
       "Bash(gh pr diff *)",
+      "Bash(glab mr view *)",
       "Bash(gh api *)",
       "Bash(gh release list *)",
       "Bash(npm install *)",
@@ -126,7 +128,9 @@
       "Bash(git push * -f*)",
       "Bash(git push -uf*)",
       "Bash(git push * -uf*)",
-      "Bash(git push * +*)"
+      "Bash(git push * +*)",
+      "Bash(gh pr merge *)",
+      "Bash(glab mr merge *)"
     ],
     "additionalDirectories": [
       "/tmp"
