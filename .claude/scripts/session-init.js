@@ -17,7 +17,7 @@
 //   - Size budget (harness research, P6-C1): Claude Code replaces a Bash result
 //     over about 30 KB with a 2 KB preview and a saved file, so a command reading
 //     this output loses everything past the preview. The session-start object
-//     stays under 16,000 characters, half that cut: a LESSONS.md over 8 KB comes
+//     is kept under 16,000 characters, half that cut, wherever trimming can do it: a LESSONS.md over 8 KB comes
 //     back as a handle instead of its content, and only the newest plans are listed
 //     in full (both below); the total is then measured, and parts that add up past
 //     it are trimmed in a fixed order (fitSessionStart). --scope cannot promise a size, since it lists every
@@ -428,6 +428,8 @@ const PLANS_BY_NAME = 40;
 // can still add up past the budget, so the total is checked and the object shrinks
 // in a fixed order until it fits: the lessons index becomes a handle, then the map
 // overview is cut to its opening, then name-only plan entries move to plansOmitted.
+// The newest 10 plans, the models and the worktree are never trimmed, so an object
+// whose untrimmable parts alone exceed the budget is printed as it is.
 const SESSION_START_BUDGET = 16000;
 function fitSessionStart(payload) {
   const size = (o) => JSON.stringify(ordered(o, SESSION_START_ORDER), null, 2).length + 1;
