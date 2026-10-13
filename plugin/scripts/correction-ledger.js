@@ -664,6 +664,27 @@ function runCandidates() {
   }
   result.window.from = since;
 
+  const scan = scanExchanges(files, since);
+  result.interruptsWithoutFollowUp = scan.interruptsWithoutFollowUp;
+  result.candidates = scan.exchanges.filter(function (x) { return x.kept; }).map(candidateOf);
+
+  result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+// The one walk over a set of session files (review of #229, R15). Capture and the
+// backfill both need each human message paired with the same context: the output
+// it reacts to, the request behind that output, and, for a reply to an interrupt,
+// the turn that was cut off, an interrupt in another session that this one's
+// opening message answers included. The backfill once had its own copy of this
+// walk, and the copy had already drifted (it read one session file, so it never
+// saw that cross-session pairing), so both modes call this one. It returns EVERY
+// human message inside the window as an exchange, in scan order; `kept` marks the
+// ones capture keeps as candidates (they passed the length and procedural gates,
+// or they answer an interrupt), and the backfill looks one up by its exact time
+// whether capture kept it or not.
+function scanExchanges(files, since) {
+  const scan = { exchanges: [], interruptsWithoutFollowUp: 0 };
   const time = function (iso) { const t = Date.parse(iso); return isNaN(t) ? null : t; };
   const unanswered = []; // interrupts still pending when their file ended
   const answers = [];    // each file's opening entry, which another file's interrupt can link to
@@ -723,7 +744,7 @@ function runCandidates() {
         // so the interrupt has no follow-up the scan can see. Counting it is
         // what makes that visible (the owner's decision in the review of the
         // #220 cycle, R6). The command itself is machine text, never a candidate.
-        if (pending) { result.interruptsWithoutFollowUp += 1; pending = null; }
+        if (pending) { scan.interruptsWithoutFollowUp += 1; pending = null; }
         if (opener) answers.push({ file: files[i], at: entry.timestamp, command: true });
         continue;
       }
@@ -734,12 +755,12 @@ function runCandidates() {
         const t0 = time(pending.at);
         const t = time(entry.timestamp);
         if (t0 !== null && t !== null && t - t0 > INTERRUPT_LINK_MS) {
-          result.interruptsWithoutFollowUp += 1;
+          scan.interruptsWithoutFollowUp += 1;
           pending = null;
         }
       }
 
-      const candidate = {
+      const ex = {
         at: entry.timestamp || null,
         session: entry.sessionId || path.basename(files[i], '.jsonl'),
         // A hint for prioritization, never a gate. See the PUSHBACK comment above.
@@ -750,21 +771,24 @@ function runCandidates() {
         // private fields are short summaries the extractor writes, capped on --add.
         asked: truncate(askedForLast, MAX_ASKED),
         assistant_said: truncate(lastAssistant, 800),
-        human_said: truncate(text, 1200)
+        human_said: truncate(text, 1200),
+        kept: false,       // the scan's own bookkeeping, dropped by candidateOf()
+        file: files[i]
       };
       if (pending) {
         // The follow-up skips the length and procedural gates, and is paired
         // with the turn that was cut off rather than anything said since.
-        candidate.after_interrupt = true;
-        candidate.assistant_said = truncate(pending.assistant_said, 800);
-        candidate.asked = truncate(pending.asked, MAX_ASKED);
+        ex.after_interrupt = true;
+        ex.assistant_said = truncate(pending.assistant_said, 800);
+        ex.asked = truncate(pending.asked, MAX_ASKED);
+        ex.kept = true;
         pending = null;
-        result.candidates.push(candidate);
+        scan.exchanges.push(ex);
         continue;
       }
-      const kept = couldBeIntervention(text);
-      if (kept) result.candidates.push(candidate);
-      if (opener) answers.push({ file: files[i], at: entry.timestamp, candidate: candidate, kept: kept });
+      ex.kept = couldBeIntervention(text);
+      scan.exchanges.push(ex);
+      if (opener) answers.push({ file: files[i], at: entry.timestamp, exchange: ex });
     }
     if (pending) unanswered.push(pending);
   }
@@ -773,9 +797,8 @@ function runCandidates() {
   // Oldest interrupt first, each takes the earliest opening entry of another
   // file that comes after it within INTERRUPT_LINK_MS and that no earlier
   // interrupt took. A slash command there counts the interrupt, as it does
-  // inside a session. A text already kept as a candidate is upgraded in place,
-  // never added twice; one the gates dropped is added. The rest are counted,
-  // not guessed.
+  // inside a session. The opening text is upgraded in place, and kept even if
+  // the gates dropped it. The rest are counted, not guessed.
   unanswered.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
   unanswered.forEach(function (p) {
     const t0 = time(p.at);
@@ -787,17 +810,24 @@ function runCandidates() {
         if (best === null || t < time(best.at)) best = ans;
       });
     }
-    if (!best) { result.interruptsWithoutFollowUp += 1; return; }
+    if (!best) { scan.interruptsWithoutFollowUp += 1; return; }
     best.taken = true;
-    if (best.command) { result.interruptsWithoutFollowUp += 1; return; }
-    best.candidate.after_interrupt = true;
-    best.candidate.assistant_said = truncate(p.assistant_said, 800);
-    best.candidate.asked = truncate(p.asked, MAX_ASKED);
-    if (!best.kept) { best.kept = true; result.candidates.push(best.candidate); }
+    if (best.command) { scan.interruptsWithoutFollowUp += 1; return; }
+    best.exchange.after_interrupt = true;
+    best.exchange.assistant_said = truncate(p.assistant_said, 800);
+    best.exchange.asked = truncate(p.asked, MAX_ASKED);
+    best.exchange.kept = true;
   });
+  return scan;
+}
 
-  result.candidates.sort(function (a, b) { return String(a.at).localeCompare(String(b.at)); });
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+// A candidate as --candidates prints it: the exchange without the scan's own fields.
+function candidateOf(ex) {
+  return {
+    at: ex.at, session: ex.session, has_pushback_marker: ex.has_pushback_marker,
+    after_interrupt: ex.after_interrupt, asked: ex.asked, assistant_said: ex.assistant_said,
+    human_said: ex.human_said
+  };
 }
 
 // ==========================================================================
@@ -1055,7 +1085,7 @@ function runRecordFix() {
   const at = new Date().toISOString();
   const rateRows = readJsonl(LEDGER_PATH).map(function (r) { return rateRow(r, axial); });
   const before = rateFor(rateRows, buildCycles(readJsonl(HEARTBEAT_PATH)),
-    { category: opts.category, root: root, at: Date.parse(at), side: 'before' });
+    { category: opts.category, root: root, at: Date.parse(at), side: 'before', version: version });
   const record = {
     at: at, category: opts.category, home: opts.home, label: label, version: version,
     repo: root ? path.basename(root) : null,
@@ -1121,40 +1151,20 @@ function transcriptFileFor(repoPath, session) {
   return null;
 }
 
-// The exchange around the human message at exactly `at`. A row's `at` is that
-// message's own timestamp, copied verbatim from the candidate the row was drafted
-// from, so the join is exact: no nearest match, no guess between turns. The walk
-// mirrors --candidates: the request behind the output, the output, the reply.
+// The exchange a row was drafted from, found through the same walk capture uses
+// (scanExchanges), over every session file in the folder that holds the row's
+// transcript, so a fill-in sees exactly the context capture gives that message,
+// a reply to another session's interrupt included (review of #229, R15). A row's
+// `at` is that message's own timestamp, copied verbatim from its candidate, so the
+// join is exact: the message at that time in that file, no nearest match, no guess
+// between turns. Each folder is walked once per run.
+const exchangeCache = new Map();
 function exchangeAt(file, at) {
-  let lines;
-  try { lines = fs.readFileSync(file, 'utf-8').split('\n'); } catch (e) { return null; }
-  let lastAssistant = '';
-  let lastHuman = '';
-  let askedForLast = '';
-  for (let j = 0; j < lines.length; j++) {
-    const line = lines[j].trim();
-    if (!line) continue;
-    let entry;
-    try { entry = JSON.parse(line); } catch (e) { continue; }
-    if (entry.type === 'assistant') {
-      const t = assistantText(entry);
-      if (t) { lastAssistant = t; askedForLast = lastHuman; }
-      continue;
-    }
-    if (entry.type !== 'user') continue;
-    const text = humanText(entry);
-    const command = isSlashCommand(entry, text);
-    if (!text && !command) continue;
-    const marker = !command && INTERRUPT.test(text);
-    if (entry.timestamp === at && text && !command && !marker) {
-      return {
-        asked: truncate(askedForLast, MAX_ASKED),
-        assistant_said: truncate(lastAssistant, 800),
-        human_said: truncate(text, 1200)
-      };
-    }
-    const request = command ? commandRequest(entry) : (marker ? '' : text);
-    if (request) lastHuman = request;
+  const folder = path.dirname(file);
+  if (!exchangeCache.has(folder)) exchangeCache.set(folder, scanExchanges(sessionFiles(folder), null).exchanges);
+  const list = exchangeCache.get(folder);
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].file === file && list[i].at === at) return list[i];
   }
   return null;
 }
@@ -1336,8 +1346,12 @@ function versionAtLeast(have, want) {
 // One category's rate on one side of a fix. Before: the cycles that ended at or
 // before the fix's time. After: the cycles that began at or after it, so the cycle
 // in progress when the fix landed counts in neither. `root` narrows a project fix
-// to its repo; `version` narrows a toolkit fix's after side to cycles closed on
-// that release or a later one.
+// to its repo. `version` narrows a toolkit fix to cycles closed on a recorded
+// version, so both sides count the same kind of install (review of #229, R10):
+// before, a release older than the fix; after, that release or a later one. A
+// cycle with no version (the source copy, a copy-install, anything closed before
+// versions were recorded) cannot say which side it ran on, and one that ran the
+// fixed release before the fix was recorded had the fix, so neither is before.
 function rateFor(rateRows, cycles, w) {
   const inWindow = new Set();
   cycles.forEach(function (list) {
@@ -1345,7 +1359,9 @@ function rateFor(rateRows, cycles, w) {
       if (c.first) return;
       if (w.root && c.root !== w.root) return;
       if (w.side === 'before') {
-        if (c.end <= w.at) inWindow.add(c);
+        if (c.end > w.at) return;
+        if (w.version && !(c.version && !versionAtLeast(c.version, w.version))) return;
+        inWindow.add(c);
         return;
       }
       if (c.start === null || c.start < w.at) return;
@@ -1397,9 +1413,9 @@ function rolledFixes(rateRows, cycles) {
       out.skipped++;
       return;
     }
-    const w = { category: f.category, root: root, at: Date.parse(f.at) };
+    const w = { category: f.category, root: root, at: Date.parse(f.at), version: f.home === 'toolkit' ? f.version : null };
     f.before = validRate(raw.before) || rateFor(rateRows, cycles, Object.assign({ side: 'before' }, w));
-    f.after = rateFor(rateRows, cycles, Object.assign({ side: 'after', version: f.home === 'toolkit' ? f.version : null }, w));
+    f.after = rateFor(rateRows, cycles, Object.assign({ side: 'after' }, w));
     f.enough_cycles = f.before.cycles >= MIN_CYCLES_TO_JUDGE && f.after.cycles >= MIN_CYCLES_TO_JUDGE;
     out.fixes.push(f);
   });

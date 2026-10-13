@@ -1255,6 +1255,64 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- review of #229, R10: a toolkit fix's two sides count the same installs ------
+// Before had counted every cycle that ended by the fix, so a working copy that
+// records no version (the toolkit's source copy, a copy-install) sat on a toolkit
+// fix's before side and never on its after side, and a cycle that already ran the
+// fixed release, closed before the fix was recorded, counted as before. Both sides
+// now count only cycles closed on a recorded version: before an older release,
+// after the fixed one or later. --record-fix stores its before by the same rule.
+{
+  const sb = makeSandbox('toolkitsides229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const U = path.join(sb.root, 'unversioned');
+  const P = path.join(sb.root, 'plugin');
+  const lines = function (file, recs) {
+    fs.writeFileSync(path.join(dir, file), recs.map(function (r) { return JSON.stringify(r); }).join('\n') + '\n', 'utf-8');
+  };
+  const beat = function (p, at, v) {
+    const b = { at: at, repo: path.basename(p), repo_path: p, session: '', candidates: 0, added: 0 };
+    if (v) b.toolkit_version = v;
+    return b;
+  };
+  const row = function (p, at) {
+    return { at: at, repo: path.basename(p), repo_path: p, kind: 'human', scope: 'toolkit', stage: 'execute',
+      produced: '', correction: '', open_code: 'x code', axial_code: null };
+  };
+  lines('correction-heartbeat.jsonl', [
+    beat(U, '2026-09-01T10:00:00.000Z'), beat(U, '2026-09-05T10:00:00.000Z'), beat(U, '2026-09-20T10:00:00.000Z'),
+    beat(P, '2026-09-02T10:00:00.000Z', '7.6.0'), beat(P, '2026-09-06T10:00:00.000Z', '7.6.0'),
+    beat(P, '2026-09-11T10:00:00.000Z', '7.7.0'), beat(P, '2026-09-13T10:00:00.000Z', '7.7.0'),
+    beat(P, '2026-09-18T10:00:00.000Z', '7.7.0')
+  ]);
+  lines('correction-ledger.jsonl', [
+    row(U, '2026-09-03T10:00:00.000Z'),   // closed with no version: on neither side of a toolkit fix
+    row(P, '2026-09-04T10:00:00.000Z'),   // closed on 7.6.0, before the fix: before
+    row(P, '2026-09-08T10:00:00.000Z'),   // closed on 7.7.0 before the fix was recorded: ran the fix, so not before
+    row(P, '2026-09-15T10:00:00.000Z')    // closed on 7.7.0 after the fix: after
+  ]);
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({ 'x code': 'cat-x' }), 'utf-8');
+  lines('correction-fixes.jsonl', [
+    { at: '2026-09-12T00:00:00.000Z', category: 'cat-x', home: 'toolkit', label: 'toolkit fix', version: '7.7.0' }
+  ]);
+  const fx = (JSON.parse(run(sb, ['--show-rollup'])).fixes || [])[0];
+  const pair = function (s) { return s ? [s.rows, s.cycles] : null; };
+  check('a toolkit fix\'s before side counts only cycles closed on an older recorded version',
+    !!fx && JSON.stringify(pair(fx.before)) === JSON.stringify([1, 1]), JSON.stringify(fx && fx.before));
+  check('a toolkit fix\'s after side still counts only cycles closed on the fixed version or later',
+    !!fx && JSON.stringify(pair(fx.after)) === JSON.stringify([1, 1]), JSON.stringify(fx && fx.after));
+  fs.rmSync(path.join(dir, 'correction-fixes.jsonl'));
+  let stored = null;
+  try {
+    run(sb, ['--record-fix', '--category', 'cat-x', '--home', 'toolkit', '--label', 'x', '--version', '7.7.0']);
+    stored = JSON.parse(fs.readFileSync(path.join(dir, 'correction-fixes.jsonl'), 'utf-8').trim()).before;
+  } catch (e) { stored = { error: e.message }; }
+  check('record-fix stores a toolkit fix\'s before by the same rule', JSON.stringify(pair(stored)) === JSON.stringify([1, 1]),
+    JSON.stringify(stored));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- issue #229: the home verdict comes from the spread --------------------------
 // One repo: project. Two or more: toolkit when MORE than half the rows came during
 // a toolkit stage (explore, create-plan, execute, review, document), global
@@ -1580,6 +1638,52 @@ function tripwireBinaryTest() {
   } catch (e) {
     check('tripwire binary test set up a git repo', false, e.message);
   }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- review of #229, R15: a fill-in gets the context capture would have given ----
+// --backfill-candidates had its own copy of the transcript walk, and the copy had
+// already drifted: it read one session file, so a row drafted from the opening
+// message of a new session, answering an interrupt in the session before it, came
+// back with no output to react to. Both modes now share one walk.
+{
+  const sb = makeSandbox('backfillpair229');
+  const repo = path.join(sb.root, 'pair');
+  const g = function (args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+  fs.mkdirSync(repo, { recursive: true });
+  g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+  g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+  const real = fs.realpathSync(repo);
+  const claudeDir = path.join(sb.home, '.claude');
+  const tdir = path.join(claudeDir, 'projects', real.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(tdir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts, sid) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: sid, message: { content: t } }); };
+  fs.writeFileSync(path.join(tdir, 'sess-p1.jsonl'), [
+    user('Move the settings page under the account menu.', '2026-09-23T10:00:00.000Z', 'sess-p1'),
+    asst('Moving it under the help menu.'),
+    user('[Request interrupted by user]', '2026-09-23T10:00:30.000Z', 'sess-p1')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(tdir, 'sess-p2.jsonl'),
+    user('No, the account menu, as I asked.', '2026-09-23T10:02:00.000Z', 'sess-p2') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), JSON.stringify({ at: '2026-09-23T10:02:00.000Z',
+    repo: 'pair', repo_path: real, kind: 'human', scope: 'project', stage: 'execute', produced: 'p', correction: 'c',
+    open_code: 'pair code', axial_code: null, session: 'sess-p2' }) + '\n', 'utf-8');
+  let c = null;
+  try { c = JSON.parse(run(sb, ['--backfill-candidates'], { cwd: repo })); } catch (e) { c = { error: e.message }; }
+  const cand = ((c && c.candidates) || [])[0] || {};
+  check('a fill-in for a reply to another session\'s interrupt gets the output that was cut off, as capture does',
+    cand.assistant_said === 'Moving it under the help menu.' && cand.asked === 'Move the settings page under the account menu.',
+    JSON.stringify(c).slice(0, 240));
+  let same = {};
+  try {
+    const cap = JSON.parse(run(sb, ['--candidates', '--since', '2026-09-23T00:00:00.000Z'], { cwd: repo }));
+    same = cap.candidates.filter(function (x) { return x.at === '2026-09-23T10:02:00.000Z'; })[0] || {};
+  } catch (e) { same = { error: e.message }; }
+  check('capture and the fill-in give that message the same context',
+    same.assistant_said === cand.assistant_said && same.asked === cand.asked && same.human_said === cand.human_said,
+    JSON.stringify(same).slice(0, 240));
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
