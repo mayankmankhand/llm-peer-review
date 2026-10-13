@@ -3031,6 +3031,9 @@ console.log('\n11f. a call-back another release wrote runs nothing: the link mov
   check('through the runner it exits 3 and saves one line: not run, both releases, then a new session and a toolkit issue',
     !!v && v.verdict === 'pass' && /^upgrade-audit: not run: .*the 7\.0\.0 audit.*the 7\.1\.0 audit.*new session.*toolkit issue/.test(v.body) && v.body.split('\n').filter(Boolean).length === 2, out.error || (v && v.body));
   check('  and it shows none of the evidence: no check ran', !!v && !/hitl-loop/.test(v.body), v && v.body);
+  // A version that differs only by a suffix is another build too.
+  const beta = c1 ? sessionRun(SMALL, c1.receipt.check.split(' ').slice(2).map(w => (w === '7.1.0' ? '7.1.0-beta.1' : w))) : null;
+  check('  and a call-back naming 7.1.0-beta.1 is not run by the 7.1.0 build either (exit 3)', !!beta && beta.status === 3 && /not run: .*7\.1\.0-beta\.1/.test(beta.stderr) && beta.stdout === '', beta && beta.status + ' ' + beta.stderr);
 }
 
 finish();

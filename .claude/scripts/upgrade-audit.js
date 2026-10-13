@@ -1531,8 +1531,10 @@ function main() {
   if (toVersion === null) { console.error('upgrade-audit: no usable version in ' + path.join(pluginRoot, '.claude-plugin', 'plugin.json')); process.exit(1); }
   // A call-back written by another release came through a link that moved
   // after its run (issue #228): this release's detection could miss the
-  // finding and call it one that no longer stands, so nothing runs.
-  if (opts.release !== null && compareVersions(validVersion(opts.release), toVersion) !== 0) {
+  // finding and call it one that no longer stands, so nothing runs. The match
+  // is exact, because a build whose version differs only by a suffix such as
+  // -beta.1 may detect differently too.
+  if (opts.release !== null && validVersion(opts.release) !== toVersion) {
     console.error('upgrade-audit: not run: this receipt was written by the ' + validVersion(opts.release) + ' audit, but ' + STABLE_AUDIT + ' now leads to the ' + toVersion + ' audit, because a session started on another release moved the link during this upgrade; ' + LINK_STEPS);
     process.exit(3);
   }
