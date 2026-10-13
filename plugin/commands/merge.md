@@ -1,0 +1,85 @@
+---
+description: "Land Worktree PRs"
+allowed-tools:
+  - "Bash(mktemp -d /tmp/*)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
+---
+# Land Worktree PRs
+
+**Use this when:** One or more PRs from worktree branches are finished and you want them on main, in an order you choose, with proof that no work was lost on the way.
+**Don't use this when:** The work is still in progress (finish it with `/tk:document`, which opens the PR), or you only want to see what landed (`git log --first-parent main`).
+
+`/tk:merge 241 242` lands PR #241 and then PR #242, one at a time, in the order given. Which PR lands first is your call, so `/tk:merge` is human-triggered and never chained into, and it hands off to nothing (M14). A branch with no PR is named by its branch name instead of a number.
+
+For each PR it brings the branch up to date with main and fixes the conflicts, then runs four checks before anything lands: the project's tests, and the three checks keyed on the branch's cut point from the merge rules below (rule 1, other work this landing would remove; rule 2, this PR's own lines that would not land; rule 3, a decision of this PR that contradicts one that landed after its cut). The first flag, failing check or contradiction stops that PR and pages you (M1) in plain English: what would be lost or contradicted, who wrote it, and what you can do. A PR whose checks all pass lands without another question, because naming it was the decision. Say **"report only"** on this run to stop before each landing and see the results first (M10). A landing on the host leaves the machine and always asks first (M9).
+
+The formats and the checks are defined once, in the merge rules; the host commands are the rows of the host table. Both are inlined here.
+
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/merge-rules.md"`
+
+!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md"`
+
+## How commands run here
+
+<rules>
+
+- Every `merge-check.js` call is `node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js <mode>` from the project root (M16). It prints one JSON object on stdout and one plain line per flag on stderr; exit 1 means flags, exit 2 a usage or git error, which stops this command with the error line shown.
+- A PR's branch is worked on in the worktree that holds it. Name that folder in each git call (`git -C <worktree> <command>`), and run a project command that needs its own folder (a rebuild, the checks, the pre-push check) as `(cd <worktree> && <command>)`, so this session's working folder never moves. In default permission mode these ask once each; approve them.
+- Never take one side of a whole file to make a conflict go away, except the generated paths and `CHANGELOG.md` as Step 2 says: that is exactly how work gets lost. Never delete a branch or a worktree this command did not create.
+- Temporary files (the landing message, the decisions file, a changelog block, a checks file) go in a fresh folder from `mktemp -d /tmp/merge-text.XXXXXX`, made per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`.
+
+</rules>
+
+## Procedure
+
+<procedure>
+
+### Step 1: Before landing anything
+
+1. **Host and style.** Detect the host with the host table's rule. Then fetch when the repo has an `origin` remote (`git fetch origin`), and run `merge-check.js --style`. Its `main` is the default branch and its `style` the repo's landing habit; say the style in one line ("This repo lands with merge commits made here, so `/tk:merge` merges locally and pushes nothing."). On `unknown`, ask once which of the three styles to use and record the answer with `merge-check.js --style <answer>`. A host style (`host-merge`, `host-squash`) passes `--main origin/<main>` to every later `merge-check.js` call, because the host's copy of main is the one that moves; `local-merge` uses `<main>` as printed. A host style lands through the host, so ask once now, for the whole run, before anything is pushed: "This run pushes and merges PRs #241 and #242 on GitHub. Go?" (M9).
+2. **The PRs.** With no arguments, ask which PRs to land and in what order; never pick the order yourself. For each number, run `merge-check.js --pr <N>`: it reads the PR through the host's read row and prints `title`, `state`, `branch`, `head`, `decisions`, `changelog` and `cutFrom`. A PR that is not open is skipped, said in one line. A branch that is not local is fetched (`git fetch origin <branch>:<branch>`). A branch named without a PR takes its title from you: ask once, with its newest commit's subject as the suggested answer.
+3. **Landings made without this command.** Run `merge-check.js --marker`. When it prints no marker, run `merge-check.js --mark <main>` and say "No landing record yet: starting it at main's tip (<short sha>); earlier landings are not checked." Otherwise run `merge-check.js --since <marker>`. For each landing whose `rule1` says not checkable and which names a `pr`, read that PR with `merge-check.js --pr <pr>`; when it has a `cutFrom`, check the landing with `merge-check.js --landing --before <landing>^1 --after <landing> --cut <cutFrom> --tip <landing>` (a squash keeps no branch tip, so rule 2 has nothing to compare there). Any flag pages you before more lands: name each line, the file and the landing that removed it, and offer to keep it on purpose or to stop. On "keep it", the flag's `keep` lines go into the first landing message this run writes, or, when the run lands nothing, into an empty commit on main (`git -C <main worktree> commit --allow-empty -F <file>`). Then `merge-check.js --mark <main>`.
+
+### Step 2: Update and fix, for each PR in order
+
+1. **The cut.** Run `merge-check.js --cut <branch> --pr <N>` (a branch without a PR: `--cut <branch>`). It prints `cut`, `source` and `onMain`. When `onMain` is false, stop this PR and explain: its branch was cut from another branch, not from main, so landing it would also land that branch's unlanded commits; land that branch first, or cut this one again from main. A `merge-base` source is a weaker check: say so in the PR's closing line. Note the branch tip now, `git rev-parse <branch>`: it is this PR's own work, before any fix, and the checks compare against it.
+2. **The worktree.** `git worktree list --porcelain` names the worktree whose `branch` line is `refs/heads/<branch>`. When there is one, `git -C <worktree> status --porcelain --untracked-files=no` must print nothing: uncommitted changes there are someone's work, so stop and ask. When there is none, make a temporary one, `git worktree add .claude/worktrees/merge-<N> <branch>`, and remove it at the end. A temporary worktree starts without `.env.local` and the installed dependencies: before the checks, copy and install them the way `/tk:worktree`'s setup step does.
+3. **Merge main in.** `git -C <worktree> merge --no-ff --no-edit <main>`. When it stops on conflicts, fix each one this way:
+   - **Generated paths** (the files `.claude/toolkit/generated.json` lists): take main's side, `git -C <worktree> checkout --theirs -- <path>`. They are rebuilt below.
+   - **`CHANGELOG.md`**, when the PR has a `changelog` part: take main's side, `git -C <worktree> checkout --theirs -- CHANGELOG.md`; the PR's block goes back in below. A PR without the part keeps both sides of its changelog conflict, like any text.
+   - **The lessons files** merge with both sides kept when `.gitattributes` says so (C-18). Either way, `grep -oE '^- \*\*[^*]+\*\*' <worktree>/LESSONS.md | sort | uniq -d` prints each lead the index now holds twice (no output: none); merge each such pair into one bullet, and its write-ups in `LESSONS-detail.md` into one.
+   - **Everything else**: combine both sides, so that the result does what this PR decided and what main's landings decided (their `Decisions:` lines are in `git log <cut>..<main> --first-parent`). When the two cannot both hold, keep both lines and let rule 3 raise it.
+
+   Then `git -C <worktree> add` the fixed files and `git -C <worktree> commit --no-edit`.
+4. **Re-insert and rebuild.** When the PR has a `changelog` part, put main's whole file back whether or not it conflicted, `git -C <worktree> checkout <main> -- CHANGELOG.md`, so a release that landed in between cannot hold the block under its version. Write the part byte for byte to `<tmp>/block.md` with the Write tool, run `merge-check.js --changelog-place <worktree>/CHANGELOG.md <tmp>/block.md`, insert the block directly before the line it prints with a blank line after it, and commit the file on its own ("Re-insert the changelog block for #<N>"). Then run each `rebuild` command from `generated.json` as `(cd <worktree> && <rebuild>)`, and commit what changed ("Rebuild <paths> after the update").
+5. Note the updated tip, `git rev-parse <branch>`: it is exactly what lands.
+
+### Step 3: Check, for each PR
+
+1. **Lines (rules 1 and 2).** `merge-check.js --landing --before <main> --after <updated tip> --cut <cut> --tip <own tip>`, adding `--kept <file>` when this run kept lines that are not on main yet (one `Kept on purpose:` line each). Its JSON's `before` is the commit of main that was checked.
+2. **Tests.** Run the project's checks in the worktree the way `/tk:execute`'s test step runs them: the checks file is `.claude/toolkit/checks.json` when the worktree has one; otherwise write the ecosystem default as a one-entry file with the Write tool (`[{"id": "tests", "check": "npm test --if-present", "expect": {"exit": 0}}]` for a `package.json`, the same row with `pytest -q` when `pyproject.toml` or `pytest.ini` exists), and skip with one line when there is neither, or `package.json` still holds npm's `no test specified` placeholder. Run `(cd <worktree> && node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --checks <checks file> --out <tmp>/checks --timeout 600000)`; it is green when its JSON has `summary.fail` 0 and `summary.error` 0. Read a failure with `grep -nE '^not ok|FAIL|Error' <stdoutFile> | head -30` over the file each failing row names, never the whole log (M16).
+3. **Decisions (rule 3).** `merge-check.js --decisions --cut <cut> --tip <own tip> --pr <N> --out <tmp>/decisions.md` (`--pr` left out for a branch without a PR). When its `landings` list is empty, nothing landed after the cut and there is nothing to contradict: skip the dispatch and say so. Otherwise dispatch the `decision-checker` agent (`subagent_type=tk:decision-checker`) with the Agent tool and no model parameter: it is a judge and runs on the session model (`${CLAUDE_PLUGIN_ROOT}/skills/shared/model-routing.md`). The prompt carries the file's path and nothing else. It returns `No contradictions` or up to six lines `N. <this PR's decision> contradicts <landing>: <why>`; any other reply is dispatched once more, and a second unreadable reply pages as a contradiction would. When the agent type is not found, run `/reload-plugins` once, then fall back as `model-routing.md` says.
+4. **The verdict.** All clean: land (Step 4). Anything else stops this PR before it lands and pages you, one plain-English line per problem: the line, the file and the landing or commit that wrote it (rules 1 and 2), the failing check and its first error (tests), or the two decisions and why both cannot hold (rule 3). Offer what fits:
+   - **Fix it**: Claude fixes it on the branch in the same worktree, commits, and runs Step 3 again, at most 3 rounds, then stops and pages again.
+   - **Keep it on purpose** (a flagged line): the flag's `keep` line goes into the landing message, exactly as printed.
+   - **Land it as it is** (a contradiction): the PR's decisions go into the landing message as always, so history shows which decision came later.
+   - **Stop**: nothing of this PR lands; the PRs after it in the list are not started.
+
+### Step 4: Land, for each PR
+
+1. **Main has not moved.** `git rev-parse <main>` must still print the `before` commit Step 3 checked; when it does not, go back to Step 2 for this PR.
+2. **The landing message**, written with the Write tool to `<tmp>/landing.txt` in the merge rules' format: the subject for the style (`Merge PR #<N>: <title>` for a merge, `<title> (#<N>)` for a squash, `Merge <branch>: <title>` for a branch without a PR), the title, `Decisions:` with the PR's decision list (`- None recorded` when it has none), the `Cut from:` line with the full cut, and every `Kept on purpose:` line from this run.
+3. **local-merge.** In the worktree that holds main (`git worktree list --porcelain`; when none does, a temporary `git worktree add .claude/worktrees/merge-main <main>`, removed at the end), `git -C <main worktree> status --porcelain --untracked-files=no` must print nothing, else stop and ask. Then `git -C <main worktree> merge --no-ff -F <tmp>/landing.txt <branch>`, and confirm `git diff --quiet <updated tip> <main>` exits 0. Nothing is pushed: the landing is in your local main.
+4. **host-merge or host-squash.** Run the pre-push check for the branch (M11): `(cd <worktree> && node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js origin <branch>)`, then `git -C <worktree> push origin HEAD:<branch>`; exit 1 pages you and only you can say push anyway, exit 2 means fetch and check again. Write the message's body (every line after the subject and the blank line under it) to `<tmp>/landing-body.md`, and run the host table's merge row with `--merge` for host-merge or `--squash` for host-squash, the updated tip as the head guard (`--match-head-commit` on GitHub, `--sha` on GitLab), and the subject single-quoted per the host table's rule. Then `git fetch origin` and confirm `git diff --quiet <updated tip> origin/<main>` exits 0. When it does not (main moved on the host after the check), check the landing itself with `merge-check.js --landing --before <landing>^1 --after <landing> --cut <cut> --tip <own tip>` and page any flag.
+5. **Record it.** `merge-check.js --mark <main tip>` (`origin/<main>` for a host style), remove this PR's temporary worktree with `git worktree remove .claude/worktrees/merge-<N>`, and print one line: `#<N> landed as <short sha> (<style>): rules 1 and 2 clean, <n> checks passed, <no contradictions | n kept on purpose>`.
+
+### Step 5: Close
+
+One line per PR, landed or stopped and why, then what is left for you: for local-merge, "Nothing was pushed: push main when you are ready (the host marks each PR merged when main reaches it)"; for a host style, "Your local main is behind until you pull." Remove the temporary main worktree if this run made one.
+
+</procedure>

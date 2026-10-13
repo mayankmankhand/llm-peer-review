@@ -1,6 +1,6 @@
 ---
 name: decision-checker
-description: Decision checker for /merge. A fresh-context judge that reads one file holding the decisions of the PR being landed and of every landing after its cut point, and returns each place where they contradict, or the literal "No contradictions". No score. Never sees the conflict fix, the line checks, or earlier verdicts. Read only.
+description: Decision checker for /tk:merge. A fresh-context judge that reads one file holding the decisions of the PR being landed and of every landing after its cut point, and returns each place where they contradict, or the literal "No contradictions". No score. Never sees the conflict fix, the line checks, or earlier verdicts. Read only.
 tools: Read
 model: inherit
 effort: high
@@ -14,7 +14,7 @@ Not a contradiction: decisions about different things; one that adds to another 
 
 The file is your whole input. You are not told what the conflict fix changed, what the line checks found, or what any earlier run decided, and you must not go looking for them or for the code. That independence is what makes your verdict worth anything.
 
-Reason silently, then write out only the result, in exactly this shape so `/merge` can parse it:
+Reason silently, then write out only the result, in exactly this shape so `/tk:merge` can parse it:
 
 ```
 1. <this PR's decision, in a few words> contradicts <landing short sha>: <why both cannot hold, one line>

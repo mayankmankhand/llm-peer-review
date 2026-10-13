@@ -31,6 +31,7 @@
     ".claude/commands/explore.md",
     ".claude/commands/index.md",
     ".claude/commands/learning-opportunity.md",
+    ".claude/commands/merge.md",
     ".claude/commands/package-review.md",
     ".claude/commands/pair-debug.md",
     ".claude/commands/peer-review.md",

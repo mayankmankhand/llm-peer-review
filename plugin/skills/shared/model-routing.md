@@ -24,7 +24,7 @@ The pin lives in agent frontmatter under `${CLAUDE_PLUGIN_ROOT}/agents/`, never 
 | `plan-critic` | inherit | high | Read | `/tk:create-plan` critic loop before the approval stop |
 | `design-critic` | inherit | high | Read | `/tk:execute` design steps (M15) |
 | `design-comparer` | inherit | high | Read | `/tk:execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15) |
-| `decision-checker` | inherit | high | Read | `/merge` at every landing: the fresh reviewer whose verdict on contradicting decisions stops the landing or lets it through |
+| `decision-checker` | inherit | high | Read | `/tk:merge` at every landing: the fresh reviewer whose verdict on contradicting decisions stops the landing or lets it through |
 | `index-mapper` | sonnet | medium | Read, Grep, Glob | `/tk:index` Step 3 chunk analysis |
 | `correction-extractor` | haiku | low | Read | `/tk:document` capture stage |
 | `review-finder` (deprecated in 7.0, removed in 8.0) | inherit | high | Read, Grep, Glob, Bash | Downstream commands that still dispatch the generic finder by name; the toolkit itself no longer does |

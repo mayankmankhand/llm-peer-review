@@ -47,7 +47,11 @@
 //                                 branch's own tip before any update from main
 //   --since <ref>                 the same checks for every landing on main's
 //                                 first-parent line after <ref>
-//   --style [merge|squash]        the repo's landing habit; with a value, record it
+//   --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]
+//                                 write the file the decision-checker agent reads:
+//                                 this PR's decisions, then each landing's after the cut
+//   --style [local-merge|host-merge|host-squash]
+//                                 the repo's landing habit; with a value, record it
 //   --changelog-place <changelog> <block>
 //                                 the line number a changelog block goes before
 //   --marker | --mark <sha>       read or write the last checked landing
@@ -57,7 +61,8 @@
 // Output: one JSON object on stdout; on stderr one plain line per flag and a
 // summary line. Exit 0 when nothing is flagged, 1 when anything is, 2 on a
 // usage or git error (one line on stderr). Only --record-cut, --mark and
-// --style with a value write anything, and only to git config. Every git call
+// --style with a value write to git config, and only --decisions writes a file,
+// the one --out names. Every git call
 // takes an argument list, never a shell string, and runs at the repository's
 // top level. Dependency-free.
 //
@@ -73,7 +78,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --style [merge|squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
 
 class UsageError extends Error {}
 
@@ -528,24 +533,35 @@ function readPr(n) {
 }
 
 // ---- style, changelog, marker -----------------------------------------------------
+// The landing styles /merge offers (merge-rules.md, "The marker and the style"):
+// a merge commit made on this machine, the host's merge button, or the host's
+// squash. A rebase habit lands as a squash, because a rebase leaves no landing
+// commit to carry the record.
+const STYLES = ['local-merge', 'host-merge', 'host-squash'];
+// GitLab's merge button writes this line into the merge commit's message.
+const GITLAB_MERGE_RE = /^See merge request \S+!\d+\s*$/m;
+function styleOf(sha) {
+  const k = landingKind(sha);
+  if (k.kind === 'direct') return null;
+  if (k.kind === 'host-rebase') return 'rebase';
+  if (k.kind !== 'merge') return 'host-squash';
+  const [ce, body] = git(['log', '-1', '--format=%ce%x00%B', sha]).split('\0');
+  return String(ce || '').trim().toLowerCase() === HOST_COMMITTER || GITLAB_MERGE_RE.test(body || '') ? 'host-merge' : 'local-merge';
+}
 function style(mainRef, value) {
   if (value !== undefined) {
-    if (value !== 'merge' && value !== 'squash') throw new UsageError('--style records merge or squash');
+    if (!STYLES.includes(value)) throw new UsageError('--style records ' + STYLES.join(', ') + ' or nothing');
     git(['config', 'tk.mergeStyle', value]);
     return { style: value, source: 'recorded', written: true };
   }
-  const rec = gitTry(['config', '--get', 'tk.mergeStyle']);
-  if (rec && (rec.trim() === 'merge' || rec.trim() === 'squash')) return { style: rec.trim(), source: 'recorded' };
+  const rec = String(gitTry(['config', '--get', 'tk.mergeStyle']) || '').trim();
+  if (STYLES.includes(rec)) return { style: rec, source: 'recorded' };
   const list = (gitTry(['rev-list', '--first-parent', '-n', String(STYLE_SCAN), mainRef]) || '').split('\n').filter(Boolean);
-  const n = { merge: 0, squash: 0, rebase: 0 };
-  for (const c of list) {
-    const k = landingKind(c).kind;
-    if (k === 'merge') n.merge++;
-    else if (k === 'squash' || k === 'host-squash') n.squash++;
-    else if (k === 'host-rebase') n.rebase++;
-  }
-  const max = Math.max(n.merge, n.squash, n.rebase);
-  const s = max === 0 ? 'unknown' : n.merge === max ? 'merge' : n.squash === max ? 'squash' : 'rebase';
+  const n = { 'local-merge': 0, 'host-merge': 0, 'host-squash': 0, rebase: 0 };
+  for (const c of list) { const k = styleOf(c); if (k) n[k]++; }
+  const squashes = n['host-squash'] + n.rebase;
+  const max = Math.max(n['local-merge'], n['host-merge'], squashes);
+  const s = max === 0 ? 'unknown' : n['local-merge'] === max ? 'local-merge' : n['host-merge'] === max ? 'host-merge' : 'host-squash';
   return { style: s, source: 'history', counts: n, scanned: list.length };
 }
 
@@ -572,6 +588,78 @@ function changelogPlace(clFile, blockFile) {
   return { line: at + 1, rule: 'after the title' };
 }
 
+// ---- the decisions file (rule 3) ---------------------------------------------------
+// The one file the decision-checker agent reads (merge-rules.md, "The decisions
+// file"): a `## This PR` part, then a `## Landing <short sha>: <subject>` part for
+// each landing on main after the cut, oldest first. A part holds its decision
+// list; one with none (a PR from before the lists existed, a list that says
+// `None recorded`, a landing whose message has no `Decisions:` lines) holds its
+// text and its changes instead, generated paths left out, cut at DIFF_LINES lines.
+const DIFF_LINES = 150;
+function listed(lines) {
+  const out = lines.filter((l) => /^\s*[-*]\s+\S/.test(l)).map((l) => l.trim());
+  if (!out.length || (out.length === 1 && /^[-*]\s+None recorded\.?$/i.test(out[0]))) return null;
+  return out;
+}
+function messageDecisions(message) {
+  const lines = String(message || '').replace(/\r\n/g, '\n').split('\n');
+  const i = lines.findIndex((l) => /^Decisions:\s*$/.test(l));
+  if (i < 0) return null;
+  let j = i + 1;
+  while (j < lines.length && /^\s*[-*]\s+\S/.test(lines[j])) j++;
+  return listed(lines.slice(i + 1, j));
+}
+// A diff in a fence longer than any backtick run inside it.
+function changesOf(a, b, excl) {
+  const out = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U1', a, b, '--', '.'].concat(excl)).replace(/\n$/, '');
+  if (!out) return '(no changes outside generated paths)';
+  const lines = out.split('\n');
+  const shown = lines.length > DIFF_LINES ? lines.slice(0, DIFF_LINES).concat('... (' + (lines.length - DIFF_LINES) + ' more lines left out)') : lines;
+  const fence = '`'.repeat(Math.max(3, ...(out.match(/`+/g) || []).map((r) => r.length + 1)));
+  return fence + 'diff\n' + shown.join('\n') + '\n' + fence;
+}
+// A PR body file as --pr-body takes it (raw text, or gh's or glab's JSON), with its title when the JSON has one.
+function readPrArg(arg) {
+  const raw = arg === '-' ? fs.readFileSync(0, 'utf8') : fs.readFileSync(arg, 'utf8');
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j === 'object') return { title: typeof j.title === 'string' ? j.title : null, body: typeof j.body === 'string' ? j.body : typeof j.description === 'string' ? j.description : '' };
+  } catch (e) { /* not JSON: a raw body */ }
+  return { title: null, body: raw };
+}
+function decisionsFile(o, mainRef, excl) {
+  const c = {};
+  for (const k of ['cut', 'tip']) {
+    if (o['--' + k] === undefined) throw new UsageError('--decisions needs --' + k);
+    c[k] = resolveCommit(o['--' + k]);
+    if (!c[k]) throw new UsageError('--' + k + ' ' + o['--' + k] + ' does not name a commit');
+  }
+  if (!o['--out']) throw new UsageError('--decisions needs --out <file>');
+  const pr = o['--pr'] ? readPr(o['--pr']) : o['--pr-body'] ? readPrArg(o['--pr-body']) : { title: null, body: '' };
+  const own = listed(String(parseBody(pr.body).decisions || '').split('\n'));
+  const name = o['--pr'] ? 'PR #' + pr.number + ': ' + pr.title : (pr.title || 'The branch at ' + c.tip.slice(0, 7));
+  const out = ['## This PR', '', name, ''];
+  if (own) out.push(...own);
+  else {
+    out.push('No decision list: read what it decides from its text and its changes.', '');
+    if (pr.body && pr.body.trim()) out.push(pr.body.trim(), '');
+    out.push(changesOf(git(['merge-base', mainRef, c.tip]).trim(), c.tip, excl));
+  }
+  const landings = [];
+  for (const L of (gitTry(['rev-list', '--first-parent', '--reverse', mainRef, '^' + c.cut]) || '').split('\n').filter(Boolean)) {
+    const k = landingKind(L);
+    if (k.kind === 'direct') continue;
+    const d = messageDecisions(git(['log', '-1', '--format=%B', L]));
+    out.push('', '## Landing ' + L.slice(0, 7) + ': ' + k.subject, '');
+    if (d) out.push(...d);
+    else out.push('No decision list: read what it decided from its changes.', '', changesOf(L + '^1', L, excl));
+    landings.push({ commit: L, subject: k.subject, decisions: d ? d.length : 0 });
+  }
+  const file = path.resolve(o['--out']);
+  fs.writeFileSync(file, out.join('\n') + '\n');
+  return { file, cut: c.cut, tip: c.tip, thisPr: own ? 'decisions' : 'text and changes', landings };
+}
+
 // ---- output ------------------------------------------------------------------------
 function plainLine(f) {
   if (f.rule === 'cut') return 'cut: ' + f.message;
@@ -594,9 +682,9 @@ function finish(result, flags, suppressed, notes) {
 }
 
 // ---- arguments ---------------------------------------------------------------------
-const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark']);
+const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
-const BARE_FLAGS = new Set(['--landing', '--marker']);
+const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions']);
 function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -626,8 +714,8 @@ function main(argv) {
     const [cl, block] = o['--changelog-place'];
     return finish(Object.assign({ mode: 'changelog-place' }, changelogPlace(path.resolve(cl), path.resolve(block))), [], 0, notes);
   }
-  if (o['--pr-body'] && !o['--cut']) return finish(Object.assign({ mode: 'pr-body' }, parseBody(readBodyArg(o['--pr-body']))), [], 0, notes);
-  if (o['--pr'] && !o['--cut']) return finish(Object.assign({ mode: 'pr' }, readPr(o['--pr'])), [], 0, notes);
+  if (o['--pr-body'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr-body' }, parseBody(readBodyArg(o['--pr-body']))), [], 0, notes);
+  if (o['--pr'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr' }, readPr(o['--pr'])), [], 0, notes);
   if (o['--marker']) {
     const v = gitTry(['config', '--get', 'tk.landingChecked']);
     return finish({ mode: 'marker', marker: v ? v.trim() : null }, [], 0, notes);
@@ -663,6 +751,11 @@ function main(argv) {
     const notCheckable = r.landings.filter((l) => l.rule1 !== 'checked').length;
     if (notCheckable) notes.push(notCheckable + ' landing(s) could not be checked for rule 1; see each landing\'s rule1 field');
     return finish({ mode: 'since', main: mainRef, since: resolveCommit(o['--since']), landings: r.landings, directCommits: r.directCommits }, flags, r.suppressed, notes);
+  }
+  if (o['--decisions']) {
+    const r = decisionsFile(o, mainRef, excl);
+    if (!r.landings.length) notes.push('no landing reached ' + mainRef + ' after the cut, so there is nothing to contradict');
+    return finish(Object.assign({ mode: 'decisions', main: mainRef }, r), [], 0, notes);
   }
   if (o['--cut']) {
     let body = null;

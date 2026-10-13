@@ -30,6 +30,7 @@ A landing's cut comes from its `Cut from:` line. A merge without one uses the me
 - **Rule 1:** a line another landing added to main after the cut, which this landing removes.
 - **Rule 2:** a line the branch itself added that does not make it into the landing. Copies are counted per file: against git's own merge where the file merges cleanly (so a line both sides added identically counts once), and as main's copies plus the branch's minus the common ancestor's where it conflicts (so a dropped `}` is caught even when another `}` remains).
 - **Cut:** the cut is not on main.
+- **Rule 3:** a decision of this PR that contradicts one a landing after its cut made, in the same file or another (one says go right, the other go left). The `decision-checker` agent judges it from the decisions file below; it is the one check that is judgment, and it runs at landing only.
 
 `merge-check.js` exits 0 when nothing is flagged, 1 when anything is, and 2 on a usage or git error; each flag is one plain line on stderr. Paths in `.claude/toolkit/generated.json` are skipped. A conflict combined correctly (a new line that keeps both sides' intent) still flags both original lines: a combined line is a judgment, and you confirm it by keeping them on purpose. `weaker` and `not checkable` are notes, never flags, and a gate fails on flags only.
 
@@ -63,6 +64,10 @@ A landing's cut comes from its `Cut from:` line. A merge without one uses the me
 
 The subject is `Merge PR #<N>: <title>` for a merge commit and `<title> (#<N>)` for a squash; a branch landed without a PR names the branch, `Merge <branch>: <title>`. `Kept on purpose:` lines appear only when you kept a flagged line.
 
+## The decisions file
+
+`node .claude/scripts/merge-check.js --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]` writes the one file the `decision-checker` agent reads: a `## This PR` part, then one `## Landing <short sha>: <subject>` part per landing on main after the cut, oldest first. A part holds its decision list, from the PR body's `## Decisions` part or a landing message's `Decisions:` lines. A part with none (a PR opened before these parts existed, a list that says `None recorded`, a landing made without `/merge`) holds its text and its changes instead, generated paths left out and cut at 150 lines. A commit made straight on main is not a landing and gets no part; rule 1 still covers its lines. With no landing after the cut there is nothing to contradict, and the agent is not dispatched.
+
 ## Kept on purpose
 
 A flagged line you accept is recorded as
@@ -91,4 +96,4 @@ A path is a repository path (a folder ends in `/`). `rebuild` is one command, ru
 
 ## The marker and the style
 
-`merge-check.js --mark <sha>` records the last landing checked (`tk.landingChecked` in git config) and `--marker` reads it; `/merge` checks every landing after the marker before landing more. `--style` reads the repo's landing habit from recent history (`merge`, `squash`, `rebase` or `unknown`) unless `tk.mergeStyle` records one, and `--style merge` or `--style squash` records the answer to the one-time question.
+`merge-check.js --mark <sha>` records the last landing checked (`tk.landingChecked` in git config) and `--marker` reads it; `/merge` checks every landing after the marker before landing more. `--style` reads the repo's landing habit from its last 50 first-parent commits, unless `tk.mergeStyle` records one: `local-merge` (merge commits made on this machine), `host-merge` (merge commits the host's button made: GitHub's `noreply@github.com` committer, or GitLab's `See merge request` line), `host-squash` (squashes, the host's or `/merge`'s; a rebase habit counts here too, because a rebase leaves no landing commit to carry the record), or `unknown`. `--style local-merge`, `--style host-merge` or `--style host-squash` records the answer to the one-time question.

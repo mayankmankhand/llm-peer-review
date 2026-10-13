@@ -4,7 +4,8 @@
 // #232): rule 1 (a line another landing added after this branch's cut, which
 // the landing removes), rule 2 (the branch's own lines that do not land), the
 // cut check, and the modes around them (recording and looking up the cut, PR
-// body parts, the landings on main, the style, the marker, changelog placement).
+// body parts, the landings on main, the decisions file the decision-checker
+// reads, the landing style, the marker, changelog placement).
 //
 // The fixtures are the issue #232 replays, rebuilt from nothing here; nothing
 // is read from reports/. Every case builds its own scratch repository under the
@@ -450,16 +451,97 @@ section('--style, --marker and --mark', () => {
   const web = { GIT_COMMITTER_NAME: 'GitHub', GIT_COMMITTER_EMAIL: 'noreply@github.com' };
   write(dir, 'b.txt', 'b\n'); commitAll(dir, 'One (#1)', web);
   write(dir, 'c.txt', 'c\n'); commitAll(dir, 'Two (#2)', web);
-  check('button squashes: squash', mc(dir, ['--style']).json.style === 'squash');
-  for (const n of ['p', 'q', 'r']) { g(dir, ['checkout', '-q', '-b', n]); write(dir, n + '.txt', n + '\n'); commitAll(dir, n); g(dir, ['checkout', '-q', 'main']); g(dir, ['merge', '--no-ff', '-q', '-m', 'Merge ' + n, n]); }
-  check('more merges than squashes: merge', mc(dir, ['--style']).json.style === 'merge');
-  check('--style squash records the answer', mc(dir, ['--style', 'squash']).json.written === true);
+  check('button squashes: host-squash', mc(dir, ['--style']).json.style === 'host-squash');
+  // Merges made here, then merges the host's button made (GitHub's committer, or
+  // GitLab's "See merge request" line): each kind wins once it is the larger.
+  const mergeIn = (n, msg, env) => { g(dir, ['checkout', '-q', '-b', n]); write(dir, n + '.txt', n + '\n'); commitAll(dir, n); g(dir, ['checkout', '-q', 'main']); g(dir, ['merge', '--no-ff', '-q', '-m', msg, n], env); };
+  for (const n of ['p', 'q', 'r']) mergeIn(n, 'Merge ' + n);
+  let st = mc(dir, ['--style']).json;
+  check('more merges made here than squashes: local-merge, with the counts', st.style === 'local-merge' && st.counts['local-merge'] === 3 && st.counts['host-squash'] === 2, JSON.stringify(st));
+  mergeIn('s', 'Merge pull request #7 from o/s', web);
+  mergeIn('t', 'Merge pull request #8 from o/t', web);
+  mergeIn('u', "Merge branch 'u' into 'main'\n\nSee merge request group/sub/app!9", undefined);
+  mergeIn('v', "Merge branch 'v' into 'main'\n\nSee merge request group/app!10", undefined);
+  st = mc(dir, ['--style']).json;
+  check('more button merges (GitHub committer or GitLab line) than merges made here: host-merge', st.style === 'host-merge' && st.counts['host-merge'] === 4, JSON.stringify(st));
+  write(dir, 'w.txt', 'w\n'); commitAll(dir, 'Rebased one', web);
+  check('a button rebase is counted apart and lands as a squash', mc(dir, ['--style']).json.counts.rebase === 1);
+  check('--style squash (not a style) is refused with exit 2', mc(dir, ['--style', 'squash']).status === 2);
+  check('--style host-squash records the answer', mc(dir, ['--style', 'host-squash']).json.written === true);
   const rec = mc(dir, ['--style']).json;
-  check('a recorded style wins over history', rec.style === 'squash' && rec.source === 'recorded');
+  check('a recorded style wins over history', rec.style === 'host-squash' && rec.source === 'recorded');
   check('--marker is null before anything is marked', mc(dir, ['--marker']).json.marker === null);
   const head = rev(dir, 'HEAD');
   check('--mark records a commit', mc(dir, ['--mark', 'HEAD']).json.marker === head);
   check('--marker reads it back', mc(dir, ['--marker']).json.marker === head);
+});
+
+// --- the decisions file -----------------------------------------------------------------------
+// The right/left case in different files (rule 3's case): PR1 lands with its
+// decisions in the landing message; PR2, cut before it, decides the opposite in
+// another file. The file /merge hands the decision-checker holds both, and the
+// same fixture in its legacy form (no lists anywhere) holds each side's changes.
+section('--decisions: the file the decision-checker reads', () => {
+  const dir = newRepo('decisions');
+  write(dir, 'rules.md', 'Direction: straight\n');
+  write(dir, 'guide.md', 'Follow the direction in rules.md.\n');
+  write(dir, '.claude/toolkit/generated.json', JSON.stringify([{ paths: ['gen/'], rebuild: 'true' }]));
+  write(dir, 'gen/out.txt', 'v0\n');
+  const m0 = commitAll(dir, 'M0');
+  const cut2 = cut(dir, 'pr2');
+  // PR1 lands with a landing message that carries its decisions.
+  g(dir, ['checkout', '-q', '-b', 'pr1']);
+  write(dir, 'rules.md', 'Direction: right\n');
+  write(dir, 'gen/out.txt', 'v1 GENERATED-ONLY\n');
+  commitAll(dir, 'Set the direction to right');
+  g(dir, ['checkout', '-q', 'main']);
+  const msg1 = path.join(sandbox, 'msg1.txt');
+  fs.writeFileSync(msg1, 'Merge PR #1: Go right\n\nGo right\n\nDecisions:\n- The direction is right - the map says so\n\nCut from: ' + m0 + '\n');
+  g(dir, ['merge', '--no-ff', '-q', '-F', msg1, 'pr1']);
+  const l1 = rev(dir, 'HEAD');
+  // A direct commit after it: not a landing, so not a part.
+  write(dir, 'notes.md', 'A note.\n');
+  commitAll(dir, 'Add a note');
+  // PR2, cut before PR1 landed, says the opposite elsewhere.
+  g(dir, ['checkout', '-q', 'pr2']);
+  write(dir, 'guide.md', 'Always go left, whatever rules.md says.\n');
+  const tip2 = commitAll(dir, 'Tell readers to go left');
+  g(dir, ['checkout', '-q', 'main']);
+  const body = path.join(sandbox, 'pr2-body.md');
+  fs.writeFileSync(body, 'Go left.\n\n## Decisions\n- Readers always go left - the left road is shorter\n\nCut from: ' + cut2 + '\n');
+  const out = path.join(sandbox, 'decisions-1.md');
+  let r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', body, '--out', out]);
+  let text = fs.existsSync(out) ? read(sandbox, 'decisions-1.md') : '';
+  check('with lists: exit 0, the file opens with the This PR part and holds its decision', r.status === 0 && /^## This PR\n\nThe branch at [0-9a-f]{7}\n\n- Readers always go left - the left road is shorter\n/.test(text), text.slice(0, 300) + r.stderr);
+  check('with lists: one Landing part, PR1, with its decision; the direct commit is not a part', (text.match(/^## /gm) || []).length === 2 && text.includes('## Landing ' + l1.slice(0, 7) + ': Merge PR #1: Go right\n\n- The direction is right - the map says so') && !text.includes('Add a note'), text);
+  check('with lists: the JSON names the file, this PR\'s source and the one landing', r.json && r.json.file === out && r.json.thisPr === 'decisions' && r.json.landings.length === 1 && r.json.landings[0].commit === l1 && r.json.landings[0].decisions === 1, r.stdout);
+  // The legacy form: no list in the body, none in the landing message.
+  const legacyMsg = path.join(sandbox, 'msg-legacy.txt');
+  // Land PR1 again, this time with a message that carries no decisions.
+  g(dir, ['reset', '-q', '--hard', l1 + '^1']);
+  fs.writeFileSync(legacyMsg, 'Merge PR #1: Go right\n');
+  g(dir, ['merge', '--no-ff', '-q', '-F', legacyMsg, 'pr1']);
+  const l1b = rev(dir, 'HEAD');
+  const legacyBody = path.join(sandbox, 'pr2-legacy.json');
+  fs.writeFileSync(legacyBody, JSON.stringify({ title: 'Go left', body: 'This tells readers to go left.\n\n## Decisions\n- None recorded\n' }));
+  const out2 = path.join(sandbox, 'decisions-2.md');
+  r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', legacyBody, '--out', out2]);
+  text = fs.existsSync(out2) ? read(sandbox, 'decisions-2.md') : '';
+  check('legacy: "None recorded" is no list, so This PR holds its title, its text and its own changes', r.status === 0 && r.json.thisPr === 'text and changes' && /^## This PR\n\nGo left\n\nNo decision list/.test(text) && text.includes('This tells readers to go left.') && text.includes('+Always go left, whatever rules.md says.'), text);
+  check('legacy: the landing with no Decisions lines holds its changes, generated paths left out', text.includes('## Landing ' + l1b.slice(0, 7) + ': Merge PR #1: Go right') && text.includes('+Direction: right') && !text.includes('GENERATED-ONLY') && r.json.landings[0].decisions === 0, text);
+  // A long change is cut, and the cut is said.
+  g(dir, ['checkout', '-q', '-b', 'big']);
+  write(dir, 'big.txt', Array.from({ length: 400 }, (x, i) => 'line ' + i).join('\n') + '\n');
+  commitAll(dir, 'Big');
+  g(dir, ['checkout', '-q', 'main']);
+  g(dir, ['merge', '--no-ff', '-q', '-m', 'Merge PR #3: Big', 'big']);
+  const out3 = path.join(sandbox, 'decisions-3.md');
+  r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', body, '--out', out3]);
+  text = fs.existsSync(out3) ? read(sandbox, 'decisions-3.md') : '';
+  check('a landing\'s changes are cut at 150 lines, and the file says how many were left out', r.status === 0 && /\.\.\. \(\d+ more lines left out\)/.test(text) && r.json.landings.length === 2, text.slice(-400));
+  check('no landing after the cut: an empty list and a note', mc(dir, ['--decisions', '--cut', 'HEAD', '--tip', tip2, '--pr-body', body, '--out', path.join(sandbox, 'decisions-4.md')]).json.landings.length === 0);
+  check('--decisions without --out is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2]).status === 2);
+  check('--decisions with a --tip that names nothing is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', 'nope', '--out', out3]).status === 2);
 });
 
 // --- changelog placement, generated paths, usage ----------------------------------------------
