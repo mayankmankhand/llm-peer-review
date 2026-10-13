@@ -301,6 +301,9 @@ section('kept on purpose: suppresses exactly its flag, in a --kept file or a lat
   fs.writeFileSync(keptFile, keep + '\n');
   const viaFile = landing(dir, landings[1], ['--kept', keptFile]);
   check('a --kept file suppresses the flag and counts it', viaFile.status === 0 && viaFile.json.flagged === 0 && viaFile.json.keptOnPurpose === 1, viaFile.stderr);
+  const flagged = mc(dir, ['--since', landings[0].before]);
+  const named = flagged.stderr.split('\n').filter((l) => /was added by/.test(l));
+  check('--since names the landing that dropped each flagged line', flagged.status === 1 && named.length === 1 && named[0].startsWith('landing ' + landings[1].after.slice(0, 7) + ' ('), flagged.stderr);
   g(dir, ['commit', '-q', '--allow-empty', '-m', 'Accept a removal\n\n' + keep]);
   const since = mc(dir, ['--since', landings[0].before]);
   check('an empty commit on main carrying the line suppresses it in --since', since.status === 0 && since.json.flagged === 0 && since.json.keptOnPurpose === 1, since.stderr);
@@ -445,6 +448,30 @@ section('--since: what counts as a landing, and what cannot be checked', () => {
   check('a button rebase commit is not checkable', /^not checkable/.test(hostRebase.rule1));
   check('our squash takes its cut from the landing message; its rule 2 is not checkable', ours.cutSource === 'landing message' && ours.cut === m0 && ours.rule1 === 'checked' && /^not checkable/.test(ours.rule2));
   check('not checkable is a note, never a flag: exit 0', mc(dir, ['--since', m0]).status === 0);
+});
+
+// --- submodule pointers ----------------------------------------------------------------
+// A submodule is a pointer (mode 160000) to a commit, not a file of lines. A
+// landing that moves one gives the line checks nothing to read, and git blame
+// on it fails, so the pointer is skipped and the landing's text files are still
+// checked.
+section('submodule pointers: a landing that moves one is checked without it', () => {
+  const dir = newRepo('gitlink');
+  write(dir, 'a.txt', 'a\n');
+  const m0 = commitAll(dir, 'M0');
+  g(dir, ['update-index', '--add', '--cacheinfo', '160000,' + m0 + ',mod']);
+  g(dir, ['commit', '-q', '-m', 'Add a submodule pointer']);
+  const m1 = rev(dir, 'HEAD');
+  cut(dir, 'S');
+  g(dir, ['checkout', '-q', 'S']);
+  g(dir, ['update-index', '--cacheinfo', '160000,' + m1 + ',mod']);
+  write(dir, 'b.txt', 'b\n');
+  g(dir, ['add', '--', 'b.txt']);
+  g(dir, ['commit', '-q', '-m', 'Move the pointer and add b']);
+  g(dir, ['checkout', '-q', 'main']);
+  const l = land(dir, 'merge', 'S', 'good', () => {});
+  const r = landing(dir, l);
+  check('a moved submodule pointer is no git error: the landing is checked, exit 0, nothing flagged', r.status === 0 && r.json && r.json.flagged === 0, r.stderr);
 });
 
 section('--style, --marker and --mark', () => {

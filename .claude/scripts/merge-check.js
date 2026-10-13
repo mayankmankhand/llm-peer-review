@@ -152,9 +152,17 @@ function generatedPaths(notes) {
 function excludeSpecs(paths) { return paths.map((p) => ':(exclude)' + p); }
 
 // Files that differ between two commits, as repository paths (NUL-separated,
-// so a name with spaces or quotes arrives intact).
+// so a name with spaces or quotes arrives intact). A submodule pointer (mode
+// 160000 on either side) is left out: it names a commit, not lines, so neither
+// rule has text to read there and git blame on it fails.
 function changedFiles(a, b, excl) {
-  return git(['diff', '--name-only', '-z', '--no-renames', '--no-ext-diff', a, b, '--', '.'].concat(excl)).split('\0').filter(Boolean);
+  const raw = git(['diff', '--raw', '-z', '--no-renames', '--no-ext-diff', a, b, '--', '.'].concat(excl)).split('\0');
+  const files = [];
+  for (let i = 0; i + 1 < raw.length; i += 2) {
+    const modes = raw[i].replace(/^:/, '').split(' ');
+    if (modes[0] !== '160000' && modes[1] !== '160000') files.push(raw[i + 1]);
+  }
+  return files;
 }
 
 // The hunk headers of a zero-context diff of one file. Only `@@ -` lines are
@@ -669,10 +677,13 @@ function decisionsFile(o, mainRef, excl) {
 }
 
 // ---- output ------------------------------------------------------------------------
+// A flag from --since carries `landing` (its short sha and subject), so each
+// line says which landing dropped it when several are checked at once.
 function plainLine(f) {
-  if (f.rule === 'cut') return 'cut: ' + f.message;
-  if (f.rule === 1) return f.file + ': "' + f.line + '" was added by ' + f.addedIn + ' after this branch was cut, and this landing removes it';
-  return f.file + ': "' + f.line + '" is this branch\'s own line (' + f.addedBy.slice(0, 7) + ')' + (f.missing > 1 ? ', ' + f.missing + ' copies,' : '') + ' and it does not make it into the landing';
+  const at = f.landing ? 'landing ' + f.landing + ': ' : '';
+  if (f.rule === 'cut') return at + 'cut: ' + f.message;
+  if (f.rule === 1) return at + f.file + ': "' + f.line + '" was added by ' + f.addedIn + ' after this branch was cut, and this landing removes it';
+  return at + f.file + ': "' + f.line + '" is this branch\'s own line (' + f.addedBy.slice(0, 7) + ')' + (f.missing > 1 ? ', ' + f.missing + ' copies,' : '') + ' and it does not make it into the landing';
 }
 function finish(result, flags, suppressed, notes) {
   result.flagged = flags.length;
@@ -750,12 +761,12 @@ function main(argv) {
       if (!c[k]) throw new UsageError('--' + k + ' ' + o['--' + k] + ' does not name a commit');
     }
     const r = checkLanding(c, mainRef, excl, kept, notes);
-    if (!changedFiles(c.before, c.after, excl).length) notes.push('the landing changes nothing on ' + mainRef + ' outside generated paths');
+    if (!changedFiles(c.before, c.after, excl).length) notes.push('the landing changes nothing on ' + mainRef + ' outside generated paths and submodule pointers');
     return finish({ mode: 'landing', main: mainRef, before: c.before, after: c.after, cut: c.cut, tip: c.tip, flags: r.flags }, r.flags, r.suppressed, notes);
   }
   if (o['--since']) {
     const r = since(o['--since'], mainRef, excl, kept, notes);
-    const flags = [].concat.apply([], r.landings.map((l) => l.flags));
+    const flags = [].concat.apply([], r.landings.map((l) => l.flags.map((f) => Object.assign({ landing: l.commit.slice(0, 7) + ' (' + l.subject + ')' }, f))));
     const notCheckable = r.landings.filter((l) => l.rule1 !== 'checked').length;
     if (notCheckable) notes.push(notCheckable + ' landing(s) could not be checked for rule 1; see each landing\'s rule1 field');
     return finish({ mode: 'since', main: mainRef, since: resolveCommit(o['--since']), landings: r.landings, directCommits: r.directCommits }, flags, r.suppressed, notes);

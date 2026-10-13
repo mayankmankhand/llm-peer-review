@@ -65,7 +65,7 @@ All four key on the branch's **cut point**, the commit it was cut from, which `/
 
 **How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash.
 
-**Landings made another way.** Each run first checks every landing since its last run, and the release gate checks every landing since the last release, so a PR merged with the host's button is still checked, one step later.
+**Landings made another way.** Each run first checks every landing since its last run, so a PR merged with the host's merge button is still checked, one step later. A squash made with the button is checked only when its PR carries the `Cut from:` line `/document` writes, and then only for other work it removed: a squash keeps no branch to compare its own lines against. A rebase made with the button is listed as not checkable, and a squash made with GitLab's button looks like an ordinary commit and is not seen.
 
 It is human-triggered and never chained into: which PR lands first is your call.
 
