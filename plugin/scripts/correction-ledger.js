@@ -337,12 +337,39 @@ function sessionFiles(dir) {
 //
 // Stripped rather than rejected outright, because a real message can carry one of
 // these alongside genuine text: an IDE "opened file" event is prepended to whatever
-// the user actually typed in that turn, and that turn is a real intervention.
+// the user actually typed in that turn, and that turn is a real intervention. An
+// entry the harness stamps as machine-sent never gets this far (isMachineStamped,
+// below): the tags cover machine text in entries that carry no such stamp.
 const HARNESS_TAGS = [
   'system-reminder', 'task-notification', 'command-message', 'command-name',
   'command-args', 'command-contents', 'ide_selection', 'ide_opened_file',
   'ide_diagnostics', 'local-command-stdout', 'local-command-stderr'
 ];
+
+// Entries Claude Code itself stamps as machine-sent (issue #230). A current
+// transcript names the sender of every user entry: `origin.kind` is "human" for
+// a message the person typed, "peer" for a report a subagent or another session
+// sends back, "task-notification" for a background task's notice; `isMeta` marks
+// text the harness injects, such as a skill's instructions as the Skill tool
+// loads them (with the call's `sourceToolUseID`) or a note about an image;
+// `isCompactSummary` marks the summary a compaction writes; and an entry with no
+// origin may still carry `turnOrigin`. In the downstream cycle that raised #230,
+// 23 of 23 candidates were such entries, and across this machine's transcripts
+// since 2026-10-01 they were 213 of 534.
+//
+// The list is CLOSED, like the rest of this filter: only a stamp known to mean
+// "not typed by a person" drops an entry. A missing stamp (an older Claude Code;
+// the interrupt marker, which carries none) or an unknown one (a sender kind
+// added later) keeps it. If Claude Code renames these fields, the scan goes back
+// to offering the noise; it never starts dropping what a person typed.
+const MACHINE_ORIGINS = ['peer', 'task-notification'];
+const MACHINE_TURN_ORIGINS = ['peer', 'task_notification', 'system'];
+function isMachineStamped(entry) {
+  if (entry.isMeta === true || entry.isCompactSummary === true) return true;
+  const kind = entry.origin && typeof entry.origin.kind === 'string' ? entry.origin.kind : null;
+  if (kind !== null) return MACHINE_ORIGINS.indexOf(kind) !== -1;
+  return typeof entry.turnOrigin === 'string' && MACHINE_TURN_ORIGINS.indexOf(entry.turnOrigin) !== -1;
+}
 
 // A user entry's text as written, harness markup included.
 function rawUserText(entry) {
@@ -399,7 +426,8 @@ function isSlashCommand(entry, text) {
 // candidate, by contrast, costs a few tokens in one extra read.
 //
 // So the asymmetry decides the shape: reject only the certain non-humans (machine
-// text, bare acknowledgments) and let the extractor judge the rest.
+// text, bare acknowledgments, and the sender stamps isMachineStamped knows) and let
+// the extractor judge the rest.
 //
 // The pushback list below survives as a HINT on each candidate, never as a gate,
 // so the extractor can prioritize without the filter deciding anything.
@@ -538,6 +566,10 @@ function runCandidates() {
         continue;
       }
       if (entry.type !== 'user') continue;
+      // A message Claude Code stamps as machine-sent is skipped whole (#230): it
+      // is never a candidate, never an interrupt's follow-up, never a session's
+      // opener, and never a slash command that settles an interrupt.
+      if (isMachineStamped(entry)) continue;
 
       // A null here (a tool result, or an entry that held only harness tags such
       // as a task notification) leaves a pending interrupt as it is.
