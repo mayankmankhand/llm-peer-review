@@ -68,6 +68,7 @@ function runRaw(sb, args, opts) {
 }
 
 function ledgerFile(sb) { return path.join(sb.home, '.claude', 'correction-ledger.jsonl'); }
+function isoOrNullTest(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v) && !Number.isNaN(Date.parse(v)); }
 function rollupFile(sb) { return path.join(sb.home, '.claude', 'correction-rollup.json'); }
 
 function writeRows(sb, rows) {
@@ -1038,6 +1039,574 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #229: a worktree counts as the repo it belongs to -------------------
+// The rollup used to group by the working copy's folder name, so a worktree read
+// as a repo of its own, and every project's `worktree-1` merged under one label.
+// Rows now resolve to their main working copy: a live path through git, a removed
+// one through the `.claude/worktrees/` folder it sat in.
+{
+  const sb = makeSandbox('identity229');
+  const main = path.join(sb.root, 'mainrepo');
+  const wt = path.join(main, '.claude', 'worktrees', 'wt-one');
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: main, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    fs.mkdirSync(main, { recursive: true });
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    g(['worktree', 'add', wt, '-b', 'side']);
+    const code = 'worktree identity probe';
+    run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: code }])], { cwd: main });
+    run(sb, ['--add', '--data', writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: code }])], { cwd: wt });
+    // A row left by a worktree that has since been removed: its path is gone.
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-09-20T10:00:00.000Z', repo: 'wt-gone', repo_path: path.join(main, '.claude', 'worktrees', 'wt-gone'),
+      kind: 'human', scope: 'project', stage: 'review', produced: '', correction: '', open_code: code, axial_code: null
+    }) + '\n', 'utf-8');
+    const r = JSON.parse(run(sb, ['--show-rollup']));
+    const bucket = r.kinds.human.buckets[0];
+    check('a worktree row, a removed worktree row and the main copy row count as one repo',
+      bucket.count === 3 && JSON.stringify(bucket.repos) === JSON.stringify(['mainrepo']),
+      JSON.stringify(bucket.repos));
+    const stored = fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n').filter(Boolean).map(function (l) { return JSON.parse(l); });
+    check('a row written from a worktree carries the main copy name, and keeps its own path',
+      stored[1].repo === 'mainrepo' && stored[1].repo_path.indexOf('wt-one') !== -1,
+      JSON.stringify({ repo: stored[1].repo }));
+  } catch (e) {
+    check('worktree identity test set up a repo and a worktree', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: a candidate carries the request behind the output -------------
+// A fix needs to know what was asked, not only what came back and what the human
+// said about it. The scan kept only the assistant's last output; it now also keeps
+// the human words that came before that output, as `asked`.
+{
+  const sb = makeSandbox('asked229');
+  const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: 'sess-a', message: { content: t } }); };
+  fs.writeFileSync(path.join(dir, 'sess-a.jsonl'), [
+    user('Please write the README intro for the install page.', '2026-09-20T10:00:00.000Z'),
+    asst('Here is an intro that opens with the project history.'),
+    user("That's not right, it should lead with the install step.", '2026-09-20T10:01:00.000Z'),
+    // A request made by running a slash command: its words are harness tags.
+    user('<command-message>explore</command-message><command-name>/explore</command-name><command-args>issue 9</command-args>', '2026-09-20T10:02:00.000Z'),
+    user('# Initial Exploration Stage\n**Use this when:** Starting a new feature.', '2026-09-20T10:02:01.000Z'),
+    asst('Going with scoping mode.'),
+    user('Actually I wanted vision mode for this one, please switch.', '2026-09-20T10:03:00.000Z'),
+    // A request whose answer the human cut off.
+    user('Rename the config loader to settings loader everywhere.', '2026-09-20T10:04:00.000Z'),
+    asst('Renaming in the tests first.'),
+    user('[Request interrupted by user]', '2026-09-20T10:04:30.000Z'),
+    user('no', '2026-09-20T10:04:40.000Z')
+  ].join('\n') + '\n', 'utf-8');
+  const out = JSON.parse(run(sb, ['--candidates', '--since', '2026-09-20T00:00:00.000Z']));
+  const at = function (ts) { return out.candidates.filter(function (c) { return c.at === ts; })[0] || {}; };
+  check('a candidate carries the human request that came before the output',
+    at('2026-09-20T10:01:00.000Z').asked === 'Please write the README intro for the install page.',
+    JSON.stringify(at('2026-09-20T10:01:00.000Z').asked));
+  check('a request made by a slash command is carried as the command and its arguments',
+    at('2026-09-20T10:03:00.000Z').asked === '/explore issue 9',
+    JSON.stringify(at('2026-09-20T10:03:00.000Z').asked));
+  check('the message after an interrupt carries the request whose answer was cut off',
+    at('2026-09-20T10:04:40.000Z').after_interrupt === true &&
+    at('2026-09-20T10:04:40.000Z').asked === 'Rename the config loader to settings loader everywhere.',
+    JSON.stringify(at('2026-09-20T10:04:40.000Z')));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the request and the rewrite are capped, private fields ---------
+{
+  const sb = makeSandbox('rewrite229');
+  const longLines = Array.from({ length: 60 }, function (_, i) { return '- bullet line ' + i + ' of the owner rewrite'; }).join('\n');
+  run(sb, ['--add', '--data', writeRows(sb, [{
+    scope: 'project', stage: 'execute', open_code: 'cap probe',
+    trigger: 'T'.repeat(500), rewrite: longLines
+  }])]);
+  const row = JSON.parse(fs.readFileSync(ledgerFile(sb), 'utf-8').trim());
+  check('the request is capped at 300 characters', typeof row.trigger === 'string' && row.trigger.length === 300, String(row.trigger && row.trigger.length));
+  check('the rewrite is capped at 1,200 characters', typeof row.rewrite === 'string' && row.rewrite.length === 1200, String(row.rewrite && row.rewrite.length));
+  check('the rewrite keeps its line breaks, which carry its structure',
+    typeof row.rewrite === 'string' && row.rewrite.indexOf('\n- bullet line 1 ') !== -1,
+    JSON.stringify(String(row.rewrite).slice(0, 80)));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: no private field reaches the rollup, and its shape is pinned ----
+// The earlier privacy check planted a marker in `correction` only. Every private
+// field gets one now, and the bucket's field list is asserted exactly, so a new
+// field cannot join the rollup without this test changing too.
+{
+  const sb = makeSandbox('privacy229');
+  run(sb, ['--add', '--data', writeRows(sb, [{
+    scope: 'toolkit', stage: 'review', open_code: 'privacy probe',
+    produced: 'PRODUCED_LEAK_MARKER', correction: 'CORRECTION_LEAK_MARKER',
+    trigger: 'TRIGGER_LEAK_MARKER', rewrite: 'REWRITE_LEAK_MARKER'
+  }])]);
+  const markers = ['PRODUCED_LEAK_MARKER', 'CORRECTION_LEAK_MARKER', 'TRIGGER_LEAK_MARKER', 'REWRITE_LEAK_MARKER'];
+  const stdout = run(sb, ['--rollup']);
+  const file = fs.readFileSync(rollupFile(sb), 'utf-8');
+  const ledger = fs.readFileSync(ledgerFile(sb), 'utf-8');
+  markers.forEach(function (m) {
+    check('no ' + m.split('_')[0].toLowerCase() + ' text reaches the rollup',
+      stdout.indexOf(m) === -1 && file.indexOf(m) === -1, m + ' leaked');
+  });
+  check('the ledger itself holds all four private fields (control)',
+    markers.every(function (m) { return ledger.indexOf(m) !== -1; }));
+  const bucket = JSON.parse(stdout).kinds.human.buckets[0];
+  const expected = ['axial_code', 'count', 'hint_disagrees', 'home', 'last_seen', 'open_codes', 'repos', 'scope_split', 'spread', 'stage_split'];
+  check('a rollup bucket carries exactly the expected fields',
+    JSON.stringify(Object.keys(bucket).sort()) === JSON.stringify(expected), JSON.stringify(Object.keys(bucket).sort()));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the evidence read shows a repo's rows only inside that repo ----
+// The one read path back to the private fields. Each case below states what it
+// must show: its own repo's rows, or nothing. The canary sits in a second repo
+// that has the same folder name, which is the case a label comparison would get
+// wrong; identity is the main working copy's real path.
+{
+  const sb = makeSandbox('evidence229');
+  const work = path.join(sb.root, 'work', 'api');
+  const personal = path.join(sb.root, 'personal', 'api');
+  const initRepo = function (dir) {
+    const g = function (args) { return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    fs.mkdirSync(dir, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    return g;
+  };
+  const evidence = function (cwd, env) {
+    return runRaw(sb, ['--evidence', '--category', 'probe category'], { cwd: cwd, env: env });
+  };
+  const rowsOf = function (r) { try { return JSON.parse(r.stdout).rows; } catch (e) { return null; } };
+  try {
+    const gw = initRepo(work);
+    initRepo(personal);
+    const wt = path.join(work, '.claude', 'worktrees', 'wt-a');
+    gw(['worktree', 'add', wt, '-b', 'side']);
+    fs.mkdirSync(path.join(work, 'src', 'deep'), { recursive: true });
+    fs.mkdirSync(path.join(sb.home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(sb.home, '.claude', 'correction-axial-map.json'),
+      JSON.stringify({ 'evidence probe': 'probe category' }), 'utf-8');
+    const row = function (marker) {
+      return writeRows(sb, [{ scope: 'project', stage: 'execute', open_code: 'evidence probe',
+        produced: marker + ' produced', correction: marker + ' correction', trigger: marker + ' trigger', rewrite: marker + ' rewrite' }]);
+    };
+    run(sb, ['--add', '--data', row('WORK_ROW')], { cwd: work });
+    run(sb, ['--add', '--data', row('WORKTREE_ROW')], { cwd: wt });
+    run(sb, ['--add', '--data', row('EVIDENCE_CANARY')], { cwd: personal });
+    // A stored path that starts inside work/api and resolves into personal/api.
+    // Joined by hand: path.join would normalize the `..` away before it is stored,
+    // and the test would then never plant the climbing path it exists to check.
+    const climbing = [work, '..', '..', 'personal', 'api'].join(path.sep);
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-09-21T10:00:00.000Z', repo: 'api', repo_path: climbing,
+      kind: 'human', scope: 'project', stage: 'review', produced: 'DOTDOT_CANARY', correction: '', open_code: 'evidence probe', axial_code: null
+    }) + '\n', 'utf-8');
+    // A row from before repo_path existed: it cannot prove where it came from.
+    fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+      at: '2026-08-01T10:00:00.000Z', repo: 'api', kind: 'human', scope: 'project', stage: 'review',
+      produced: 'NOPATH_CANARY', correction: '', open_code: 'evidence probe', axial_code: null
+    }) + '\n', 'utf-8');
+
+    const fromWork = evidence(work);
+    const seen = JSON.stringify(rowsOf(fromWork));
+    check('evidence from a repo shows its own rows and its worktree\'s',
+      fromWork.status === 0 && seen.indexOf('WORK_ROW') !== -1 && seen.indexOf('WORKTREE_ROW') !== -1, seen.slice(0, 200));
+    check('evidence never shows a same-named sibling repo\'s rows',
+      fromWork.stdout.indexOf('EVIDENCE_CANARY') === -1 && fromWork.stdout.indexOf('DOTDOT_CANARY') === -1,
+      'the canary reached the wrong repo');
+    check('evidence leaves out, and counts, a row with no stored path',
+      fromWork.stdout.indexOf('NOPATH_CANARY') === -1 && JSON.parse(fromWork.stdout).left_out.no_repo_path === 1,
+      fromWork.stdout.slice(0, 200));
+    const fromPersonal = evidence(personal);
+    check('the sibling repo sees its own rows, including the path that climbs into it with ..',
+      fromPersonal.stdout.indexOf('EVIDENCE_CANARY') !== -1 && fromPersonal.stdout.indexOf('DOTDOT_CANARY') !== -1 &&
+      fromPersonal.stdout.indexOf('WORK_ROW') === -1, fromPersonal.stdout.slice(0, 200));
+    const fromDeep = evidence(path.join(work, 'src', 'deep'));
+    check('evidence from a subdirectory shows the same rows as the repo root',
+      JSON.stringify(rowsOf(fromDeep)) === JSON.stringify(rowsOf(fromWork)), fromDeep.stdout.slice(0, 200));
+    const link = path.join(sb.root, 'link-to-api');
+    fs.symlinkSync(work, link);
+    const fromLink = evidence(link);
+    check('evidence through a symlinked path shows the same rows as the real path',
+      JSON.stringify(rowsOf(fromLink)) === JSON.stringify(rowsOf(fromWork)), fromLink.stdout.slice(0, 200));
+    const fromWorktree = evidence(wt);
+    check('evidence from a worktree shows its main copy\'s rows, by design',
+      JSON.stringify(rowsOf(fromWorktree)) === JSON.stringify(rowsOf(fromWork)), fromWorktree.stdout.slice(0, 200));
+    const plain = path.join(sb.root, 'not-a-repo');
+    fs.mkdirSync(plain);
+    const fromPlain = evidence(plain);
+    check('evidence refuses outside a git repository and prints no rows',
+      fromPlain.status !== 0 && fromPlain.stdout.indexOf('_ROW') === -1 && fromPlain.stdout.indexOf('CANARY') === -1,
+      'exit ' + fromPlain.status + ' ' + fromPlain.stdout.slice(0, 120));
+    const moved = path.join(sb.root, 'moved-ledger');
+    fs.mkdirSync(moved);
+    const fromMoved = evidence(work, { TK_LEDGER_DIR: moved });
+    check('under TK_LEDGER_DIR evidence reads only the moved ledger, which holds none of these rows',
+      fromMoved.status === 0 && JSON.stringify(rowsOf(fromMoved)) === '[]', fromMoved.stdout.slice(0, 200));
+    fs.mkdirSync(path.join(personal, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(personal, '.claude', '.no-correction-log'), '', 'utf-8');
+    const fromOptedOut = evidence(personal);
+    check('evidence in an opted-out repo prints no rows',
+      fromOptedOut.stdout.indexOf('CANARY') === -1 && JSON.parse(fromOptedOut.stdout).optedOut === true,
+      fromOptedOut.stdout.slice(0, 200));
+  } catch (e) {
+    check('evidence test set up its repos', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: rates per cycle, before and after a fix -----------------------
+// Planted state: two repos' heartbeats and rows, and fix records written by hand so
+// their times can sit exactly on a cycle boundary. A record with no stored `before`
+// has it computed by the same rule --record-fix stores it with. The repo folders
+// are never created, so each resolves to itself.
+{
+  const sb = makeSandbox('rates229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const A = path.join(sb.root, 'repo-a');
+  const B = path.join(sb.root, 'repo-b');
+  const lines = function (file, recs) {
+    fs.writeFileSync(path.join(dir, file), recs.map(function (r) { return JSON.stringify(r); }).join('\n') + '\n', 'utf-8');
+  };
+  const beat = function (p, at, v) {
+    const b = { at: at, repo: path.basename(p), repo_path: p, session: '', candidates: 0, added: 0 };
+    if (v) b.toolkit_version = v;
+    return b;
+  };
+  const row = function (p, at, code) {
+    return { at: at, repo: path.basename(p), repo_path: p, kind: 'human', scope: 'project', stage: 'execute',
+      produced: 'RATE_PRIVATE_MARKER', correction: '', open_code: code || 'x code', axial_code: null };
+  };
+  lines('correction-heartbeat.jsonl', [
+    beat(A, '2026-09-01T10:00:00.000Z'), beat(A, '2026-09-05T10:00:00.000Z'), beat(A, '2026-09-10T10:00:00.000Z'),
+    beat(A, '2026-09-15T10:00:00.000Z'), beat(A, '2026-09-20T10:00:00.000Z'),
+    beat(B, '2026-09-02T10:00:00.000Z'), beat(B, '2026-09-16T10:00:00.000Z', '7.7.0'), beat(B, '2026-09-21T10:00:00.000Z', '7.7.0')
+  ]);
+  lines('correction-ledger.jsonl', [
+    row(A, '2026-08-30T10:00:00.000Z'),                                    // A's first cycle: left out
+    row(A, '2026-09-03T10:00:00.000Z'),                                    // A cycle 2
+    row(A, '2026-09-07T10:00:00.000Z'), row(A, '2026-09-08T10:00:00.000Z'), // A cycle 3
+    row(A, '2026-09-12T10:00:00.000Z'),                                    // A cycle 4, in progress at the mid-cycle fixes
+    row(A, '2026-09-18T10:00:00.000Z'),                                    // A cycle 5
+    row(A, '2026-09-25T10:00:00.000Z'),                                    // after A's last heartbeat: left out
+    row(A, '2026-09-04T10:00:00.000Z', 'backfill: x code'),                // marked as a backfill: left out
+    row(B, '2026-09-01T12:00:00.000Z'),                                    // B's first cycle: left out
+    row(B, '2026-09-17T10:00:00.000Z')                                     // B cycle 3, closed on 7.7.0
+  ]);
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'),
+    JSON.stringify({ 'x code': 'cat-x', 'backfill: x code': 'cat-x' }), 'utf-8');
+  lines('correction-fixes.jsonl', [
+    { at: '2026-09-13T00:00:00.000Z', category: 'cat-x', home: 'global', label: 'mid-cycle global fix', version: null },
+    { at: '2026-09-13T00:00:00.000Z', category: 'cat-x', home: 'toolkit', label: 'mid-cycle toolkit fix', version: '7.7.0' },
+    { at: '2026-09-05T10:00:00.000Z', category: 'cat-x', home: 'global', label: 'fix on a heartbeat', version: null }
+  ]);
+  const out = run(sb, ['--show-rollup']);
+  const r = JSON.parse(out);
+  const fx = r.fixes || [];
+  const nums = function (f) { return f && f.before && f.after ? [f.before.rows, f.before.cycles, f.after.rows, f.after.cycles] : null; };
+  check('a global fix: before counts the cycles that ended by it, after the cycles that began after it, the one in progress neither',
+    JSON.stringify(nums(fx[0])) === JSON.stringify([3, 2, 2, 2]), JSON.stringify(nums(fx[0])));
+  check('a toolkit fix counts only after-cycles closed on the fixed version; a heartbeat with no version counts for a global fix only',
+    !!fx[1] && !!fx[1].after && fx[1].after.cycles === 1 && fx[1].after.rows === 1 && !!fx[0] && fx[0].after.cycles === 2,
+    JSON.stringify(nums(fx[1])));
+  check('a heartbeat at exactly the fix\'s time falls in before, and the cycle it opens falls in after',
+    JSON.stringify(nums(fx[2])) === JSON.stringify([1, 1, 5, 4]), JSON.stringify(nums(fx[2])));
+  check('rates_left_out counts the rows each rule dropped',
+    !!r.rates_left_out && r.rates_left_out.first_cycle === 2 && r.rates_left_out.backfill_marked === 1 &&
+    r.rates_left_out.no_later_cycle === 1, JSON.stringify(r.rates_left_out));
+  check('a fix is not judged before 5 cycles on each side',
+    !!fx[0] && fx[0].enough_cycles === false, JSON.stringify(fx[0] && fx[0].enough_cycles));
+  check('no private text reaches the rollup through the rates', out.indexOf('RATE_PRIVATE_MARKER') === -1);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- review of #229, R10: a toolkit fix's two sides count the same installs ------
+// Before had counted every cycle that ended by the fix, so a working copy that
+// records no version (the toolkit's source copy, a copy-install) sat on a toolkit
+// fix's before side and never on its after side, and a cycle that already ran the
+// fixed release, closed before the fix was recorded, counted as before. Both sides
+// now count only cycles closed on a recorded version: before an older release,
+// after the fixed one or later. --record-fix stores its before by the same rule.
+{
+  const sb = makeSandbox('toolkitsides229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const U = path.join(sb.root, 'unversioned');
+  const P = path.join(sb.root, 'plugin');
+  const lines = function (file, recs) {
+    fs.writeFileSync(path.join(dir, file), recs.map(function (r) { return JSON.stringify(r); }).join('\n') + '\n', 'utf-8');
+  };
+  const beat = function (p, at, v) {
+    const b = { at: at, repo: path.basename(p), repo_path: p, session: '', candidates: 0, added: 0 };
+    if (v) b.toolkit_version = v;
+    return b;
+  };
+  const row = function (p, at) {
+    return { at: at, repo: path.basename(p), repo_path: p, kind: 'human', scope: 'toolkit', stage: 'execute',
+      produced: '', correction: '', open_code: 'x code', axial_code: null };
+  };
+  lines('correction-heartbeat.jsonl', [
+    beat(U, '2026-09-01T10:00:00.000Z'), beat(U, '2026-09-05T10:00:00.000Z'), beat(U, '2026-09-20T10:00:00.000Z'),
+    beat(P, '2026-09-02T10:00:00.000Z', '7.6.0'), beat(P, '2026-09-06T10:00:00.000Z', '7.6.0'),
+    beat(P, '2026-09-11T10:00:00.000Z', '7.7.0'), beat(P, '2026-09-13T10:00:00.000Z', '7.7.0'),
+    beat(P, '2026-09-18T10:00:00.000Z', '7.7.0')
+  ]);
+  lines('correction-ledger.jsonl', [
+    row(U, '2026-09-03T10:00:00.000Z'),   // closed with no version: on neither side of a toolkit fix
+    row(P, '2026-09-04T10:00:00.000Z'),   // closed on 7.6.0, before the fix: before
+    row(P, '2026-09-08T10:00:00.000Z'),   // closed on 7.7.0 before the fix was recorded: ran the fix, so not before
+    row(P, '2026-09-15T10:00:00.000Z')    // closed on 7.7.0 after the fix: after
+  ]);
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({ 'x code': 'cat-x' }), 'utf-8');
+  lines('correction-fixes.jsonl', [
+    { at: '2026-09-12T00:00:00.000Z', category: 'cat-x', home: 'toolkit', label: 'toolkit fix', version: '7.7.0' }
+  ]);
+  const fx = (JSON.parse(run(sb, ['--show-rollup'])).fixes || [])[0];
+  const pair = function (s) { return s ? [s.rows, s.cycles] : null; };
+  check('a toolkit fix\'s before side counts only cycles closed on an older recorded version',
+    !!fx && JSON.stringify(pair(fx.before)) === JSON.stringify([1, 1]), JSON.stringify(fx && fx.before));
+  check('a toolkit fix\'s after side still counts only cycles closed on the fixed version or later',
+    !!fx && JSON.stringify(pair(fx.after)) === JSON.stringify([1, 1]), JSON.stringify(fx && fx.after));
+  fs.rmSync(path.join(dir, 'correction-fixes.jsonl'));
+  let stored = null;
+  try {
+    run(sb, ['--record-fix', '--category', 'cat-x', '--home', 'toolkit', '--label', 'x', '--version', '7.7.0']);
+    stored = JSON.parse(fs.readFileSync(path.join(dir, 'correction-fixes.jsonl'), 'utf-8').trim()).before;
+  } catch (e) { stored = { error: e.message }; }
+  check('record-fix stores a toolkit fix\'s before by the same rule', JSON.stringify(pair(stored)) === JSON.stringify([1, 1]),
+    JSON.stringify(stored));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the home verdict comes from the spread --------------------------
+// One repo: project. Two or more: toolkit when MORE than half the rows came during
+// a toolkit stage (explore, create-plan, execute, review, document), global
+// otherwise, so a tie goes to global. One row, or no category yet: no home.
+{
+  const sb = makeSandbox('home229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const A = path.join(sb.root, 'repo-a');
+  const B = path.join(sb.root, 'repo-b');
+  let n = 0;
+  const row = function (p, code, stage, scope) {
+    n++;
+    return JSON.stringify({ at: '2026-09-0' + (1 + (n % 9)) + 'T10:00:00.000Z', repo: path.basename(p), repo_path: p,
+      kind: 'human', scope: scope, stage: stage, produced: '', correction: '', open_code: code, axial_code: null });
+  };
+  fs.writeFileSync(path.join(dir, 'correction-ledger.jsonl'), [
+    row(A, 'one repo', 'execute', 'toolkit'), row(A, 'one repo', 'review', 'toolkit'),
+    row(A, 'mostly toolkit', 'execute', 'project'), row(B, 'mostly toolkit', 'review', 'project'), row(B, 'mostly toolkit', 'other', 'project'),
+    row(A, 'a tie', 'execute', 'toolkit'), row(B, 'a tie', 'other', 'toolkit'),
+    row(A, 'never in a stage', 'other', 'project'), row(B, 'never in a stage', 'unknown', 'project'),
+    row(A, 'only once', 'execute', 'project'),
+    row(A, 'no category yet', 'execute', 'project'), row(B, 'no category yet', 'execute', 'project')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({
+    'one repo': 'cat-one-repo', 'mostly toolkit': 'cat-toolkit', 'a tie': 'cat-tie',
+    'never in a stage': 'cat-global', 'only once': 'cat-single'
+  }), 'utf-8');
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  const b = {};
+  r.kinds.human.buckets.forEach(function (x) { b[x.axial_code] = x; });
+  const home = function (k) { return b[k] ? b[k].home : 'missing'; };
+  check('a category in one repo belongs to that project',
+    home('cat-one-repo') === 'project' && b['cat-one-repo'].spread === 1, home('cat-one-repo'));
+  check('a category in two repos, mostly during toolkit stages, belongs to the toolkit',
+    home('cat-toolkit') === 'toolkit' && b['cat-toolkit'].spread === 2 &&
+    JSON.stringify(b['cat-toolkit'].stage_split) === JSON.stringify({ toolkit: 2, other: 1 }), home('cat-toolkit'));
+  check('a tie between toolkit stages and the rest goes to global', home('cat-tie') === 'global', home('cat-tie'));
+  check('a category in two repos outside toolkit stages belongs to the global instructions', home('cat-global') === 'global', home('cat-global'));
+  check('a category with one row, and the unlabeled bucket, get no home',
+    !!b['cat-single'] && b['cat-single'].home === null && !!b['(unlabeled)'] && b['(unlabeled)'].home === null,
+    JSON.stringify([home('cat-single'), home('(unlabeled)')]));
+  check('hint_disagrees is set when the capture tag points away from the verdict',
+    b['cat-toolkit'].hint_disagrees === true && b['cat-tie'].hint_disagrees === true && b['cat-one-repo'].hint_disagrees === true,
+    JSON.stringify([b['cat-toolkit'].hint_disagrees, b['cat-tie'].hint_disagrees, b['cat-one-repo'].hint_disagrees]));
+  check('hint_disagrees is unset when the capture tag agrees', b['cat-global'].hint_disagrees === false,
+    JSON.stringify(b['cat-global'].hint_disagrees));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: --record-fix validates every field and stores the before rate ----
+{
+  const sb = makeSandbox('recordfix229');
+  const dir = path.join(sb.home, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'correction-axial-map.json'), JSON.stringify({ 'x code': 'cat-x' }), 'utf-8');
+  const fixes = path.join(dir, 'correction-fixes.jsonl');
+  const tryFix = function (args, cwd) { return runRaw(sb, ['--record-fix'].concat(args), { cwd: cwd }); };
+  const refused = function (name, args) {
+    const r = tryFix(args);
+    check(name, r.status !== 0 && !fs.existsSync(fixes), 'exit ' + r.status + ', fixes file ' + (fs.existsSync(fixes) ? 'written' : 'absent'));
+  };
+  refused('record-fix refuses a category the axial map does not name', ['--category', 'no such category', '--home', 'global', '--label', 'x']);
+  refused('record-fix refuses an unknown home', ['--category', 'cat-x', '--home', 'nowhere', '--label', 'x']);
+  refused('record-fix refuses a fix with no label', ['--category', 'cat-x', '--home', 'global']);
+  refused('record-fix refuses a toolkit fix without a version', ['--category', 'cat-x', '--home', 'toolkit', '--label', 'x']);
+  refused('record-fix refuses free text in the version',
+    ['--category', 'cat-x', '--home', 'toolkit', '--label', 'x', '--version', '7.7.0; FIX_VERSION_MARKER']);
+  refused('record-fix refuses a version on a fix that is not a toolkit fix',
+    ['--category', 'cat-x', '--home', 'global', '--label', 'x', '--version', '7.7.0']);
+  refused('record-fix refuses a project fix outside a git repository', ['--category', 'cat-x', '--home', 'project', '--label', 'x']);
+  const ok = tryFix(['--category', 'cat-x', '--home', 'global', '--label', 'read the source before answering']);
+  let stored = {};
+  try { stored = JSON.parse(fs.readFileSync(fixes, 'utf-8').trim()); } catch (e) { /* checked below */ }
+  check('record-fix stores the fix with the exact time and a before snapshot',
+    ok.status === 0 && isoOrNullTest(stored.at) && stored.home === 'global' && stored.version === null &&
+    !!stored.before && stored.before.cycles === 0 && stored.before.rows === 0 && stored.before.rate === null,
+    ok.stdout + ok.stderr);
+  const r = JSON.parse(run(sb, ['--show-rollup']));
+  check('the rollup lists the recorded fix with its label and home',
+    r.fixes.length === 1 && r.fixes[0].label === 'read the source before answering' && r.fixes[0].home === 'global',
+    JSON.stringify(r.fixes));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: a heartbeat records the toolkit version a plugin install runs ----
+// A plugin install has .claude-plugin/plugin.json one folder above scripts/; the
+// source copy and a copy-install have none and record null.
+{
+  const sb = makeSandbox('version229');
+  const pluginRoot = path.join(sb.root, 'plugin-copy');
+  fs.mkdirSync(path.join(pluginRoot, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(pluginRoot, 'scripts', 'correction-ledger.js'));
+  fs.writeFileSync(path.join(pluginRoot, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'tk', version: '9.8.7' }), 'utf-8');
+  execFileSync('node', [path.join(pluginRoot, 'scripts', 'correction-ledger.js'), '--heartbeat'],
+    { cwd: sb.proj, env: Object.assign({}, process.env, { HOME: sb.home }), encoding: 'utf-8' });
+  run(sb, ['--heartbeat']);
+  const beats = fs.readFileSync(path.join(sb.home, '.claude', 'correction-heartbeat.jsonl'), 'utf-8')
+    .trim().split('\n').map(function (l) { return JSON.parse(l); });
+  check('a plugin install\'s heartbeat records its toolkit version', beats[0].toolkit_version === '9.8.7', JSON.stringify(beats[0].toolkit_version));
+  check('the source copy\'s heartbeat records no version', beats[1].toolkit_version === null, JSON.stringify(beats[1].toolkit_version));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: older rows are filled in through a side file, never re-added ----
+// A row written before the request and rewrite fields existed can have them
+// filled in from its transcript, if the transcript is still on disk. The fill goes
+// to correction-backfill.jsonl, keyed by the row's `at` and `session`; the ledger
+// is never rewritten and no row is added. Each row the backfill cannot use is
+// counted, by reason.
+{
+  const sb = makeSandbox('backfill229');
+  const bf = path.join(sb.root, 'bf');
+  const bf2 = path.join(sb.root, 'bf2');
+  [bf, bf2].forEach(function (dir) {
+    const g = function (args) { return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+    fs.mkdirSync(dir, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+  });
+  const claudeDir = path.join(sb.home, '.claude');
+  const tdir = path.join(claudeDir, 'projects', fs.realpathSync(bf).replace(/[/\\]/g, '-'));
+  fs.mkdirSync(tdir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: 'sess-b1', message: { content: t } }); };
+  fs.writeFileSync(path.join(tdir, 'sess-b1.jsonl'), [
+    user('Draft the release note for the CLI.', '2026-09-22T10:00:00.000Z'),
+    asst('Here is a note about the history of the CLI.'),
+    user('No, I want it to say: Install with one command, then run it.', '2026-09-22T10:01:00.000Z')
+  ].join('\n') + '\n', 'utf-8');
+  const real = fs.realpathSync(bf);
+  const old = function (at, session, extra) {
+    return JSON.stringify(Object.assign({ at: at, repo: 'bf', repo_path: real, kind: 'human', scope: 'project',
+      stage: 'document', produced: 'p', correction: 'c', open_code: 'bf code', axial_code: null, session: session }, extra || {}));
+  };
+  fs.writeFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), [
+    old('2026-09-22T10:01:00.000Z', 'sess-b1'),                          // fillable
+    old('2026-09-22T11:00:00.000Z', 'sess-b1'),                          // no message at that time
+    old('2026-09-22T12:00:00.000Z', ''),                                 // no session recorded
+    old('2026-09-22T12:30:00.000Z', '../../etc/passwd'),                 // not a plain session id
+    old('2026-09-22T13:00:00.000Z', 'sess-gone'),                        // transcript gone
+    old('2026-09-22T14:00:00.000Z', 'sess-b1', { trigger: '', rewrite: '' }), // already has the fields
+    JSON.stringify({ at: '2026-09-22T15:00:00.000Z', repo: 'bf2', repo_path: fs.realpathSync(bf2), kind: 'human',
+      scope: 'project', stage: 'document', produced: '', correction: '', open_code: 'bf code', axial_code: null, session: 'sess-x' })
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(claudeDir, 'correction-axial-map.json'), JSON.stringify({ 'bf code': 'cat-bf' }), 'utf-8');
+  const sidefile = path.join(claudeDir, 'correction-backfill.jsonl');
+  try {
+    const c = JSON.parse(run(sb, ['--backfill-candidates'], { cwd: bf }));
+    check('backfill lists only the row it can fill, with the exchange around it',
+      c.candidates.length === 1 && c.candidates[0].backfill === true &&
+      c.candidates[0].asked === 'Draft the release note for the CLI.' &&
+      c.candidates[0].human_said.indexOf('Install with one command') !== -1, JSON.stringify(c.candidates).slice(0, 200));
+    check('backfill counts each row it could not use, by reason',
+      JSON.stringify(c.counts) === JSON.stringify({ repo_rows: 6, not_needed: 1, already_filled: 0, no_session: 2, transcript_gone: 1, no_match: 1, candidates: 1 }),
+      JSON.stringify(c.counts));
+    const fill = function (entries) { return runRaw(sb, ['--add-backfill', '--data', writeRows(sb, entries)], { cwd: bf }); };
+    const good = { at: '2026-09-22T10:01:00.000Z', session: 'sess-b1', trigger: 'asked for a CLI release note', rewrite: 'Install with one command, then run it.' };
+    let r = fill([{ at: '2026-09-22T15:00:00.000Z', session: 'sess-x', trigger: 'x', rewrite: '' }]);
+    check('backfill refuses an entry for another repo\'s row', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    r = fill([good, { at: '2026-09-22T11:00:00.000Z', session: 'nope', trigger: 'x', rewrite: '' }]);
+    check('a backfill batch with one bad entry writes nothing', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    r = fill([{ at: good.at, session: good.session, trigger: '', rewrite: '' }]);
+    check('backfill refuses an entry with neither field', r.status !== 0 && !fs.existsSync(sidefile), 'exit ' + r.status);
+    const handoff = writeRows(sb, [good]);
+    r = runRaw(sb, ['--add-backfill', '--data', handoff], { cwd: bf });
+    check('backfill writes an accepted entry to the side file and deletes the hand-off file',
+      r.status === 0 && fs.existsSync(sidefile) && !fs.existsSync(handoff), 'exit ' + r.status + ' ' + r.stderr);
+    r = fill([good]);
+    check('backfill refuses to fill the same row twice',
+      r.status !== 0 && fs.readFileSync(sidefile, 'utf-8').trim().split('\n').length === 1, 'exit ' + r.status);
+    const ev = JSON.parse(run(sb, ['--evidence', '--category', 'cat-bf'], { cwd: bf }));
+    const filled = ev.rows.filter(function (x) { return x.at === good.at; })[0] || {};
+    check('the evidence read joins the filled-in fields onto their row',
+      filled.backfilled === true && filled.trigger === good.trigger && filled.rewrite === good.rewrite, JSON.stringify(filled));
+    check('the ledger itself is never rewritten by a backfill',
+      fs.readFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), 'utf-8').indexOf('asked for a CLI release note') === -1);
+    const roll = run(sb, ['--show-rollup']);
+    check('the rollup counts filled rows and carries none of their text',
+      JSON.parse(roll).backfilled === 1 && roll.indexOf('asked for a CLI release note') === -1 && roll.indexOf('Install with one command') === -1,
+      roll.slice(0, 120));
+  } catch (e) {
+    check('backfill test ran end to end', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: stage is checked against the extractor's list -------------------
+// `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
+// free-text channel through the projection, the hole `at` had before isoOrNull().
+{
+  const sb = makeSandbox('stage229');
+  run(sb, ['--add', '--data', writeRows(sb, [
+    { scope: 'toolkit', stage: '/tk:Review', open_code: 'stage normalization probe' },
+    { scope: 'toolkit', stage: 'STAGE_LEAK_MARKER a free-text sentence', open_code: 'stage normalization probe' },
+    { scope: 'toolkit', open_code: 'stage normalization probe' }
+  ])]);
+  const stored = fs.readFileSync(ledgerFile(sb), 'utf-8').split('\n').filter(Boolean).map(function (l) { return JSON.parse(l); });
+  check('a stage spelled as a command is stored as the stage name', stored[0].stage === 'review', stored[0].stage);
+  check('free text in stage is never stored',
+    stored[1].stage === 'other' && fs.readFileSync(ledgerFile(sb), 'utf-8').indexOf('STAGE_LEAK_MARKER') === -1,
+    stored[1].stage);
+  check('a missing stage is stored as unknown', stored[2].stage === 'unknown', stored[2].stage);
+  // An older row written before the check: the projection normalizes it too. The
+  // rollup prints no stage text today, so this guards against later widening.
+  fs.appendFileSync(ledgerFile(sb), JSON.stringify({
+    at: '2026-09-01T10:00:00.000Z', repo: 'proj', kind: 'human', scope: 'toolkit',
+    stage: 'OLD_STAGE_LEAK_MARKER spilled', produced: '', correction: '', open_code: 'stage normalization probe', axial_code: null
+  }) + '\n', 'utf-8');
+  const out = run(sb, ['--rollup']);
+  check('free text in an older row\'s stage never reaches the rollup',
+    out.indexOf('OLD_STAGE_LEAK_MARKER') === -1 && fs.readFileSync(rollupFile(sb), 'utf-8').indexOf('OLD_STAGE_LEAK_MARKER') === -1);
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- 3. concurrent appends -------------------------------------------------
 {
   const sb = makeSandbox('concurrent');
@@ -1149,9 +1718,122 @@ function tripwireBinaryTest() {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- review of #229, R15: a fill-in gets the context capture would have given ----
+// --backfill-candidates had its own copy of the transcript walk, and the copy had
+// already drifted: it read one session file, so a row drafted from the opening
+// message of a new session, answering an interrupt in the session before it, came
+// back with no output to react to. Both modes now share one walk.
+{
+  const sb = makeSandbox('backfillpair229');
+  const repo = path.join(sb.root, 'pair');
+  const g = function (args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+  fs.mkdirSync(repo, { recursive: true });
+  g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+  g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+  const real = fs.realpathSync(repo);
+  const claudeDir = path.join(sb.home, '.claude');
+  const tdir = path.join(claudeDir, 'projects', real.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(tdir, { recursive: true });
+  const asst = function (t) { return JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } }); };
+  const user = function (t, ts, sid) { return JSON.stringify({ type: 'user', timestamp: ts, sessionId: sid, message: { content: t } }); };
+  fs.writeFileSync(path.join(tdir, 'sess-p1.jsonl'), [
+    user('Move the settings page under the account menu.', '2026-09-23T10:00:00.000Z', 'sess-p1'),
+    asst('Moving it under the help menu.'),
+    user('[Request interrupted by user]', '2026-09-23T10:00:30.000Z', 'sess-p1')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(tdir, 'sess-p2.jsonl'),
+    user('No, the account menu, as I asked.', '2026-09-23T10:02:00.000Z', 'sess-p2') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(claudeDir, 'correction-ledger.jsonl'), JSON.stringify({ at: '2026-09-23T10:02:00.000Z',
+    repo: 'pair', repo_path: real, kind: 'human', scope: 'project', stage: 'execute', produced: 'p', correction: 'c',
+    open_code: 'pair code', axial_code: null, session: 'sess-p2' }) + '\n', 'utf-8');
+  let c = null;
+  try { c = JSON.parse(run(sb, ['--backfill-candidates'], { cwd: repo })); } catch (e) { c = { error: e.message }; }
+  const cand = ((c && c.candidates) || [])[0] || {};
+  check('a fill-in for a reply to another session\'s interrupt gets the output that was cut off, as capture does',
+    cand.assistant_said === 'Moving it under the help menu.' && cand.asked === 'Move the settings page under the account menu.',
+    JSON.stringify(c).slice(0, 240));
+  let same = {};
+  try {
+    const cap = JSON.parse(run(sb, ['--candidates', '--since', '2026-09-23T00:00:00.000Z'], { cwd: repo }));
+    same = cap.candidates.filter(function (x) { return x.at === '2026-09-23T10:02:00.000Z'; })[0] || {};
+  } catch (e) { same = { error: e.message }; }
+  check('capture and the fill-in give that message the same context',
+    same.assistant_said === cand.assistant_said && same.asked === cand.asked && same.human_said === cand.human_said,
+    JSON.stringify(same).slice(0, 240));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: the tripwire refuses the fix records and the backfill file too --
+// The backfill side file carries filled-in private text; the fix records are a
+// per-machine record. Both join the never-push list, which also catches `git add -f`.
+function tripwireNewFilesTest() {
+  const sb = makeSandbox('tripwire229');
+  const repo = path.join(sb.root, 'repo');
+  fs.mkdirSync(path.join(repo, 'notes'), { recursive: true });
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    g(['init', '-q']);
+    g(['config', 'user.email', 'test@example.com']);
+    g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    fs.writeFileSync(path.join(repo, 'notes', 'correction-fixes.jsonl'), '{"category":"x"}\n', 'utf-8');
+    fs.writeFileSync(path.join(repo, 'notes', 'correction-backfill.jsonl'), '{"trigger":"x"}\n', 'utf-8');
+    g(['add', '-f', 'notes']); g(['commit', '-qm', 'oops']);
+    const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8' });
+    const said = (r.stdout || '') + (r.stderr || '');
+    check('tripwire blocks a pushed fix record or backfill side file', r.status !== 0, 'exit ' + r.status);
+    check('tripwire names both new ledger files',
+      said.indexOf('correction-fixes.jsonl') !== -1 && said.indexOf('correction-backfill.jsonl') !== -1, said.slice(0, 300));
+  } catch (e) {
+    check('tripwire new-files test set up a git repo', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
+// --- issue #229: TK_LEDGER_DIR also moves the fix records and the backfill file ---
+// A guard, not a fail-first check: both paths are built from the same folder.
+function ledgerDirNewFilesTest() {
+  const sb = makeSandbox('ledgerdir229');
+  const repo = path.join(sb.root, 'repo229');
+  const moved = path.join(sb.root, 'moved229');
+  const g = function (args) {
+    return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  };
+  try {
+    fs.mkdirSync(repo, { recursive: true });
+    fs.mkdirSync(moved, { recursive: true });
+    g(['init', '-q']); g(['config', 'user.email', 'test@example.com']); g(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+    g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+    fs.writeFileSync(path.join(moved, 'correction-axial-map.json'), JSON.stringify({ 'moved code': 'cat-moved' }), 'utf-8');
+    fs.writeFileSync(path.join(moved, 'correction-ledger.jsonl'), JSON.stringify({
+      at: '2026-09-23T10:00:00.000Z', repo: 'repo229', repo_path: fs.realpathSync(repo), kind: 'human', scope: 'project',
+      stage: 'execute', produced: '', correction: '', open_code: 'moved code', axial_code: null, session: 'sess-m'
+    }) + '\n', 'utf-8');
+    const env = { TK_LEDGER_DIR: moved };
+    run(sb, ['--record-fix', '--category', 'cat-moved', '--home', 'global', '--label', 'moved fix'], { cwd: repo, env: env });
+    run(sb, ['--add-backfill', '--data', writeRows(sb, [{ at: '2026-09-23T10:00:00.000Z', session: 'sess-m', trigger: 'moved trigger', rewrite: '' }])],
+      { cwd: repo, env: env });
+    const names = ['correction-fixes.jsonl', 'correction-backfill.jsonl'];
+    check('TK_LEDGER_DIR holds the fix records and the backfill side file',
+      names.every(function (n) { return fs.existsSync(path.join(moved, n)); }), fs.readdirSync(moved).join(', '));
+    check('TK_LEDGER_DIR leaves neither under HOME',
+      names.every(function (n) { return !fs.existsSync(path.join(sb.home, '.claude', n)); }));
+  } catch (e) {
+    check('TK_LEDGER_DIR new-files test ran', false, e.message);
+  }
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 function finish() {
   tripwireTest();
   tripwireBinaryTest();
+  tripwireNewFilesTest();
+  ledgerDirNewFilesTest();
   console.log('');
   if (failures.length === 0) {
     console.log(passed + ' checks passed.\n');
