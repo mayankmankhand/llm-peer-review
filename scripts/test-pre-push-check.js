@@ -54,6 +54,16 @@ const TRIPWIRE = path.resolve(__dirname, '..', '.claude', 'scripts', 'pre-push-c
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 
+// A private temp folder for every tripwire run (issue #231). The tripwire
+// builds its tree under os.tmpdir(), and another run of this suite at the same
+// time (a second worktree, CI) builds its trees in the shared temp folder, so a
+// leftover check that read the shared folder saw their trees as this run's and
+// failed at random. TMPDIR, TMP and TEMP point each run here, and the leftover
+// check reads only here.
+const CHILD_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'tripwire-tmp-'));
+process.on('exit', function () { try { fs.rmSync(CHILD_TMP, { recursive: true, force: true }); } catch (e) { /* best effort */ } });
+function childEnv() { return Object.assign({}, process.env, { TMPDIR: CHILD_TMP, TMP: CHILD_TMP, TEMP: CHILD_TMP }); }
+
 let passed = 0;
 const failures = [];
 
@@ -119,7 +129,7 @@ function makeRepo(label) {
 // Run the tripwire in a repo. Returns exit status plus both streams; a clean run
 // is defined by the contract as exit 0 AND empty stdout, so both are captured.
 function run(repo) {
-  const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8' });
+  const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8', env: childEnv() });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
@@ -460,7 +470,14 @@ function pluginCopyTests() {
   fs.rmSync(path.join(sb.repo, 'plugin', 'ok'));
   r = run(sb.repo);
   check('an uncommitted change in the working copy does not block a push whose commit is fresh', r.status === 0, 'status ' + r.status + ' ' + r.stdout.slice(0, 300));
-  check('the check leaves no temporary tree behind', !fs.readdirSync(os.tmpdir()).some(function (n) { return n.indexOf('pre-push-build-') === 0 && fs.statSync(path.join(os.tmpdir(), n)).mtimeMs > Date.now() - 60000; }));
+  // A tree another run of this suite left in the shared temp folder (a second
+  // worktree, CI) must not count as this run's (#231): plant one. The check
+  // reads only this suite's private folder, where every tripwire run here
+  // builds its tree.
+  const planted = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-push-build-'));
+  try {
+    check('the check leaves no temporary tree behind', !fs.readdirSync(CHILD_TMP).some(function (n) { return n.indexOf('pre-push-build-') === 0; }));
+  } finally { fs.rmSync(planted, { recursive: true, force: true }); }
   cleanup(sb);
 }
 
@@ -543,7 +560,7 @@ function makePluginCopy(version) {
   return root;
 }
 function runCopy(pluginRoot, cwd) {
-  const r = spawnSync('node', [path.join(pluginRoot, 'scripts', 'pre-push-check.js')], { cwd: cwd, encoding: 'utf-8' });
+  const r = spawnSync('node', [path.join(pluginRoot, 'scripts', 'pre-push-check.js')], { cwd: cwd, encoding: 'utf-8', env: childEnv() });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 // The one plugin update message (issue #183), as the version-helper block defines
@@ -866,7 +883,7 @@ const ZERO = '0'.repeat(40);
 const TOKEN_LINE = 'CI_TOKEN' + '=' + GITLAB_PAT + '\n';
 
 function runWith(repo, args, input) {
-  const r = spawnSync('node', [TRIPWIRE].concat(args), { cwd: repo, encoding: 'utf-8', input: input === undefined ? '' : input });
+  const r = spawnSync('node', [TRIPWIRE].concat(args), { cwd: repo, encoding: 'utf-8', input: input === undefined ? '' : input, env: childEnv() });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
