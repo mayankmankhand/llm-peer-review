@@ -618,7 +618,7 @@ function analyzeRun(run, answers) {
     if (expect.byType && expect.byType[type]) want = expect.byType[type];
     else if (kind) want = (expect.finderModels && expect.finderModels[kind[1]]) || expect.finders || expect.main;
     else if (/index-mapper$/.test(type)) want = expect.mapper || expect.main;
-    else if (!/^(tk:)?(audit-skeptic|fix-verifier|plan-critic|design-critic|design-comparer|correction-extractor|review-[a-z]+-finder|index-mapper|review-finder)$/.test(type)) warnings.push('other-agent:' + type);
+    else if (!/^(tk:)?(audit-skeptic|fix-verifier|plan-critic|design-critic|design-comparer|decision-checker|correction-extractor|review-[a-z]+-finder|index-mapper|review-finder)$/.test(type)) warnings.push('other-agent:' + type);
     if (fams.length > 0 && fams.some(f => f !== want)) reasons.push('model:' + type + '=' + fams.join('+') + ' (want ' + want + ')');
   }
 

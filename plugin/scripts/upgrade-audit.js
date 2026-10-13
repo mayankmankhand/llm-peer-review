@@ -996,7 +996,7 @@ const TOOLS_NONE_AWK = String.raw`{ x = $0; sub(/\r$/, "", x) } NR == 1 { print 
 // to the same rule; test-upgrade-audit.js fails when this copy drifts from the
 // toolkit's agents or from that test's JUDGES.
 const C14_FINDERS = ['code', 'security', 'ux', 'plan', 'commands', 'deps', 'browser', 'copy'].map(k => 'review-' + k + '-finder').concat('index-mapper');
-const C14_JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
+const C14_JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'decision-checker'];
 // A toolkit agent given to subagent_type, `tk:` scoped (group 1) or bare. The
 // name must end there, so `index-mapper-v2` or another plugin's
 // `other:plan-critic` is no match.

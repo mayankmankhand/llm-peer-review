@@ -831,7 +831,7 @@ section('13. uncommitted.baseline: the starting snapshot (#202)', function () {
 section('14. the model mode: flag, then an unfinished plan, then fit (#205)', function () {
   const FINDERS = ['review-code-finder', 'review-security-finder', 'review-ux-finder', 'review-plan-finder',
     'review-commands-finder', 'review-deps-finder', 'review-browser-finder', 'review-copy-finder'];
-  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer'];
+  const JUDGES = ['audit-skeptic', 'fix-verifier', 'plan-critic', 'design-critic', 'design-comparer', 'decision-checker'];
   const plugin = path.join(TMP, 'plugin layout', 'plugin');
   const copy = path.join(plugin, 'scripts', 'session-init.js');
   fs.mkdirSync(path.dirname(copy), { recursive: true });

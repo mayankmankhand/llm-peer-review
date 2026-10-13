@@ -84,7 +84,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 - **Your agents.** An agent of yours runs on the model its file names, in every mode. With no `model:` line it follows `CLAUDE_CODE_SUBAGENT_MODEL` whenever that is set, which can put a reviewer or judge of yours below your session model: give such an agent `model: inherit`. Your review kinds are agents too, and `/tk:review` dispatches them with no model, so a kind whose agent names a model runs on it in every mode, even above your session model.
 - **Your calls to the toolkit's finders or map helper.** Pass `model` the way the toolkit's own commands do: its `models.perRole` value from `node ~/.claude/plugins/data/tk-llm-peer-review/current/scripts/session-init.js --models`, never above your session model. Left out, the finders run on Opus whatever your session runs.
-- **Your calls to the toolkit's judges** (`tk:audit-skeptic`, `tk:fix-verifier`, `tk:plan-critic`, `tk:design-critic`, `tk:design-comparer`). Pass no model: a model named in a call overrides the judge's own `model: inherit`.
+- **Your calls to the toolkit's judges** (`tk:audit-skeptic`, `tk:fix-verifier`, `tk:plan-critic`, `tk:design-critic`, `tk:design-comparer`, `tk:decision-checker`). Pass no model: a model named in a call overrides the judge's own `model: inherit`.
 
 `/tk:upgrade` checks these three on every upgrade (C-14): a reviewer, judge or review-kind agent of yours with no `model:` line, a call to a finder or the map helper that passes no model, and a call that names a model for a judge.
 

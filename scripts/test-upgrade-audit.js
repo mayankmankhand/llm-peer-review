@@ -2482,7 +2482,7 @@ console.log('\n9c. agents and helper calls follow the model routing rule (C-14)'
   // lists are updated with it.
   const repoAgents = fs.readdirSync(path.join(REPO, '.claude', 'agents')).filter(n => n.endsWith('.md')).map(n => { const m = /^name:\s*(\S+)/m.exec(read(path.join(REPO, '.claude', 'agents', n))); return m ? m[1] : n.slice(0, -3); });
   const rosterJudges = (/const JUDGES = \[([^\]]*)\]/.exec(read(path.join(REPO, 'scripts', 'test-model-roster.js'))) || ['', ''])[1].match(/[a-z-]+/g) || [];
-  check('test-model-roster.js names five judges, each a toolkit agent', rosterJudges.length === 5 && rosterJudges.every(j => repoAgents.includes(j)), rosterJudges.join(','));
+  check('test-model-roster.js names six judges, each a toolkit agent', rosterJudges.length === 6 && rosterJudges.every(j => repoAgents.includes(j)), rosterJudges.join(','));
   c = calls('drift', cmd(...repoAgents.flatMap(n => ['Dispatch `subagent_type=tk:' + n + '` for the work.', 'Dispatch `subagent_type=tk:' + n + '` with model: sonnet.'])));
   const wantFinders = repoAgents.filter(n => /^review-[a-z]+-finder$/.test(n) || n === 'index-mapper').sort();
   const gotFinders = c.fs14.filter(f => f.key.split(':')[2] === 'finder-call').map(f => f.key.split(':')[3]).sort();
