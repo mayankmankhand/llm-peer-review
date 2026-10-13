@@ -425,6 +425,15 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('a missing ID, an extra ID and a conflicting second line are each a problem', gaps.status === 1 && gp === 'conflict:R2,extra:R99,missing:R6', gp);
   const prose = run(['--verdicts', shard, ret('Report delivered. Summary of verdicts: R2 STANDS, R3 REFUTED, R4 STANDS, R5 STANDS, R6 STANDS.\n')]);
   check('a prose summary is not a verdict line: every ID is missing', prose.status === 1 && ((parse(prose) || {}).returns || [{ problems: [] }])[0].problems.filter((p) => p.kind === 'missing').length === 5, prose.stdout);
+  // A real verifier return put an evidence list after its verdicts, each line
+  // opening with the ID and a colon; a fixture voter put one before them.
+  const evidence = run(['--verdicts', shard, ret('- **R2:** two GET requests returned the file.\nR2: STANDS\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: STANDS\n**R4:** The false sentence is gone from x.md:62.\nR5: I sent a request.\n')]);
+  check('prose after an ID and a colon is evidence, not a second verdict', evidence.status === 0 && ((parse(evidence) || {}).verdicts || {}).R4 === 'STANDS', evidence.stdout);
+  const onlyProse = run(['--verdicts', shard, ret('R2: STANDS\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: the receipt shows the call.\n')]);
+  const op = ((parse(onlyProse) || {}).returns || [{ problems: [] }])[0].problems;
+  check('an ID named only in prose is missing, and the problem says so', onlyProse.status === 1 && op.length === 1 && op[0].kind === 'missing' && op[0].id === 'R6' && /prose/.test(op[0].note || ''), JSON.stringify(op));
+  const keepBeside = run(['--verdicts', shard, ret('R2: STANDS\nR2: KEEP\nR3: REFUTED\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
+  check('an all-capitals word outside the set is a problem even beside a valid verdict', keepBeside.status === 1 && /"word":"KEEP"/.test(keepBeside.stdout), keepBeside.stdout);
   const t2down = run(['--verdicts', shard, ret('R2: DOWNGRADE Warn\nR3: STANDS\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
   check('DOWNGRADE is not a tier 2 word', t2down.status === 1 && /"word":"DOWNGRADE"/.test(t2down.stdout), t2down.stdout);
 

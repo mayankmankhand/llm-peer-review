@@ -108,7 +108,9 @@
 // and a colon at the start of a line (markdown marks and indentation aside),
 // followed by one word of that tier's closed set: REFUTED or STANDS; tier 3 adds
 // DOWNGRADE Warn and DOWNGRADE Suggest; the verifier says FIXED or NOT FIXED. A
-// split: line belongs to the verdict above it. stdout is one JSON object,
+// split: line belongs to the verdict above it. A line of prose after an ID and
+// a colon (an evidence list, say) is not a verdict and decides nothing; an
+// all-capitals word there (KEEP, KILL) is a verdict outside the set. stdout is one JSON object,
 // {tier, ids, ok, returns: [{file, problems}]}; a problem is a missing ID, an
 // extra ID, an unknown word (KEEP, KILL) or two lines that disagree for one ID,
 // and any problem makes ok false and the exit code 1, with nothing decided,
@@ -470,6 +472,7 @@ function readReturn(text, ids, tier) {
   const decided = {};
   const splits = {};
   const unknownIds = new Set();
+  const proseIds = new Set();
   let last = null;
   let waiting = null; // the verdict whose reasoning is still on the next line
   const lines = String(text).replace(/^\uFEFF/, '').split(/\r?\n/);
@@ -491,8 +494,17 @@ function readReturn(text, ids, tier) {
     const rest = m[2].replace(/^(?:\*\*|__|`|\*|_)+/, '');
     const word = words.find((w) => rest.toLowerCase().startsWith(w.toLowerCase()) && !/[A-Za-z0-9]/.test(rest.charAt(w.length)));
     if (!word) {
-      problems.push({ kind: 'unknown', id, line: i + 1, word: (rest.match(/^[^\s.,;:*`_-]*/) || [''])[0], text: lines[i].trim().slice(0, 120) });
-      unknownIds.add(id);
+      const token = (rest.match(/^[^\s.,;:*`_-]*/) || [''])[0];
+      // An all-capitals word where a verdict goes (KEEP, KILL, DOWNGRADE in tier
+      // 2) is a verdict outside the closed set. Anything else is prose about the
+      // ID, such as an evidence list under the verdicts: it decides nothing, and
+      // the ID is missing only if no verdict line names it.
+      if (/^[A-Z]{2,}$/.test(token)) {
+        problems.push({ kind: 'unknown', id, line: i + 1, word: token, text: lines[i].trim().slice(0, 120) });
+        unknownIds.add(id);
+      } else {
+        proseIds.add(id);
+      }
       continue;
     }
     if (!ids.includes(id)) { problems.push({ kind: 'extra', id, line: i + 1 }); continue; }
@@ -505,7 +517,10 @@ function readReturn(text, ids, tier) {
     last = id;
     if (reason === '') waiting = decided[id];
   }
-  for (const id of ids) if (!decided[id] && !unknownIds.has(id)) problems.push({ kind: 'missing', id });
+  for (const id of ids) {
+    if (decided[id] || unknownIds.has(id)) continue;
+    problems.push(proseIds.has(id) ? { kind: 'missing', id, note: 'named only in prose lines, never with a verdict word' } : { kind: 'missing', id });
+  }
   problems.sort((a, b) => (a.line || Infinity) - (b.line || Infinity));
   return { problems, decided, splits };
 }
