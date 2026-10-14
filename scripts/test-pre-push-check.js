@@ -1511,6 +1511,41 @@ function settingsMergeTests() {
     check('#243 push-to-main test set up its repo', false, e.message);
   }
   cleanup(sb);
+
+  // Cases A and B through the real repo hook (review of #243, R2). Every case
+  // above calls the script directly; here a real `git push` runs
+  // scripts/git-hooks/pre-push, which pipes git's own ref lines into the
+  // tripwire at its default path, so the remote name and the ref lines are
+  // proven to reach the gate the way they do on a maintainer's push. The copy
+  // of the tripwire is left untracked: the hook runs it, the scan never sees it.
+  sb = settingsRepo('settings-hook', true);
+  try {
+    fs.mkdirSync(path.join(sb.repo, '.claude', 'scripts'), { recursive: true });
+    fs.copyFileSync(TRIPWIRE, path.join(sb.repo, '.claude', 'scripts', 'pre-push-check.js'));
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'feature work');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'main']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push');
+    sb.g(['push', '-q', 'origin', 'main']);
+    sb.g(['checkout', '-q', 'feature']);
+    sb.g(['merge', '-q', '--no-edit', 'main']);
+    sb.g(['config', 'core.hooksPath', path.resolve(__dirname, 'git-hooks')]);
+    const push = function () {
+      const p = spawnSync('git', ['push', 'origin', 'feature'], { cwd: sb.repo, encoding: 'utf-8', env: childEnv() });
+      return { status: p.status, stdout: (p.stdout || '') + (p.stderr || ''), stderr: '' };
+    };
+    let r = push();
+    check('#243 case A through the real repo hook: git push goes through',
+      r.status === 0 && sb.sha('refs/remotes/origin/feature') === sb.sha('HEAD'), brief(r));
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS.concat(['Bash(curl *)']), ['Bash(git push *)']), 'widen permissions');
+    r = push();
+    check('#243 case B through the real repo hook: git push is refused and prints the row',
+      r.status !== 0 && r.stdout.indexOf('+      "Bash(curl *)"') !== -1 && sb.sha('refs/remotes/origin/feature') !== sb.sha('HEAD'), brief(r));
+  } catch (e) {
+    check('#243 real-hook test set up its repo', false, e.message);
+  }
+  cleanup(sb);
 }
 
 maskingTest();
