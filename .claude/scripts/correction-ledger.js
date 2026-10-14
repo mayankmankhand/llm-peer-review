@@ -329,9 +329,10 @@ function appendJsonl(file, record) {
 // somewhere it should not. The same two facts cut the other way, though: the
 // script runs under a pre-approved permission, any JSON array reads cleanly,
 // and an unguarded unlink turned `--data package.json` typed by mistake into a
-// deleted project file (holistic review, R2). The documented hand-off location
-// is /tmp/correction-rows-<session>.json (document.md), so the temp directory is the only
-// place this script is entitled to delete from. Anywhere else the file is left
+// deleted project file (holistic review, R2). Every documented hand-off lives in
+// a fresh mktemp folder under /tmp (correction-rows.json from document.md,
+// correction-backfill-rows.json from the error-analysis skill), so the temp
+// directory is the only place this script is entitled to delete from. Anywhere else the file is left
 // alone and one stderr line says so, because the private layer in it is still
 // worth cleaning up by hand. Both sides are compared as real paths so a
 // symlinked temp directory (macOS) compares equal to itself. A failure to

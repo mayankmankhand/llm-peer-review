@@ -164,10 +164,10 @@ Rows recorded before the request and rewrite fields existed can have them filled
    It prints this repo's rows that lack the two fields and still have a transcript, each with the exchange around it, plus counts of the rows it could not use (no session recorded, transcript gone, no message at that exact time).
 2. Dispatch the `correction-extractor` agent with that output, exactly as capture does. It returns the filled-in fields in its `backfill` array.
 3. Show each one to the user. Nothing is written until they accept it, and they can drop either field.
-4. Write the accepted entries as `backfill.json` in a fresh folder from `mktemp -d /tmp/correction-backfill.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`, then run:
+4. Write the accepted entries as `correction-backfill-rows.json` in a fresh folder from `mktemp -d /tmp/correction-backfill.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`, then run:
 
    ```bash
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --add-backfill --data <folder>/backfill.json
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --add-backfill --data <folder>/correction-backfill-rows.json
    ```
 
    The helper checks the whole batch before writing anything: every entry must match a row of this repo that has not been filled in yet. It deletes the file after a successful write.

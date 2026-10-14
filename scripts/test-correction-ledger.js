@@ -934,7 +934,7 @@ function outsideRoots(dir, roots) {
 // --add and --set-axial remove the --data file after reading it, because it
 // carries the private layer untruncated. The path is the caller's and the script
 // runs under a pre-approved permission, so the unlink has to stay inside the
-// documented hand-off location (/tmp/correction-rows.json, per document.md), or
+// documented hand-off location (a fresh mktemp folder under /tmp, per document.md), or
 // a typo like `--data package.json` reads a project file and then deletes it
 // (holistic review, R2).
 {
@@ -1822,6 +1822,45 @@ function tripwireNewFilesTest() {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- issue #238: the tripwire refuses both hand-off files by name -------------
+// /document writes its rows as correction-rows.json and the error-analysis
+// backfill writes correction-backfill-rows.json, each in a fresh /tmp folder.
+// Both carry the private fields untruncated, and the names stay distinctive so
+// the never-push list catches one that lands in a repo. Each runs in its own
+// repo, so one name's block can never hide the other's absence. The detail is
+// one line: the release gate prints only a failing suite's last 15 lines.
+function tripwireHandoffTest() {
+  const pushOne = function (label, name) {
+    const sb = makeSandbox(label);
+    const repo = path.join(sb.root, 'repo');
+    fs.mkdirSync(path.join(repo, 'notes'), { recursive: true });
+    const g = function (args) {
+      return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    };
+    try {
+      g(['init', '-q']);
+      g(['config', 'user.email', 'test@example.com']);
+      g(['config', 'user.name', 'Test']);
+      fs.writeFileSync(path.join(repo, 'README.md'), 'x\n', 'utf-8');
+      g(['add', 'README.md']); g(['commit', '-qm', 'init']);
+      fs.writeFileSync(path.join(repo, 'notes', name), '[{"open_code":"x"}]\n', 'utf-8');
+      g(['add', '-f', 'notes']); g(['commit', '-qm', 'oops']);
+      const r = spawnSync('node', [TRIPWIRE], { cwd: repo, encoding: 'utf-8' });
+      return { status: r.status, said: ((r.stdout || '') + (r.stderr || '')).replace(/\s*\n\s*/g, ' | ') };
+    } catch (e) {
+      return { status: null, said: 'set-up failed: ' + e.message };
+    } finally {
+      fs.rmSync(sb.root, { recursive: true, force: true });
+    }
+  };
+  const backfill = pushOne('handoff238b', 'correction-backfill-rows.json');
+  check('tripwire blocks a pushed backfill hand-off file', backfill.status === 1, 'exit ' + backfill.status + ' :: ' + backfill.said.slice(0, 200));
+  check('tripwire names the backfill hand-off file', backfill.said.indexOf('correction-backfill-rows.json') !== -1, backfill.said.slice(0, 200));
+  const rows = pushOne('handoff238r', 'correction-rows.json');
+  check('tripwire still blocks a pushed rows hand-off file',
+    rows.status === 1 && rows.said.indexOf('correction-rows.json') !== -1, 'exit ' + rows.status + ' :: ' + rows.said.slice(0, 200));
+}
+
 // --- issue #229: TK_LEDGER_DIR also moves the fix records and the backfill file ---
 // A guard, not a fail-first check: both paths are built from the same folder.
 function ledgerDirNewFilesTest() {
@@ -1861,6 +1900,7 @@ function finish() {
   tripwireTest();
   tripwireBinaryTest();
   tripwireNewFilesTest();
+  tripwireHandoffTest();
   ledgerDirNewFilesTest();
   console.log('');
   if (failures.length === 0) {

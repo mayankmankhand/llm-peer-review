@@ -120,12 +120,17 @@ const NEVER_PUSH_BASENAMES = [
   // Since #229: the fix records, and the backfill side file, which carries
   // filled-in private text (what was asked, and the user's own rewrite).
   "correction-fixes.jsonl", "correction-backfill.jsonl",
-  // The load-bearing one. Every name above lives at ~/.claude/, outside any repo,
-  // so git could not commit it anyway. correction-rows.json is the hand-off file
-  // /document writes before --add, it carries both private fields UNtruncated, and
-  // its path is chosen at runtime rather than fixed in code. The script deletes it
-  // after a successful append; this catches the run where that did not happen.
-  "correction-rows.json",
+  // The load-bearing two. Every name above lives at ~/.claude/, outside any repo,
+  // so git could not commit it anyway. These are the hand-off files: /document
+  // writes correction-rows.json before --add, and the error-analysis backfill
+  // writes correction-backfill-rows.json before --add-backfill. Each carries the
+  // private fields UNtruncated, each goes into a fresh mktemp folder under /tmp,
+  // and its path is chosen at runtime rather than fixed in code, so a session can
+  // still put one inside a repo. The script deletes a hand-off after a successful
+  // write, but only from the temp directory; this catches every other case. The
+  // names are kept distinctive on purpose (#238): a generic rows.json could not be
+  // listed here without blocking ordinary files.
+  "correction-rows.json", "correction-backfill-rows.json",
   // A committed .netrc is never legitimate: the whole file is credentials, so
   // there is no line pattern to match and the name alone is the check (#164).
   // _netrc is the Windows spelling of the same file.
