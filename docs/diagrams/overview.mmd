@@ -1,6 +1,8 @@
 ---
 config:
   layout: elk
+  elk:
+    nodePlacementStrategy: NETWORK_SIMPLEX
 ---
 flowchart TB
   accTitle: How LLM Peer Review runs, as one line
@@ -11,7 +13,7 @@ flowchart TB
   %% the 2 fix tries from M5 in hitl-loop.md, the hooks from
   %% .claude/scripts/session-start.js and pre-push-check.js.
 
-  G1[["Gate in<br/>session-start hook"]] --- E("/tk:explore") --- P("/tk:create-plan") --- Y((("You<br/>approve"))) --- X("/tk:execute") --- R("/tk:review") --- D("/tk:document") -.- M("/tk:merge") --- G2[["Gate out<br/>pre-push hook"]]
+  G1[["Gate in<br/>session-start hook"]] --- E("/tk:explore") --- P("/tk:create-plan") --- Y("You approve") --- X("/tk:execute") --- R("/tk:review") --- D("/tk:document") -.- M("/tk:merge") --- G2[["Gate out<br/>pre-push hook"]]
   P --- PL("↺ critic loop<br/>up to 2 rounds")
   X --- XL("↺ check loop<br/>every step")
   R --- RL("↺ audit and fix loop<br/>up to 2 tries")

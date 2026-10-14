@@ -1,6 +1,8 @@
 ---
 config:
   layout: elk
+  elk:
+    nodePlacementStrategy: NETWORK_SIMPLEX
 ---
 flowchart TB
   accTitle: Inside /tk:create-plan
@@ -9,7 +11,7 @@ flowchart TB
   %% Facts from .claude/commands/create-plan.md (reads, check lines, lint, the
   %% critic's 2 rounds and round-2 gaps) and M14 in hitl-stages.md (the gate).
 
-  A("/tk:create-plan<br/>follows explore") --- R("Reads the map, LESSONS.md<br/>and your plan gate") --- W("Writes the plan<br/>every step has a check that must fail first") --- L("Lint<br/>every check line can run") --- K{{"Plan critic<br/>fresh eyes: the plan and the summary only"}} --- H("HTML page of the plan") --- Y((("You<br/>approve")))
+  A("/tk:create-plan<br/>follows explore") --- R("Reads the map, LESSONS.md<br/>and your plan gate") --- W("Writes the plan<br/>every step has a check that must fail first") --- L("Lint<br/>every check line can run") --- K{{"Plan critic<br/>fresh eyes: the plan and the summary only"}} --- H("HTML page of the plan") --- Y("You approve")
   K --- KL("↺ fix the gaps<br/>up to 2 rounds")
   KL -.- MC("Round-2 gaps<br/>carried to review")
   Y -.- X("/tk:execute<br/>only when you say go")
