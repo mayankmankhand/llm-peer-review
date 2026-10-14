@@ -449,3 +449,9 @@
 - **A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.**
 - **Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.**
 - **A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `scripts/seed-history.js`, or every later full test run fails.**
+
+## Issue 241 (check a claim at its source)
+
+- **A plan line that says what another script does is a claim: read the script before the line goes in the plan.**
+- **The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.**
+- **Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.**

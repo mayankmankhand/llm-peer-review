@@ -68,6 +68,7 @@ A permission row added to the plugin seed also goes into this repo's `.claude/se
 A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.
 A permission you cannot self-provision may have an already-permitted equivalent.
 A pipeline's exit status is the last command's, so `grep | head` always succeeds.
+A plan line that says what another script does is a claim: read the script before the line goes in the plan.
 A plan that promises a one-commit revert must say what happens once later work moves the text.
 A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.
 A plugin CLI command run inside a project also edits that project's settings file.
@@ -229,10 +230,12 @@ Sub-agent output can arrive HTML-escaped; unescape a check before executing anyt
 Subagents do NOT auto-discover project skills.
 Tag vocabulary for prompts:
 Test an undo instruction by executing it, not by matching its text.
+Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.
 The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.
 The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.
 The design critic finds rendering bugs the test suite cannot see.
 The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.
+The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
 Tokenising the shared layer does not tokenise its consumers.
