@@ -240,6 +240,33 @@ $Issue91OldScripts = @("scripts\ask-gpt.js", "scripts\ask-gemini.js", "scripts\b
 $Issue91ToolkitDeps = @("openai", "@google/generative-ai", "@google/genai", "playwright-core", "@axe-core/playwright")
 $Issue91ToolkitScripts = @("ask-gpt", "ask-gemini")
 
+# Issue #245: files an earlier release shipped and the toolkit no longer
+# ships at all, such as the review-finder agent 8.0.0 removed. Read from
+# the plugin's own list (scripts\historical-managed-paths.txt), so a rerun
+# here removes what /tk:setup removes on the plugin and the two lists can
+# never drift. A line is kept when it names a .claude/ path the toolkit
+# source no longer has and no list above already migrates; the root
+# scripts/ lines stay with the script-relocation lists. Without the list
+# file nothing is removed, and the pre-flight says so.
+# PARITY: mirrored in setup.sh (REMOVED_FILES) - change both together
+$RemovedListFile = Join-Path $ToolkitRoot "scripts\historical-managed-paths.txt"
+$RemovedFiles = @()
+$RemovedListMissing = $false
+if (Test-Path -LiteralPath $RemovedListFile -PathType Leaf) {
+  $rmHandled = @($RenamedFiles | ForEach-Object { $_.Old }) + @($LegacyCommands | ForEach-Object { ".claude\commands\$_" })
+  foreach ($rmLine in Get-Content -LiteralPath $RemovedListFile) {
+    $rmLine = $rmLine.TrimEnd("`r")
+    # Comments and blank lines fail this test too.
+    if (-not $rmLine.StartsWith(".claude/")) { continue }
+    $rmRel = $rmLine.Replace("/", "\")
+    if (Test-Path -LiteralPath (Join-Path $ToolkitRoot $rmRel)) { continue }
+    if ($rmHandled -contains $rmRel) { continue }
+    $RemovedFiles += $rmRel
+  }
+} else {
+  $RemovedListMissing = $true
+}
+
 # --- Pre-flight report (issue #133) ----------------------------
 # Everything in this section is READ-ONLY. It prints what this run will
 # do - the version gap, which migrations fire, which managed files will
@@ -439,6 +466,13 @@ foreach ($r in $RenamedFiles) {
 if ($pfCount -gt 0) {
   $PfMigrations += "Renamed-file cleanup (issue #80): $pfCount old-named file(s) backed up, then removed"
 }
+# PARITY: mirrored in setup.sh (removed-file pre-flight lines) - change both together
+# One line per file, so the report names each path before anything changes.
+foreach ($rmRel in $RemovedFiles) {
+  if (Test-Path -LiteralPath (Join-Path $Target $rmRel) -PathType Leaf) {
+    $PfMigrations += "Removed-file cleanup (issue #245): $rmRel - no longer shipped; backed up, then removed"
+  }
+}
 # PARITY: the plan-migration line setup.sh prints (read-only mirror of the
 # plan migration block below).
 $pfCount = @(Get-ChildItem -Path (Join-Path $Target ".claude\plans") -Filter "PLAN-*.md" -File -ErrorAction SilentlyContinue).Count
@@ -556,6 +590,7 @@ $pfMigrationTargets = @($RenamedFiles | ForEach-Object { $_.Old })
 foreach ($pfName in $LegacyCommands) {
   $pfMigrationTargets += (Join-Path ".claude\commands" $pfName)
 }
+$pfMigrationTargets += $RemovedFiles
 $pfPrefix = $Target
 if (-not $pfPrefix.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
   $pfPrefix = $pfPrefix + [System.IO.Path]::DirectorySeparatorChar
@@ -638,6 +673,12 @@ if (-not $NodeAvailable) {
   Write-Host ""
   Write-Host "    Note: node was not found, so the .claude\settings.local.json permission"
   Write-Host "    merge will be skipped this run."
+}
+# PARITY: mirrored in setup.sh (missing removed-file list note) - change both together
+if ($RemovedListMissing) {
+  Write-Host ""
+  Write-Host "    Note: scripts\historical-managed-paths.txt was not found in the toolkit,"
+  Write-Host "    so no file the toolkit dropped is removed this run."
 }
 Write-Host ""
 
@@ -868,6 +909,27 @@ foreach ($r in $RenamedFiles) {
 }
 if ($RenamedCleaned -gt 0) {
   Write-Host "  Cleaned up $RenamedCleaned renamed file(s)"
+}
+
+# --- Removed-file cleanup (issue #245) --------------------------
+# PARITY: mirrored in setup.sh (removed-file cleanup) - change both together
+# Files the toolkit no longer ships ($RemovedFiles, built from the plugin's
+# own list above). Runs before any shipped file is copied; the filter skips
+# every path the toolkit ships now, so a shipped file is never removed here.
+# Only a regular file at the exact path goes, backed up first; a directory
+# or a project file under any other name is never touched.
+$RemovedCleaned = 0
+foreach ($rmRel in $RemovedFiles) {
+  $rmPath = Join-Path $Target $rmRel
+  if (Test-Path -LiteralPath $rmPath -PathType Leaf) {
+    Backup-File -Original $rmPath
+    Remove-Item -LiteralPath $rmPath -Force
+    Write-Host "  Removed file the toolkit no longer ships: $rmRel"
+    $RemovedCleaned = $RemovedCleaned + 1
+  }
+}
+if ($RemovedCleaned -gt 0) {
+  Write-Host "  Cleaned up $RemovedCleaned file(s) the toolkit no longer ships"
 }
 
 # --- Plan migration (v3.5 -> v4.0) -----------------------------

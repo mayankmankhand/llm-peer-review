@@ -328,6 +328,41 @@ ISSUE91_OLD_SCRIPTS=(
   scripts/browse.js
 )
 
+# Issue #245: files an earlier release shipped and the toolkit no longer
+# ships at all, such as the review-finder agent 8.0.0 removed. Read from
+# the plugin's own list (scripts/historical-managed-paths.txt), so a rerun
+# here removes what /tk:setup removes on the plugin and the two lists can
+# never drift. A line is kept when it names a .claude/ path the toolkit
+# source no longer has and no list above already migrates; the root
+# scripts/ lines stay with the script-relocation lists. Without the list
+# file nothing is removed, and the pre-flight says so.
+# PARITY: mirrored in setup.ps1 ($RemovedFiles) - change both together
+REMOVED_LIST_FILE="$TOOLKIT_ROOT/scripts/historical-managed-paths.txt"
+REMOVED_FILES=()
+REMOVED_LIST_MISSING=0
+if [ -f "$REMOVED_LIST_FILE" ]; then
+  # `|| [ -n ... ]` keeps a last line with no trailing newline.
+  while IFS= read -r rm_rel || [ -n "$rm_rel" ]; do
+    rm_rel="${rm_rel%$'\r'}"
+    # Comments and blank lines fail this test too.
+    case "$rm_rel" in
+      .claude/*) ;;
+      *) continue ;;
+    esac
+    if [ -e "$TOOLKIT_ROOT/$rm_rel" ]; then continue; fi
+    rm_handled=0
+    for pf_name in "${LEGACY_COMMANDS[@]}"; do
+      if [ "$rm_rel" = ".claude/commands/$pf_name" ]; then rm_handled=1; fi
+    done
+    for pf_name in "${RENAMED_OLD[@]}"; do
+      if [ "$rm_rel" = "$pf_name" ]; then rm_handled=1; fi
+    done
+    if [ "$rm_handled" -eq 0 ]; then REMOVED_FILES+=("$rm_rel"); fi
+  done < "$REMOVED_LIST_FILE"
+else
+  REMOVED_LIST_MISSING=1
+fi
+
 # ─── Pre-flight report (issue #133) ──────────────────────────
 # Everything in this section is READ-ONLY. It prints what this run will
 # do - the version gap, which migrations fire, which managed files will
@@ -491,6 +526,9 @@ preflight_is_migration_target() {
   for pf_name in "${RENAMED_OLD[@]}"; do
     if [ "$rel" = "$pf_name" ]; then return 0; fi
   done
+  for pf_name in "${REMOVED_FILES[@]}"; do
+    if [ "$rel" = "$pf_name" ]; then return 0; fi
+  done
   return 1
 }
 
@@ -511,6 +549,13 @@ done
 if [ "$PF_COUNT" -gt 0 ]; then
   PF_MIGRATIONS+=("Renamed-file cleanup (issue #80): $PF_COUNT old-named file(s) backed up, then removed")
 fi
+# PARITY: mirrored in setup.ps1 (removed-file pre-flight lines) - change both together
+# One line per file, so the report names each path before anything changes.
+for pf_rel in "${REMOVED_FILES[@]}"; do
+  if [ -f "$TARGET/$pf_rel" ]; then
+    PF_MIGRATIONS+=("Removed-file cleanup (issue #245): $pf_rel - no longer shipped; backed up, then removed")
+  fi
+done
 PF_COUNT=$(compgen -G "$TARGET/.claude/plans/PLAN-*.md" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$PF_COUNT" -gt 0 ]; then
   PF_MIGRATIONS+=("Plan migration (v4.0): $PF_COUNT plan(s) move from .claude/plans/ to plans/")
@@ -714,6 +759,12 @@ if ! command -v node > /dev/null 2>&1; then
   echo "    Note: node was not found, so the .claude/settings.local.json permission"
   echo "    merge and the package.json cleanup will be skipped this run."
 fi
+# PARITY: mirrored in setup.ps1 (missing removed-file list note) - change both together
+if [ "$REMOVED_LIST_MISSING" -eq 1 ]; then
+  echo ""
+  echo "    Note: scripts/historical-managed-paths.txt was not found in the toolkit,"
+  echo "    so no file the toolkit dropped is removed this run."
+fi
 echo ""
 
 if [ "$DRY_RUN" -eq 1 ]; then
@@ -852,6 +903,26 @@ for i in "${!RENAMED_OLD[@]}"; do
 done
 if [ "$RENAMED_CLEANED" -gt 0 ]; then
   echo "  Cleaned up $RENAMED_CLEANED renamed file(s)"
+fi
+
+# ─── Removed-file cleanup (issue #245) ──────────────────────
+# PARITY: mirrored in setup.ps1 (removed-file cleanup) - change both together
+# Files the toolkit no longer ships (REMOVED_FILES, built from the plugin's
+# own list above). Runs before any shipped file is copied; the filter skips
+# every path the toolkit ships now, so a shipped file is never removed here.
+# Only a regular file at the exact path goes, backed up first; a directory
+# or a project file under any other name is never touched.
+REMOVED_CLEANED=0
+for rm_rel in "${REMOVED_FILES[@]}"; do
+  if [ -f "$TARGET/$rm_rel" ]; then
+    backup_file "$TARGET/$rm_rel"
+    rm -f "$TARGET/$rm_rel"
+    echo "  Removed file the toolkit no longer ships: $rm_rel"
+    REMOVED_CLEANED=$((REMOVED_CLEANED + 1))
+  fi
+done
+if [ "$REMOVED_CLEANED" -gt 0 ]; then
+  echo "  Cleaned up $REMOVED_CLEANED file(s) the toolkit no longer ships"
 fi
 
 # ─── Plan migration (v3.5 -> v4.0) ─────────────────────────

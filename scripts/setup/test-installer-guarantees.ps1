@@ -87,6 +87,10 @@
 #      gen-media.js is a managed dep-free script and enters the manifest
 #      like its siblings (issue #160), and so does env-local.js, the shared
 #      .env.local lookup gen-media.js and both ask scripts require (issue #177)
+#  24. A rerun backs up and removes a file the toolkit dropped (issue
+#      #245): review-finder.md is named in the pre-flight, its edited copy
+#      lands in the backup, a project agent under another name is untouched,
+#      the manifest drops it, and a second rerun removes nothing
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File scripts\setup\test-installer-guarantees.ps1
@@ -1373,6 +1377,55 @@ try {
   } else {
     Failed "fresh install left no .claude\settings.local.json to check"
   }
+
+  # --- [24] a rerun backs up and removes files the toolkit dropped ---
+  # PARITY: mirrored in test-installer-guarantees.sh ([24]) - change both together
+  # Issue #245: 8.0.0 removed the review-finder agent, and a copy-install rerun
+  # kept it, so it still answered a dispatch by name there while reaching
+  # nothing on the plugin. The installers now read the plugin's own list of
+  # dropped files. An edited copy proves the backup keeps the user's bytes; a
+  # project agent under another name must come through untouched.
+  Write-Host "[24] a rerun backs up and removes files the toolkit dropped"
+  $dropScratch = Join-Path $Work "dropped"
+  New-Item -ItemType Directory -Force -Path $dropScratch | Out-Null
+  $dropBackups = { @(Get-ChildItem -Path $dropScratch -Directory -Force -Filter ".toolkit-backup-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name } | Sort-Object) }
+  Invoke-Setup -SetupArgs @("-Target", $dropScratch) -LogFile (Join-Path $Log "dropped-install.log")
+  if ($LASTEXITCODE -eq 0) { Ok "fresh install for the dropped-file scenario exited 0" } else { Failed "fresh install exited $LASTEXITCODE" }
+  $dropAgent = Join-Path $dropScratch ".claude\agents\review-finder.md"
+  $ownAgent = Join-Path $dropScratch ".claude\agents\my-reviewer.md"
+  [System.IO.File]::WriteAllText($dropAgent, "EDITED REVIEW-FINDER MARKER`n")
+  [System.IO.File]::WriteAllText($ownAgent, "---`nname: my-reviewer`n---`nproject agent`n")
+  $ownOrig = Join-Path $Work "my-reviewer.orig"
+  Copy-Item -LiteralPath $ownAgent -Destination $ownOrig
+  $backupsBefore = & $dropBackups
+  Invoke-Setup -SetupArgs @("-Target", $dropScratch) -LogFile (Join-Path $Log "dropped-rerun.log")
+  if ($LASTEXITCODE -eq 0) { Ok "rerun with a dropped agent exited 0" } else { Failed "rerun exited $LASTEXITCODE" }
+  Assert-Contains "Removed-file cleanup (issue #245): .claude\agents\review-finder.md" (Join-Path $Log "dropped-rerun.log") "the pre-flight names the dropped agent"
+  Assert-Contains "Removed file the toolkit no longer ships: .claude\agents\review-finder.md" (Join-Path $Log "dropped-rerun.log") "the run says it removed the dropped agent"
+  if (Test-Path -LiteralPath $dropAgent) { Failed "review-finder.md is still in the project" } else { Ok "review-finder.md is gone" }
+  $newBackups = @(& $dropBackups | Where-Object { $backupsBefore -notcontains $_ })
+  $backedUp = if ($newBackups.Count -gt 0) { Join-Path $dropScratch (Join-Path $newBackups[0] ".claude\agents\review-finder.md") } else { $null }
+  if ($backedUp -and (Test-Path -LiteralPath $backedUp -PathType Leaf) -and (Get-Content -LiteralPath $backedUp -Raw).Contains("EDITED REVIEW-FINDER MARKER")) {
+    Ok "the backup keeps the edited review-finder.md"
+  } else {
+    Failed "no backup of the edited review-finder.md"
+  }
+  if (Test-FilesEqual $ownAgent $ownOrig) { Ok "a project agent under another name is untouched" } else { Failed "my-reviewer.md changed or vanished" }
+  $dropManifest = Join-Path $dropScratch ".claude\.toolkit-manifest.json"
+  if ((Test-Path -LiteralPath $dropManifest) -and (Get-Content -LiteralPath $dropManifest -Raw).Contains('".claude/agents/review-finder.md"')) {
+    Failed "the manifest still lists review-finder.md"
+  } else {
+    Ok "the manifest has no entry for review-finder.md"
+  }
+  $backupsBefore = & $dropBackups
+  Invoke-Setup -SetupArgs @("-Target", $dropScratch) -LogFile (Join-Path $Log "dropped-rerun2.log")
+  if ($LASTEXITCODE -eq 0) { Ok "a second rerun exited 0" } else { Failed "second rerun exited $LASTEXITCODE" }
+  if ((Get-Content -LiteralPath (Join-Path $Log "dropped-rerun2.log") -Raw).Contains("Removed file the toolkit no longer ships")) {
+    Failed "the second rerun removed something again"
+  } else {
+    Ok "the second rerun removes nothing"
+  }
+  if (@(& $dropBackups).Count -eq @($backupsBefore).Count) { Ok "the second rerun makes no new backup" } else { Failed "the second rerun made a new backup folder" }
 
 } finally {
   if ($uncScratch -and (Test-Path -LiteralPath $uncScratch)) {

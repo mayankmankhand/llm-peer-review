@@ -75,6 +75,10 @@
 #      gen-media.js is a managed dep-free script and enters the manifest
 #      like its siblings (issue #160), and so does env-local.js, the shared
 #      .env.local lookup gen-media.js and both ask scripts require (issue #177)
+#  24. A rerun backs up and removes a file the toolkit dropped (issue
+#      #245): review-finder.md is named in the pre-flight, its edited copy
+#      lands in the backup, a project agent under another name is untouched,
+#      the manifest drops it, and a second rerun removes nothing
 #
 # Usage:
 #   bash scripts/setup/test-installer-guarantees.sh
@@ -1134,6 +1138,53 @@ if [ -f "$PERM_FILE" ]; then
 else
   fail "fresh install left no .claude/settings.local.json to check"
 fi
+
+# ─── [24] a rerun backs up and removes files the toolkit dropped ───
+# PARITY: mirrored in test-installer-guarantees.ps1 ([24]) - change both together
+# Issue #245: 8.0.0 removed the review-finder agent, and a copy-install rerun
+# kept it, so it still answered a dispatch by name there while reaching
+# nothing on the plugin. The installers now read the plugin's own list of
+# dropped files. An edited copy proves the backup keeps the user's bytes; a
+# project agent under another name must come through untouched.
+echo "[24] a rerun backs up and removes files the toolkit dropped"
+DROP_SCRATCH="$WORK/dropped"
+mkdir -p "$DROP_SCRATCH"
+list_drop_backups() { find "$DROP_SCRATCH" -maxdepth 1 -name '.toolkit-backup-*' -type d | sort; }
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$DROP_SCRATCH" < /dev/null > "$LOG/dropped-install.log" 2>&1
+DROP_RC=$?
+set -e
+if [ "$DROP_RC" -eq 0 ]; then ok "fresh install for the dropped-file scenario exited 0"; else fail "fresh install exited $DROP_RC (log: $LOG/dropped-install.log)"; fi
+printf 'EDITED REVIEW-FINDER MARKER\n' > "$DROP_SCRATCH/.claude/agents/review-finder.md"
+printf -- '---\nname: my-reviewer\n---\nproject agent\n' > "$DROP_SCRATCH/.claude/agents/my-reviewer.md"
+cp "$DROP_SCRATCH/.claude/agents/my-reviewer.md" "$WORK/my-reviewer.orig"
+list_drop_backups > "$WORK/drop-backups-before.txt"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$DROP_SCRATCH" < /dev/null > "$LOG/dropped-rerun.log" 2>&1
+DROP_RC=$?
+set -e
+if [ "$DROP_RC" -eq 0 ]; then ok "rerun with a dropped agent exited 0"; else fail "rerun exited $DROP_RC (log: $LOG/dropped-rerun.log)"; fi
+assert_grep "Removed-file cleanup (issue #245): .claude/agents/review-finder.md" "$LOG/dropped-rerun.log" "the pre-flight names the dropped agent"
+assert_grep "Removed file the toolkit no longer ships: .claude/agents/review-finder.md" "$LOG/dropped-rerun.log" "the run says it removed the dropped agent"
+if [ -e "$DROP_SCRATCH/.claude/agents/review-finder.md" ]; then fail "review-finder.md is still in the project"; else ok "review-finder.md is gone"; fi
+list_drop_backups > "$WORK/drop-backups-after.txt"
+DROP_BACKUP="$(comm -13 "$WORK/drop-backups-before.txt" "$WORK/drop-backups-after.txt" | head -1)"
+if [ -n "$DROP_BACKUP" ] && grep -qF "EDITED REVIEW-FINDER MARKER" "$DROP_BACKUP/.claude/agents/review-finder.md" 2>/dev/null; then
+  ok "the backup keeps the edited review-finder.md"
+else
+  fail "no backup of the edited review-finder.md (backup dir: ${DROP_BACKUP:-none})"
+fi
+if cmp -s "$DROP_SCRATCH/.claude/agents/my-reviewer.md" "$WORK/my-reviewer.orig"; then ok "a project agent under another name is untouched"; else fail "my-reviewer.md changed or vanished"; fi
+if grep -qF '".claude/agents/review-finder.md"' "$DROP_SCRATCH/.claude/.toolkit-manifest.json" 2>/dev/null; then fail "the manifest still lists review-finder.md"; else ok "the manifest has no entry for review-finder.md"; fi
+list_drop_backups > "$WORK/drop-backups-before.txt"
+set +e
+bash "$SCRIPT_DIR/setup.sh" "$DROP_SCRATCH" < /dev/null > "$LOG/dropped-rerun2.log" 2>&1
+DROP_RC=$?
+set -e
+if [ "$DROP_RC" -eq 0 ]; then ok "a second rerun exited 0"; else fail "second rerun exited $DROP_RC (log: $LOG/dropped-rerun2.log)"; fi
+if grep -qF "Removed file the toolkit no longer ships" "$LOG/dropped-rerun2.log"; then fail "the second rerun removed something again"; else ok "the second rerun removes nothing"; fi
+list_drop_backups > "$WORK/drop-backups-after.txt"
+if cmp -s "$WORK/drop-backups-before.txt" "$WORK/drop-backups-after.txt"; then ok "the second rerun makes no new backup"; else fail "the second rerun made a new backup folder"; fi
 
 # ─── Summary ─────────────────────────────────────────────────
 echo ""

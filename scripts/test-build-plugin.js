@@ -557,6 +557,49 @@ check('live: setup.sh and setup.ps1 list and copy every project script the seed 
 const mutatedSh = shText.replace(/^(for pf_name in .*?) merge-findings\.js(.*; do)$/m, '$1$2');
 const mutatedGaps = installerGaps(mutatedSh, ps1Text);
 check('mutation: dropping merge-findings.js from setup.sh\'s managed-file list trips the installer check', mutatedSh !== shText && mutatedGaps.length === 1 && mutatedGaps[0] === 'merge-findings.js (setup.sh managed-file list)', mutatedGaps.join(', '));
+// Files the toolkit dropped (issue #245). Both installers read the plugin's own
+// list, scripts/historical-managed-paths.txt, so a copy-install rerun removes
+// what /tk:setup removes on the plugin. The static half pins that both read the
+// list and print the same lines; the dry runs below pin what the filter keeps.
+const REMOVED_LIST = 'historical-managed-paths.txt';
+const REMOVED_PF = 'Removed-file cleanup (issue #245): ';
+const REMOVED_DONE = 'Removed file the toolkit no longer ships: ';
+const removedGaps = (sh, ps1) => [[sh, 'setup.sh'], [ps1, 'setup.ps1']].flatMap(([text, name]) =>
+  [REMOVED_LIST, REMOVED_PF, REMOVED_DONE].filter(s => !text.includes(s)).map(s => name + ' lacks ' + JSON.stringify(s)));
+check('removed-file cleanup: setup.sh and setup.ps1 both read historical-managed-paths.txt and print the same lines', removedGaps(shText, ps1Text).length === 0, removedGaps(shText, ps1Text).join(', '));
+const shNoList = shText.split(REMOVED_LIST).join('historical-paths-gone.txt');
+check('removed-file cleanup: mutation: setup.sh that no longer reads the list trips the check', shNoList !== shText && removedGaps(shNoList, ps1Text).length === 1, removedGaps(shNoList, ps1Text).join(', '));
+// A dry run is the installer's own answer: it prints the pre-flight and exits
+// before touching anything. Every file is hashed before and after to prove it.
+const RETIRED = ['.claude/agents/review-finder.md', '.claude/commands/dev-lead-1.md', '.claude/commands/ui-spec.md', '.claude/skills/shared/output-template.md'];
+function dryRunRemoved(files, dirs) {
+  const proj = tmpDir('removed-files-');
+  for (const [rel, body] of files) write(proj, rel, body);
+  for (const rel of dirs) fs.mkdirSync(path.join(proj, rel), { recursive: true });
+  const snapshot = () => {
+    const out = {};
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const a = path.join(d, e.name); if (e.isDirectory()) { out[path.relative(proj, a) + '/'] = 'dir'; walk(a); } else out[path.relative(proj, a)] = crypto.createHash('sha256').update(fs.readFileSync(a)).digest('hex'); } };
+    walk(proj);
+    return JSON.stringify(out);
+  };
+  const before = snapshot();
+  const r = spawnSync('bash', [path.join(REPO, 'scripts', 'setup', 'setup.sh'), proj, '--dry-run'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120000 });
+  const out = (r.stdout || '') + (r.stderr || '');
+  const listed = out.split('\n').map(l => (/^\s+- Removed-file cleanup \(issue #245\): (\S+)/.exec(l) || [])[1]).filter(Boolean).sort();
+  return { status: r.status, out, listed, unchanged: snapshot() === before };
+}
+const full = dryRunRemoved([
+  ...RETIRED.map(rel => [rel, 'old toolkit copy of ' + rel + '\n']),
+  ['.claude/agents/my-reviewer.md', '---\nname: my-reviewer\n---\nproject agent\n'],
+  ['.claude/agents/plan-critic.md', 'shipped agent, older copy\n'],
+  ['.claude/commands/dev-lead-gpt.md', 'renamed-old command\n'],
+  ['.claude/commands/review-code.md', 'legacy command\n'],
+], []);
+check('removed-file cleanup: a setup.sh dry run lists exactly the four retired paths, built from the real list and the real .claude/', full.status === 0 && JSON.stringify(full.listed) === JSON.stringify([...RETIRED].sort()), 'exit ' + full.status + ', listed ' + JSON.stringify(full.listed));
+check('removed-file cleanup: a project agent, a shipped agent and the older lists\' files stay off it, each older file under its own cleanup', !full.listed.some(p => /my-reviewer|plan-critic|dev-lead-gpt|review-code\.md/.test(p)) && /- Renamed-file cleanup \(issue #80\)/.test(full.out) && /- Legacy command cleanup \(v3\.5\)/.test(full.out), full.out.split('\n').filter(l => /cleanup/.test(l)).join(' | '));
+check('removed-file cleanup: the dry run changes no file', full.unchanged);
+const dirAtPath = dryRunRemoved([['.claude/agents/review-finder.md', 'old toolkit copy\n']], ['.claude/commands/ui-spec.md']);
+check('removed-file cleanup: a directory at a retired path is not listed, and the dry run changes nothing', dirAtPath.status === 0 && JSON.stringify(dirAtPath.listed) === JSON.stringify(['.claude/agents/review-finder.md']) && dirAtPath.unchanged, 'exit ' + dirAtPath.status + ', listed ' + JSON.stringify(dirAtPath.listed));
 // The seed rows grant only what the toolkit runs (issue #180): `git config` is
 // the host-detection read alone, `npm install` is the plain install alone (a
 // worktree row with a wildcard would also allow added package names), the /index grep rows are gone, and every gh or glab host
