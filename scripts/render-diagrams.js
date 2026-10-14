@@ -198,21 +198,20 @@ async function render(names, opts) {
   return written;
 }
 
-// A self-contained page showing this run's images in both themes, each also
-// inside a phone-width frame: the surface the design critic judges.
+// A self-contained page showing this run's images, light then dark, each on
+// its theme's page color and at the width GitHub gives an image: the surface
+// the design critic judges. Nothing else is on it, so a judge weighs only the
+// diagrams (phone width is checked separately).
 function writePreview(palettes, names) {
   const img = (name, theme) => {
     const file = path.join(REPO, IMAGE_DIR, name + '-' + theme + '.svg');
     return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '') : '<p>missing</p>';
   };
-  const section = name => THEMES.map(theme =>
-    '<section class="t" style="background:' + palettes[theme].bg + ';color:' + palettes[theme].text + '"><h2>' + name + ' (' + theme + ')</h2>' +
-    '<div class="row"><div class="wide">' + img(name, theme) + '</div><div class="phone">' + img(name, theme) + '</div></div></section>').join('');
+  const sections = names.flatMap(name => THEMES.map(theme =>
+    '<section style="background:' + palettes[theme].bg + '"><div class="w">' + img(name, theme) + '</div></section>')).join('');
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Diagram Preview</title><style>' +
-    'body{margin:0;font-family:' + FONT + '}h2{font-size:1rem;margin:0 0 12px}.t{padding:24px}' +
-    '.row{display:flex;gap:32px;align-items:flex-start;flex-wrap:wrap}.wide{flex:1;min-width:320px;max-width:860px}' +
-    '.phone{width:343px;border:8px solid #71717a;border-radius:24px;padding:12px}svg{max-width:100%;height:auto;display:block}' +
-    '</style></head><body>' + names.map(section).join('') + '</body></html>';
+    'body{margin:0}section{padding:32px 24px}.w{max-width:880px;margin:0 auto}svg{max-width:100%;height:auto;display:block;margin:0 auto}' +
+    '</style></head><body>' + sections + '</body></html>';
   fs.mkdirSync(path.dirname(path.join(REPO, PREVIEW_PATH)), { recursive: true });
   fs.writeFileSync(path.join(REPO, PREVIEW_PATH), html);
   console.log('  ' + PREVIEW_PATH);
