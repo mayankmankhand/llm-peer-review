@@ -432,3 +432,7 @@
 - **Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.**
 - **To ignore what the default branch already has, compare content from the merge base, not commit ancestry.**
 - **Diff a standing page's open items before and after a render: a seeded item from another plan resolves whenever the plan lens runs.**
+
+## Issue 235 (messages typed while Claude works)
+
+- **A count taken by a different walk than the code's own can call a live case "never seen": when the real run finds it, test it in the same step.**

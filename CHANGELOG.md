@@ -4,16 +4,19 @@
 
 ## Unreleased - No False Alarm From Main
 
-**Additive on top of v8.0.0.** Issues #243 and #238. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again.
+**Additive on top of v8.0.0.** Issues #243, #238 and #235. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working.
 
 ### Fixed
 
 - **A merge of main no longer blocks the push on main's settings change.** (#243) A branch that merged the default branch carried that branch's commits in its push, so a `.claude/settings.json` change already reviewed on main blocked a branch that never touched the file. The tripwire now counts a settings change only when the file differs between the branch and where it forked from the remote's default branch, and the block shows just that difference: the rows the branch adds. A branch's own change still blocks, and so does every case the check cannot settle: no default branch on the remote, a history with two fork points, or a copy of main older than what the branch merged.
 - **The ledger's hand-off files are caught by name again.** (#238) `/document` had been writing its hand-off as `rows.json` and the error-analysis backfill as `backfill.json`, names the tripwire's never-push list does not hold. They are now `correction-rows.json` and `correction-backfill-rows.json`, both on the list and in the gitignore ledger block, so one that lands inside a repo by mistake cannot be pushed.
+- **The correction scan sees messages typed while Claude works.** (#235) Claude Code stores a message typed mid-turn as a queued attachment, not as a user message, so `correction-ledger.js --candidates` never offered one, and a mid-turn redirect is often exactly a correction. The scan now reads it like any other message, taking its sender stamp from inside the attachment: a subagent's report or a task notice queued the same way is still dropped, and one with no stamp is still kept. A short reply typed mid-turn still meets the same length gate, unless it answers an interrupt. On this repo's transcripts since 2026-10-01 the scan kept all 94 earlier candidates and added 15, every one a message typed mid-turn.
 
 ### Why
 
 Every false block makes "push anyway" more automatic for the real one, and a downstream project overrode two in one day, on two branches, for one change already on main. The tripwire's never-push check already treated published history as no news; the settings check now does the same, comparing content rather than which commits are on main, because the merge commit itself shows main's change.
+
+A message typed while Claude is still working is often the moment you saw it heading the wrong way, and the ledger never counted one. In the #228/#230 cycle the scan found nothing at all, because that cycle's one correction was typed mid-turn.
 
 ## v8.0.0 - Two Removals, Rules That Fit (2026-10-13)
 
