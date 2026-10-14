@@ -4,7 +4,7 @@
 
 ## Unreleased - No False Alarm From Main
 
-**Additive on top of v8.0.0.** Issues #243, #238, #235, #245 and #244. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole.
+**Additive on top of v8.0.0.** Issues #243, #238, #235, #245, #244 and #237. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole. Cycles in parallel worktrees stop overwriting one review page: each branch gets its own, and the cycle summary stays one shared log.
 
 ### Fixed
 
@@ -12,6 +12,7 @@
 - **The ledger's hand-off files are caught by name again.** (#238) `/document` had been writing its hand-off as `rows.json` and the error-analysis backfill as `backfill.json`, names the tripwire's never-push list does not hold. They are now `correction-rows.json` and `correction-backfill-rows.json`, both on the list and in the gitignore ledger block, so one that lands inside a repo by mistake cannot be pushed.
 - **The correction scan sees messages typed while Claude works.** (#235) Claude Code stores a message typed mid-turn as a queued attachment, not as a user message, so `correction-ledger.js --candidates` never offered one, and a mid-turn redirect is often exactly a correction. The scan now reads it like any other message, taking its sender stamp from inside the attachment: a subagent's report or a task notice queued the same way is still dropped, and one with no stamp is still kept. A short reply typed mid-turn still meets the same length gate, unless it answers an interrupt. On this repo's transcripts since 2026-10-01 the scan kept all 94 earlier candidates and added 15, every one a message typed mid-turn.
 - **A copy-install rerun removes files the toolkit dropped.** (#245) Re-running `setup.sh` or `setup.ps1` kept `.claude/agents/review-finder.md`, which 8.0.0 removed, so on a copy-install it still answered a dispatch by name that reaches nothing on the plugin. Both installers now read the plugin's own list of dropped files, `scripts/historical-managed-paths.txt`, and remove each `.claude/` file the toolkit no longer ships and no older cleanup handles: today `review-finder.md`, `dev-lead-1.md`, `ui-spec.md` and `output-template.md`. The pre-flight names each path before anything changes, each file is backed up first, only a regular file at that exact path goes, and without the list file nothing is removed.
+- **Parallel worktree cycles no longer overwrite one standing page.** (#237) Every working copy published to one review page, and a worktree's render read the page it replaced from its own empty `artifacts/html/`, so it started from nothing and could hide the open findings another cycle left; the fix was copying the newest page in by hand. The review page is now one per branch: `review` on the default branch, `review-<branch>` on any other (with a short hash when the branch name had to be cleaned up, so `feature/x` and `feature-x` stay apart), and the cycle summary stays one shared log. Both are read and written in the main copy's `artifacts/html/` from any worktree, so removing a worktree takes neither with it. `render-html.js --standing --name review [--branch <b>]` prints which page that is, whether it exists, how many findings it holds open and its link: the review prompts use it to decide whether to render, and `/tk:merge` uses it to end a landed branch's line with its open count when any remain. Inside a git submodule, the index and the standing pages now live in the submodule's own folder instead of a hidden folder every submodule shared.
 
 ### Added
 
@@ -21,6 +22,7 @@
 
 - `/tk:upgrade` runs C-19 on every upgrade. A project whose pasted files are all at or under 28,500 bytes sees nothing.
 - Other editors: re-run `setup.sh` or `setup.ps1`. The pre-flight lists each dropped file it will remove, `review-finder.md` among them, and backs each one up, so the 8.0.0 advice to delete `review-finder.md` by hand no longer applies.
+- Nothing to run for the per-branch review pages. Your default branch keeps its existing page and link; the first review on any other branch publishes a new private page named after it.
 
 ### Why
 
@@ -31,6 +33,8 @@ A message typed while Claude is still working is often the moment you saw it hea
 A copy-install and the plugin should behave the same for the same command, and a leftover agent made them differ: the 8.0.0 notes had to ask copy-install users to delete it by hand. Reading the plugin's own list means the next file the toolkit drops leaves both installs the same way, with no installer edit.
 
 A file cut to its first 2 KB still runs, so nothing fails: the stage just skips a gate or an always-ask rule near the end. The loop rules themselves were over the limit from 7.6.3 to 8.0.0 and nothing noticed. C-19 holds your pasted files to the guard the toolkit already holds its own to.
+
+One shared review page cannot hold two branches safely: a review marks an open finding fixed when it looked at that file and did not find it again, and a sibling branch's copy of the file never had the other branch's change. Splitting the page by branch keeps each one honest, while the cycle log, which records past events rather than open findings, stays shared. Following the index to the newest page's file, the issue's first idea, would have pointed into worktree folders that are deleted when their cycle ends, so both pages now live where the index already did.
 
 ## v8.0.0 - Two Removals, Rules That Fit (2026-10-13)
 
