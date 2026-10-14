@@ -464,8 +464,9 @@ function sessionFiles(dir) {
   return out;
 }
 
-// Wrapper tags the harness injects into entries that carry type "user". None of
-// them are typed by a human: they are system reminders, slash-command expansion
+// Wrapper tags the harness injects into entries that carry type "user", and
+// into the queued messages read as one (asUserEntry, below). None of them are
+// typed by a human: they are system reminders, slash-command expansion
 // metadata, IDE events, and background-task notifications. They arrive in the same
 // shape as a real turn, so without stripping them a single cycle's candidate list
 // is mostly the toolkit talking to itself. Found on the first live capture run,
@@ -491,7 +492,8 @@ const HARNESS_TAGS = [
 // `isCompactSummary` marks the summary a compaction writes; and an entry with no
 // origin may still carry `turnOrigin`. In the downstream cycle that raised #230,
 // 23 of 23 candidates were such entries, and across this machine's transcripts
-// since 2026-10-01 they were 213 of 534.
+// since 2026-10-01 they were 213 of 534. A message queued while Claude works
+// carries the same stamp inside its attachment; asUserEntry() lifts it here.
 //
 // The list is CLOSED, like the rest of this filter: only a stamp known to mean
 // "not typed by a person" drops an entry. A missing stamp (an older Claude Code;
@@ -505,6 +507,36 @@ function isMachineStamped(entry) {
   const kind = entry.origin && typeof entry.origin.kind === 'string' ? entry.origin.kind : null;
   if (kind !== null) return MACHINE_ORIGINS.indexOf(kind) !== -1;
   return typeof entry.turnOrigin === 'string' && MACHINE_TURN_ORIGINS.indexOf(entry.turnOrigin) !== -1;
+}
+
+// A message typed while Claude is still working (issue #235). The transcript
+// does not store it as a user entry: it records an attachment of type
+// queued_command whose `prompt` is what was typed (a string, or a list of
+// content blocks like a user entry's content), with the sender stamp INSIDE the
+// attachment (`attachment.origin`, `attachment.isMeta`), not on the entry where
+// isMachineStamped() reads it. Machine text rides the same attachment: a
+// subagent's report (origin peer, with isMeta) and a background task's notice
+// (origin task-notification, or no stamp and its text wrapped in the
+// task-notification tag). Across this machine's transcripts on 2026-10-13,
+// 2,132 queued entries were 93 stamped human, 1,087 peer, 546
+// task-notification, 405 unstamped task notices in their tags and 1 unstamped
+// prompt; none of the 93 was also stored as a user entry, so reading them
+// counts nothing twice.
+//
+// So a queued entry comes back in the shape of a user entry, its stamp lifted
+// to where isMachineStamped() looks, and the scan treats it exactly like a
+// message typed between turns: the same stamp list, tag strip, gates and
+// interrupt pairing, and it becomes the request the next output answers. Every
+// queued entry is lifted, not only the human-stamped ones, so the closed list
+// keeps failing open: one with no stamp stays a candidate. The rest of the
+// entry is kept as it is. Any other entry comes back unchanged.
+function asUserEntry(entry) {
+  const queued = entry && entry.type === 'attachment' && entry.attachment;
+  if (!queued || queued.type !== 'queued_command') return entry;
+  const lifted = Object.assign({}, entry, { type: 'user', message: { content: queued.prompt } });
+  if (queued.origin !== undefined) lifted.origin = queued.origin;
+  if (queued.isMeta !== undefined) lifted.isMeta = queued.isMeta;
+  return lifted;
 }
 
 // A user entry's text as written, harness markup included.
@@ -733,6 +765,8 @@ function scanExchanges(files, since) {
       if (!line) continue;
       let entry;
       try { entry = JSON.parse(line); } catch (e) { continue; }
+      // A message typed while Claude worked is read as a user entry (#235).
+      entry = asUserEntry(entry);
 
       if (entry.type === 'assistant') {
         const t = assistantText(entry);

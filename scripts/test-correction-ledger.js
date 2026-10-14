@@ -644,6 +644,87 @@ console.log('\ncorrection-ledger.js\n');
     said(cross, 'SKILL_OPENER_MARKER').length === 0 && cross.interruptsWithoutFollowUp === 0, JSON.stringify(cross));
 }
 
+// --- issue #235: messages typed while Claude works are read like any other ---
+// A message typed while Claude is still working is not stored as a user entry.
+// The transcript records it as an attachment of type queued_command, and the
+// sender stamp sits INSIDE the attachment, not on the entry. The shape below is
+// the one real files carry (observed 2026-10-13, across this machine's
+// top-level transcripts: 2,132 such entries, of them 93 stamped human, 1,087
+// peer with isMeta, 546 task-notification, 405 unstamped task notices wrapped
+// in their tags and 1 unstamped prompt; 86 of the 93 human prompts are lists
+// of text blocks, the rest strings; none of the 93 is also stored as a user
+// entry), with made-up text only. Each machine-sent fixture can be dropped by
+// exactly one code path: its text has no tags, passes the length gate and
+// holds a pushback word, so only its one stamp field can keep it out. The
+// tagged notice carries no stamp, so only the tag strip can drop it, and the
+// short message is stamped human, so only the length gate can.
+{
+  const BASE = Date.parse('2026-10-01T12:00:00.000Z');
+  const at = function (sec) { return new Date(BASE + sec * 1000).toISOString(); };
+  const asstE = function (t, sec) { return { type: 'assistant', timestamp: at(sec), message: { content: [{ type: 'text', text: t }] } }; };
+  const userE = function (text, sec, sid) {
+    return { type: 'user', timestamp: at(sec), sessionId: sid, origin: { kind: 'human' }, message: { content: [{ type: 'text', text: text }] } };
+  };
+  const queuedE = function (prompt, sec, sid, fields) {
+    return { type: 'attachment', timestamp: at(sec), sessionId: sid,
+      attachment: Object.assign({ type: 'queued_command', prompt: prompt, commandMode: 'prompt' }, fields || {}) };
+  };
+  const HUMAN = { origin: { kind: 'human' } };
+  function scan(label, sessions) {
+    const sb = makeSandbox('queued-' + label);
+    const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+    fs.mkdirSync(dir, { recursive: true });
+    Object.keys(sessions).forEach(function (sid) {
+      fs.writeFileSync(path.join(dir, sid + '.jsonl'),
+        sessions[sid].map(function (e) { return JSON.stringify(e); }).join('\n') + '\n', 'utf-8');
+    });
+    const out = JSON.parse(run(sb, ['--candidates', '--since', '2026-10-01T00:00:00.000Z']));
+    fs.rmSync(sb.root, { recursive: true, force: true });
+    return out;
+  }
+  const said = function (out, marker) { return out.candidates.filter(function (c) { return (c.human_said || '').indexOf(marker) !== -1; }); };
+  const opening = function (out) { return JSON.stringify(out.candidates.map(function (c) { return c.human_said.slice(0, 40); })); };
+  const fields = function (c) { return c ? JSON.stringify({ asked: c.asked.slice(0, 40), said: c.assistant_said.slice(0, 40) }) : 'no candidate'; };
+
+  const typed = scan('typed', { s1: [asstE('FIRST_OUTPUT_Q drafting the outline', 0),
+    userE('REQUEST_Q please make the outline shorter and cut the intro', 10, 's1'),
+    asstE('SECOND_OUTPUT_Q rewriting the outline now', 20),
+    queuedE([{ type: 'text', text: 'BLOCKS_Q actually keep the intro,' }, { type: 'text', text: 'just trim the examples instead' }], 25, 's1', HUMAN),
+    queuedE('STRING_Q and do not touch the summary section either', 30, 's1', HUMAN),
+    asstE('THIRD_OUTPUT_Q trimmed the examples and left the summary', 40),
+    userE('NEXT_TYPED_Q that is not what I meant, the examples were fine', 50, 's1')] });
+  const blocks = said(typed, 'BLOCKS_Q')[0];
+  const next = said(typed, 'NEXT_TYPED_Q')[0];
+  check('a message typed while Claude works is a candidate, from text blocks or a plain string (#235)',
+    !!blocks && blocks.human_said.indexOf('just trim the examples') !== -1 && said(typed, 'STRING_Q').length === 1,
+    opening(typed));
+  check('a typed-while-working candidate carries the output and the ask before it (#235)',
+    !!blocks && blocks.assistant_said.indexOf('SECOND_OUTPUT_Q') !== -1 && blocks.asked.indexOf('REQUEST_Q') !== -1,
+    fields(blocks));
+  check('the next typed message carries the queued message as its ask (#235)',
+    !!next && next.asked.indexOf('STRING_Q') !== -1 && next.assistant_said.indexOf('THIRD_OUTPUT_Q') !== -1,
+    fields(next));
+
+  const unstamped = scan('unstamped', { s1: [asstE('Here is the table.', 0),
+    queuedE('UNSTAMPED_Q a build with no sender stamp here, please redo the table', 10, 's1')] });
+  check('a queued message with no sender stamp stays a candidate (#235)',
+    said(unstamped, 'UNSTAMPED_Q').length === 1, opening(unstamped));
+
+  const machine = scan('machine', { s1: [asstE('Dispatching the reviewers now.', 0),
+    queuedE('PEER_Q the reviewer reports that this is not correct and should be undone', 10, 's1', { origin: { kind: 'peer' } }),
+    queuedE('META_Q a harness note saying that this is wrong and should be redone', 20, 's1', { isMeta: true }),
+    queuedE('TASKSTAMP_Q background task finished: the agent says that is not right', 30, 's1',
+      { origin: { kind: 'task-notification' }, commandMode: 'task-notification' }),
+    queuedE('<task-notification>TASKTAG_Q the task finished and says this is wrong</task-notification>', 40, 's1',
+      { commandMode: 'task-notification' })] });
+  check('no queued message stamped or tagged as machine-sent is a candidate (#235)',
+    machine.candidates.length === 0, opening(machine));
+
+  const short = scan('short', { s1: [asstE('Rewriting the parser.', 0), queuedE('stop that', 10, 's1', HUMAN)] });
+  check('a short queued message meets the same length gate as any other (#235)',
+    short.candidates.length === 0, opening(short));
+}
+
 // --- the axial map merges instead of overwriting ----------------------------
 {
   const sb = makeSandbox('axial');
