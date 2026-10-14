@@ -4,7 +4,7 @@
 
 ## Unreleased - No False Alarm From Main
 
-**Additive on top of v8.0.0.** Issues #243, #238, #235, #245, #244 and #237. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole. Cycles in parallel worktrees stop overwriting one review page: each branch gets its own, and the cycle summary stays one shared log.
+**Additive on top of v8.0.0.** Issues #243, #238, #235, #245, #244, #237 and #241. Claude checks a claim at its source before stating it, and says so when one comes from memory. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole. Cycles in parallel worktrees stop overwriting one review page: each branch gets its own, and the cycle summary stays one shared log.
 
 ### Fixed
 
@@ -16,11 +16,14 @@
 
 ### Added
 
+- **Claude checks a claim at its source before stating it.** (#241) A correction that kept coming back across projects: Claude answered from what it remembered when the real source was one step away, such as a menu path it never checked, a fact about your setup it assumed, a link it never opened, a rule's reach it recalled, or an outcome it reasoned about instead of running. The always-on Self-Service paragraph of `.claude/rules/toolkit.md` gains one sentence: a claim with a checkable source (a link, a file, a command, a version, earlier work) is checked there before it is stated, and one that cannot be checked says it comes from memory. The manual's Self-Service section names the five shapes, `/tk:explore` reads the issue, earlier plans, the code a change touches and `LESSONS.md` before it asks you anything, and `/tk:execute` checks that a step it asks you to take in your own setup exists there before giving it. The rules file grows by 33 words, which every project reads on every turn.
 - **`/tk:upgrade` flags a file of yours too big to paste whole (C-19).** (#244) The stages paste six of your files from `.claude/toolkit/` whole, and Claude Code cuts any pasted output over about 30,000 bytes to a 2 KB preview without saying so. C-19 runs on every upgrade, reads which files are pasted from the plugin's own commands and skills, and reports each one over 28,500 bytes, the margin the toolkit holds its own pasted files to. It measures size only and never reads the text. Its fix shortens the file without dropping a rule, through the normal upgrade loop; the rerun checks the size, so read the shortened file once yourself.
 
 ### Upgrading
 
 - `/tk:upgrade` runs C-19 on every upgrade. A project whose pasted files are all at or under 28,500 bytes sees nothing.
+- `/tk:upgrade` reports your `.claude/rules/toolkit.md` as behind the seed (C-7), because of the new Self-Service sentence. Its fix merges the seed's text into your copy and keeps everything under your `<!-- Project section:` line.
+- Other editors: re-running `setup.sh` or `setup.ps1` replaces `.claude/rules/toolkit.md` whole, after copying the old one into a `.toolkit-backup-<date>-<time>-<n>/` folder in your project. Copy back anything you wrote under its Project section from that backup.
 - Other editors: re-run `setup.sh` or `setup.ps1`. The pre-flight lists each dropped file it will remove, `review-finder.md` among them, and backs each one up, so the 8.0.0 advice to delete `review-finder.md` by hand no longer applies.
 - Nothing to run for the per-branch review pages. Your default branch keeps its existing page and link; the first review on any other branch publishes a new private page named after it.
 
@@ -33,6 +36,8 @@ A message typed while Claude is still working is often the moment you saw it hea
 A copy-install and the plugin should behave the same for the same command, and a leftover agent made them differ: the 8.0.0 notes had to ask copy-install users to delete it by hand. Reading the plugin's own list means the next file the toolkit drops leaves both installs the same way, with no installer edit.
 
 A file cut to its first 2 KB still runs, so nothing fails: the stage just skips a gate or an always-ask rule near the end. The loop rules themselves were over the limit from 7.6.3 to 8.0.0 and nothing noticed. C-19 holds your pasted files to the guard the toolkit already holds its own to.
+
+Each of those from-memory answers had its source within reach, and you had to point at it. Checking first costs one read or one command; a confident wrong answer costs a round trip and some trust. The cycle that added the rule tripped it twice: its plan said the seed history would carry the new sentence downstream and that a copy-install rerun keeps your Project section, and reading the upgrade audit and the installer showed both were wrong.
 
 One shared review page cannot hold two branches safely: a review marks an open finding fixed when it looked at that file and did not find it again, and a sibling branch's copy of the file never had the other branch's change. Splitting the page by branch keeps each one honest, while the cycle log, which records past events rather than open findings, stays shared. Following the index to the newest page's file, the issue's first idea, would have pointed into worktree folders that are deleted when their cycle ends, so both pages now live where the index already did.
 
