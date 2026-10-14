@@ -723,6 +723,19 @@ console.log('\ncorrection-ledger.js\n');
   const short = scan('short', { s1: [asstE('Rewriting the parser.', 0), queuedE('stop that', 10, 's1', HUMAN)] });
   check('a short queued message meets the same length gate as any other (#235)',
     short.candidates.length === 0, opening(short));
+
+  // A queued message can also be the reply to an interrupt: the old-against-new
+  // run on this repo's transcripts on 2026-10-13 found one, a short reply that
+  // only the follow-up path keeps (it skips the length gate). The marker carries
+  // no stamp, as real interrupt markers do.
+  const inter = scan('interrupt', { s1: [asstE('INTERRUPTED_Q rewriting the parser', 0),
+    { type: 'user', timestamp: at(5), sessionId: 's1', message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+    queuedE('no', 8, 's1', HUMAN)] });
+  const reply = inter.candidates[0];
+  check('a short queued reply to an interrupt is its tagged follow-up (#235)',
+    inter.candidates.length === 1 && !!reply && reply.human_said === 'no' && reply.after_interrupt === true &&
+    reply.assistant_said.indexOf('INTERRUPTED_Q') !== -1 && inter.interruptsWithoutFollowUp === 0,
+    opening(inter) + ' interrupts=' + inter.interruptsWithoutFollowUp);
 }
 
 // --- the axial map merges instead of overwriting ----------------------------
