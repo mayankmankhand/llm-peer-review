@@ -60,3 +60,6 @@ correction-fixes.jsonl
 correction-backfill.jsonl
 correction-rows.json
 correction-backfill-rows.json
+
+# scripts/render-diagrams.js keeps its pinned Mermaid download here
+scripts/.cache/

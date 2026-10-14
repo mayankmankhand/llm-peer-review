@@ -1,0 +1,33 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: How LLM Peer Review runs, as one line
+  accDescr: The line runs top to bottom. Gate in is the session-start hook. Then explore, create-plan with a critic loop of up to 2 rounds, your approval, execute with a check loop on every step, review with an audit and fix loop of up to 2 tries, and document. Merge lands worktree PRs when you start it. Gate out is the pre-push hook, run before every push. A dotted branch line leads to the GPT or Gemini debate, which runs only when you ask.
+
+  %% Limits come from their sources: the critic's 2 rounds from
+  %% .claude/commands/create-plan.md, the check loop from M17 in hitl-stages.md,
+  %% the 2 fix tries from M5 in hitl-loop.md, the hooks from
+  %% .claude/scripts/session-start.js and pre-push-check.js.
+
+  G1[["Gate in<br/>session-start hook"]] --- E("/tk:explore") --- P("/tk:create-plan") --- Y((("You<br/>approve"))) --- X("/tk:execute") --- R("/tk:review") --- D("/tk:document") -.- M("/tk:merge") --- G2[["Gate out<br/>pre-push hook"]]
+  P --- PL("↺ critic loop<br/>up to 2 rounds")
+  X --- XL("↺ check loop<br/>every step")
+  R --- RL("↺ audit and fix loop<br/>up to 2 tries")
+  R -.- A("/tk:ask-gpt or /tk:ask-gemini<br/>when you ask")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}},font-weight:bold
+  classDef ring fill:{{warn-soft}},stroke:{{warn}},stroke-width:3px,color:{{text}}
+  classDef you fill:{{accent}},stroke:{{accent}},color:{{badge-text}},font-weight:bold
+  classDef hook fill:{{bg}},stroke:{{accent}},stroke-width:2px,stroke-dasharray:6 3,color:{{text}}
+  classDef side fill:{{bg}},stroke:{{warn}},stroke-width:2px,color:{{text}}
+  class E,P,X,R,D,M stn
+  class PL,XL,RL ring
+  class Y you
+  class G1,G2 hook
+  class A side
+  linkStyle 0,1,2,3,4,5,7 stroke:{{accent}},stroke-width:8px
+  linkStyle 6 stroke:{{accent}},stroke-width:4px,stroke-dasharray:6 5
+  linkStyle 8,9,10 stroke:{{warn}},stroke-width:4px
+  linkStyle 11 stroke:{{warn}},stroke-width:3px,stroke-dasharray:4 4
