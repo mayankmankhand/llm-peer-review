@@ -92,6 +92,12 @@
 //     nothing alone, the fix clears it with its receipt agreeing, and a project
 //     with the seed's attributes, a rule only in .git/info/attributes, no
 //     lessons files, or no git repository is no finding.
+//   - C-19 (a pasted project file over the paste limit, issue #244): one byte
+//     over 28,500 is one warn finding even for a project audited at 8.0.1, its
+//     receipt shows the file and stops confirming once it is trimmed; a file at
+//     the limit, an absent one, and an oversized file nothing pastes are no
+//     finding; on the real commands and skills the pasted files are exactly
+//     the six #244 names; the 8.0.0 build does not run it.
 // Every receipt an explicit run emits is run through `bash -c` from its fixture
 // project and must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise. Mutation checks prove the
@@ -317,6 +323,8 @@ function receiptShows(f, r) {
   // The lessons merge rule (C-18): git prints one line per lessons file the
   // finding names, and none of them says union.
   if (f.id === 'C-18') { const got = outLines(r.stdout); return got.length > 0 && got.every(l => /^LESSONS(-detail)?\.md: merge: /.test(l) && !/: merge: union$/.test(l)); }
+  // A pasted file over the limit (C-19): find prints the file's path, alone.
+  if (f.id === 'C-19') return r.stdout.trim() === f.file.relPath;
   // A tracked migration record: git prints the record's path and nothing else.
   if (/because it tracks the file/.test(f.receipt.shows)) return r.stdout.trim() === f.file.relPath;
   const marker = /reading ([a-z]+): </.exec(f.receipt.shows);
@@ -3016,6 +3024,50 @@ console.log('\n9g. the lessons files keep both sides on a merge (C-18)');
   check('  with it, the seed-attributes project is flagged, so the clean checks above bite', c18(audit800(c18Case('seed-mutant', { lessons: ['LESSONS.md'], attrs: seedAttrs.join('\n') }), [], { script: m.path })).length === 1);
   const entry = read(REAL_CONVENTIONS).split(/^### /m).find(b => /^C-18:/.test(b)) || '';
   check('the real C-18 entry is a lessons-merge convention since 8.0.0 at Severity suggest, not run on every upgrade', /^- \*\*Since:\*\* 8\.0\.0$/m.test(entry) && /^- \*\*Detector:\*\* lessons-merge$/m.test(entry) && /^- \*\*Severity:\*\* suggest$/m.test(entry) && !/^- \*\*Runs:\*\*/m.test(entry), entry.slice(0, 300));
+}
+
+console.log('\n9h. a pasted project file over the paste limit (C-19)');
+{
+  // C-19 arrives in 8.0.1, so it needs a plugin root at that version, built
+  // from the real source: its commands and skills decide which project files
+  // are pasted. The 8.0.0 root from 9g shows it out of range.
+  const PLUGIN801 = path.join(TMP, 'plugin801');
+  const b801 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN801, '--version', '8.0.1'], { cwd: REPO, encoding: 'utf8' });
+  check('C-19: build-plugin.js builds a 8.0.1 plugin root', b801.status === 0 && fs.existsSync(path.join(PLUGIN801, '.claude-plugin', 'plugin.json')), b801.stdout + b801.stderr);
+  const audit801 = (d) => audit(d, [], { pluginRoot: PLUGIN801 });
+  const c19 = (res) => res.findings.filter(f => f.id === 'C-19');
+  const LIMIT = 28500;
+  const SIX = ['do-not-report.md', 'execute-gate.md', 'fix-rules.md', 'plan-gate.md', 'review-kinds.md', 'severity-anchors.md'].map(n => '.claude/toolkit/' + n);
+  // A project last audited at `audited` (8.0.1 by default, so only the
+  // every-upgrade entries are in range), holding each [path, size] given.
+  const c19Case = (name, files, audited) => {
+    const dir = path.join(TMP, 'c19-' + name);
+    const v = audited || '8.0.1';
+    write(dir, '.claude/.toolkit-state.json', JSON.stringify({ version: v, path: 'plugin', auditedVersion: v }, null, 2));
+    for (const [rel, bytes] of files) write(dir, rel, 'x'.repeat(bytes - 1) + '\n');
+    return dir;
+  };
+
+  let r = audit801(c19Case('at-limit', [['.claude/toolkit/fix-rules.md', LIMIT]]));
+  check('C-19: a pasted file of exactly 28,500 bytes is no finding', r.status === 0 && c19(r).length === 0, r.summary + JSON.stringify(c19(r)).slice(0, 300));
+  const d = c19Case('over', [['.claude/toolkit/fix-rules.md', LIMIT + 1]]);
+  r = audit801(d);
+  const f = c19(r);
+  check('C-19: one byte over is one warn finding for a project audited at 8.0.1, keyed by the file, with Since 8.0.1 and the size in its text', r.status === 0 && f.length === 1 && f[0].severity === 'warn' && f[0].key === 'C-19:.claude/toolkit/fix-rules.md:paste-size' && f[0].since === '8.0.1' && f[0].file.relPath === '.claude/toolkit/fix-rules.md' && /28,501 bytes/.test(f[0].what), JSON.stringify(f).slice(0, 500) + r.summary);
+  check('C-19: its fix says to shorten the file without dropping a rule', f.length === 1 && /without dropping a rule/.test(f[0].fix), f[0] && f[0].fix);
+  check('C-19: its receipt passes, printing the file', f.length === 1 && allReceiptsShow(d, f).length === 0, allReceiptsShow(d, f).join(' | '));
+  const before = { findings: f };
+  write(d, '.claude/toolkit/fix-rules.md', 'x'.repeat(LIMIT - 1) + '\n');
+  const after = audit801(d);
+  check('C-19: trimming the file to the limit clears it, and the old receipt agrees with the rerun', f.length === 1 && c19(after).length === 0 && receiptsAgree(d, before, after).length === 0, receiptsAgree(d, before, after).join(' | '));
+  r = audit801(c19Case('absent', []));
+  check('C-19: a project with no pasted files is no finding', r.status === 0 && c19(r).length === 0, r.summary);
+  r = audit801(c19Case('unpasted', [['.claude/toolkit/notes.md', LIMIT * 2]]));
+  check('C-19: an oversized file in .claude/toolkit/ that nothing pastes is no finding', r.status === 0 && c19(r).length === 0, JSON.stringify(c19(r)).slice(0, 300));
+  r = audit801(c19Case('all-six', SIX.map(rel => [rel, LIMIT + 1])));
+  check('C-19: on the real commands and skills the pasted files are exactly the six #244 names', r.status === 0 && JSON.stringify(c19(r).map(x => x.file.relPath).sort()) === JSON.stringify(SIX), JSON.stringify(c19(r).map(x => x.file.relPath)));
+  r = audit(c19Case('old-root', [['.claude/toolkit/fix-rules.md', LIMIT + 1]], '7.6.5'), [], { pluginRoot: path.join(TMP, 'plugin800') });
+  check('C-19: the 8.0.0 build does not run it', r.status === 0 && c19(r).length === 0 && !/C-19/.test(r.summary), r.summary);
 }
 
 console.log('\n10. errors and usage');

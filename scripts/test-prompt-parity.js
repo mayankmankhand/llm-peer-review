@@ -149,6 +149,18 @@ const PASTE_LIMIT = 28500;
   const over = [...pasted].filter(rel => fs.existsSync(path.join(REPO, rel))).map(rel => [rel, fs.statSync(path.join(REPO, rel)).size]).filter(([, size]) => size > PASTE_LIMIT);
   check('every file a command or skill pastes whole is at most ' + PASTE_LIMIT + ' bytes (' + pasted.size + ' pasted files)', pasted.size > 10 && over.length === 0, over.map(([rel, size]) => rel + ' ' + size).join(', '));
 }
+// The upgrade audit's C-19 (issue #244) holds a project's own pasted files in
+// .claude/toolkit/ to the same limit, so the two numbers must never drift.
+{
+  const limitDrift = (text) => {
+    const m = /^const PASTE_LIMIT = (\d+);/m.exec(text);
+    return !m ? 'no PASTE_LIMIT line in upgrade-audit.js' : Number(m[1]) !== PASTE_LIMIT ? 'upgrade-audit.js has ' + m[1] + ', this guard ' + PASTE_LIMIT : '';
+  };
+  const auditText = read('.claude/scripts/upgrade-audit.js');
+  check('paste limit: upgrade-audit.js uses the same limit as this guard', limitDrift(auditText) === '', limitDrift(auditText));
+  const mutated = auditText.replace(/^const PASTE_LIMIT = \d+;/m, 'const PASTE_LIMIT = ' + (PASTE_LIMIT + 1) + ';');
+  check('paste limit: mutation: a different number in upgrade-audit.js trips the check', mutated !== auditText && limitDrift(mutated) !== '', limitDrift(mutated));
+}
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

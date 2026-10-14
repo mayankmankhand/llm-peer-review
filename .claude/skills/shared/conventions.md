@@ -12,8 +12,8 @@ A convention describes the toolkit's contract with a project's own files. It is 
 ### C-<n>: <title>
 - **Since:** <version the convention arrived in>
 - **Runs:** every upgrade   (optional; only on an entry that must be checked on every upgrade)
-- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds
-- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | manual
+- **Scope:** prompt-files | prompt-files+claude-md | prompt-files+session-files | claude-md | agents | settings-local | seed-stamp | seed-lines | seed-blocks | lessons | gitattributes | local-edits | review-kinds | toolkit-pastes
+- **Detector:** regex | seed-stamp | dead-permissions | permission-rows | seed-lines | seed-blocks | lessons-shape | lessons-merge | unscoped-names | local-edits | agent-tools | review-kinds | agent-models | paste-size | manual
 - **Severity:** warn | suggest   (optional; a regex detector's findings default to warn)
 - **Looks behind:** `<a JavaScript regular expression, applied per line; repeat the bullet for several>`
 - **Fix:** <the shape of the fix, one line>
@@ -197,6 +197,15 @@ Why: a step that says check, verify or confirm and names no command leaves the m
 - **Fix:** append the lines the finding lists to `.gitattributes` (create the file when it is absent): the comment line, then `LESSONS.md merge=union` and `LESSONS-detail.md merge=union` for each file git does not already merge that way; leave every other line as it is
 
 Why: two branches that each add a lesson both append to `LESSONS.md` and `LESSONS-detail.md`, so every pair of parallel worktrees conflicts there, and a conflict fixed by hand can drop either side's lesson. Git's built-in union driver keeps the lines both sides added instead, and `/tk:merge` then checks the joined file for a lead written twice. `CHANGELOG.md` is left out on purpose: a union merge can file a line under a version already released, with no conflict to show it. The detector asks git (`git check-attr merge`), so a rule anywhere git reads one counts, and reports one finding when a lessons file the project has is not merged with `union`; a project that is not a git repository has none. It ships at `suggest`: a project that fixes these conflicts by hand loses nothing it had. `/tk:setup` writes the lines into a new `.gitattributes`, and a migration from the copy-install appends them to an existing one, so this entry is for projects set up before it: a project set up later on the plugin with a `.gitattributes` of its own, which setup leaves untouched, adds the lines by hand.
+
+### C-19: A pasted project file stays under the paste limit
+- **Since:** 8.0.1
+- **Runs:** every upgrade
+- **Scope:** toolkit-pastes
+- **Detector:** paste-size
+- **Fix:** shorten the file to 28,500 bytes or less without dropping a rule: cut repetition and long examples, or move long detail into another file of your own and leave a line here that tells the reader to open it; the stage pastes this one file whole, so a part split off is never pasted
+
+Why: the toolkit's stages paste six files of the project's own from `.claude/toolkit/` whole, through an inline `cat`: `fix-rules.md`, `severity-anchors.md`, `do-not-report.md`, `execute-gate.md`, `plan-gate.md` and `review-kinds.md`. Claude Code replaces a pasted output over about 30,000 bytes with a 2 KB preview and says nothing, so the stage runs with only the start of the project's rules, and a gate or an always-ask rule near the end is skipped without a trace. The detector reads which files are pasted from the plugin's own commands and skills on every run, so a file a later release starts pasting is covered too, and reports each one over 28,500 bytes, the margin the toolkit holds its own pasted files to. It measures size only and never reads the text: C-12 still keeps the folder's text out of every other convention. A file at or under the limit, an absent file, and a file nothing pastes are no finding. A project's rules can grow on any day, so this entry runs on every upgrade.
 
 ## How a release adds a convention
 

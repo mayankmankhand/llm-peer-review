@@ -102,7 +102,10 @@
 // seed/toolkit-lesson-leads.txt, the toolkit's own lessons that the
 // copy-installers wrote into projects. lessons-merge (C-18) asks git for the
 // merge attribute of LESSONS.md and LESSONS-detail.md and flags a lessons file
-// the project has that git does not merge with union. `manual` is not run here
+// the project has that git does not merge with union. paste-size (C-19) finds the
+// project files a stage pastes whole from the plugin's own commands and skills
+// (pastedProjectFiles) and flags each one over PASTE_LIMIT bytes, by size alone.
+// `manual` is not run here
 // at all: the /tk:upgrade skill judges those by hand (a judgment no grep
 // expresses) and emits findings in the same shape.
 //
@@ -1507,6 +1510,30 @@ const LESSONS_MERGE_FILES = ['LESSONS.md', 'LESSONS-detail.md'];
 const LESSONS_MERGE_COMMENT = '# Lessons files keep both sides on a merge: two branches that each add a lesson never conflict';
 const lessonsMergeLine = (rel) => rel + ' merge=union';
 
+// --- a pasted project file over the paste limit (C-19) ----------------------------
+// Stages paste some of the project's own files from .claude/toolkit/ whole, through
+// an inline cat, and Claude Code replaces a pasted output over about 30,000 bytes
+// with a 2 KB preview without saying so. Which files are pasted is read from the
+// plugin's own commands and skills on every run, with the pattern
+// scripts/test-prompt-parity.js uses for the toolkit's own files, so a file a later
+// release starts pasting is covered with no edit here. The limit is that suite's
+// PASTE_LIMIT, and the suite fails when the two numbers drift.
+const PASTE_LIMIT = 28500;
+const PASTE_RE = /!`cat ([^ `]+)[^`]*`/g;
+function pastedProjectFiles(pluginRoot) {
+  const pasted = new Set();
+  for (const dir of ['commands', 'skills']) {
+    for (const rel of walkFiles(path.join(pluginRoot, dir), dir, [])) {
+      if (!/\.md$/.test(rel)) continue;
+      for (const m of fs.readFileSync(path.join(pluginRoot, rel), 'utf8').matchAll(PASTE_RE)) {
+        if (m[1].startsWith('.claude/toolkit/')) pasted.add(m[1]);
+      }
+    }
+  }
+  return [...pasted].sort();
+}
+const withCommas = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
 // Is this project the toolkit's own repository? The source tree is what the
 // plugin is built from, not something to seed or upgrade. The marketplace file
 // names the toolkit itself when the marketplace is named llm-peer-review or
@@ -2282,6 +2309,20 @@ function main() {
               receipt: { check: 'git check-attr merge -- ' + flagged.map(shq).join(' ') + ' | grep -v -e ' + shq(': merge: union$'), shows: 'one line per lessons file whose merge attribute is not union; the check exits 0 only while one remains' } });
           }
         }
+      }
+    } else if (c.detector === 'paste-size') {
+      // (C-19) Each project file a stage pastes whole, measured against the
+      // paste limit. Size only: the text is never read, an absent file is no
+      // finding, and a file nothing pastes is never measured. The receipt's
+      // find follows a linked path (-H) as cat does when it pastes the file.
+      for (const rel of pastedProjectFiles(pluginRoot)) {
+        if (!isFile(P(rel))) continue;
+        const size = fs.statSync(P(rel)).size;
+        if (size <= PASTE_LIMIT) continue;
+        emit({ id: c.id, key: claim(c.id + ':' + rel + ':paste-size').key, severity: c.severity, convention: c.title, file: { relPath: rel },
+          what: (c.severity === 'warn' ? 'Should fix. ' : 'Optional. ') + rel + ' is ' + withCommas(size) + ' bytes, over the ' + withCommas(PASTE_LIMIT) + '-byte paste limit: a stage pastes it whole, and Claude Code replaces a pasted output over about 30,000 bytes with a 2 KB preview, so the stage runs with only the start of this file and skips the rest without a trace.',
+          fix: c.fix, since: c.since,
+          receipt: { check: 'find -H ' + shq(rel) + ' -size +' + PASTE_LIMIT + 'c | grep .', shows: 'the file\'s path, printed only while it is over ' + withCommas(PASTE_LIMIT) + ' bytes; the check exits 0 only while it is' } });
       }
     } else if (c.detector === 'local-edits') {
       // The evidence of a local edit is the copy-install's own record: the
