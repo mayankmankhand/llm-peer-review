@@ -36,6 +36,8 @@ and never overwrites a design system you already have. Edit it freely.
 
 <!-- Reactions captured while reacting to idea lists in /explore: what felt right,
      what felt tacky, what to avoid. One line each, newest last. -->
+- 2026-10-14, docs diagrams: assembly line (an idea goes in, stations stamp it, a merged change comes out) felt right; subway map a close second. Picked from eight rendered sketches, not from text: describe a look in words and the owner cannot react, so show it.
+- 2026-10-14, docs diagrams: for loops and hooks, picked the vertical line diagram (loops as amber side stops with their limits, hooks as ticket gates) over loops drawn as rework arrows on the line and over a map with loop tags only.
 
 ## Directions tried
 
