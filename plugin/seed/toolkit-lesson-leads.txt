@@ -61,6 +61,7 @@ A name that is also a key is a migration decision, not a preference.
 A negative-count receipt needs a pattern that cannot match an incidental word.
 A nested worktree has two roots: every list of path prefixes strips the longer one first.
 A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".
+A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.
 A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.
@@ -97,6 +98,7 @@ A standing page rendered in a worktree has no predecessor on disk: copy the main
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
 A suite is green when its exit code is 0, not when its tail looks quiet.
+A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.
 A sweep's receipt is its grep patterns and their output, not the word "clean".
 A test fixture must never carry a real-shaped secret; assemble it at runtime, because the tripwire has no allow-list by design.
 A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.
@@ -251,7 +253,9 @@ When releases that predate a new call can receive it, name the answer they give:
 When storage is append-only, validate the whole batch before writing any of it.
 When the owner changes a decision at a page, sweep what was already written under the old decision.
 When the plan's wording drifts from the exploration summary the owner approved, the summary wins.
+Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.
 Worktree detection: `--git-dir` vs `--git-common-dir`.
+Write a check's stated failure in that suite's own failure format; the suites do not print it alike.
 Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.
 Write the validation bar before the result, then honor it when the result is inconvenient.
 XML tags in prompts are a real thing, not just hype.
