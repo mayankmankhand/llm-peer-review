@@ -371,8 +371,8 @@
 - **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.**
+- **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.** Superseded by #237: no copy is needed.
+- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.** Superseded by #237: no copy is needed.
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
 - **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
@@ -443,3 +443,9 @@
 - **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.**
 - **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
 - **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
+
+## Issue 237 (one review page per branch)
+
+- **A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.**
+- **Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.**
+- **A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `scripts/seed-history.js`, or every later full test run fails.**

@@ -60,6 +60,7 @@ A model named in a helper's file is relative to the session that dispatches it: 
 A name that is also a key is a migration decision, not a preference.
 A negative-count receipt needs a pattern that cannot match an incidental word.
 A nested worktree has two roots: every list of path prefixes strips the longer one first.
+A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `scripts/seed-history.js`, or every later full test run fails.
 A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".
 A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
@@ -96,6 +97,7 @@ A standing page rendered in a worktree has no predecessor on disk: copy in the p
 A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.
 A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
+A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
 A suite is green when its exit code is 0, not when its tail looks quiet.
 A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.
@@ -213,6 +215,7 @@ Review a plan this size with three fresh lenses before executing it.
 Review proposed prompt edits before applying them, and triage the volume hard.
 Review your own AI-generated code before shipping.
 Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.
+Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.
 Run debates on plans, not just finished work.
 Run your own receipt before you report it as confirmation.
 Scope parity gaps explicitly when fixing one of several.
