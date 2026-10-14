@@ -293,6 +293,14 @@ If Claude can do it, Claude should do it. Do not ask the user to run commands th
 - **Judgment calls** - anything that requires the user's opinion, approval, or decision.
 - **Destructive actions** - deleting data, force-pushing, or anything hard to reverse still needs confirmation.
 
+### Check at the source
+A claim with a checkable source (a link, a file, a command, a version, earlier work) is checked there before it is stated; one that cannot be checked says it comes from memory. It takes five shapes:
+- **Steps for the user's own setup** - a menu path, a command, a shortcut or an update step is confirmed to exist in the tool and version the user runs before it is given.
+- **The user's own state** - what is installed, what was sent, whether a connector is live, what an earlier issue or plan settled: look it up rather than assume it, and never ask the user what the repo already answers.
+- **A source the work names** - a link in the message, the code a change touches, the fixes a past release made: open it before building on a description of it.
+- **What a rule covers** - read the rule's file before saying what it enforces.
+- **An outcome** - when a command can show it, run it (M16).
+
 ### The rule of thumb
 Ask yourself: "Can I run this command and interpret the result?" If yes, just do it. If you need the user's eyes or opinion, then ask.
 

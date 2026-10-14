@@ -100,7 +100,7 @@ If you hit a critical blocker, **stop executing** rather than push through a bro
 1. Explain what went wrong and why, what the options are, and a recommended default
 2. Suggest re-running `/create-plan` with what you've learned
 
-A blocker still unresolved within the retry bound is a hard stop that pages the human (M1 in `.claude/skills/shared/hitl-loop.md`): phrase it as a decision a non-engineer can make.
+A blocker still unresolved within the retry bound is a hard stop that pages the human (M1 in `.claude/skills/shared/hitl-loop.md`): phrase it as a decision a non-engineer can make. A step the page asks the user to take in their own setup (a command, a menu path, a setting) is checked to exist there first, or marked as from memory (Self-Service, "Check at the source", in the toolkit reference).
 
 **Critical blocker examples:** the plan assumed an API supports a feature it doesn't, a core dependency is incompatible with the project, or the planned architecture can't work as designed.
 

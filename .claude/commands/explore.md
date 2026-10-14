@@ -76,6 +76,7 @@ After the user describes their idea, **think like an experienced product manager
 ### How to Ask Questions
 Ask **3-4 focused questions per round**, over 2-3 rounds; in vision mode, each Expand on the scope dial adds a round. Keep it digestible:
 
+- **Read before you ask** - the issue, earlier plans, the code the change touches and `LESSONS.md` come first; skip any question they already answer (Self-Service, "Check at the source", in the toolkit reference)
 - **Group related questions** - don't scatter topics
 - **Number them** - easy to reference in answers
 - **Keep each question short** - one sentence, not a paragraph

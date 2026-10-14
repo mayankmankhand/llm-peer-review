@@ -4,7 +4,8 @@
 // agree (review fix R5, 2026-10-05): the disclosure line a dispatched finder may
 // return (`NOT CHECKED: <one sentence>`), the eight project seam files under
 // `.claude/toolkit/`, the reload-then-fallback sentence the commands share, and
-// the PR parts, the kept-on-purpose key and the decisions file /merge relies on.
+// the PR parts, the kept-on-purpose key and the decisions file /merge relies on,
+// and the check-at-source sentence the rules seed and the manual share (#241).
 // Each of these lives in more than one file on purpose (an inlined fragment, a
 // seed, a command that parses what another file tells a finder to emit), so an
 // edit to one copy and not the others is exactly the drift this suite catches.
@@ -133,6 +134,31 @@ const kept = mc.parseKept('Kept on purpose: abc1234 src/app.js: return \'alpha v
 check('merge-check.js reads a kept line in that key, file and text apart', kept.length === 1 && kept[0].sha === 'abc1234' && kept[0].file === 'src/app.js' && kept[0].text === 'return \'alpha v2 (A: faster)\';', JSON.stringify(kept));
 for (const [file, text] of [['decision-checker.md', CHECKER], ['merge-rules.md', RULES], ['merge-check.js', MC_SRC]]) check(file + ' names the decisions file\'s two headings', text.includes('## This PR') && text.includes('## Landing '), file);
 check('merge.md dispatches the decision-checker by name with no model, and document.md names /merge', /subagent_type=decision-checker/.test(MERGE_CMD) && /no model parameter/.test(MERGE_CMD) && DOC.includes('`/merge <N>`'));
+
+console.log('\n6. the check-at-source sentence (#241)');
+// Issue #241: one sentence in the seeded rules file's Self-Service paragraph
+// says a claim with a checkable source is checked there before it is stated.
+// The manual's "Check at the source" part carries it word for word, and so
+// must the plugin's emitted seed, which is what a downstream project receives;
+// the two stages that point to the part name it. The sentence is read from the
+// rules seed rather than written here, so this suite pins its two anchor
+// phrases and its agreement across files, not its exact wording.
+{
+  const rulesText = read('.claude/rules/toolkit.md');
+  const selfService = (/^## Self-Service\r?\n\r?\n([^\r\n]+)/m.exec(rulesText) || [])[1] || '';
+  const anchored = selfService.split(/(?<=\.)\s+(?=[A-Z])/).filter(s => s.includes('checkable source') && s.includes('from memory'));
+  const sentence = anchored.length === 1 ? anchored[0] : '';
+  check('241: the rules seed\'s Self-Service paragraph holds one sentence with "checkable source" and "from memory"', sentence !== '', anchored.length + ' found');
+  const manual = read('.claude/skills/shared/toolkit-reference.md');
+  const part = (/^### Check at the source\r?\n([\s\S]*?)(?=^###? |^<\/guidelines>)/m.exec(manual) || [])[1] || '';
+  check('241: the manual\'s Check at the source part carries that sentence word for word, once', sentence !== '' && count(part, sentence) === 1, part ? count(part, sentence) + ' found' : 'no "### Check at the source" part');
+  check('241: the manual\'s Check at the source part points the run-it shape to M16', /\bM16\b/.test(part));
+  for (const file of ['.claude/commands/explore.md', '.claude/commands/execute.md']) check('241: ' + file + ' names "Check at the source"', read(file).includes('"Check at the source"'));
+  const emitted = read('plugin/seed/rules-toolkit.md');
+  check('241: the emitted plugin seed carries that sentence word for word, once', sentence !== '' && count(emitted, sentence) === 1, sentence ? count(emitted, sentence) + ' found' : 'no sentence in the rules seed');
+  const mutatedPart = part.replace(sentence, sentence.replace(/\bchecked\b/, 'verified'));
+  check('241: mutation: one changed word in the manual\'s copy trips the word-for-word check', sentence !== '' && mutatedPart !== part && count(mutatedPart, sentence) === 0);
+}
 
 // 8.0.0: Claude Code swaps any single pasted command output over about 30,000
 // bytes for a 2 KB preview (measured 2026-10-13: 30,000 arrived whole, 30,500
