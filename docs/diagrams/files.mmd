@@ -1,0 +1,26 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Where the files live
+  accDescr: The toolkit's own files, its commands, skills, agents and scripts, live in the plugin cache on your machine and change only with a plugin update; none of them are copied into your project. In your project, setup seeds a few files once and then they are yours: CLAUDE.md, LESSONS.md, DESIGN-PROFILE.md, the .claude/toolkit folder for your own extensions, and settings.local.json. The rules file .claude/rules/toolkit.md is the toolkit's, and your own notes go under its project line. Files made as you work, plans, artifacts/html, reports and CODEBASE_MAP.md, stay out of git.
+
+  %% Facts from docs/EXTENDING.md (plugin cache, rules file), the setup skill
+  %% (what it seeds) and plugin/seed/gitignore (what stays out of git).
+
+  PC("The toolkit's files<br/>commands, skills, agents, scripts<br/>in the plugin cache,<br/>updated with the plugin") --- PJ("Your project<br/>none of the toolkit's files are copied in")
+  PJ --- RF("The toolkit's rules<br/>.claude/rules/toolkit.md<br/>your notes go under its project line")
+  PJ --- S("Yours, seeded once by /tk:setup<br/>CLAUDE.md, LESSONS.md<br/>DESIGN-PROFILE.md, .claude/toolkit/<br/>.claude/settings.local.json")
+  PJ --- W("Made as you work, kept out of git<br/>plans/, artifacts/html/<br/>reports/, CODEBASE_MAP.md")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef yours fill:{{positive-soft}},stroke:{{positive}},stroke-width:2px,color:{{text}}
+  classDef kit fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef temp fill:{{bg-muted}},stroke:{{border}},stroke-width:2px,color:{{text}}
+  class PC,RF kit
+  class PJ stn
+  class S yours
+  class W temp
+  linkStyle 0 stroke:{{accent}},stroke-width:8px
+  linkStyle 1,2,3 stroke:{{accent}},stroke-width:4px

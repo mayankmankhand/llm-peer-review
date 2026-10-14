@@ -1,0 +1,39 @@
+---
+config:
+  layout: elk
+---
+flowchart LR
+  accTitle: The two hooks, gate in and gate out
+  accDescr: Gate in is the session-start hook. When Claude Code opens a session it points a stable link at the installed plugin, then compares the plugin's version with the project's and tells you when they differ or when an old copy-install is still there. Gate out is the pre-push check, run before every push Claude makes. It checks what the push adds for secrets in any new line, files that must never leave the machine, permission changes in settings.json, and a plugin older than the project. Any hit blocks the push and asks you; otherwise the push goes out.
+
+  %% Gate in from .claude/scripts/session-start.js (its two jobs); gate out from
+  %% .claude/scripts/pre-push-check.js (checks 1 to 4) and M11.
+
+  subgraph IN ["Gate in: session-start hook"]
+    direction TB
+    S1("Claude Code opens a session") --- S2("Links the stable path<br/>to the installed plugin") --- S3{{"Plugin and project<br/>on different versions?"}}
+    S3 -.- S4("Tells you what to update")
+  end
+  subgraph OUT ["Gate out: pre-push check"]
+    direction TB
+    P1("Claude is about to push") --- P2("Four checks on what the push adds<br/>1. secrets in any new line<br/>2. files that must never leave the machine<br/>3. permission changes in settings.json<br/>4. a plugin older than the project") --- P3{{"Any hit?"}}
+    P3 --- P4("No: the push goes out")
+    P3 -.- B("Yes: blocked, you are asked")
+  end
+  IN ~~~ OUT
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef stop fill:{{block-soft}},stroke:{{block}},stroke-width:2px,color:{{text}}
+  classDef done fill:{{positive-soft}},stroke:{{positive}},stroke-width:2px,color:{{text}}
+  classDef tell fill:{{warn-soft}},stroke:{{warn}},stroke-width:2px,color:{{text}}
+  class S1,S2,P1,P2 stn
+  class S3,P3 judge
+  class S4 tell
+  class B stop
+  class P4 done
+  style IN fill:{{bg}},stroke:{{accent}},stroke-width:2px,stroke-dasharray:6 3,color:{{text}}
+  style OUT fill:{{bg}},stroke:{{accent}},stroke-width:2px,stroke-dasharray:6 3,color:{{text}}
+  linkStyle 0,1,3,4,5 stroke:{{accent}},stroke-width:8px
+  linkStyle 2 stroke:{{warn}},stroke-width:3px,stroke-dasharray:4 4
+  linkStyle 6 stroke:{{block}},stroke-width:3px,stroke-dasharray:4 4

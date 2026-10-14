@@ -1,0 +1,33 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Inside /tk:explore
+  accDescr: You type explore. It reads the issue, earlier plans, the code and the lessons first, then asks two setup questions, scoping or vision and which models. Questions come in rounds of 3 or 4, over 2 or 3 rounds; vision mode adds a scope dial, and UI work adds a design step with three seeded directions to pick from. It runs index when the codebase map is missing or 10 or more commits old. The closing summary chains into create-plan only when no question is left open; otherwise you answer or say plan it anyway.
+
+  %% Facts from .claude/commands/explore.md (reads first, the two questions,
+  %% rounds, scope dial, design step, index) and M14 in hitl-stages.md (the gate).
+
+  A("You type /tk:explore") --- R("Reads first<br/>the issue, plans, code, LESSONS.md") --- M{{"Scoping or vision?<br/>Models: best, fit or cheap?"}} --- Q("Questions") --- C("Closing summary") --- G{{"Converged?<br/>no open question"}} --- P("/tk:create-plan")
+  Q --- QL("↺ question rounds<br/>3-4 questions, 2-3 rounds")
+  Q --- D("Design step, for UI work<br/>three seeded directions to pick from")
+  R --- I("/tk:index<br/>when the map is missing or stale")
+  G -.- Y("Not yet: you answer,<br/>or say plan it anyway")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef ring fill:{{warn-soft}},stroke:{{warn}},stroke-width:3px,color:{{text}}
+  classDef side fill:{{bg}},stroke:{{warn}},stroke-width:2px,color:{{text}}
+  classDef stop fill:{{block-soft}},stroke:{{block}},stroke-width:2px,color:{{text}}
+  classDef next fill:{{accent}},stroke:{{accent}},color:{{badge-text}}
+  class A,R,Q,C stn
+  class M,G judge
+  class QL ring
+  class D,I side
+  class Y stop
+  class P next
+  linkStyle 0,1,2,3,4,5 stroke:{{accent}},stroke-width:8px
+  linkStyle 6 stroke:{{warn}},stroke-width:4px
+  linkStyle 7,8 stroke:{{accent}},stroke-width:3px
+  linkStyle 9 stroke:{{block}},stroke-width:2px,stroke-dasharray:4 4

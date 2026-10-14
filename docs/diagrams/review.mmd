@@ -1,0 +1,30 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Inside /tk:review
+  accDescr: Review reads what changed and sends it to the finders for each lens. Every finding carries a check anyone can run; a finding whose check fails goes to the audited-out log. Skeptics then try to refute the rest, one per seven findings, and three vote on any Block; refuted findings go to the log too. Survivors are fixed, and a verifier that is never the fixer checks each fix. A failed fix gets one more try; after two tries the fix is undone and you are asked.
+
+  %% Tiers from M2, the fixer-never-verifies rule from M3 and the two-try bound
+  %% from M5, all in .claude/skills/shared/hitl-loop.md.
+
+  C("What changed") --- F("Finders, one per lens<br/>code, security, UX, copy, plan, ...") --- K("Receipts<br/>each finding's check runs") --- S{{"Skeptics<br/>1 per 7 findings, 3 votes on a Block"}} --- X("Fix") --- V{{"Verifier<br/>never the fixer"}} --- OK("Committed")
+  V --- VL("↺ fix again<br/>up to 2 tries")
+  K -.- L("Audited-out log<br/>check failed or refuted")
+  S -.- L
+  VL -.- P("After 2 tries<br/>undone, you are asked")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef ring fill:{{warn-soft}},stroke:{{warn}},stroke-width:3px,color:{{text}}
+  classDef stop fill:{{block-soft}},stroke:{{block}},stroke-width:2px,color:{{text}}
+  classDef done fill:{{positive-soft}},stroke:{{positive}},stroke-width:2px,color:{{text}}
+  class C,F,K,X stn
+  class S,V judge
+  class VL ring
+  class L,P stop
+  class OK done
+  linkStyle 0,1,2,3,4,5 stroke:{{accent}},stroke-width:8px
+  linkStyle 6 stroke:{{warn}},stroke-width:4px
+  linkStyle 7,8,9 stroke:{{block}},stroke-width:2px,stroke-dasharray:4 4

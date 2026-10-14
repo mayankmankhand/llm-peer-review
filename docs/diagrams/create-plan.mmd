@@ -1,0 +1,32 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Inside /tk:create-plan
+  accDescr: Create-plan follows explore on its own. It reads the codebase map, the lessons and your project's plan gate, then writes the plan, giving every step a check that must fail before the work and pass after it. A lint confirms every check line can run. A plan critic with fresh eyes, given only the plan and the exploration summary, names the biggest gaps; they are fixed, for up to 2 rounds, and gaps from round 2 are carried to review. An HTML page shows the plan, and you approve it. Execute never starts on its own.
+
+  %% Facts from .claude/commands/create-plan.md (reads, check lines, lint, the
+  %% critic's 2 rounds and round-2 gaps) and M14 in hitl-stages.md (the gate).
+
+  A("/tk:create-plan<br/>follows explore") --- R("Reads the map, LESSONS.md<br/>and your plan gate") --- W("Writes the plan<br/>every step has a check that must fail first") --- L("Lint<br/>every check line can run") --- K{{"Plan critic<br/>fresh eyes: the plan and the summary only"}} --- H("HTML page of the plan") --- Y((("You<br/>approve")))
+  K --- KL("↺ fix the gaps<br/>up to 2 rounds")
+  KL -.- MC("Round-2 gaps<br/>carried to review")
+  Y -.- X("/tk:execute<br/>only when you say go")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef ring fill:{{warn-soft}},stroke:{{warn}},stroke-width:3px,color:{{text}}
+  classDef side fill:{{bg}},stroke:{{warn}},stroke-width:2px,color:{{text}}
+  classDef you fill:{{accent}},stroke:{{accent}},color:{{badge-text}},font-weight:bold
+  classDef next fill:{{bg}},stroke:{{accent}},stroke-width:3px,color:{{text}}
+  class A,R,W,L,H stn
+  class K judge
+  class KL ring
+  class MC side
+  class Y you
+  class X next
+  linkStyle 0,1,2,3,4,5 stroke:{{accent}},stroke-width:8px
+  linkStyle 6 stroke:{{warn}},stroke-width:4px
+  linkStyle 7 stroke:{{warn}},stroke-width:2px,stroke-dasharray:4 4
+  linkStyle 8 stroke:{{accent}},stroke-width:4px,stroke-dasharray:6 5

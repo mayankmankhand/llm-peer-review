@@ -5,8 +5,8 @@
 //
 //   node scripts/render-diagrams.js            render every docs/diagrams/*.mmd
 //   node scripts/render-diagrams.js <name>...  render only these (no .mmd suffix)
-//   node scripts/render-diagrams.js --preview  also write
-//                                              artifacts/html/diagrams-preview.html
+//   node scripts/render-diagrams.js --preview  also write a page of this run's
+//                                              images: artifacts/html/diagrams-preview.html
 //
 // Why images and not live Mermaid blocks: GitHub's phone app shows a Mermaid
 // block as raw code, and a large one shrinks past reading on a phone. An SVG
@@ -194,14 +194,13 @@ async function render(names, opts) {
   } finally {
     await browser.close();
   }
-  if (opts.preview) writePreview(palettes);
+  if (opts.preview) writePreview(palettes, names);
   return written;
 }
 
-// A self-contained page showing every image in both themes, each also inside
-// a phone-width frame: the surface the design critic judges.
-function writePreview(palettes) {
-  const names = listSources();
+// A self-contained page showing this run's images in both themes, each also
+// inside a phone-width frame: the surface the design critic judges.
+function writePreview(palettes, names) {
   const img = (name, theme) => {
     const file = path.join(REPO, IMAGE_DIR, name + '-' + theme + '.svg');
     return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').replace(/^<!--[^\n]*-->\n/, '') : '<p>missing</p>';

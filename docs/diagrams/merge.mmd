@@ -1,0 +1,26 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Inside /tk:merge
+  accDescr: You type merge with the pull requests in the order you choose. It first looks for landings made without it, then for each pull request brings the branch up to date and fixes the conflicts. Four checks run: the project's tests and three lost-work rules, one of them judged by a fresh decision checker. Any flag stops that pull request and asks you to fix it, keep it, land it as it is, or stop. When everything passes it lands locally, asks you once before landing on GitHub or GitLab, and moves to the next pull request.
+
+  %% Facts from .claude/commands/merge.md and the three rules in
+  %% .claude/skills/shared/merge-rules.md; the host landing asks per M9.
+
+  A("You type /tk:merge 241 242<br/>in the order you choose") --- O("Looks for landings<br/>made without /tk:merge") --- U("Brings the branch up to date<br/>and fixes the conflicts") --- K{{"Four checks<br/>tests and three lost-work rules"}} --- L("Lands it locally") --- H{{"Land on GitHub or GitLab?<br/>asks you once"}} --- N("Next pull request")
+  K --- D{{"Decision checker<br/>fresh eyes on contradicting decisions"}}
+  K -.- S("Any flag stops this PR<br/>fix, keep, land as is, or stop")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef stop fill:{{block-soft}},stroke:{{block}},stroke-width:2px,color:{{text}}
+  classDef done fill:{{positive-soft}},stroke:{{positive}},stroke-width:2px,color:{{text}}
+  class A,O,U,L stn
+  class K,H,D judge
+  class S stop
+  class N done
+  linkStyle 0,1,2,3,4,5 stroke:{{accent}},stroke-width:8px
+  linkStyle 6 stroke:{{accent}},stroke-width:3px
+  linkStyle 7 stroke:{{block}},stroke-width:2px,stroke-dasharray:4 4

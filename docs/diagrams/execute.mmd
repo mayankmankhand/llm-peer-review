@@ -1,0 +1,30 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: Inside /tk:execute
+  accDescr: Execute starts from your approved plan and records where the run starts. For every step it writes the step's check first, runs it before the work, where it must fail for the reason the plan stated, does the work, and runs it again, where it must pass. A failing step gets up to 3 fix attempts; still failing, the run stops and asks you. A step that builds a UI runs a design loop of up to 5 rounds for a new surface, 2 for an improved one. Each green step is committed, and after the last one the run hands off to review.
+
+  %% Facts from .claude/commands/execute.md (start commit, the check order, the
+  %% 3-attempt bound), M17 in hitl-stages.md and the M15 bound in design-rules.md.
+
+  A("Your approved plan") --- S("Records where the run starts") --- T("Writes the step's check first") --- B{{"Before the work<br/>the check must fail, for the stated reason"}} --- W("Does the work") --- F{{"After the work<br/>the check must pass"}} --- C("Commits the step") --- N("/tk:review")
+  C --- CL("↺ next step<br/>until every step is green")
+  F --- FL("↺ fix and rerun<br/>up to 3 attempts")
+  FL -.- X("Still failing:<br/>stops and asks you")
+  W --- DL("↺ design loop, UI steps<br/>up to 5 rounds new, 2 improve")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  classDef ring fill:{{warn-soft}},stroke:{{warn}},stroke-width:3px,color:{{text}}
+  classDef stop fill:{{block-soft}},stroke:{{block}},stroke-width:2px,color:{{text}}
+  classDef next fill:{{accent}},stroke:{{accent}},color:{{badge-text}}
+  class A,S,T,W,C stn
+  class B,F judge
+  class CL,FL,DL ring
+  class X stop
+  class N next
+  linkStyle 0,1,2,3,4,5,6 stroke:{{accent}},stroke-width:8px
+  linkStyle 7,8,10 stroke:{{warn}},stroke-width:4px
+  linkStyle 9 stroke:{{block}},stroke-width:2px,stroke-dasharray:4 4

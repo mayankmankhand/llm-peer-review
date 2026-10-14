@@ -107,6 +107,36 @@ check('every diagram source has accTitle and accDescr', unnamed.length === 0, un
   }
 })();
 
+// ---- the tour ------------------------------------------------------------------
+
+// docs/HOW-IT-WORKS.md shows every diagram in a <picture>: a dark source the
+// viewer's theme picks, a light <img> with alt text for everyone else, and a
+// short plain-text list under it (at least three items before the next
+// heading), which is what a screen reader or a text-only viewer gets.
+const TOUR = 'docs/HOW-IT-WORKS.md';
+const PLANNED = ['overview', 'explore', 'create-plan', 'execute', 'review', 'document', 'merge', 'hooks', 'side-trips', 'files'];
+(function tourCase() {
+  const file = path.join(REPO, TOUR);
+  if (!fs.existsSync(file)) { check('the tour embeds all ten diagrams with alt text and a dark source', false, TOUR + ' is missing'); return; }
+  const text = fs.readFileSync(file, 'utf8');
+  const embedded = new Map();
+  for (const m of text.matchAll(/<picture>([\s\S]*?)<\/picture>([\s\S]*?)(?=\n#{1,6}\s|<picture>|$)/g)) {
+    const dark = (m[1].match(/<source\s+media="\(prefers-color-scheme: dark\)"\s+srcset="images\/diagrams\/([a-z0-9-]+)-dark\.svg"/) || [])[1];
+    const img = m[1].match(/<img\s+src="images\/diagrams\/([a-z0-9-]+)-light\.svg"\s+alt="([^"]*)"/);
+    const items = (m[2].match(/^\s*(?:[-*]|\d+\.)\s+\S/gm) || []).length;
+    if (img) embedded.set(img[1], { dark: dark === img[1], alt: img[2].trim().length >= 20, items });
+  }
+  const problems = [];
+  for (const name of new Set([...PLANNED, ...listSources(REPO)])) {
+    const e = embedded.get(name);
+    if (!e) { problems.push(name + ' is not embedded'); continue; }
+    if (!e.dark) problems.push(name + ' has no matching dark source');
+    if (!e.alt) problems.push(name + ' has no real alt text');
+    if (e.items < 3) problems.push(name + ' has ' + e.items + ' list items under it, not 3 or more');
+  }
+  check('the tour embeds all ten diagrams with alt text and a dark source', problems.length === 0, problems.join('; '));
+})();
+
 // ---- links -------------------------------------------------------------------
 
 // The human-readable docs: README, the root guides and everything under docs/.

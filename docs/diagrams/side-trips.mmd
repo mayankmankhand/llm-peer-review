@@ -1,0 +1,32 @@
+---
+config:
+  layout: elk
+---
+flowchart TB
+  accTitle: The side trips off the main line
+  accDescr: Four side trips leave the main line. Worktree, before explore, makes a parallel folder and branch whose work lands with merge. Index writes the codebase map and runs on its own when the map is missing or old. The GPT or Gemini debate, from a plan or a review, argues for up to 3 rounds and ends in a verdict of agreed and disagreed points and ranked actions, which go through the same audit as review findings. Peer review takes findings you paste from another model and sorts them into real, opinion or dismissed.
+
+  %% Facts from .claude/commands/worktree.md, index.md, ask-gpt.md (3 rounds,
+  %% the verdict, actions audited per M2), peer-review.md and M12 and M14.
+
+  WT("/tk:worktree<br/>a parallel folder and branch") -.- E("/tk:explore") --- P("/tk:create-plan") --- X("/tk:execute") --- R("/tk:review") --- D("/tk:document")
+  WT -.- MG("Lands later<br/>with /tk:merge")
+  E --- IX("/tk:index<br/>the codebase map, on its own when old")
+  P -.- G("/tk:ask-gpt or /tk:ask-gemini<br/>up to 3 rounds")
+  R -.- G
+  G --- V("Verdict: agreed, disagreed,<br/>ranked actions")
+  V --- AU("Actions go through<br/>the same audit as review")
+  R -.- PR("/tk:peer-review<br/>paste another model's findings")
+  PR --- PV("Real, opinion<br/>or dismissed")
+
+  classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
+  classDef side fill:{{bg}},stroke:{{warn}},stroke-width:2px,color:{{text}}
+  classDef judge fill:{{accent-soft}},stroke:{{accent}},stroke-width:2px,color:{{text}}
+  class E,P,X,R,D stn
+  class WT,MG,IX,G,PR side
+  class V,AU,PV judge
+  linkStyle 1,2,3,4 stroke:{{accent}},stroke-width:8px
+  linkStyle 0,5 stroke:{{warn}},stroke-width:3px,stroke-dasharray:4 4
+  linkStyle 6 stroke:{{accent}},stroke-width:3px
+  linkStyle 7,8,11 stroke:{{warn}},stroke-width:3px,stroke-dasharray:4 4
+  linkStyle 9,10,12 stroke:{{warn}},stroke-width:3px
