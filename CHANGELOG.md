@@ -4,19 +4,33 @@
 
 ## Unreleased - No False Alarm From Main
 
-**Additive on top of v8.0.0.** Issues #243, #238 and #235. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working.
+**Additive on top of v8.0.0.** Issues #243, #238, #235, #245 and #244. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole.
 
 ### Fixed
 
 - **A merge of main no longer blocks the push on main's settings change.** (#243) A branch that merged the default branch carried that branch's commits in its push, so a `.claude/settings.json` change already reviewed on main blocked a branch that never touched the file. The tripwire now counts a settings change only when the file differs between the branch and where it forked from the remote's default branch, and the block shows just that difference: the rows the branch adds. A branch's own change still blocks, and so does every case the check cannot settle: no default branch on the remote, a history with two fork points, or a copy of main older than what the branch merged.
 - **The ledger's hand-off files are caught by name again.** (#238) `/document` had been writing its hand-off as `rows.json` and the error-analysis backfill as `backfill.json`, names the tripwire's never-push list does not hold. They are now `correction-rows.json` and `correction-backfill-rows.json`, both on the list and in the gitignore ledger block, so one that lands inside a repo by mistake cannot be pushed.
 - **The correction scan sees messages typed while Claude works.** (#235) Claude Code stores a message typed mid-turn as a queued attachment, not as a user message, so `correction-ledger.js --candidates` never offered one, and a mid-turn redirect is often exactly a correction. The scan now reads it like any other message, taking its sender stamp from inside the attachment: a subagent's report or a task notice queued the same way is still dropped, and one with no stamp is still kept. A short reply typed mid-turn still meets the same length gate, unless it answers an interrupt. On this repo's transcripts since 2026-10-01 the scan kept all 94 earlier candidates and added 15, every one a message typed mid-turn.
+- **A copy-install rerun removes files the toolkit dropped.** (#245) Re-running `setup.sh` or `setup.ps1` kept `.claude/agents/review-finder.md`, which 8.0.0 removed, so on a copy-install it still answered a dispatch by name that reaches nothing on the plugin. Both installers now read the plugin's own list of dropped files, `scripts/historical-managed-paths.txt`, and remove each `.claude/` file the toolkit no longer ships and no older cleanup handles: today `review-finder.md`, `dev-lead-1.md`, `ui-spec.md` and `output-template.md`. The pre-flight names each path before anything changes, each file is backed up first, only a regular file at that exact path goes, and without the list file nothing is removed.
+
+### Added
+
+- **`/tk:upgrade` flags a file of yours too big to paste whole (C-19).** (#244) The stages paste six of your files from `.claude/toolkit/` whole, and Claude Code cuts any pasted output over about 30,000 bytes to a 2 KB preview without saying so. C-19 runs on every upgrade, reads which files are pasted from the plugin's own commands and skills, and reports each one over 28,500 bytes, the margin the toolkit holds its own pasted files to. It measures size only and never reads the text. Its fix shortens the file without dropping a rule, through the normal upgrade loop; the rerun checks the size, so read the shortened file once yourself.
+
+### Upgrading
+
+- `/tk:upgrade` runs C-19 on every upgrade. A project whose pasted files are all at or under 28,500 bytes sees nothing.
+- Other editors: re-run `setup.sh` or `setup.ps1`. The pre-flight lists each dropped file it will remove, `review-finder.md` among them, and backs each one up, so the 8.0.0 advice to delete `review-finder.md` by hand no longer applies.
 
 ### Why
 
 Every false block makes "push anyway" more automatic for the real one, and a downstream project overrode two in one day, on two branches, for one change already on main. The tripwire's never-push check already treated published history as no news; the settings check now does the same, comparing content rather than which commits are on main, because the merge commit itself shows main's change.
 
 A message typed while Claude is still working is often the moment you saw it heading the wrong way, and the ledger never counted one. In the #228/#230 cycle the scan found nothing at all, because that cycle's one correction was typed mid-turn.
+
+A copy-install and the plugin should behave the same for the same command, and a leftover agent made them differ: the 8.0.0 notes had to ask copy-install users to delete it by hand. Reading the plugin's own list means the next file the toolkit drops leaves both installs the same way, with no installer edit.
+
+A file cut to its first 2 KB still runs, so nothing fails: the stage just skips a gate or an always-ask rule near the end. The loop rules themselves were over the limit from 7.6.3 to 8.0.0 and nothing noticed. C-19 holds your pasted files to the guard the toolkit already holds its own to.
 
 ## v8.0.0 - Two Removals, Rules That Fit (2026-10-13)
 
