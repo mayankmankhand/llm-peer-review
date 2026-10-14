@@ -357,7 +357,8 @@ function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs,
 //
 // 1. The review page is one page per BRANCH. Callers still pass the bare name
 //    `review`: on the default branch it stays `review`, on any other branch it
-//    becomes `review-<branch>`, and a detached checkout gets
+//    becomes `review-<branch>` (plus a short hash when the branch's name had
+//    to be sanitized), and a detached checkout gets
 //    `review-detached-<short sha>`. One shared page is wrong for findings: a
 //    run resolves an open finding on a file it reviewed and did not find
 //    again, and a sibling worktree's copy of that file never had the other
@@ -416,8 +417,20 @@ function standingPage(name, branch) {
   }
   const main = defaultBranch();
   if (!main || b === main) return { name: name, label: '' };
-  return { name: 'review-' + safeFileName(b), label: b };
+  // Two branches never share a page (review of #237, R3): a name the sanitizer
+  // changed (`feature/x` would meet `feature-x`) or one shaped like the
+  // detached form gets a short hash of the branch's real name appended.
+  const safe = safeFileName(b);
+  const tag = (safe !== b || /^detached-/.test(b))
+    ? '-' + require('crypto').createHash('sha1').update(b).digest('hex').slice(0, 6) : '';
+  return { name: 'review-' + safe + tag, label: b };
 }
+
+// The file a branch's page lives in, or '' for an unchanged name. A branch
+// name can match a name older timestamped pages were recorded under (a branch
+// called `orchestrator` meets `review-orchestrator`), so a branch page's index
+// lookup accepts only rows recorded for this exact file (review of #237, R3).
+function standingFileOf(page) { return page.label ? safeFileName(page.name) + '.html' : ''; }
 
 // True when an --out-dir resolves to this working copy's own artifacts/html,
 // the folder every toolkit prompt renders a standing page into. Both sides go
@@ -498,7 +511,12 @@ if (indexModes) {
 
 // A bare `review` means this branch's page in the index modes too (issue #237),
 // so a lookup or a record keys the same page the render wrote.
-if (opts.indexAdd || opts.indexUrl) opts.name = standingPage(opts.name).name;
+let standingFile = '';
+if (opts.indexAdd || opts.indexUrl) {
+  const page = standingPage(opts.name);
+  opts.name = page.name;
+  standingFile = standingFileOf(page);
+}
 
 if (opts.indexAdd) {
   if (!opts.name) die('--index-add requires --name');
@@ -545,11 +563,14 @@ if (opts.indexAdd) {
 
 // Scan forward and keep the last match: the newest record for a name wins,
 // which is what makes a re-published stable artifact resolve to its current
-// page. '' when the name has no record.
-function newestUrl(name) {
+// page. '' when the name has no record. With `fileName`, only rows recorded
+// for a local file of that name count (a branch's page; see standingFileOf).
+function newestUrl(name, fileName) {
   let found = '';
   for (const rec of readIndexRows()) {
-    if (rec.name === name && typeof rec.url === 'string' && rec.url) found = rec.url;
+    if (rec.name !== name || typeof rec.url !== 'string' || !rec.url) continue;
+    if (fileName && (typeof rec.local !== 'string' || rec.local.split(/[\\/]/).pop() !== fileName)) continue;
+    found = rec.url;
   }
   return found;
 }
@@ -575,13 +596,13 @@ if (opts.standing) {
     else if (prior.state === 'ok') open = openFindings(prior.data).length;
   }
   process.stdout.write(JSON.stringify({ name: page.name, file: file, exists: exists,
-                                        open: open, url: newestUrl(page.name) }) + '\n');
+                                        open: open, url: newestUrl(page.name, standingFileOf(page)) }) + '\n');
   process.exit(0);
 }
 
 if (opts.indexUrl) {
   if (!opts.name) die('--index-url requires --name');
-  const found = newestUrl(opts.name);
+  const found = newestUrl(opts.name, standingFile);
   if (found) process.stdout.write(found + '\n');
   process.exit(0);
 }

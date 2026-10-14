@@ -2099,6 +2099,59 @@ function submoduleRootTest() {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Review of #237, R3: a branch's page name must be its own. Sanitizing turns
+// `feature/x` and `feature-x` into one file name, a branch named
+// `detached-<sha>` would take a detached checkout's page, and a branch named
+// `orchestrator` lands on `review-orchestrator`, a name older timestamped
+// reviews already recorded, so the lookup handed back one of their pages.
+// ---------------------------------------------------------------------------
+function branchNameCollisionTest() {
+  console.log('\nbranch page names stay unique (review of #237, R3)');
+  const root = tmpdir('237names');
+  const main = path.join(root, 'main');
+  const pages = path.join(main, 'artifacts', 'html');
+  fs.mkdirSync(main);
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  function run(cwd, args) {
+    const r = spawnSync('node', [SCRIPT].concat(args), { cwd: cwd, encoding: 'utf-8' });
+    return { status: r.status, out: (r.stdout || '').trim(), err: r.stderr || '' };
+  }
+  const standing = function (branch) {
+    const r = run(main, ['--standing', '--name', 'review', '--branch', branch]);
+    try { return JSON.parse(r.out); } catch (e) { return { unparsed: r.out + r.err }; }
+  };
+  try {
+    git(main, ['init', '-q', '-b', 'main']);
+    git(main, ['-c', 'user.email=t@example.com', '-c', 'user.name=Test', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    const slash = standing('feature/x');
+    const hyphen = standing('feature-x');
+    check('237 names: feature/x and feature-x get different pages',
+          typeof slash.name === 'string' && typeof hyphen.name === 'string' && slash.name !== hyphen.name,
+          JSON.stringify([slash.name, hyphen.name]));
+    const sha = git(main, ['rev-parse', '--short', 'HEAD']);
+    const lookalike = standing('detached-' + sha);
+    check('237 names: a branch named detached-<sha> does not take a detached checkout\'s page',
+          typeof lookalike.name === 'string' && lookalike.name !== 'review-detached-' + sha, JSON.stringify(lookalike));
+
+    // An older timestamped review recorded under the name the branch maps to.
+    run(main, ['--index-add', '--type', 'review', '--name', 'review-orchestrator',
+               '--local', path.join(pages, 'review-orchestrator-2026-01-01-000000.html'), '--url', 'https://example.com/old']);
+    const wt = path.join(root, 'wt');
+    git(main, ['worktree', 'add', '-q', '-b', 'orchestrator', wt]);
+    const lookup = run(wt, ['--index-url', '--name', 'review']).out;
+    const orch = standing('orchestrator');
+    check('237 names: a branch page ignores older records under the same name',
+          lookup === '' && orch.url === '', JSON.stringify({ lookup: lookup, standing: orch }));
+    git(main, ['worktree', 'remove', '--force', wt]);
+  } catch (e) {
+    check('branch name test set up a git repo', false, e.message);
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 hardeningTests();
 themeContrastTests();
 findingContractTests();
@@ -2107,6 +2160,7 @@ cycle162ReviewTests();
 cycleStandingPageTests();
 issue237Tests();
 submoduleRootTest();
+branchNameCollisionTest();
 
 console.log('');
 if (failures.length === 0) {
