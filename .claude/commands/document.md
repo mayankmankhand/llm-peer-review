@@ -244,7 +244,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 
-Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/document-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`. Then run the helper from the project root with that folder as `<render-dir>`. The cycle summary is a **standing page**: `--stable` writes exactly `artifacts/html/cycle.html` and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
+Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/document-render.XXXXXX`, made and used per "Temporary folders" in `.claude/skills/shared/html-outputs.md`. Then run the helper from the project root with that folder as `<render-dir>`. The cycle summary is a **standing page**: `--stable` writes exactly the main copy's `artifacts/html/cycle.html`, from a worktree too, so every working copy adds to one log, and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
 Check the publish gate first (see **"Render for the viewport"** in `.claude/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below.
 
@@ -268,7 +268,7 @@ After the HTML is written (or deliberately skipped), write the current `HEAD` SH
 
 **This must be the final action of `/document`.** The marker is a high-water mark meaning "every commit up to here is already summarized." Writing it last guarantees that an interrupted run re-summarizes the same window (a harmless duplicate) rather than skipping work permanently. Never write the marker before the summary exists.
 
-**The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree. Never read the window from the page, and never read the log from the marker.
+**The marker and the standing page remember different things, on purpose.** `.last-cycle` owns one fact and only that fact: where the git window starts. The page's data island owns what the running log already contains. Because the two never answer the same question, they cannot disagree. Never read the window from the page, and never read the log from the marker. The marker belongs to the working copy and the page to the whole repository, so after a worktree's branch lands, the main copy's next run summarizes those commits again and the log can hold a second entry for them: the harmless duplicate, never a skipped window.
 
 ## HTML Output Rules
 
