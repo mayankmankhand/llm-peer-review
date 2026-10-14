@@ -114,7 +114,11 @@
 //
 // Output: writes <out-dir>/<name>-<timestamp>.html, or <out-dir>/<name>.html with
 //   --stable (out-dir defaults to artifacts/html under the CURRENT working
-//   directory, i.e. the project root), and prints that path to stdout. Only the
+//   directory, i.e. the project root), and prints that path to stdout. The two
+//   standing pages bound for that folder are the exception: a --stable review
+//   or cycle page is written to the MAIN copy's artifacts/html from any
+//   worktree, and a bare `--name review` becomes this branch's page (issue
+//   #237; see standingPage below). Only the
 //   path goes to stdout (callers capture it to hand to open-artifact.sh);
 //   diagnostics go to stderr. Exit 0 on success, 1 on any error.
 //
@@ -330,6 +334,86 @@ function underRoot(abs, root, platform) {
 }
 function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs, WORK_ROOT); }
 
+// ==========================================================================
+// Standing pages per branch (issue #237). Cycles running in parallel
+// worktrees all published to one standing review page, and a worktree render
+// read the page it replaced from its own artifacts/html/, which is empty in a
+// fresh worktree, so the shared page lost its open findings unless someone
+// copied the newest one in by hand. Two rules close that:
+//
+// 1. The review page is one page per BRANCH. Callers still pass the bare name
+//    `review`: on the default branch it stays `review`, on any other branch it
+//    becomes `review-<branch>`, and a detached checkout gets
+//    `review-detached-<short sha>`. One shared page is wrong for findings: a
+//    run resolves an open finding on a file it reviewed and did not find
+//    again, and a sibling worktree's copy of that file never had the other
+//    branch's change, so it would mark that branch's findings fixed. The rule
+//    covers the render, --index-url and --index-add alike, so every lookup
+//    and every record keys the page the render wrote. No other name changes.
+// 2. The standing review and cycle pages live in the MAIN copy's
+//    artifacts/html/ (REPO_ROOT, the root the index already uses), read and
+//    written there whichever working copy renders them. A worktree folder is
+//    deleted when its cycle ends, so a page inside it, or an index row
+//    pointing into it, outlives nothing; the main copy outlives every
+//    worktree, which is also how /merge finds a landed branch's page. The
+//    cycle page keeps its one name: it is a log of past cycles, so parallel
+//    cycles add to it, and there is no finding for one to close falsely.
+//
+// Rule 2 fires only for a render bound for the working copy's own
+// artifacts/html (the default, or the prompts' explicit
+// `--out-dir artifacts/html`); any other --out-dir keeps its name and folder.
+// When the default branch cannot be told (no origin/HEAD, no main, no master)
+// or this is not a repository, the name stays `review`, as before.
+//
+// Known limit: two renders of the shared cycle page in the same second both
+// read the same predecessor, and the later write wins, dropping the earlier
+// run's entry. A render takes well under a second, so this is documented
+// rather than locked.
+function gitRead(args) {
+  const r = require('child_process').spawnSync('git', args,
+    { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return r.status === 0 ? (r.stdout || '').trim() : null; // null: failed; '': ok, no output
+}
+
+// The default branch, found the way merge-check.js finds it: the local name
+// of origin/HEAD, else `main`, else `master`; '' when none resolves.
+function defaultBranch() {
+  const head = gitRead(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  if (head) return head.replace(/^[^/]+\//, '');
+  for (const b of ['main', 'master']) {
+    if (gitRead(['show-ref', '--verify', '--quiet', 'refs/heads/' + b]) !== null) return b;
+  }
+  return '';
+}
+
+// The same sanitizing the render applies to --name, so a branch's page name is
+// one string in the file name, the index and the lookup alike.
+function safeFileName(n) { return n.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_'); }
+
+// Which page a bare `review` means here: { name, label }, where label is the
+// branch to show in the page title ('' when the name is unchanged). `branch`
+// names a branch other than the current one.
+function standingPage(name, branch) {
+  if (name !== 'review') return { name: name, label: '' };
+  let b = branch || gitRead(['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  if (!b) {
+    const sha = gitRead(['rev-parse', '--short', 'HEAD']);
+    return sha ? { name: 'review-detached-' + sha, label: 'detached ' + sha } : { name: name, label: '' };
+  }
+  const main = defaultBranch();
+  if (!main || b === main) return { name: name, label: '' };
+  return { name: 'review-' + safeFileName(b), label: b };
+}
+
+// True when an --out-dir resolves to this working copy's own artifacts/html,
+// the folder every toolkit prompt renders a standing page into. Both sides go
+// through realpath, as in underRoot, so a root reached through a symlink
+// still matches.
+function isStandardDir(outDir) {
+  return pathKey(path.resolve(realOrSelf(process.cwd()), outDir)) ===
+         pathKey(path.join(realOrSelf(WORK_ROOT), 'artifacts', 'html'));
+}
+
 // Put the stamp on line 1 of one file, replacing an existing stamp rather
 // than adding a second, and leaving everything after it byte-identical.
 // Returns true when the file carries the stamp, false when it could not be
@@ -396,6 +480,10 @@ if (indexModes) {
         '); run the render and the index step as separate commands');
   }
 }
+
+// A bare `review` means this branch's page in the index modes too (issue #237),
+// so a lookup or a record keys the same page the render wrote.
+if (opts.indexAdd || opts.indexUrl) opts.name = standingPage(opts.name).name;
 
 if (opts.indexAdd) {
   if (!opts.name) die('--index-add requires --name');
@@ -504,7 +592,21 @@ if (!opts.outDir) die('--out-dir given without a directory');
 // Distinct names can collapse to the same prefix (e.g. "a/b" and "a-b" both
 // become "a-b"); the -N timestamp guard below is the backstop against collisions
 // (in --stable mode there is no guard: overwriting is the intended behavior).
-const safeName = opts.name.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_');
+//
+// A standing review or cycle page bound for this working copy's artifacts/html
+// is read and written in the main copy's instead, and a bare `review` becomes
+// this branch's page (issue #237; the rules sit beside standingPage above).
+let pageDir = path.resolve(process.cwd(), opts.outDir);
+let branchLabel = '';
+if (opts.stable && (opts.shell === 'review' || opts.shell === 'document') && isStandardDir(opts.outDir)) {
+  pageDir = path.join(REPO_ROOT, 'artifacts', 'html');
+  if (opts.shell === 'review') {
+    const page = standingPage(opts.name);
+    opts.name = page.name;
+    branchLabel = page.label;
+  }
+}
+const safeName = safeFileName(opts.name);
 if (!safeName) die('--name produced an empty filename');
 
 // Validate the shell against the allowlist before it is used to build a path.
@@ -1429,6 +1531,15 @@ function markWhatChanged(data, prior) {
 // The review contract runs FIRST: it reads each receipt's output off disk, and
 // the strip below would rewrite those paths out from under it.
 if (opts.shell === 'review') {
+  // A branch's page says which branch it is (issue #237), in the heading and in
+  // the <title> that names the hosted page, so several pages in the gallery do
+  // not all read "Review". A payload whose title already ends with the branch
+  // (copied from the last page) is left as it is rather than doubled.
+  if (branchLabel) {
+    const base = (typeof parsed.title === 'string' && parsed.title.trim()) ? parsed.title.trim() : 'Review';
+    const suffix = ' - ' + branchLabel;
+    parsed.title = base.slice(-suffix.length) === suffix ? base : base + suffix;
+  }
   // Three flags are the renderer's to set and never the payload's. A payload
   // that arrives carrying them is stripped before anything reads them, or
   // `carried: true` beside an inline stdout would walk straight past the
@@ -1455,7 +1566,7 @@ if (opts.shell === 'review') {
   // rather than two.
   let prior = { state: 'none' };
   if (opts.stable) {
-    prior = priorPayload(path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+    prior = priorPayload(path.join(pageDir, safeName + '.html'));
     carryForward(parsed, prior);
   }
   applyReviewContract(parsed);
@@ -1469,7 +1580,7 @@ if (opts.shell === 'review') {
 // is derived from outDir + safeName exactly as above, so it follows the --name
 // the caller passed (`cycle`) rather than hardcoding a filename.
 if (opts.shell === 'document' && opts.stable) {
-  const priorCycle = priorPayload(path.join(path.resolve(process.cwd(), opts.outDir), safeName + '.html'));
+  const priorCycle = priorPayload(path.join(pageDir, safeName + '.html'));
   carryCycleLog(parsed, priorCycle);
   markCycleChanged(parsed, priorCycle);
 }
@@ -1598,8 +1709,9 @@ const ts = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()
 
 // path.resolve handles both relative (against the cwd, i.e. the project root)
 // and absolute --out-dir values. --out-dir is a trusted local argument; only
-// --name needed sanitizing above.
-const outDir = path.resolve(process.cwd(), opts.outDir);
+// --name needed sanitizing above. pageDir is that folder, or the main copy's
+// artifacts/html for a standing review or cycle page (issue #237).
+const outDir = pageDir;
 fs.mkdirSync(outDir, { recursive: true });
 
 let outPath;

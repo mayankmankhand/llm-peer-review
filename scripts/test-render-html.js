@@ -1894,12 +1894,151 @@ function cycleStandingPageTests() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Issue #237: cycles running in parallel worktrees overwrote one standing
+// page, and a worktree render started from nothing because the page it
+// replaced was read from the worktree's own (empty) artifacts/html/. The
+// review page is now one page per branch and the cycle page one shared log,
+// and both live in the MAIN copy's artifacts/html/ whichever working copy
+// renders them, so a removed worktree takes neither with it.
+// Own temp repo with a real branch worktree, and every command runs inside
+// it, so nothing here can reach this repository's own artifacts/html/; the
+// last case proves that rather than assuming it.
+// ---------------------------------------------------------------------------
+function issue237Tests() {
+  console.log('\nstanding pages per branch, kept in the main copy (issue #237)');
+  const realDir = path.join(REPO, 'artifacts', 'html');
+  function realState() {
+    const idx = path.join(realDir, 'index.jsonl');
+    const stat = function (f) { const p = path.join(realDir, f); return fs.existsSync(p) ? fs.statSync(p).mtimeMs : -1; };
+    return JSON.stringify({
+      indexLines: fs.existsSync(idx) ? fs.readFileSync(idx, 'utf-8').split('\n').length : -1,
+      review: stat('review.html'), cycle: stat('cycle.html')
+    });
+  }
+  const realBefore = realState();
+
+  const root = tmpdir('237');
+  const main = path.join(root, 'main');
+  const pages = path.join(main, 'artifacts', 'html');
+  fs.mkdirSync(main);
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  function run(cwd, args) {
+    const r = spawnSync('node', [SCRIPT].concat(args), { cwd: cwd, encoding: 'utf-8' });
+    return { status: r.status, out: (r.stdout || '').trim(), err: r.stderr || '' };
+  }
+  let n = 0;
+  function renderIn(cwd, shell, name, data, extraArgs) {
+    const dataPath = path.join(root, 'in-' + (++n) + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    return run(cwd, ['--shell', shell, '--name', name, '--stable', '--data', dataPath].concat(extraArgs || []));
+  }
+  const island = function (file) { return JSON.parse(dataIsland(fs.readFileSync(file, 'utf-8'))); };
+  const review = function (what) {
+    return { title: 'Review', lenses: ['code'], reviewedFiles: ['a.js'],
+             groups: [{ label: 'code', findings: [{ id: 'R1', severity: 'warn', specialist: 'code',
+               what: what, fix: 'Fix it.', file: { relPath: 'a.js', line: 1 } }] }] };
+  };
+  const cycle = function (title) {
+    return { title: title, pill: 'v1', subtitle: '2026-10-14 &middot; window <code>a..b</code>', commitCount: 1 };
+  };
+
+  try {
+    git(main, ['init', '-q', '-b', 'main']);
+    git(main, ['config', 'user.email', 't@example.com']);
+    git(main, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n');
+    git(main, ['add', '.']);
+    git(main, ['commit', '-qm', 'init']);
+    const wt = path.join(root, 'wt');
+    git(main, ['worktree', 'add', '-q', '-b', 'wt-237', wt]);
+    const branchPage = path.join(pages, 'review-wt-237.html');
+
+    // The default branch keeps today's page and name.
+    const onMain = renderIn(main, 'review', 'review', review('Main finding.'));
+    check('237: the default branch still writes review.html',
+          onMain.status === 0 && onMain.out === path.join(pages, 'review.html'), onMain.out + onMain.err);
+    const mainBytes = fs.existsSync(path.join(pages, 'review.html')) ? fs.readFileSync(path.join(pages, 'review.html'), 'utf-8') : '';
+
+    // A branch writes its own page, into the main copy.
+    const onBranch = renderIn(wt, 'review', 'review', review('Branch finding.'));
+    check('237: a worktree review render writes review-<branch>.html in the main copy',
+          onBranch.status === 0 && onBranch.out === branchPage &&
+          !fs.existsSync(path.join(wt, 'artifacts', 'html')), onBranch.out + onBranch.err);
+    check('237: the main copy\'s review.html is untouched by a worktree render',
+          mainBytes !== '' && fs.readFileSync(path.join(pages, 'review.html'), 'utf-8') === mainBytes);
+    const titled = fs.existsSync(branchPage) ? fs.readFileSync(branchPage, 'utf-8') : '';
+    check('237: a branch page names its branch in its title',
+          titled.indexOf('<title>Review - wt-237</title>') !== -1, (titled.match(/<title>[^<]*<\/title>/) || ['(none)'])[0]);
+    renderIn(wt, 'review', 'review', review('Branch finding.'));
+    const again = fs.existsSync(branchPage) ? fs.readFileSync(branchPage, 'utf-8') : '';
+    check('237: a second render on the branch names the branch once',
+          again.indexOf('<title>Review - wt-237</title>') !== -1, (again.match(/<title>[^<]*<\/title>/) || ['(none)'])[0]);
+
+    // The prompts pass --out-dir artifacts/html explicitly; it must behave like
+    // the default. Any other folder keeps the plain name and the given folder.
+    const explicitStd = renderIn(wt, 'review', 'review', review('Branch finding.'), ['--out-dir', 'artifacts/html']);
+    check('237: --out-dir artifacts/html given explicitly behaves like the default',
+          explicitStd.out === branchPage, explicitStd.out + explicitStd.err);
+    const elsewhere = path.join(root, 'elsewhere');
+    const explicitTmp = renderIn(wt, 'review', 'review', review('Branch finding.'), ['--out-dir', elsewhere]);
+    check('237: an explicit --out-dir keeps the plain name and folder',
+          explicitTmp.out === path.join(elsewhere, 'review.html'), explicitTmp.out + explicitTmp.err);
+
+    // The cycle page is one shared log: a worktree's render reads the main
+    // copy's page and adds to it.
+    renderIn(main, 'document', 'cycle', cycle('Main Cycle'));
+    const wtCycle = renderIn(wt, 'document', 'cycle', cycle('Worktree Cycle'));
+    const log = wtCycle.out === path.join(pages, 'cycle.html') ? island(wtCycle.out).cycleLog : null;
+    check('237: a worktree cycle render keeps the main copy\'s cycle log',
+          Array.isArray(log) && log.length >= 1 && log[0].line === 'Main Cycle',
+          wtCycle.out + ' ' + JSON.stringify(log) + wtCycle.err);
+
+    // The index keys a branch's page by the branch's name, from both sides,
+    // and a worktree may record the main-copy file it rendered.
+    const addWt = run(wt, ['--index-add', '--type', 'review', '--name', 'review',
+                           '--local', branchPage, '--url', 'https://example.com/wt']);
+    const addMain = run(main, ['--index-add', '--type', 'review', '--name', 'review',
+                               '--local', path.join(pages, 'review.html'), '--url', 'https://example.com/main']);
+    const rows = fs.readFileSync(path.join(pages, 'index.jsonl'), 'utf-8').trim().split('\n').map(JSON.parse);
+    const fromWt = run(wt, ['--index-url', '--name', 'review']).out;
+    const fromMain = run(main, ['--index-url', '--name', 'review']).out;
+    check('237: --index-add and --index-url with --name review use the branch\'s name',
+          addWt.status === 0 && addMain.status === 0 &&
+          rows.some(function (r) { return r.name === 'review-wt-237' && r.url === 'https://example.com/wt'; }) &&
+          fromWt === 'https://example.com/wt' && fromMain === 'https://example.com/main',
+          JSON.stringify({ addWt: addWt.err, fromWt: fromWt, fromMain: fromMain, names: rows.map(function (r) { return r.name; }) }));
+
+    // A detached checkout never writes the main page.
+    const det = path.join(root, 'det');
+    git(main, ['worktree', 'add', '-q', '--detach', det, 'HEAD']);
+    const sha = git(det, ['rev-parse', '--short', 'HEAD']);
+    const onDetached = renderIn(det, 'review', 'review', review('Detached finding.'));
+    check('237: a detached checkout writes review-detached-<short sha>.html',
+          onDetached.out === path.join(pages, 'review-detached-' + sha + '.html'), onDetached.out + onDetached.err);
+    git(main, ['worktree', 'remove', '--force', det]);
+
+    // The point of the main-copy home: removing the worktree keeps the page.
+    git(main, ['worktree', 'remove', '--force', wt]);
+    check('237: a branch page survives git worktree remove', fs.existsSync(branchPage));
+  } catch (e) {
+    check('issue 237 tests ran without an exception', false, e.message);
+  }
+
+  check('237: this repository\'s own artifacts/html is untouched by the cases',
+        realState() === realBefore, realBefore + ' -> ' + realState());
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 hardeningTests();
 themeContrastTests();
 findingContractTests();
 issue162Tests();
 cycle162ReviewTests();
 cycleStandingPageTests();
+issue237Tests();
 
 console.log('');
 if (failures.length === 0) {
