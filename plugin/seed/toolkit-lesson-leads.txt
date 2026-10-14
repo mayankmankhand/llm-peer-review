@@ -141,6 +141,7 @@ Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small
 DRY refactors create duplication-of-the-other-kind bugs.
 Define a judgement gate once, in countable terms, consistent with its governing rule.
 Diagnostic output to stderr when stdout is captured by another LLM.
+Diff a standing page's open items before and after a render: a seeded item from another plan resolves whenever the plan lens runs.
 Don't micro-tag individual bullets.
 Don't state a cited past lesson as if it happened this session.
 Don't trust merged review severities without verifying the source lines.
@@ -151,6 +152,7 @@ Enforce invariants in code, not just comments - convention-only constraints erod
 Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.
 Extending a running rollup beats adding a competing one.
 FS-probes for "is X installed" should fall through, not be authoritative.
+Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.
 Fill a plan's Outcomes by replacing the template placeholder, not inserting above it.
 Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.
 Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.
@@ -172,6 +174,7 @@ Isolate a headless test session's whole home, not only its plugin: a scratch `HO
 Issue framing != actual problem.
 Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.
 Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.
+Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.
 Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
 Lazy locators don't throw - validate at parse, not at construction.
@@ -225,6 +228,7 @@ The comment justifying an exclusion is load-bearing: if it is wrong, the exclusi
 The design critic finds rendering bugs the test suite cannot see.
 The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
+To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
 Tokenising the shared layer does not tokenise its consumers.
 Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.
 Two halves of one feature, written in one session, can each be right and still not meet.

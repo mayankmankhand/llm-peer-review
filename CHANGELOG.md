@@ -2,6 +2,19 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - No False Alarm From Main
+
+**Additive on top of v8.0.0.** Issues #243 and #238. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again.
+
+### Fixed
+
+- **A merge of main no longer blocks the push on main's settings change.** (#243) A branch that merged the default branch carried that branch's commits in its push, so a `.claude/settings.json` change already reviewed on main blocked a branch that never touched the file. The tripwire now counts a settings change only when the file differs between the branch and where it forked from the remote's default branch, and the block shows just that difference: the rows the branch adds. A branch's own change still blocks, and so does every case the check cannot settle: no default branch on the remote, a history with two fork points, or a copy of main older than what the branch merged.
+- **The ledger's hand-off files are caught by name again.** (#238) `/document` had been writing its hand-off as `rows.json` and the error-analysis backfill as `backfill.json`, names the tripwire's never-push list does not hold. They are now `correction-rows.json` and `correction-backfill-rows.json`, both on the list and in the gitignore ledger block, so one that lands inside a repo by mistake cannot be pushed.
+
+### Why
+
+Every false block makes "push anyway" more automatic for the real one, and a downstream project overrode two in one day, on two branches, for one change already on main. The tripwire's never-push check already treated published history as no news; the settings check now does the same, comparing content rather than which commits are on main, because the merge commit itself shows main's change.
+
 ## v8.0.0 - Two Removals, Rules That Fit (2026-10-13)
 
 **A major release on top of v7.6.5, which stays additive on v7.0.0 and v6.0.0 (#228 to #232, and the harness research).** Two removals promised in 7.0 land: the generic `review-finder` agent and prose receipt expectations. Reviews and upgrades since 7.6.3 read loop rules truncated at Claude Code's paste limit, and splitting the rules file fixes that. After updating, run `/tk:upgrade` in each project. Also new: `/tk:merge` lands worktree PRs checked for lost work, every plan step proves itself before and after (M17), the correction ledger turns its counts into fixes, upgrade receipts run through the checks runner, and the startup output fits what Claude Code shows.

@@ -425,3 +425,10 @@
 
 - **A removal that makes a consumer refuse a form breaks every producer of that form: sweep the producers before it lands.**
 - **A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.**
+
+## Issues 238 and 243 (no false alarm from main)
+
+- **Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.**
+- **Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.**
+- **To ignore what the default branch already has, compare content from the merge base, not commit ancestry.**
+- **Diff a standing page's open items before and after a render: a seeded item from another plan resolves whenever the plan lens runs.**
