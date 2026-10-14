@@ -138,8 +138,10 @@ const argv = process.argv.slice(2);
 const opts = {
   shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false,
   noAbs: false,
-  // index modes (issue #154; --index-sync from the holistic pass)
-  indexAdd: false, indexUrl: false, indexSync: false, type: '', local: '', url: ''
+  // index modes (issue #154; --index-sync from the holistic pass; --standing
+  // and its --branch from issue #237)
+  indexAdd: false, indexUrl: false, indexSync: false, type: '', local: '', url: '',
+  standing: false, branch: ''
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -152,6 +154,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--index-add') opts.indexAdd = true; // boolean flag
   else if (a === '--index-url') opts.indexUrl = true; // boolean flag
   else if (a === '--index-sync') opts.indexSync = true; // boolean flag
+  else if (a === '--standing') opts.standing = true; // boolean flag
+  else if (a === '--branch') opts.branch = argv[++i] || '';
   else if (a === '--type') opts.type = argv[++i] || '';
   else if (a === '--local') opts.local = argv[++i] || '';
   else if (a === '--url') opts.url = argv[++i] || '';
@@ -458,8 +462,9 @@ function readIndexRows() {
   return rows;
 }
 
-const indexModes = [opts.indexAdd, opts.indexUrl, opts.indexSync].filter(Boolean).length;
-if (indexModes > 1) die('--index-add, --index-url, and --index-sync are mutually exclusive');
+const indexModes = [opts.indexAdd, opts.indexUrl, opts.indexSync, opts.standing].filter(Boolean).length;
+if (indexModes > 1) die('--index-add, --index-url, --index-sync, and --standing are mutually exclusive');
+if (opts.branch && !opts.standing) die('--branch is read only by --standing');
 
 // The index modes return early, before any render validation, so a command line
 // that mixes them with render flags would silently win: exit 0, nothing rendered,
@@ -528,15 +533,45 @@ if (opts.indexAdd) {
   process.exit(0);
 }
 
-if (opts.indexUrl) {
-  if (!opts.name) die('--index-url requires --name');
-  // Scan forward and keep the last match: the newest record for a name wins,
-  // which is what makes a re-published stable artifact resolve to its current
-  // page.
+// Scan forward and keep the last match: the newest record for a name wins,
+// which is what makes a re-published stable artifact resolve to its current
+// page. '' when the name has no record.
+function newestUrl(name) {
   let found = '';
   for (const rec of readIndexRows()) {
-    if (rec.name === opts.name && typeof rec.url === 'string' && rec.url) found = rec.url;
+    if (rec.name === name && typeof rec.url === 'string' && rec.url) found = rec.url;
   }
+  return found;
+}
+
+// One JSON line about a standing page (issue #237), so a prompt reads facts
+// instead of composing paths: which page the name means here (or on --branch),
+// the file it lives in (always the main copy's artifacts/html), whether that
+// file exists, how many open findings it holds, and its newest hosted URL.
+// The review prompts use `exists` as their render gate, and /merge uses
+// `open` and `url` for its one line about a landed branch. `open` is counted
+// on the review page only (0 when it does not exist yet), and is null for any
+// other page or a review page that cannot be read.
+//     node .claude/scripts/render-html.js --standing --name review [--branch <b>]
+if (opts.standing) {
+  if (!opts.name) die('--standing requires --name');
+  const page = standingPage(opts.name, opts.branch);
+  const file = path.join(REPO_ROOT, 'artifacts', 'html', safeFileName(page.name) + '.html');
+  const exists = fs.existsSync(file);
+  let open = null;
+  if (opts.name === 'review') {
+    const prior = priorPayload(file);
+    if (prior.state === 'none') open = 0;
+    else if (prior.state === 'ok') open = openFindings(prior.data).length;
+  }
+  process.stdout.write(JSON.stringify({ name: page.name, file: file, exists: exists,
+                                        open: open, url: newestUrl(page.name) }) + '\n');
+  process.exit(0);
+}
+
+if (opts.indexUrl) {
+  if (!opts.name) die('--index-url requires --name');
+  const found = newestUrl(opts.name);
   if (found) process.stdout.write(found + '\n');
   process.exit(0);
 }

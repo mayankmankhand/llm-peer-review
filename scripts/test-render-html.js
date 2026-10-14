@@ -1955,6 +1955,16 @@ function issue237Tests() {
     const wt = path.join(root, 'wt');
     git(main, ['worktree', 'add', '-q', '-b', 'wt-237', wt]);
     const branchPage = path.join(pages, 'review-wt-237.html');
+    // --standing answers "which page, does it exist, how much is open, where
+    // is it hosted" in one JSON line, for the review prompts' gate and /merge.
+    const standing = function (cwd, args) {
+      const r = run(cwd, ['--standing'].concat(args));
+      try { return JSON.parse(r.out); } catch (e) { return { unparsed: r.out + r.err }; }
+    };
+    const none = standing(wt, ['--name', 'review']);
+    check('237 standing: no page yet prints exists false and open 0',
+          none.name === 'review-wt-237' && none.exists === false && none.open === 0 && none.url === '',
+          JSON.stringify(none));
 
     // The default branch keeps today's page and name.
     const onMain = renderIn(main, 'review', 'review', review('Main finding.'));
@@ -2011,6 +2021,17 @@ function issue237Tests() {
           fromWt === 'https://example.com/wt' && fromMain === 'https://example.com/main',
           JSON.stringify({ addWt: addWt.err, fromWt: fromWt, fromMain: fromMain, names: rows.map(function (r) { return r.name; }) }));
 
+    const here = standing(wt, ['--name', 'review']);
+    const onMainStanding = standing(main, ['--name', 'review']);
+    check('237 standing: without --branch it answers for the current branch',
+          here.name === 'review-wt-237' && here.file === branchPage && here.exists === true &&
+          onMainStanding.name === 'review' && onMainStanding.file === path.join(pages, 'review.html'),
+          JSON.stringify([here, onMainStanding]));
+    const cyc = standing(wt, ['--name', 'cycle']);
+    check('237 standing: the cycle page reports its file with open null',
+          cyc.name === 'cycle' && cyc.file === path.join(pages, 'cycle.html') && cyc.exists === true && cyc.open === null,
+          JSON.stringify(cyc));
+
     // A detached checkout never writes the main page.
     const det = path.join(root, 'det');
     git(main, ['worktree', 'add', '-q', '--detach', det, 'HEAD']);
@@ -2023,6 +2044,11 @@ function issue237Tests() {
     // The point of the main-copy home: removing the worktree keeps the page.
     git(main, ['worktree', 'remove', '--force', wt]);
     check('237: a branch page survives git worktree remove', fs.existsSync(branchPage));
+    // /merge asks from the main copy, after the branch's worktree is gone.
+    const landed = standing(main, ['--name', 'review', '--branch', 'wt-237']);
+    check('237 standing: --branch finds a worktree\'s page from the main copy',
+          landed.name === 'review-wt-237' && landed.file === branchPage && landed.exists === true &&
+          landed.open === 1 && landed.url === 'https://example.com/wt', JSON.stringify(landed));
   } catch (e) {
     check('issue 237 tests ran without an exception', false, e.message);
   }
