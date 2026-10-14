@@ -436,3 +436,10 @@
 ## Issue 235 (messages typed while Claude works)
 
 - **A count taken by a different walk than the code's own can call a live case "never seen": when the real run finds it, test it in the same step.**
+
+## Issues 244 and 245 (dropped files and the paste limit)
+
+- **A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.**
+- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.**
+- **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
+- **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
