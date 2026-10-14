@@ -207,6 +207,14 @@ for (let i = 0; i < argv.length; i++) {
 // usable outside a repo, and an index in the wrong place is a far smaller
 // failure than a render that refuses to run. child_process is core Node, so
 // this keeps the zero-dependency promise above.
+//
+// A submodule is the exception to "the parent of the shared .git" (review of
+// #237, R2): its git folder lives inside the superproject at
+// .git/modules/<name>, whose parent is a folder every submodule shares, so
+// their indexes and standing pages overwrote one another. git records where
+// such a working copy really is as core.worktree, relative to the git folder;
+// when that is set, it names the main copy. An ordinary repository leaves it
+// unset, so nothing changes there.
 function mainRepoRoot() {
   try {
     const common = require('child_process')
@@ -214,7 +222,9 @@ function mainRepoRoot() {
                     { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
       .trim();
     if (!common) return process.cwd();
-    return path.dirname(path.resolve(process.cwd(), common));
+    const commonAbs = path.resolve(process.cwd(), common);
+    const worktree = gitRead(['--git-dir=' + commonAbs, 'config', '--get', 'core.worktree']);
+    return worktree ? path.resolve(commonAbs, worktree) : path.dirname(commonAbs);
   } catch (e) {
     return process.cwd(); // not a repo, or no git on PATH
   }

@@ -2058,6 +2058,47 @@ function issue237Tests() {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// Review of #237, R2: inside a git submodule the shared git folder is the
+// superproject's .git/modules/<name>, so "the parent of the common folder" was
+// .git/modules itself, one folder every submodule shares: the index and, since
+// #237, the standing pages landed there and overwrote each other. The main
+// copy of a submodule is the folder git records as its core.worktree.
+// ---------------------------------------------------------------------------
+function submoduleRootTest() {
+  console.log('\nstanding pages inside a git submodule (review of #237, R2)');
+  const root = tmpdir('237sub');
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  try {
+    for (const name of ['sub', 'super']) {
+      const dir = path.join(root, name);
+      fs.mkdirSync(dir);
+      git(dir, ['init', '-q', '-b', 'main']);
+      git(dir, ['-c', 'user.email=t@example.com', '-c', 'user.name=Test', 'commit', '-q', '--allow-empty', '-m', 'init']);
+    }
+    const sup = path.join(root, 'super');
+    git(sup, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', path.join(root, 'sub'), 's1']);
+    const s1 = path.join(sup, 's1');
+    const dataPath = path.join(root, 'in.json');
+    fs.writeFileSync(dataPath, JSON.stringify({ title: 'Review' }), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', 'review', '--name', 'review', '--stable', '--data', dataPath],
+      { cwd: s1, encoding: 'utf-8' });
+    const out = (r.stdout || '').trim();
+    check('237 submodule: a standing page rendered in a submodule lands in that submodule',
+          out === path.join(s1, 'artifacts', 'html', 'review.html'), out + (r.stderr || ''));
+    const idx = spawnSync('node', [SCRIPT, '--index-add', '--type', 'review', '--name', 'review',
+      '--url', 'https://example.com/s1'], { cwd: s1, encoding: 'utf-8' });
+    check('237 submodule: its index is the submodule\'s own',
+          (idx.stdout || '').trim() === path.join(s1, 'artifacts', 'html', 'index.jsonl'),
+          (idx.stdout || '').trim() + (idx.stderr || ''));
+  } catch (e) {
+    check('submodule test set up a superproject and a submodule', false, e.message);
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 hardeningTests();
 themeContrastTests();
 findingContractTests();
@@ -2065,6 +2106,7 @@ issue162Tests();
 cycle162ReviewTests();
 cycleStandingPageTests();
 issue237Tests();
+submoduleRootTest();
 
 console.log('');
 if (failures.length === 0) {
