@@ -37,7 +37,7 @@ Markdown remains canonical even when HTML is also generated. Claude reads the ma
 
 For all other commands, Claude decides per-output whether HTML adds value. Default is markdown; generate HTML when:
 
-- `/review` family: whenever the run has any surviving finding, or the standing page `artifacts/html/review.html` already exists (so a clean run can take it to empty)
+- `/review` family: whenever the run has any surviving finding, or this branch's standing page already exists (`render-html.js --standing --name review` prints `"exists":true`), so a clean run can take it to empty
 - `/explore` vision-mode summary: 2+ options being compared
 - `/ask-gpt` / `/ask-gemini`: 3+ Recommended Actions in the final summary
 - `/audit-html`: 5+ candidates listed in the report
@@ -50,7 +50,7 @@ For all other commands, Claude decides per-output whether HTML adds value. Defau
 |---|---|
 | `/tmp/playground.*/` | Playground throwaways (interactive, disposable), one fresh folder per page |
 | `plans/PLAN-*.html` | Plan renders, alongside `PLAN-*.md`. Gitignored. |
-| `artifacts/html/` | Cycle-bound artifacts (debate views, explore option comparisons, audit reports) - timestamped. Also the three `--stable` views, not timestamped: the standing review page `review.html`, the standing cycle summary `cycle.html`, and `/audit-html` static views. Gitignored. |
+| `artifacts/html/` | Cycle-bound artifacts (debate views, explore option comparisons, audit reports) - timestamped. Also the three `--stable` views, not timestamped: the standing review page, one page per branch (`review.html` on the default branch, `review-<branch>.html` elsewhere), the standing cycle summary `cycle.html`, and `/audit-html` static views. The two standing pages are written to the main copy's `artifacts/html/` from any worktree. Gitignored. |
 | `artifacts/html/index.jsonl` | One appended JSON line per published artifact (type, name, local path, URL, timestamp). Written and read by `render-html.js`, never edited by hand. It is the record; each published local file also carries its URL on line 1 as `<!-- hosted: <url> -->`, a derived copy that `--index-sync` regenerates from the newest record per file. Gitignored with the rest of `artifacts/html/`. |
 
 The `artifacts/html/` directory lives at the project root. It parallels `plans/` and `reports/` (both gitignored user-facing working dirs).
@@ -65,7 +65,7 @@ node .claude/scripts/render-html.js --shell <review|debate|document|explore|audi
 
 By default the helper computes a unique timestamped name `<basename>-YYYY-MM-DD-HHMMSS.html` (with a `-N` guard for same-second runs), creates `artifacts/html/`, needs no read-before-write step, and prints the output path to stdout. This is what keeps the open fast and collision-free: the command emits only the small JSON, never the boilerplate, and there is never a read-then-overwrite cycle. The prebuilt shells live in `.claude/skills/shared/shells/`; each documents its own JSON schema in a header comment.
 
-The four identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run: plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `artifacts/html/review.html`, replaced on every review run), the standing cycle summary (`--shell document --name cycle --stable` -> `artifacts/html/cycle.html`, replaced on every `/document` run - note the shell and the name differ here, and the name is the index key), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
+The four identity-keyed types use `--stable`, which writes exactly `<basename>.html` (no timestamp, no `-N` guard) and replaces the file on re-run - the right behavior for a view whose identity outlives any one run: plan HTML (`--shell plan --out-dir plans --stable` -> `plans/PLAN-<basename>.html`, replaced on re-plan), the standing review page (`--shell review --stable` -> `review.html` on the default branch, `review-<branch>.html` on any other, replaced on every review run on that branch), the standing cycle summary (`--shell document --name cycle --stable` -> `artifacts/html/cycle.html`, replaced on every `/document` run - note the shell and the name differ here, and the name is the index key), and the `/audit-html` opt-in static view (`--shell docview --stable` -> `artifacts/html/<source-basename>.html`, replaced when regenerated).
 
 **Exceptions.** Two pages are written by hand rather than rendered through the helper: `/playground` throwaways (`/tmp/`, interactive) and the `/codebase-to-course` course, which opens locally and is not published.
 

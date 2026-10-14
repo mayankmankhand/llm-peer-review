@@ -91,7 +91,7 @@ For a stable type, look up its recorded page first:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-url --name <name>
 ```
 
-It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page. The index is keyed to the repository rather than the working directory, so this lookup finds the same record from a worktree as from the main copy.
+It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page. The index is keyed to the repository rather than the working directory, so this lookup finds the same record from a worktree as from the main copy. The bare name `review` is the one exception: the lookup and the record below both resolve it to this branch's page, as the render does.
 
 **Record every publish.** Immediately after a successful publish:
 
@@ -100,7 +100,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-add --type <shell> --n
      --local <path> --url <url>
 ```
 
-`<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. `<path>` must be the path `render-html.js` printed for that render. It has to lie inside the working copy the render ran in (a worktree's own `artifacts/html/` qualifies), and the helper refuses anything outside it. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
+`<name>` must be the exact `--name` value used for the render, because that is the key `--index-url` looks up. `<path>` must be the path `render-html.js` printed for that render. It has to lie inside the working copy the render ran in or the main copy (a worktree's own `artifacts/html/` qualifies, and so does the main copy's, where standing pages live), and the helper refuses anything outside them. The helper creates `artifacts/html/` if needed, timestamps the record itself, and appends one JSON line. It is never read-then-rewritten, so concurrent sessions cannot clobber each other.
 
 **The record stamps the file.** In the same call, the helper writes the hosted URL onto the first line of that local file as `<!-- hosted: <url> -->`, before the doctype, so the file on disk names the page it mirrors. The index is the record; the stamp is a derived copy of it. A missing local file is a stderr warning, not a failure: the record still lands. To change a URL, append a new record with `--index-add`; it re-stamps the file. A stamp can also go missing on its own: a `--stable` re-render overwrites the file, and a file published before stamping existed never had one. `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --index-sync` re-derives every stamp from the newest record per local file and prints `index-sync: N stamped, M missing` (plus `, K skipped` when a row was refused: a path outside the repository, a non-HTML file, or a URL that is not a plain `https://` link). Only `.html` mirrors are ever stamped, and only `https://` URLs are accepted. Never edit a stamp by hand, and never stamp a markdown twin: `PLAN-*.md` is read by Claude, and the HTML file is the mirror of the page.
 

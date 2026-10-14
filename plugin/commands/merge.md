@@ -6,6 +6,8 @@ allowed-tools:
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
 ---
@@ -76,7 +78,7 @@ The formats and the checks are defined once, in the merge rules; the host comman
 2. **The landing message**, written with the Write tool to `<tmp>/landing.txt` in the merge rules' format: the subject for the style (`Merge PR #<N>: <title>` for a merge, `<title> (#<N>)` for a squash, `Merge <branch>: <title>` for a branch without a PR), the title, `Decisions:` with the PR's decision list (`- None recorded` when it has none), the `Cut from:` line with the full cut, and every `Kept on purpose:` line from this run.
 3. **local-merge.** Go to the worktree that holds main (`git worktree list --porcelain` names it; often it is the project root itself; when none holds main, make a temporary one, `git worktree add .claude/worktrees/merge-main <main>`, removed at the end) and step in when it is not the project root. There `git status --porcelain --untracked-files=no` must print nothing, else step back and ask. Then `git merge --no-ff -F <tmp>/landing.txt <branch>`, confirm `git diff --quiet <updated tip> <main>` exits 0, and step back to the project root. Nothing is pushed: the landing is in your local main.
 4. **host-merge or host-squash.** Step into the branch's worktree and run the pre-push check for the branch (M11), `node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js origin <branch>`, then `git push origin HEAD:<branch>`, and step back; exit 1 pages you and only you can say push anyway, exit 2 means fetch and check again. Write the message's body (every line after the subject and the blank line under it) to `<tmp>/landing-body.md`, and run the host table's merge row with `--merge` for host-merge or `--squash` for host-squash, the updated tip as the head guard (`--match-head-commit` on GitHub, `--sha` on GitLab), and the subject single-quoted per the host table's rule. Then `git fetch origin` and confirm `git diff --quiet <updated tip> origin/<main>` exits 0. When it does not (main moved on the host after the check), check the landing itself with `merge-check.js --landing --before <landing>^1 --after <landing> --cut <cut> --tip <own tip>` and page any flag.
-5. **Record it.** `merge-check.js --mark <main tip>` (`origin/<main>` for a host style), remove this PR's temporary worktree with `git worktree remove .claude/worktrees/merge-<N>`, and print one line: `#<N> landed as <short sha> (<style>): rules 1 and 2 clean, <n> checks passed, <no contradictions | n kept on purpose>`.
+5. **Record it.** `merge-check.js --mark <main tip>` (`origin/<main>` for a host style), remove this PR's temporary worktree with `git worktree remove .claude/worktrees/merge-<N>`, and print one line: `#<N> landed as <short sha> (<style>): rules 1 and 2 clean, <n> checks passed, <no contradictions | n kept on purpose>`. Then run `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --standing --name review --branch <branch>` (M16): when its `open` is above 0, end that line with `; its review page still has <open> open findings: <url>` (its `file` when `url` is empty).
 
 ### Step 5: Close
 

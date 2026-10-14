@@ -9,7 +9,7 @@ This file documents WHEN to render (the gate) and HOW to render (data injection 
 Render the review page whenever **either** is true:
 
 - the run has any surviving finding, or
-- the standing page already exists at `artifacts/html/review.html`, so this run can carry it forward or take it to empty.
+- this branch's standing page already exists (`node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so this run can carry it forward or take it to empty.
 
 Skip only when there are no findings **and** no page yet. No findings-count gate applies to the review page: a page that must be able to go empty cannot sit behind one, because a clean run after a busy one would leave the busy run's findings showing as open.
 
@@ -23,7 +23,7 @@ Honor "skip HTML" if the user replies with that phrase. Continue with markdown o
 
 ## How to Render (data injection)
 
-The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/review-shell.html`. You produce a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, the one standing page per repository (step 3 below). This is what makes the open fast and collision-free.
+The boilerplate (all CSS, layout, and every card) lives once in the prebuilt shell `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/review-shell.html`. You produce a compact JSON payload of the findings; the helper injects it (plus the shared `tokens.css`) into the shell and writes a self-contained file: for a review, this branch's one standing page (step 3 below). This is what makes the open fast and collision-free.
 
 Steps:
 
@@ -49,13 +49,13 @@ Steps:
 
 2. **Write the JSON to a per-run temp file.** Write it as `data.json` in a fresh folder from `mktemp -d /tmp/review-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`; that folder is `<render-dir>` below.
 
-3. **Run the helper from the project root, once, at the end of the run.** On an auto run that is after the auto-fix loop has settled (the runner's After the Report section says where), with the loop's FIXED findings in `alreadyFixed` and only the unfixed ones open; on a "report only" run, right after the report. A page rendered before the loop was stale within minutes of being published. The review page is `--stable`: one standing page per repository at `artifacts/html/review.html`, replaced in place rather than added to. The name is the bare `review` because the identity is the repo. Before overwriting, the helper reads the page it is replacing and fills `sinceLast` with what changed, so pass every surviving finding from the lenses that ran, name those lenses in `lenses` and the files the run reviewed in `reviewedFiles` - the comparison is what produces the memory, and a finding from a lens that ran, on a file this run reviewed, and not in the payload is reported resolved.
+3. **Run the helper from the project root, once, at the end of the run.** On an auto run that is after the auto-fix loop has settled (the runner's After the Report section says where), with the loop's FIXED findings in `alreadyFixed` and only the unfixed ones open; on a "report only" run, right after the report. A page rendered before the loop was stale within minutes of being published. The review page is `--stable`: one page per branch, replaced in place rather than added to: `review` on the default branch, `review-<branch>` on any other (`review-detached-<short sha>` when detached), kept in the main copy's `artifacts/html/` from any worktree so it outlives the worktree. Per branch because a run resolves open findings on the files it reviewed, and another branch's copy of a file never had this branch's change. Before overwriting, the helper reads the page it is replacing and fills `sinceLast` with what changed, so pass every surviving finding from the lenses that ran, name those lenses in `lenses` and the files the run reviewed in `reviewedFiles` - the comparison is what produces the memory, and a finding from a lens that ran, on a file this run reviewed, and not in the payload is reported resolved.
    Check the publish gate first (see **"Render for the viewport"** in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`): if this session can publish, add `--no-abs` to the command below.
 
       ```
    node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --shell review --name review --out-dir artifacts/html --stable --data <render-dir>/data.json
    ```
-   - The name is always the bare `review`, for every caller. A direct `/tk:review-code` run and an orchestrated `/tk:review` write the same standing page, because the page is the repository's open findings and not a record of which command produced them. Which lens ran belongs in `lenses` (which is what keeps a direct run from overwriting the other lenses' findings), in `chips`, and in the markdown filename, not in the page's identity.
+   - Every caller passes the bare `review`; the renderer adds the branch. A direct `/tk:review-code` run and an orchestrated `/tk:review` write the same standing page, because the page is the branch's open findings and not a record of which command produced them. Which lens ran belongs in `lenses` (which is what keeps a direct run from overwriting the other lenses' findings), in `chips`, and in the markdown filename, not in the page's identity.
    - You do NOT read, name, or delete any prior file. The helper handles naming and overwrites; there is nothing to clean up.
 
 4. **Show it to the user** per the **"Viewing the Artifact"** rules in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision. The publish never asks (a private claude.ai page is not an outward send under M9); when you hand over the link, say in one clause what the page holds: the surviving findings with their receipts and the audited-out log.
