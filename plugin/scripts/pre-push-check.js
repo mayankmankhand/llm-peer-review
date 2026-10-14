@@ -33,6 +33,14 @@
 //   3. Settings diff - .claude/settings.json changed in this push: the hunks
 //                      are printed so the human can approve the permission
 //                      change knowingly (M11's origin: silently added grants).
+//                      A change the remote's default branch already has is
+//                      not news (issue #243): it was reviewed when it landed
+//                      there, and a branch that merged it never made it. So
+//                      the hit counts only when the settings file differs
+//                      between HEAD and its merge base with that branch, and
+//                      that diff is what is printed. No default branch, more
+//                      than one merge base, or git failing: today's per-base
+//                      diff, and the push blocks.
 //   4. Version guard - only when this copy runs from inside the tk plugin (a
 //                      .claude-plugin/plugin.json sits one folder above it;
 //                      the source copy and non-plugin installs have none and
@@ -731,7 +739,11 @@ function checkRemote(remote) {
 }
 
 // The base of a ref the remote does not have yet: the merge-base of HEAD with
-// the remote's default branch, or null (all history) when there is none.
+// the remote's default branch, or null (all history) when there is none. The
+// settings gate (issue #243) finds the default branch through this same lookup.
+// Every candidate is a remote-tracking ref, never a local branch: a local main
+// can hold commits nobody has pushed or reviewed, and a push of main itself
+// would compare with its own tip and show nothing.
 function newRefBase(remote) {
   const candidates = [];
   const remoteHead = git(["symbolic-ref", "-q", "refs/remotes/" + remote + "/HEAD"]);
@@ -752,18 +764,22 @@ function newRef(label, remote, prefix) {
   return { label, base: found.base, note };
 }
 
-// No arguments: HEAD's upstream, trusted only under refs/remotes/.
+// No arguments: HEAD's upstream, trusted only under refs/remotes/. The remote
+// it names rides along for the settings gate (issue #243); the branch's own
+// config says which remote that is, since a remote name may hold a slash.
 function upstreamDestination() {
-  if (git(["symbolic-ref", "--quiet", "--short", "HEAD"]) === null) {
+  const branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+  if (branch === null) {
     fail("detached HEAD - cannot determine what a push would publish.");
   }
   const upstream = git(["rev-parse", "--symbolic-full-name", "@{u}"]);
   const ref = upstream === null ? "" : upstream.trim();
   if (ref.startsWith("refs/remotes/")) {
     const base = commitOf(ref);
-    if (base !== null) return { label: "upstream " + ref, base, note: "base " + base.slice(0, 7) };
+    const remote = git(["config", "--get", "branch." + branch.trim() + ".remote"]);
+    if (base !== null) return { label: "upstream " + ref, base, note: "base " + base.slice(0, 7), remote: remote === null ? null : remote.trim() };
   }
-  return newRef("origin, no remote upstream", "origin", "");
+  return Object.assign(newRef("origin, no remote upstream", "origin", ""), { remote: "origin" });
 }
 
 // <remote> <branch-or-tag>: the push sends HEAD there. A plain name only, so
@@ -829,7 +845,8 @@ function refLineDestinations(remote, head) {
 }
 
 // Resolve the destinations the arguments name, then the merged commit list.
-// `summary` is the stderr line's description of what was checked.
+// `summary` is the stderr line's description of what was checked, and `remote`
+// the remote the push goes to, which the settings gate reads (issue #243).
 function outgoingCommits(argv) {
   let destinations;
   let remote = null;
@@ -864,7 +881,7 @@ function outgoingCommits(argv) {
   const summary = destinations.length === 0
     ? remote + " (no refs pushed)"
     : destinations.map((d) => d.label + " (" + d.note + ")").join(", ");
-  return { commits, destinations: range, summary };
+  return { commits, destinations: range, summary, remote: argv.length === 0 ? destinations[0].remote : remote };
 }
 
 // --- 2. Scan one commit ---------------------------------------------------
@@ -1013,7 +1030,7 @@ function scanPatch(patch, sha, hits, rescanned) {
 const RUNNING_VERSION = runningPluginVersion();
 if (RUNNING_VERSION !== null) process.stderr.write("tk pre-push check " + RUNNING_VERSION + "\n");
 
-const { commits, destinations, summary } = outgoingCommits(process.argv.slice(2));
+const { commits, destinations, summary, remote } = outgoingCommits(process.argv.slice(2));
 // One stderr line naming what the scan covered, on every run that got this far
 // (issue #178): a range is only trustworthy when a reader can see it.
 function reportScanned() {
@@ -1030,7 +1047,7 @@ if (commits.length === 0) {
   process.exit(0); // nothing outgoing, nothing to say on stdout
 }
 
-const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), buildStale: null, versionBehind: null };
+const hits = { secrets: [], neverPushRaw: [], neverPush: [], unscannable: [], settingsCommits: new Set(), settingsGate: null, buildStale: null, versionBehind: null };
 for (const sha of commits) scanCommit(sha, hits);
 reportScanned();
 
@@ -1140,6 +1157,39 @@ for (const candidate of hits.neverPushRaw) {
   }
 }
 
+// Settings changes the default branch already has (issue #243). A branch that
+// merges main and is pushed carries main's commits in its outgoing range, so a
+// settings change reviewed when it landed on main blocked the push of a branch
+// that never made it, and every such false block makes "push anyway" more
+// automatic for the real one. Skipping commits that main already holds cannot
+// fix it: the merge commit is not on main, and diffed against its first parent
+// (-m above) it shows main's change. So the gate compares content instead: the
+// settings file from HEAD's merge base with the remote's default branch to HEAD,
+// which after a merge of that branch is exactly what the branch adds. Empty
+// means every settings change in the push is already there: not a hit.
+//
+// Every doubt blocks. No remote to ask, no default branch, more than one merge
+// base (git would pick one, and which one decides whether main's change shows),
+// or git failing: null, and the per-base report below runs as before. A
+// remote-tracking default branch older than what the branch merged moves the
+// merge base back, so the newer change shows and blocks.
+function settingsGate(pushRemote) {
+  if (pushRemote === null) return null;
+  const found = newRefBase(pushRemote);
+  if (found.base === null) return null;
+  const bases = git(["merge-base", "--all", "HEAD", found.from]);
+  if (bases === null || bases.trim().split("\n").length !== 1) return null;
+  const diff = git(["diff", "--no-color", found.base, "HEAD", "--", SETTINGS_PATH]);
+  if (diff === null) return null;
+  return { from: found.from, diff: diff };
+}
+
+if (hits.settingsCommits.size > 0) {
+  const gate = settingsGate(remote);
+  if (gate !== null && gate.diff.trim() === "") hits.settingsCommits.clear();
+  else hits.settingsGate = gate;
+}
+
 const clean =
   hits.secrets.length === 0 &&
   hits.neverPush.length === 0 &&
@@ -1167,10 +1217,17 @@ if (hits.unscannable.length > 0) {
   for (const s of hits.unscannable) out.push("  " + s);
   out.push("");
 }
-if (hits.settingsCommits.size > 0) {
+if (hits.settingsCommits.size > 0 && hits.settingsGate !== null) {
+  // The gate ran (issue #243): what the branch adds over the default branch,
+  // which is the change to approve. Hunks the default branch already has stay out.
   out.push("Shared settings file (" + SETTINGS_PATH + ") changes in this push:");
-  // One diff per distinct base, each against what that destination has
-  // (issue #178). With a single base the output is what it always was.
+  out.push("  What this push adds over " + hits.settingsGate.from.replace(/^refs\/remotes\//, "") + ", the remote's default branch:");
+  out.push(hits.settingsGate.diff.trimEnd());
+  out.push("");
+} else if (hits.settingsCommits.size > 0) {
+  out.push("Shared settings file (" + SETTINGS_PATH + ") changes in this push:");
+  // The gate could not run. One diff per distinct base, each against what that
+  // destination has (issue #178). With a single base the output is what it always was.
   const byBase = new Map();
   for (const d of destinations) {
     const key = d.base === null ? "" : d.base;

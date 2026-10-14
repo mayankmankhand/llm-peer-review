@@ -1066,9 +1066,13 @@ function rangeNeverPushTests() {
     check('ref line to topic: the edited .env exists at topic\'s base, so it is not re-reported', r.status === 0 && r.stdout === '', show(r));
     r = runWith(sb.repo, ['--remote', 'origin'], 'HEAD ' + head + ' refs/heads/topic ' + topic + '\nHEAD ' + head + ' refs/heads/develop ' + develop + '\n');
     check('ref lines to topic and develop: .env is at topic\'s base but not develop\'s, so it blocks', r.status === 1 && /\.env @ [0-9a-f]{7}/.test(r.stdout), show(r));
-    check('ref lines to topic and develop: the settings diff is given per base, and develop\'s shows the change',
-      r.stdout.indexOf('  For origin refs/heads/topic (base ' + topic.slice(0, 7) + '):\n  (no change against this base)') !== -1
-      && r.stdout.indexOf('  For origin refs/heads/develop (base ' + develop.slice(0, 7) + '):\n') !== -1 && r.stdout.indexOf('+  "permissions": { "allow": ["Bash(curl *)"] }') !== -1, show(r));
+    // Since #243 the settings diff is one diff against the remote's default
+    // branch, not one per base: it is what the branch adds, whatever each
+    // destination already has. The per-base form is the fallback when no
+    // default branch is found.
+    check('ref lines to topic and develop: the settings diff is compared with origin/main and shows the change',
+      r.stdout.indexOf("  What this push adds over origin/main, the remote's default branch:\n") !== -1
+      && r.stdout.indexOf('  For origin refs/heads/') === -1 && r.stdout.indexOf('+  "permissions": { "allow": ["Bash(curl *)"] }') !== -1, show(r));
   } catch (e) {
     check('never-push range test set up its repos', false, e.message);
   }
@@ -1322,6 +1326,193 @@ function forcedBinaryTests() {
   cleanup(sb);
 }
 
+// --- 16. settings changes carried in from the default branch (issue #243) -------
+// A feature branch that merges main and is pushed carries main's commits in its
+// outgoing range. When one of them changed .claude/settings.json, the push used
+// to block on a change that was reviewed when it landed on main and that the
+// branch never made. The gate compares content with the remote's default branch:
+// the settings diff from the merge base of HEAD and <remote>/<default> to HEAD.
+// Empty is not a hit; anything else blocks and prints that diff. Every fallback
+// (no default branch, two merge bases, a stale remote-tracking ref) blocks.
+const SETTINGS = '.claude/settings.json';
+// One row per line, so a diff can show one row without its neighbours.
+function settingsJson(allow, ask) {
+  const rows = function (list) { return list.map(function (r) { return '      "' + r + '"'; }).join(',\n'); };
+  let text = '{\n  "permissions": {\n    "allow": [\n' + rows(allow) + '\n    ]';
+  if (ask) text += ',\n    "ask": [\n' + rows(ask) + '\n    ]';
+  return text + '\n  }\n}\n';
+}
+const BASE_ROWS = ['Bash(ls *)'];
+// show() on one line: the gate prints only a failing suite's last 15 lines, so a
+// multi-line detail would push the earlier failure names out of view.
+function brief(r) { return show(r).replace(/\s*\n\s*/g, ' | '); }
+
+// main holds one allow row on origin; feature is cut from it and pushed.
+// `setHead` adds refs/remotes/origin/HEAD, as a clone has; a hand-added remote
+// has none, which is why the lookup probes <remote>/main too.
+function settingsRepo(label, setHead) {
+  const sb = remoteRepo(label);
+  commitFile(sb, 'README.md', 'seed\n', 'init');
+  commitFile(sb, SETTINGS, settingsJson(BASE_ROWS), 'shared settings');
+  sb.g(['push', '-q', '-u', 'origin', 'main']);
+  if (setHead) sb.g(['remote', 'set-head', 'origin', 'main']);
+  return sb;
+}
+
+function settingsMergeTests() {
+  console.log('\n16. settings changes carried in from the default branch (issue #243)');
+
+  // Case A: main tightens permissions after feature was pushed; feature merges
+  // main with no conflict. The merge's only settings change is main's own.
+  let sb = settingsRepo('settings-case-a', true);
+  try {
+    sb.g(['push', '-q', 'origin', 'main:develop']); // develop never gets main's change
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'feature work');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'main']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push');
+    sb.g(['push', '-q', 'origin', 'main']);
+    sb.g(['checkout', '-q', 'feature']);
+    sb.g(['merge', '-q', '--no-edit', 'main']);
+    const head = sb.sha('HEAD');
+    const feature = sb.sha('refs/remotes/origin/feature');
+
+    // Case D: the merge commit itself lists the settings file under -m, which is
+    // why skipping main's own commits by ancestry could never clear case A.
+    const listed = sb.g(['diff-tree', '-r', '--name-only', '-m', head]);
+    check('#243 case D: the case A merge commit lists the settings file under diff-tree -m', listed.indexOf(SETTINGS) !== -1, listed.replace(/\n/g, ' '));
+
+    let r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 case A: a merge of main whose only settings change is already on main passes', r.status === 0 && r.stdout === '', brief(r));
+    r = runWith(sb.repo, ['--remote', 'origin'], 'refs/heads/feature ' + head + ' refs/heads/feature ' + feature + '\n');
+    check('#243 case A through the hook ref line passes', r.status === 0 && r.stdout === '', brief(r));
+    r = run(sb.repo);
+    check('#243 case A with no destination named passes', r.status === 0 && r.stdout === '', brief(r));
+    r = runWith(sb.repo, ['origin', 'develop']);
+    check('#243 a side branch that receives only the main change passes', r.status === 0 && r.stdout === '', brief(r));
+
+    // Case B: the branch now adds a row of its own. It blocks, the row is
+    // printed, and main's already-reviewed ask block is not.
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS.concat(['Bash(curl *)']), ['Bash(git push *)']), 'widen permissions');
+    r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 case B: a row the branch adds itself still blocks and is printed',
+      r.status === 1 && r.stdout.indexOf('+      "Bash(curl *)"') !== -1, brief(r));
+    check('#243 case B: the ask block main already had is not printed as added', r.stdout.indexOf('+    "ask": [') === -1, brief(r));
+    check('#243 case B: the block names the default branch it compared with',
+      r.stdout.indexOf("What this push adds over origin/main, the remote's default branch:") !== -1, brief(r));
+  } catch (e) {
+    check('#243 case A and B test set up its repos', false, e.message);
+  }
+  cleanup(sb);
+
+  // Case C: feature adds a row and is pushed; main adds a different row on the
+  // same lines; the conflict is combined by hand and the merge adds one more.
+  // The destination is the existing origin/feature, so today's diff (against
+  // it) carries main's row; the gate's diff shows only the branch's two rows.
+  sb = settingsRepo('settings-case-c', true);
+  try {
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS.concat(['Bash(npm test *)'])), 'allow tests');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'main']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS.concat(['Bash(git status *)'])), 'allow status');
+    sb.g(['push', '-q', 'origin', 'main']);
+    sb.g(['checkout', '-q', 'feature']);
+    try { sb.g(['merge', '-q', '--no-edit', 'main']); } catch (e) { /* the conflict is expected */ }
+    // main's row stays last, so the gate's diff leaves it as untouched context.
+    fs.writeFileSync(path.join(sb.repo, SETTINGS), settingsJson(BASE_ROWS.concat(['Bash(npm test *)', 'Bash(make *)', 'Bash(git status *)'])), 'utf-8');
+    sb.g(['add', SETTINGS]);
+    sb.g(['commit', '-q', '--no-edit']);
+    const r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 case C: a hand-combined merge that adds a row still blocks', r.status === 1, brief(r));
+    check('#243 case C: the block prints the branch rows and not the main change',
+      r.stdout.indexOf('+      "Bash(npm test *)"') !== -1 && r.stdout.indexOf('+      "Bash(make *)"') !== -1
+      && !/^[+-].*git status/m.test(r.stdout), brief(r));
+  } catch (e) {
+    check('#243 case C test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // No default branch: the remote has only trunk and no HEAD ref, so the gate
+  // has nothing to compare with and the push blocks as it always did.
+  sb = remoteRepo('settings-no-default');
+  try {
+    sb.g(['symbolic-ref', 'HEAD', 'refs/heads/trunk']);
+    commitFile(sb, 'README.md', 'seed\n', 'init');
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS), 'shared settings');
+    sb.g(['push', '-q', '-u', 'origin', 'trunk']);
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'feature work');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'trunk']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push');
+    sb.g(['push', '-q', 'origin', 'trunk']);
+    sb.g(['checkout', '-q', 'feature']);
+    sb.g(['merge', '-q', '--no-edit', 'trunk']);
+    const r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 a remote with no default branch still blocks', r.status === 1 && r.stdout.indexOf('Shared settings file') !== -1, brief(r));
+  } catch (e) {
+    check('#243 no-default test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // Two merge bases (a criss-cross): feature merges main's settings commit while
+  // main merges feature's first commit. git would pick one base, and which one
+  // decides whether main's change shows, so the gate refuses to guess.
+  sb = settingsRepo('settings-criss-cross', true);
+  try {
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'feature work');
+    const f1 = sb.sha('HEAD');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'main']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push');
+    const m1 = sb.sha('HEAD');
+    sb.g(['merge', '-q', '--no-ff', '--no-edit', f1]);
+    sb.g(['push', '-q', 'origin', 'main']);
+    sb.g(['checkout', '-q', 'feature']);
+    sb.g(['merge', '-q', '--no-ff', '--no-edit', m1]);
+    const bases = sb.g(['merge-base', '--all', 'HEAD', 'refs/remotes/origin/main']).trim().split('\n');
+    const r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 a history with two merge bases still blocks', bases.length === 2 && r.status === 1, 'bases ' + bases.length + ' :: ' + brief(r));
+  } catch (e) {
+    check('#243 criss-cross test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // A stale remote-tracking main: main's settings change is committed but not
+  // pushed, and feature merges it. origin/main lacks the change, so it is news.
+  sb = settingsRepo('settings-stale', true);
+  try {
+    sb.g(['checkout', '-q', '-b', 'feature']);
+    commitFile(sb, 'src/a.js', 'console.log(1);\n', 'feature work');
+    sb.g(['push', '-q', '-u', 'origin', 'feature']);
+    sb.g(['checkout', '-q', 'main']);
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push, not pushed');
+    sb.g(['checkout', '-q', 'feature']);
+    sb.g(['merge', '-q', '--no-edit', 'main']);
+    const r = runWith(sb.repo, ['origin', 'feature']);
+    check('#243 a stale remote-tracking main still blocks', r.status === 1 && r.stdout.indexOf('"Bash(git push *)"') !== -1, brief(r));
+  } catch (e) {
+    check('#243 stale-ref test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+
+  // A push to main itself, on a remote with no HEAD ref: the lookup must use
+  // origin/main, never local main, or the change would compare with itself.
+  sb = settingsRepo('settings-main', false);
+  try {
+    commitFile(sb, SETTINGS, settingsJson(BASE_ROWS, ['Bash(git push *)']), 'ask before a push');
+    const r = runWith(sb.repo, ['origin', 'main']);
+    check('#243 a push to main itself still blocks and prints its change',
+      r.status === 1 && r.stdout.indexOf('+    "ask": [') !== -1, brief(r));
+  } catch (e) {
+    check('#243 push-to-main test set up its repo', false, e.message);
+  }
+  cleanup(sb);
+}
+
 maskingTest();
 exitCodeTests();
 pluginCopyTests();
@@ -1338,6 +1529,7 @@ rangeNeverPushTests();
 rangeInvalidTests();
 byteContainerTests();
 forcedBinaryTests();
+settingsMergeTests();
 
 console.log('');
 if (failures.length === 0) {
