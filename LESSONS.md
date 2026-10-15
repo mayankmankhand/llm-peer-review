@@ -466,3 +466,8 @@
 - **A runner mode several callers share changes only behind a flag the new caller passes.**
 - **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
 - **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.**
+
+## Issue 249 (the test gate speed)
+
+- **A rule widened to catch one missed case can mis-sort another: before keeping it, test the case on its other side.**
+- **When a hand-kept list decides what runs, check the list against what exists: a missing entry otherwise passes as all green.**
