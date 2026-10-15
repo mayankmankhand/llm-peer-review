@@ -157,6 +157,18 @@
 //            baseline, so one growth is flagged once. A run that failed never
 //            moves the baseline. `cost` on the printed object (and in
 //            results.json) holds { ms, baselineMs, grew }.
+//   skip     a run on a working tree (every tracked file and every untracked
+//            file git does not ignore, edits and modes included) and a list
+//            that the last run on them passed is skipped: nothing runs, the
+//            object carries the passing run's summary and rows plus
+//            `skipped: { from, head, note }`, the note reads "skipped: nothing
+//            changed since the passing run at <time> (<commit>)", results.json
+//            is still written, and a history row marked skipped keeps the
+//            baseline. A failing last run on the same tree always runs again.
+//            The tree is read with `git ls-files` alone, which never writes or
+//            locks the index. Ignored files and refs are not part of it, and a
+//            folder outside a repository has no fingerprint, so it never
+//            skips; --no-skip runs regardless. A plan step never skips.
 // --history [--since <time>] prints what the step cost since a time: runs,
 // skipped, totalMs, latestMs, baselineMs, and each growth with the baseline it
 // grew from.
@@ -1344,7 +1356,9 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  --timeout         per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + '); a run over half of it is flagged slow\n'
   + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
   + '  --full            this list is the project\'s full test step: time it, add a row to the main copy\'s\n'
-  + '                    reports/checks/history.jsonl, and flag a pass over 1.5x the baseline (flags.grew, cost)\n'
+  + '                    reports/checks/history.jsonl, and flag a pass over 1.5x the baseline (flags.grew, cost);\n'
+  + '                    skipped, with a note (`skipped`), when the tree and the list match the last passing run\n'
+  + '  --no-skip         with --full: run even when nothing changed\n'
   + '  expect            exactly one of (a prose string is an error since 8.0.0)\n'
   + '                    {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
   + '                    (regexes are tested with the multiline flag against the saved output)\n'
@@ -1360,12 +1374,13 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
 
 function parseArgs(argv) {
   const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, rerunFailures: false, help: false,
-    plan: '', lint: false, tally: false, step: '', phase: '', full: false, history: false, since: '' };
+    plan: '', lint: false, tally: false, step: '', phase: '', full: false, noSkip: false, history: false, since: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--rerun-failures') opts.rerunFailures = true;
     else if (a === '--full') opts.full = true;
+    else if (a === '--no-skip') opts.noSkip = true;
     else if (a === '--history') opts.history = true;
     else if (a === '--since') opts.since = argv[++i] || '';
     else if (a === '--plan') opts.plan = argv[++i] || '';
@@ -1603,16 +1618,105 @@ function baselineFor(rows, key) {
   return null;
 }
 
+// What the working tree holds, as one hash: every tracked file and every
+// untracked file git does not ignore, edits and modes included, so a skip
+// can trust that the suite would read exactly what the passing run read.
+// Read-only by construction: `git ls-files` never writes the index and takes
+// no lock (unlike `git status` or `git add`, which refresh it), so another git
+// process holding the index lock changes nothing here. A file git still lists
+// with its staged id and does not report modified is taken at that id; a
+// modified or untracked file is hashed from disk the way git hashes a blob.
+// Ignored files (installed packages, .env.local) are not part of it, and
+// neither are refs: --no-skip forces a run. Null outside a repository, or
+// when git cannot list the tree, and a null fingerprint never skips.
+function fingerprint(cwd) {
+  const ls = (args) => {
+    const r = spawnSync('git', ['--no-optional-locks', 'ls-files', '-z'].concat(args), { cwd, encoding: 'utf8', maxBuffer: MAX_BUFFER, stdio: ['ignore', 'pipe', 'ignore'] });
+    return r.status === 0 ? r.stdout.split('\0').filter(Boolean) : null;
+  };
+  const staged = ls(['-s']);
+  const modified = ls(['-m']);
+  const deleted = ls(['-d']);
+  const untracked = ls(['-o', '--exclude-standard']);
+  if (!staged || !modified || !deleted || !untracked) return null;
+  const changed = new Set(modified.concat(untracked));
+  const gone = new Set(deleted);
+  const lines = [];
+  for (const entry of staged) {
+    const tab = entry.indexOf('\t');
+    const file = entry.slice(tab + 1);
+    if (gone.has(file)) lines.push('D ' + file);
+    else if (!changed.has(file)) lines.push('I ' + entry.slice(0, tab) + ' ' + file);
+  }
+  for (const file of changed) {
+    if (gone.has(file)) continue;
+    const abs = path.join(cwd, file);
+    let st;
+    try { st = fs.lstatSync(abs); } catch (e) { lines.push('D ' + file); continue; }
+    let body;
+    if (st.isSymbolicLink()) body = Buffer.from(fs.readlinkSync(abs));
+    else if (st.isFile()) body = fs.readFileSync(abs);
+    else { lines.push('X ' + file); continue; }      // a nested repository git lists as a folder
+    const blob = crypto.createHash('sha1').update('blob ' + body.length + '\0').update(body).digest('hex');
+    const mode = st.isSymbolicLink() ? '120000' : (st.mode & 0o111 ? '100755' : '100644');
+    lines.push('W ' + mode + ' ' + blob + ' ' + file);
+  }
+  lines.sort();
+  return crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
+// The newest run (not a skip) of this list on this exact tree, or null.
+function lastRunOn(rows, key, print) {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (!r.skipped && r.key === key && r.fingerprint === print) return r;
+  }
+  return null;
+}
+
+// A skip: nothing changed since `prior` passed on the same tree with the same
+// list, so running again could only show a flake. It prints the same shape a
+// run does, with the passing run's summary and rows, `skipped` and its note,
+// writes results.json, and adds a history row marked skipped that keeps the
+// baseline and is never counted as a run.
+function skipRun(checks, prior, cwd, outDir, file, key, print, against) {
+  const at = new Date().toISOString();
+  const head = headCommit(cwd);
+  const note = 'skipped: nothing changed since the passing run at ' + prior.at + (prior.head ? ' (' + String(prior.head).slice(0, 7) + ')' : '');
+  const priorRows = Array.isArray(prior.checks) ? prior.checks : [];
+  const rows = priorRows.map((c) => ({ id: c.id, verdict: c.verdict, exit: null, stdoutFile: null, detail: note, ms: null, slow: false, flaky: false }));
+  const summary = prior.summary && typeof prior.summary === 'object' ? Object.assign({}, prior.summary) : { pass: rows.length, fail: 0, error: 0 };
+  const result = { checks: rows, summary, flags: { slow: 0, flaky: 0, grew: 0 }, cost: { ms: 0, baselineMs: against, grew: false }, skipped: { from: prior.at, head: prior.head || null, note } };
+  const byId = new Map(checks.map((c) => [c.id, c]));
+  const saved = rows.map((r) => Object.assign({}, r, byId.has(r.id) ? { check: byId.get(r.id).check, expect: byId.get(r.id).expect } : {}));
+  try {
+    fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(Object.assign({ at, head }, result, { checks: saved })) + '\n');
+  } catch (e) {
+    process.stderr.write('run-checks: could not save ' + path.join(outDir, 'results.json') + ': ' + e.message + '\n');
+  }
+  appendHistory(file, { at, head, key, fingerprint: print, ms: 0, passed: true, skipped: true, from: prior.at,
+    againstMs: against, baselineMs: against, grew: false, summary, checks: priorRows });
+  process.stderr.write('run-checks: ' + note + '\n');
+  return result;
+}
+
 // Run the list as the full test step: time the whole run, compare a pass with
 // the baseline, and append one row. The first passing run is the baseline; a
 // passing run over 1.5x it is flagged (flags.grew 1) and becomes the new
 // baseline, so the same growth is flagged once, never on every later run. A
 // failing run (a fail, an error, a flake) never moves the baseline: one cut
-// short or one that ran into its time limit would mislead it.
+// short or one that ran into its time limit would mislead it. Before running,
+// a tree and list the last run on them passed is skipped (skipRun), unless
+// --no-skip; a failing last run on the same tree is never skipped.
 // `file` is historyFile()'s answer, taken before the out folder was made.
 function runFull(checks, opts, cwd, outDir, file) {
   const key = checksKey(checks);
   const rows = readHistory(file);
+  const print = fingerprint(cwd);
+  if (!opts.noSkip && print !== null) {
+    const prior = lastRunOn(rows, key, print);
+    if (prior && prior.passed) return skipRun(checks, prior, cwd, outDir, file, key, print, baselineFor(rows, key));
+  }
   const started = Date.now();
   let row = null;
   const result = runAll(checks, opts, cwd, outDir, null, (res) => {
@@ -1623,7 +1727,7 @@ function runFull(checks, opts, cwd, outDir, file) {
     res.flags.grew = grew ? 1 : 0;
     res.cost = { ms, baselineMs: against, grew };
     row = {
-      at: new Date(started).toISOString(), head: headCommit(cwd), key, ms, passed,
+      at: new Date(started).toISOString(), head: headCommit(cwd), key, fingerprint: print, ms, passed,
       againstMs: against, baselineMs: passed && (against === null || grew) ? ms : against, grew,
       summary: res.summary, checks: res.checks.map((c) => ({ id: c.id, verdict: c.verdict, ms: c.ms })),
     };

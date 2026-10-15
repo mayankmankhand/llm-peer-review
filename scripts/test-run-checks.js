@@ -1576,7 +1576,7 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
     one(a.stdout + JSON.stringify(ra)));
 
   pinBaseline(h.dir, 1);
-  const b = fullRun(h.dir, list);
+  const b = fullRun(h.dir, list, ['--no-skip']);  // the tree is unchanged: a skip would prove nothing here
   const rb = historyRows(h.dir);
   check('248 history: a passing run over 1.5x the baseline sets flags.grew and names the old baseline',
     !!b.json && b.json.flags.grew === 1 && b.json.cost.baselineMs === 1 && rb.length === 2 && b.json.cost.ms === rb[1].ms,
@@ -1584,7 +1584,7 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
   check('248 history: the run that grew becomes the new baseline', rb.length === 2 && rb[1].grew === true && rb[1].baselineMs === rb[1].ms, one(JSON.stringify(rb)));
 
   pinBaseline(h.dir, 1e9);
-  const c = fullRun(h.dir, list);
+  const c = fullRun(h.dir, list, ['--no-skip']);
   const rc = historyRows(h.dir);
   check('248 history: a run under 1.5x the baseline flags nothing and keeps the baseline',
     !!c.json && c.json.flags.grew === 0 && rc.length === 3 && rc[2].baselineMs === 1e9 && rc[2].grew === false, one(c.stdout + JSON.stringify(rc[2])));
@@ -1605,7 +1605,7 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
   pinBaseline(h.dir, 1e9);
   const wt = path.join(sandbox, 'h248-wt');
   h.git(['worktree', 'add', '-q', '-b', 'wt', wt]);
-  const w = fullRun(wt, list);
+  const w = fullRun(wt, list, ['--no-skip']);
   const rw = historyRows(h.dir);
   check('248 history: a run in a worktree appends to the main copy\'s history, not the worktree\'s',
     w.status === 0 && rw.length === 5 && historyRows(wt).length === 0, one(w.stdout + w.stderr));
@@ -1646,6 +1646,104 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
   check('248 history: a link on the history\'s path is refused and nothing is written through it',
     linked.status === 1 && /history/.test(linked.stderr) && fs.readdirSync(away).length === 0 && !fs.existsSync(linked.out),
     one(linked.stdout + linked.stderr + ' ' + fs.readdirSync(away)));
+});
+
+// --- 248. skip a full run on unchanged code (issue #248) ---------------------
+// The loop ran the whole suite four times in one cycle on code that had not
+// changed. A --full run whose working tree (edits and new files included) and
+// checks list match the last passing run is skipped with a one-line note; it
+// reads git without ever writing or locking the real index.
+section('248 skip: a full run on unchanged code is skipped with a note (issue #248)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const s = freshRepo('s248');
+  fs.writeFileSync(path.join(s.dir, 'g.txt'), 'gone soon\n');
+  s.git(['add', 'g.txt']);
+  s.git(['commit', '-qm', 'g']);
+  const list = [{ id: 'tests', check: 'grep -c hello f.txt', expect: { exit: 0 } }];
+  const skipped = (r) => !!(r.json && r.json.skipped);
+
+  const a = fullRun(s.dir, list);
+  const b = fullRun(s.dir, list);
+  const rb = historyRows(s.dir);
+  const saved = fs.existsSync(path.join(b.out, 'results.json')) ? JSON.parse(fs.readFileSync(path.join(b.out, 'results.json'), 'utf8')) : {};
+  check('248 skip: a second run on an unchanged tree is skipped, with the note and the passing run\'s summary',
+    !skipped(a) && skipped(b) && /^skipped: nothing changed since the passing run at /.test(String(b.json.skipped.note))
+      && JSON.stringify(b.json.summary) === JSON.stringify(a.json.summary) && b.json.flags.grew === 0,
+    one(b.stdout + b.stderr));
+  check('248 skip: a skip still writes results.json, marked skipped', !!saved.skipped && saved.summary && saved.summary.fail === 0, one(JSON.stringify(saved)));
+  check('248 skip: a skip writes a history row marked skipped that keeps the baseline',
+    rb.length === 2 && rb[1].skipped === true && rb[1].baselineMs === rb[0].baselineMs && rb[1].key === rb[0].key, one(JSON.stringify(rb)));
+  const hs = run(['--history'], s.dir).json || {};
+  check('248 skip: --history counts the skip apart from the runs', hs.runs === 1 && hs.skipped === 1 && hs.totalMs === rb[0].ms, one(JSON.stringify(hs)));
+  check('248 skip: the same list at another path (a fresh scratch folder) is the same list, so it skipped', rb.length === 2 && rb[0].key === rb[1].key, one(JSON.stringify(rb)));
+
+  const forced = fullRun(s.dir, list, ['--no-skip']);
+  check('248 skip: --no-skip always runs', !skipped(forced) && !!forced.json && forced.json.summary.pass === 1, one(forced.stdout + forced.stderr));
+
+  fs.writeFileSync(path.join(s.dir, 'f.txt'), 'hello\nmore\n');
+  const edited = fullRun(s.dir, list);
+  const again = fullRun(s.dir, list);
+  check('248 skip: an edit to a tracked file makes it run, and the run after that skips again', !skipped(edited) && skipped(again), one(edited.stdout + ' | ' + again.stdout));
+
+  fs.writeFileSync(path.join(s.dir, 'new.txt'), 'new\n');
+  const untracked = fullRun(s.dir, list);
+  check('248 skip: a new untracked file makes it run', !skipped(untracked) && untracked.status === 0, one(untracked.stdout));
+
+  fs.rmSync(path.join(s.dir, 'g.txt'));
+  const deleted = fullRun(s.dir, list);
+  check('248 skip: a deleted tracked file makes it run', !skipped(deleted) && deleted.status === 0, one(deleted.stdout));
+
+  fs.chmodSync(path.join(s.dir, 'f.txt'), 0o755);
+  const moded = fullRun(s.dir, list);
+  check('248 skip: a file made executable makes it run', !skipped(moded), one(moded.stdout));
+
+  const other = fullRun(s.dir, [{ id: 'tests', check: 'grep -c hello f.txt', expect: { match: '^1$' } }]);
+  check('248 skip: a changed checks list makes it run', !skipped(other), one(other.stdout));
+
+  fs.writeFileSync(path.join(s.dir, 'f.txt'), 'bye\n');
+  const broke = fullRun(s.dir, list);
+  const still = fullRun(s.dir, list);
+  check('248 skip: a failing last run never skips, so the same failure runs again', !skipped(broke) && broke.json.summary.fail === 1 && !skipped(still) && still.json.summary.fail === 1, one(broke.stdout + ' | ' + still.stdout));
+  fs.writeFileSync(path.join(s.dir, 'f.txt'), 'hello\n');
+
+  // Must-never: the fingerprint reads git and never writes or locks the real
+  // index. A staged change is the state a lock-taking command would rewrite.
+  fs.writeFileSync(path.join(s.dir, 'staged.txt'), 'staged\n');
+  s.git(['add', 'staged.txt']);
+  fs.writeFileSync(path.join(s.dir, 'staged.txt'), 'staged, then edited\n');
+  const idx = path.join(s.dir, '.git', 'index');
+  const quiet = (args) => s.git(['--no-optional-locks'].concat(args));
+  const snap = () => ({ bytes: fs.readFileSync(idx).toString('base64'), mtime: fs.statSync(idx).mtimeMs, staged: quiet(['ls-files', '-s']), status: quiet(['status', '--porcelain']) });
+  const before = snap();
+  const ran = fullRun(s.dir, list);
+  const skip = fullRun(s.dir, list);
+  const after = snap();
+  check('248 skip: running and skipping leave the real index, its staged entries and the status as they were',
+    !skipped(ran) && skipped(skip) && before.bytes === after.bytes && before.mtime === after.mtime && before.staged === after.staged && before.status === after.status,
+    one(JSON.stringify({ ran: ran.stdout.slice(0, 80), skip: skip.stdout.slice(0, 80), same: before.bytes === after.bytes, mtime: [before.mtime, after.mtime] })));
+  const lock = path.join(s.dir, '.git', 'index.lock');
+  fs.writeFileSync(lock, '');
+  const locked = fullRun(s.dir, list);
+  const lockKept = fs.existsSync(lock);
+  fs.rmSync(lock, { force: true });
+  check('248 skip: with the index locked by another git process, the fingerprint still reads and the run still skips', locked.status === 0 && skipped(locked) && lockKept, one(locked.stdout + locked.stderr));
+
+  // Outside a repository there is no fingerprint, so nothing is skipped.
+  const nogit = path.join(sandbox, 'nogit248');
+  fs.mkdirSync(path.join(nogit, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(nogit, 'f.txt'), 'hello\n');
+  const n1 = fullRun(nogit, list);
+  const n2 = fullRun(nogit, list);
+  check('248 skip: outside a git repository nothing is skipped', n1.status === 0 && n2.status === 0 && !skipped(n1) && !skipped(n2) && historyRows(nogit).length === 2, one(n2.stdout + n2.stderr));
+
+  // A plan step's checks never consult the history, so they always run.
+  fs.mkdirSync(path.join(s.dir, 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(s.dir, 'plans', 'PLAN-s.md'), ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: S** `[sequential]`',
+    '  - Check target `n`: `grep -c hello f.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`', ''].join('\n'));
+  const p1 = run(['--plan', 'plans/PLAN-s.md', '--step', '1', '--phase', 'before'], s.dir);
+  const p2 = run(['--plan', 'plans/PLAN-s.md', '--step', '1', '--phase', 'before'], s.dir);
+  check('248 skip: a plan step run twice on the same tree runs both times', !!p1.json && !!p2.json && !p1.json.skipped && !p2.json.skipped && (p2.byId.n || {}).verdict === 'pass', one(p2.stdout + p2.stderr));
 });
 
 console.log('');
