@@ -103,14 +103,15 @@
     // Where the time went (issue #248). The two scripts' outputs, pasted as
     // they print them: cycle is correction-ledger.js --cycle-time, testCost
     // is run-checks.js --history. Numbers only: the shell renders every value
-    // as text, and drops one that is not a plain non-negative number. The
+    // as text, and drops one that is not a plain non-negative number (a
+    // growth's `at` shows as its day, and only when it is an ISO time). The
     // section is skipped when neither part has anything to show.
     "timeBreakdown": {
       "cycle": { "window": { "ms": 2629772, "from": "previous-document" },
                  "ms": { "claude": 1551777, "tests": 61550, "agents": 115175, "waiting": 0, "away": 901270 },
                  "counts": { "turns": 2, "testRuns": 7, "agents": 2, "backgroundAgents": 0, "quiet": 1 } },
       "testCost": { "runs": 2, "skipped": 1, "totalMs": 330000, "latestMs": 170000, "baselineMs": 160000,
-                    "grew": [ { "ms": 164000, "baselineMs": 80000 } ] }
+                    "grew": [ { "at": "2026-10-15T02:00:00.000Z", "ms": 164000, "baselineMs": 80000 } ] }
     },
 
     // Footer line (HTML allowed). Defaults to the standard /document note.
@@ -508,7 +509,7 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     if (num(counts.testRuns) !== null) said.push(plural(counts.testRuns, "test run", "test runs"));
     if (num(counts.agents) !== null) {
       said.push(plural(counts.agents, "helper agent", "helper agents")
-        + (num(counts.backgroundAgents) !== null ? " (plus " + counts.backgroundAgents + " in the background)" : ""));
+        + (num(counts.backgroundAgents) ? " (plus " + counts.backgroundAgents + " in the background)" : ""));
     }
     if (num(counts.turns) !== null) said.push(plural(counts.turns, "message from you", "messages from you"));
     if (num(counts.quiet) !== null) said.push(plural(counts.quiet, "quiet stretch", "quiet stretches") + " over 2.5 minutes");
@@ -526,7 +527,10 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     if (nonEmpty(cost.grew)) {
       cost.grew.forEach(function (g) {
         if (!g || num(g.ms) === null || num(g.baselineMs) === null) return;
-        card.appendChild(text(el("p", "card-line"), "Grew past 1.5x its baseline: " + duration(g.baselineMs) + " to " + duration(g.ms) + "."));
+        // The day it grew, taken only from a value shaped like the ISO time
+        // the history prints, so the owner knows which run to look at.
+        var day = typeof g.at === "string" && /^\d{4}-\d{2}-\d{2}T/.test(g.at) ? g.at.slice(0, 10) : "";
+        card.appendChild(text(el("p", "card-line"), "Grew past 1.5x its baseline" + (day ? " on " + day : "") + ": " + duration(g.baselineMs) + " to " + duration(g.ms) + "."));
       });
     }
     return card.childNodes.length ? card : null;

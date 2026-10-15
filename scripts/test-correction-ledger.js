@@ -1945,6 +1945,20 @@ function cycleTimeTest() {
     rd.status === 0 && !!jd.ms && jd.ms.waiting === 300000 && jd.ms.away === 1500000 && jd.ms.claude === 60000 && sum(jd.ms) === 1860000,
     one(rd.stdout + rd.stderr));
   check('248 cycle-time: a question on screen is visible output, so a wait for its answer is no quiet stretch', !!jd.counts && jd.counts.quiet === 0, one(JSON.stringify(jd.counts)));
+
+  // --- E: calls that never got an answer (review of #248, R1) -----------------
+  // A session that died mid test call, and a background run whose finish
+  // notice never came, must stop at their session's last entry, not run on to
+  // the window's end and swallow everything after them as tests.
+  //   e1: the test call at 10 s is the session's last entry: 0 s of tests.
+  //   e2: a background run launched at 110 s, last entry at 120 s: 10 s.
+  const e = makeSandbox('cycle-e');
+  writeLog(e, e.proj, 'e1', [command(0, '/explore'), say(5, 'Running the suite.'), tool(10, 'u1', 'Bash', { command: 'npm test' })]);
+  writeLog(e, e.proj, 'e2', [human(100, 'Picking this up again now.'), tool(110, 'u2', 'Bash', { command: 'npm test', run_in_background: true }),
+    result(111, 'u2', { backgroundTaskId: 'bg-u2' }), say(120, 'Started.')]);
+  const re = cycle(e, ['--until', at(1000)]);
+  check('248 cycle-time: a call with no result, or a background run with no notice, stops at its session\'s last entry',
+    re.status === 0 && !!re.json && re.json.ms.tests === 10000 && sum(re.json.ms) === 1000000, one(re.stdout + re.stderr));
 }
 
 function tripwireTest() {

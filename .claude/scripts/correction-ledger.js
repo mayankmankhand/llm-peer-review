@@ -1841,7 +1841,8 @@ function runSetAxial() {
 //   tests    a Bash call that runs the checks runner (--checks or --phase),
 //            npm test or pytest: from the call to its result, or, for one
 //            started in the background, from the launch to the notice that it
-//            finished
+//            finished (a call that never got its result, or its notice, stops
+//            at its session's last entry)
 //   agents   a foreground Agent call, from the call to its result (a
 //            background one is counted in backgroundAgents and adds no time,
 //            since it overlaps whatever else happened)
@@ -2007,6 +2008,12 @@ function cycleWindow(markers, since) {
 function sessionIntervals(entries, start, end, notices, counts) {
   const iv = [];
   const inWindow = function (t) { return t >= start && t <= end; };
+  // A call that never got its result (the session died mid-call), or a
+  // background run whose finish notice never came, stops at this session's
+  // last entry: running it on to the window's end would count everything after
+  // it as tests, the busiest state (review of #248, R1).
+  let lastSeen = start;
+  entries.forEach(function (x) { if (x.t <= end && x.t > lastSeen) lastSeen = x.t; });
   const pending = new Map();
   let turnStart = null, lastClaude = null, lastVisible = null;
   const turnEnd = function () { return lastClaude !== null ? lastClaude : turnStart; };
@@ -2017,7 +2024,7 @@ function sessionIntervals(entries, start, end, notices, counts) {
     if (call.name === 'Bash' && TEST_COMMAND.test(String(call.input.command || ''))) {
       if (inWindow(call.t)) counts.testRuns++;
       const background = call.input.run_in_background === true;
-      const stop = background ? (notices.has(call.id) ? notices.get(call.id) : end) : doneAt;
+      const stop = background ? (notices.has(call.id) ? notices.get(call.id) : lastSeen) : doneAt;
       iv.push({ s: call.t, e: stop, p: P_TESTS });
     } else if (call.name === 'Agent' || call.name === 'Task') {
       const background = res.isAsync === true || call.input.run_in_background === true;
@@ -2067,7 +2074,7 @@ function sessionIntervals(entries, start, end, notices, counts) {
     quietUntil(turnEnd());
     iv.push({ s: turnStart, e: turnEnd(), p: P_CLAUDE });
   }
-  pending.forEach(function (call) { finish(call, end, {}); });   // still running at the window's end
+  pending.forEach(function (call) { finish(call, lastSeen, {}); });   // never answered: stops at the last entry
   return iv;
 }
 

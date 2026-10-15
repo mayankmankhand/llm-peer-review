@@ -2199,11 +2199,15 @@ function timePageTests() {
     /Full test runs: 2 ran, 1 skipped, 5\.5 min in all/.test(full) && /latest 2\.8 min against a baseline of 2\.7 min/.test(full) && !/Grew past/.test(full),
     full.slice(0, 800));
   const grown = text(page({ cycle: cycle, testCost: Object.assign({}, testCost, { grew: [{ at: '2026-10-15T02:00:00.000Z', ms: 164000, baselineMs: 80000 }] }) }));
-  check('248 time page: a growth adds a note with the two times', /Grew past 1\.5x its baseline: 1\.3 min to 2\.7 min/.test(grown), grown.slice(0, 800));
+  check('248 time page: a growth adds a note with the day it happened and the two times', /Grew past 1\.5x its baseline on 2026-10-15: 1\.3 min to 2\.7 min/.test(grown), grown.slice(0, 800));
+  // Review of #248, R12: a background count of 0 is clutter; a real one shows.
+  const withBackground = text(page({ cycle: Object.assign({}, cycle, { counts: Object.assign({}, cycle.counts, { backgroundAgents: 2 }) }), testCost: testCost }));
+  check('248 time page: the background clause shows only when some helper agents ran in the background',
+    !/in the background/.test(full) && /2 helper agents \(plus 2 in the background\)/.test(withBackground), full.slice(0, 400) + ' | ' + withBackground.slice(0, 400));
 
   const hostile = page({
     cycle: { window: cycle.window, ms: Object.assign({}, cycle.ms, { claude: '<script>alert(1)</script>', away: -5 }), counts: Object.assign({}, cycle.counts, { quiet: '<img src=x onerror=alert(2)>' }) },
-    testCost: Object.assign({}, testCost, { latestMs: '<b>bold</b>' })
+    testCost: Object.assign({}, testCost, { latestMs: '<b>bold</b>', grew: [{ at: '<img src=y onerror=alert(3)>', ms: 164000, baselineMs: 80000 }] })
   });
   check('248 time page: a value that is not a number is dropped and never reaches the page as markup',
     !/alert|<script|<img|<b>/.test(hostile) && !/Claude working/.test(text(hostile)) && !/Away \(/.test(text(hostile)) && /Tests: 1\.0 min/.test(text(hostile)) && !/quiet stretch/.test(text(hostile)),

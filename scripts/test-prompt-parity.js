@@ -188,5 +188,25 @@ const PASTE_LIMIT = 28500;
   check('paste limit: mutation: a different number in upgrade-audit.js trips the check', mutated !== auditText && limitDrift(mutated) !== '', limitDrift(mutated));
 }
 
+// --- the cycle page's time section (issue #248, review R6) ----------------------
+// /document pastes two scripts' outputs into timeBreakdown under two keys it
+// names in prose, and the shell reads them by name. Nothing else ties the two,
+// so a rename on either side would leave the section silently empty. The keys
+// are read from document.md's own sentence and looked up in the shell.
+{
+  const SHELL = read('.claude/skills/shared/shells/document-shell.html');
+  const keysDrift = (doc, shell) => {
+    const m = /set `timeBreakdown` to `\{"(\w+)": <the first JSON>, "(\w+)": <the second JSON>\}`/.exec(doc);
+    if (!m) return 'document.md no longer names the two timeBreakdown keys in its usual sentence';
+    const missing = [m[1], m[2]].filter((k) => !new RegExp('\\btb\\.' + k + '\\b').test(shell));
+    return missing.length ? 'document-shell.html does not read ' + missing.map((k) => 'tb.' + k).join(' or ') : '';
+  };
+  check('time section: the two keys document.md writes are the keys document-shell.html reads', keysDrift(DOC, SHELL) === '', keysDrift(DOC, SHELL));
+  const renamedShell = SHELL.replace(/tb\.testCost/g, 'tb.testRuns');
+  const renamedDoc = DOC.replace('"testCost": <the second JSON>', '"cost": <the second JSON>');
+  check('time section: mutation: a key renamed on either side trips the check',
+    keysDrift(DOC, renamedShell) !== '' && keysDrift(renamedDoc, SHELL) !== '', keysDrift(DOC, renamedShell) + ' | ' + keysDrift(renamedDoc, SHELL));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }
