@@ -2,9 +2,9 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
-## Unreleased - Where the Time Went
+## v8.0.3 - Where the Time Went (2026-10-15)
 
-**Issues #248 and #249.** A full cycle could take hours with no way to see where the time went, and the loop quietly paid for slow and repeated test runs. Not released yet: the version number is decided at release.
+**A patch on top of v8.0.2 (#248, #249).** A full cycle could take hours with no way to see where the time went, and the loop quietly paid for slow and repeated test runs. The cycle page now shows where it went, and the full test step keeps track of its own cost.
 
 ### Added
 
@@ -16,6 +16,13 @@
 
 - **A status line before long waits.** The always-on rules ask Claude to say in one line what is coming before anything expected to take over a minute, and to answer every question before moving on. Existing projects get the new rules text through `/tk:upgrade`.
 - **`/tk:explore` opens with a short recommendation**, five lines or fewer, then the questions. In vision mode the recommendation is a first direction to react to, not a narrowed scope.
+
+### Upgrading
+
+- On the plugin: `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, then restart Claude Code, then `/tk:upgrade` in each project. No new permission rows and no new upgrade checks.
+- `/tk:upgrade` reports your `.claude/rules/toolkit.md` as behind the seed (C-7), because of the new status-line sentence. Its fix merges the seed's text into your copy and keeps everything under your `<!-- Project section:` line.
+- Other editors: re-running `setup.sh` or `setup.ps1` replaces `.claude/rules/toolkit.md` whole, after copying the old one into a `.toolkit-backup-<date>-<time>-<n>/` folder in your project. Copy back anything you wrote under its Project section from that backup.
+- The test history starts empty in each project: the first full run sets the usual time.
 
 ### Why
 
