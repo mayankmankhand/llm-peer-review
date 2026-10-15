@@ -108,7 +108,12 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 ## How It Works: File Architecture
 
-When you set up the toolkit in a project, it creates several files. Here's how they fit together:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/files-dark.svg">
+  <img src="images/diagrams/files-light.svg" alt="Where files live: the toolkit's commands, skills, agents and scripts stay in the plugin cache and change only with the plugin; in your project, setup seeds the rules file, CLAUDE.md, the lessons files, DESIGN-PROFILE.md, .claude/toolkit and settings.local.json once and then they are yours, and plans, artifacts/html, reports and CODEBASE_MAP.md are made as you work." width="440">
+</picture>
+
+The picture shows who owns what; the table gives every file's job:
 
 | File | Who owns it | What it does |
 |---|---|---|
@@ -169,7 +174,7 @@ If you run multiple Claude Code sessions at the same time (in Cursor windows or 
 ## Customization
 
 - **CLAUDE.md** - Your project-specific instructions. Describe your project, tech stack, and preferences here. See [How It Works](#how-it-works-file-architecture) for details.
-- **`.claude/rules/toolkit.md`** - The short toolkit rules seed. Don't edit this. `/tk:setup` writes it only when it is missing, so it never replaces yours; when `/tk:upgrade` flags it as stale, delete it and run `/tk:setup` for a fresh copy, or merge the new seed text by hand. Your own rules go in their own files beside it, which the toolkit never touches.
+- **`.claude/rules/toolkit.md`** - The short toolkit rules seed. Leave the toolkit's part as it is and put your own rules under its `<!-- Project section:` line, where the upgrade check stops comparing (see [Extending a toolkit stage](#extending-a-toolkit-stage)); a rules file of your own beside it works too, and the toolkit never touches one. `/tk:setup` writes the seed only when it is missing, so it never replaces yours. When `/tk:upgrade` flags it as stale (C-7), merge the new seed text and keep everything from the project line down; if you delete the file and run `/tk:setup` for a fresh copy instead, copy your project section aside first.
 - **Commands and skills** - On the plugin, the toolkit's files are read-only in the plugin cache. Customize by adding your own command, skill, or agent in your project's `.claude/` folder: dispatch the toolkit's finders by scoped name (`subagent_type=tk:review-code-finder`), preload a criteria skill on your own agent with a `skills:` line, and refer to toolkit pieces by name rather than by path, which is what `/tk:upgrade` checks (see [docs/CONVENTIONS.md](CONVENTIONS.md)). On a copy-install each file in `.claude/commands/` and `.claude/skills/<name>/SKILL.md` is a copy you can edit until the next re-run of setup replaces it.
 - **LESSONS.md** - Lesson index that Claude reads each session so past lessons feed back into new work; full write-ups live in **LESSONS-detail.md**. Both are yours to customize.
 

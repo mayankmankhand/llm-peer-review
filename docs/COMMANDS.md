@@ -36,13 +36,20 @@ Full prompt: [`.claude/commands/create-plan.md`](../.claude/commands/create-plan
 
 ### `/execute` - Build it, update the plan as you go
 
-Walks through the plan step by step, updating status emojis and progress in real time. Spawns parallel agents for `[parallel]` steps, runs `[sequential]` steps in order. Small failures get at most 3 fix attempts per step. Stops on critical blockers (e.g. the plan assumed an API supports a feature it doesn't) instead of pushing through a broken plan. Each step works check-first through the toolkit's checks runner (`run-checks.js`): `/execute` first writes the step's target, such as its new test case or must line, and none of the step's real work; the before run must then show the failure the plan stated; then comes the work, and the after run, when every target must pass without a flake and every guard must still hold. The after run is the step's green, and both runs are saved under `reports/checks/<plan>/`. The project's full test step, `npm test` or `pytest` by default, or exactly the checks in your `.claude/toolkit/checks.json` when that file exists, runs at each parallel checkpoint and at the plan's Verify step. A plan written before steps carried their own checks has no check lines, so it runs the full test step after every step instead and goes green the old way. The runner saves each log and reads back only the failing lines; npm's stock placeholder script counts as no tests, and a failed or refused check turns the run red. A check that fails and then passes when run again is flaky and still counts as a fail. An older check that flakes, a guard that was already failing before the step's work, or a check that passed but took more than half its time limit does not stop the build: it goes to `/review` as a must-check line. A check that ran out of time is a plain fail. On a clean finish it hands off to `/review`; on a blocker it stops there and asks you.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/execute-dark.svg">
+  <img src="images/diagrams/execute-light.svg" alt="Inside execute: from your approved plan it records where the run starts; for every step it writes the check first, the check must fail before the work for the stated reason, it does the work, the check must pass after, and it commits the step; a failing step gets up to 3 fix attempts and then stops and asks you; UI steps run a design loop of up to 5 rounds new or 2 improve; after the last step it hands off to review." width="440">
+</picture>
+
+Walks through the plan step by step, updating status emojis and progress in real time: `[parallel]` steps run as parallel agents, `[sequential]` steps in order. Each step works check-first through the toolkit's checks runner (`run-checks.js`), as the picture shows: it writes the step's target (a new test case or must line) and none of the real work, a before run must show the failure the plan stated, then comes the work, and an after run where every target passes without a flake and every guard still holds. That after run is the step's green; both runs are saved under `reports/checks/<plan>/`. Small failures get at most 3 fix attempts per step, and a critical blocker (the plan assumed an API supports a feature it doesn't) stops the run and asks you instead of pushing through a broken plan. On a clean finish it hands off to `/review`.
+
+The project's full test step, `npm test` or `pytest` by default, or exactly the checks in your `.claude/toolkit/checks.json` when that file exists, runs at each parallel checkpoint and at the plan's Verify step; npm's stock placeholder script counts as no tests. A plan written before steps carried their own checks runs the full test step after every step instead. The runner saves each log and reads back only the failing lines, and a failed or refused check turns the run red. A check that fails and then passes when run again is flaky and still counts as a fail; one that ran out of time is a plain fail. An older check that flakes, a guard already failing before the step's work, or a check that passed but took more than half its time limit does not stop the build: it goes to `/review` as a must-check line.
 
 Full prompt: [`.claude/commands/execute.md`](../.claude/commands/execute.md)
 
 ### Kinds of check
 
-`/create-plan` writes each step's checks as lines indented under the step; `/execute` writes each target first (the new test case or must line), then runs the checks before and after the step's work. A step carries three kinds of line:
+`/create-plan` writes each step's checks as lines indented under the step, in three kinds:
 
 - **Target:** the check that shows the step's change. It states in advance the one result only the missing behavior can produce, and it must show exactly that result before the work and pass after it.
 - **Guard:** something the step could break, such as the tests of a module it touches or a sentence a rewrite has to keep. It passes before and after.
@@ -68,7 +75,7 @@ Pick the target that shows the change:
 
 **The stated failure.** A target's result before the work is written down in advance, and only the missing behavior can produce it: for a test, the new case's name in the suite's failure list, not just "the tests fail", because some other failure would satisfy that too. A crash or a missing file is not the stated failure: `/execute` adds the smallest stub, such as an empty function, and runs the check again.
 
-**Why a check that already passes proves nothing.** A target that passes before the work would have passed whether or not the work was done, so its pass afterwards says nothing about the work. The same goes for an absence check, a target whose result after the work is a count of 0 or a no-match: aimed at something that never existed, it already passes before the work, so it fits only a step that removes something. A count of 0 before the work, for a line the step adds, is fine: that is a must line's stated failure. When a target passes before the work, `/execute` fixes the check or its stated reason, never the work.
+**Why a check that already passes proves nothing.** A target that passes before the work would pass whether or not the work was done. So an absence check (a count of 0 or a no-match after the work) fits only a step that removes something, while a count of 0 before the work, for a line the step adds, is a must line's stated failure. When a target passes before the work, `/execute` fixes the check or its stated reason, never the work.
 
 **The whole system** stays with the plan's Verify step: the project's full test step, a user flow end to end, and old against new when the plan replaces a system. A docs-only or config-only plan needs no Verify step.
 
@@ -76,7 +83,16 @@ The rules are M17 in [`.claude/skills/shared/hitl-stages.md`](../.claude/skills/
 
 ### `/review` - Auto-detect what changed, run the right specialists, fix what they confirm
 
-Looks at what changed (the commits `/execute` made, which it hands over as a range, plus anything uncommitted) and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel. Typed with no range, it takes the newest plan's own commits while any of them are unpushed, else your unpushed commits, and the report opens by naming that range and why it chose it. Before you read anything, the combined findings pass a three-tier audit: every finding ships with a receipt (a runnable check, like a grep or a test) that the toolkit's checks runner (`run-checks.js`) executes from your project root and judges by machine (read-only commands only; a check it refuses fails the receipt), survivors face a fresh skeptic whose default is to refute, and Block-severity findings must survive a three-skeptic vote. The plan's must-check items (gaps the plan or design critics left open, and the slow, flaky or broken-before checks `/execute` carried on past) go through the same audit, and, when the plan has check lines, so does one finding for each plan step whose checks are missing, would not run, or did not prove it in their saved records (a plan written before steps carried checks gets none), so each one is either confirmed or dismissed with proof. Surviving step findings come to you rather than being fixed automatically, because a step cannot be proved after its work. The report shows only the survivors. Each finding is one sentence carrying the defect and its harm, a second only when it says who is hit or when it fires, and a fix line that states a cost, with the check that proves it attached. Everything the audit killed is listed one line each in an "Audited out" log, never fixed. Survivors are then fixed automatically, and each fix is re-verified (max 2 rounds) instead of assumed done. In a project with tests, a logic bug a test can show is fixed check-first: a test is written in your project's tests and shown to fail for the bug's reason, then the bug is fixed and the test passes, and the test stays, so the bug cannot come back unseen. The run ends with a summary showing, for every fix, the check that proves it worked. Once the loop settles it hands off to `/document`, which finishes the cycle: docs updated, commits made, and (behind a secret-scanning tripwire) pushed. Your control points: you approved the plan before anything was built, the loop stops and asks whenever a decision genuinely needs a human (for example, edits to the toolkit's own prompt files), and two per-run phrases give you the wheel back - "report only" reports findings without changing anything, "no chaining" stops the handoff to the next stage.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/review-dark.svg">
+  <img src="images/diagrams/review-light.svg" alt="Inside review: what changed goes to one finder per lens; each finding's check runs; skeptics, one per seven findings and three votes on a Block, try to refute the rest; survivors are fixed and a verifier that is never the fixer checks each fix; a failed fix gets up to 2 tries, then it is undone and you are asked. Failed checks and refuted findings go to the audited-out log." width="440">
+</picture>
+
+Looks at what changed (the commits `/execute` made, which it hands over as a range, plus anything uncommitted) and dispatches the relevant review skills (`/review-code`, `/review-security`, `/review-ux`, `/review-plan`, `/review-browser`, `/review-deps`, `/review-copy`, and others) in parallel. Typed with no range, it takes the newest plan's own commits while any of them are unpushed, else your unpushed commits, and the report opens by naming that range and why it chose it.
+
+Before you read anything, every finding passes the three-tier audit in the picture: its receipt (a runnable check, like a grep or a test) is run from your project root by the checks runner and judged by machine (read-only commands only; a refused check fails the receipt), survivors face a fresh skeptic whose default is to refute, and a Block must also survive a three-skeptic vote. The plan's must-check items (gaps the plan or design critics left open, and the slow, flaky or broken-before checks `/execute` carried on past) go through the same audit, as does one finding for each plan step whose checks are missing, would not run, or did not prove it in their saved records (a plan written before steps carried checks gets none). Surviving step findings come to you rather than being fixed, because a step cannot be proved after its work.
+
+The report shows only the survivors: one sentence carrying the defect and its harm, a second only when it says who is hit or when it fires, a fix line that states a cost, and the check that proves it. What the audit killed is listed one line each in an "Audited out" log, never fixed. Survivors are fixed automatically and each fix is re-verified (max 2 rounds) instead of assumed done. In a project with tests, a logic bug a test can show is fixed check-first: a test written in your project's tests fails for the bug's reason, the fix makes it pass, and the test stays, so the bug cannot come back unseen. The run ends with a summary showing the check behind every fix, then hands off to `/document`, which updates the docs, commits, and pushes behind a secret-scanning tripwire. You stay in control at the plan approval, at every stop where a decision genuinely needs a human (for example, edits to the toolkit's own prompt files), and through the two per-run brakes, "report only" and "no chaining" ([the loop and its two brakes](#the-loop-and-its-two-brakes)).
 
 **One review page per branch.** The review's page (published privately when your session can publish) shows what is still open, and it is replaced in place on every run. Your default branch has one page; every other branch, such as a worktree's, gets its own, named after the branch and starting empty, so cycles running side by side never overwrite or wrongly close each other's findings. Both the review pages and the cycle summary `/document` keeps are saved in the main copy's `artifacts/html/`, whichever worktree ran them, so removing a worktree loses neither. The cycle summary is one shared log for the whole repository.
 
@@ -111,7 +127,35 @@ Full prompt: [`.claude/commands/merge.md`](../.claude/commands/merge.md) | Rules
 
 ### `/ask-gpt` and `/ask-gemini` - Debate with another AI
 
-Run a structured debate of up to 3 rounds between Claude and ChatGPT (or Gemini). They push back on each other, concede points, and produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same two-sentence finding contract as `/review` (one sentence carrying the defect and its harm, a second only when it says who is hit or when it fires, and a fix line that states a cost), so the output model is consistent across all peer-review surfaces. Each debate typically costs $0.01-$0.10 in API credits. Requires API keys from OpenAI and/or Google AI Studio. See [API-KEYS.md](../API-KEYS.md) for setup.
+Run an automated debate between Claude and ChatGPT (or Gemini) about your code or plan; the toolkit carries every message, so you copy nothing by hand. They push back on each other and concede points for up to 3 rounds (it ends after round 2 when both fully agree), then produce a structured verdict: Agreed / Disagreed / Recommended Actions. Recommended Actions use the same two-sentence finding contract as `/review` (one sentence carrying the defect and its harm, a second only when it says who is hit or when it fires, and a fix line that states a cost), so the output model is consistent across all peer-review surfaces. Want a different perspective? Run `/ask-gemini` after `/ask-gpt`.
+
+Each debate typically costs $0.01-$0.10 in API credits, depending on context size, and needs an OpenAI and/or Gemini API key with credits: [API-KEYS.md](../API-KEYS.md) walks through the setup.
+
+**Choosing what to review:**
+
+<img src="images/ask-gpt-prompt.png" alt="ask-gpt prompt showing review options" width="700">
+
+```
+You: /ask-gpt
+
+Claude: What would you like me to review?
+        1. Plan    2. Code    3. Branch    4. Feature    5. Other
+
+You: Review the auth middleware
+
+Claude: [Gathers context → sends to ChatGPT → they debate up to 3 rounds]
+
+        --- Summary ---
+        Agreed: Add token expiry check, extract magic numbers
+
+        Recommended Actions:
+        - [ ] Add token expiry validation
+        - [ ] Move 3600 to TOKEN_EXPIRY_SECONDS
+
+        Want me to implement these?
+
+You: Yes
+```
 
 Full prompts: [`.claude/commands/ask-gpt.md`](../.claude/commands/ask-gpt.md) | [`.claude/commands/ask-gemini.md`](../.claude/commands/ask-gemini.md)
 
@@ -151,42 +195,3 @@ Full prompt: [`.claude/commands/create-issue.md`](../.claude/commands/create-iss
 | QA a running web app via headless browser | `/review-browser` |
 | Check if copy is clear to a fresh reader | `/review-copy` |
 | Pre-release go/no-go check across all domains | `/review-full` |
-
----
-
-## How `/ask-gpt` and `/ask-gemini` Work
-
-`/ask-gpt` and `/ask-gemini` run an automated debate between Claude and another AI about your code or plan. You don't have to copy anything manually; the toolkit handles the whole loop. A debate runs up to 3 rounds - if both models fully agree after round 2, it ends early instead of running a third.
-
-### Example
-
-```
-You: /ask-gpt
-
-Claude: What would you like me to review?
-        1. Plan    2. Code    3. Branch    4. Feature    5. Other
-
-You: Review the auth middleware
-
-Claude: [Gathers context → sends to ChatGPT → they debate up to 3 rounds]
-
-        --- Summary ---
-        Agreed: Add token expiry check, extract magic numbers
-
-        Recommended Actions:
-        - [ ] Add token expiry validation
-        - [ ] Move 3600 to TOKEN_EXPIRY_SECONDS
-
-        Want me to implement these?
-
-You: Yes
-```
-
-Want a different perspective? Run `/ask-gemini` next.
-
-> **API costs:** Each debate (up to 3 rounds) typically costs $0.01-$0.10 in API credits depending on context size. You'll need an OpenAI and/or Gemini API key with credits. See **[API-KEYS.md](../API-KEYS.md)** for a step-by-step setup guide.
-
-**Choosing what to review:**
-
-<img src="images/ask-gpt-prompt.png" alt="ask-gpt prompt showing review options" width="700">
-

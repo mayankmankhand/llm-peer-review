@@ -2,7 +2,7 @@
 
 What to do when a command, an install, or a debate fails. Install and update steps are in [INSTALL.md](INSTALL.md); the commands themselves in [COMMANDS.md](COMMANDS.md).
 
-## Troubleshooting
+## Every install
 
 - **"Unknown command: /tk:explore" right after installing or updating the plugin** - Run `/reload-plugins` or restart Claude Code. The same fix applies when a dispatch says an agent type such as `tk:review-code-finder` is not found: a plugin's agents register when the session loads them.
 - **`/tk:ask-gpt` says the key was not found** - The message lists the three places it looked, in order: the environment, the project's `.env.local` (from the folder the command runs in up to the git root), and `~/.claude/plugins/.env.local`. Check that the key sits in one of them, that its line is spelled exactly (`OPENAI_API_KEY=...`), and that its value is not blank. A worktree is its own git root, so it needs its own copy of the project file (`/tk:worktree` makes one). See [API-KEYS.md](../API-KEYS.md).
@@ -15,9 +15,14 @@ What to do when a command, an install, or a debate fails. Install and update ste
 - **`/tk:execute` says a step's target check passed before the work** - Each step's target is meant to fail first, for the reason the plan stated, and this one passed instead. A check that passed before the work would pass whether or not the work is done, so it proves nothing. The runner also catches a target whose result before the work already meets what the plan expects after it, and says so in the target's detail: "it already meets its after expect". `/tk:execute` fixes the check or its stated reason in the plan, never the work, records the change in the plan's Outcomes, and runs the before check again; each fix counts against the step's 3 attempts. When no honest check can fail first, the attempts run out and the step stops and asks you, which usually means the plan misjudged where things stood. The kinds of check and their stated failures are in [Kinds of check](COMMANDS.md#kinds-of-check).
 - **A check was flagged slow or flaky** - Flaky means it failed, then passed when run again; slow means it took more than half its time limit. A flaky check still counts as a fail. When it is the step's own new check, `/tk:execute` fixes it within the step's 3 attempts, because a check that passes only sometimes proves nothing. An older check that flakes, a guard that was already failing before the step's work, or a slow check that passed does not stop the build: it becomes a `[check]` line under the plan's `## Must-check for review`, naming the saved record that shows the flag, and `/tk:review` checks it. A check that ran out of time is a plain fail, not only slow. Slow is a finding to fix, not a reason to raise the time limit or retry.
 - **A plan written before steps carried their own checks has no check lines** - It runs the way it was written: after every step, the project's full test step decides green, and `/tk:review` has no check records to read for it. Nothing needs fixing. To give the remaining work per-step checks, plan it again with `/tk:create-plan` rather than adding lines to a few steps by hand: once a plan has any check lines, every step in it is expected to carry its own, and a step without them becomes a review finding. The line shapes are under [Kinds of check](COMMANDS.md#kinds-of-check).
+- **`/ask-gpt` or `/ask-gemini` prints a "deprecated model" warning** - The debate replaces an outdated `GPT_MODEL` or `GEMINI_MODEL` value with the current default and says so. Edit `.env.local` to remove or update the stale value if you want to silence the warning. See [API-KEYS.md](../API-KEYS.md#changing-the-model).
+
+## Copy-install only (Cursor, Codex, other editors)
+
+These come from the setup scripts and the files they copy into a project; a plugin install never meets them.
+
 - **Commands don't show up in Cursor** - Make sure `.claude/commands/` exists in your project root with `.md` files inside. The editor workspace root must be the folder that contains `.claude/`.
 - **`/ask-gpt` or `/ask-gemini` fails** - Check that `npm install --prefix .claude/scripts` was run and `.env.local` has valid API keys.
-- **`/ask-gpt` or `/ask-gemini` prints a "deprecated model" warning** - v4.5.0 auto-overrides outdated `GPT_MODEL` or `GEMINI_MODEL` env values with the current default. Edit `.env.local` to remove or update the stale value if you want to silence the warning. See [API-KEYS.md](../API-KEYS.md#changing-the-model).
 - **"setup.sh: command not found"** - Run the full command from the setup instructions, not just `setup.sh` on its own.
 - **"target directory does not exist"** - Create the project folder first: `mkdir -p /path/to/project`
 - **Script errors with `/bin/bash^M` or "bad interpreter"** - Line-ending issue. Your shell scripts have Windows-style line endings (CRLF) instead of Unix-style (LF). Easiest fix: delete the folder and clone fresh. Advanced fix: run `git add --renormalize . && git checkout -- .` in the repo.
@@ -25,4 +30,3 @@ What to do when a command, an install, or a debate fails. Install and update ste
 - **I customized a toolkit file and upgraded - where did it go?** - The setup script preserves your original at `.toolkit-backup-<timestamp>/` at the project root before overwriting. Copy it back if you want to keep your version. Safe to delete the backup directory when done.
 - **Setup one-liner fails partway through** - Safe to rerun the command. Leftover `/tmp/tmp.*` folders are harmless and can be deleted. `.toolkit-backup-*/` directories from prior runs are also safe to delete once you have confirmed you do not need the originals.
 - **Commands seem outdated or missing sections** - Delete any toolkit command files from `~/.claude/commands/`. Global copies override project commands and cause stale behavior. The setup script warns about this automatically.
-
