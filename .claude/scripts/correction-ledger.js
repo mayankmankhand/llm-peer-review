@@ -1874,6 +1874,14 @@ function runSetAxial() {
 // WHICH LOGS. Every working copy of this repository: the main copy, each
 // worktree git lists, and the folders of removed worktrees that lived under
 // the main copy's .claude/worktrees/ (subagent logs never, as in the scan).
+// A cycle can start in the main copy and carry on in a worktree, so those are
+// read as one; but a worktree is also how two cycles run side by side, and
+// those must not blend (issue #249). So the stage markers come from ONE copy:
+// the copy this call runs in, or the main copy when this copy has no explore
+// or create-plan stage of its own (the cycle began there). Any other copy with
+// an explore or create-plan stage of its own ran a parallel cycle, and it is
+// left out, its markers and its time; a copy with none only continued a cycle
+// and is counted.
 // Each session is cut into turns on its own; the sessions are then laid over
 // one timeline where, at any moment, the busiest state wins (tests, then
 // agents, then an open question, then claude, then waiting, then away; a
@@ -1886,7 +1894,9 @@ function runSetAxial() {
 //
 // Logs are read newest first, and reading stops at the first file last
 // written before the start (or before the previous document stage): nothing
-// in it can fall in the window or move its start.
+// in it can fall in the window or move its start. Telling whether a copy ran a
+// cycle of its own reads that copy's files newest first only until its first
+// explore or create-plan stage.
 const AWAY_AFTER_MS = 15 * 60 * 1000;
 const QUIET_AFTER_MS = 150 * 1000;
 const STAGE_COMMAND = /^\/(?:tk:)?(explore|create-plan|document)(?:\s|$)/;
@@ -1899,25 +1909,29 @@ const NOTICE_ID = /<tool-use-id>([^<\s]+)<\/tool-use-id>/g;
 const P_AWAY = 0, P_WAITING = 1, P_CLAUDE = 2, P_ASKED_AWAY = 3, P_ASKED = 4, P_AGENTS = 5, P_TESTS = 6;
 const ASK_TOOL = 'AskUserQuestion';
 
-// The session-log folders of every working copy of this repository.
+// The session-log folders of every working copy of this repository, each with
+// the working copy it belongs to: { dir, copy }. A copy is named by its real
+// path; a session started in a subfolder of this copy belongs to this copy,
+// and a removed worktree's folder is a copy of its own, named by the folder.
 function cycleFolders() {
-  const main = thisMainRoot() || realOr(repoRoot);
-  const copies = [main, realOr(repoRoot), realOr(cwd)];
+  const here = realOr(repoRoot);
+  const main = thisMainRoot() || here;
+  const copies = [[main, main], [here, here], [realOr(cwd), here]];
   const listed = git(['worktree', 'list', '--porcelain']);
   if (listed) {
     listed.split('\n').forEach(function (l) {
-      if (l.indexOf('worktree ') === 0) copies.push(realOr(l.slice(9).trim()));
+      if (l.indexOf('worktree ') === 0) { const p = realOr(l.slice(9).trim()); copies.push([p, p]); }
     });
   }
   const encode = function (p) { return [p.replace(/[/\\]/g, '-'), p.replace(/[^A-Za-z0-9]/g, '-')]; };
-  const names = new Set();
-  copies.forEach(function (p) { encode(p).forEach(function (n) { names.add(n); }); });
+  const owner = new Map();
+  copies.forEach(function (c) { encode(c[0]).forEach(function (n) { if (!owner.has(n)) owner.set(n, c[1]); }); });
   const prefixes = encode(path.join(main, '.claude', 'worktrees') + path.sep);
   let all;
   try { all = fs.readdirSync(TRANSCRIPT_ROOT); } catch (e) { all = []; }
   return all.filter(function (n) {
-    return names.has(n) || prefixes.some(function (p) { return n.length > p.length && n.indexOf(p) === 0; });
-  }).map(function (n) { return path.join(TRANSCRIPT_ROOT, n); });
+    return owner.has(n) || prefixes.some(function (p) { return n.length > p.length && n.indexOf(p) === 0; });
+  }).map(function (n) { return { dir: path.join(TRANSCRIPT_ROOT, n), copy: owner.has(n) ? owner.get(n) : n }; });
 }
 
 // One session's timed entries, oldest first, and the first notice time of each
@@ -2124,29 +2138,52 @@ function runCycleTime() {
     end = Date.parse(opts.until);
     if (Number.isNaN(end)) die('--until needs a time, such as 2026-10-15T01:00:00Z');
   }
-  // Every session file, newest written first.
+  // Every session file, newest written first, with the copy it belongs to.
+  const here = realOr(repoRoot);
+  const main = thisMainRoot() || here;
   const files = [];
-  cycleFolders().forEach(function (dir) {
-    sessionFiles(dir).forEach(function (f) {
-      try { files.push({ file: f, mtime: fs.statSync(f).mtimeMs }); } catch (e) { /* gone since listed */ }
+  cycleFolders().forEach(function (f) {
+    sessionFiles(f.dir).forEach(function (file) {
+      try { files.push({ file: file, copy: f.copy, mtime: fs.statSync(file).mtimeMs }); } catch (e) { /* gone since listed */ }
     });
   });
   files.sort(function (a, b) { return b.mtime - a.mtime; });
   const notices = new Map();
-  const sessions = [];
-  const markers = [];
-  let win = null;
-  for (let i = 0; i < files.length; i++) {
-    // Older files cannot reach the window or move its start (see the header).
-    const floor = since !== null ? since : (win && win.prevDoc !== undefined ? win.prevDoc : null);
-    if (floor !== null && files[i].mtime < floor) break;
-    const entries = readCycleSession(files[i].file, notices);
+  // Each file is read at most once, whichever question needs it first.
+  const read = new Map();
+  const entriesOf = function (f) {
+    if (!read.has(f.file)) read.set(f.file, readCycleSession(f.file, notices));
+    return read.get(f.file);
+  };
+  const stagesOf = function (entries) {
+    const out = [];
     entries.forEach(function (x) {
       if (x.t > end) return;
       const st = cycleStage(x.e, cycleKind(x.e));
-      if (st) markers.push({ t: x.t, stage: st });
+      if (st) out.push({ t: x.t, stage: st });
     });
-    sessions.push(entries);
+    return out;
+  };
+  // Whether a copy ran a cycle of its own: an explore or create-plan stage
+  // by the window's end, looked for newest file first.
+  const started = new Map();
+  const startsOwn = function (copy) {
+    if (!started.has(copy)) {
+      started.set(copy, files.some(function (f) {
+        return f.copy === copy && stagesOf(entriesOf(f)).some(function (m) { return m.stage !== 'document'; });
+      }));
+    }
+    return started.get(copy);
+  };
+  const source = startsOwn(here) ? here : main;
+  const markers = [];
+  let win = null;
+  for (let i = 0; i < files.length; i++) {
+    if (files[i].copy !== source) continue;
+    // Older files cannot reach the window or move its start (see the header).
+    const floor = since !== null ? since : (win && win.prevDoc !== undefined ? win.prevDoc : null);
+    if (floor !== null && files[i].mtime < floor) break;
+    stagesOf(entriesOf(files[i])).forEach(function (m) { markers.push(m); });
     markers.sort(function (a, b) { return a.t - b.t; });
     win = cycleWindow(markers, since);
   }
@@ -2154,6 +2191,15 @@ function runCycleTime() {
     process.stdout.write(JSON.stringify({ window: null, ms: null, counts: null }) + '\n');
     return;
   }
+  // The sessions counted: the source copy's, this copy's, and those of every
+  // copy that ran no cycle of its own. A file last written before the window
+  // holds nothing in it.
+  const sessions = [];
+  files.forEach(function (f) {
+    if (f.mtime < win.start) return;
+    if (f.copy !== source && f.copy !== here && startsOwn(f.copy)) return;
+    sessions.push(entriesOf(f));
+  });
   const counts = { turns: 0, testRuns: 0, agents: 0, backgroundAgents: 0, quiet: 0, sessions: 0 };
   let intervals = [];
   sessions.forEach(function (entries) {

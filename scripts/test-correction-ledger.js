@@ -1922,6 +1922,44 @@ function cycleTimeTest() {
   let jw = null;
   try { jw = JSON.parse(fromWt.stdout); } catch (e) { jw = null; }
   check('248 cycle-time: run from inside the worktree, it reads the same logs', !!jw && JSON.stringify(jw.ms) === JSON.stringify(jc.ms), one(fromWt.stdout + fromWt.stderr));
+  check('249 cycle-time: a worktree with no stage of its own takes the main copy\'s window and counts every copy that only continued it',
+    !!jw && !!jw.window && jw.window.start === at(0) && !!jw.counts && jw.counts.sessions === 4 && jw.counts.turns === 5, one(fromWt.stdout + fromWt.stderr));
+
+  // --- F: two worktrees, each running a cycle of its own (issue #249) ---------
+  // Worktree A explores at 0 s and builds until 520 s. Worktree B runs its own
+  // cycle beside it: it explores at 100 s, documents at 300 s and starts its
+  // next cycle at 400 s. The main copy only documented an hour before. Read
+  // from A, only A's session counts, and B's document stage does not cut A's
+  // window (merged, the markers put the window at 400 s); read from B, A's
+  // parallel cycle is left out of B's window, 400-600 s.
+  const f = makeSandbox('cycle-f');
+  const gf = (args, cwd) => execFileSync('git', args, { cwd: cwd || f.proj, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' }) });
+  gf(['init', '-q']);
+  fs.writeFileSync(path.join(f.proj, 'f.txt'), 'x\n');
+  gf(['add', 'f.txt']);
+  gf(['commit', '-qm', 'init']);
+  const wa = path.join(f.proj, '.claude', 'worktrees', 'wa');
+  const wb = path.join(f.proj, '.claude', 'worktrees', 'wb');
+  gf(['worktree', 'add', '-q', '-b', 'wa', wa]);
+  gf(['worktree', 'add', '-q', '-b', 'wb', wb]);
+  writeLog(f, fs.realpathSync(f.proj), 'm0', [command(-3600, '/document'), say(-3500, 'Documented.')]);
+  writeLog(f, fs.realpathSync(wa), 'a1', [command(0, '/explore', 'issue 1'), say(20, 'A explores.'), human(500, 'Build A now please.'), say(520, 'A built.')]);
+  writeLog(f, fs.realpathSync(wb), 'b1', [command(100, '/explore', 'issue 2'), say(120, 'B explores.'), command(300, '/document'), say(320, 'B documented.'),
+    command(400, '/explore', 'issue 3'), say(420, 'B explores again.')]);
+  const fromA = runRaw(f, ['--cycle-time', '--until', at(600)], { cwd: wa });
+  let ja2 = null;
+  try { ja2 = JSON.parse(fromA.stdout); } catch (err) { ja2 = null; }
+  check('249 cycle-time: read from one of two worktrees each running its own cycle, only its own sessions count',
+    !!ja2 && !!ja2.counts && ja2.counts.sessions === 1 && ja2.counts.turns === 2 && sum(ja2.ms) === 600000, one(fromA.stdout + fromA.stderr));
+  check('249 cycle-time: another worktree\'s document stage does not cut this cycle\'s window',
+    !!ja2 && !!ja2.window && ja2.window.start === at(0), one(fromA.stdout + fromA.stderr));
+  const fromB = runRaw(f, ['--cycle-time', '--until', at(600)], { cwd: wb });
+  let jb2 = null;
+  try { jb2 = JSON.parse(fromB.stdout); } catch (err) { jb2 = null; }
+  check('249 cycle-time: read from the other worktree, the first worktree\'s parallel cycle is left out',
+    !!jb2 && !!jb2.window && jb2.window.start === at(400) && jb2.window.from === 'previous-document' && !!jb2.counts && jb2.counts.sessions === 1 && jb2.counts.turns === 1,
+    one(fromB.stdout + fromB.stderr));
 
   // --- D: a question Claude asks the owner with the question tool -------------
   // The wait for the answer is the owner's time, not Claude's: 20-320 s is
