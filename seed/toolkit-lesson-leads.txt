@@ -169,6 +169,7 @@ GPT and Gemini peer review caught things standard reviews missed.
 Generate a long report from parts with one script; never append into a file that is also its own source.
 Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.
 Give a finder a neutral copy of what it judges: a fixture's name and comments state the answer, and a finder with Grep will read the plan.
+Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.
 Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.
 HTML output is useless if the user only gets a file link - it opens as source in the editor.
 Harden every field on a whitelist, or the whitelist is not a boundary.
@@ -184,6 +185,7 @@ Issue framing != actual problem.
 Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.
 Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.
 Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.
+Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.
 Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
 Lazy locators don't throw - validate at parse, not at construction.
@@ -206,6 +208,7 @@ Pick a trace repo the owner is already working in: an idle repo turns the trace 
 Pin subagents freely; never switch the main-loop model mid-session.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
+Probe why a command prompts before choosing the fix: the stop on `test -e <file>; echo $?` was the `$?`, not the `;` the issue blamed.
 Profile a slow suite by section before speeding it up: one fixture check can be the whole cost.
 Prove a harness with the thing it will be used for, not with a trivial prompt.
 Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.
@@ -215,6 +218,7 @@ Release counts go stale a second time when the fix loop itself changes them; re-
 Render a standing page when its content is final, not when it first becomes available.
 Replacing LLM-run prose with a script removes non-determinism and shrinks the permission surface.
 Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.
+Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.
 Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.
 Review a plan this size with three fresh lenses before executing it.
 Review proposed prompt edits before applying them, and triage the volume hard.
