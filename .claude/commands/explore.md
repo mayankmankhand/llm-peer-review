@@ -88,6 +88,8 @@ Ask **3-4 focused questions per round**, over 2-3 rounds; in vision mode, each E
 > 1. What's in scope? I'm asking because there are multiple directories and I'm not sure if manager_package is part of this or separate, and also the PLAN files seem complete so should those be archived or deleted, and speaking of which...
 
 **Good example:**
+> Recommendation: scope this to the web app and archive the finished plans.
+>
 > A few quick questions:
 > 1. What's in scope - just the web app, or the review commands too?
 > 2. The 3 completed PLAN files - delete, archive, or keep?
