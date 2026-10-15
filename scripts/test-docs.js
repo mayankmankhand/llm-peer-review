@@ -107,6 +107,18 @@ check('every diagram source has accTitle and accDescr', unnamed.length === 0, un
   }
 })();
 
+// The hash must cover the whole Mermaid config the render passes, not only the
+// base settings: an edit to the color mapping or the font changes every image,
+// so it has to make every image stale too.
+(function hashCase() {
+  const name = 'the freshness hash covers the full render config';
+  if (!renderer || typeof renderer.hashInput !== 'function') { check(name, false, 'scripts/render-diagrams.js exports no hashInput'); return; }
+  const palettes = renderer.readPalettes(fs.readFileSync(path.join(REPO, renderer.TOKENS_PATH), 'utf8'));
+  const input = JSON.parse(renderer.hashInput('flowchart TB\n  A --- B\n', 'light', palettes.light));
+  check(name, JSON.stringify(input.config) === JSON.stringify(renderer.renderConfig(palettes.light, 'light')),
+    'the hash input does not carry the full render config');
+})();
+
 // ---- the tour ------------------------------------------------------------------
 
 // docs/HOW-IT-WORKS.md shows every diagram in a <picture>: a dark source the

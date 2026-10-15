@@ -21,8 +21,9 @@
 //
 // Line 1 of every image is a render line holding a hash of everything the
 // render read: the source, the theme's palette, the Mermaid version and the
-// base settings. scripts/test-docs.js recomputes that hash without rendering,
-// so a source edited after its render fails the test, and CI needs no browser.
+// full config (base settings, color mapping, font). scripts/test-docs.js
+// recomputes that hash without rendering, so a source edited after its render
+// fails the test, and CI needs no browser.
 //
 // The engine: playwright-core from .claude/scripts/node_modules (the toolkit's
 // own dependency) drives Chromium, and Mermaid is fetched once with `npm pack`
@@ -105,11 +106,17 @@ function fill(source, palette, name) {
   });
 }
 
-// The hash on an image's render line. Line endings are normalized first, so a
-// Windows checkout that turns LF into CRLF does not make every image stale.
+// What the hash on an image's render line covers: the full Mermaid config the
+// render passes (the base settings, the color mapping and the font), the
+// palette, the Mermaid version and the source. Line endings are normalized
+// first, so a Windows checkout that turns LF into CRLF does not make every
+// image stale.
+function hashInput(source, theme, palette) {
+  return JSON.stringify({ mermaid: MERMAID_VERSION, config: renderConfig(palette, theme), theme, palette, source: source.replace(/\r\n/g, '\n') });
+}
+
 function sourceHash(source, theme, palette) {
-  const input = JSON.stringify({ mermaid: MERMAID_VERSION, base: BASE, theme, palette, source: source.replace(/\r\n/g, '\n') });
-  return crypto.createHash('sha256').update(input).digest('hex');
+  return crypto.createHash('sha256').update(hashInput(source, theme, palette)).digest('hex');
 }
 
 function hashLine(name, theme, sha256) {
@@ -222,7 +229,7 @@ function listSources() {
   return fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => n.endsWith('.mmd')).map(n => n.slice(0, -4)).sort() : [];
 }
 
-module.exports = { SOURCE_DIR, IMAGE_DIR, TOKENS_PATH, MERMAID_VERSION, THEMES, SIZE_CAP, readPalettes, renderConfig, sourceHash, parseHashLine };
+module.exports = { SOURCE_DIR, IMAGE_DIR, TOKENS_PATH, MERMAID_VERSION, THEMES, SIZE_CAP, readPalettes, renderConfig, hashInput, sourceHash, parseHashLine };
 
 if (require.main === module) {
   const args = process.argv.slice(2);

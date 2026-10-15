@@ -2,7 +2,7 @@
 
 LLM Peer Review is a general-purpose toolkit for building with Claude Code. You type `/tk:explore`, answer a few questions and approve one plan; the rest runs as a line, and at every stop a model that did not do the work checks it. This page shows that line, each stop on it, the two hooks that guard it, and where every file lives. Each picture has a short text version under it.
 
-**How to read the pictures.** The thick blue line runs on its own. A dotted line is a step you start. An amber stop is a loop that repeats work, with its limit written on it. A dashed box is a hook. A blue-tinted shape is a fresh-eyes judge, a model that sees the work without having done it. Red means the line stops or asks you; green means done.
+**How to read the pictures.** The thick blue line runs on its own. A dotted line is a step you start. A blue-tinted shape is a check the work must pass: a fresh-eyes judge (a model that sees the work without having done it), a test, or a question the step settles before it moves on. Solid blue is you approving, or the next command taking over (outlined when it waits for you). Amber marks a loop that repeats work (its limit is written on it), a side trip off the line, or a notice to you. A dashed box is a hook. Red means the line stops or asks you; green means done. The files picture uses its own three: blue-tinted for the toolkit's files, green for yours, grey for files made as you work.
 
 The commands carry the `tk:` prefix on the plugin. On the copy-install for other editors the same commands run without it (`/explore`).
 
@@ -10,11 +10,11 @@ The commands carry the `tk:` prefix on the plugin. On the copy-install for other
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/overview-dark.svg">
-  <img src="images/diagrams/overview-light.svg" alt="The toolkit as one line from top to bottom: gate in, explore, create-plan with a critic loop of up to 2 rounds, you approve, execute with a check loop on every step, review with an audit and fix loop of up to 2 tries, document, then merge and gate out; a dotted branch leads to the GPT or Gemini debate." width="582">
+  <img src="images/diagrams/overview-light.svg" alt="The toolkit as one line from top to bottom: gate in, explore, create-plan with a critic loop of up to 2 rounds, you approve, execute with a check loop on every step, review with an audit and fix loop of up to 2 tries, document, then merge when you start it; gate out, the check before every push, sits under both document and merge; a dotted branch leads to the GPT or Gemini debate." width="582">
 </picture>
 
 1. **Gate in.** When Claude Code opens, a hook checks the plugin and your project are on the same version.
-2. **You start the line** with `/tk:explore` and approve the plan `/tk:create-plan` writes. That approval is the one gate you have to pass.
+2. **You start the line** with `/tk:explore` and approve the plan `/tk:create-plan` writes. That approval is the one stop that waits for you.
 3. **The rest runs on its own:** `/tk:execute` builds it, `/tk:review` audits and fixes it, `/tk:document` writes it up. Each amber stop is a loop with a hard limit, so nothing goes round forever.
 4. **Dotted lines are yours to start:** `/tk:merge` lands work from a parallel worktree, and `/tk:ask-gpt` or `/tk:ask-gemini` starts a debate with another model.
 5. **Gate out.** Before any push Claude makes, a check looks for secrets and other things that must not leave your machine.

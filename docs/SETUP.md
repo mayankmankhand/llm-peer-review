@@ -116,7 +116,7 @@ gh --version
 claude --version
 ```
 
-You should see version numbers for each, and Node.js should be 22 or newer. If any command says "not found", go back to the relevant install step above.
+You should see version numbers for each, and Node.js should be 22 or newer. If any command says "not found", go back to the relevant install step above. Using another editor instead of Claude Code? Skip the last check.
 
 ### Step 6: Install the toolkit plugin
 
