@@ -460,3 +460,9 @@
 
 - **When a fix corrects a fact, search every doc for its other copies before calling it done.**
 - **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**
+
+## Issue 248 (cycle time and test cost)
+
+- **A runner mode several callers share changes only behind a flag the new caller passes.**
+- **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
+- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.**

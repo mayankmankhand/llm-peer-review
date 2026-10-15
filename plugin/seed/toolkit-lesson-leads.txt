@@ -86,6 +86,7 @@ A replay sandbox must hold everything the replayed agent will reach for: the ran
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
 A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.
+A runner mode several callers share changes only behind a flag the new caller passes.
 A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
 A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.
 A second mode that needs the same context as an existing walk should call that walk, not copy it.
@@ -196,6 +197,7 @@ Mutation-testing a group of assertions is not mutation-testing each assertion.
 Never interpolate shell variables into inline `node -e` strings.
 Never write a literal HTML comment as an example inside an HTML comment.
 Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
+On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
 Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.
 Permission approvals can land in the wrong settings file.
@@ -244,6 +246,7 @@ Two finders describing one defect write two dedup keys: the key catches exact re
 Two halves of one feature, written in one session, can each be right and still not meet.
 Update (v4.4.0, issue #97):
 Use deterministic scripts for structural data, not LLMs.
+Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.
 Verify audit findings against file content before acting - subagent claims about file structure are not facts.
 Verify impact, not just existence, before scoping a fix.
 Version bumps touch more files than you think.

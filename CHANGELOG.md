@@ -2,6 +2,25 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Where the Time Went
+
+**Issue #248.** A full cycle could take hours with no way to see where the time went, and the loop quietly paid for slow and repeated test runs. Not released yet: the version number is decided at release.
+
+### Added
+
+- **The cycle page shows where the time went.** A new section on the page `/tk:document` keeps: Claude working, tests, helper agents, waiting on you, and away (gaps over 15 minutes), with each one's share. Below them come counts of test runs, your messages, and quiet stretches over 2.5 minutes, then the full test runs' cost. It reads the session logs of every worktree of the repository, as times and counts only: no message text, command or path leaves them, nothing is stored, and the correction-ledger opt-out turns it off too.
+- **The full test step keeps its cost.** Each run's time is saved in `reports/checks/history.jsonl` in the main copy. A passing run that takes over 1.5 times the usual time is flagged once, in the build's summary and on the cycle page, and becomes the new usual.
+- **A test run on unchanged code is skipped.** When every tracked and new file is the same as at the last passing run, uncommitted edits included, `/tk:execute` and `/tk:merge` skip the run with a one-line note and count it as green. The check reads git without locking it. Ignored files and git tags are not part of it; `--no-skip` forces a run.
+
+### Changed
+
+- **A status line before long waits.** The always-on rules ask Claude to say in one line what is coming before anything expected to take over a minute, and to answer every question before moving on. Existing projects get the new rules text through `/tk:upgrade`.
+- **`/tk:explore` opens with a short recommendation**, five lines or fewer, then the questions.
+
+### Why
+
+On 2026-10-14 the full suite had grown from about 80 to 164 seconds in five days with no warning, the loop ran it nine times, four of them avoidable, and finding where three hours went took a one-off read of the session log. A cost nobody sees is a cost nobody fixes.
+
 ## v8.0.2 - One Fewer Command (2026-10-14)
 
 **A patch on top of v8.0.1.** `/tk:package-review` is removed: `/tk:ask-gpt` and `/tk:ask-gemini` already do its job. Nothing else changes in how the loop runs.
