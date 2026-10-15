@@ -31,9 +31,26 @@
 // Modes:
 //   node session-init.js                          the session-start object
 //   node session-init.js --scope [<base>..<end>]  what a review covers (#182, below)
+//   node session-init.js --scope [<range>] --out reports/receipts/<stamp>/scope.json
+//                                                 the same, saved by the script (#250, below)
 //   node session-init.js --models                 only the model mode (#205, below)
 // Each takes an optional --mode <best|fit|cheap>, the mode a command's "mode:" word
 // asked for, and each output carries the resolved "models" object.
+//
+// --out <file> (#250), with --scope only: /review saved the scope with a `>`
+//   redirect, and a redirect stops a default-mode session for approval even when
+//   this script's own permission row allows it. With --out the script writes the
+//   whole scope object (the layout --scope prints) to the file, making its folders,
+//   and prints the same object with every "files" and "commits" list left out, plus
+//   "savedTo" (the path relative to the working-copy root), so the caller reads the
+//   fields it acts on without a second call. The session-init permission rows allow
+//   any arguments, so --out writes only under <root>/reports/receipts/ and only a
+//   .json file: a path outside it, any symlink on the way down from the root
+//   (checked before a folder is made, so nothing is created elsewhere), a target
+//   that is itself a symlink (opened with O_NOFOLLOW where the platform has it), or
+//   a folder that resolves outside it is refused. A refusal prints the full scope
+//   object as without --out, plus "outError", and writes no file. --out without
+//   --scope is the usual one-object error.
 // Any other argument prints {"generatedAt", "cwd", "error"} and exits 0.
 //
 // models (#205): which model each helper runs on this cycle.
@@ -68,6 +85,11 @@
 //
 // Session-start object, in this order: generatedAt, newestPlan, models, worktree,
 // map, lessons, plans, plansOmitted (only when plans were left out), cwd.
+// worktree is { isWorktree, gitDir, commonDir, branch, issueBranch }. issueBranch
+// (#250) is true when the branch already has the toolkit's issue name,
+// worktree-<number>-<label>, and false otherwise (another name, a detached HEAD,
+// no git), so /explore, /create-plan and /document read the answer instead of
+// piping the branch into grep, which stops a default-mode session for approval.
 // lessons is { exists, path, hasDetail, content } while LESSONS.md is 8 KB or less.
 // Over that, content is left out and the object carries a handle instead:
 // { exists, path, hasDetail, bytes, lines, head, note }, where head is the file's
@@ -276,6 +298,11 @@ const START_COMMIT_LINE = /^\*\*Start commit:\*\*[ \t]+([0-9a-fA-F]{7,40})[ \t]*
 // same shape: that spelling at the start of a line, one word, nothing after it.
 const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
 
+// The toolkit's issue branch name, worktree-<number>-<label> (the branch naming
+// rule in the toolkit reference), the same pattern /explore, /create-plan and
+// /document tested with grep before #250. A detached HEAD prints "HEAD" and fails it.
+const ISSUE_BRANCH = /^worktree-[0-9]+-[A-Za-z0-9._-]+$/;
+
 function sessionStart() {
   // --- Worktree state -------------------------------------------------------
   // A worktree is detected when the per-worktree git dir differs from the shared
@@ -286,12 +313,14 @@ function sessionStart() {
   // worktree (#226). The raw values are still reported as git printed them.
   const gitDir = git(["rev-parse", "--git-dir"]);
   const commonDir = git(["rev-parse", "--git-common-dir"]);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
   const worktree = {
     isWorktree: gitDir !== null && commonDir !== null &&
       path.resolve(cwd, gitDir) !== path.resolve(cwd, commonDir),
     gitDir,
     commonDir,
-    branch: git(["rev-parse", "--abbrev-ref", "HEAD"]),
+    branch,
+    issueBranch: typeof branch === "string" && ISSUE_BRANCH.test(branch),
   };
 
   // --- Codebase map summary + freshness ------------------------------------
@@ -1357,14 +1386,78 @@ function withScopeLine(payload, given) {
 const rawArgs = process.argv.slice(2);
 let requestedMode = null;
 let modeError = null;
+// --out <file> (#250) is taken out the same way, so --scope's own argument parses as before.
+let outGiven = false;
+let outPath = null;
 const cliArgs = [];
 for (let i = 0; i < rawArgs.length; i++) {
   if (rawArgs[i] === "--mode") {
     if (i + 1 >= rawArgs.length) modeError = "--mode needs a value: best, fit or cheap";
     else requestedMode = rawArgs[++i].trim().toLowerCase();
+  } else if (rawArgs[i] === "--out") {
+    outGiven = true;
+    if (i + 1 < rawArgs.length) outPath = rawArgs[++i];
   } else {
     cliArgs.push(rawArgs[i]);
   }
+}
+
+// --out (#250): save the scope object under <root>/reports/receipts/ and nowhere
+// else. Returns { savedTo } or { error }. Every check runs before anything is made
+// or written, apart from the folders, which are made only after each existing step
+// down from the root has been seen not to be a symlink; the resolved folder is then
+// checked once more, so a link put in place meanwhile is still caught.
+function saveScope(payload, given, root) {
+  if (typeof given !== "string" || given.trim() === "") return { error: "--out needs a file path under reports/receipts/" };
+  if (typeof root !== "string" || root === "") return { error: "--out needs a git working tree, and this is not one" };
+  const receipts = path.join(root, "reports", "receipts");
+  const target = path.resolve(root, given);
+  if (!target.startsWith(receipts + path.sep) || path.extname(target).toLowerCase() !== ".json") {
+    return { error: "--out writes only a .json file under reports/receipts/: " + given };
+  }
+  const folder = path.dirname(target);
+  // Each existing step from the root down to the folder, before any is made.
+  const steps = path.relative(root, folder).split(path.sep);
+  let at = root;
+  for (const step of steps) {
+    at = path.join(at, step);
+    let stat;
+    try { stat = fs.lstatSync(at); } catch { break; }
+    if (stat.isSymbolicLink()) return { error: "--out refuses a symlink on the way to the file: " + path.relative(root, at) };
+    if (!stat.isDirectory()) return { error: "--out needs folders on the way to the file, not a file: " + path.relative(root, at) };
+  }
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    const realReceipts = path.join(fs.realpathSync(root), "reports", "receipts");
+    const realFolder = fs.realpathSync(folder);
+    if (realFolder !== realReceipts && !realFolder.startsWith(realReceipts + path.sep)) {
+      return { error: "--out resolves outside reports/receipts/: " + given };
+    }
+    let existing = null;
+    try { existing = fs.lstatSync(target); } catch { existing = null; }
+    if (existing !== null && existing.isSymbolicLink()) return { error: "--out refuses a file that is a symlink: " + given };
+    // O_NOFOLLOW where the platform has it (not on Windows), so a link made after
+    // the check above is still not followed.
+    const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW || 0);
+    const fd = fs.openSync(target, flags, 0o644);
+    try { fs.writeSync(fd, JSON.stringify(payload, null, 2) + "\n"); } finally { fs.closeSync(fd); }
+  } catch (e) {
+    return { error: "--out could not write " + given + ": " + String(e && e.message) };
+  }
+  return { savedTo: path.relative(root, target).split(path.sep).join("/") };
+}
+
+// The printed object after a save: the scope without its long lists, which the
+// saved file holds. Only arrays under these names go; every count stays.
+function withoutLists(value) {
+  if (Array.isArray(value)) return value.map(withoutLists);
+  if (value === null || typeof value !== "object") return value;
+  const out = {};
+  for (const k of Object.keys(value)) {
+    if ((k === "files" || k === "commits") && Array.isArray(value[k])) continue;
+    out[k] = withoutLists(value[k]);
+  }
+  return out;
 }
 // Every output carries the models object; a failure there must never cost the rest.
 function withModels(payload) {
@@ -1376,7 +1469,9 @@ function withModels(payload) {
   }
   return payload;
 }
-if (cliArgs.length === 0) {
+if (outGiven && cliArgs[0] !== "--scope") {
+  emit({ generatedAt: new Date().toISOString(), error: "--out works only with --scope (session-init.js --scope [<base>..<end>] --out reports/receipts/<stamp>/scope.json)", cwd });
+} else if (cliArgs.length === 0) {
   emit(fitSessionStart(withModels(sessionStart())), (o) => ordered(o, SESSION_START_ORDER));
 } else if (cliArgs[0] === "--models" && cliArgs.length === 1) {
   emit(withModels({ generatedAt: new Date().toISOString(), cwd }), (o) => ordered(o, ["generatedAt", "models", "cwd"]));
@@ -1388,7 +1483,14 @@ if (cliArgs.length === 0) {
     // Fail soft on anything unforeseen too: the caller always gets one JSON object.
     result = { generatedAt: new Date().toISOString(), cwd, source: "none", reason: "error", message: String(e && e.message), error: String(e && e.message) };
   }
-  emit(withScopeLine(withModels(result), cliArgs.length > 1 && String(cliArgs[1]).trim() !== ""), layoutScope);
+  const full = layoutScope(withScopeLine(withModels(result), cliArgs.length > 1 && String(cliArgs[1]).trim() !== ""));
+  if (!outGiven) {
+    emit(full);
+  } else {
+    const saved = saveScope(full, outPath, result.root);
+    if (saved.error) emit(Object.assign({}, full, { outError: saved.error }), (o) => ordered(o, ["generatedAt", "error", "outError"]));
+    else emit(Object.assign(withoutLists(full), { savedTo: saved.savedTo }), (o) => ordered(o, ["generatedAt", "error", "scopeLine", "savedTo"]));
+  }
 } else {
   emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)", cwd });
 }

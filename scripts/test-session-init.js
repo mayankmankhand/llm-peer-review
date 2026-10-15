@@ -1164,6 +1164,97 @@ section('17. worktree.isWorktree from a subfolder (#226)', function () {
   check('a linked worktree is a worktree from a subfolder', at(path.join(wt, 'sub')).isWorktree === true, JSON.stringify(at(path.join(wt, 'sub'))));
 });
 
+section('250 issue-branch: worktree.issueBranch answers the branch-name check (#250)', function () {
+  // /explore, /create-plan and /document asked `git rev-parse ... | grep -Eq ...; echo $?`,
+  // which stops a default-mode session twice (the $? and the unrowed grep). The
+  // script answers the same regex as a yes/no field instead.
+  const repo = newRepo('issue-branch');
+  write(repo, 'a.txt', 'a\n');
+  commitAll(repo, 'init');
+  const ib = function (cwd) { return dig(runScript([], cwd).json, 'worktree.issueBranch'); };
+  check('250 issue-branch: false on main', ib(repo) === false, JSON.stringify(ib(repo)));
+  git(repo, ['checkout', '-q', '-b', 'worktree-250-five-gaps']);
+  check('250 issue-branch: true on worktree-250-five-gaps', ib(repo) === true, JSON.stringify(ib(repo)));
+  git(repo, ['checkout', '-q', '-b', 'worktree-250']);
+  check('250 issue-branch: false on worktree-250, which has no label', ib(repo) === false, JSON.stringify(ib(repo)));
+  git(repo, ['checkout', '-q', '--detach']);
+  check('250 issue-branch: false on a detached HEAD', ib(repo) === false, JSON.stringify(ib(repo)));
+  const wt = path.join(TMP, 'issue-branch-linked');
+  git(repo, ['worktree', 'add', '-q', '-b', 'worktree-7-linked-copy', wt]);
+  check('250 issue-branch: true in a linked worktree on worktree-7-linked-copy', ib(wt) === true, JSON.stringify(ib(wt)));
+  const plain = path.join(TMP, 'issue-branch-no-git');
+  fs.mkdirSync(plain, { recursive: true });
+  check('250 issue-branch: false outside a git working tree', ib(plain) === false, JSON.stringify(ib(plain)));
+});
+
+section('250 scope out: --scope --out saves the scope itself, only under reports/receipts/ (#250)', function () {
+  // /review saved its scope with a `>` redirect, which asks in default mode even
+  // when the script's own row allows it. --out writes the file from the script.
+  // Because the session-init rows allow any arguments, --out must never write
+  // anywhere else: not outside reports/receipts/, not through a symlink.
+  const repo = newRepo('scope-out');
+  write(repo, 'a.txt', 'a\n');
+  const c1 = commitAll(repo, 'one');
+  write(repo, 'b.txt', 'b\n');
+  commitAll(repo, 'two');
+  write(repo, 'c.txt', 'uncommitted\n');
+  const outside = path.join(TMP, 'scope-out-outside');
+  fs.mkdirSync(outside, { recursive: true });
+  const exists = function (p) { try { fs.lstatSync(p); return true; } catch (e) { return false; } };
+  const one = function (x) { return String(x).replace(/\s+/g, ' ').slice(0, 160); };
+  const readJson = function (p) { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return null; } };
+
+  const r = runScript(['--scope', c1 + '..HEAD', '--out', 'reports/receipts/t/scope.json'], repo);
+  const saved = readJson(path.join(repo, 'reports', 'receipts', 't', 'scope.json'));
+  check('250 scope out: the full scope is written, its folders made',
+    saved !== null && typeof saved.scopeLine === 'string' && Array.isArray(dig(saved, 'range.files')) && Array.isArray(dig(saved, 'uncommitted.untracked.files')),
+    one(JSON.stringify(saved)));
+  check('250 scope out: the printed object names the file and carries the key fields',
+    r.json.savedTo === 'reports/receipts/t/scope.json' && saved !== null && r.json.scopeLine === saved.scopeLine &&
+      dig(r.json, 'range.base') === dig(saved, 'range.base') && dig(r.json, 'range.end') === dig(saved, 'range.end') && r.json.totals !== undefined,
+    one(r.stdout));
+  check('250 scope out: the printed object leaves out every file and commit list',
+    r.parsed && !/"(files|commits)":/.test(r.stdout), one(r.stdout));
+  const moved = runScript(['--out', 'reports/receipts/t2/scope.json', '--scope'], repo);
+  check('250 scope out: --out may come before --scope', moved.json.savedTo === 'reports/receipts/t2/scope.json' && exists(path.join(repo, 'reports', 'receipts', 't2', 'scope.json')), one(moved.stdout));
+
+  const refused = function (label, out, cwd, mustNotExist) {
+    const x = runScript(['--scope', '--out', out], cwd || repo);
+    check('250 scope out: refused, ' + label,
+      typeof x.json.outError === 'string' && typeof x.json.scopeLine === 'string' && x.json.savedTo === undefined && !exists(mustNotExist),
+      one(x.stdout));
+  };
+  refused('a path outside reports/receipts/ (../x.json)', '../x.json', repo, path.join(TMP, 'x.json'));
+  refused('an absolute path elsewhere', path.join(outside, 'abs.json'), repo, path.join(outside, 'abs.json'));
+  refused('a name without .json', 'reports/receipts/t/scope.txt', repo, path.join(repo, 'reports', 'receipts', 't', 'scope.txt'));
+  fs.mkdirSync(path.join(repo, 'reports', 'receipts'), { recursive: true });
+  fs.symlinkSync(outside, path.join(repo, 'reports', 'receipts', 'link'));
+  refused('a symlinked folder inside reports/receipts/ that leads outside', 'reports/receipts/link/scope.json', repo, path.join(outside, 'scope.json'));
+  fs.mkdirSync(path.join(repo, 'reports', 'receipts', 's'), { recursive: true });
+  const victim = path.join(outside, 'victim.json');
+  fs.writeFileSync(victim, 'keep\n');
+  fs.symlinkSync(victim, path.join(repo, 'reports', 'receipts', 's', 'scope.json'));
+  const v = runScript(['--scope', '--out', 'reports/receipts/s/scope.json'], repo);
+  check('250 scope out: refused, an existing scope.json that is a symlink to a file outside, which is left unchanged',
+    typeof v.json.outError === 'string' && fs.readFileSync(victim, 'utf8') === 'keep\n', one(v.stdout));
+
+  const linked = newRepo('scope-out-linked-receipts');
+  write(linked, 'a.txt', 'a\n');
+  commitAll(linked, 'one');
+  const away = path.join(TMP, 'scope-out-away');
+  fs.mkdirSync(away, { recursive: true });
+  fs.mkdirSync(path.join(linked, 'reports'), { recursive: true });
+  fs.symlinkSync(away, path.join(linked, 'reports', 'receipts'));
+  refused('reports/receipts itself a symlink to outside, with no folder made there', 'reports/receipts/t/scope.json', linked, path.join(away, 't'));
+
+  const lone = runScript(['--out', 'reports/receipts/lone/scope.json'], repo);
+  check('250 scope out: --out without --scope is the one-object error, and writes nothing',
+    typeof lone.json.error === 'string' && /--out/.test(lone.json.error) && !exists(path.join(repo, 'reports', 'receipts', 'lone')), one(lone.stdout));
+  const bare = runScript(['--scope', '--out'], repo);
+  check('250 scope out: --out with no path is refused, and the scope still prints',
+    typeof bare.json.outError === 'string' && typeof bare.json.scopeLine === 'string', one(bare.stdout));
+});
+
 section('The 16,000-character budget holds as a total (review R13)', function () {
   // Each part under its own 8 KB cap can still sum past the budget: an inline
   // LESSONS.md and a long map overview together. The total is measured, and the
