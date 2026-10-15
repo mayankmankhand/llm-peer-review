@@ -58,8 +58,13 @@ const sha = (root, rel) => crypto.createHash('sha256').update(fs.readFileSync(pa
 // The same CR-stripped sha256, of a text rather than a file.
 const shaText = (text) => crypto.createHash('sha256').update(Buffer.from(text, 'utf8').toString('latin1').replace(/\r/g, ''), 'latin1').digest('hex');
 function git(repo, args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+// Automatic maintenance off (issue #250): newer git (2.55 on GitHub's runner) starts
+// automatic maintenance in the background after a commit, and its lock file
+// appearing and vanishing in .git/objects made a cpSync of the repo fail with
+// ENOENT. Every repo this suite copies goes through here.
 function initRepo(repo) {
   git(repo, ['init', '-q']); git(repo, ['config', 'user.email', 't@t']); git(repo, ['config', 'user.name', 't']); git(repo, ['config', 'commit.gpgsign', 'false']);
+  git(repo, ['config', 'maintenance.auto', 'false']);
 }
 function commitAll(repo, msg) { git(repo, ['add', '-A']); git(repo, ['commit', '-qm', msg]); }
 // `script` runs another copy of setup-project.js (a mutant in a temp dir).
