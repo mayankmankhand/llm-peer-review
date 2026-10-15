@@ -1922,6 +1922,29 @@ function cycleTimeTest() {
   let jw = null;
   try { jw = JSON.parse(fromWt.stdout); } catch (e) { jw = null; }
   check('248 cycle-time: run from inside the worktree, it reads the same logs', !!jw && JSON.stringify(jw.ms) === JSON.stringify(jc.ms), one(fromWt.stdout + fromWt.stderr));
+
+  // --- D: a question Claude asks the owner with the question tool -------------
+  // The wait for the answer is the owner's time, not Claude's: 20-320 s is
+  // waiting, 340-1840 s (25 minutes) is away. The question is on screen, so it
+  // ends a quiet stretch, and the answer starts a new one.
+  //   claude 0-20, 320-340, 1840-1850, 1850-1860 = 60; waiting 300; away 1,500
+  const d = makeSandbox('cycle-d');
+  writeLog(d, d.proj, 'sess-d', [
+    command(0, '/explore'),
+    say(10, 'Two choices.'),
+    tool(20, 'q1', 'AskUserQuestion', { questions: [] }),
+    result(320, 'q1', { answers: {} }),
+    say(330, 'Going with the first.'),
+    tool(340, 'q2', 'AskUserQuestion', { questions: [] }),
+    result(1840, 'q2', { answers: {} }),
+    say(1850, 'Done.'),
+  ]);
+  const rd = cycle(d, ['--until', at(1860)]);
+  const jd = rd.json || {};
+  check('248 cycle-time: the wait for an answer to the question tool is waiting, or away past 15 minutes, never Claude working',
+    rd.status === 0 && !!jd.ms && jd.ms.waiting === 300000 && jd.ms.away === 1500000 && jd.ms.claude === 60000 && sum(jd.ms) === 1860000,
+    one(rd.stdout + rd.stderr));
+  check('248 cycle-time: a question on screen is visible output, so a wait for its answer is no quiet stretch', !!jd.counts && jd.counts.quiet === 0, one(JSON.stringify(jd.counts)));
 }
 
 function tripwireTest() {

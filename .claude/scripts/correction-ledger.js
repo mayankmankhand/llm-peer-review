@@ -1845,8 +1845,11 @@ function runSetAxial() {
 //   agents   a foreground Agent call, from the call to its result (a
 //            background one is counted in backgroundAgents and adds no time,
 //            since it overlaps whatever else happened)
-//   waiting  a gap after Claude's turn of 15 minutes or less
-//   away     a gap of more than 15 minutes
+//   waiting  a gap after Claude's turn of 15 minutes or less, and the wait for
+//            the answer to a question Claude asked with the question tool
+//            (AskUserQuestion), which sits inside Claude's turn but is the
+//            owner's time
+//   away     a gap of more than 15 minutes, or a question that waited longer
 // with counts: turns (the owner's messages), testRuns, agents,
 // backgroundAgents, quiet (stretches of over 150 s inside a turn with no text
 // from Claude) and sessions.
@@ -1872,7 +1875,9 @@ function runSetAxial() {
 // the main copy's .claude/worktrees/ (subagent logs never, as in the scan).
 // Each session is cut into turns on its own; the sessions are then laid over
 // one timeline where, at any moment, the busiest state wins (tests, then
-// agents, then claude, then waiting, then away), so two sessions at once are
+// agents, then an open question, then claude, then waiting, then away; a
+// question on screen also counts as text, so its wait is no quiet stretch),
+// so two sessions at once are
 // never counted twice and the five parts always add up to the window. A
 // stretch no session covers is waiting or away by its length; the stretch
 // after the last entry is the turn this call is part of, unless it is longer
@@ -1887,8 +1892,11 @@ const STAGE_COMMAND = /^\/(?:tk:)?(explore|create-plan|document)(?:\s|$)/;
 const STAGE_SKILL = /^(?:tk:)?(explore|create-plan|document)$/;
 const TEST_COMMAND = /run-checks\.js\b[^\n]*--(?:checks|phase)\b|\bnpm\s+(?:run\s+)?test\b|\bpytest\b/;
 const NOTICE_ID = /<tool-use-id>([^<\s]+)<\/tool-use-id>/g;
-// Priorities on the shared timeline, highest wins; also the index into the totals.
-const P_AWAY = 0, P_WAITING = 1, P_CLAUDE = 2, P_AGENTS = 3, P_TESTS = 4;
+// Priorities on the shared timeline, highest wins; also the index into the
+// totals. An open question outranks Claude's turn around it, and its time is
+// added to waiting (or away, past 15 minutes) when the totals are read.
+const P_AWAY = 0, P_WAITING = 1, P_CLAUDE = 2, P_ASKED_AWAY = 3, P_ASKED = 4, P_AGENTS = 5, P_TESTS = 6;
+const ASK_TOOL = 'AskUserQuestion';
 
 // The session-log folders of every working copy of this repository.
 function cycleFolders() {
@@ -2015,6 +2023,8 @@ function sessionIntervals(entries, start, end, notices, counts) {
       const background = res.isAsync === true || call.input.run_in_background === true;
       if (inWindow(call.t)) { if (background) counts.backgroundAgents++; else counts.agents++; }
       if (!background) iv.push({ s: call.t, e: doneAt, p: P_AGENTS });
+    } else if (call.name === ASK_TOOL) {
+      iv.push({ s: call.t, e: doneAt, p: doneAt - call.t > AWAY_AFTER_MS ? P_ASKED_AWAY : P_ASKED });
     }
   };
   entries.forEach(function (x) {
@@ -2041,6 +2051,7 @@ function sessionIntervals(entries, start, end, notices, counts) {
       }
       blocksOf(x.e, 'tool_use').forEach(function (c) {
         if (c.id) pending.set(c.id, { id: c.id, t: x.t, name: c.name, input: c.input && typeof c.input === 'object' ? c.input : {} });
+        if (c.name === ASK_TOOL) { quietUntil(x.t); lastVisible = x.t; }   // the question is on screen
       });
     } else {
       blocksOf(x.e, 'tool_result').forEach(function (c) {
@@ -2048,6 +2059,7 @@ function sessionIntervals(entries, start, end, notices, counts) {
         if (!call) return;
         pending.delete(c.tool_use_id);
         finish(call, x.t, x.e.toolUseResult && typeof x.e.toolUseResult === 'object' ? x.e.toolUseResult : {});
+        if (call.name === ASK_TOOL) lastVisible = x.t;                     // answered: the quiet clock restarts
       });
     }
   });
@@ -2070,8 +2082,8 @@ function layTimeline(intervals, start, end) {
     if (e > s) { points.push([s, v.p, 1]); points.push([e, v.p, -1]); }
   });
   points.sort(function (a, b) { return a[0] - b[0]; });
-  const live = [0, 0, 0, 0, 0];
-  const ms = [0, 0, 0, 0, 0];
+  const live = [0, 0, 0, 0, 0, 0, 0];
+  const ms = [0, 0, 0, 0, 0, 0, 0];
   const gaps = [];
   let at = start, i = 0;
   while (at < end) {
@@ -2089,7 +2101,8 @@ function layTimeline(intervals, start, end) {
     if (g[1] === end && len <= AWAY_AFTER_MS) ms[P_CLAUDE] += len;
     else ms[len > AWAY_AFTER_MS ? P_AWAY : P_WAITING] += len;
   });
-  return { claude: ms[P_CLAUDE], tests: ms[P_TESTS], agents: ms[P_AGENTS], waiting: ms[P_WAITING], away: ms[P_AWAY] };
+  return { claude: ms[P_CLAUDE], tests: ms[P_TESTS], agents: ms[P_AGENTS],
+    waiting: ms[P_WAITING] + ms[P_ASKED], away: ms[P_AWAY] + ms[P_ASKED_AWAY] };
 }
 
 function runCycleTime() {
