@@ -2200,6 +2200,12 @@ function timePageTests() {
   check('249 time page: the counts say what they count, test and check runs, and quiet stretches as Claude\'s time inside the rows above',
     /7 test and check runs/.test(full) && /1 quiet stretch over 2\.5 minutes where Claude was working without a word \(inside the times above\)/.test(full),
     full.slice(0, 600));
+  // Review of #249, R8: the run count says the full runs below are part of it,
+  // and says nothing about them when the page shows none.
+  const noCost = text(page({ cycle: cycle }));
+  check('249 time page: the run count says the full test runs below are among them, only when they are shown',
+    /7 test and check runs \(the full test runs below among them\)/.test(full) && /7 test and check runs,/.test(noCost) && !/among them/.test(noCost),
+    full.slice(0, 600) + ' | ' + noCost.slice(0, 400));
   check('248 time page: the tests line shows full runs, skips and the latest run against its baseline',
     /Full test runs: 2 ran, 1 skipped, 5\.5 min in all/.test(full) && /latest 2\.8 min against a baseline of 2\.7 min/.test(full) && !/Grew past/.test(full),
     full.slice(0, 800));

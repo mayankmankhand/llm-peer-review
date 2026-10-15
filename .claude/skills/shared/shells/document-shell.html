@@ -506,7 +506,10 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     }
 
     var said = [];
-    if (num(counts.testRuns) !== null) said.push(plural(counts.testRuns, "test and check run", "test and check runs"));
+    if (num(counts.testRuns) !== null) {
+      said.push(plural(counts.testRuns, "test and check run", "test and check runs")
+        + (num(cost.runs) !== null ? " (the full test runs below among them)" : ""));
+    }
     if (num(counts.agents) !== null) {
       said.push(plural(counts.agents, "helper agent", "helper agents")
         + (num(counts.backgroundAgents) ? " (plus " + counts.backgroundAgents + " in the background)" : ""));
