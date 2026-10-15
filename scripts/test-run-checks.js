@@ -1520,6 +1520,134 @@ section('17. a target that already meets its after expect fails the before run (
   check('the tally leaves a step whose target already passed unproved', s1.status === 'unproved' && /did not show its stated failure before/.test(String(s1.reasons)), one(JSON.stringify(s1)));
 });
 
+// --- 248. the full test step's history (issue #248) ---------------------------
+// A full test run used to keep its time only in the folder it wrote, so a suite
+// that doubled in five days raised nothing. A --full run appends one row to the
+// main copy's reports/checks/history.jsonl; a passing run over 1.5x the
+// baseline is flagged once and becomes the new baseline. Each case runs in a
+// repository of its own, so the history file starts empty.
+function freshRepo(name) {
+  const dir = path.join(sandbox, name);
+  fs.mkdirSync(dir, { recursive: true });
+  const g = (args, cwd) => execFileSync('git', args, { cwd: cwd || dir, encoding: 'utf8', env: ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+  g(['init', '-q']);
+  g(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  fs.writeFileSync(path.join(dir, 'f.txt'), 'hello\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'reports/\n');
+  g(['add', '-A']);
+  g(['commit', '-qm', 'init']);
+  return { dir, git: g };
+}
+function historyRows(dir) {
+  const file = path.join(dir, 'reports', 'checks', 'history.jsonl');
+  if (!fs.existsSync(file)) return [];
+  return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+}
+// Rewrite the newest row's baseline, so a growth case never waits on real time.
+function pinBaseline(dir, ms) {
+  const file = path.join(dir, 'reports', 'checks', 'history.jsonl');
+  const all = historyRows(dir);
+  all[all.length - 1].baselineMs = ms;
+  fs.writeFileSync(file, all.map((r) => JSON.stringify(r)).join('\n') + '\n');
+}
+function fullRun(dir, list, extra) {
+  const out = path.join(dir, 'reports', 'out-' + (++counter));
+  const r = run(['--checks', checksFile(list), '--out', out, '--full'].concat(extra || []), dir);
+  r.out = out;
+  return r;
+}
+
+section('248 history: a full run keeps its time and flags growth once (issue #248)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const h = freshRepo('h248');
+  const list = [{ id: 'tests', check: 'grep -c hello f.txt', expect: { exit: 0 } }];
+
+  const plain = run(['--checks', checksFile(list), '--out', path.join(h.dir, 'reports', 'out-plain')], h.dir);
+  check('248 history: a --checks run without --full writes no history row', plain.status === 0 && historyRows(h.dir).length === 0, one(plain.stdout + plain.stderr));
+
+  const a = fullRun(h.dir, list);
+  const ra = historyRows(h.dir);
+  check('248 history: a --full run appends one row with its time, commit, key and verdict',
+    a.status === 0 && ra.length === 1 && typeof ra[0].ms === 'number' && ra[0].passed === true
+      && /^[0-9a-f]{40,64}$/.test(String(ra[0].head)) && /^[0-9a-f]{64}$/.test(String(ra[0].key)) && !isNaN(Date.parse(ra[0].at)),
+    one(a.stdout + a.stderr + JSON.stringify(ra)));
+  check('248 history: the first passing run is its own baseline and flags nothing',
+    ra.length === 1 && ra[0].baselineMs === ra[0].ms && !!a.json && a.json.flags.grew === 0 && !!a.json.cost && a.json.cost.baselineMs === null && a.json.cost.ms === ra[0].ms,
+    one(a.stdout + JSON.stringify(ra)));
+
+  pinBaseline(h.dir, 1);
+  const b = fullRun(h.dir, list);
+  const rb = historyRows(h.dir);
+  check('248 history: a passing run over 1.5x the baseline sets flags.grew and names the old baseline',
+    !!b.json && b.json.flags.grew === 1 && b.json.cost.baselineMs === 1 && rb.length === 2 && b.json.cost.ms === rb[1].ms,
+    one(b.stdout + b.stderr));
+  check('248 history: the run that grew becomes the new baseline', rb.length === 2 && rb[1].grew === true && rb[1].baselineMs === rb[1].ms, one(JSON.stringify(rb)));
+
+  pinBaseline(h.dir, 1e9);
+  const c = fullRun(h.dir, list);
+  const rc = historyRows(h.dir);
+  check('248 history: a run under 1.5x the baseline flags nothing and keeps the baseline',
+    !!c.json && c.json.flags.grew === 0 && rc.length === 3 && rc[2].baselineMs === 1e9 && rc[2].grew === false, one(c.stdout + JSON.stringify(rc[2])));
+
+  // The same checks list failing: the key is the same, so the baseline is the
+  // one it would move, and it must not.
+  pinBaseline(h.dir, 1);
+  fs.writeFileSync(path.join(h.dir, 'f.txt'), 'bye\n');
+  const d = fullRun(h.dir, list);
+  fs.writeFileSync(path.join(h.dir, 'f.txt'), 'hello\n');
+  const rd = historyRows(h.dir);
+  check('248 history: a failing run is recorded but never flags growth or moves the baseline',
+    !!d.json && d.json.summary.fail === 1 && d.json.flags.grew === 0 && rd.length === 4 && rd[3].passed === false && rd[3].baselineMs === 1 && rd[3].key === rd[0].key,
+    one(d.stdout + JSON.stringify(rd[3])));
+
+  // A worktree's full run lands in the main copy's history, so the baseline
+  // outlives the worktree.
+  pinBaseline(h.dir, 1e9);
+  const wt = path.join(sandbox, 'h248-wt');
+  h.git(['worktree', 'add', '-q', '-b', 'wt', wt]);
+  const w = fullRun(wt, list);
+  const rw = historyRows(h.dir);
+  check('248 history: a run in a worktree appends to the main copy\'s history, not the worktree\'s',
+    w.status === 0 && rw.length === 5 && historyRows(wt).length === 0, one(w.stdout + w.stderr));
+
+  const all = run(['--history'], h.dir);
+  const hs = all.json || {};
+  const lastPass = rw.filter((x) => x.passed && !x.skipped).pop() || {};
+  check('248 history: --history counts the runs, sums their time and lists each growth',
+    all.status === 0 && hs.runs === 5 && hs.skipped === 0 && hs.totalMs === rw.reduce((s, x) => s + x.ms, 0)
+      && hs.latestMs === lastPass.ms && hs.baselineMs === lastPass.baselineMs && Array.isArray(hs.grew) && hs.grew.length === 1 && hs.grew[0].baselineMs === 1,
+    one(all.stdout + all.stderr));
+  const since = run(['--history', '--since', rw[3].at], h.dir);
+  check('248 history: --history --since leaves out the runs that started earlier', since.status === 0 && !!since.json && since.json.runs === 2 && since.json.grew.length === 0, one(since.stdout + since.stderr));
+  const bad = run(['--history', '--since', 'not-a-time'], h.dir);
+  check('248 history: --history refuses a --since that is not a time', bad.status === 1 && /--since/.test(bad.stderr), one(bad.stdout + bad.stderr));
+  const none = run(['--history'], freshRepo('h248-empty').dir);
+  check('248 history: --history with no history file reports nothing run', none.status === 0 && !!none.json && none.json.runs === 0 && none.json.latestMs === null && none.json.grew.length === 0, one(none.stdout + none.stderr));
+
+  // A plan step's checks are never the full test step.
+  fs.mkdirSync(path.join(h.dir, 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(h.dir, 'plans', 'PLAN-h.md'), ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: H** `[sequential]`',
+    '  - Check target `n`: `grep -c hello f.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`', ''].join('\n'));
+  const before = historyRows(h.dir).length;
+  run(['--plan', 'plans/PLAN-h.md', '--step', '1', '--phase', 'before'], h.dir);
+  check('248 history: a plan step run writes no history row', historyRows(h.dir).length === before, String(historyRows(h.dir).length));
+  const mixed = run(['--plan', 'plans/PLAN-h.md', '--step', '1', '--phase', 'before', '--full'], h.dir);
+  const alone = run(['--full'], h.dir);
+  check('248 history: --full goes only with --checks', mixed.status === 1 && /--full/.test(mixed.stderr) && alone.status === 1, one(mixed.stderr + ' | ' + alone.stderr));
+
+  // The history is appended to, so a link on its path is refused before
+  // anything runs, and nothing lands where the link points.
+  const l = freshRepo('h248-link');
+  const away = fs.mkdtempSync(path.join(sandbox, 'away-'));
+  fs.mkdirSync(path.join(l.dir, 'reports'), { recursive: true });
+  fs.symlinkSync(away, path.join(l.dir, 'reports', 'checks'));
+  const linked = fullRun(l.dir, list);
+  check('248 history: a link on the history\'s path is refused and nothing is written through it',
+    linked.status === 1 && /history/.test(linked.stderr) && fs.readdirSync(away).length === 0 && !fs.existsSync(linked.out),
+    one(linked.stdout + linked.stderr + ' ' + fs.readdirSync(away)));
+});
+
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
 console.log(failures.length + ' FAILED, ' + passed + ' passed:');

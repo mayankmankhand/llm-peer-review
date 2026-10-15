@@ -13,8 +13,11 @@
 //   node run-checks.js --plan <plan.md> --lint
 //   node run-checks.js --plan <plan.md> --step <N> --phase before|after [--timeout <ms>]
 //   node run-checks.js --plan <plan.md> --tally
+//   node run-checks.js --checks <file.json> --out <dir> --full [...]
+//   node run-checks.js --history [--since <time>]
 //
-// (The --plan forms read a plan's own check lines; see "Plan mode" below.)
+// (The --plan forms read a plan's own check lines; see "Plan mode" below. The
+// last two are the full test step's history; see "Full runs" below.)
 //
 // <file.json> is a JSON array of { id, check, expect }:
 //   id      a filename stem: letters, digits, . _ - only, unique in the file
@@ -139,6 +142,25 @@
 //             are older checks, a finding for review (M17). The plan's
 //             problems outside any step are listed, and summary.problems
 //             counts them.
+// Full runs (issue #248). A full test run that doubled in five days raised
+// nothing, because each run's time stayed in the folder it wrote. --full marks
+// a --checks list as the project's whole test step (/execute's and /merge's;
+// never a review receipt or a plan step) and keeps its cost:
+//   history  one row per run appended to reports/checks/history.jsonl in the
+//            main working copy (a worktree's run too, so the baseline
+//            outlives the worktree): when it started, the commit, the list's
+//            key (a hash of its content, so a fallback list written fresh each
+//            time keeps one key), the whole run's ms, whether it passed, and
+//            the baseline it was measured against and the one after it.
+//   grew     the first passing run is the baseline. A passing run over 1.5x
+//            the baseline sets flags.grew to 1, and its time becomes the new
+//            baseline, so one growth is flagged once. A run that failed never
+//            moves the baseline. `cost` on the printed object (and in
+//            results.json) holds { ms, baselineMs, grew }.
+// --history [--since <time>] prints what the step cost since a time: runs,
+// skipped, totalMs, latestMs, baselineMs, and each growth with the baseline it
+// grew from.
+//
 // The plan must be a regular file inside the project, read through realpath.
 // Exit 0 once the plan was read (the statuses and problems are the result);
 // exit 1, with one line on stderr, for a plan outside the project, unreadable
@@ -202,6 +224,7 @@
 // because the plugin build rewrites command names in prompts, never in
 // scripts.
 
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -1320,6 +1343,8 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  --out             where <id>.txt and results.json are saved; must be under reports/ or the system temp folder\n'
   + '  --timeout         per check, in milliseconds (default ' + DEFAULT_TIMEOUT_MS + '); a run over half of it is flagged slow\n'
   + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
+  + '  --full            this list is the project\'s full test step: time it, add a row to the main copy\'s\n'
+  + '                    reports/checks/history.jsonl, and flag a pass over 1.5x the baseline (flags.grew, cost)\n'
   + '  expect            exactly one of (a prose string is an error since 8.0.0)\n'
   + '                    {"exit": 0}  {"match": "regex"}  {"noMatch": "regex"}  {"lines": {"min": 1, "max": 3}}\n'
   + '                    (regexes are tested with the multiline flag against the saved output)\n'
@@ -1328,15 +1353,21 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + 'plan mode: node run-checks.js --plan <plan.md> (--lint | --tally | --step <N> --phase before|after [--timeout <ms>])\n'
   + '  --lint            every check line in the plan that would not run, as problems\n'
   + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/\n'
-  + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n';
+  + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n'
+  + 'history: node run-checks.js --history [--since <time>]\n'
+  + '  --history         what the full test step cost: runs, skipped, totalMs, latestMs, baselineMs, grew\n'
+  + '  --since           only the runs that started at or after this time (ISO, e.g. 2026-10-15T01:00:00Z)\n';
 
 function parseArgs(argv) {
   const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, rerunFailures: false, help: false,
-    plan: '', lint: false, tally: false, step: '', phase: '' };
+    plan: '', lint: false, tally: false, step: '', phase: '', full: false, history: false, since: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--rerun-failures') opts.rerunFailures = true;
+    else if (a === '--full') opts.full = true;
+    else if (a === '--history') opts.history = true;
+    else if (a === '--since') opts.since = argv[++i] || '';
     else if (a === '--plan') opts.plan = argv[++i] || '';
     else if (a === '--lint') opts.lint = true;
     else if (a === '--tally') opts.tally = true;
@@ -1458,7 +1489,10 @@ function headCommit(cwd) {
 // `extra` (plan mode: plan, step, phase) leads both the printed object and
 // results.json; a check's `role` (target or guard, plan mode only) is copied
 // onto its row. results.json rows also carry the check's command and expect.
-function runAll(checks, opts, cwd, outDir, extra) {
+// `decorate` (a --full run) adds to the result once every check has run and
+// before results.json is saved, so the saved record and the printed object
+// carry the same fields.
+function runAll(checks, opts, cwd, outDir, extra, decorate) {
   const env = checkEnv();              // the same environment the guard judges with
   const root = realpathOrNull(cwd);
   const at = new Date().toISOString();
@@ -1475,6 +1509,7 @@ function runAll(checks, opts, cwd, outDir, extra) {
     results.push(row);
   }
   const result = Object.assign({}, extra || {}, { checks: results, summary, flags });
+  if (decorate) decorate(result);
   // Saved only when a check ran: a run whose every check was refused writes
   // nothing at all, as it always has, so a refusal never leaves a record that
   // looks like evidence.
@@ -1488,6 +1523,133 @@ function runAll(checks, opts, cwd, outDir, extra) {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// The full test step's history (issue #248). A --full run is the project's
+// whole test step, the one /execute and /merge run, and only it is recorded:
+// a review receipt or a plan step's check is never the suite, and a skipped
+// receipt would lose the output its finding points at.
+// ---------------------------------------------------------------------------
+const GROWTH_FACTOR = 1.5;
+const HISTORY_REL = path.join('reports', 'checks', 'history.jsonl');
+
+// The main working copy's root, the folder holding the shared .git, so a
+// worktree's run lands in the same history as the main copy's and the
+// baseline outlives the worktree. Outside a repository, or in a layout with
+// no .git folder to anchor on, it is the folder the run started in. Git older
+// than 2.31 prints the flag back first, so the path is the last line.
+function mainCopyRoot(cwd) {
+  const r = spawnSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const lines = (r.stdout || '').trim().split('\n');
+  const common = lines[lines.length - 1];
+  if (r.status !== 0 || !common || path.basename(common) !== '.git') return cwd;
+  return path.dirname(common);
+}
+
+// The history file's path. It is appended to, so a link or a non-folder on
+// the way to it (or a history that is itself a link) is refused, as a record
+// folder's is: a write never lands outside the main copy's reports/.
+function historyFile(cwd) {
+  const root = mainCopyRoot(cwd);
+  const bad = linkOnRecordPath(root, path.join('reports', 'checks'));
+  if (bad) throw new Error('the history ' + HISTORY_REL + ' was not used: ' + bad + ' is a link or not a folder');
+  const file = path.join(root, HISTORY_REL);
+  let st = null;
+  try { st = fs.lstatSync(file); } catch (e) { /* not written yet */ }
+  if (st && !st.isFile()) throw new Error('the history ' + HISTORY_REL + ' was not used: it is a link or not a file');
+  return file;
+}
+
+// Every row, oldest first. A line that does not parse (a write cut short) is
+// skipped rather than fatal: one torn row must not stop the test step.
+function readHistory(file) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return []; }
+  const rows = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const r = JSON.parse(line);
+      if (r && typeof r === 'object' && typeof r.at === 'string' && !isNaN(Date.parse(r.at))) rows.push(r);
+    } catch (e) { /* torn line */ }
+  }
+  return rows;
+}
+
+function appendHistory(file, row) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, JSON.stringify(row) + '\n');
+  } catch (e) {
+    process.stderr.write('run-checks: could not add to ' + HISTORY_REL + ': ' + e.message + '\n');
+  }
+}
+
+// A checks list's identity is its content, not its path, so the one-entry
+// fallback list written into a fresh scratch folder on every run keeps one
+// key, and so one baseline.
+function checksKey(checks) {
+  return crypto.createHash('sha256').update(canonical(checks)).digest('hex');
+}
+
+// The baseline in force for a key: the newest row of that key that carries
+// one. Every row carries the baseline as it stood after it, so a failing run
+// passes the baseline on unchanged.
+function baselineFor(rows, key) {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].key === key && typeof rows[i].baselineMs === 'number') return rows[i].baselineMs;
+  }
+  return null;
+}
+
+// Run the list as the full test step: time the whole run, compare a pass with
+// the baseline, and append one row. The first passing run is the baseline; a
+// passing run over 1.5x it is flagged (flags.grew 1) and becomes the new
+// baseline, so the same growth is flagged once, never on every later run. A
+// failing run (a fail, an error, a flake) never moves the baseline: one cut
+// short or one that ran into its time limit would mislead it.
+// `file` is historyFile()'s answer, taken before the out folder was made.
+function runFull(checks, opts, cwd, outDir, file) {
+  const key = checksKey(checks);
+  const rows = readHistory(file);
+  const started = Date.now();
+  let row = null;
+  const result = runAll(checks, opts, cwd, outDir, null, (res) => {
+    const ms = Date.now() - started;
+    const passed = checks.length > 0 && res.summary.fail === 0 && res.summary.error === 0 && res.flags.flaky === 0;
+    const against = baselineFor(rows, key);
+    const grew = passed && against !== null && ms > against * GROWTH_FACTOR;
+    res.flags.grew = grew ? 1 : 0;
+    res.cost = { ms, baselineMs: against, grew };
+    row = {
+      at: new Date(started).toISOString(), head: headCommit(cwd), key, ms, passed,
+      againstMs: against, baselineMs: passed && (against === null || grew) ? ms : against, grew,
+      summary: res.summary, checks: res.checks.map((c) => ({ id: c.id, verdict: c.verdict, ms: c.ms })),
+    };
+  });
+  appendHistory(file, row);
+  return result;
+}
+
+// What the full test step cost, for a cycle page: runs and skips since a
+// time, their total, the latest passing run against its baseline, and each
+// run that grew past it (with the baseline it grew from).
+function historyReport(cwd, since) {
+  const all = readHistory(historyFile(cwd));
+  const rows = all.filter((r) => since === null || Date.parse(r.at) >= since);
+  const ran = rows.filter((r) => !r.skipped);
+  const passes = ran.filter((r) => r.passed);
+  const last = passes.length ? passes[passes.length - 1] : null;
+  return {
+    since: since === null ? null : new Date(since).toISOString(),
+    runs: ran.length,
+    skipped: rows.length - ran.length,
+    totalMs: ran.reduce((s, r) => s + (typeof r.ms === 'number' ? r.ms : 0), 0),
+    latestMs: last ? last.ms : null,
+    baselineMs: last ? baselineFor(all, last.key) : null,
+    grew: ran.filter((r) => r.grew).map((r) => ({ at: r.at, ms: r.ms, baselineMs: typeof r.againstMs === 'number' ? r.againstMs : null })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1909,10 +2071,26 @@ function main(argv) {
   try { opts = parseArgs(argv); } catch (e) { fail(e.message + '\n' + USAGE.trimEnd()); }
   if (opts.help) { process.stdout.write(USAGE); return; }
   const cwd = process.cwd();
+  if (opts.history) {
+    if (opts.checks || opts.out || opts.plan || opts.full || opts.lint || opts.tally || opts.step || opts.phase || opts.rerunFailures) {
+      fail('--history takes only --since');
+    }
+    let since = null;
+    if (opts.since) {
+      since = Date.parse(opts.since);
+      if (isNaN(since)) fail('--since needs a time, such as 2026-10-15T01:00:00Z');
+    }
+    let report;
+    try { report = historyReport(cwd, since); } catch (e) { fail(e.message); }
+    process.stdout.write(JSON.stringify(report) + '\n');
+    return;
+  }
+  if (opts.since) fail('--since goes with --history');
   if (opts.plan || opts.lint || opts.tally || opts.step || opts.phase) {
     // Plan mode writes its own records, so it takes no --checks and no --out.
     if (!opts.plan) fail('--lint, --tally, --step and --phase go with --plan <plan.md>\n' + USAGE.trimEnd());
     if (opts.checks || opts.out) fail('--plan cannot be combined with --checks or --out (a plan run keeps its own records)');
+    if (opts.full) fail('--full goes only with --checks: a plan step\'s checks are never the full test step');
     const phaseRun = !!(opts.step || opts.phase);
     if ([opts.lint, opts.tally, phaseRun].filter(Boolean).length !== 1) fail('--plan needs exactly one of --lint, --tally, or --step <N> --phase before|after');
     if (phaseRun && (!STEP_ARG_RE.test(opts.step) || (opts.phase !== 'before' && opts.phase !== 'after'))) {
@@ -1926,9 +2104,14 @@ function main(argv) {
   if (!opts.checks || !opts.out) fail('--checks and --out are both required\n' + USAGE.trimEnd());
   let checks;
   try { checks = loadChecks(opts.checks); } catch (e) { fail(e.message); }
+  // A refused history stops a full run before its out folder is made.
+  let history = null;
+  if (opts.full) { try { history = historyFile(cwd); } catch (e) { fail(e.message); } }
   let outDir;
   try { outDir = prepareOutDir(opts.out, cwd); } catch (e) { fail(e.message); }
-  process.stdout.write(JSON.stringify(runAll(checks, opts, cwd, outDir)) + '\n');
+  let result;
+  try { result = opts.full ? runFull(checks, opts, cwd, outDir, history) : runAll(checks, opts, cwd, outDir); } catch (e) { fail(e.message); }
+  process.stdout.write(JSON.stringify(result) + '\n');
 }
 
 module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main, parsePlan };
