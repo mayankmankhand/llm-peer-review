@@ -385,7 +385,7 @@ A project has two settings files. `.claude/settings.json` is committed and share
 
 The baseline carries the five `glab` rows the toolkit's own host commands run, the GitLab twins of its `gh issue create`, `gh issue view`, `gh pr create`, `gh pr list` and `gh pr view` rows, so a GitLab repo needs no extra row for them and a GitHub-hosted project simply never runs them. For other GitLab work, add the ones you use to your own `settings.local.json`, for example `Bash(glab auth status *)`, `Bash(glab issue close *)`, `Bash(glab issue list *)`, and `Bash(glab issue reopen *)`. Which CLI a command reaches for is decided at runtime from the git remote - see `.claude/skills/shared/host-cli.md`.
 
-Host detection itself needs no new permission: it reads `git config --get remote.origin.url`, which the baseline allows as that exact command and nothing broader. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory. The installed-CLI fallback (`command -v gh` / `command -v glab`) may prompt on first use, which is acceptable because it only runs when the remote host is neither github.com nor gitlab.com.
+Host detection runs on three exact rows and nothing broader: it reads `git config --get remote.origin.url`, and when the remote names neither github.com nor gitlab.com it falls back to `command -v gh` and `command -v glab`, each a call of its own. `git remote get-url origin` returns the same string but would need a new entry, and reading `.git/config` as a file breaks inside a worktree, where `.git` is a file rather than a directory.
 
 | Permission | Why it's here |
 |---|---|
@@ -393,6 +393,7 @@ Host detection itself needs no new permission: it reads `git config --get remote
 | `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories. A force push, a mirror push, and a delete push still ask: see the ask rows below the table |
 | `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git merge *)`, `Bash(git stash *)` | Branch management, merging (`/merge` brings a branch up to date with main and lands it on this machine), and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
+| `Bash(command -v gh)`, `Bash(command -v glab)` | Host detection's fallback when the remote names neither github.com nor gitlab.com: which of the two CLIs is installed. Exact rows, so nothing else that starts with `command` is allowed |
 | `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |
 | `Bash(git check-ignore *)` | Verifying .gitignore rules before committing |
 | `Bash(git worktree *)` | Creating, listing, and removing worktrees for parallel sessions |
