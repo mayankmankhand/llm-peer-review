@@ -4,18 +4,18 @@
 
 ## Unreleased - Where the Time Went
 
-**Issue #248.** A full cycle could take hours with no way to see where the time went, and the loop quietly paid for slow and repeated test runs. Not released yet: the version number is decided at release.
+**Issues #248 and #249.** A full cycle could take hours with no way to see where the time went, and the loop quietly paid for slow and repeated test runs. Not released yet: the version number is decided at release.
 
 ### Added
 
-- **The cycle page shows where the time went.** A new section on the page `/tk:document` keeps: Claude working, tests, helper agents, waiting on you, and away (gaps over 15 minutes), with each one's share. Below them come counts of test runs, your messages, and quiet stretches over 2.5 minutes, then the full test runs' cost. It reads the session logs of every worktree of the repository, as times and counts only: no message text, command or path leaves them, nothing is stored, and the correction-ledger opt-out turns it off too.
-- **The full test step keeps its cost.** Each run's time is saved in `reports/checks/history.jsonl` in the main copy. A passing run that takes over 1.5 times the usual time is flagged once, in the build's summary and on the cycle page, and becomes the new usual.
+- **The cycle page shows where the time went.** A new section on the page `/tk:document` keeps: Claude working, tests, helper agents, waiting on you, and away (gaps over 15 minutes), with each one's share. Below them come counts of test and check runs (the full test runs among them), your messages, and quiet stretches over 2.5 minutes (time already inside the rows above), then the full test runs' cost. It reads the session logs of every working copy of the repository, so a cycle that began in the main copy and carried on in a worktree is counted whole, while a worktree running a cycle of its own beside it is left out. It reads them as times and counts only: no message text, command or path leaves them, nothing is stored, and the correction-ledger opt-out turns it off too.
+- **The full test step keeps its cost.** Each run's time is saved in `reports/checks/history.jsonl` in the main copy. A passing run that takes over 1.5 times the usual time is flagged once, in the build's summary and on the cycle page, and becomes the new usual. So does a passing run under two thirds of the usual time, so a speed-up does not hide the next slowdown.
 - **A test run on unchanged code is skipped.** When every tracked and new file is the same as at the last passing run, uncommitted edits included, `/tk:execute` and `/tk:merge` skip the run with a one-line note and count it as green. The check reads git without locking it. Ignored files and git tags are not part of it; `--no-skip` forces a run.
 
 ### Changed
 
 - **A status line before long waits.** The always-on rules ask Claude to say in one line what is coming before anything expected to take over a minute, and to answer every question before moving on. Existing projects get the new rules text through `/tk:upgrade`.
-- **`/tk:explore` opens with a short recommendation**, five lines or fewer, then the questions.
+- **`/tk:explore` opens with a short recommendation**, five lines or fewer, then the questions. In vision mode the recommendation is a first direction to react to, not a narrowed scope.
 
 ### Why
 
