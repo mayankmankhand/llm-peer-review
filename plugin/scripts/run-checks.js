@@ -154,8 +154,10 @@
 //            the baseline it was measured against and the one after it.
 //   grew     the first passing run is the baseline. A passing run over 1.5x
 //            the baseline sets flags.grew to 1, and its time becomes the new
-//            baseline, so one growth is flagged once. A run that failed never
-//            moves the baseline. `cost` on the printed object (and in
+//            baseline, so one growth is flagged once. A passing run under
+//            two-thirds of the baseline becomes the new baseline with no flag,
+//            so a suite made faster is measured against its new time (issue
+//            #249). A run that failed never moves the baseline. `cost` on the printed object (and in
 //            results.json) holds { ms, baselineMs, grew }.
 //   skip     a run on a working tree (every tracked file and every untracked
 //            file git does not ignore, edits and modes included) and a list
@@ -1357,6 +1359,7 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  --rerun-failures  run a failing check once more; a pass the second time stays a fail, flagged flaky\n'
   + '  --full            this list is the project\'s full test step: time it, add a row to the main copy\'s\n'
   + '                    reports/checks/history.jsonl, and flag a pass over 1.5x the baseline (flags.grew, cost);\n'
+  + '                    a pass under two-thirds of the baseline becomes the new baseline, with no flag;\n'
   + '                    skipped, with a note (`skipped`), when the tree and the list match the last passing run\n'
   + '  --no-skip         with --full: run even when nothing changed\n'
   + '  expect            exactly one of (a prose string is an error since 8.0.0)\n'
@@ -1547,6 +1550,11 @@ function runAll(checks, opts, cwd, outDir, extra, decorate) {
 // receipt would lose the output its finding points at.
 // ---------------------------------------------------------------------------
 const GROWTH_FACTOR = 1.5;
+// A passing run under this share of the baseline becomes the new baseline, so
+// a suite made faster is measured against its new time rather than the old
+// one: left at the old time, the growth flag could not fire again until a run
+// was slower than any before it (issue #249). It raises no flag.
+const SHRINK_FACTOR = 2 / 3;
 const HISTORY_REL = path.join('reports', 'checks', 'history.jsonl');
 
 // The main working copy's root, the folder holding the shared .git, so a
@@ -1704,6 +1712,7 @@ function skipRun(checks, prior, cwd, outDir, file, key, print, against) {
 // the baseline, and append one row. The first passing run is the baseline; a
 // passing run over 1.5x it is flagged (flags.grew 1) and becomes the new
 // baseline, so the same growth is flagged once, never on every later run. A
+// passing run under two-thirds of it becomes the new baseline too, unflagged. A
 // failing run (a fail, an error, a flake) never moves the baseline: one cut
 // short or one that ran into its time limit would mislead it. Before running,
 // a tree and list the last run on them passed is skipped (skipRun), unless
@@ -1724,11 +1733,12 @@ function runFull(checks, opts, cwd, outDir, file) {
     const passed = checks.length > 0 && res.summary.fail === 0 && res.summary.error === 0 && res.flags.flaky === 0;
     const against = baselineFor(rows, key);
     const grew = passed && against !== null && ms > against * GROWTH_FACTOR;
+    const shrank = passed && against !== null && ms < against * SHRINK_FACTOR;
     res.flags.grew = grew ? 1 : 0;
     res.cost = { ms, baselineMs: against, grew };
     row = {
       at: new Date(started).toISOString(), head: headCommit(cwd), key, fingerprint: print, ms, passed,
-      againstMs: against, baselineMs: passed && (against === null || grew) ? ms : against, grew,
+      againstMs: against, baselineMs: passed && (against === null || grew || shrank) ? ms : against, grew,
       summary: res.summary, checks: res.checks.map((c) => ({ id: c.id, verdict: c.verdict, ms: c.ms })),
     };
   });

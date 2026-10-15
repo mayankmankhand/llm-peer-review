@@ -1583,11 +1583,13 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
     one(b.stdout + b.stderr));
   check('248 history: the run that grew becomes the new baseline', rb.length === 2 && rb[1].grew === true && rb[1].baselineMs === rb[1].ms, one(JSON.stringify(rb)));
 
+  // Far under the baseline, so it also moves the baseline down (issue #249,
+  // whose own cases below pin a run between two-thirds and 1.5x).
   pinBaseline(h.dir, 1e9);
   const c = fullRun(h.dir, list, ['--no-skip']);
   const rc = historyRows(h.dir);
-  check('248 history: a run under 1.5x the baseline flags nothing and keeps the baseline',
-    !!c.json && c.json.flags.grew === 0 && rc.length === 3 && rc[2].baselineMs === 1e9 && rc[2].grew === false, one(c.stdout + JSON.stringify(rc[2])));
+  check('248 history: a run under 1.5x the baseline flags nothing',
+    !!c.json && c.json.flags.grew === 0 && rc.length === 3 && rc[2].grew === false, one(c.stdout + JSON.stringify(rc[2])));
 
   // The same checks list failing: the key is the same, so the baseline is the
   // one it would move, and it must not.
@@ -1646,6 +1648,46 @@ section('248 history: a full run keeps its time and flags growth once (issue #24
   check('248 history: a link on the history\'s path is refused and nothing is written through it',
     linked.status === 1 && /history/.test(linked.stderr) && fs.readdirSync(away).length === 0 && !fs.existsSync(linked.out),
     one(linked.stdout + linked.stderr + ' ' + fs.readdirSync(away)));
+});
+
+// --- 249. the baseline comes down after a speed-up (issue #249) ----------------
+// The baseline only ever moved up, so a suite made three times faster kept the
+// old time as its baseline, and the 1.5x growth flag could not fire until a run
+// took longer than any before it. A passing run under two-thirds of the
+// baseline becomes the new baseline, with no flag; a run between two-thirds
+// and 1.5x keeps it. Each check sleeps one second, so a run's time is known to
+// within its overhead, and the pinned baselines leave over a second of room.
+// Growth past 1.5x is the 248 cases' above, unchanged.
+section('249 baseline: a passing run under two-thirds of the baseline becomes the new baseline (issue #249)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const h = freshRepo('h249');
+  const list = [{ id: 'nap', check: 'sleep 1', expect: { exit: 0 } }, { id: 'tests', check: 'grep -c hello f.txt', expect: { exit: 0 } }];
+  fullRun(h.dir, list);
+
+  pinBaseline(h.dir, 1400);   // a run of 1.0 s to 2.1 s is over two-thirds of it and under 1.5x
+  const b = fullRun(h.dir, list, ['--no-skip']);
+  const rb = historyRows(h.dir);
+  check('249 baseline: a passing run between two-thirds and 1.5x of the baseline keeps it and flags nothing',
+    !!b.json && b.json.flags.grew === 0 && rb.length === 2 && rb[1].passed === true && rb[1].baselineMs === 1400 && rb[1].grew === false,
+    one(b.stdout + b.stderr + JSON.stringify(rb[1])));
+
+  pinBaseline(h.dir, 9000);
+  const c = fullRun(h.dir, list, ['--no-skip']);
+  const rc = historyRows(h.dir);
+  check('249 baseline: a passing run under two-thirds of the baseline becomes the new baseline',
+    rc.length === 3 && rc[2].passed === true && rc[2].baselineMs === rc[2].ms && rc[2].ms < 6000, one(JSON.stringify(rc[2])));
+  check('249 baseline: the run that brought the baseline down raises no flag and names the old baseline',
+    !!c.json && c.json.flags.grew === 0 && c.json.cost.baselineMs === 9000 && rc[2].grew === false && rc[2].againstMs === 9000,
+    one(c.stdout + c.stderr));
+
+  // The same list failing: a run cut short is no measure of the suite.
+  pinBaseline(h.dir, 9000);
+  fs.writeFileSync(path.join(h.dir, 'f.txt'), 'bye\n');
+  const d = fullRun(h.dir, list);
+  fs.writeFileSync(path.join(h.dir, 'f.txt'), 'hello\n');
+  const rd = historyRows(h.dir);
+  check('249 baseline: a failing run under two-thirds of the baseline never moves it',
+    !!d.json && d.json.summary.fail === 1 && rd.length === 4 && rd[3].passed === false && rd[3].baselineMs === 9000, one(d.stdout + JSON.stringify(rd[3])));
 });
 
 // --- 248. skip a full run on unchanged code (issue #248) ---------------------
