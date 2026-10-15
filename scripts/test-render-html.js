@@ -2193,7 +2193,12 @@ function timePageTests() {
       && /Helper agents: 1\.9 min/.test(full) && /Waiting on you: 0 s/.test(full) && /Away \(gaps over 15 min\): 15 min/.test(full),
     full.slice(0, 600));
   check('248 time page: the counts read as plain sentences',
-    /7 test runs/.test(full) && /2 helper agents/.test(full) && /2 messages from you/.test(full) && /1 quiet stretch over 2\.5 minutes/.test(full),
+    /7 test and check runs/.test(full) && /2 helper agents/.test(full) && /2 messages from you/.test(full) && /1 quiet stretch over 2\.5 minutes/.test(full),
+    full.slice(0, 600));
+  // Issue #249: "test runs" counted every checks-runner call, and the quiet
+  // count matched no row above it, so each count now says what it counts.
+  check('249 time page: the counts say what they count, test and check runs, and quiet stretches as Claude\'s time inside the rows above',
+    /7 test and check runs/.test(full) && /1 quiet stretch over 2\.5 minutes where Claude was working without a word \(inside the times above\)/.test(full),
     full.slice(0, 600));
   check('248 time page: the tests line shows full runs, skips and the latest run against its baseline',
     /Full test runs: 2 ran, 1 skipped, 5\.5 min in all/.test(full) && /latest 2\.8 min against a baseline of 2\.7 min/.test(full) && !/Grew past/.test(full),

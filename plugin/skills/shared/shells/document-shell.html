@@ -506,13 +506,13 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     }
 
     var said = [];
-    if (num(counts.testRuns) !== null) said.push(plural(counts.testRuns, "test run", "test runs"));
+    if (num(counts.testRuns) !== null) said.push(plural(counts.testRuns, "test and check run", "test and check runs"));
     if (num(counts.agents) !== null) {
       said.push(plural(counts.agents, "helper agent", "helper agents")
         + (num(counts.backgroundAgents) ? " (plus " + counts.backgroundAgents + " in the background)" : ""));
     }
     if (num(counts.turns) !== null) said.push(plural(counts.turns, "message from you", "messages from you"));
-    if (num(counts.quiet) !== null) said.push(plural(counts.quiet, "quiet stretch", "quiet stretches") + " over 2.5 minutes");
+    if (num(counts.quiet) !== null) said.push(plural(counts.quiet, "quiet stretch", "quiet stretches") + " over 2.5 minutes where Claude was working without a word (inside the times above)");
     if (said.length) card.appendChild(text(el("p", "card-line"), said.join(", ") + "."));
 
     if (num(cost.runs) !== null) {
