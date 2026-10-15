@@ -1876,12 +1876,15 @@ function runSetAxial() {
 // the main copy's .claude/worktrees/ (subagent logs never, as in the scan).
 // A cycle can start in the main copy and carry on in a worktree, so those are
 // read as one; but a worktree is also how two cycles run side by side, and
-// those must not blend (issue #249). So the stage markers come from ONE copy:
-// the copy this call runs in, or the main copy when this copy has no explore
-// or create-plan stage of its own (the cycle began there). Any other copy with
-// an explore or create-plan stage of its own ran a parallel cycle, and it is
-// left out, its markers and its time; a copy with none only continued a cycle
-// and is counted.
+// those must not blend (issue #249). A copy's own cycle opens at its latest
+// explore or create-plan stage and closes at the first document stage after
+// it. So the stage markers come from ONE copy: the copy this call runs in, or
+// the main copy when this copy has no cycle of its own, or one it documented
+// before the main copy's latest start (a reused worktree carrying on the cycle
+// that began there). Any other copy whose own cycle was open when the window
+// opened, or started in it, ran a parallel cycle, and it is left out, its
+// markers and its time; a copy with none only continued a cycle and is
+// counted.
 // Each session is cut into turns on its own; the sessions are then laid over
 // one timeline where, at any moment, the busiest state wins (tests, then
 // agents, then an open question, then claude, then waiting, then away; a
@@ -1894,9 +1897,9 @@ function runSetAxial() {
 //
 // Logs are read newest first, and reading stops at the first file last
 // written before the start (or before the previous document stage): nothing
-// in it can fall in the window or move its start. Telling whether a copy ran a
-// cycle of its own reads that copy's files newest first only until its first
-// explore or create-plan stage.
+// in it can fall in the window or move its start. Finding a copy's own cycle
+// reads that copy's files newest first only until one was last written before
+// the latest explore or create-plan stage found so far.
 const AWAY_AFTER_MS = 15 * 60 * 1000;
 const QUIET_AFTER_MS = 150 * 1000;
 const STAGE_COMMAND = /^\/(?:tk:)?(explore|create-plan|document)(?:\s|$)/;
@@ -2164,18 +2167,34 @@ function runCycleTime() {
     });
     return out;
   };
-  // Whether a copy ran a cycle of its own: an explore or create-plan stage
-  // by the window's end, looked for newest file first.
-  const started = new Map();
-  const startsOwn = function (copy) {
-    if (!started.has(copy)) {
-      started.set(copy, files.some(function (f) {
-        return f.copy === copy && stagesOf(entriesOf(f)).some(function (m) { return m.stage !== 'document'; });
-      }));
+  // A copy's own latest cycle: its last explore or create-plan stage by the
+  // window's end, and the first document stage after it (null while that cycle
+  // is open). Newest file first; a file last written before the start found so
+  // far cannot hold a later one.
+  const cycles = new Map();
+  const ownCycle = function (copy) {
+    if (!cycles.has(copy)) {
+      let start = null;
+      const docs = [];
+      for (let i = 0; i < files.length; i++) {
+        if (start !== null && files[i].mtime < start) break;
+        if (files[i].copy !== copy) continue;
+        stagesOf(entriesOf(files[i])).forEach(function (m) {
+          if (m.stage === 'document') docs.push(m.t);
+          else if (start === null || m.t > start) start = m.t;
+        });
+      }
+      const after = docs.filter(function (t) { return start !== null && t > start; });
+      cycles.set(copy, { start: start, done: after.length ? Math.min.apply(null, after) : null });
     }
-    return started.get(copy);
+    return cycles.get(copy);
   };
-  const source = startsOwn(here) ? here : main;
+  // This copy's markers, unless its own cycle was documented before the main
+  // copy's latest start: a reused worktree then only carries on the main copy's
+  // cycle (review of #249, R9).
+  const mine = ownCycle(here);
+  const mainStart = here === main ? null : ownCycle(main).start;
+  const source = mine.start !== null && (mine.done === null || mainStart === null || mine.done > mainStart) ? here : main;
   const markers = [];
   let win = null;
   for (let i = 0; i < files.length; i++) {
@@ -2192,12 +2211,16 @@ function runCycleTime() {
     return;
   }
   // The sessions counted: the source copy's, this copy's, and those of every
-  // copy that ran no cycle of its own. A file last written before the window
-  // holds nothing in it.
+  // copy with no cycle of its own open when the window opened or started in it.
+  // A file last written before the window holds nothing in it.
+  const parallel = function (copy) {
+    const c = ownCycle(copy);
+    return c.start !== null && (c.done === null || c.done >= win.start);
+  };
   const sessions = [];
   files.forEach(function (f) {
     if (f.mtime < win.start) return;
-    if (f.copy !== source && f.copy !== here && startsOwn(f.copy)) return;
+    if (f.copy !== source && f.copy !== here && parallel(f.copy)) return;
     sessions.push(entriesOf(f));
   });
   const counts = { turns: 0, testRuns: 0, agents: 0, backgroundAgents: 0, quiet: 0, sessions: 0 };

@@ -235,6 +235,14 @@ if (PART === null) {
       if (d.e2e.checks !== d.e2e.shapes.length) ownShapes = false;
     }
     T.e2e.checks = ownShapes ? T.e2e.shapes.size : -1;
+    // Every fenced section belongs to exactly one part: one the table leaves out
+    // runs in no part, and its checks would vanish with nothing failing (review
+    // of #249, R7).
+    console.log('\nparts: every fenced section runs in exactly one part');
+    const fenced = [...new Set([...fs.readFileSync(__filename, 'utf8').matchAll(/\bOWN\('(\d+[a-z]?)'\)/g)].map(m => m[1]))];
+    const homes = (s) => Object.keys(PARTS).filter(k => PARTS[k].includes(s)).length;
+    check('each of the ' + fenced.length + ' fenced sections is listed in exactly one part', fenced.length > 0 && fenced.every(s => homes(s) === 1),
+      'not in exactly one part: ' + fenced.filter(s => homes(s) !== 1).join(', '));
     defaultRunsChecks(T);
     finish();
   });

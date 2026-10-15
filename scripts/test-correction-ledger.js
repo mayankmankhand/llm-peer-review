@@ -1961,6 +1961,48 @@ function cycleTimeTest() {
     !!jb2 && !!jb2.window && jb2.window.start === at(400) && jb2.window.from === 'previous-document' && !!jb2.counts && jb2.counts.sessions === 1 && jb2.counts.turns === 1,
     one(fromB.stdout + fromB.stderr));
 
+  // --- G: a reused worktree (review of #249, R9) --------------------------------
+  // Worktree R ran a cycle of its own long ago (explore at 0 s, document at
+  // 300 s) and now carries on the cycle the main copy began at 1,000 s (R's
+  // session at 1,200 s). Worktree P runs a parallel cycle, explore at 900 s,
+  // and its own document stage is the one running now (1,250 s). Read from R,
+  // R's finished cycle is not its own: the window is the main copy's, from
+  // 1,000 s, and counts the main copy's session and R's. Read from the main
+  // copy, R only continued it and is counted. Read from P, its cycle is its
+  // own although its document stage came after the main copy's explore.
+  const gs = makeSandbox('cycle-g');
+  const gg = (args, cwd) => execFileSync('git', args, { cwd: cwd || gs.proj, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' }) });
+  gg(['init', '-q']);
+  fs.writeFileSync(path.join(gs.proj, 'f.txt'), 'x\n');
+  gg(['add', 'f.txt']);
+  gg(['commit', '-qm', 'init']);
+  const wr = path.join(gs.proj, '.claude', 'worktrees', 'wr');
+  const wp = path.join(gs.proj, '.claude', 'worktrees', 'wp');
+  gg(['worktree', 'add', '-q', '-b', 'wr', wr]);
+  gg(['worktree', 'add', '-q', '-b', 'wp', wp]);
+  const mainG = fs.realpathSync(gs.proj);
+  writeLog(gs, mainG, 'm0', [command(-3600, '/document'), say(-3500, 'Documented.')]);
+  writeLog(gs, mainG, 'm1', [command(1000, '/explore', 'issue 5'), say(1010, 'Main explores.')]);
+  writeLog(gs, fs.realpathSync(wr), 'r1', [command(0, '/explore', 'issue 4'), say(10, 'R explores.'), command(300, '/document'), say(310, 'R documented.')]);
+  writeLog(gs, fs.realpathSync(wr), 'r2', [human(1200, 'Build it in the old worktree.'), say(1210, 'Built.')]);
+  writeLog(gs, fs.realpathSync(wp), 'p1', [command(900, '/explore', 'issue 6'), say(910, 'P explores.'), command(1250, '/document'), say(1260, 'P documents.')]);
+  const fromR = runRaw(gs, ['--cycle-time', '--until', at(1300)], { cwd: wr });
+  let jr = null;
+  try { jr = JSON.parse(fromR.stdout); } catch (err) { jr = null; }
+  check('249 cycle-time: read from a reused worktree, its earlier finished cycle is not this one: the window is the main copy\'s',
+    !!jr && !!jr.window && jr.window.start === at(1000) && !!jr.counts && jr.counts.sessions === 2, one(fromR.stdout + fromR.stderr));
+  const fromMainG = runRaw(gs, ['--cycle-time', '--until', at(1300)], { cwd: gs.proj });
+  let jm = null;
+  try { jm = JSON.parse(fromMainG.stdout); } catch (err) { jm = null; }
+  check('249 cycle-time: read from the main copy, a reused worktree that only continued its cycle is counted',
+    !!jm && !!jm.window && jm.window.start === at(1000) && !!jm.counts && jm.counts.sessions === 2, one(fromMainG.stdout + fromMainG.stderr));
+  const fromP = runRaw(gs, ['--cycle-time', '--until', at(1300)], { cwd: wp });
+  let jp = null;
+  try { jp = JSON.parse(fromP.stdout); } catch (err) { jp = null; }
+  check('249 cycle-time: a worktree whose own document stage runs now keeps its own window beside the main copy\'s cycle',
+    !!jp && !!jp.window && jp.window.start === at(900) && jp.window.from === 'first-stage', one(fromP.stdout + fromP.stderr));
+
   // --- D: a question Claude asks the owner with the question tool -------------
   // The wait for the answer is the owner's time, not Claude's: 20-320 s is
   // waiting, 340-1840 s (25 minutes) is away. The question is on screen, so it
