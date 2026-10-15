@@ -2157,10 +2157,66 @@ themeContrastTests();
 findingContractTests();
 issue162Tests();
 cycle162ReviewTests();
+// ---------------------------------------------------------------------------
+// 248 time page: "Where the time went" on the cycle page (issue #248)
+//
+// The cycle page carries the two scripts' outputs as they print them:
+// timeBreakdown.cycle is correction-ledger.js --cycle-time, and
+// timeBreakdown.testCost is run-checks.js --history. The section shows numbers
+// only, built as text: a value that is not a number is dropped, never drawn.
+// ---------------------------------------------------------------------------
+function timePageTests() {
+  console.log('\n248 time page');
+  const dir = tmpdir('timepage');
+  let n = 0;
+  const page = function (timeBreakdown) {
+    const data = { title: 'Time Page Cycle', whatShipped: 'Something shipped.' };
+    if (timeBreakdown !== undefined) data.timeBreakdown = timeBreakdown;
+    const p = path.join(dir, 'd' + (++n) + '.json');
+    fs.writeFileSync(p, JSON.stringify(data), 'utf-8');
+    const out = execFileSync('node', [SCRIPT, '--shell', 'document', '--name', 'time-' + n, '--out-dir', dir, '--data', p],
+      { encoding: 'utf-8', cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return renderDom(fs.readFileSync(out, 'utf-8'));
+  };
+  // Shaped exactly as the two scripts print them.
+  const cycle = {
+    window: { start: '2026-10-15T01:45:28.572Z', end: '2026-10-15T02:29:18.344Z', ms: 2629772, from: 'previous-document' },
+    ms: { claude: 1551777, tests: 61550, agents: 115175, waiting: 0, away: 901270 },
+    counts: { turns: 2, testRuns: 7, agents: 2, backgroundAgents: 0, quiet: 1, sessions: 1 }
+  };
+  const testCost = { since: '2026-10-15T01:45:28.572Z', runs: 2, skipped: 1, totalMs: 330000, latestMs: 170000, baselineMs: 160000, grew: [] };
+  const text = function (dom) { return dom.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' '); };
+
+  const full = text(page({ cycle: cycle, testCost: testCost }));
+  check('248 time page: the section shows each category\'s time and share',
+    /Where the time went/.test(full) && /Claude working: 26 min \(59%\)/.test(full) && /Tests: 1\.0 min/.test(full)
+      && /Helper agents: 1\.9 min/.test(full) && /Waiting on you: 0 s/.test(full) && /Away \(gaps over 15 min\): 15 min/.test(full),
+    full.slice(0, 600));
+  check('248 time page: the counts read as plain sentences',
+    /7 test runs/.test(full) && /2 helper agents/.test(full) && /2 messages from you/.test(full) && /1 quiet stretch over 2\.5 minutes/.test(full),
+    full.slice(0, 600));
+  check('248 time page: the tests line shows full runs, skips and the latest run against its baseline',
+    /Full test runs: 2 ran, 1 skipped, 5\.5 min in all/.test(full) && /latest 2\.8 min against a baseline of 2\.7 min/.test(full) && !/Grew past/.test(full),
+    full.slice(0, 800));
+  const grown = text(page({ cycle: cycle, testCost: Object.assign({}, testCost, { grew: [{ at: '2026-10-15T02:00:00.000Z', ms: 164000, baselineMs: 80000 }] }) }));
+  check('248 time page: a growth adds a note with the two times', /Grew past 1\.5x its baseline: 1\.3 min to 2\.7 min/.test(grown), grown.slice(0, 800));
+
+  const hostile = page({
+    cycle: { window: cycle.window, ms: Object.assign({}, cycle.ms, { claude: '<script>alert(1)</script>', away: -5 }), counts: Object.assign({}, cycle.counts, { quiet: '<img src=x onerror=alert(2)>' }) },
+    testCost: Object.assign({}, testCost, { latestMs: '<b>bold</b>' })
+  });
+  check('248 time page: a value that is not a number is dropped and never reaches the page as markup',
+    !/alert|<script|<img|<b>/.test(hostile) && !/Claude working/.test(text(hostile)) && !/Away \(/.test(text(hostile)) && /Tests: 1\.0 min/.test(text(hostile)) && !/quiet stretch/.test(text(hostile)),
+    hostile.slice(0, 800));
+  check('248 time page: no timeBreakdown means no section', !/Where the time went/.test(text(page())), '');
+  check('248 time page: an opted-out or empty breakdown shows no rows', !/Claude working/.test(text(page({ cycle: { optedOut: true } }))), '');
+}
+
 cycleStandingPageTests();
 issue237Tests();
 submoduleRootTest();
 branchNameCollisionTest();
+timePageTests();
 
 console.log('');
 if (failures.length === 0) {
