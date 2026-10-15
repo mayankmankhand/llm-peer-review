@@ -15,6 +15,7 @@
 .claude/commands/dev-lead-gemini.md
 .claude/commands/dev-lead-gpt.md
 .claude/commands/learning-opportunity.md
+.claude/commands/package-review.md
 .claude/commands/review-browser.md
 .claude/commands/review-code.md
 .claude/commands/review-commands.md
