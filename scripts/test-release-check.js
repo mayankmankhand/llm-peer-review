@@ -555,6 +555,101 @@ function releaseRepo(version, tag, opt) {
     r.status === 1 && isFail(r.out, 'suites') && /inside a git work tree/.test(line(r.out, 'suites')) && !fs.existsSync(path.join(repo, 'marker.ran')), flat(r.out));
 }
 
+// --- 249. a pass the hook can reuse (issue #249) ---------------------------------
+// A release push ran the whole gate for the tag and again for main, on files
+// that had just passed. A default-suite run where every suite passed records
+// the files' fingerprint (the checks runner's), the commit and each suite's
+// time in the clone's git folder, and only --reuse-pass (the hook's flag)
+// skips the suites, when both the files and every named commit match it.
+{
+  const flat = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  // The only default suite: it counts its runs in an ignored file, so counting
+  // never changes the files' fingerprint, and fails when COUNT_EXIT says so.
+  write(repo, 'scripts/test-count.js', "const fs = require('fs'); const path = require('path');\n"
+    + "fs.appendFileSync(path.join(__dirname, '..', 'runs.txt'), 'x\\n');\nprocess.exit(Number(process.env.COUNT_EXIT || 0));\n");
+  write(repo, '.gitignore', 'runs.txt\n');
+  commitAll(repo, 'counting suite');
+  const runs = () => (fs.existsSync(path.join(repo, 'runs.txt')) ? fs.readFileSync(path.join(repo, 'runs.txt'), 'utf8').split('\n').filter(Boolean).length : 0);
+  const recordFile = path.join(repo, '.git', 'tk-release-gate.json');
+  const record = () => { try { return JSON.parse(fs.readFileSync(recordFile, 'utf8')); } catch (e) { return null; } };
+  const head = () => git(repo, ['rev-parse', 'HEAD']);
+
+  let r = run(repo, ['--tests-only']);
+  const rec = record();
+  check('249 reuse: a passing default run records its files, its commit and each suite\'s time in the clone\'s git folder',
+    r.status === 0 && !!rec && /^[0-9a-f]{64}$/.test(String(rec.fingerprint)) && rec.head === head() && typeof rec.suites['scripts/test-count.js'] === 'number'
+      && git(repo, ['status', '--porcelain']) === '', flat(r.out + JSON.stringify(rec)));
+
+  let before = runs();
+  r = run(repo, ['--tests-only', '--reuse-pass']);
+  check('249 reuse: --reuse-pass on the same files and commit skips the suites with one line, and the other checks still run',
+    r.status === 0 && runs() === before && isOk(r.out, 'suites') && /skipped, the same files passed at /.test(line(r.out, 'suites')) && isOk(r.out, 'build') && isOk(r.out, 'release checks'), flat(r.out));
+
+  before = runs();
+  r = run(repo, ['--tests-only']);
+  check('249 reuse: without --reuse-pass the suites always run', r.status === 0 && runs() === before + 1, flat(r.out));
+
+  write(repo, 'plugin/commands/explore.md', '# Explore\n\nEdited.\n');
+  before = runs();
+  r = run(repo, ['--tests-only', '--reuse-pass']);
+  const ranOnEdit = runs() === before + 1;
+  git(repo, ['checkout', '--', 'plugin/commands/explore.md']);
+  write(repo, 'notes.txt', 'new\n');
+  run(repo, ['--tests-only']);           // record the files as they are now
+  fs.rmSync(path.join(repo, 'notes.txt'));
+  before = runs();
+  r = run(repo, ['--tests-only', '--reuse-pass']);
+  check('249 reuse: a changed tracked file, or a new or removed untracked one, makes --reuse-pass run the suites',
+    ranOnEdit && runs() === before + 1 && /not reusing a pass: the files differ/.test(r.out), flat(r.out));
+
+  run(repo, ['--tests-only']);           // a pass on the clean tree at HEAD
+  before = runs();
+  r = run(repo, ['--reuse-pass', '--commit', git(repo, ['rev-parse', 'HEAD~1'])]);
+  const ranOther = runs() === before + 1;
+  git(repo, ['commit', '-q', '--allow-empty', '-m', 'same files, new commit']);
+  before = runs();
+  r = run(repo, ['--tests-only', '--reuse-pass']);
+  check('249 reuse: a pass recorded at one commit does not skip a run that names another, or a new commit on the same files',
+    ranOther && runs() === before + 1 && /not reusing a pass: the last pass was at /.test(r.out), flat(r.out));
+
+  fs.rmSync(recordFile, { force: true });
+  run(repo, ['--tests-only', '--suites', 'scripts/test-count.js']);
+  const afterSubset = record();
+  run(repo, ['--tests-only'], { COUNT_EXIT: '1' });
+  check('249 reuse: a --suites run and a failing run never record a pass', afterSubset === null && record() === null, flat(JSON.stringify(record())));
+
+  // A suite that edits a tracked file while it runs: the files that passed are
+  // not the files on disk, so nothing is recorded.
+  write(repo, 'scripts/test-edit.js', "require('fs').appendFileSync(require('path').join(__dirname, '..', 'plugin', 'commands', 'explore.md'), 'more\\n');\n");
+  commitAll(repo, 'editing suite');
+  r = run(repo, ['--tests-only']);
+  const editedRecord = record();
+  git(repo, ['checkout', '--', 'plugin/commands/explore.md']);
+  git(repo, ['rm', '-q', 'scripts/test-edit.js']);
+  commitAll(repo, 'no editing suite');
+  check('249 reuse: files that change while the suites run are never recorded as passed',
+    r.status === 0 && editedRecord === null && /not recorded as a pass: the files changed while the suites ran/.test(r.out), flat(r.out));
+
+  r = run(repo, ['--reuse-pass', '--suites', 'scripts/test-count.js']);
+  const r2 = run(repo, ['--reuse-pass', '--skip-suites']);
+  check('249 reuse: --reuse-pass goes only with the default suite set', r.status === 2 && r2.status === 2 && /--reuse-pass/.test(r.out + r2.out), flat(r.out + r2.out));
+
+  // Longest first: with one at a time, the suite the last pass timed as the
+  // slowest starts first.
+  write(repo, 'scripts/test-count.js', "const fs = require('fs'); const path = require('path');\n"
+    + "fs.appendFileSync(path.join(__dirname, '..', 'order.txt'), 'count\\n');\n");
+  write(repo, 'scripts/test-slow.js', "const fs = require('fs'); const path = require('path');\n"
+    + "fs.appendFileSync(path.join(__dirname, '..', 'order.txt'), 'slow\\n');\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);\n");
+  write(repo, '.gitignore', 'runs.txt\norder.txt\n');
+  commitAll(repo, 'two timed suites');
+  run(repo, ['--tests-only', '--jobs', '1']);
+  fs.rmSync(path.join(repo, 'order.txt'), { force: true });
+  run(repo, ['--tests-only', '--jobs', '1']);
+  const order = fs.readFileSync(path.join(repo, 'order.txt'), 'utf8').split('\n').filter(Boolean);
+  check('249 reuse: the suites start longest first, by the times the last pass recorded', JSON.stringify(order) === '["slow","count"]', JSON.stringify(order));
+}
+
 // --- 2. build check ----------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
@@ -763,14 +858,20 @@ function runHook(stdin, extra) {
 
   // The gate is told what is pushed, not left to read HEAD.
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/main ' + ZERO + '\n');
-  check('hook: main push passes --remote <remote> --commit <local sha>', h.status === 0 && h.args === '--remote origin --commit ' + SHA, JSON.stringify(h));
+  check('hook: main push passes --remote <remote> --commit <local sha>', h.status === 0 && h.args === '--remote origin --commit ' + SHA + ' --reuse-pass', JSON.stringify(h));
+  // Issue #249: the hook asks the gate to reuse a recorded pass, so a release
+  // push does not rerun the suites on files that just passed.
+  const hm = runHook('refs/heads/main ' + SHA + ' refs/heads/main ' + ZERO + '\n');
+  const ht = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
+  check('249 reuse: the hook passes --reuse-pass for a main push and a release-tag push',
+    hm.status === 0 && / --reuse-pass$/.test(hm.args) && ht.status === 0 && / --reuse-pass$/.test(ht.args), JSON.stringify([hm.args, ht.args]));
   h = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
-  check('hook: tag push passes --pushing-tag <tag>:<local sha>', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+  check('hook: tag push passes --pushing-tag <tag>:<local sha>', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA + ' --reuse-pass', JSON.stringify(h));
   h = runHook('refs/heads/feature ' + SHA + ' refs/heads/feature ' + ZERO + '\nrefs/heads/main ' + SHA + ' refs/heads/main ' + ZERO + '\nHEAD ' + TAG_SHA + ' refs/tags/v2.0.0 ' + ZERO + '\n');
   check('hook: main plus tag in one push passes both, and nothing for the feature ref',
-    h.status === 0 && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v2.0.0:' + TAG_SHA, JSON.stringify(h));
+    h.status === 0 && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v2.0.0:' + TAG_SHA + ' --reuse-pass', JSON.stringify(h));
   h = runHook('refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n');
-  check('hook: a tag-only push names no remote (the tag push is what publishes the tag)', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+  check('hook: a tag-only push names no remote (the tag push is what publishes the tag)', h.status === 0 && h.args === '--pushing-tag v1.1.0:' + TAG_SHA + ' --reuse-pass', JSON.stringify(h));
 
   // Issue #178: the tripwire is told the remote and handed every ref line, so it
   // scans what each destination lacks rather than HEAD's upstream. Deletions
@@ -787,11 +888,11 @@ function runHook(stdin, extra) {
   check('hook: a deletion still reaches the tripwire, and never the gate', h.status === 0 && h.ran === 'tripwire' && h.args === '' && twIs(h, DELETED_REF), JSON.stringify(h));
   const TAG_REF = 'refs/tags/v1.1.0 ' + TAG_SHA + ' refs/tags/v1.1.0 ' + ZERO + '\n';
   h = runHook(TAG_REF);
-  check('hook: a release tag reaches the tripwire with its line, then the gate with --pushing-tag', h.status === 0 && h.ran === 'tripwire,release' && twIs(h, TAG_REF) && h.args === '--pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+  check('hook: a release tag reaches the tripwire with its line, then the gate with --pushing-tag', h.status === 0 && h.ran === 'tripwire,release' && twIs(h, TAG_REF) && h.args === '--pushing-tag v1.1.0:' + TAG_SHA + ' --reuse-pass', JSON.stringify(h));
   const MAIN_REF = 'refs/heads/main ' + SHA + ' refs/heads/main ' + STUB_OLD + '\n';
   h = runHook(NEW_REF + MAIN_REF + DELETED_REF + TAG_REF);
   check('hook: a multi-ref push hands the tripwire every line in order, and the gate main and the tag',
-    h.status === 0 && h.ran === 'tripwire,release' && twIs(h, NEW_REF + MAIN_REF + DELETED_REF + TAG_REF) && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v1.1.0:' + TAG_SHA, JSON.stringify(h));
+    h.status === 0 && h.ran === 'tripwire,release' && twIs(h, NEW_REF + MAIN_REF + DELETED_REF + TAG_REF) && h.args === '--remote origin --commit ' + SHA + ' --pushing-tag v1.1.0:' + TAG_SHA + ' --reuse-pass', JSON.stringify(h));
   h = runHook('');
   check('hook: empty stdin gives the tripwire --remote origin and no lines', h.status === 0 && twIs(h, ''), JSON.stringify(h));
   // The lines are data: shell syntax in a ref name is passed through, never run.
@@ -886,7 +987,7 @@ function runHook(stdin, extra) {
   p = push(['feature:main']);
   const featureSha = git(repo, ['rev-parse', 'feature']);
   check('git push to main: hook ran release-check', p.status === 0 && p.ran === 'tripwire,release', JSON.stringify(p));
-  check('git push to main: git\'s own ref line reaches release-check as --remote <remote> --commit <pushed sha>', p.args === '--remote ' + remote + ' --commit ' + featureSha, JSON.stringify(p));
+  check('git push to main: git\'s own ref line reaches release-check as --remote <remote> --commit <pushed sha>', p.args === '--remote ' + remote + ' --commit ' + featureSha + ' --reuse-pass', JSON.stringify(p));
   p = push([':refs/heads/main']);
   check('git push deleting main: release-check not run', p.status === 0 && p.ran === 'tripwire', JSON.stringify(p));
 

@@ -5,6 +5,7 @@
 //
 //   node scripts/release-check.js [--repo <dir>] [--suites <list|glob>]
 //                                 [--skip-suites] [--tests-only] [--jobs <n>]
+//                                 [--reuse-pass]
 //                                 [--commit <sha>]
 //                                 [--pushing-tag <tag>[:<sha>]]...
 //                                 [--remote <name|url>]
@@ -42,6 +43,17 @@
 //                    tail under it, prints as the suite ends; the failed list
 //                    is sorted by name, and one more line gives the count,
 //                    the wall time and how many ran at a time.
+//                    A default-set run (no --suites) where every suite exited
+//                    0 records the pass in the clone's git folder
+//                    (tk-release-gate.json): the files' fingerprint, taken
+//                    before the suites and again after (a run whose files
+//                    changed meanwhile records nothing), HEAD, and each
+//                    suite's seconds, which order the next run longest
+//                    first. --reuse-pass (the pre-push hook's flag, never a
+//                    manual run's) skips the suites when the files match the
+//                    record and every commit the run names (HEAD when none)
+//                    is the recorded HEAD: a release push then does not
+//                    rerun them on files that just passed (issue #249).
 //   2. Build       - `node scripts/build-plugin.js --check` exits 0 (plugin/
 //                    matches its source). Skipped with a note when the repo has
 //                    no build-plugin.js (the tests' scratch repos).
@@ -136,7 +148,7 @@ const path = require('path');
 // at 865; the headroom is for a paragraph per release, not for a manual.
 const README_WORD_BUDGET = 1500;
 
-const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--jobs <n>] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
+const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--jobs <n>] [--reuse-pass] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
 // hook when the push comes from a linked worktree. Inherited by a suite, it
 // would point the suite's scratch `git init` and `git commit` at the real
@@ -169,7 +181,7 @@ const OUTPUT_KEEP = 4 * 1024 * 1024;
 const REMOTE_TIMEOUT_MS = 2 * 60 * 1000;
 
 function parseArgs(argv) {
-  const o = { repo: process.cwd(), suites: null, skipSuites: false, testsOnly: false, jobs: null, commits: [], tags: [], remote: null };
+  const o = { repo: process.cwd(), suites: null, skipSuites: false, testsOnly: false, jobs: null, reusePass: false, commits: [], tags: [], remote: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -181,6 +193,7 @@ function parseArgs(argv) {
     else if (a === '--suites') o.suites = value();
     else if (a === '--skip-suites') o.skipSuites = true;
     else if (a === '--tests-only') o.testsOnly = true;
+    else if (a === '--reuse-pass') o.reusePass = true;
     else if (a === '--jobs') {
       const v = value();
       if (!/^[1-9]\d*$/.test(v)) usage('--jobs takes a whole number of at least 1, got ' + v);
@@ -203,6 +216,8 @@ function parseArgs(argv) {
   // Those three name what a push carries, for the very checks --tests-only
   // skips. Accepting both would let a push run with no release checks.
   if (o.testsOnly && (o.commits.length || o.tags.length || o.remote !== null)) usage('--tests-only cannot be combined with --commit, --pushing-tag or --remote (it skips the checks they feed)');
+  // A recorded pass is of the default set, so only that set can reuse it.
+  if (o.reusePass && (o.suites !== null || o.skipSuites)) usage('--reuse-pass goes only with the default suite set (no --suites, no --skip-suites)');
   return o;
 }
 
@@ -326,6 +341,52 @@ process.on('uncaughtException', (e) => {
 });
 process.on('exit', stopAllSuites);
 
+// The pass record (see the header). The fingerprint is the checks runner's,
+// read from the gate's own repository; without it the gate neither records
+// nor reuses, as a null fingerprint never skips a run there either.
+const RUN_CHECKS = path.join(__dirname, '..', '.claude', 'scripts', 'run-checks.js');
+const fingerprintOf = (() => {
+  try { return fs.existsSync(RUN_CHECKS) ? require(RUN_CHECKS).fingerprint || null : null; } catch (e) { return null; }
+})();
+const filesPrint = () => (fingerprintOf ? fingerprintOf(REPO) : null);
+function recordFile() {
+  const r = git(['rev-parse', '--git-common-dir']);
+  return r.status === 0 && r.out ? path.join(path.resolve(REPO, r.out), 'tk-release-gate.json') : null;
+}
+function readRecord() {
+  const file = recordFile();
+  if (!file) return null;
+  try {
+    const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return rec && typeof rec === 'object' && !Array.isArray(rec) ? rec : null;
+  } catch (e) { return null; }
+}
+// Written whole, through a temp file and a rename, so a reader never sees half.
+function writeRecord(rec) {
+  const file = recordFile();
+  if (!file) return;
+  const temp = file + '.' + process.pid + '.tmp';
+  try {
+    fs.writeFileSync(temp, JSON.stringify(rec) + '\n');
+    fs.renameSync(temp, file);
+  } catch (e) {
+    try { fs.rmSync(temp, { force: true }); } catch (x) { /* best effort */ }
+    console.log('         could not record the pass: ' + e.message);
+  }
+}
+// Why a recorded pass cannot stand for this run, or null when it can.
+function reuseRefusal(rec, print) {
+  if (!rec) return 'no pass is recorded';
+  if (print === null) return 'the files cannot be fingerprinted';
+  if (rec.fingerprint !== print) return 'the files differ from the last pass';
+  const named = opts.commits.map(resolveCommit).concat(opts.tags.map(t => resolveCommit(t.rev)));
+  if (!named.length) named.push(resolveCommit('HEAD'));
+  if (named.some(sha => sha === null)) return 'a commit this run names cannot be resolved';
+  const other = named.find(sha => sha !== rec.head);
+  if (other) return 'the last pass was at ' + String(rec.head).slice(0, 7) + ', not ' + other.slice(0, 7);
+  return null;
+}
+
 function defaultJobs() {
   const cpus = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
   return Math.max(1, cpus - 1);
@@ -370,7 +431,7 @@ function runSuite(rel, tempRoot) {
       const seconds = ((Date.now() - started) / 1000).toFixed(1);
       // Matches the text the gate printed when it ran suites one at a time.
       const shown = startError ? 'error ' + startError.code : timedOut ? 'error ETIMEDOUT' : signal ? 'signal ' + signal : code;
-      resolve({ rel, ok: !startError && !timedOut && code === 0, line: rel + ': exit ' + shown + ' (' + seconds + ' s)', out: out.stdout + out.stderr });
+      resolve({ rel, ok: !startError && !timedOut && code === 0, seconds: Number(seconds), line: rel + ': exit ' + shown + ' (' + seconds + ' s)', out: out.stdout + out.stderr });
     };
     child.on('error', (e) => { startError = e; finish(null, null); });
     child.on('close', finish);
@@ -381,18 +442,31 @@ async function checkSuites() {
   if (opts.skipSuites) { report('suites', true, 'skipped (--skip-suites)'); return; }
   const suites = opts.suites !== null ? expandSuites(opts.suites) : defaultSuites();
   if (suites.length === 0) { report('suites', false, 'no suites found' + (opts.suites !== null ? ' for --suites ' + opts.suites : ' under scripts/test-*.js')); return; }
+  const defaultSet = opts.suites === null;
+  const rec = readRecord();
+  const printBefore = defaultSet ? filesPrint() : null;
+  if (opts.reusePass) {
+    const why = reuseRefusal(rec, printBefore);
+    if (!why) { report('suites', true, 'skipped, the same files passed at ' + rec.at + ' (' + String(rec.head).slice(0, 7) + ')'); return; }
+    console.log('         not reusing a pass: ' + why);
+  }
   const tempRoot = os.tmpdir();
   if (insideWorkTree(tempRoot)) {
     report('suites', false, 'the temp folder ' + tempRoot + ' is inside a git work tree, where several suites break; set TMPDIR to a folder outside any repository');
     return;
   }
   const jobs = Math.min(opts.jobs || defaultJobs(), suites.length);
+  // Longest first, by the last pass's times; a suite it never timed goes
+  // first (it may be the longest), then by name.
+  const times = rec && rec.suites && typeof rec.suites === 'object' ? rec.suites : {};
+  const took = (rel) => (typeof times[rel] === 'number' ? times[rel] : Infinity);
+  const order = suites.slice().sort((a, b) => (took(b) - took(a)) || (a < b ? -1 : a > b ? 1 : 0));
   const started = Date.now();
   const done = [];
   let next = 0;
   const worker = async () => {
-    while (next < suites.length) {
-      const r = await runSuite(suites[next++], tempRoot);
+    while (next < order.length) {
+      const r = await runSuite(order[next++], tempRoot);
       // One write per suite, its tail directly under its line.
       const tailText = !r.ok && r.out.trim() ? '\n' + tail(r.out, 15) : '';
       console.log('         ' + r.line + tailText);
@@ -402,6 +476,13 @@ async function checkSuites() {
   await Promise.all(Array.from({ length: jobs }, worker));
   console.log('         ' + suites.length + ' suite' + (suites.length === 1 ? '' : 's') + ' in ' + ((Date.now() - started) / 1000).toFixed(1) + ' s, ' + jobs + ' at a time');
   const failed = done.filter(r => !r.ok).map(r => r.rel).sort();
+  if (!failed.length && defaultSet && printBefore !== null) {
+    if (filesPrint() === printBefore) {
+      const timed = {};
+      for (const r of done) timed[r.rel] = r.seconds;
+      writeRecord({ at: new Date(started).toISOString(), head: resolveCommit('HEAD'), fingerprint: printBefore, suites: timed });
+    } else console.log('         not recorded as a pass: the files changed while the suites ran');
+  }
   if (failed.length) report('suites', false, failed.length + ' of ' + suites.length + ' suites exited non-zero: ' + failed.join(', '));
   else report('suites', true, suites.length + ' suites exited 0');
 }

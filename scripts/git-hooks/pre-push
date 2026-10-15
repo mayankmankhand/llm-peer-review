@@ -37,6 +37,11 @@
 #      so it checks the pushed commit and that each pushed tag is
 #      v<plugin.json version> of the commit it points at. A push to main also
 #      names the remote, where the gate confirms the release tag is published.
+#      The gate is also given --reuse-pass: when the files and the pushed
+#      commit are exactly those of the last default-suite pass it recorded,
+#      it skips the suites and runs every other check, so a release pushed as
+#      a tag and then main does not rerun them on files that just passed
+#      (issue #249). A manual run never reuses a pass.
 #
 # Tests substitute the two scripts with TK_PRE_PUSH_CHECK and TK_RELEASE_CHECK
 # (paths to node scripts), so routing is tested without the real checks. A
@@ -126,6 +131,7 @@ fi
 [ -z "$release" ] && exit 0
 
 printf '%s\n' "pre-push: release push to$release; running $release_check" >&2
+set -- "$@" --reuse-pass
 node "$release_check" "$@" </dev/null
 status=$?
 if [ "$status" -ne 0 ]; then
