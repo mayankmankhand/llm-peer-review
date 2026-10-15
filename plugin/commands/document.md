@@ -14,6 +14,8 @@ allowed-tools:
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -262,6 +264,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
+- **Where the time went** -> `timeBreakdown`. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --cycle-time`, then `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --history --since <the window.start it printed>`, and set `timeBreakdown` to `{"cycle": <the first JSON>, "testCost": <the second JSON>}`, each pasted as printed: the shell reads those exact fields, and both hold numbers only, so nothing from the conversation rides along. When the first prints `optedOut` or `"window": null`, or either command fails, leave `timeBreakdown` out and say why in one digest line.
 
 Write the JSON as `data.json` in a fresh folder from `mktemp -d /tmp/document-render.XXXXXX`, made and used per "Temporary folders" in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md`. Then run the helper from the project root with that folder as `<render-dir>`. The cycle summary is a **standing page**: `--stable` writes exactly the main copy's `artifacts/html/cycle.html`, from a worktree too, so every working copy adds to one log, and replaces it on every run, so cycle pages never pile up, and the helper reads the page it is about to overwrite to build `sinceLast` and the running `cycleLog`.
 
