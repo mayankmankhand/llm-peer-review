@@ -13,7 +13,7 @@ This project runs the LLM Peer Review toolkit. On the plugin its commands are ty
 1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop` and `hitl-stages` fragments (rules M1 to M17), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon
-4. **Show your work** - Tell me what you're doing and why
+4. **Show your work** - Tell me what you're doing and why. Before anything expected to take over a minute, say in one line what is coming, and answer every question I ask before moving on
 5. **Use the Skill tool for /create-plan, /review, and /review-*** - Never manually replicate these commands or skills. If the user says "create plan" or "review", invoke the appropriate command or skill via the Skill tool so the template is followed.
 6. **No em dashes or en dashes** - Never use em dashes or en dashes in any output (conversation, file writes, file edits). Use regular hyphens or rewrite the sentence.
 7. **Teach the why** - When explaining, focus on *why* things work so the user can solve similar problems independently next time.
