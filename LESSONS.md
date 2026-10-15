@@ -455,3 +455,8 @@
 - **A plan line that says what another script does is a claim: read the script before the line goes in the plan.**
 - **The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.**
 - **Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.**
+
+## Docs visual tour (diagrams, /package-review removed)
+
+- **When a fix corrects a fact, search every doc for its other copies before calling it done.**
+- **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**

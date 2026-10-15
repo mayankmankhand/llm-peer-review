@@ -21,6 +21,10 @@ Shared reference files (`browse-api.md`, `conventions.md`, the eight `criteria-*
 
 If you are arriving with your own commands or an existing workflow rather than adapting the toolkit's, see [Already Have Your Own Workflow?](docs/EXTENDING.md#already-have-your-own-workflow) in the extending guide. It covers adding the auto loop to a workflow you already have, and which filenames the installer reclaims on upgrade.
 
+## Changing a Diagram (Maintainer)
+
+The pictures in the docs are SVG files rendered from Mermaid sources. Edit `docs/diagrams/<name>.mmd`, then run `node scripts/render-diagrams.js <name>` (add `--preview` for a page of the result at `artifacts/html/diagrams-preview.html`) and commit the source and both images together. The first run downloads a pinned Mermaid into the gitignored `scripts/.cache/`; it also needs Chromium (`npx --prefix .claude/scripts playwright-core install chromium`). `npm test` fails on an image older than its source, so a forgotten render shows up there. Colors come from `.claude/skills/shared/shells/tokens.css`; each `<img>` in the docs carries the picture's natural width so GitHub does not stretch it.
+
 ## Checking `/audit-html` (Maintainer)
 
 After changing `/audit-html` or `.claude/skills/shared/html-own-files.md`, run the skill against this repository:

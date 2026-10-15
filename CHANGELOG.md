@@ -2,6 +2,21 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+### Removed
+
+- **`/tk:package-review`.** It bundled a project's code into one markdown file for you to paste into ChatGPT or Gemini by hand. `/tk:ask-gpt` and `/tk:ask-gemini` run that review as a debate for you, so the manual bundle had no job left. The debates' "file is too large" message no longer points at it.
+
+### Upgrading
+
+- Nothing to run on the plugin: the command is gone once you update.
+- Other editors: re-running `setup.sh` or `setup.ps1` removes `.claude/commands/package-review.md`, backed up first into a `.toolkit-backup-<date>-<time>-<n>/` folder; the pre-flight names it before anything changes. A copy you edited is removed the same way, so copy back anything you wrote in it.
+
+### Why
+
+The command predates the debates and had become a second, manual way to do what they do. One fewer command is one fewer thing a new user has to read past.
+
 ## v8.0.1 - No False Alarm, Checked at the Source (2026-10-14)
 
 **A patch on top of v8.0.0, which stays the release to read first if you are coming from 7.x.** Issues #243, #238, #235, #245, #244, #237 and #241. After updating, run `/tk:upgrade` in each project. Claude checks a claim at its source before stating it, and says so when one comes from memory. The pre-push tripwire stops blocking on a settings change the branch never made, and it catches the correction ledger's hand-off files by name again. The correction scan also sees a message you type while Claude is still working. A copy-install rerun removes the files the toolkit dropped, and `/tk:upgrade` flags a file of yours too big to paste whole. Cycles in parallel worktrees stop overwriting one review page: each branch gets its own, and the cycle summary stays one shared log.

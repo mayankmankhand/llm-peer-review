@@ -11,6 +11,7 @@
 A "nothing defines X" finding must first refute the generic rule that already covers X.
 A "nothing reads this file" claim must check every grep hit, test suites included.
 A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.
+A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.
 A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
@@ -247,6 +248,7 @@ Verify audit findings against file content before acting - subagent claims about
 Verify impact, not just existence, before scoping a fix.
 Version bumps touch more files than you think.
 Watch for tool output artifacts in reviews.
+When a fix corrects a fact, search every doc for its other copies before calling it done.
 When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.
 When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.
 When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
