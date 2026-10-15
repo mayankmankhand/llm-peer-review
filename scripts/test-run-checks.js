@@ -1671,13 +1671,15 @@ section('249 baseline: a passing run under two-thirds of the baseline becomes th
     !!b.json && b.json.flags.grew === 0 && rb.length === 2 && rb[1].passed === true && rb[1].baselineMs === 1400 && rb[1].grew === false,
     one(b.stdout + b.stderr + JSON.stringify(rb[1])));
 
+  // Two fast passes in a row since #250: the first keeps the baseline, the second moves it.
   pinBaseline(h.dir, 9000);
+  fullRun(h.dir, list, ['--no-skip']);
   const c = fullRun(h.dir, list, ['--no-skip']);
   const rc = historyRows(h.dir);
-  check('249 baseline: a passing run under two-thirds of the baseline becomes the new baseline',
-    rc.length === 3 && rc[2].passed === true && rc[2].baselineMs === rc[2].ms && rc[2].ms < 6000, one(JSON.stringify(rc[2])));
+  check('249 baseline: passing runs under two-thirds of the baseline bring it down',
+    rc.length === 4 && rc[3].passed === true && rc[3].baselineMs === Math.max(rc[2].ms, rc[3].ms) && rc[3].ms < 6000, one(JSON.stringify(rc[3])));
   check('249 baseline: the run that brought the baseline down raises no flag and names the old baseline',
-    !!c.json && c.json.flags.grew === 0 && c.json.cost.baselineMs === 9000 && rc[2].grew === false && rc[2].againstMs === 9000,
+    !!c.json && c.json.flags.grew === 0 && c.json.cost.baselineMs === 9000 && rc[3].grew === false && rc[3].againstMs === 9000,
     one(c.stdout + c.stderr));
 
   // The same list failing: a run cut short is no measure of the suite.
@@ -1687,7 +1689,45 @@ section('249 baseline: a passing run under two-thirds of the baseline becomes th
   fs.writeFileSync(path.join(h.dir, 'f.txt'), 'hello\n');
   const rd = historyRows(h.dir);
   check('249 baseline: a failing run under two-thirds of the baseline never moves it',
-    !!d.json && d.json.summary.fail === 1 && rd.length === 4 && rd[3].passed === false && rd[3].baselineMs === 9000, one(d.stdout + JSON.stringify(rd[3])));
+    !!d.json && d.json.summary.fail === 1 && rd.length === 5 && rd[4].passed === false && rd[4].baselineMs === 9000, one(d.stdout + JSON.stringify(rd[4])));
+});
+
+// --- 250. one fast pass is not a speed-up (issue #250) -----------------------
+// A single passing run under two-thirds of the baseline moved it down, so the next
+// run at the old normal time could read as growth (1.5 x 2/3 is exactly one). The
+// baseline now comes down only after two fast passes in a row, to the slower one.
+section('250 baseline: the baseline comes down only after two fast passes in a row (issue #250)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const list = [{ id: 'nap', check: 'sleep 1', expect: { exit: 0 } }, { id: 'tests', check: 'grep -c hello f.txt', expect: { exit: 0 } }];
+
+  const h = freshRepo('h250');
+  fullRun(h.dir, list);
+  pinBaseline(h.dir, 9000);
+  const a = fullRun(h.dir, list, ['--no-skip']);
+  const ra = historyRows(h.dir);
+  check('250 baseline: one passing run under two-thirds keeps the baseline and flags nothing',
+    !!a.json && a.json.flags.grew === 0 && ra.length === 2 && ra[1].passed === true && ra[1].ms < 6000 && ra[1].baselineMs === 9000 && ra[1].grew === false,
+    one(JSON.stringify(ra[1])));
+  const b = fullRun(h.dir, list, ['--no-skip']);
+  const rb = historyRows(h.dir);
+  check('250 baseline: the run after a single fast pass is still measured against the old baseline',
+    !!b.json && b.json.cost.baselineMs === 9000 && rb.length === 3 && rb[2].againstMs === 9000 && rb[2].grew === false, one(JSON.stringify(rb[2])));
+  check('250 baseline: a second fast pass in a row moves it to the slower of the two',
+    rb.length === 3 && rb[2].passed === true && rb[2].baselineMs === Math.max(rb[1].ms, rb[2].ms), one(JSON.stringify(rb.slice(1))));
+
+  // A failing run between the two fast passes measures nothing, so it does not break the pair.
+  const g = freshRepo('g250');
+  fullRun(g.dir, list);
+  pinBaseline(g.dir, 9000);
+  fullRun(g.dir, list, ['--no-skip']);
+  fs.writeFileSync(path.join(g.dir, 'f.txt'), 'bye\n');
+  fullRun(g.dir, list);
+  fs.writeFileSync(path.join(g.dir, 'f.txt'), 'hello\n');
+  fullRun(g.dir, list, ['--no-skip']);
+  const rg = historyRows(g.dir);
+  check('250 baseline: a failing run between two fast passes does not break the pair',
+    rg.length === 4 && rg[2].passed === false && rg[2].baselineMs === 9000 && rg[3].passed === true && rg[3].baselineMs === Math.max(rg[1].ms, rg[3].ms),
+    one(JSON.stringify(rg.slice(1))));
 });
 
 // --- 248. skip a full run on unchanged code (issue #248) ---------------------
