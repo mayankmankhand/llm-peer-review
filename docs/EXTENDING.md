@@ -110,7 +110,7 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/files-dark.svg">
-  <img src="images/diagrams/files-light.svg" alt="Where files live: the toolkit's commands, skills, agents and scripts stay in the plugin cache and change only with the plugin; in your project, setup seeds the rules file, CLAUDE.md, the lessons files, DESIGN-PROFILE.md, .claude/toolkit and settings.local.json once and then they are yours, and plans, artifacts/html, reports and CODEBASE_MAP.md are made as you work." width="440">
+  <img src="images/diagrams/files-light.svg" alt="Where files live: the toolkit's commands, skills, agents and scripts stay in the plugin cache and change only with the plugin; in your project, setup seeds the rules file, CLAUDE.md, the lessons files, DESIGN-PROFILE.md, .claude/toolkit and settings.local.json once and then they are yours, and plans, artifacts/html, reports and CODEBASE_MAP.md are made as you work." width="1026">
 </picture>
 
 The picture shows who owns what; the table gives every file's job:

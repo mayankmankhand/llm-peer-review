@@ -10,7 +10,7 @@ The commands carry the `tk:` prefix on the plugin. On the copy-install for other
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/overview-dark.svg">
-  <img src="images/diagrams/overview-light.svg" alt="The toolkit as one line from top to bottom: gate in, explore, create-plan with a critic loop of up to 2 rounds, you approve, execute with a check loop on every step, review with an audit and fix loop of up to 2 tries, document, then merge and gate out; a dotted branch leads to the GPT or Gemini debate.">
+  <img src="images/diagrams/overview-light.svg" alt="The toolkit as one line from top to bottom: gate in, explore, create-plan with a critic loop of up to 2 rounds, you approve, execute with a check loop on every step, review with an audit and fix loop of up to 2 tries, document, then merge and gate out; a dotted branch leads to the GPT or Gemini debate." width="582">
 </picture>
 
 1. **Gate in.** When Claude Code opens, a hook checks the plugin and your project are on the same version.
@@ -27,7 +27,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/explore-dark.svg">
-  <img src="images/diagrams/explore-light.svg" alt="Inside explore: you type it; it reads the issue, plans, code and lessons first, and runs index when the map is missing or stale; it asks scoping or vision and which models; questions come in rounds of 3 to 4, over 2 to 3 rounds, with a design step for UI work; a closing summary chains into create-plan only when no question is open, otherwise you answer or say plan it anyway.">
+  <img src="images/diagrams/explore-light.svg" alt="Inside explore: you type it; it reads the issue, plans, code and lessons first, and runs index when the map is missing or stale; it asks scoping or vision and which models; questions come in rounds of 3 to 4, over 2 to 3 rounds, with a design step for UI work; a closing summary chains into create-plan only when no question is open, otherwise you answer or say plan it anyway." width="832">
 </picture>
 
 - **It reads before it asks:** the issue, earlier plans, the code the change touches and your lessons file, so it never asks what the repo already answers.
@@ -39,7 +39,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/create-plan-dark.svg">
-  <img src="images/diagrams/create-plan-light.svg" alt="Inside create-plan: it follows explore, reads the map, the lessons and your plan gate, writes the plan with a check on every step that must fail first, lints the check lines, and has a fresh plan critic name the gaps, fixed for up to 2 rounds with round-2 gaps carried to review; an HTML page shows the plan and you approve it; execute starts only when you say go.">
+  <img src="images/diagrams/create-plan-light.svg" alt="Inside create-plan: it follows explore, reads the map, the lessons and your plan gate, writes the plan with a check on every step that must fail first, lints the check lines, and has a fresh plan critic name the gaps, fixed for up to 2 rounds with round-2 gaps carried to review; an HTML page shows the plan and you approve it; execute starts only when you say go." width="449">
 </picture>
 
 - **Every step carries its own proof:** a check that must fail before the work, for a reason written in advance, and pass after it. A lint confirms each check line can actually run.
@@ -51,7 +51,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/execute-dark.svg">
-  <img src="images/diagrams/execute-light.svg" alt="Inside execute: from your approved plan it records where the run starts; for every step it writes the check first, the check must fail before the work for the stated reason, it does the work, the check must pass after, and it commits the step; a failing step gets up to 3 fix attempts and then stops and asks you; UI steps run a design loop of up to 5 rounds new or 2 improve; after the last step it hands off to review.">
+  <img src="images/diagrams/execute-light.svg" alt="Inside execute: from your approved plan it records where the run starts; for every step it writes the check first, the check must fail before the work for the stated reason, it does the work, the check must pass after, and it commits the step; a failing step gets up to 3 fix attempts and then stops and asks you; UI steps run a design loop of up to 5 rounds new or 2 improve; after the last step it hands off to review." width="737">
 </picture>
 
 - **Check first, every step:** the check must fail before the work for the reason the plan stated, and pass after it. A check that already passes proves nothing, so it does not count.
@@ -66,7 +66,7 @@ More on all three: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/review-dark.svg">
-  <img src="images/diagrams/review-light.svg" alt="Inside review: what changed goes to one finder per lens; each finding's check runs; skeptics, one per seven findings and three votes on a Block, try to refute the rest; survivors are fixed and a verifier that is never the fixer checks each fix; a failed fix gets up to 2 tries, then it is undone and you are asked. Failed checks and refuted findings go to the audited-out log.">
+  <img src="images/diagrams/review-light.svg" alt="Inside review: what changed goes to one finder per lens; each finding's check runs; skeptics, one per seven findings and three votes on a Block, try to refute the rest; survivors are fixed and a verifier that is never the fixer checks each fix; a failed fix gets up to 2 tries, then it is undone and you are asked. Failed checks and refuted findings go to the audited-out log." width="476">
 </picture>
 
 - **Finders look, one per lens:** code, security, UX, copy, plan compliance and more, picked by what changed.
@@ -81,7 +81,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/document-dark.svg">
-  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR; writes the cycle page of what changed and why; and ends the line.">
+  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR; writes the cycle page of what changed and why; and ends the line." width="719">
 </picture>
 
 - **The docs catch up with the code:** README, CLAUDE.md, the changelog, the lessons file and the design profile.
@@ -93,7 +93,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/merge-dark.svg">
-  <img src="images/diagrams/merge-light.svg" alt="Inside merge: you type it with the pull requests in your order; it looks for landings made without merge, brings each branch up to date and fixes the conflicts, then runs four checks, the tests and three lost-work rules with a fresh decision checker; any flag stops that pull request and asks you to fix, keep, land as is or stop; otherwise it lands locally, asks you once before landing on GitHub or GitLab, and moves to the next.">
+  <img src="images/diagrams/merge-light.svg" alt="Inside merge: you type it with the pull requests in your order; it looks for landings made without merge, brings each branch up to date and fixes the conflicts, then runs four checks, the tests and three lost-work rules with a fresh decision checker; any flag stops that pull request and asks you to fix, keep, land as is or stop; otherwise it lands locally, asks you once before landing on GitHub or GitLab, and moves to the next." width="882">
 </picture>
 
 - **You choose the order:** `/tk:merge 241 242` lands one pull request, then the next. It is never started for you.
@@ -106,7 +106,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/hooks-dark.svg">
-  <img src="images/diagrams/hooks-light.svg" alt="Two gates. Gate in, the session-start hook: when Claude Code opens it links the stable path to the installed plugin and tells you what to update when the plugin and project versions differ. Gate out, the pre-push check: before Claude pushes it runs four checks on what the push adds; any hit blocks the push and asks you, otherwise the push goes out.">
+  <img src="images/diagrams/hooks-light.svg" alt="Two gates. Gate in, the session-start hook: when Claude Code opens it links the stable path to the installed plugin and tells you what to update when the plugin and project versions differ. Gate out, the pre-push check: before Claude pushes it runs four checks on what the push adds; any hit blocks the push and asks you, otherwise the push goes out." width="980">
 </picture>
 
 - **Gate in is the plugin's one Claude Code hook.** It runs every time a session starts, keeps a stable path pointing at the installed plugin, and when the plugin and your project are on different versions, or an old copy-install is still around, tells you what to run: update the plugin, `/tk:upgrade` or `/tk:setup`.
@@ -117,7 +117,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/side-trips-dark.svg">
-  <img src="images/diagrams/side-trips-light.svg" alt="Side trips off the main line: worktree before explore makes a parallel folder and branch that lands later with merge; index writes the codebase map on its own when it is old; the GPT or Gemini debate from a plan or a review runs up to 3 rounds and ends in a verdict of agreed and disagreed points and ranked actions, which go through the same audit as review; peer review sorts pasted findings into real, opinion or dismissed.">
+  <img src="images/diagrams/side-trips-light.svg" alt="Side trips off the main line: worktree before explore makes a parallel folder and branch that lands later with merge; index writes the codebase map on its own when it is old; the GPT or Gemini debate from a plan or a review runs up to 3 rounds and ends in a verdict of agreed and disagreed points and ranked actions, which go through the same audit as review; peer review sorts pasted findings into real, opinion or dismissed." width="1128">
 </picture>
 
 - **`/tk:ask-gpt` and `/tk:ask-gemini`** argue a plan or a change with another model for up to three rounds and end with a verdict: what they agreed on, what they did not, and ranked actions. The actions go through the same audit as review findings before anything changes.
@@ -129,7 +129,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/files-dark.svg">
-  <img src="images/diagrams/files-light.svg" alt="Where files live: the toolkit's commands, skills, agents and scripts stay in the plugin cache and change only with the plugin; your project gets none of them; in your project the toolkit's rules file takes your notes under its project line, setup seeds CLAUDE.md, LESSONS.md, DESIGN-PROFILE.md, .claude/toolkit and settings.local.json once and then they are yours, and plans, artifacts/html, reports and CODEBASE_MAP.md are made as you work and kept out of git.">
+  <img src="images/diagrams/files-light.svg" alt="Where files live: the toolkit's commands, skills, agents and scripts stay in the plugin cache and change only with the plugin; your project gets none of them; in your project the toolkit's rules file takes your notes under its project line, setup seeds CLAUDE.md, LESSONS.md, DESIGN-PROFILE.md, .claude/toolkit and settings.local.json once and then they are yours, and plans, artifacts/html, reports and CODEBASE_MAP.md are made as you work and kept out of git." width="1026">
 </picture>
 
 - **The toolkit stays in the plugin cache** and changes only when you update the plugin. None of its commands, skills, agents or scripts are copied into your project.
