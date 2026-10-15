@@ -74,9 +74,9 @@ Needs Claude Code 2.x with plugin support and Node.js 22 or newer. Cursor, Codex
 - [docs/COMMANDS.md](docs/COMMANDS.md): how each command works, which review to use, how the debates run
 - [docs/EXTENDING.md](docs/EXTENDING.md): keep your own workflow, extend a stage, the file architecture, parallel worktrees
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md): what to do when something fails
-- [DEMO-SCRIPT.md](DEMO-SCRIPT.md): a five-minute walkthrough
+- [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md): a five-minute walkthrough
 - [API-KEYS.md](API-KEYS.md): keys for the debates and the optional media generation
-- [SETUP.md](SETUP.md): an editor from scratch, on Windows or Mac
+- [docs/SETUP.md](docs/SETUP.md): a new computer from scratch, on Windows or Mac
 - [AGENT-SETUP.md](AGENT-SETUP.md): for an AI agent doing the install
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [CHANGELOG.md](CHANGELOG.md)
 

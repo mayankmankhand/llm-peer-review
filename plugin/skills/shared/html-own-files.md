@@ -36,7 +36,7 @@ This is *additive and shape-aware*, never a migration. Every project qualifies f
 These stay markdown regardless of length or complexity:
 
 - `CODEBASE_MAP.md` (Claude reads it, not the user)
-- `README.md`, `SETUP.md`, `API-KEYS.md`, `AGENT-SETUP.md`, `CONTRIBUTING.md`, `DEMO-SCRIPT.md` (GitHub and GitLab render these natively)
+- `README.md`, `docs/SETUP.md`, `API-KEYS.md`, `AGENT-SETUP.md`, `CONTRIBUTING.md`, `docs/DEMO-SCRIPT.md` (GitHub and GitLab render these natively)
 - `CLAUDE.md`, `LESSONS.md` (index, read every session), `LESSONS-detail.md` (read on demand), `DESIGN-PROFILE.md` (read before design work), `.claude/rules/*.md` (read by Claude every session)
 - `.claude/commands/*.md`, `.claude/skills/*/SKILL.md` (prompt files)
 - `CHANGELOG.md` (per-release notes, host-native)

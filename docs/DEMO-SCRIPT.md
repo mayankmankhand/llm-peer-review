@@ -2,7 +2,7 @@
 
 **Total time:** ~5 minutes
 **Sample task:** Add a `/hello` command that greets the user
-**Prerequisites:** Claude Code installed, API keys configured (OpenAI for `/ask-gpt`), clean git state
+**Prerequisites:** Claude Code with the toolkit plugin installed and `/tk:setup` run in the demo project (see [SETUP.md](SETUP.md)), an OpenAI key for `/tk:ask-gpt` ([API-KEYS.md](../API-KEYS.md)), clean git state. On a copy-install in another editor, type each command without the `tk:` prefix.
 
 > **Formatting guide:**
 > - **SAY** = what to tell the audience
@@ -24,11 +24,11 @@
 ## 2. Explore (~60 seconds)
 
 **SAY:**
-> Every feature starts with `/explore`. It asks you questions about scope, goals, and edge cases before you write any code.
+> Every feature starts with `/tk:explore`. It asks you questions about scope, goals, and edge cases before you write any code.
 
 **TYPE:**
 ```
-/explore Add a /hello slash command that greets the user by name
+/tk:explore Add a /hello slash command that greets the user by name
 ```
 
 **WAIT** for Claude to ask "Scoping or vision? [scoping]" first - answer `scoping` (or just confirm the default). Then it asks the scoping questions (2-4 questions).
@@ -48,9 +48,9 @@
 ## 3. Create Plan (~45 seconds)
 
 **SAY:**
-> Now that Claude understands the feature, the plan writes itself - I don't type anything here. Once the exploration has converged, `/create-plan` fires on its own. This produces a markdown file with tracked steps, so you always know where you are.
+> Now that Claude understands the feature, the plan writes itself - I don't type anything here. Once the exploration has converged, `/tk:create-plan` fires on its own. This produces a markdown file with tracked steps, so you always know where you are.
 
-**WAIT** for `/create-plan` to fire on its own, then for the plan to be generated. An HTML view of the plan is published to a private Claude-hosted page and the link appears in chat; when the session cannot publish, it opens in your default browser instead. Either way that is expected, not a glitch.
+**WAIT** for `/tk:create-plan` to fire on its own, then for the plan to be generated. An HTML view of the plan is published to a private Claude-hosted page and the link appears in chat; when the session cannot publish, it opens in your default browser instead. Either way that is expected, not a glitch.
 
 **SAY:**
 > Notice the plan has status emojis, a progress percentage, and clear steps. This becomes your single source of truth for the feature. And that plan page, whether it arrived as a link in chat or opened in a tab? That's the same plan rendered as HTML, so you can scan it without reading raw markdown.
@@ -62,11 +62,11 @@
 ## 4. Execute (~60 seconds)
 
 **SAY:**
-> Now we build. `/execute` follows the plan step by step, updating the status as it goes.
+> Now we build. `/tk:execute` follows the plan step by step, updating the status as it goes.
 
 **TYPE:**
 ```
-/execute
+/tk:execute
 ```
 
 **WAIT** for Claude to build the `/hello` command.
@@ -81,12 +81,12 @@
 ## 5. Review (~45 seconds)
 
 **SAY:**
-> Before we ship anything, we review - and again I don't type it. `/review` chains straight from `/execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I want it to look without touching anything, I say "no chaining" when I approve the plan and then type `/review report only` myself - "report only" applies to a run you start, and a chained review is not one.
+> Before we ship anything, we review - and again I don't type it. `/tk:review` chains straight from `/tk:execute`. It finds issues, double-checks which ones are real, fixes those, and then re-checks every fix it made. If I want it to look without touching anything, I say "no chaining" when I approve the plan and then type `/tk:review report only` myself - "report only" applies to a run you start, and a chained review is not one.
 
-**WAIT** for `/review` to chain from `/execute` and produce its report.
+**WAIT** for `/tk:review` to chain from `/tk:execute` and produce its report.
 
 **SAY:**
-> `/review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, and the toolkit stops and asks when a decision needs a human. Two phrases give me the wheel back: "no chaining" stops it handing off to the next stage, and "report only" means it tells me what it found without changing anything.
+> `/tk:review` auto-detects what changed and dispatches the right specialist reviews. You get the written report - bugs, style issues, suggestions - then it fixes the confirmed ones and re-checks each fix, ending with a summary that shows the proof behind every change. My control points are the same ones you have already seen: I approved the plan before we built, and the toolkit stops and asks when a decision needs a human. Two phrases give me the wheel back: "no chaining" stops it handing off to the next stage, and "report only" means it tells me what it found without changing anything.
 
 **TIP:** If the review is clean (no issues), say: "A clean review is great - but the point is that it always checks before changing anything." If the review finds 3+ issues, an HTML report may appear as a link in chat, or open in the browser if this session cannot publish - narrate it as the rendered view of the same findings.
 
@@ -99,7 +99,7 @@
 
 **TYPE:**
 ```
-/ask-gpt
+/tk:ask-gpt
 ```
 
 **WAIT** for the debate to run (this takes 30-60 seconds).
@@ -114,7 +114,7 @@
 ## 7. Wrap-up (~15 seconds)
 
 **SAY:**
-> `/document` has already run by this point - it chained from `/review` and updated the README and docs to match what was built. So a debate here is a second opinion on a finished cycle, and you'd run `/peer-review` to evaluate its findings and feed the real ones back through the same loop.
+> `/tk:document` has already run by this point - it chained from `/tk:review` and updated the README and docs to match what was built. So a debate here is a second opinion on a finished cycle, and you'd run `/tk:peer-review` to evaluate its findings and feed the real ones back through the same loop.
 >
 > That's the full loop: explore, plan, build, review, document - all of it chaining after I approve the plan. The debate is the optional extra I reach for deliberately. Two phrases give me the wheel back at any point: "no chaining" and "report only".
 
@@ -124,21 +124,21 @@
 
 | Step | Command | Time |
 |------|---------|------|
-| Explore the problem | `/explore` | ~60s |
+| Explore the problem | `/tk:explore` | ~60s |
 | Create a plan | *chains automatically* | ~45s |
-| Build it | `/execute` | ~60s |
+| Build it | `/tk:execute` | ~60s |
 | Review the code | *chains automatically* | ~45s |
-| AI debate | `/ask-gpt` | ~45s |
+| AI debate | `/tk:ask-gpt` | ~45s |
 | Documentation | *chains automatically* | ~15s |
-| Wrap-up (narrate) | `/peer-review` | ~15s |
+| Wrap-up (narrate) | `/tk:peer-review` | ~15s |
 
 ---
 
 ## Before the Demo
 
 Checklist:
-- [ ] Claude Code is installed and running
-- [ ] API keys are configured (`.env.local` has OpenAI key for `/ask-gpt`)
+- [ ] Claude Code is installed and running, with the toolkit plugin installed and `/tk:setup` run in the project
+- [ ] An OpenAI key is set for `/tk:ask-gpt` (an environment variable, the project's `.env.local`, or `~/.claude/plugins/.env.local`)
 - [ ] Decide up front whether the demo session can publish (Claude Code with artifacts on); if not, have the default browser ready, since the HTML views open there instead
 - [ ] Clean git state (no uncommitted changes)
 - [ ] You're in the project directory
