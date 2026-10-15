@@ -136,8 +136,8 @@ const argv = process.argv.slice(2);
 const opts = {
   candidates: false, add: false, heartbeat: false,
   rollup: false, showRollup: false, setAxial: false, evidence: false, recordFix: false,
-  backfillCandidates: false, addBackfill: false,
-  data: '', since: '', session: '', candidateCount: '', addedCount: '', category: '',
+  backfillCandidates: false, addBackfill: false, cycleTime: false,
+  data: '', since: '', until: '', session: '', candidateCount: '', addedCount: '', category: '',
   home: '', label: '', version: ''
 };
 for (let i = 0; i < argv.length; i++) {
@@ -152,6 +152,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--record-fix') opts.recordFix = true;
   else if (a === '--backfill-candidates') opts.backfillCandidates = true;
   else if (a === '--add-backfill') opts.addBackfill = true;
+  else if (a === '--cycle-time') opts.cycleTime = true;
+  else if (a === '--until') opts.until = argv[++i] || '';
   else if (a === '--category') opts.category = argv[++i] || '';
   else if (a === '--home') opts.home = argv[++i] || '';
   else if (a === '--label') opts.label = argv[++i] || '';
@@ -165,12 +167,13 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const modes = ['candidates', 'add', 'heartbeat', 'rollup', 'showRollup', 'setAxial', 'evidence', 'recordFix',
-  'backfillCandidates', 'addBackfill']
+  'backfillCandidates', 'addBackfill', 'cycleTime']
   .filter(function (m) { return opts[m]; });
 if (modes.length === 0) {
   die('need one of --candidates, --add, --heartbeat, --rollup, --show-rollup, --set-axial, --evidence, ' +
-    '--record-fix, --backfill-candidates, --add-backfill');
+    '--record-fix, --backfill-candidates, --add-backfill, --cycle-time');
 }
+if (opts.until && !opts.cycleTime) die('--until goes with --cycle-time');
 if (modes.length > 1) die('modes are mutually exclusive, got: ' + modes.join(', '));
 
 const cwd = process.cwd();
@@ -1827,6 +1830,324 @@ function runSetAxial() {
   process.stdout.write(JSON.stringify(result) + '\n');
 }
 
+// ==========================================================================
+// --cycle-time (issue #248): where a cycle's time went
+// ==========================================================================
+//
+// A full cycle took about three hours, and finding where the time went took a
+// one-off read of the session log. This mode reads the logs the scan reads and
+// splits one cycle's window into five parts, as times and counts only:
+//   claude   Claude's turns, less the parts below that ran inside them
+//   tests    a Bash call that runs the checks runner (--checks or --phase),
+//            npm test or pytest: from the call to its result, or, for one
+//            started in the background, from the launch to the notice that it
+//            finished
+//   agents   a foreground Agent call, from the call to its result (a
+//            background one is counted in backgroundAgents and adds no time,
+//            since it overlaps whatever else happened)
+//   waiting  a gap after Claude's turn of 15 minutes or less
+//   away     a gap of more than 15 minutes
+// with counts: turns (the owner's messages), testRuns, agents,
+// backgroundAgents, quiet (stretches of over 150 s inside a turn with no text
+// from Claude) and sessions.
+//
+// PRIVACY. It reads timestamps, entry types, tool names and durations. A Bash
+// command is read only to test whether it runs tests, and is never printed;
+// nothing is stored. The opt-out marker holds as in every other mode: an
+// opted-out repo prints {"optedOut":true} and its logs are never opened.
+//
+// THE WINDOW starts at the first explore or create-plan stage after the
+// previous document stage (typed, or run by a chain through the Skill tool,
+// with or without the plugin prefix) and ends now; --until <time> pins the end
+// (a past cycle, a test). The document stage running now is not the previous
+// one: the previous one is the newest that came before the newest explore or
+// create-plan. With no document stage before it, the window starts at the
+// first explore or create-plan the logs hold; --since <time> sets the start
+// outright. `window.from` says which: previous-document, first-stage or since.
+// The output names no command, because the plugin build rewrites command
+// names in prompts, never in scripts.
+//
+// WHICH LOGS. Every working copy of this repository: the main copy, each
+// worktree git lists, and the folders of removed worktrees that lived under
+// the main copy's .claude/worktrees/ (subagent logs never, as in the scan).
+// Each session is cut into turns on its own; the sessions are then laid over
+// one timeline where, at any moment, the busiest state wins (tests, then
+// agents, then claude, then waiting, then away), so two sessions at once are
+// never counted twice and the five parts always add up to the window. A
+// stretch no session covers is waiting or away by its length; the stretch
+// after the last entry is the turn this call is part of, unless it is longer
+// than 15 minutes.
+//
+// Logs are read newest first, and reading stops at the first file last
+// written before the start (or before the previous document stage): nothing
+// in it can fall in the window or move its start.
+const AWAY_AFTER_MS = 15 * 60 * 1000;
+const QUIET_AFTER_MS = 150 * 1000;
+const STAGE_COMMAND = /^\/(?:tk:)?(explore|create-plan|document)(?:\s|$)/;
+const STAGE_SKILL = /^(?:tk:)?(explore|create-plan|document)$/;
+const TEST_COMMAND = /run-checks\.js\b[^\n]*--(?:checks|phase)\b|\bnpm\s+(?:run\s+)?test\b|\bpytest\b/;
+const NOTICE_ID = /<tool-use-id>([^<\s]+)<\/tool-use-id>/g;
+// Priorities on the shared timeline, highest wins; also the index into the totals.
+const P_AWAY = 0, P_WAITING = 1, P_CLAUDE = 2, P_AGENTS = 3, P_TESTS = 4;
+
+// The session-log folders of every working copy of this repository.
+function cycleFolders() {
+  const main = thisMainRoot() || realOr(repoRoot);
+  const copies = [main, realOr(repoRoot), realOr(cwd)];
+  const listed = git(['worktree', 'list', '--porcelain']);
+  if (listed) {
+    listed.split('\n').forEach(function (l) {
+      if (l.indexOf('worktree ') === 0) copies.push(realOr(l.slice(9).trim()));
+    });
+  }
+  const encode = function (p) { return [p.replace(/[/\\]/g, '-'), p.replace(/[^A-Za-z0-9]/g, '-')]; };
+  const names = new Set();
+  copies.forEach(function (p) { encode(p).forEach(function (n) { names.add(n); }); });
+  const prefixes = encode(path.join(main, '.claude', 'worktrees') + path.sep);
+  let all;
+  try { all = fs.readdirSync(TRANSCRIPT_ROOT); } catch (e) { all = []; }
+  return all.filter(function (n) {
+    return names.has(n) || prefixes.some(function (p) { return n.length > p.length && n.indexOf(p) === 0; });
+  }).map(function (n) { return path.join(TRANSCRIPT_ROOT, n); });
+}
+
+// One session's timed entries, oldest first, and the first notice time of each
+// background call it names (a notice carries the call's tool-use id).
+function readCycleSession(file, notices) {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return []; }
+  const out = [];
+  text.split('\n').forEach(function (line) {
+    if (!line) return;
+    let e;
+    try { e = JSON.parse(line); } catch (err) { return; }
+    const t = e && typeof e.timestamp === 'string' ? Date.parse(e.timestamp) : NaN;
+    if (Number.isNaN(t)) return;
+    out.push({ t: t, e: e });
+    if (line.indexOf('<tool-use-id>') !== -1) {
+      let m;
+      NOTICE_ID.lastIndex = 0;
+      while ((m = NOTICE_ID.exec(line)) !== null) {
+        if (!notices.has(m[1]) || notices.get(m[1]) > t) notices.set(m[1], t);
+      }
+    }
+  });
+  out.sort(function (x, y) { return x.t - y.t; });
+  return out;
+}
+
+// What an entry does to the turn: 'human' (the owner wrote; a turn starts),
+// 'machine' (a background notice or a peer's report; a turn starts but is not
+// the owner's), 'claude' (Claude or its tools at work), or null (queue
+// bookkeeping, attachments, snapshots: no change). Built on the scan's own
+// sender stamps (isMachineStamped and the harness tags), read the same way.
+function cycleKind(e) {
+  if (e.type === 'assistant' || e.type === 'system') return 'claude';
+  if (e.type !== 'user') return null;
+  const content = e.message && e.message.content;
+  if (Array.isArray(content) && content.some(function (c) { return c && c.type === 'tool_result'; })) return 'claude';
+  if (e.isMeta === true || e.isCompactSummary === true) return 'claude';
+  const kind = e.origin && typeof e.origin.kind === 'string' ? e.origin.kind : null;
+  if (kind !== null && MACHINE_ORIGINS.indexOf(kind) !== -1) return 'machine';
+  if (kind === null && typeof e.turnOrigin === 'string' && MACHINE_TURN_ORIGINS.indexOf(e.turnOrigin) !== -1) return 'machine';
+  const raw = rawUserText(e);
+  if (raw === null) return 'claude';
+  if (kind === null && /<task-notification>/.test(raw)) return 'machine';
+  if (/<command-name>/.test(raw)) return 'human';
+  if (isCommandExpansion(raw) || humanText(e) === null) return 'claude';
+  return 'human';
+}
+
+// The loop stage an entry starts, or null: a typed command, or a Skill call.
+function cycleStage(e, kind) {
+  if (kind === 'human') {
+    const m = STAGE_COMMAND.exec(commandRequest(e));
+    return m ? m[1] : null;
+  }
+  if (e.type !== 'assistant') return null;
+  const content = e.message && Array.isArray(e.message.content) ? e.message.content : [];
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    if (c && c.type === 'tool_use' && c.name === 'Skill' && c.input && typeof c.input.skill === 'string') {
+      const m = STAGE_SKILL.exec(c.input.skill);
+      if (m) return m[1];
+    }
+  }
+  return null;
+}
+
+function blocksOf(e, type) {
+  const content = e.message && Array.isArray(e.message.content) ? e.message.content : [];
+  return content.filter(function (c) { return c && c.type === type; });
+}
+
+// The window from the stage markers (see the header above), or null.
+function cycleWindow(markers, since) {
+  if (since !== null) return { start: since, from: 'since' };
+  const starts = markers.filter(function (m) { return m.stage !== 'document'; });
+  if (!starts.length) return null;
+  const lastStart = starts[starts.length - 1].t;
+  const docs = markers.filter(function (m) { return m.stage === 'document' && m.t < lastStart; });
+  if (!docs.length) return { start: starts[0].t, from: 'first-stage' };
+  const prevDoc = docs[docs.length - 1].t;
+  const first = starts.filter(function (m) { return m.t > prevDoc; })[0];
+  return { start: first.t, from: 'previous-document', prevDoc: prevDoc };
+}
+
+// One session cut into intervals on the shared timeline, and its counts added
+// to `counts`. Tool calls are paired with their results by id.
+function sessionIntervals(entries, start, end, notices, counts) {
+  const iv = [];
+  const inWindow = function (t) { return t >= start && t <= end; };
+  const pending = new Map();
+  let turnStart = null, lastClaude = null, lastVisible = null;
+  const turnEnd = function () { return lastClaude !== null ? lastClaude : turnStart; };
+  const quietUntil = function (t) {
+    if (t - lastVisible > QUIET_AFTER_MS && t > start && lastVisible < end) counts.quiet++;
+  };
+  const finish = function (call, doneAt, res) {
+    if (call.name === 'Bash' && TEST_COMMAND.test(String(call.input.command || ''))) {
+      if (inWindow(call.t)) counts.testRuns++;
+      const background = call.input.run_in_background === true;
+      const stop = background ? (notices.has(call.id) ? notices.get(call.id) : end) : doneAt;
+      iv.push({ s: call.t, e: stop, p: P_TESTS });
+    } else if (call.name === 'Agent' || call.name === 'Task') {
+      const background = res.isAsync === true || call.input.run_in_background === true;
+      if (inWindow(call.t)) { if (background) counts.backgroundAgents++; else counts.agents++; }
+      if (!background) iv.push({ s: call.t, e: doneAt, p: P_AGENTS });
+    }
+  };
+  entries.forEach(function (x) {
+    if (x.t > end) return;
+    const kind = cycleKind(x.e);
+    if (kind === 'human' || kind === 'machine') {
+      if (turnStart !== null) {
+        const stop = turnEnd();
+        quietUntil(stop);
+        iv.push({ s: turnStart, e: stop, p: P_CLAUDE });
+        iv.push({ s: stop, e: x.t, p: x.t - stop > AWAY_AFTER_MS ? P_AWAY : P_WAITING });
+      }
+      turnStart = x.t; lastClaude = null; lastVisible = x.t;
+      if (kind === 'human' && inWindow(x.t)) counts.turns++;
+      return;
+    }
+    if (kind !== 'claude') return;
+    if (turnStart === null) { turnStart = x.t; lastVisible = x.t; }   // a log that opens mid-turn
+    lastClaude = x.t;
+    if (x.e.type === 'assistant') {
+      if (blocksOf(x.e, 'text').some(function (c) { return typeof c.text === 'string' && c.text.trim(); })) {
+        quietUntil(x.t);
+        lastVisible = x.t;
+      }
+      blocksOf(x.e, 'tool_use').forEach(function (c) {
+        if (c.id) pending.set(c.id, { id: c.id, t: x.t, name: c.name, input: c.input && typeof c.input === 'object' ? c.input : {} });
+      });
+    } else {
+      blocksOf(x.e, 'tool_result').forEach(function (c) {
+        const call = pending.get(c.tool_use_id);
+        if (!call) return;
+        pending.delete(c.tool_use_id);
+        finish(call, x.t, x.e.toolUseResult && typeof x.e.toolUseResult === 'object' ? x.e.toolUseResult : {});
+      });
+    }
+  });
+  if (turnStart !== null) {
+    quietUntil(turnEnd());
+    iv.push({ s: turnStart, e: turnEnd(), p: P_CLAUDE });
+  }
+  pending.forEach(function (call) { finish(call, end, {}); });   // still running at the window's end
+  return iv;
+}
+
+// Lay every session's intervals over [start, end]: each moment goes to the
+// highest-priority state live then; a moment no session covers is waiting or
+// away by the length of its uncovered stretch, and the last stretch is this
+// call's own turn when it is 15 minutes or shorter.
+function layTimeline(intervals, start, end) {
+  const points = [];
+  intervals.forEach(function (v) {
+    const s = Math.max(v.s, start), e = Math.min(v.e, end);
+    if (e > s) { points.push([s, v.p, 1]); points.push([e, v.p, -1]); }
+  });
+  points.sort(function (a, b) { return a[0] - b[0]; });
+  const live = [0, 0, 0, 0, 0];
+  const ms = [0, 0, 0, 0, 0];
+  const gaps = [];
+  let at = start, i = 0;
+  while (at < end) {
+    while (i < points.length && points[i][0] <= at) { live[points[i][1]] += points[i][2]; i++; }
+    const next = i < points.length ? Math.min(points[i][0], end) : end;
+    let top = -1;
+    for (let p = P_TESTS; p >= P_AWAY; p--) { if (live[p] > 0) { top = p; break; } }
+    if (top >= 0) ms[top] += next - at;
+    else if (gaps.length && gaps[gaps.length - 1][1] === at) gaps[gaps.length - 1][1] = next;
+    else gaps.push([at, next]);
+    at = next;
+  }
+  gaps.forEach(function (g) {
+    const len = g[1] - g[0];
+    if (g[1] === end && len <= AWAY_AFTER_MS) ms[P_CLAUDE] += len;
+    else ms[len > AWAY_AFTER_MS ? P_AWAY : P_WAITING] += len;
+  });
+  return { claude: ms[P_CLAUDE], tests: ms[P_TESTS], agents: ms[P_AGENTS], waiting: ms[P_WAITING], away: ms[P_AWAY] };
+}
+
+function runCycleTime() {
+  if (optedOut()) { process.stdout.write(JSON.stringify({ optedOut: true }) + '\n'); return; }
+  let since = null;
+  if (opts.since) {
+    since = Date.parse(opts.since);
+    if (Number.isNaN(since)) die('--since needs a time, such as 2026-10-15T01:00:00Z');
+  }
+  let end = Date.now();
+  if (opts.until) {
+    end = Date.parse(opts.until);
+    if (Number.isNaN(end)) die('--until needs a time, such as 2026-10-15T01:00:00Z');
+  }
+  // Every session file, newest written first.
+  const files = [];
+  cycleFolders().forEach(function (dir) {
+    sessionFiles(dir).forEach(function (f) {
+      try { files.push({ file: f, mtime: fs.statSync(f).mtimeMs }); } catch (e) { /* gone since listed */ }
+    });
+  });
+  files.sort(function (a, b) { return b.mtime - a.mtime; });
+  const notices = new Map();
+  const sessions = [];
+  const markers = [];
+  let win = null;
+  for (let i = 0; i < files.length; i++) {
+    // Older files cannot reach the window or move its start (see the header).
+    const floor = since !== null ? since : (win && win.prevDoc !== undefined ? win.prevDoc : null);
+    if (floor !== null && files[i].mtime < floor) break;
+    const entries = readCycleSession(files[i].file, notices);
+    entries.forEach(function (x) {
+      if (x.t > end) return;
+      const st = cycleStage(x.e, cycleKind(x.e));
+      if (st) markers.push({ t: x.t, stage: st });
+    });
+    sessions.push(entries);
+    markers.sort(function (a, b) { return a.t - b.t; });
+    win = cycleWindow(markers, since);
+  }
+  if (!win || win.start >= end) {
+    process.stdout.write(JSON.stringify({ window: null, ms: null, counts: null }) + '\n');
+    return;
+  }
+  const counts = { turns: 0, testRuns: 0, agents: 0, backgroundAgents: 0, quiet: 0, sessions: 0 };
+  let intervals = [];
+  sessions.forEach(function (entries) {
+    if (!entries.some(function (x) { return x.t >= win.start && x.t <= end; })) return;
+    counts.sessions++;
+    intervals = intervals.concat(sessionIntervals(entries, win.start, end, notices, counts));
+  });
+  process.stdout.write(JSON.stringify({
+    window: { start: new Date(win.start).toISOString(), end: new Date(end).toISOString(), ms: end - win.start, from: win.from },
+    ms: layTimeline(intervals, win.start, end),
+    counts: counts
+  }) + '\n');
+}
+
 // --- dispatch ---
 if (opts.candidates) runCandidates();
 else if (opts.add) runAdd();
@@ -1838,3 +2159,4 @@ else if (opts.evidence) runEvidence();
 else if (opts.recordFix) runRecordFix();
 else if (opts.backfillCandidates) runBackfillCandidates();
 else if (opts.addBackfill) runAddBackfill();
+else if (opts.cycleTime) runCycleTime();

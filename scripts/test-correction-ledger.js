@@ -1763,6 +1763,167 @@ function outsideRoots(dir, roots) {
 }
 
 // --- 9. the tripwire flags a force-added ledger ----------------------------
+// --- 248 cycle-time: where a cycle's time went (issue #248) ---------------------
+// --cycle-time reads the session logs of every working copy of the repository
+// and splits the cycle's window into Claude working, tests, helper agents,
+// waiting on the user and away, with counts. Numbers only: the fixtures plant a
+// canary in a typed message, a reply, a command and a path, and none may reach
+// the output. Every timestamp is fixed, and --until pins the window's end, so
+// each expected number is worked out by hand in the comments below.
+function cycleTimeTest() {
+  console.log('\n248 cycle-time');
+  const T0 = Date.parse('2026-10-01T10:00:00.000Z');
+  const at = (s) => new Date(T0 + s * 1000).toISOString();
+  const human = (s, text) => ({ type: 'user', timestamp: at(s), origin: { kind: 'human' }, message: { content: text } });
+  const command = (s, name, args) => ({ type: 'user', timestamp: at(s), origin: { kind: 'human' },
+    message: { content: '<command-message>' + name.slice(1) + '</command-message>\n<command-name>' + name + '</command-name>\n<command-args>' + (args || '') + '</command-args>' } });
+  const say = (s, text) => ({ type: 'assistant', timestamp: at(s), message: { content: [{ type: 'text', text: text }] } });
+  const tool = (s, id, name, input) => ({ type: 'assistant', timestamp: at(s), message: { content: [{ type: 'tool_use', id: id, name: name, input: input }] } });
+  const result = (s, id, extra) => ({ type: 'user', timestamp: at(s), message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] }, toolUseResult: extra || {} });
+  const notice = (s, id) => ({ type: 'user', timestamp: at(s), origin: { kind: 'task-notification' },
+    message: { content: '<task-notification>\n<task-id>bg-' + id + '</task-id>\n<tool-use-id>' + id + '</tool-use-id>\n<status>completed</status>\n</task-notification>' } });
+  const enc = (p) => p.replace(/[^A-Za-z0-9]/g, '-');
+  const writeLog = (sb, folderPath, name, entries) => {
+    const dir = path.join(sb.home, '.claude', 'projects', enc(folderPath));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name + '.jsonl'), entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    return dir;
+  };
+  const cycle = (sb, args) => {
+    const r = runRaw(sb, ['--cycle-time'].concat(args || []));
+    let json = null;
+    try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, json: json };
+  };
+  const sum = (ms) => ms ? ms.claude + ms.tests + ms.agents + ms.waiting + ms.away : -1;
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 400);
+
+  // --- A: one session, every category ----------------------------------------
+  // Turn 1 runs 0-190 s; a background test runs 170-400 s; its notice at 400 s
+  // starts a short machine turn to 410 s; the owner answers at 790 s (a 380 s
+  // wait), and after turn 2 (790-810 s) is away for 20 minutes (1,200 s).
+  //   tests   20-80 + 170-400                    = 290
+  //   agents  90-150                              = 60
+  //   claude  0-20, 80-90, 150-170 (turn 1 = 50), 400-410, 790-810, 2010-2020,
+  //           and 2020-2030 to the window's end  = 100
+  //   waiting 190-400 lies under the test; 410-790 = 380
+  //   away    810-2010                            = 1,200     total 2,030 s
+  // One quiet stretch: 10-180 s in turn 1 shows no text for 170 s.
+  const a = makeSandbox('cycle-a');
+  const logA = [
+    command(-3600, '/document'),
+    say(-3000, 'Documented.'),
+    command(0, '/explore', 'issue 7'),
+    say(10, 'Reading CANARY-REPLY-7f3 first.'),
+    tool(15, 'r1', 'Read', { file_path: '/x/CANARY-PATH-7f3.md' }),
+    result(16, 'r1'),
+    tool(20, 't1', 'Bash', { command: 'npm test -- CANARY-CMD-7f3' }),
+    result(80, 't1', { durationMs: 60000 }),
+    tool(90, 'a1', 'Agent', { description: 'map it', prompt: 'p' }),
+    result(150, 'a1', { agentId: 'x1', totalDurationMs: 60000 }),
+    tool(160, 'a2', 'Agent', { description: 'later', prompt: 'p' }),
+    result(161, 'a2', { agentId: 'x2', isAsync: true }),
+    tool(170, 't2', 'Bash', { command: 'node .claude/scripts/run-checks.js --checks c.json --out reports/o --full', run_in_background: true }),
+    result(171, 't2', { backgroundTaskId: 'bg-t2' }),
+    say(180, 'Started the suite.'),
+    say(190, 'Which option?'),
+    notice(400, 't2'),
+    say(410, 'The suite passed.'),
+    human(790, 'Pick the first one, CANARY-TYPED-7f3.'),
+    say(800, 'On it.'),
+    say(810, 'Done.'),
+    human(2010, 'Thanks, carry on.'),
+    say(2020, 'Next step.'),
+  ];
+  const dirA = writeLog(a, a.proj, 'sess-a', logA);
+  // A subagent's log is the toolkit talking to itself: never read.
+  fs.mkdirSync(path.join(dirA, 'sess-a', 'subagents'), { recursive: true });
+  fs.writeFileSync(path.join(dirA, 'sess-a', 'subagents', 'agent-x1.jsonl'),
+    [human(100, 'a prompt the toolkit wrote'), tool(101, 's1', 'Bash', { command: 'npm test' }), result(500, 's1')].map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const ra = cycle(a, ['--until', at(2030)]);
+  const ja = ra.json || {};
+  check('248 cycle-time: the window starts at the first stage after the previous document run',
+    ra.status === 0 && !!ja.window && ja.window.start === at(0) && ja.window.end === at(2030) && ja.window.ms === 2030000 && ja.window.from === 'previous-document',
+    one(ra.stdout + ra.stderr));
+  check('248 cycle-time: the five categories add up to the window', !!ja.ms && sum(ja.ms) === 2030000, one(JSON.stringify(ja.ms)));
+  check('248 cycle-time: a foreground test call and a background one (launch to notice) count as tests', !!ja.ms && ja.ms.tests === 290000, one(JSON.stringify(ja.ms)));
+  check('248 cycle-time: a foreground helper agent counts its time; a background one is counted with no time',
+    !!ja.ms && ja.ms.agents === 60000 && !!ja.counts && ja.counts.agents === 1 && ja.counts.backgroundAgents === 1, one(JSON.stringify(ja)));
+  check('248 cycle-time: a 380 s gap after Claude\'s turn is waiting and a 20-minute one is away',
+    !!ja.ms && ja.ms.waiting === 380000 && ja.ms.away === 1200000 && ja.ms.claude === 100000, one(JSON.stringify(ja.ms)));
+  check('248 cycle-time: a 170 s stretch with no Claude text inside a turn is one quiet stretch', !!ja.counts && ja.counts.quiet === 1, one(JSON.stringify(ja.counts)));
+  check('248 cycle-time: turns count the owner\'s messages, test runs count both test calls, and subagent logs are never read',
+    !!ja.counts && ja.counts.turns === 3 && ja.counts.testRuns === 2, one(JSON.stringify(ja.counts)));
+  check('248 cycle-time: no typed message, reply, command or path reaches the output', ra.stdout.length > 0 && !/CANARY/.test(ra.stdout + ra.stderr), one(ra.stdout));
+  fs.writeFileSync(path.join(a.proj, '.claude', '.no-correction-log'), '');
+  const optedOut = cycle(a, ['--until', at(2030)]);
+  check('248 cycle-time: an opted-out repo prints optedOut and nothing else', optedOut.status === 0 && optedOut.stdout.trim() === '{"optedOut":true}', one(optedOut.stdout));
+
+  // --- B: a chained stage, the tk: prefix, no earlier document, --since -------
+  // The first window runs from the first stage in the logs (no document before
+  // it). A document the chain ran through the Skill tool at 600 s ends that
+  // cycle; the next starts at the typed create-plan at 700 s; the document
+  // running now (900 s) is not the previous one.
+  const b = makeSandbox('cycle-b');
+  const logB = [
+    human(0, 'Hello there, what is open?'),
+    say(10, 'Two issues.'),
+    command(60, '/tk:explore', '9'),
+    say(70, 'Exploring.'),
+    tool(120, 'k1', 'Skill', { skill: 'tk:create-plan' }),
+    result(121, 'k1'),
+    say(130, 'Plan ready.'),
+    tool(600, 'k2', 'Skill', { skill: 'document' }),
+    result(601, 'k2'),
+    say(610, 'Documented.'),
+    command(700, '/tk:create-plan', '10'),
+    say(710, 'Planning.'),
+    tool(900, 'k3', 'Skill', { skill: 'tk:document' }),
+    result(901, 'k3'),
+  ];
+  writeLog(b, b.proj, 'sess-b', logB);
+  const rb = cycle(b, ['--until', at(910)]);
+  check('248 cycle-time: a document the chain ran through the Skill tool ends the cycle, and the one running now does not',
+    rb.status === 0 && !!rb.json && rb.json.window.start === at(700) && rb.json.window.from === 'previous-document' && sum(rb.json.ms) === 210000,
+    one(rb.stdout + rb.stderr));
+  const rb2 = cycle(b, ['--until', at(500)]);
+  check('248 cycle-time: with no earlier document the window starts at the first stage in the logs, and says so',
+    rb2.status === 0 && !!rb2.json && rb2.json.window.start === at(60) && rb2.json.window.from === 'first-stage', one(rb2.stdout + rb2.stderr));
+  const rb3 = cycle(b, ['--since', at(30), '--until', at(500)]);
+  check('248 cycle-time: --since sets the start', rb3.status === 0 && !!rb3.json && rb3.json.window.start === at(30) && rb3.json.window.from === 'since' && sum(rb3.json.ms) === 470000, one(rb3.stdout + rb3.stderr));
+  const rb4 = cycle(b, ['--since', 'yesterday']);
+  check('248 cycle-time: a --since that is not a time is refused', rb4.status !== 0 && /--since/.test(rb4.stderr), one(rb4.stdout + rb4.stderr));
+
+  // --- C: worktrees, a removed worktree, and two sessions at once --------------
+  // The main copy explores (0-10 s) and a second main-copy session overlaps it
+  // (5-50 s); a live worktree builds (200-210 s); a removed worktree's folder
+  // still holds a session (300-310 s). Merged, the window 0-320 s is counted
+  // once: the categories add to 320 s, never more.
+  const c = makeSandbox('cycle-c');
+  const g = (args, cwd) => execFileSync('git', args, { cwd: cwd || c.proj, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
+    env: Object.assign({}, process.env, { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@example.com' }) });
+  g(['init', '-q']);
+  fs.writeFileSync(path.join(c.proj, 'f.txt'), 'x\n');
+  g(['add', 'f.txt']);
+  g(['commit', '-qm', 'init']);
+  const wt = path.join(c.proj, '.claude', 'worktrees', 'w1');
+  g(['worktree', 'add', '-q', '-b', 'w1', wt]);
+  const main = fs.realpathSync(c.proj);
+  writeLog(c, main, 'm1', [command(0, '/explore'), say(10, 'Exploring.'), human(100, 'Go on.'), say(110, 'Planned.')]);
+  writeLog(c, main, 'm2', [human(5, 'A side question here.'), say(50, 'Answered.')]);
+  writeLog(c, fs.realpathSync(wt), 'w1', [human(200, 'Build it now please.'), say(210, 'Built.')]);
+  writeLog(c, path.join(main, '.claude', 'worktrees', 'gone'), 'g1', [human(300, 'Review it now please.'), say(310, 'Reviewed.')]);
+  const rc = cycle(c, ['--until', at(320)]);
+  const jc = rc.json || {};
+  check('248 cycle-time: a cycle split across the main copy, a worktree and a removed worktree is counted whole',
+    rc.status === 0 && !!jc.counts && jc.counts.turns === 5 && jc.window.start === at(0), one(rc.stdout + rc.stderr));
+  check('248 cycle-time: two sessions at once are not counted twice', !!jc.ms && sum(jc.ms) === 320000, one(JSON.stringify(jc.ms)));
+  const fromWt = runRaw(c, ['--cycle-time', '--until', at(320)], { cwd: wt });
+  let jw = null;
+  try { jw = JSON.parse(fromWt.stdout); } catch (e) { jw = null; }
+  check('248 cycle-time: run from inside the worktree, it reads the same logs', !!jw && JSON.stringify(jw.ms) === JSON.stringify(jc.ms), one(fromWt.stdout + fromWt.stderr));
+}
+
 function tripwireTest() {
   const sb = makeSandbox('tripwire');
   const repo = path.join(sb.root, 'repo');
@@ -1996,6 +2157,7 @@ function finish() {
   tripwireNewFilesTest();
   tripwireHandoffTest();
   ledgerDirNewFilesTest();
+  cycleTimeTest();
   console.log('');
   if (failures.length === 0) {
     console.log(passed + ' checks passed.\n');
