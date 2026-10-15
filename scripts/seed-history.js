@@ -26,6 +26,14 @@
 //
 // --check writes nothing and exits 1 when either file on disk differs from what
 // the tags give, which is how a test confirms the files are current.
+//
+// plugin/ ships both files, so a run that writes either one into the
+// repository's own seed/ folder then rebuilds plugin/ (node
+// scripts/build-plugin.js, from the repository, no arguments) and says so; a
+// failed rebuild exits 1 with the build's output. Before this, a run that
+// rewrote the files left plugin/ stale and the next full test run failed on
+// its build check (issue #249). --check, files written outside seed/, and a
+// repository with no build script never rebuild.
 
 const fs = require('fs');
 const path = require('path');
@@ -147,6 +155,8 @@ function main() {
   const { tags, blocks, leads } = collect(o.repo, o.from);
   const want = [[o.blocks, blocksText(blocks, o.from, tags)], [o.leads, leadsText(leads)]];
   let stale = 0;
+  let wroteSeed = false;
+  const seedDir = path.join(o.repo, 'seed') + path.sep;
   for (const [file, text] of want) {
     const shown = path.relative(o.repo, file) || file;
     const have = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
@@ -159,10 +169,26 @@ function main() {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, text);
     console.error('seed-history: wrote ' + shown);
+    if (file.startsWith(seedDir)) wroteSeed = true;
   }
   const entries = [...blocks.values()].reduce((n, m) => n + m.size, 0);
   console.error('seed-history: ' + tags.length + ' release tag(s), ' + entries + ' block and file entries from ' + o.from + ' on, ' + leads.size + ' lesson leads');
   if (stale) process.exit(1);
+  if (wroteSeed) rebuildPlugin(o.repo);
+}
+
+// plugin/ carries copies of both seed files, so it is rebuilt after either one
+// changes (see the header). A repository with no build script has no plugin/.
+function rebuildPlugin(repo) {
+  const script = path.join(repo, 'scripts', 'build-plugin.js');
+  if (!fs.existsSync(script)) return;
+  const r = spawnSync(process.execPath, [script], { cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) {
+    process.stderr.write((r.stdout || '') + (r.stderr || ''));
+    console.error('seed-history: rebuilding plugin/ failed (exit ' + (r.status === null ? r.signal : r.status) + '); fix it and run node scripts/build-plugin.js');
+    process.exit(1);
+  }
+  console.error('seed-history: rebuilt plugin/');
 }
 
 main();

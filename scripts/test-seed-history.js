@@ -110,6 +110,45 @@ check('a --from that is not a version tag is refused', r.status === 2 && /takes 
 r = run(['--repo', path.join(TMP, 'not-a-repo'), '--blocks', BLOCKS, '--leads', LEADS]);
 check('a folder that is not a git repository is an error', r.status === 1 && /not a git repository/.test(r.stderr), r.stderr);
 
+console.log('\n3b. a run that writes a seed file rebuilds plugin/ (issue #249)');
+// plugin/ ships both seed files, so a run that rewrote them and left plugin/
+// alone made the next full test run fail on the build check. A stub build
+// script in a scratch repository records each call (its folder and arguments)
+// and fails when STUB_EXIT says so.
+const P = path.join(TMP, 'rebuild');
+fs.mkdirSync(P, { recursive: true });
+git(P, ['init', '-q']);
+write(P, 'seed/CLAUDE.md', '# Project\n\n' + V1_COMMENT + '\n');
+write(P, 'LESSONS.md', '# Lessons\n\n- **Alpha lead.**\n');
+git(P, ['add', '-A']); git(P, ['commit', '-q', '-m', 'v1']); git(P, ['tag', 'v1.0.0']);
+write(P, 'scripts/build-plugin.js', "const fs = require('fs'); const path = require('path');\n"
+  + "fs.appendFileSync(path.join(__dirname, '..', 'build-calls.txt'), process.cwd() + ' [' + process.argv.slice(2).join(' ') + ']\\n');\n"
+  + "if (process.env.STUB_EXIT) { console.error('stub build failed'); process.exit(Number(process.env.STUB_EXIT)); }\n");
+const calls = () => (fs.existsSync(path.join(P, 'build-calls.txt')) ? read(path.join(P, 'build-calls.txt')).split('\n').filter(Boolean) : []);
+const runEnv = (args, env) => spawnSync('node', [SCRIPT].concat(args), { encoding: 'utf8', env: Object.assign({}, process.env, env || {}) });
+r = run(['--repo', P, '--from', 'v1.0.0']);
+check('249 seed-history: a run that writes a seed file rebuilds plugin/ once, from the repository with no arguments, and says so',
+  r.status === 0 && calls().length === 1 && calls()[0] === fs.realpathSync(P) + ' []' && /rebuilt plugin\//.test(r.stderr), r.stderr + ' | ' + JSON.stringify(calls()));
+r = run(['--repo', P, '--from', 'v1.0.0']);
+check('249 seed-history: a run with nothing to write does not rebuild', r.status === 0 && calls().length === 1 && !/rebuilt/.test(r.stderr), r.stderr);
+fs.appendFileSync(path.join(P, 'seed', 'toolkit-lesson-leads.txt'), 'Zeta lead.\n');
+r = run(['--repo', P, '--from', 'v1.0.0', '--check']);
+check('249 seed-history: --check never rebuilds, even on a stale file', r.status === 1 && calls().length === 1, r.stderr);
+const OUT_BLOCKS = path.join(TMP, 'out-blocks.txt');
+const OUT_LEADS = path.join(TMP, 'out-leads.txt');
+r = run(['--repo', P, '--from', 'v1.0.0', '--blocks', OUT_BLOCKS, '--leads', OUT_LEADS]);
+check('249 seed-history: files written outside the repository\'s seed folder do not rebuild plugin/', r.status === 0 && fs.existsSync(OUT_LEADS) && calls().length === 1, r.stderr);
+r = runEnv(['--repo', P, '--from', 'v1.0.0'], { STUB_EXIT: '1' });
+check('249 seed-history: a failed rebuild makes the run exit 1 and shows the build\'s own output',
+  r.status === 1 && calls().length === 2 && /stub build failed/.test(r.stderr), r.stderr);
+const Q = path.join(TMP, 'no-build');
+fs.mkdirSync(Q, { recursive: true });
+git(Q, ['init', '-q']);
+write(Q, 'seed/CLAUDE.md', '# Project\n');
+git(Q, ['add', '-A']); git(Q, ['commit', '-q', '-m', 'v1']); git(Q, ['tag', 'v1.0.0']);
+r = run(['--repo', Q, '--from', 'v1.0.0']);
+check('249 seed-history: a repository with no build script still writes and exits 0', r.status === 0 && fs.existsSync(path.join(Q, 'seed', 'toolkit-lesson-leads.txt')) && !/rebuilt/.test(r.stderr), r.stderr);
+
 console.log('\n4. the shipped history seeds');
 const shipped = sb.parseHistory(read(path.join(REPO, 'seed', 'historical-seed-blocks.txt')));
 check('seed/historical-seed-blocks.txt has block and file entries for all four seeded files', sb.SEED_FILES.every(sf => shipped.has(sf.rel) && [...shipped.get(sf.rel).values()].some(x => x.kind === 'block') && [...shipped.get(sf.rel).values()].some(x => x.kind === 'file')), [...shipped.keys()].join(','));
