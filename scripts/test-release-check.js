@@ -458,6 +458,103 @@ function releaseRepo(version, tag, opt) {
   check('unknown argument: exit 2', r.status === 2, r.stdout + r.stderr);
 }
 
+// --- 249. the suites run side by side (issue #249) ---------------------------------
+// One after another, the suites took about 150 s on a 12-core machine using one
+// core. They now run in a pool (--jobs, default the CPU count less one), each
+// with a temp folder of its own outside any git work tree, removed when it
+// exits; a suite past its time limit, or a gate stopped mid-run, takes every
+// process the suite started with it. The output keeps its shape.
+{
+  // Failure detail stays on one line: the gate shows a failing suite's last 15 lines.
+  const flat = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  git(repo, ['tag', 'v1.0.0']);
+  // A stub that records when it started and ended, and the temp folder it saw.
+  const napStub = (name, ms) => "const fs = require('fs'); const path = require('path'); const d = path.join(__dirname, '..', 'naps');\n"
+    + "fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, '" + name + ".start'), String(Date.now()));\n"
+    + "fs.writeFileSync(path.join(d, '" + name + ".tmp'), require('os').tmpdir());\n"
+    + 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ' + ms + ');\n'
+    + "fs.writeFileSync(path.join(d, '" + name + ".end'), String(Date.now()));\nprocess.exit(0);\n";
+  write(repo, 'stubs/nap-a.js', napStub('a', 800));
+  write(repo, 'stubs/nap-b.js', napStub('b', 800));
+  const nap = (n, what) => { try { return fs.readFileSync(path.join(repo, 'naps', n + '.' + what), 'utf8'); } catch (e) { return null; } };
+  const overlapped = () => Number(nap('a', 'start')) < Number(nap('b', 'end')) && Number(nap('b', 'start')) < Number(nap('a', 'end'));
+  let r = run(repo, ['--suites', 'stubs/nap-a.js,stubs/nap-b.js', '--jobs', '2']);
+  const together = r.status === 0 && overlapped();
+  const tmpA = nap('a', 'tmp');
+  const tmpB = nap('b', 'tmp');
+  const totals = /^ {9}2 suites in \d+\.\d s, 2 at a time$/m.test(r.out);
+  fs.rmSync(path.join(repo, 'naps'), { recursive: true, force: true });
+  const r1 = run(repo, ['--suites', 'stubs/nap-a.js,stubs/nap-b.js', '--jobs', '1']);
+  check('249 parallel: with --jobs 2 two suites run at the same time, and with --jobs 1 one after the other',
+    together && r1.status === 0 && !overlapped() && nap('a', 'end') !== null && nap('b', 'end') !== null, flat(r.out + ' | ' + r1.out));
+  check('249 parallel: a line under the suites says how many ran, in how long, and how many at a time', totals, flat(r.out));
+  const inside = (d) => { const rel = path.relative(repo, d); return !rel.startsWith('..') && !path.isAbsolute(rel); };
+  check('249 parallel: each suite gets its own temp folder outside the repository, removed when it exits',
+    !!tmpA && !!tmpB && tmpA !== tmpB && !inside(tmpA) && !inside(tmpB) && path.dirname(tmpA) === os.tmpdir() && !fs.existsSync(tmpA) && !fs.existsSync(tmpB),
+    flat(JSON.stringify({ tmpA, tmpB, root: os.tmpdir() })));
+  r = run(repo, ['--suites', 'stubs/pass.js', '--jobs', '0']);
+  const r2 = run(repo, ['--suites', 'stubs/pass.js', '--jobs', 'many']);
+  check('249 parallel: --jobs takes a whole number of at least 1', r.status === 2 && r2.status === 2 && /--jobs/.test(r.out + r2.out), flat(r.out + r2.out));
+
+  // Two failures: listed sorted, each tail directly under its own exit line.
+  write(repo, 'stubs/zz-fail.js', "console.log('zz said this'); process.exit(1);\n");
+  write(repo, 'stubs/aa-fail.js', "console.log('aa said this'); process.exit(1);\n");
+  r = run(repo, ['--suites', 'stubs/zz-fail.js,stubs/aa-fail.js', '--jobs', '2']);
+  const lines = r.out.split('\n');
+  const under = (name, said) => { const at = lines.findIndex((l) => l.includes('stubs/' + name + '.js: exit 1 (')); return at >= 0 && (lines[at + 1] || '').includes(said); };
+  check('249 parallel: failing suites are listed sorted by name, each with its tail directly under its own exit line',
+    r.status === 1 && /2 of 2 suites exited non-zero: stubs\/aa-fail\.js, stubs\/zz-fail\.js$/.test(line(r.out, 'suites')) && under('aa-fail', 'aa said this') && under('zz-fail', 'zz said this'), flat(r.out));
+
+  // A suite that starts a long-running child and outlives its time limit. It
+  // ends itself after 8 s, so a gate that ignores the limit fails these cases
+  // in seconds rather than waiting out the 10-minute default.
+  const hangStub = "const { spawn } = require('child_process'); const fs = require('fs'); const path = require('path');\n"
+    + "const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 15000)'], { stdio: 'ignore' });\n"
+    + "fs.writeFileSync(path.join(__dirname, '..', 'hang.pid'), String(c.pid));\n"
+    + "fs.writeFileSync(path.join(__dirname, '..', 'hang.tmp'), require('os').tmpdir());\nsetTimeout(() => process.exit(0), 8000);\n";
+  write(repo, 'stubs/hang.js', hangStub);
+  const gone = (pid) => {   // a killed process can take a moment to be reaped
+    for (let i = 0; i < 40; i++) {
+      try { process.kill(pid, 0); } catch (e) { if (e.code === 'ESRCH') return true; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    return false;
+  };
+  r = run(repo, ['--suites', 'stubs/hang.js'], { TK_RELEASE_SUITE_TIMEOUT_MS: '1500' });
+  const hangPid = Number(fs.readFileSync(path.join(repo, 'hang.pid'), 'utf8'));
+  check('249 parallel: a suite past its time limit is stopped with every process it started, and reported as timed out',
+    r.status === 1 && /stubs\/hang\.js: exit error ETIMEDOUT/.test(r.out) && /TK_RELEASE_SUITE_TIMEOUT_MS is set/.test(r.out) && hangPid > 0 && gone(hangPid)
+      && !fs.existsSync(fs.readFileSync(path.join(repo, 'hang.tmp'), 'utf8')), flat(r.out));
+
+  // A gate stopped mid-run: a small driver starts it, waits for the stub to be
+  // running, sends SIGTERM, and reports how the gate ended.
+  fs.rmSync(path.join(repo, 'hang.pid'), { force: true });
+  const driverDir = tmp('release-driver-');
+  write(driverDir, 'driver.js', "const { spawn } = require('child_process'); const fs = require('fs');\n"
+    + 'const [script, repo] = process.argv.slice(2);\n'
+    + "const g = spawn(process.execPath, [script, '--repo', repo, '--suites', 'stubs/hang.js'], { stdio: 'ignore' });\n"
+    + "const t = setInterval(() => { if (fs.existsSync(repo + '/hang.pid')) { clearInterval(t); setTimeout(() => g.kill('SIGTERM'), 200); } }, 50);\n"
+    + "g.on('exit', (code, signal) => { console.log(JSON.stringify({ code, signal })); process.exit(0); });\n"
+    + "setTimeout(() => { g.kill('SIGKILL'); console.log(JSON.stringify({ code: 'stuck' })); process.exit(0); }, 20000);\n");
+  gateTargets.push(repo);
+  const dr = spawnSync('node', [path.join(driverDir, 'driver.js'), SCRIPT, repo], { encoding: 'utf8' });
+  let ended = null;
+  try { ended = JSON.parse(dr.stdout.trim()); } catch (e) { ended = null; }
+  const stoppedPid = fs.existsSync(path.join(repo, 'hang.pid')) ? Number(fs.readFileSync(path.join(repo, 'hang.pid'), 'utf8')) : 0;
+  check('249 parallel: a gate stopped mid-run stops every running suite and what it started, removes its temp folder, and exits non-zero',
+    !!ended && typeof ended.code === 'number' && ended.code !== 0 && stoppedPid > 0 && gone(stoppedPid)
+      && !fs.existsSync(fs.readFileSync(path.join(repo, 'hang.tmp'), 'utf8')), flat(dr.stdout + dr.stderr));
+
+  // A temp folder inside a git work tree breaks suites that build "not a
+  // repo" fixtures, so the gate refuses it before any suite runs.
+  write(repo, 'stubs/marker.js', "require('fs').writeFileSync(require('path').join(__dirname, '..', 'marker.ran'), 'x');\n");
+  fs.mkdirSync(path.join(repo, 'inner-tmp'), { recursive: true });
+  r = run(repo, ['--suites', 'stubs/marker.js'], { TMPDIR: path.join(repo, 'inner-tmp') });
+  check('249 parallel: a temp folder inside a git work tree fails the suites check with one line, and no suite runs',
+    r.status === 1 && isFail(r.out, 'suites') && /inside a git work tree/.test(line(r.out, 'suites')) && !fs.existsSync(path.join(repo, 'marker.ran')), flat(r.out));
+}
+
 // --- 2. build check ----------------------------------------------------------------
 {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));

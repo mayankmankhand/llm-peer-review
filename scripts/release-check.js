@@ -4,7 +4,7 @@
 // (issue #175). Nothing here ships in plugin/.
 //
 //   node scripts/release-check.js [--repo <dir>] [--suites <list|glob>]
-//                                 [--skip-suites] [--tests-only]
+//                                 [--skip-suites] [--tests-only] [--jobs <n>]
 //                                 [--commit <sha>]
 //                                 [--pushing-tag <tag>[:<sha>]]...
 //                                 [--remote <name|url>]
@@ -28,6 +28,20 @@
 //                    line, its exit code then its wall time
 //                    (`scripts/test-x.js: exit 0 (12.3 s)`), so a slow suite
 //                    is found in the gate's own output (#231).
+//                    The suites run side by side (issue #249): a pool of the
+//                    CPU count less one (--jobs <n> sets it; --jobs 1 runs
+//                    them one at a time). Each suite gets a temp folder of
+//                    its own (TMPDIR, TMP and TEMP) under the gate's temp
+//                    folder, removed when it exits, and runs in a process
+//                    group of its own, so a suite past its time limit, or a
+//                    gate stopped by Ctrl-C or SIGTERM, takes every process
+//                    the suite started with it. A temp folder inside a git
+//                    work tree fails the check before any suite runs: several
+//                    suites build fixtures that must not be inside a
+//                    repository. Each suite's line, with a failing suite's
+//                    tail under it, prints as the suite ends; the failed list
+//                    is sorted by name, and one more line gives the count,
+//                    the wall time and how many ran at a time.
 //   2. Build       - `node scripts/build-plugin.js --check` exits 0 (plugin/
 //                    matches its source). Skipped with a note when the repo has
 //                    no build-plugin.js (the tests' scratch repos).
@@ -113,15 +127,16 @@
 //             1 at least one check failed (block the release or push)
 //             2 usage error (unknown argument, missing value)
 
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // Check R: the most words README.md may hold. The rewrite of 2026-10-09 landed
 // at 865; the headroom is for a paragraph per release, not for a manual.
 const README_WORD_BUDGET = 1500;
 
-const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
+const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--jobs <n>] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
 // hook when the push comes from a linked worktree. Inherited by a suite, it
 // would point the suite's scratch `git init` and `git commit` at the real
@@ -137,14 +152,24 @@ const LOCAL_REPO_ENV = [
 const CHILD_ENV = Object.assign({}, process.env);
 for (const k of LOCAL_REPO_ENV) delete CHILD_ENV[k];
 // A hung suite must not hang a push forever; 10 minutes is far above any
-// suite's real runtime.
-const SUITE_TIMEOUT_MS = 10 * 60 * 1000;
+// suite's real runtime. TK_RELEASE_SUITE_TIMEOUT_MS overrides it, for the
+// gate's own tests only, and says so whenever it is set.
+const SUITE_TIMEOUT_MS = (() => {
+  const v = process.env.TK_RELEASE_SUITE_TIMEOUT_MS;
+  if (v === undefined || v === '') return 10 * 60 * 1000;
+  if (!/^[1-9]\d*$/.test(v)) { console.error('release-check: TK_RELEASE_SUITE_TIMEOUT_MS must be a whole number of milliseconds, got ' + JSON.stringify(v)); process.exit(2); }
+  console.error('release-check: TK_RELEASE_SUITE_TIMEOUT_MS is set; each suite stops after ' + v + ' ms instead of 10 minutes');
+  return Number(v);
+})();
+// The most of a suite's output kept, per stream: a failing suite shows only
+// its last 15 lines.
+const OUTPUT_KEEP = 4 * 1024 * 1024;
 // The same for asking a remote about the release tag. A credential prompt can
 // never be answered from inside a hook, so git is told not to ask.
 const REMOTE_TIMEOUT_MS = 2 * 60 * 1000;
 
 function parseArgs(argv) {
-  const o = { repo: process.cwd(), suites: null, skipSuites: false, testsOnly: false, commits: [], tags: [], remote: null };
+  const o = { repo: process.cwd(), suites: null, skipSuites: false, testsOnly: false, jobs: null, commits: [], tags: [], remote: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => {
@@ -156,6 +181,11 @@ function parseArgs(argv) {
     else if (a === '--suites') o.suites = value();
     else if (a === '--skip-suites') o.skipSuites = true;
     else if (a === '--tests-only') o.testsOnly = true;
+    else if (a === '--jobs') {
+      const v = value();
+      if (!/^[1-9]\d*$/.test(v)) usage('--jobs takes a whole number of at least 1, got ' + v);
+      o.jobs = Number(v);
+    }
     else if (a === '--commit') o.commits.push(value());
     else if (a === '--remote') o.remote = value();
     else if (a === '--pushing-tag') {
@@ -265,30 +295,113 @@ function compareVersions(a, b) {
 }
 
 // --- 1. suites -----------------------------------------------------------------
-function checkSuites() {
+// The suites run side by side (see the header). Each one is a child in its own
+// process group with its own temp folder; `running` holds the live ones, so a
+// gate that is stopped, or that crashes, stops them and removes their folders
+// before it exits.
+const running = new Map();   // pid -> the suite's temp folder
+function removeDir(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* best effort */ }
+}
+// Kill a suite's whole group: the suite and everything it started.
+function killGroup(pid) {
+  try { process.kill(-pid, 'SIGKILL'); } catch (e) { /* already gone */ }
+}
+function stopAllSuites() {
+  for (const [pid, dir] of running) { killGroup(pid); removeDir(dir); }
+  running.clear();
+}
+for (const [sig, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.on(sig, () => {
+    const n = running.size;
+    stopAllSuites();
+    console.error('release-check: stopped by ' + sig + (n ? '; stopped ' + n + ' running suite(s)' : ''));
+    process.exit(code);
+  });
+}
+process.on('uncaughtException', (e) => {
+  stopAllSuites();
+  console.error('release-check: ' + (e && e.stack ? e.stack : e));
+  process.exit(1);
+});
+process.on('exit', stopAllSuites);
+
+function defaultJobs() {
+  const cpus = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+  return Math.max(1, cpus - 1);
+}
+// True when dir is inside a git work tree.
+function insideWorkTree(dir) {
+  const r = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: dir, env: CHILD_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return r.status === 0 && (r.stdout || '').trim() === 'true';
+}
+
+// Run one suite; resolves to { rel, ok, line, out }. ONLY the exit code
+// counts. A suite that is missing, cannot start, is killed by a signal or runs
+// past its time limit is a failure, never a pass.
+function runSuite(rel, tempRoot) {
+  return new Promise((resolve) => {
+    const abs = path.resolve(REPO, rel);
+    if (!fs.existsSync(abs)) { resolve({ rel, ok: false, line: rel + ': missing', out: '' }); return; }
+    const dir = fs.mkdtempSync(path.join(tempRoot, 'tk-suite-'));
+    const env = Object.assign({}, CHILD_ENV, { TMPDIR: dir, TMP: dir, TEMP: dir });
+    const started = Date.now();
+    const out = { stdout: '', stderr: '' };
+    let timedOut = false;
+    let startError = null;
+    let settled = false;
+    const child = spawn('node', [abs], { cwd: REPO, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const keep = (name) => (d) => { out[name] += d; if (out[name].length > OUTPUT_KEEP) out[name] = out[name].slice(-OUTPUT_KEEP); };
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', keep('stdout'));
+    child.stderr.on('data', keep('stderr'));
+    if (child.pid) running.set(child.pid, dir);
+    const timer = setTimeout(() => { timedOut = true; killGroup(child.pid); }, SUITE_TIMEOUT_MS);
+    // When the suite ends, anything it left running (holding its output
+    // open) is stopped too, so the result never waits on a stray process.
+    child.on('exit', () => { if (child.pid) killGroup(child.pid); });
+    const finish = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (child.pid) running.delete(child.pid);
+      removeDir(dir);
+      const seconds = ((Date.now() - started) / 1000).toFixed(1);
+      // Matches the text the gate printed when it ran suites one at a time.
+      const shown = startError ? 'error ' + startError.code : timedOut ? 'error ETIMEDOUT' : signal ? 'signal ' + signal : code;
+      resolve({ rel, ok: !startError && !timedOut && code === 0, line: rel + ': exit ' + shown + ' (' + seconds + ' s)', out: out.stdout + out.stderr });
+    };
+    child.on('error', (e) => { startError = e; finish(null, null); });
+    child.on('close', finish);
+  });
+}
+
+async function checkSuites() {
   if (opts.skipSuites) { report('suites', true, 'skipped (--skip-suites)'); return; }
   const suites = opts.suites !== null ? expandSuites(opts.suites) : defaultSuites();
   if (suites.length === 0) { report('suites', false, 'no suites found' + (opts.suites !== null ? ' for --suites ' + opts.suites : ' under scripts/test-*.js')); return; }
-  const failed = [];
-  for (const rel of suites) {
-    const abs = path.resolve(REPO, rel);
-    if (!fs.existsSync(abs)) { failed.push(rel); console.log('         ' + rel + ': missing'); continue; }
-    const started = Date.now();
-    const r = spawnSync('node', [abs], {
-      cwd: REPO, env: CHILD_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-      maxBuffer: 256 * 1024 * 1024, timeout: SUITE_TIMEOUT_MS,
-    });
-    const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    // status is null when the suite was killed (timeout, signal) or never
-    // started; that is a failure, never a pass.
-    const code = r.status === null ? (r.error ? 'error ' + r.error.code : 'signal ' + r.signal) : r.status;
-    console.log('         ' + rel + ': exit ' + code + ' (' + seconds + ' s)');
-    if (r.status !== 0) {
-      failed.push(rel);
-      const out = (r.stdout || '') + (r.stderr || '');
-      if (out.trim()) console.log(tail(out, 15));
-    }
+  const tempRoot = os.tmpdir();
+  if (insideWorkTree(tempRoot)) {
+    report('suites', false, 'the temp folder ' + tempRoot + ' is inside a git work tree, where several suites break; set TMPDIR to a folder outside any repository');
+    return;
   }
+  const jobs = Math.min(opts.jobs || defaultJobs(), suites.length);
+  const started = Date.now();
+  const done = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < suites.length) {
+      const r = await runSuite(suites[next++], tempRoot);
+      // One write per suite, its tail directly under its line.
+      const tailText = !r.ok && r.out.trim() ? '\n' + tail(r.out, 15) : '';
+      console.log('         ' + r.line + tailText);
+      done.push(r);
+    }
+  };
+  await Promise.all(Array.from({ length: jobs }, worker));
+  console.log('         ' + suites.length + ' suite' + (suites.length === 1 ? '' : 's') + ' in ' + ((Date.now() - started) / 1000).toFixed(1) + ' s, ' + jobs + ' at a time');
+  const failed = done.filter(r => !r.ok).map(r => r.rel).sort();
   if (failed.length) report('suites', false, failed.length + ' of ' + suites.length + ' suites exited non-zero: ' + failed.join(', '));
   else report('suites', true, suites.length + ' suites exited 0');
 }
@@ -681,14 +794,16 @@ function checkCommits() {
   }
 }
 
-console.log('release-check: ' + REPO);
-checkSuites();
-checkBuild();
-checkReadmeBudget();
-infoPromptLoad();
-infoCatchRate();
-if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
-else checkCommits();
-const failedCount = results.filter(ok => !ok).length;
-console.log('release-check: ' + (results.length - failedCount) + ' passed, ' + failedCount + ' failed');
-process.exit(failedCount ? 1 : 0);
+(async () => {
+  console.log('release-check: ' + REPO);
+  await checkSuites();
+  checkBuild();
+  checkReadmeBudget();
+  infoPromptLoad();
+  infoCatchRate();
+  if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
+  else checkCommits();
+  const failedCount = results.filter(ok => !ok).length;
+  console.log('release-check: ' + (results.length - failedCount) + ' passed, ' + failedCount + ' failed');
+  process.exit(failedCount ? 1 : 0);
+})();
