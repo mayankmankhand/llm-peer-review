@@ -174,10 +174,18 @@ function scanReport(file, opts, root) {
   const receipts = receiptsFor(md, opts.receipts, root);
   const scope = receipts ? readJson(path.join(receipts, 'scope.json')) : null;
   const u = scope && scope.uncommitted ? scope.uncommitted : {};
-  const base = u.baseline && !u.baselineError ? u.baseline : scope && scope.range && scope.range.end ? scope.range.end : null;
+  let base = u.baseline && !u.baselineError ? u.baseline : scope && scope.range && scope.range.end ? scope.range.end : null;
+  // A harness run's scope names commits of its own scratch project, which this
+  // repository never had: with no base to look in, the cited file is assumed to
+  // have been in the reviewed tree, as with no scope.json at all.
+  let baseNote;
+  if (base && git(root, ['cat-file', '-e', base + '^{commit}']).status !== 0) {
+    baseNote = 'base ' + base + ' is not in this repository; cited files are assumed to have been in the reviewed tree';
+    base = null;
+  }
   const untrackedAtStart = u.untracked && Array.isArray(u.untracked.files)
     ? u.untracked.files.map((f) => (typeof f === 'string' ? f : f && f.path)).filter(Boolean) : [];
-  const row = { report: file, receipts, base, diff: null, rechecks: rechecks(receipts), fixed: [] };
+  const row = Object.assign({ report: file, receipts, base }, baseNote ? { baseNote } : {}, { diff: null, rechecks: rechecks(receipts), fixed: [] });
 
   let patches = null;
   if (opts.diffs.length) { patches = opts.diffs.map((d) => fs.readFileSync(d, 'utf8')); row.diff = { source: 'diff', files: opts.diffs }; }

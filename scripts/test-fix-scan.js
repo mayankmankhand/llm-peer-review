@@ -123,6 +123,18 @@ check('252 scan: the base is the scope\'s uncommitted.baseline when set, else ra
   !!snap.R7 && snap.R7.hunk === 'file untouched' && !!L.R7 && L.R7.hunk === 'file absent' && !!erred.R7 && erred.R7.hunk === 'file absent',
   one(JSON.stringify([snap.R7, L.R7, erred.R7])));
 
+// A scope whose base commit this repository does not have (a harness run's
+// scratch project) is read as no base: the labels still come from the patch.
+write('reports/receipts/stamp/scope.json', scope({ range: { base: 'f'.repeat(40), end: 'f'.repeat(40) } }));
+const foreignPatch = path.join(sandbox, 'foreign.diff');
+fs.writeFileSync(foreignPatch, git(['diff', B, F]));
+const foreign = (scan([report, '--receipts', receipts, '--diff', foreignPatch, '--json']).rows || [])[0] || {};
+const FB = byId(foreign);
+write('reports/receipts/stamp/scope.json', scope());
+check('252 scan: a scope base this repository does not have is dropped with a note, and the patch still labels',
+  foreign.base === null && /not in this repository/.test(String(foreign.baseNote)) && !!FB.R2 && FB.R2.hunk === 'file touched, hunk untouched' && !!FB.R1 && FB.R1.hunk === 'hunk touched',
+  one(JSON.stringify(foreign)));
+
 // A saved patch gives the same labels, and so does the newest verify-r<n>-diff.patch.
 const patchFile = path.join(sandbox, 'fixes.diff');
 fs.writeFileSync(patchFile, git(['diff', B, F]));
