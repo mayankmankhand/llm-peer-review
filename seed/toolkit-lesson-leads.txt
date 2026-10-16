@@ -116,6 +116,7 @@ A tripwire on the owner's config must tell the owner's other sessions from the r
 A user interrupt also stops running workflow agents, and nothing announces it.
 A version block describes what that version shipped; point at what changed since, never rewrite it.
 A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.
+A workflow resume caches completed calls as a call-order prefix: patch a pipeline by appending work, never by inserting it.
 A worktree is just a folder, a branch is just a pointer.
 A 🟩 on "ask the user about X" can mislead.
 AI debates surface things standard reviews miss.
@@ -199,6 +200,7 @@ Moving text verbatim between files keeps its links but breaks its prose pointers
 Mutation-testing a group of assertions is not mutation-testing each assertion.
 Never interpolate shell variables into inline `node -e` strings.
 Never write a literal HTML comment as an example inside an HTML comment.
+Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.
 Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
 On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
@@ -228,6 +230,7 @@ Run a reviewer's suggested fix in a scratch case before applying it: the submodu
 Run debates on plans, not just finished work.
 Run your own receipt before you report it as confirmation.
 Scope parity gaps explicitly when fixing one of several.
+Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
 Self-enforce release-time conventions in the artifact or the checklist, not in memory.
 Set shell variables before a backgrounded `&&` chain, never inside it.
 Shared files reduce duplication across review skills.

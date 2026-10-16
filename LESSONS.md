@@ -478,3 +478,9 @@
 - **Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.**
 - **Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.**
 - **Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.**
+
+## Issue 247 (21 agent papers against the toolkit's problems)
+
+- **Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.**
+- **A workflow resume caches completed calls as a call-order prefix: patch a pipeline by appending work, never by inserting it.**
+- **Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.**
