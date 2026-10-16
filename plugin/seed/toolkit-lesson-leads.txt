@@ -102,6 +102,7 @@ A standing page rendered in a worktree has no predecessor on disk: copy the live
 A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.
+A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
 A suite is green when its exit code is 0, not when its tail looks quiet.
 A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.
@@ -137,6 +138,7 @@ Ask what a change means for repos that already installed the last version, befor
 Audit before converting.
 Auto-start lifecycle code is hard to verify without a real dev server.
 Before engineering a smarter limit, lift the old one once and see whether it binds.
+Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.
 Boundary annotations in few-shot examples teach thresholds, not just format.
 Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.
 CLI default-acceptance prompts don't fully translate to chat.
@@ -165,6 +167,7 @@ FS-probes for "is X installed" should fall through, not be authoritative.
 Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.
 Fill a plan's Outcomes by replacing the template placeholder, not inserting above it.
 Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.
+Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.
 Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.
 GPT and Gemini peer review caught things standard reviews missed.
 Generate a long report from parts with one script; never append into a file that is also its own source.
@@ -202,6 +205,7 @@ Never interpolate shell variables into inline `node -e` strings.
 Never write a literal HTML comment as an example inside an HTML comment.
 Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.
 Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
+On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.
 On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
 Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.

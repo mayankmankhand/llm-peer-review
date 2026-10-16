@@ -484,3 +484,10 @@
 - **Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.**
 - **A workflow resume caches completed calls as a call-order prefix: patch a pipeline by appending work, never by inserting it.**
 - **Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.**
+
+## Issue 254 (refresh only what changed)
+
+- **A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.**
+- **Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.**
+- **Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.**
+- **On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.**
