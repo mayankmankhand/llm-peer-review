@@ -431,6 +431,23 @@ function inventory() {
   return { files, skipCounts };
 }
 
+// The kept files of one commit, read from git rather than the working tree,
+// with the scan's skip rules and size cap: the merge's view of the files the
+// refresh scan saw, so an edit or a deletion made while the subagents run
+// cannot change which blocks count as sent. Sizes come from the commit's
+// blobs; a submodule entry has none and is left out. Throws when git fails.
+function inventoryAt(commit) {
+  const files = [];
+  for (const entry of git(["ls-tree", "-r", "-l", "-z", commit]).split("\0")) {
+    const m = /^\S+ blob \S+ +(\d+)\t([\s\S]+)$/.exec(entry);
+    if (!m || classifySkip(m[2])) continue;
+    const tokens = Math.ceil(Number(m[1]) / 4);
+    if (tokens > MAX_FILE_TOKENS) continue;
+    files.push({ path: m[2], tokens });
+  }
+  return files;
+}
+
 // HEAD, for staleness tracking in the map header. Empty repos have no HEAD,
 // so they keep the placeholder.
 function headCommit() {
@@ -866,8 +883,9 @@ function printDelta() {
 
 // The merge behind --finalize --merge: the existing map merged into the temp
 // map a --delta run wrote. It recomputes the delta the scan made, from the old
-// map's commit to the temp map's own Commit line (the HEAD the scan saw, so a
-// commit that lands while the subagents run changes nothing here), and then:
+// map's commit to the temp map's own Commit line (the HEAD the scan saw), over
+// that commit's files rather than the working tree's, so neither a commit nor
+// an edit made while the subagents run changes anything here, and then:
 //
 //   - old blocks keep their order and their bytes;
 //   - a returned block replaces the old block of the same heading, in place;
@@ -903,9 +921,9 @@ function mergeIntoTemp(tmpText, fail) {
   }
   let files;
   try {
-    files = inventory().files;
+    files = inventoryAt(end);
   } catch {
-    fail("git_failed", "git ls-files failed - not a git repository?");
+    fail("git_failed", `git ls-tree ${end} failed - not a git repository?`);
   }
   const d = computeDelta(ready.guide, ready.since, end, files);
   const sent = new Set(d.touched.map((b) => b.heading));

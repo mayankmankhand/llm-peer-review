@@ -656,6 +656,19 @@ const SORTED_BLOCKS = [
   check('254 merge: HEAD moving after the scan changes nothing: src/ replaced, nothing unreturned', r.status === 0 && JSON.stringify(j.merge) === JSON.stringify({ kept: 4, replaced: ['src/'], added: [], dropped: [], notReturned: [] }), r.stdout.slice(0, 300) + ' ' + JSON.stringify(j.merge));
 }
 {
+  // A changed file deleted from the working tree while the subagents run (not
+  // committed): the merge reads the files of the temp map's own commit, as the
+  // scan saw them, so the block it sent out is still recognised as sent.
+  const { repo } = deltaRepo('merge-wt-deleted');
+  fs.writeFileSync(path.join(repo, 'lib/c.js'), 'module.exports = 30;\n');
+  const b = commitAll(repo, 'B');
+  fs.writeFileSync(path.join(repo, 'CODEBASE_MAP.md.tmp'), tempMap(b, ['### lib/c.js', '**Files:** lib/c.js', '**Purpose:** what lib/c.js does now.', '']));
+  fs.rmSync(path.join(repo, 'lib/c.js'));
+  const r = merge(repo);
+  const j = r.json || {};
+  check('254 merge: a sent file deleted from the working tree mid-refresh is still a sent block, not a clash', r.status === 0 && JSON.stringify((j.merge || {}).replaced) === JSON.stringify(['lib/c.js']), r.stdout.slice(0, 300));
+}
+{
   // A CRLF map stays CRLF on every line, whatever the temp file used.
   const { repo, a } = deltaRepo('merge-crlf');
   fs.writeFileSync(path.join(repo, 'CODEBASE_MAP.md'), read(repo, 'CODEBASE_MAP.md').replace(/\n/g, '\r\n'));
