@@ -183,6 +183,16 @@ Asks 2-3 clarifying questions first, then creates a short (10-15 line) issue via
 
 Full prompt: [`.claude/commands/create-issue.md`](../.claude/commands/create-issue.md)
 
+### `/index` - the codebase map
+
+Writes `CODEBASE_MAP.md`, a short map of the project that `/explore`, `/create-plan` and `/pair-debug` read so they know where things live. Each module in the map lists the files it covers on a `**Files:**` line. `/document` refreshes the map when it is 10 or more commits behind.
+
+Once a map exists, `/index` refreshes it rather than rebuilding it. It asks git which files changed since the commit the map was made at, sends only the modules that cover those files, plus any new files, to a helper, and copies every other part of the map across unchanged. On this repository a refresh took one helper and about an eighth of the tokens of a full rebuild. `/index full` rebuilds the whole map.
+
+A refresh switches to a full rebuild on its own, and says why, when there is no map, the map has no `**Files:**` lines (every map written before 8.0.5), the map's commit is not on this branch, or the change would need four or more helpers. At the end it says how many modules it updated, added, dropped and kept, and how many files no module covers; `/index full` fills those in.
+
+Full prompt: [`.claude/commands/index.md`](../.claude/commands/index.md)
+
 ---
 
 ## Which review command do I use?
