@@ -477,6 +477,66 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('a tier 2 shard takes exactly one return', tooMany.status === 1 && /usage/.test(tooMany.stderr), tooMany.stderr);
 }
 
+console.log('\n10. 252 locus: each cited line is labeled against the diff of the fixes (issue #252)');
+{
+  // The fix verifier once called a fix FIXED that deleted the cited sentences
+  // and put nothing in their place (#242 B1, bad-R3): the cut was inside one
+  // line, so a line diff calls it rewritten. locusLabel compares words: a
+  // changed block whose new words are a subsequence of its old words (text
+  // cut, nothing added) is `removed`. Changed lines sit apart below because git
+  // joins adjacent changed lines into one block, and a block is labeled whole.
+  const mod = require(SCRIPT);
+  const label = typeof mod.locusLabel === 'function' ? mod.locusLabel : () => ({});
+  const repo = path.join(sandbox, 'locus');
+  fs.mkdirSync(repo);
+  const g = (args) => spawnSync('git', ['-C', repo, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g(['init', '-q']);
+  const base = ['one', 'keep this line', 'gamma delta epsilon', 'four', 'zeta eta', 'six', 'theta whole', 'eight', 'iota kappa lambda', 'ten', 'mu   nu', 'twelve'];
+  fs.writeFileSync(path.join(repo, 'a.txt'), base.join('\n') + '\n');
+  fs.writeFileSync(path.join(repo, 'b.txt'), 'doomed\n');
+  fs.writeFileSync(path.join(repo, 'd.txt'), 'left alone\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'reviewed tree']);
+  const sha = g(['rev-parse', 'HEAD']).stdout.trim();
+  const now = base.slice();
+  now[2] = 'gamma epsilon';               // line 3: a word cut, nothing added (bad-R3)
+  now[4] = 'completely different words';  // line 5: replaced
+  now[8] = 'iota mu-new lambda';          // line 9: a word cut and a new one added
+  now[10] = 'mu nu';                      // line 11: whitespace only
+  now.splice(6, 1);                       // line 7: the whole line deleted
+  fs.writeFileSync(path.join(repo, 'a.txt'), now.join('\n') + '\n');
+  fs.rmSync(path.join(repo, 'b.txt'));
+  fs.writeFileSync(path.join(repo, 'n.txt'), 'made by the fix\n');
+  fs.writeFileSync(path.join(repo, 'u.txt'), 'untracked before the review\n');
+  const at = (rel, line, extra) => label(rel, line, Object.assign({ root: repo, base: sha }, extra || {})) || {};
+  const shows = (r, file, line) => r.file === file && r.line === line;
+  check('252 locus: a cited line in a changed file but in no changed block is untouched, file changed', shows(at('a.txt', 2), 'changed', 'untouched'), JSON.stringify(at('a.txt', 2)));
+  check('252 locus: a replaced line is rewritten', shows(at('a.txt', 5), 'changed', 'rewritten'), JSON.stringify(at('a.txt', 5)));
+  check('252 locus: a whole-line deletion is removed', shows(at('a.txt', 7), 'changed', 'removed'), JSON.stringify(at('a.txt', 7)));
+  check('252 locus: a word cut from inside a line with nothing added (the bad-R3 shape) is removed', shows(at('a.txt', 3), 'changed', 'removed'), JSON.stringify(at('a.txt', 3)));
+  check('252 locus: a cut plus new words is rewritten', shows(at('a.txt', 9), 'changed', 'rewritten'), JSON.stringify(at('a.txt', 9)));
+  check('252 locus: a whitespace-only change is untouched', shows(at('a.txt', 11), 'changed', 'untouched'), JSON.stringify(at('a.txt', 11)));
+  check('252 locus: a cited range with one rewritten line is rewritten, and one with a removed line and no rewrite is removed',
+    at('a.txt', '4-6').line === 'rewritten' && at('a.txt', '6-8').line === 'removed', JSON.stringify([at('a.txt', '4-6'), at('a.txt', '6-8')]));
+  check('252 locus: a deleted file is removed with file deleted', shows(at('b.txt', 1), 'deleted', 'removed'), JSON.stringify(at('b.txt', 1)));
+  check('252 locus: a file that was not in the reviewed tree is file absent', at('c.txt', 1).file === 'absent', JSON.stringify(at('c.txt', 1)));
+  check('252 locus: an unchanged file is file unchanged, its line untouched', shows(at('d.txt', 1), 'unchanged', 'untouched'), JSON.stringify(at('d.txt', 1)));
+  check('252 locus: no cited line labels the whole file', at('a.txt', null).line === 'rewritten' && at('a.txt', null).file === 'changed', JSON.stringify(at('a.txt', null)));
+  check('252 locus: an untracked file missing from the scope\'s starting list is file new; one on the list is file untracked, line unknown',
+    at('n.txt', 1, { untrackedAtStart: ['u.txt'] }).file === 'new' && shows(at('u.txt', 1, { untrackedAtStart: ['u.txt'] }), 'untracked', 'unknown'),
+    JSON.stringify([at('n.txt', 1, { untrackedAtStart: ['u.txt'] }), at('u.txt', 1, { untrackedAtStart: ['u.txt'] })]));
+  // A saved patch with context lines (the retrospective's fix diffs) reads the same.
+  const patch = g(['diff', sha]).stdout;
+  const fromPatch = (rel, line) => label(rel, line, { patch, root: repo, base: sha }) || {};
+  check('252 locus: a saved patch with context lines labels the same as the live tree',
+    fromPatch('a.txt', 3).line === 'removed' && fromPatch('a.txt', 5).line === 'rewritten' && fromPatch('a.txt', 2).line === 'untouched'
+      && fromPatch('a.txt', 11).line === 'untouched' && fromPatch('b.txt', 1).file === 'deleted' && fromPatch('d.txt', 1).file === 'unchanged',
+    JSON.stringify([fromPatch('a.txt', 3), fromPatch('a.txt', 5), fromPatch('a.txt', 2), fromPatch('b.txt', 1), fromPatch('d.txt', 1)]));
+  // Inside a hunk, "--- x" is a removed line whose text starts with "-- ", not a header.
+  const dashed = ['diff --git a/m.md b/m.md', 'index 1111111..2222222 100644', '--- a/m.md', '+++ b/m.md', '@@ -1,3 +1,2 @@', ' keep', '--- a dashed rule', ' tail', ''].join('\n');
+  const dash = label('m.md', 2, { patch: dashed, root: repo }) || {};
+  check('252 locus: a removed line whose own text starts with "-- " is read as a removed line, not a file header', dash.file === 'changed' && dash.line === 'removed', JSON.stringify(dash));
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
