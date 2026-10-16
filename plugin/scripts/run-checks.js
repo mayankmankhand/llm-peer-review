@@ -78,7 +78,10 @@
 // can tell a check edited after its run), so a later tally can read the
 // verdicts and their order. It is saved only when at least one check ran, so a
 // run whose every check was refused still writes nothing. A folder several
-// runs share (a review's receipts) holds the last run's.
+// runs share (a review's receipts) keeps every run's rows (issue #252): each
+// call appends its rows, each row carrying its own run's `at` and `head`, a
+// `runs` list holds one entry per call, and the top-level fields are the
+// latest call's. See saveRecord.
 //
 // Plan mode (issue #231, rule M17). A plan step names its own checks in one
 // fixed shape, and the runner reads that shape itself, so no model copies a
@@ -1536,15 +1539,93 @@ function runAll(checks, opts, cwd, outDir, extra, decorate) {
   // nothing at all, as it always has, so a refusal never leaves a record that
   // looks like evidence.
   if (results.some((r) => r.stdoutFile !== null)) {
-    const file = path.join(outDir, 'results.json');
     const rows = results.map((r, i) => Object.assign({}, r, { check: checks[i].check, expect: checks[i].expect }));
-    try {
-      fs.writeFileSync(file, JSON.stringify(Object.assign({ at, head: headCommit(cwd) }, result, { checks: rows })) + '\n');
-    } catch (e) {
-      process.stderr.write('run-checks: could not save ' + file + ': ' + e.message + '\n');
-    }
+    saveRecord(outDir, Object.assign({ at, head: headCommit(cwd) }, result, { checks: rows }));
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// The saved record (issue #252). Every write of <out>/results.json goes through
+// saveRecord, which adds to the record already in the folder instead of
+// replacing it. A review's recheck run writes into the folder that holds the
+// receipts its finding was proved with, and a rewrite deleted the very row the
+// recheck was checked against (0 of 19 saved rechecks sat beside their
+// original). Each row carries its own run's `at` and `head`; `runs` keeps one
+// { at, head, summary, flags } per call (`skipped: true` on a --full skip); the
+// top-level fields are the latest call's, so a reader of one run sees what it
+// always saw. A record written before #252 (no `runs`) counts as one run. A
+// plan phase clears its folder first, so its record is still its own run alone
+// and --tally reads exactly what it read before. A file there that is not a
+// readable record is moved aside to results.prev-<n>.json, never overwritten.
+// Receipts from parallel finders can be saved at the same moment, so the
+// read-merge-write runs under a lock file; a lock older than LOCK_STALE_MS was
+// left by a run that crashed mid-save and is cleared.
+// ---------------------------------------------------------------------------
+const LOCK_WAIT_MS = 10000;
+const LOCK_STALE_MS = 30000;
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+// True once this process holds the lock; false when it could not get it in time.
+function takeLock(lock) {
+  const until = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try { fs.closeSync(fs.openSync(lock, 'wx')); return true; } catch (e) { if (e.code !== 'EEXIST') return false; }
+    try {
+      if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) { fs.rmSync(lock, { force: true }); continue; }
+    } catch (e) { continue; }   // released between the open and the stat: try again
+    if (Date.now() > until) return false;
+    sleepMs(50);
+  }
+}
+// The record already in the folder: null when there is none, { rec } when the
+// file is one, { bad: true } when something else is on that path.
+function priorRecord(file) {
+  let st;
+  try { st = fs.lstatSync(file); } catch (e) { return null; }
+  if (!st.isFile()) return { bad: true };
+  try {
+    const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (r !== null && typeof r === 'object' && Array.isArray(r.checks)) return { rec: r };
+  } catch (e) { /* not JSON: set aside below */ }
+  return { bad: true };
+}
+// Move an unreadable results.json to the first free results.prev-<n>.json.
+function setAside(outDir, file) {
+  for (let n = 1; ; n++) {
+    const aside = path.join(outDir, 'results.prev-' + n + '.json');
+    try { fs.lstatSync(aside); continue; } catch (e) { /* free */ }
+    fs.renameSync(file, aside);
+    process.stderr.write('run-checks: ' + file + ' was not a readable record; moved it to ' + aside + '\n');
+    return;
+  }
+}
+function saveRecord(outDir, record) {
+  const file = path.join(outDir, 'results.json');
+  const lock = file + '.lock';
+  const locked = takeLock(lock);
+  if (!locked) process.stderr.write('run-checks: could not lock ' + file + '; saving without the lock\n');
+  const headOf = (r) => (r.head === undefined ? null : r.head);
+  const runOf = (r) => Object.assign({ at: r.at, head: headOf(r), summary: r.summary, flags: r.flags }, r.skipped ? { skipped: true } : {});
+  const stamp = (rows, r) => rows.map((c) => (c && typeof c === 'object' && c.at === undefined ? Object.assign({}, c, { at: r.at, head: headOf(r) }) : c));
+  try {
+    let rows = [];
+    let runs = [];
+    const prior = priorRecord(file);
+    if (prior && prior.bad) setAside(outDir, file);
+    else if (prior) {
+      rows = stamp(prior.rec.checks, prior.rec);
+      runs = Array.isArray(prior.rec.runs) ? prior.rec.runs : [runOf(prior.rec)];
+    }
+    const merged = Object.assign({}, record, { checks: rows.concat(stamp(record.checks, record)), runs: runs.concat([runOf(record)]) });
+    // Written beside the record and renamed over it, so a reader never sees half a file.
+    const tmp = file + '.tmp-' + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(merged) + '\n');
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    process.stderr.write('run-checks: could not save ' + file + ': ' + e.message + '\n');
+  } finally {
+    if (locked) fs.rmSync(lock, { force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1713,11 +1794,7 @@ function skipRun(checks, prior, cwd, outDir, file, key, print, against) {
   const result = { checks: rows, summary, flags: { slow: 0, flaky: 0, grew: 0 }, cost: { ms: 0, baselineMs: against, grew: false }, skipped: { from: prior.at, head: prior.head || null, note } };
   const byId = new Map(checks.map((c) => [c.id, c]));
   const saved = rows.map((r) => Object.assign({}, r, byId.has(r.id) ? { check: byId.get(r.id).check, expect: byId.get(r.id).expect } : {}));
-  try {
-    fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify(Object.assign({ at, head }, result, { checks: saved })) + '\n');
-  } catch (e) {
-    process.stderr.write('run-checks: could not save ' + path.join(outDir, 'results.json') + ': ' + e.message + '\n');
-  }
+  saveRecord(outDir, Object.assign({ at, head }, result, { checks: saved }));
   appendHistory(file, { at, head, key, fingerprint: print, ms: 0, passed: true, skipped: true, from: prior.at,
     againstMs: against, baselineMs: against, grew: false, summary, checks: priorRows });
   process.stderr.write('run-checks: ' + note + '\n');
