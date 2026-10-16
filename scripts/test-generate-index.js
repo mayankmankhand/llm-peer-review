@@ -508,6 +508,19 @@ const short = (m) => JSON.stringify(m).slice(0, 300);
   const m = delta(repo).json || {};
   check('254 delta: nothing committed since the map gives no chunks and changedFiles 0', m.mode === 'delta' && Array.isArray(m.chunks) && m.chunks.length === 0 && m.changedFiles === 0 && m.readTokens === 0 && m.deltaChunks === 0, short(m));
 }
+{
+  // A new file beside files a block already covers goes out with that block,
+  // even one whose literal Files line nothing else changed, so one subagent
+  // decides whether it joins the block rather than a separate new block.
+  const { repo } = deltaRepo('delta-sibling');
+  writeFiles(repo, { 'lib/d.js': 'module.exports = 6;\n' });
+  commitAll(repo, 'B');
+  const m = delta(repo).json || {};
+  const blocks = (m.chunks || []).flatMap((c) => c.blocks || []);
+  const lib = blocks.find((x) => x.heading === 'lib/c.js') || {};
+  const newFiles = (m.chunks || []).flatMap((c) => (c.newFiles || []).map((f) => f.path));
+  check('254 delta: a new file beside a block\'s files is sent with that block, not as a new file', (lib.files || []).map((f) => f.path).join() === 'lib/d.js' && newFiles.length === 0 && m.keptBlocks === 4, short({ lib, newFiles, kept: m.keptBlocks }));
+}
 // Each fallback: a full manifest, mode full, and the reason.
 function fallsBack(label, setup, reason) {
   const { repo } = deltaRepo('delta-fb-' + label);
@@ -581,7 +594,7 @@ const headingsOf = (text) => text.split('\n').filter((l) => l.startsWith('### ')
   check('254 merge: a temp map with no blocks leaves the Module Guide and the sections after it byte-identical', r.status === 0 && j.finalized === true && fromGuide(out) === fromGuide(old), r.stdout.slice(0, 300) + r.stderr);
   check('254 merge: the header, tree and Commit line are the temp file\'s, the System Overview the old map\'s', out.includes('<!-- Generated: 2026-10-16 13:00 UTC -->') && out.includes('- fresh-tree/') && sectionText(out, 'System Overview') === sectionText(old, 'System Overview'), out.slice(0, 400));
   check('254 merge: an old map whose blocks are out of order keeps that order', JSON.stringify(headingsOf(out)) === JSON.stringify(BASE_BLOCKS.map((b) => b.heading)), JSON.stringify(headingsOf(out)));
-  check('254 merge: the JSON merge record says all five kept and nothing else', JSON.stringify(j.merge) === JSON.stringify({ kept: 5, replaced: [], added: [], dropped: [], notReturned: [] }), JSON.stringify(j.merge));
+  check('254 merge: the JSON merge record says all five kept and nothing else', JSON.stringify(j.merge) === JSON.stringify({ kept: 5, replaced: [], added: [], dropped: [], notReturned: [], uncovered: 0 }), JSON.stringify(j.merge));
   check('254 merge: no temp file is left', !exists(repo, 'CODEBASE_MAP.md.tmp'));
 }
 // Blocks in sorted order, for the placement cases.
@@ -613,7 +626,7 @@ const SORTED_BLOCKS = [
   check('254 merge: a new block goes in at its sorted place', JSON.stringify(headingsOf(out)) === JSON.stringify(['aaa/', 'docs/', 'lib/c.js', 'new/', 'src/', 'typo']), JSON.stringify(headingsOf(out)));
   check('254 merge: a block whose files were all deleted is dropped, and a dead block is kept', !out.includes('### old/gone.js') && out.includes('### typo\n'), JSON.stringify(headingsOf(out)));
   check('254 merge: an omitted section is copied byte for byte, and a present one replaces the old', sectionText(out, 'Conventions') === sectionText(old, 'Conventions') && sectionText(out, 'Navigation Guide') === sectionText(old, 'Navigation Guide') && out.includes('## Gotchas\n- a fresh gotcha\n') && !out.includes('- gotcha one'), out.slice(out.indexOf('## Conventions')));
-  check('254 merge: the JSON merge record names what happened', JSON.stringify(j.merge) === JSON.stringify({ kept: 3, replaced: ['src/'], added: ['new/', 'aaa/'], dropped: ['old/gone.js'], notReturned: [] }), JSON.stringify(j.merge));
+  check('254 merge: the JSON merge record names what happened', JSON.stringify(j.merge) === JSON.stringify({ kept: 3, replaced: ['src/'], added: ['new/', 'aaa/'], dropped: ['old/gone.js'], notReturned: [], uncovered: 0 }), JSON.stringify(j.merge));
   check('254 merge: sections keep the template order', ['## System Overview', '## Directory Tree', '## Module Guide', '## Conventions', '## Gotchas', '## Navigation Guide'].every((h, i, all) => i === 0 || out.indexOf(all[i - 1] + '\n') < out.indexOf(h + '\n')), out.split('\n').filter((l) => l.startsWith('## ')).join(' | '));
 }
 {
@@ -627,6 +640,31 @@ const SORTED_BLOCKS = [
   const r = merge(repo);
   check('254 merge: a returned heading that names an untouched block is refused with heading_clash', r.status !== 0 && (r.json || {}).error === 'heading_clash', r.stdout.slice(0, 300));
   check('254 merge: after heading_clash the old map is untouched and the temp file gone', read(repo, 'CODEBASE_MAP.md') === old && !exists(repo, 'CODEBASE_MAP.md.tmp'));
+}
+{
+  // Two subagents that make up the same new heading: merging would keep only
+  // the second block, so the merge refuses instead.
+  const { repo } = deltaRepo('merge-twice');
+  const old = read(repo, 'CODEBASE_MAP.md');
+  writeFiles(repo, { 'new/n.js': 'module.exports = 5;\n', 'new/m.js': 'module.exports = 7;\n' });
+  const b = commitAll(repo, 'B');
+  fs.writeFileSync(path.join(repo, 'CODEBASE_MAP.md.tmp'), tempMap(b, [
+    '### new/', '**Files:** new/n.js', '**Purpose:** one half.', '',
+    '### new/', '**Files:** new/m.js', '**Purpose:** the other half.', '',
+  ]));
+  const r = merge(repo);
+  check('254 merge: a heading returned twice is refused with heading_clash and the old map kept', r.status !== 0 && (r.json || {}).error === 'heading_clash' && read(repo, 'CODEBASE_MAP.md') === old, r.stdout.slice(0, 300));
+}
+{
+  // The block a new file was sent out with (delta-sibling above) comes back
+  // with the file on its Files line: a replacement, not a clash.
+  const { repo } = deltaRepo('merge-sibling');
+  writeFiles(repo, { 'lib/d.js': 'module.exports = 6;\n' });
+  const b = commitAll(repo, 'B');
+  fs.writeFileSync(path.join(repo, 'CODEBASE_MAP.md.tmp'), tempMap(b, ['### lib/c.js', '**Files:** lib/c.js, lib/d.js', '**Purpose:** what lib/ does now.', '']));
+  const r = merge(repo);
+  const j = r.json || {};
+  check('254 merge: the block a new file was sent with comes back as a replacement, every file covered', r.status === 0 && JSON.stringify(j.merge) === JSON.stringify({ kept: 4, replaced: ['lib/c.js'], added: [], dropped: [], notReturned: [], uncovered: 0 }), r.stdout.slice(0, 300) + ' ' + JSON.stringify(j.merge));
 }
 {
   // A block sent out but not returned (its subagent renamed it, say) keeps its
@@ -653,7 +691,18 @@ const SORTED_BLOCKS = [
   commitAll(repo, 'C, landed during the refresh');
   const r = merge(repo);
   const j = r.json || {};
-  check('254 merge: HEAD moving after the scan changes nothing: src/ replaced, nothing unreturned', r.status === 0 && JSON.stringify(j.merge) === JSON.stringify({ kept: 4, replaced: ['src/'], added: [], dropped: [], notReturned: [] }), r.stdout.slice(0, 300) + ' ' + JSON.stringify(j.merge));
+  check('254 merge: HEAD moving after the scan changes nothing: src/ replaced, nothing unreturned', r.status === 0 && JSON.stringify(j.merge) === JSON.stringify({ kept: 4, replaced: ['src/'], added: [], dropped: [], notReturned: [], uncovered: 0 }), r.stdout.slice(0, 300) + ' ' + JSON.stringify(j.merge));
+}
+{
+  // A new file the subagents skipped: no merged block covers it, and the map's
+  // commit still moves forward, so the record counts it for /index to report.
+  const { repo } = deltaRepo('merge-uncovered');
+  writeFiles(repo, { 'new/n.js': 'module.exports = 5;\n' });
+  const b = commitAll(repo, 'B');
+  fs.writeFileSync(path.join(repo, 'CODEBASE_MAP.md.tmp'), tempMap(b, []));
+  const r = merge(repo);
+  const j = r.json || {};
+  check('254 merge: the record counts files no merged block covers (a skipped new file)', r.status === 0 && (j.merge || {}).uncovered === 1, r.stdout.slice(0, 300));
 }
 {
   // A changed file deleted from the working tree while the subagents run (not

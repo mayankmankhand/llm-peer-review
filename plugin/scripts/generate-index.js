@@ -151,9 +151,10 @@ function emitError(code, message) {
 // into it (mergeIntoTemp, below) and writes the result back to the temp file,
 // so the rename stays the one atomic step. The JSON then adds
 //
-//   "merge":{"kept":<n>,"replaced":[..],"added":[..],"dropped":[..],"notReturned":[..]}
+//   "merge":{"kept":<n>,"replaced":[..],"added":[..],"dropped":[..],"notReturned":[..],"uncovered":<n>}
 //
-// with headings in the lists. Plain --finalize does exactly what it did before.
+// with headings in the lists, and `uncovered` the count of files no merged
+// block covers. Plain --finalize does exactly what it did before.
 //
 // Any failure deletes the temp file and leaves CODEBASE_MAP.md and INDEX.md as
 // they were.
@@ -826,11 +827,39 @@ function computeDelta(guide, since, end, files) {
     }
   });
   const anyBlock = (p) => tests.some((has) => has(p));
+  // A new file no block covers goes out with the block that covers the most
+  // other files in its folder (the first such block on a tie), listed with
+  // that block's changed files: one subagent then sees both and can extend
+  // the block, where a separate new-file unit could land with another
+  // subagent and become a near-duplicate block. With no such block it stays
+  // a new file.
+  const newFiles = [];
+  for (const f of changed.filter((c) => !anyBlock(c.path))) {
+    const dir = path.posix.dirname(f.path);
+    const siblings = files.filter((s) => s.path !== f.path && path.posix.dirname(s.path) === dir);
+    let best = -1;
+    let most = 0;
+    tests.forEach((has, i) => {
+      const n = siblings.filter((s) => has(s.path)).length;
+      if (n > most) [best, most] = [i, n];
+    });
+    if (best === -1) {
+      newFiles.push(f);
+      continue;
+    }
+    const heading = guide.blocks[best].heading;
+    let unit = touched.find((t) => t.heading === heading);
+    if (!unit) {
+      unit = { heading, text: blockText(guide.blocks[best].lines), files: [], deleted: [] };
+      touched.push(unit);
+    }
+    unit.files.push(f);
+  }
   return {
     touched,
     dropped,
     dead,
-    newFiles: changed.filter((f) => !anyBlock(f.path)),
+    newFiles,
     changedFiles: changed.length + deleted.length,
     keptBlocks: guide.blocks.length - touched.length - dropped.length,
     uncoveredFiles: files.filter((f) => !anyBlock(f.path)).length,
@@ -930,10 +959,17 @@ function mergeIntoTemp(tmpText, fail) {
   const dropped = new Set(d.dropped);
   const returned = (moduleGuide(tmp.sections) || { blocks: [] }).blocks;
 
+  const seen = new Set();
   for (const b of returned) {
     if (!sent.has(b.heading) && !dropped.has(b.heading) && ready.guide.blocks.some((o) => o.heading === b.heading)) {
       fail("heading_clash", `${MAP_TMP_FILE} returns the block "${b.heading}", which was not sent out for refresh; merging it would overwrite that block unread.`);
     }
+    // Two subagents can make up the same new heading; merging would keep only
+    // the second block and drop the first one's files unseen.
+    if (seen.has(b.heading)) {
+      fail("heading_clash", `${MAP_TMP_FILE} returns the block "${b.heading}" twice; merging would keep only the second.`);
+    }
+    seen.add(b.heading);
   }
 
   const list = ready.guide.blocks
@@ -954,6 +990,11 @@ function mergeIntoTemp(tmpText, fail) {
     added.push(b.heading);
   }
   const returnedHeadings = new Set(returned.map((b) => b.heading));
+  // Files no merged block covers: a new file a subagent skipped, or one no
+  // pattern ever reached. The map's commit moves forward anyway, so a later
+  // refresh never sends such a file again; the count lets /index say so.
+  const mergedTests = list.map((x) => covers(filesPatterns(x.lines) || []));
+  const uncovered = files.filter((f) => !mergedTests.some((has) => has(f.path))).length;
 
   const old = ready.map;
   const fromTmp = (name) => tmp.sections.find((s) => s.name === name);
@@ -985,6 +1026,7 @@ function mergeIntoTemp(tmpText, fail) {
       added,
       dropped: d.dropped,
       notReturned: [...sent].filter((h) => !returnedHeadings.has(h)),
+      uncovered,
     },
   };
 }
