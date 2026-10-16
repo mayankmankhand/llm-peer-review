@@ -144,6 +144,17 @@ function emitError(code, message) {
 // may make before running --finalize once more. A map under the cap is never
 // rewritten, so it lands byte for byte.
 //
+// --finalize --merge (issue #254) is the same call after a --delta run, whose
+// temp file holds only what changed: a fresh header and Directory Tree, the
+// Module Guide blocks the subagents returned, and any section the session
+// chose to rewrite. Before the size cap, the script merges the existing map
+// into it (mergeIntoTemp, below) and writes the result back to the temp file,
+// so the rename stays the one atomic step. The JSON then adds
+//
+//   "merge":{"kept":<n>,"replaced":[..],"added":[..],"dropped":[..],"notReturned":[..]}
+//
+// with headings in the lists. Plain --finalize does exactly what it did before.
+//
 // Any failure deletes the temp file and leaves CODEBASE_MAP.md and INDEX.md as
 // they were.
 const MAP_FILE = "CODEBASE_MAP.md";
@@ -237,7 +248,7 @@ function withTrimmedHeader(lines, labels) {
   return out;
 }
 
-function finalizeMap() {
+function finalizeMap(merge) {
   const tmpPath = path.join(cwd, MAP_TMP_FILE);
   const mapPath = path.join(cwd, MAP_FILE);
 
@@ -267,8 +278,8 @@ function finalizeMap() {
   if (buf.length <= MAP_MIN_BYTES) {
     fail("too_small", `${MAP_TMP_FILE} is ${buf.length} bytes; a map must be over ${MAP_MIN_BYTES}.`);
   }
-  const text = buf.toString("utf8");
-  const lines = text.split(/\r?\n/);
+  let text = buf.toString("utf8");
+  let lines = text.split(/\r?\n/);
   if (!lines[0].startsWith("<!-- Generated:")) {
     fail("no_generated_header", `The first line of ${MAP_TMP_FILE} is not the <!-- Generated: ... --> header.`);
   }
@@ -281,6 +292,22 @@ function finalizeMap() {
   const minimal = lines.slice(0, titleAt).some((l) => l.startsWith("<!-- Files: 0,"));
   if (!minimal && !lines.some((l) => l.startsWith("## Module Guide"))) {
     fail("no_module_guide", `${MAP_TMP_FILE} has no "## Module Guide" section.`);
+  }
+
+  // The merge (--merge only): the merged map replaces the temp file's text
+  // here and on disk, and everything below runs on it.
+  let mergeRecord = null;
+  if (merge) {
+    const merged = mergeIntoTemp(text, fail);
+    try {
+      fs.writeFileSync(tmpPath, merged.text);
+    } catch (e) {
+      fail("merge_write_failed", `The merged map could not be written to ${MAP_TMP_FILE}: ${e.message}`);
+    }
+    text = merged.text;
+    lines = text.split(/\r?\n/);
+    buf = Buffer.from(text, "utf8");
+    mergeRecord = merged.record;
   }
 
   // The size cap: trim in order while over it, then write the trimmed map
@@ -347,6 +374,7 @@ function finalizeMap() {
     minimal,
     replaced,
     indexRemoved,
+    ...(mergeRecord ? { merge: mergeRecord } : {}),
   }) + "\n");
   process.exit(0);
 }
@@ -836,15 +864,130 @@ function printDelta() {
   }, chunks));
 }
 
+// The merge behind --finalize --merge: the existing map merged into the temp
+// map a --delta run wrote. It recomputes the delta the scan made, from the old
+// map's commit to the temp map's own Commit line (the HEAD the scan saw, so a
+// commit that lands while the subagents run changes nothing here), and then:
+//
+//   - old blocks keep their order and their bytes;
+//   - a returned block replaces the old block of the same heading, in place;
+//   - a new block goes before the first block whose heading sorts after it
+//     (byName, the directory tree's order), or at the end;
+//   - a block whose files went away in this diff is dropped;
+//   - a returned heading that names a block nobody sent out is refused
+//     (heading_clash): it would overwrite that block unread;
+//   - a block sent out but not returned keeps its old text and is named in
+//     notReturned, so a renamed heading never lands as an unreported twin;
+//   - sections come out in the template's order, each the temp file's when it
+//     has one, else the old map's byte for byte; a section under any other
+//     name follows them, the temp file's first. The header and title lines are
+//     the temp file's, and the Module Guide keeps the old map's lead lines.
+//
+// The result uses the old map's line endings. Returns { text, record }, or
+// calls fail (which removes the temp file and exits) with the reason.
+const TEMPLATE_SECTIONS = ["System Overview", "Directory Tree", "Module Guide", "Conventions", "Gotchas", "Navigation Guide"];
+
+function mergeIntoTemp(tmpText, fail) {
+  const oldText = readMapText(path.join(cwd, MAP_FILE));
+  if (oldText === null) {
+    fail("no_old_map", `${MAP_FILE} was not found; --merge needs the map the refresh scan read. Run /index full instead.`);
+  }
+  const ready = deltaReady(oldText);
+  if (ready.reason) {
+    fail("not_mergeable", `${MAP_FILE} cannot take a refresh (${ready.reason}). Run /index full instead.`);
+  }
+  const tmp = parseMap(tmpText);
+  const end = headerCommit(tmp.top.slice(0, tmp.titleAt)) || "HEAD";
+  if (!isAncestor(ready.since, end)) {
+    fail("not_mergeable", `The commit in ${MAP_FILE} is not an ancestor of ${end}. Run /index full instead.`);
+  }
+  let files;
+  try {
+    files = inventory().files;
+  } catch {
+    fail("git_failed", "git ls-files failed - not a git repository?");
+  }
+  const d = computeDelta(ready.guide, ready.since, end, files);
+  const sent = new Set(d.touched.map((b) => b.heading));
+  const dropped = new Set(d.dropped);
+  const returned = (moduleGuide(tmp.sections) || { blocks: [] }).blocks;
+
+  for (const b of returned) {
+    if (!sent.has(b.heading) && !dropped.has(b.heading) && ready.guide.blocks.some((o) => o.heading === b.heading)) {
+      fail("heading_clash", `${MAP_TMP_FILE} returns the block "${b.heading}", which was not sent out for refresh; merging it would overwrite that block unread.`);
+    }
+  }
+
+  const list = ready.guide.blocks
+    .filter((b) => !dropped.has(b.heading))
+    .map((b) => ({ heading: b.heading, lines: b.lines, old: true }));
+  const replaced = [];
+  const added = [];
+  for (const b of returned) {
+    const entry = { heading: b.heading, lines: endWithBlank(b.lines), old: false };
+    const at = list.findIndex((x) => x.heading === b.heading);
+    if (at !== -1) {
+      list[at] = entry;
+      replaced.push(b.heading);
+      continue;
+    }
+    const after = list.findIndex((x) => byName(x.heading, b.heading) > 0);
+    list.splice(after === -1 ? list.length : after, 0, entry);
+    added.push(b.heading);
+  }
+  const returnedHeadings = new Set(returned.map((b) => b.heading));
+
+  const old = ready.map;
+  const fromTmp = (name) => tmp.sections.find((s) => s.name === name);
+  const fromOld = (name) => old.sections.find((s) => s.name === name);
+  const parts = [tmp.top];
+  for (const name of TEMPLATE_SECTIONS) {
+    if (name === "Module Guide") {
+      parts.push(ready.guide.lead.concat(...list.map((x, i) => (i < list.length - 1 ? endWithBlank(x.lines) : x.lines))));
+      continue;
+    }
+    const s = fromTmp(name) || fromOld(name);
+    if (s) parts.push(s.lines);
+  }
+  for (const s of tmp.sections) if (!TEMPLATE_SECTIONS.includes(s.name)) parts.push(s.lines);
+  for (const s of old.sections) {
+    if (!TEMPLATE_SECTIONS.includes(s.name) && !fromTmp(s.name)) parts.push(s.lines);
+  }
+
+  // Each part but the last ends with a blank line, so a section never runs
+  // into the next; the map ends with one newline.
+  const out = [];
+  parts.forEach((p, i) => out.push(...(i < parts.length - 1 ? endWithBlank(p) : p)));
+  while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return {
+    text: out.join(old.eol) + old.eol,
+    record: {
+      kept: list.filter((x) => x.old).length,
+      replaced,
+      added,
+      dropped: d.dropped,
+      notReturned: [...sent].filter((h) => !returnedHeadings.has(h)),
+    },
+  };
+}
+
+// The lines as they are when they already end with a blank line; otherwise
+// with one added. A block or section that already ends that way is never
+// rewritten, which keeps an untouched block's bytes.
+function endWithBlank(lines) {
+  return lines.length > 0 && lines[lines.length - 1].trim() === "" ? lines : lines.concat("");
+}
+
 // Arguments: none for the full scan, --delta for the refresh scan, or
-// --finalize alone. Anything else is refused rather than ignored, so a
-// mistyped flag never prints a manifest in place of the result the caller is
-// waiting for.
+// --finalize alone or followed by --merge. Anything else is refused rather
+// than ignored, so a mistyped flag never prints a manifest in place of the
+// result the caller is waiting for.
 const args = process.argv.slice(2);
 const argsAre = (...want) => args.length === want.length && want.every((w, i) => args[i] === w);
 if (argsAre()) printFull(scanBase(), {});
 else if (argsAre("--delta")) printDelta();
-else if (argsAre("--finalize")) finalizeMap();
+else if (argsAre("--finalize")) finalizeMap(false);
+else if (argsAre("--finalize", "--merge")) finalizeMap(true);
 else {
-  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan everything, with --delta to scan what was committed since the map's commit, or with --finalize alone.`);
+  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan everything, with --delta to scan what was committed since the map's commit, or with --finalize (alone, or followed by --merge after a --delta run).`);
 }
