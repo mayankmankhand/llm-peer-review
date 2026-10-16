@@ -20,16 +20,16 @@
     "commands/ask-gemini.md": 7206,
     "commands/ask-gpt.md": 7202,
     "commands/codebase-to-course.md": 1561,
-    "commands/create-issue.md": 1802,
-    "commands/create-plan.md": 7338,
-    "commands/document.md": 9038,
+    "commands/create-issue.md": 1823,
+    "commands/create-plan.md": 7346,
+    "commands/document.md": 9074,
     "commands/execute.md": 6206,
-    "commands/explore.md": 6934,
+    "commands/explore.md": 6956,
     "commands/index.md": 1984,
-    "commands/merge.md": 5518,
+    "commands/merge.md": 5539,
     "commands/pair-debug.md": 879,
     "commands/peer-review.md": 2150,
-    "commands/review.md": 22976,
+    "commands/review.md": 22999,
     "commands/worktree.md": 1078,
     "session": 2437,
     "skills/audit-html/SKILL.md": 3487,
@@ -59,6 +59,6 @@
     "skills/review-ux/SKILL.md": 17756,
     "skills/security-audit/SKILL.md": 18457,
     "skills/setup/SKILL.md": 1398,
-    "skills/upgrade/SKILL.md": 15723
+    "skills/upgrade/SKILL.md": 15744
   }
 }
