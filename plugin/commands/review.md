@@ -92,7 +92,7 @@ Categorize the changes and pick relevant specialists:
 | The same code files (any code change) | Security | `subagent_type=tk:review-security-finder` |
 | `.tsx`, `.jsx`, `.vue`, `.svelte`, `.css`, `.scss`, `.html` files | UX Quality | `subagent_type=tk:review-ux-finder` |
 | Active `PLAN-*.md` exists in `plans/` | Plan Compliance | `subagent_type=tk:review-plan-finder` |
-| `.claude/commands/`, `.claude/skills/`, `.claude/agents/` or `.claude/rules/` files changed | Command Quality | `subagent_type=tk:review-commands-finder` |
+| `.claude/commands/`, `.claude/skills/`, `.claude/agents/` or `.claude/rules/` files changed, or a `.claude/toolkit/*.md` file other than `README.md` and `adoption.md` (the project's seam files, which stages paste in as prompt text) | Command Quality | `subagent_type=tk:review-commands-finder` |
 | `package.json` or lockfile changed | Dependency Security | `subagent_type=tk:review-deps-finder` |
 | Visual/UI changes AND (a dev server answers OR `package.json` has a `dev` or `start` script the finder can start) | Browser QA | `subagent_type=tk:review-browser-finder` |
 | `README.md`, `index.html`, or files in `docs/`, `pages/`, `content/`, `posts/` (exclude `CHANGELOG.md`, ADRs, API refs, generated docs) | Copy Clarity | `subagent_type=tk:review-copy-finder` |
