@@ -191,6 +191,7 @@ Issue framing != actual problem: third occurrence, in the diagnosis and in the s
 Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.
 Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.
 Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
+Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
 Lazy locators don't throw - validate at parse, not at construction.
 Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.
@@ -214,10 +215,12 @@ Pick a trace repo the owner is already working in: an idle repo turns the trace 
 Pin subagents freely; never switch the main-loop model mid-session.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
+Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.
 Probe why a command prompts before choosing the fix: the stop on `test -e <file>; echo $?` was the `$?`, not the `;` the issue blamed.
 Profile a slow suite by section before speeding it up: one fixture check can be the whole cost.
 Prove a harness with the thing it will be used for, not with a trivial prompt.
 Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.
+Read every fixture case before writing an "all N" bar: "all 7 deletion fixes read removed" counted a fix that hollows a feature out with a new stub.
 Read the skeptic's split lines: a refuted row often carries the real defect in a narrower claim.
 Reasoning models share their token budget between reasoning and output.
 Release counts go stale a second time when the fix loop itself changes them; re-sweep after the loop, never before.
