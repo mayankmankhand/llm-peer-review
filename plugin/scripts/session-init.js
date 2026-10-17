@@ -92,9 +92,11 @@
 // piping the branch into grep, which stops a default-mode session for approval.
 // lessons is { exists, path, hasDetail, content } while LESSONS.md is 8 KB or less.
 // Over that, content is left out and the object carries a handle instead:
-// { exists, path, hasDetail, bytes, lines, head, note }, where head is the file's
-// opening (at most 1,500 characters, cut at a line end) and note says to read the
-// file itself. map.overview over 8 KB is cut the same way, to its opening, and
+// { exists, path, hasDetail, bytes, lines, ranges, head, note }, where ranges lists
+// the line spans ({ from, to }, numbered from 1) that read the whole file, each
+// 28,500 bytes or fewer (#253), head is the file's opening (at most 1,500
+// characters, cut at a line end) and note says to read every range with the Read
+// tool. map.overview over 8 KB is cut the same way, to its opening, and
 // map.overviewCut (only then) says so. plans lists the newest 10 plans in full and the next 40 by name only
 // ({ name }); plansOmitted counts the older ones beyond those 50.
 // Each full plans[] entry is { name, progress, status, startCommit, models }. startCommit (#182)
@@ -415,8 +417,9 @@ function sessionStart() {
       Object.assign(lessons, {
         bytes,
         lines: countLines(lessonsRaw),
+        ranges: lessonRanges(lessonsRaw),
         head: headAtLineEnd(lessonsRaw, LESSONS_HEAD_CHARS),
-        note: "LESSONS.md is over 8 KB, so its content is left out here; read the file itself.",
+        note: "LESSONS.md is over 8 KB, so its content is left out here. " + LESSONS_READ_NOTE,
       });
     }
   }
@@ -447,6 +450,35 @@ function sessionStart() {
 // System Overview is cut at the same size.
 const LESSONS_INLINE_BYTES = 8 * 1024;
 const LESSONS_HEAD_CHARS = 1500;
+
+// The line ranges that read all of a handled LESSONS.md (#253). In 8 of 9 sessions
+// that got a bare "read the file itself", no stage read the index in full, and a
+// cat through Bash over about 30,000 bytes is cut to a 2 KB preview. So the handle
+// names the reads: each range ends at a line end and holds 28,500 bytes or fewer,
+// the margin the toolkit keeps under that cut; a single line over the limit is a
+// range of its own. Lines count from 1, as the Read tool's offset does. The note
+// names no command: the plugin build rewrites command names in prompts, not here.
+const LESSONS_RANGE_BYTES = 28500;
+const LESSONS_READ_NOTE = "Read the whole file with the Read tool, one call per entry in ranges (offset is from, limit is to - from + 1); a cat through Bash is cut to a 2 KB preview.";
+function lessonRanges(text) {
+  const ranges = [];
+  let from = 1;
+  let bytes = 0;
+  let line = 0;
+  for (const piece of text.split(/(?<=\n)/)) {
+    if (piece === "") continue;
+    line++;
+    const size = Buffer.byteLength(piece, "utf8");
+    if (line > from && bytes + size > LESSONS_RANGE_BYTES) {
+      ranges.push({ from, to: line - 1 });
+      from = line;
+      bytes = 0;
+    }
+    bytes += size;
+  }
+  if (line >= from) ranges.push({ from, to: line });
+  return ranges;
+}
 // Plans listed in full, then by name only; any older ones are counted.
 const PLANS_IN_FULL = 10;
 const PLANS_BY_NAME = 40;
@@ -470,8 +502,9 @@ function fitSessionStart(payload) {
     Object.assign(lessons, {
       bytes: Buffer.byteLength(raw, "utf8"),
       lines: countLines(raw),
+      ranges: lessonRanges(raw),
       head: headAtLineEnd(raw, LESSONS_HEAD_CHARS),
-      note: "LESSONS.md is left out here to keep this output under its size budget; read the file itself.",
+      note: "LESSONS.md is left out here to keep this output under its size budget. " + LESSONS_READ_NOTE,
     });
     if (size(payload) <= SESSION_START_BUDGET) return payload;
   }

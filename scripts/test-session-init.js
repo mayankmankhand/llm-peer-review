@@ -1274,6 +1274,37 @@ section('The 16,000-character budget holds as a total (review R13)', function ()
   const L = out.json.lessons || {};
   check('the budget turns the inline lessons into a handle first, and the note says why',
     L.content === undefined && L.bytes === Buffer.byteLength(lessons) && typeof L.head === 'string' && /size budget/.test(L.note || ''), JSON.stringify({ content: typeof L.content, bytes: L.bytes, note: L.note }));
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: the size-budget handle carries ranges that cover the whole file in order', cover.ok, cover.why);
+});
+
+// #253: how a lessons handle's ranges cover the file. They must start at line 1, run
+// in order with no gap or overlap, end on the last line, and hold 28,500 bytes or
+// fewer each, except a single line over that, which gets a range of its own.
+function rangeCoverage(text, ranges) {
+  const lines = text.split(/(?<=\n)/);
+  if (!Array.isArray(ranges) || ranges.length === 0) return { ok: false, why: 'ranges ' + JSON.stringify(ranges) };
+  let next = 1;
+  for (const r of ranges) {
+    if (r.from !== next || !(r.to >= r.from)) return { ok: false, why: 'range ' + JSON.stringify(r) + ' should start at line ' + next };
+    const bytes = Buffer.byteLength(lines.slice(r.from - 1, r.to).join(''));
+    if (bytes > 28500 && r.to !== r.from) return { ok: false, why: 'range ' + JSON.stringify(r) + ' holds ' + bytes + ' bytes' };
+    next = r.to + 1;
+  }
+  if (next !== lines.length + 1) return { ok: false, why: 'ranges end on line ' + (next - 1) + ' of ' + lines.length };
+  return { ok: true, why: JSON.stringify(ranges) };
+}
+
+section('A lessons handle lists every line to read (#253)', function () {
+  // One line over 28,500 bytes cannot be split at a line end, so it is read alone.
+  const repo = newRepo('ranges-long-line');
+  const lessons = '# Lessons\n\n- **short**\n' + '- **' + 'x'.repeat(30000) + '**\n' + '- **after**\n';
+  write(repo, 'LESSONS.md', lessons);
+  commitAll(repo, 'init');
+  const out = runScript([], repo);
+  const L = (out.json && out.json.lessons) || {};
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: a single line over 28,500 bytes gets a range of its own', cover.ok && (L.ranges || []).some(r => r.from === 4 && r.to === 4), cover.why);
 });
 
 section('Output fits under the host\'s cut (harness research, P6-C1)', function () {
@@ -1306,6 +1337,11 @@ section('Output fits under the host\'s cut (harness research, P6-C1)', function 
   check('a LESSONS.md over 8 KB becomes a handle: path, bytes, lines and head, no content',
     L.exists === true && L.path === 'LESSONS.md' && L.content === undefined && L.bytes === Buffer.byteLength(lessons) && L.lines === 404 && typeof L.head === 'string' && lessons.startsWith(L.head) && L.head.length <= 1500 && L.head.endsWith('\n'),
     JSON.stringify({ path: L.path, bytes: L.bytes, lines: L.lines, head: (L.head || '').length, content: typeof L.content }));
+  // #253: the 404-line fixture is about 33.5 KB, so it takes two reads.
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: the handle\'s ranges cover lines 1 to 404 in order, each 28,500 bytes or fewer, in at least 2 reads',
+    cover.ok && L.ranges.length >= 2 && L.ranges[L.ranges.length - 1].to === 404, cover.why);
+  check('253 ranges: the note says to read every range with the Read tool', /Read tool/.test(L.note || '') && /ranges/.test(L.note || ''), String(L.note));
   const plans = start.json.plans || [];
   check('the newest 10 plans keep full entries, the next 40 keep names, the rest are counted',
     plans.length === 50 && plans.slice(0, 10).every((x) => typeof x.progress === 'number' && typeof x.status === 'string') && plans.slice(10).every((x) => Object.keys(x).join() === 'name') && start.json.plansOmitted === 30 && plans[0].name === 'PLAN-issue-180.md',
