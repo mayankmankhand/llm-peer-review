@@ -2732,6 +2732,13 @@ console.log('\n7d. release notes: what --release-notes prints and the adoption r
   const current = project(at('1.2.0'));
   r = run(current, ROOT, ['--stamp']);
   check('257 stamp: a range with no entries needs no rows', r.status === 0 && /stamped/.test(r.stderr) && adoptionOf(current) === null, said(r));
+  // The upgrade skill writes the rows file even when the range has no entries,
+  // because its step 7 always names it: an empty file must stamp.
+  const emptyRows = path.join(TMP, 'notes-rows-empty.txt');
+  fs.writeFileSync(emptyRows, '');
+  const currentEmpty = project(at('1.2.0'));
+  r = run(currentEmpty, ROOT, ['--stamp', '--adoption', emptyRows]);
+  check('257 stamp: an empty rows file for a range with no entries stamps', r.status === 0 && /stamped/.test(r.stderr) && adoptionOf(currentEmpty) === null, said(r));
   const noNotes = project(at('1.0.0'));
   r = run(noNotes, BARE, ['--stamp']);
   check('257 stamp: a plugin with no notes file stamps with a note', r.status === 0 && /ships no release notes/.test(r.stderr) && audited(noNotes) === '1.2.0' && adoptionOf(noNotes) === null, said(r));
