@@ -54,6 +54,11 @@
 //   --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]
 //                                 write the file the decision-checker agent reads:
 //                                 this PR's decisions, then each landing's after the cut
+//   --wait --pr <N> --head <sha> [--timeout <seconds>]
+//                                 read PR <N> through gh or glab every 3 seconds,
+//                                 for up to 90 by default, until the host reports
+//                                 it mergeable at exactly that head; exit 1 names
+//                                 the status the host still reports
 //   --style [local-merge|host-merge|host-squash]
 //                                 the repo's landing habit; with a value, record it
 //   --changelog-place <changelog> <block>
@@ -84,7 +89,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
 
 class UsageError extends Error {}
 
@@ -621,6 +626,53 @@ function readPr(n) {
   return Object.assign(pr, parseBody(pr.body), { host: cli });
 }
 
+// ---- waiting for the host ---------------------------------------------------------
+// After a push, and after the previous landing, the host needs some seconds to
+// work out whether a PR can merge, and a merge run sooner fails (GitLab says
+// "Merge conflicts exist" while it is still checking; issue #258 item 3).
+// --wait reads the PR through the host's read row until the host reports it
+// mergeable at exactly the pushed head, every WAIT_STEP_MS for up to --timeout
+// seconds. Read-only. A transient status (`checking`, `conflict`, `UNKNOWN`)
+// is waited through; a PR that is no longer open stops it at once.
+// TK_MERGE_WAIT_STEP_MS shortens the step for the tests.
+const WAIT_TIMEOUT_S = 90;
+const WAIT_STEP_MS = 3000;
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function readMergeable(n) {
+  const cli = hostCli();
+  const args = cli === 'gh'
+    ? ['pr', 'view', String(n), '--json', 'mergeable,headRefOid,state']
+    : ['mr', 'view', String(n), '--output', 'json'];
+  const r = run(cli, args);
+  if (r.error || r.status !== 0) throw new Error(cli + ' could not read #' + n + ': ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
+  const j = JSON.parse(r.stdout);
+  return cli === 'gh'
+    ? { host: cli, status: String(j.mergeable || 'none'), ready: j.mergeable === 'MERGEABLE', head: j.headRefOid ? String(j.headRefOid).toLowerCase() : null, state: String(j.state || ''), open: j.state === 'OPEN' }
+    : { host: cli, status: String(j.detailed_merge_status || 'none'), ready: j.detailed_merge_status === 'mergeable', head: j.sha ? String(j.sha).toLowerCase() : null, state: String(j.state || ''), open: j.state === 'opened' };
+}
+function waitMergeable(o) {
+  for (const k of ['pr', 'head']) if (o['--' + k] === undefined) throw new UsageError('--wait needs --' + k);
+  if (!/^\d+$/.test(String(o['--pr']))) throw new UsageError('--pr takes a PR number');
+  const head = resolveCommit(o['--head']);
+  if (!head) throw new UsageError('--head ' + o['--head'] + ' does not name a commit');
+  const timeoutS = o['--timeout'] === undefined ? WAIT_TIMEOUT_S : Number(o['--timeout']);
+  if (!Number.isFinite(timeoutS) || timeoutS < 0) throw new UsageError('--timeout takes a number of seconds');
+  const step = Math.max(1, Number(process.env.TK_MERGE_WAIT_STEP_MS) || WAIT_STEP_MS);
+  const start = Date.now();
+  const seen = [];   // each status the host reported, in order, a repeat folded
+  let last, polls = 0;
+  for (;;) {
+    last = readMergeable(o['--pr']);
+    polls++;
+    const label = last.status + (last.head !== head ? ' at ' + (last.head ? last.head.slice(0, 7) : 'no head') : '');
+    if (seen[seen.length - 1] !== label) seen.push(label);
+    if (!last.open || (last.ready && last.head === head)) break;
+    if (Date.now() - start + step > timeoutS * 1000) break;
+    sleepMs(step);
+  }
+  return { pr: Number(o['--pr']), head, host: last.host, ready: last.open && last.ready && last.head === head, status: last.status, hostHead: last.head, state: last.state, open: last.open, polls, seen, waitedMs: Date.now() - start };
+}
+
 // ---- style, changelog, marker -----------------------------------------------------
 // The landing styles /merge offers (merge-rules.md, "The marker and the style"):
 // a merge commit made on this machine, the host's merge button, or the host's
@@ -774,9 +826,9 @@ function finish(result, flags, suppressed, notes) {
 }
 
 // ---- arguments ---------------------------------------------------------------------
-const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out']);
+const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
-const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions']);
+const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait']);
 function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -805,6 +857,19 @@ function main(argv) {
   if (o['--changelog-place']) {
     const [cl, block] = o['--changelog-place'];
     return finish(Object.assign({ mode: 'changelog-place' }, changelogPlace(path.resolve(cl), path.resolve(block))), [], 0, notes);
+  }
+  if (o['--wait']) {
+    const r = waitMergeable(o);
+    process.stdout.write(JSON.stringify(Object.assign({ mode: 'wait' }, r)) + '\n');
+    if (r.ready) {
+      process.stderr.write('merge-check: #' + r.pr + ' is mergeable at ' + r.head.slice(0, 7) + ' (' + r.polls + ' read' + (r.polls === 1 ? '' : 's') + ': ' + r.seen.join(', ') + ')\n');
+      return 0;
+    }
+    const why = !r.open ? 'it is no longer open (' + (r.state || 'no state reported') + ')'
+      : r.hostHead !== r.head ? 'the host still has ' + (r.hostHead ? r.hostHead.slice(0, 7) : 'no head') + ', not the pushed ' + r.head.slice(0, 7) + ' (' + r.status + ')'
+      : 'the host still says ' + r.status;
+    process.stderr.write('merge-check: #' + r.pr + ' is not mergeable at ' + r.head.slice(0, 7) + ' after ' + Math.round(r.waitedMs / 1000) + ' s and ' + r.polls + ' read' + (r.polls === 1 ? '' : 's') + ': ' + why + '\n');
+    return 1;
   }
   if (o['--pr-body'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr-body' }, missingParts(parseBody(readBodyArg(o['--pr-body'])), notes)), [], 0, notes);
   if (o['--pr'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr' }, missingParts(readPr(o['--pr']), notes)), [], 0, notes);

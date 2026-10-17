@@ -511,6 +511,54 @@ section('258: what a landing deletes, and what it stops tracking', () => {
   check('258 deleted: a clean landing that deletes a file still exits 0', r.status === 0 && j.flagged === 0 && /^note: [^\n]*local\.cfg/m.test(r.stderr), 'exit ' + r.status + ', flagged ' + j.flagged + ', stderr ' + JSON.stringify(r.stderr.split('\n').slice(0, 3)));
 });
 
+// Issue #258 item 3: --wait reads the PR through the host's read row until the
+// host reports it mergeable at exactly the pushed head. The stubs answer one
+// reply per call and repeat the last one after that; TK_MERGE_WAIT_STEP_MS
+// shortens the 3-second step so each case takes at most about a second.
+section('258: --wait reads the host until the PR is mergeable at the pushed head', () => {
+  const dir = newRepo('wait258');
+  write(dir, 'a.txt', 'a\n');
+  const head = commitAll(dir, 'M0');
+  const other = 'f'.repeat(40);
+  const stubDir = path.join(sandbox, 'wait-stub-258');
+  const bin = path.join(stubDir, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  for (const name of ['gh', 'glab']) {
+    write(bin, name, '#!/bin/sh\nd="' + stubDir + '"\necho "' + name + ' $*" >> "$d/calls.txt"\nn=$(cat "$d/count" 2>/dev/null || echo 0)\nn=$((n + 1))\necho "$n" > "$d/count"\nif [ -f "$d/reply-$n.json" ]; then cat "$d/reply-$n.json"; else cat "$d/reply-last.json"; fi\n');
+    fs.chmodSync(path.join(bin, name), 0o755);
+  }
+  // One case's replies, in order; the stub's call count and log start again.
+  function replies(list) {
+    for (const f of fs.readdirSync(stubDir)) if (f !== 'bin') fs.rmSync(path.join(stubDir, f), { force: true });
+    list.forEach((reply, i) => fs.writeFileSync(path.join(stubDir, 'reply-' + (i + 1) + '.json'), JSON.stringify(reply)));
+    fs.writeFileSync(path.join(stubDir, 'reply-last.json'), JSON.stringify(list[list.length - 1]));
+  }
+  const calls = () => (fs.existsSync(path.join(stubDir, 'calls.txt')) ? read(stubDir, 'calls.txt') : '');
+  const env = Object.assign({}, ENV, { PATH: bin + path.delimiter + ENV.PATH, TK_MERGE_WAIT_STEP_MS: '20' });
+  const wait = (args) => mc(dir, ['--wait'].concat(args), env);
+  const said = (r) => 'exit ' + r.status + ' ' + (r.stderr.split('\n').find((l) => l.trim()) || '');
+  g(dir, ['remote', 'add', 'origin', 'git@gitlab.com:grp/proj.git']);
+  replies([{ detailed_merge_status: 'checking', sha: head, state: 'opened' }, { detailed_merge_status: 'mergeable', sha: head, state: 'opened' }]);
+  const a = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: GitLab checking then mergeable at the pushed head is ready', a.status === 0 && a.json && a.json.ready === true && a.json.polls === 2 && /^glab mr view 8 --output json$/m.test(calls()), said(a));
+  replies([{ detailed_merge_status: 'mergeable', sha: other, state: 'opened' }]);
+  const c = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a host head that never matches times out with exit 1 and names it', c.status === 1 && c.json && c.json.ready === false && c.json.hostHead === other && /fffffff/.test(c.stderr), said(c));
+  replies([{ detailed_merge_status: 'conflict', sha: head, state: 'opened' }]);
+  const d = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a status that stays conflict times out with exit 1 and names it', d.status === 1 && d.json && d.json.ready === false && /conflict/.test(d.stderr), said(d));
+  replies([{ detailed_merge_status: 'not_open', sha: head, state: 'merged' }]);
+  const e = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a merged or closed PR stops at once', e.status === 1 && e.json && e.json.polls === 1 && /no longer open/.test(e.stderr), said(e));
+  g(dir, ['remote', 'set-url', 'origin', 'git@github.com:x/y.git']);
+  replies([{ mergeable: 'UNKNOWN', headRefOid: head, state: 'OPEN' }, { mergeable: 'MERGEABLE', headRefOid: head, state: 'OPEN' }]);
+  const b = wait(['--pr', '7', '--head', head, '--timeout', '1']);
+  check('258 wait: GitHub UNKNOWN then MERGEABLE at the pushed head is ready', b.status === 0 && b.json && b.json.ready === true && b.json.polls === 2 && /^gh pr view 7 --json mergeable,headRefOid,state$/m.test(calls()), said(b));
+  const u1 = wait(['--pr', '7', '--timeout', '1']);
+  const u2 = wait(['--head', head]);
+  check('258 wait: --wait needs --pr and --head', u1.status === 2 && /--wait needs --head/.test(u1.stderr) && u2.status === 2 && /--wait needs --pr/.test(u2.stderr), said(u1) + ' | ' + said(u2));
+});
+
 // --- landings on main, the style, the marker ------------------------------------------------
 section('--since: what counts as a landing, and what cannot be checked', () => {
   const dir = newRepo('since');
