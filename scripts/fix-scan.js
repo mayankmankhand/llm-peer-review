@@ -208,7 +208,7 @@ function scanReport(file, opts, root) {
     if (digest[id] !== 'FIXED') continue;
     const locus = loci[id] || null;
     if (!locus) { row.fixed.push({ id, locus: null, hunk: 'no locus', file: null, line: null }); continue; }
-    const l = strongest(patches.map((patch) => locusLabel(locus.path, locus.line, { root, base: base || undefined, patch, untrackedAtStart })));
+    const l = strongest(patches.map((patch) => locusLabel(locus.path, locus.line, { root, base: base || undefined, patch, untrackedAtStart, checkIgnore: !baseNote })));
     row.fixed.push({ id, locus: locus.path + (locus.line ? ':' + locus.line : ''), hunk: hunkLabel(l), file: l.file, line: l.line });
   }
   return row;

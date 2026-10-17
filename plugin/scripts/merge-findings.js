@@ -449,9 +449,10 @@ function locusLabel(relPath, line, opts) {
   const rel = path.posix.normalize(String(relPath || '').trim().replace(/\\/g, '/')).replace(/^\.\//, '');
   if (rel === '' || rel === '.' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('../')) return { file: 'absent', line: 'unknown', hunks: 0, near: 0 };
   // A file git ignores (a plan, a report) never shows in a git diff, so a fix to
-  // it cannot be seen here at all. Asked only with a base, so `root` is the
-  // repository the review ran in.
-  if (o.base && git(root, ['check-ignore', '-q', '--', rel]).status === 0) return { file: 'ignored', line: 'unknown', hunks: 0, near: 0 };
+  // it cannot be seen here at all. Asked only when `root` is the repository the
+  // review ran in: by default when a base is given, or when `checkIgnore` says so.
+  const askIgnore = o.checkIgnore !== undefined ? !!o.checkIgnore : !!o.base;
+  if (askIgnore && git(root, ['check-ignore', '-q', '--', rel]).status === 0) return { file: 'ignored', line: 'unknown', hunks: 0, near: 0 };
   const inBase = o.base ? git(root, ['cat-file', '-e', o.base + ':' + rel]).status === 0 : true;
   const onDisk = (() => { try { return fs.statSync(path.join(root, rel)).isFile(); } catch (e) { return false; } })();
   const untrackedAtStart = Array.isArray(o.untrackedAtStart) && o.untrackedAtStart.includes(rel);
