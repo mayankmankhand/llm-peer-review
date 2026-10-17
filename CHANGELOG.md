@@ -2,6 +2,26 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - The Whole Index, Read
+
+**Issue #253.** When the lessons index is too long to print at session start, the startup output now says exactly how to read all of it, and a quality-check run no longer goes to waste because a judge's blocked experiment was refused. Not released yet: the version number is decided at release.
+
+### Changed
+
+- **The lessons handle names its reads.** When `LESSONS.md` is over 8 KB, `session-init.js` used to hand back a note that only said to read the file. The handle now carries `ranges`: the line spans that read the whole file, each 28,500 bytes or fewer, worked out from the file on every run. Its note says to read every range with the Read tool, which needs no permission row and is not cut to a preview the way a `cat` through Bash is. The size-budget handle carries the same ranges. On this repository that is two reads, lines 1-407 and 408-499.
+
+### For maintainers
+
+- **A judge's blocked scratch experiment no longer voids a quality-check run.** `scripts/quality-check.js` marked a run INVALID whenever any call was denied, and the audit skeptics and fix verifiers, which have no edit tools, still try shell experiments that Claude Code refuses. A denied Bash call from either of those judges is now the warning `denied-experiment:<n>` when every absolute path it names stays inside the run (its temp folder, its scratchpad, or `/dev/null`) and it has none of the shapes that can reach outside without naming a path. Every other denial still invalidates the run. It is a best-effort filter over the text of a call that never ran, so it decides scoring, not safety.
+
+### Upgrading
+
+- Nothing to do: no new permission rows, no new upgrade checks, and no prompt file changed.
+
+### Why
+
+In 8 of 9 sessions that got the bare note, no stage read the lessons index in full, and the one `cat` that tried hit the 2 KB preview twice. On the harness side, 2 of the 63 saved runs had been thrown away only for a judge's blocked experiment ($31.79). Rechecking every saved run flipped exactly those two to valid and changed nothing else, and every recorded score comparison came out the same. The third item in the issue, a split of the time spent waiting on questions, was not built: the issue made it conditional on a pain that is not yet confirmed, and it would print 0 today.
+
 ## Unreleased - Every Run Kept
 
 **Issue #252.** A review's receipts folder now keeps the record of every check run in it, so a fix's recheck sits beside the check it answers. Not released yet: the version number is decided at release.

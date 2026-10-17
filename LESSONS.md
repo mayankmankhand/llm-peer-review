@@ -497,3 +497,7 @@
 - **Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.**
 - **Read every fixture case before writing an "all N" bar: "all 7 deletion fixes read removed" counted a fix that hollows a feature out with a new stub.**
 - **Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.**
+
+## Issue 253 (judge denials and the lessons read)
+
+- **Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.**
