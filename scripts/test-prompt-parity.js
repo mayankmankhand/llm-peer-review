@@ -63,8 +63,11 @@ for (const [file, text] of prompts) {
     named.get(m[1]).add(file);
   }
 }
-const unknown = [...named.keys()].filter(n => n !== 'README.md' && !SEAMS.includes(n));
-check('every seam a prompt file names is one of the eight, or the README setup seeds', unknown.length === 0, unknown.join(', '));
+// Two files in the folder are no seam: the README setup seeds, and the adoption
+// record /tk:upgrade's stamp writes (issue #257).
+const NOT_SEAMS = ['README.md', 'adoption.md'];
+const unknown = [...named.keys()].filter(n => !NOT_SEAMS.includes(n) && !SEAMS.includes(n));
+check('every seam a prompt file names is one of the eight, the README setup seeds, or the adoption record the stamp writes', unknown.length === 0, unknown.join(', '));
 const unread = SEAMS.filter(s => !named.has(s));
 check('each of the eight is read by at least one prompt file', unread.length === 0, unread.join(', '));
 // Issue #221: the seventh seam is JSON, not prose, and its reader is the checks runner, called from the execute stage's test step.
