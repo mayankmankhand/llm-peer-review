@@ -163,7 +163,7 @@ function finish() {
 // a part that needs another's fixture builds it the same way (recordedCaseDir).
 const PARTS = {
   1: ['0', '1', '2', '3', '3b', '4', '4b', '4c', '4d', '4e', '4f', '4g', '4h', '4i', '4j'],
-  2: ['4k', '9b'],
+  2: ['4k', '7d', '9b'],
   3: ['4l', '4m', '4n', '4o', '5', '6', '7', '7b', '7c', '8', '9', '10', '11', '11b', '11c', '11d', '11e', '11f'],
   4: ['9c', '9d', '9e', '9f', '9g', '9h'],
 };
@@ -416,6 +416,25 @@ function runReceipt(proj, f, env) {
   return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), stdout: r.stdout || '' };
 }
 const outLines = (s) => s.split('\n').filter(Boolean);
+// Every stamp a case makes carries the rows of its own range (issue #257): the
+// stamp refuses while a release-note entry in the range has no adoption row,
+// and the plugin roots built here ship the real notes. rowsFor writes one
+// `no action` row per entry a --release-notes run printed (an empty file when
+// it printed none) and returns its path; stampWithRows asks the same script,
+// project, plugin root and --from for the range, then adds the rows to the
+// stamp's arguments. Cases that test the stamp's refusals call it bare.
+let stampRowFiles = 0;
+function rowsFor(notes) {
+  let entries = [];
+  try { entries = JSON.parse(notes.stdout).entries || []; } catch (e) { entries = []; }
+  const file = path.join(TMP, 'stamp-rows-' + (++stampRowFiles) + '.txt');
+  fs.writeFileSync(file, entries.map((e) => e.id + ' no action: a test fixture').join('\n') + '\n');
+  return file;
+}
+function stampWithRows(argv) {
+  const notesArgv = argv.filter((a, i) => a !== '--stamp' && a !== '--refuted' && argv[i - 1] !== '--refuted').concat('--release-notes');
+  return argv.concat('--adoption', rowsFor(spawnSync('node', notesArgv, { encoding: 'utf8' })));
+}
 // Does the receipt's output show what the finding stands on? It exits 0, and:
 // a finding with a line shows that line (awk and grep -n both print `<n>:`); a
 // list finding prints exactly its listed items, one `<marker>: <item>` line
@@ -1557,7 +1576,7 @@ if (OWN('4i')) {
   dir = offeredCase('no-git', { noGit: true });
   res = audit(dir);
   check('outside a git repository there is no record: every row is reported', JSON.stringify(missingOf(res)) === JSON.stringify([MISSING_ROW]) && JSON.stringify(lostOf(res)) === JSON.stringify([REPORT_ROW, LINT_ROW]) && !fs.existsSync(path.join(dir, '.git')));
-  const stampAt = (d, o) => spawnSync('node', [(o && o.script) || SCRIPT, '--project', d, '--plugin-root', (o && o.pluginRoot) || PLUGIN, '--stamp'], { encoding: 'utf8' });
+  const stampAt = (d, o) => spawnSync('node', stampWithRows([(o && o.script) || SCRIPT, '--project', d, '--plugin-root', (o && o.pluginRoot) || PLUGIN, '--stamp']), { encoding: 'utf8' });
   const nogitStamp = stampAt(dir);
   check('  and --stamp there records nothing and says nothing about a record', nogitStamp.status === 0 && !/offered-rows record/.test(nogitStamp.stderr) && !fs.existsSync(path.join(dir, '.git')), nogitStamp.stderr);
 }
@@ -1568,7 +1587,7 @@ if (OWN('4i')) {
   const dir = offeredCase('stamp', { allow: SEED_ALLOW.concat([LINT_ROW]) });
   let res = audit(dir);
   check('fixture: before the stamp one lost row is reported (the other is back in the file)', JSON.stringify(lostOf(res)) === JSON.stringify([REPORT_ROW]), JSON.stringify(lostOf(res)));
-  let st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  let st = spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
   const keys = [REPORT_ROW, LINT_ROW].slice().sort();
   check('--stamp records both lost-row candidates in the offered-rows record, present or declined, and says so', st.status === 0 && JSON.stringify(recordRowsOf(dir)) === JSON.stringify(keys) && /recorded 2 permission rows of the project's own that C-9 offers back in the offered-rows record/.test(st.stderr), st.stderr + JSON.stringify(recordRowsOf(dir)));
   res = audit(dir);
@@ -1580,11 +1599,11 @@ if (OWN('4i')) {
   check('  and a row the owner removes afterwards is not offered again either', res.status === 0 && c9InRange(res) && lostOf(res) === null, res.summary + JSON.stringify(lostOf(res)));
   const recordText = () => { try { return read(recordPathOf(dir)); } catch (e) { return null; } };
   const before = recordText();
-  st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  st = spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
   check('  a second --stamp finds nothing new to record and leaves the record as it was', st.status === 0 && before !== null && recordText() === before && !/offered-rows record/.test(st.stderr), st.stderr);
   // Setup reads the same record: a seed row it records survives the stamp's write.
   const seeded = offeredCase('stamp-keeps-setup-rows', { allow: SEED_ALLOW.concat([LINT_ROW]), record: [MISSING_ROW] });
-  st = spawnSync('node', [SCRIPT, '--project', seeded, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  st = spawnSync('node', stampWithRows([SCRIPT, '--project', seeded, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
   check('  --stamp keeps every row the record already listed (a seed row setup offered) beside the rows it adds', st.status === 0 && JSON.stringify(recordRowsOf(seeded)) === JSON.stringify([MISSING_ROW, REPORT_ROW, LINT_ROW].sort()), JSON.stringify(recordRowsOf(seeded)));
   // A clone has no record: its first upgrade offers the rows once more.
   gitIn(dir, ['add', '-A']);
@@ -1594,7 +1613,7 @@ if (OWN('4i')) {
   const cres = cl.status === 0 ? audit(clone) : { findings: [] };
   check('a fresh clone has no offered-rows record, so both lost rows are offered again there', cl.status === 0 && recordRowsOf(clone) === null && JSON.stringify(lostOf(cres)) === JSON.stringify([REPORT_ROW, LINT_ROW]), cl.stderr + JSON.stringify(lostOf(cres)));
   const noLocal = offeredCase('stamp-no-settings', { noSettings: true });
-  st = spawnSync('node', [SCRIPT, '--project', noLocal, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  st = spawnSync('node', stampWithRows([SCRIPT, '--project', noLocal, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
   check('--stamp with no settings.local.json records nothing (no decision of the owner\'s can sit in a missing file)', st.status === 0 && recordRowsOf(noLocal) === null && !fs.existsSync(recordPathOf(noLocal)), st.stderr);
 }
 }
@@ -1858,7 +1877,7 @@ if (OWN('4l')) {
   const after = audit(dir, [], { pluginRoot: PLUGIN72 });
   const disagree = receiptsAgree(dir, res, after);
   check('  with every fix applied the rerun has no finding, and every receipt agrees with it', fixed.length === 5 && after.findings.length === 0 && disagree.length === 0, JSON.stringify(after.findings.map(f => f.key)) + ' | ' + disagree.join(' | '));
-  const st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN72, '--stamp'], { encoding: 'utf8' });
+  const st = spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN72, '--stamp']), { encoding: 'utf8' });
   const next = audit(dir, [], { pluginRoot: PLUGIN72 });
   check('  --stamp records 7.2.0, and the next audit keeps C-9, C-10 and C-11 in range with 0 candidates', st.status === 0 && JSON.parse(read(path.join(dir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.2.0' && /7\.2\.0 -> 7\.2\.0 \[C-2, C-7, C-9, C-10, C-11\]/.test(next.summary) && next.findings.length === 0, st.stderr + next.summary);
 }
@@ -1986,7 +2005,7 @@ console.log('\n4n. the refuted record: a finding the audit killed is not reporte
   const dir = path.join(TMP, 'refuted');
   const refutedPathOf = (d) => { const r = gitIn(d, ['rev-parse', '--git-path', 'tk-refuted-findings.json']); return r.status === 0 ? path.resolve(d, r.stdout.trim()) : null; };
   const refutedKeysOf = (d) => { try { return JSON.parse(read(refutedPathOf(d))).refuted; } catch (e) { return null; } };
-  const stampWith = (d, args) => spawnSync('node', [SCRIPT, '--project', d, '--plugin-root', PLUGIN, '--stamp'].concat(args || []), { encoding: 'utf8' });
+  const stampWith = (d, args) => spawnSync('node', stampWithRows([SCRIPT, '--project', d, '--plugin-root', PLUGIN, '--stamp'].concat(args || [])), { encoding: 'utf8' });
   const CLAUDE_LINES = ['# Project', '', 'Run /review after execute.', '', 'Run /document before a release.', ''];
   const c11 = (r) => r.findings.filter(x => x.id === 'C-11' && x.file.relPath === 'CLAUDE.md');
   write(dir, '.claude/.toolkit-state.json', STATE_701);
@@ -2096,7 +2115,7 @@ console.log('\n4o. the refuted record keeps whole-file findings out (review 2026
   gitIn(dir, ['init', '-q']);
   const recordPath = () => { const r = gitIn(dir, ['rev-parse', '--git-path', 'tk-refuted-findings.json']); return path.resolve(dir, r.stdout.trim()); };
   const recorded = () => { try { return JSON.parse(read(recordPath())).refuted; } catch (e) { return null; } };
-  const stamp = (file) => spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp', '--refuted', path.join(dir, file)], { encoding: 'utf8' });
+  const stamp = (file) => spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp', '--refuted', path.join(dir, file)]), { encoding: 'utf8' });
   let res = audit(dir);
   const whole = res.findings.find(x => /:missing-ask-rows$/.test(x.key)) || { key: '' };
   const line = res.findings.find(x => x.id === 'C-11' && x.file.relPath === 'CLAUDE.md') || { key: '' };
@@ -2196,7 +2215,7 @@ const STAMP = path.join(TMP, 'stamp');
 write(STAMP, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'copy-migrated', previousVersion: '6.3.3', auditedVersion: '7.0.0' }));
 write(STAMP, '.claude/settings.local.json', read(path.join(PLUGIN, 'seed', 'settings.local.json')));
 if (OWN('7')) {
-var st = spawnSync('node', [SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+var st = spawnSync('node', stampWithRows([SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
 var stamped = JSON.parse(read(path.join(STAMP, '.claude', '.toolkit-state.json')));
 check('--stamp raises the audited version and keeps the rest of the state', st.status === 0 && stamped.auditedVersion === '7.1.0' && stamped.version === '7.1.0' && stamped.previousVersion === '6.3.3' && stamped.path === 'copy-migrated' && /stamped/.test(st.stderr), st.stderr);
 r = audit(STAMP);
@@ -2205,7 +2224,7 @@ check('after the stamp only the conventions that run on every upgrade are in ran
 const NEWER = JSON.stringify({ version: '7.2.0', auditedVersion: '7.2.0', path: 'plugin' });
 write(STAMP, '.claude/.toolkit-state.json', NEWER);
 if (OWN('7')) {
-st = spawnSync('node', [SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+st = spawnSync('node', stampWithRows([SCRIPT, '--project', STAMP, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
 check('--stamp refuses to lower a newer auditedVersion: one line, exit 0, nothing written', st.status === 0 && read(path.join(STAMP, '.claude', '.toolkit-state.json')) === NEWER && /not stamping/.test(st.stderr) && outLines(st.stderr).length === 1 && st.stdout === '', st.stderr);
 }
 if (OWN('7b')) {
@@ -2215,7 +2234,7 @@ console.log('\n7b. C-7 fires only when the rules text changed; --stamp raises an
 }
 const RULES_REL = '.claude/rules/toolkit.md';
 const SEED_STAMP = (/<!-- Toolkit version: ([^ |]+)/.exec(SEED_RULES_TEXT) || [])[1];
-const stampRun = (proj, o) => spawnSync('node', [(o && o.script) || SCRIPT, '--project', proj, '--plugin-root', (o && o.pluginRoot) || PLUGIN, '--stamp'], { encoding: 'utf8' });
+const stampRun = (proj, o) => spawnSync('node', stampWithRows([(o && o.script) || SCRIPT, '--project', proj, '--plugin-root', (o && o.pluginRoot) || PLUGIN, '--stamp']), { encoding: 'utf8' });
 const c7Of = (res) => res.findings.filter(f => f.id === 'C-7');
 const rulesOf = (dir) => read(path.join(dir, RULES_REL));
 // A project audited at 7.1.0, so only the conventions that run on every upgrade
@@ -2606,6 +2625,122 @@ if (OWN('9')) {
   check('  a copy with one byte added inside the block fails that comparison', drift.applied && offeredBlock(read(drift.path)) !== setupBlock);
 }
 }
+if (OWN('7d')) {
+
+// --- 7d. release notes and the adoption record (issue #257) -----------------------------------
+console.log('\n7d. release notes: what --release-notes prints and the adoption rows --stamp records');
+{
+  // A plugin root as the build writes one: plugin.json and the release notes it
+  // ships, newest first. The main root is at 1.2.0 with a block above it.
+  const notesRoot = (name, version, notes) => {
+    const root = path.join(TMP, name);
+    write(root, '.claude-plugin/plugin.json', JSON.stringify({ name: 'tk', version }));
+    if (notes !== null) write(root, 'CHANGELOG.md', notes);
+    return root;
+  };
+  const ROOT = notesRoot('notes-plugin', '1.2.0', [
+    '# Release notes', 'The released blocks of the toolkit\'s CHANGELOG.md, newest first.', '',
+    '## v1.3.0 - Above (2026-10-03)', '', '### Added', '', '- **Above the plugin.** In no range here.', '',
+    '## v1.2.0 - Second (2026-10-02)', '', '### Changed', '', '- **Second change.** One bullet.', '',
+    '## v1.1.0 - First (2026-10-01)', '', '**An intro paragraph, no entry.**', '', '### Added', '',
+    '- **First addition.** Its text.', '  - a nested bullet under it', '- **Second addition.** Its text.', '',
+    '### Why', '', 'Prose under Why, no entry.', '',
+    '## v1.0.0 - Base (2026-09-30)', '', '- **Base entry.** At the recorded version, so out of range.', '',
+  ].join('\n'));
+  const PROSE = notesRoot('notes-prose', '2.0.0', '# Release notes\nx\n\n## v2.0.0 - Prose (2026-10-05)\n\nA block with no bullets at all.\n\nIts second paragraph.\n\n## v1.9.0 - Base (2026-10-04)\n\n- **Base.** Out of range.\n');
+  const BARE = notesRoot('notes-none', '1.2.0', null);
+  let n = 0;
+  const at = (v) => ({ version: v, auditedVersion: v, path: 'plugin' });
+  const project = (state, files) => {
+    const dir = path.join(TMP, 'notes-project-' + (++n));
+    fs.mkdirSync(dir, { recursive: true });
+    if (state !== null) write(dir, '.claude/.toolkit-state.json', JSON.stringify(state));
+    for (const [rel, text] of Object.entries(files || {})) write(dir, rel, text);
+    return dir;
+  };
+  const rows = (lines) => { const f = path.join(TMP, 'notes-rows-' + (++n) + '.txt'); fs.writeFileSync(f, lines.join('\n') + '\n'); return f; };
+  const run = (dir, root, args) => spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', root].concat(args), { encoding: 'utf8' });
+  const notesOf = (r) => { try { return JSON.parse(r.stdout); } catch (e) { return null; } };
+  const idsOf = (j) => (j && Array.isArray(j.entries) ? j.entries.map((e) => e.id) : null);
+  const said = (r) => 'exit ' + r.status + ' ' + (outLines(r.stderr).slice(-1)[0] || '');
+  const readOr = (p) => (fs.existsSync(p) ? read(p) : null);
+  const stateOf = (dir) => readOr(path.join(dir, '.claude', '.toolkit-state.json'));
+  const adoptionOf = (dir) => readOr(path.join(dir, '.claude', 'toolkit', 'adoption.md'));
+  const audited = (dir) => { try { return JSON.parse(stateOf(dir)).auditedVersion; } catch (e) { return null; } };
+  const snapshot = (dir) => {
+    const out = [];
+    const go = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) { const p = path.join(d, e.name); if (e.isDirectory()) go(p); else out.push(path.relative(dir, p) + '\n' + read(p)); } };
+    go(dir);
+    return out.join('\n--\n');
+  };
+  const today = new Date().toISOString().slice(0, 10);
+
+  const at100 = project(at('1.0.0'));
+  const untouched = snapshot(at100);
+  let r = run(at100, ROOT, ['--release-notes']);
+  let j = notesOf(r);
+  check('257 notes: --release-notes prints one entry per top-level bullet after the recorded version, oldest first',
+    r.status === 0 && j !== null && j.from === '1.0.0' && j.to === '1.2.0' && JSON.stringify(idsOf(j)) === JSON.stringify(['1.1.0#1', '1.1.0#2', '1.2.0#1'])
+      && j.entries[0].text === '- **First addition.** Its text.\n  - a nested bullet under it' && j.entries[0].section === 'Added' && j.entries[2].section === 'Changed' && !('note' in j),
+    'exit ' + r.status + ', ids ' + JSON.stringify(idsOf(j)) + ', ' + (outLines(r.stderr)[0] || r.stdout.slice(0, 160)));
+  check('257 notes: --release-notes writes nothing', r.status === 0 && snapshot(at100) === untouched, 'exit ' + r.status);
+  r = run(project(at('1.9.0')), PROSE, ['--release-notes']);
+  j = notesOf(r);
+  check('257 notes: a version block with no bullets is one entry',
+    r.status === 0 && JSON.stringify(idsOf(j)) === JSON.stringify(['2.0.0#1']) && j.entries[0].section === null && j.entries[0].text === 'A block with no bullets at all.\n\nIts second paragraph.',
+    'exit ' + r.status + ', ' + JSON.stringify(j && j.entries));
+  const unrecorded = [project(null), project({ auditedVersion: 'latest; touch pwned', version: '1.0.0' })].map((d) => notesOf(run(d, ROOT, ['--release-notes'])));
+  check('257 notes: with no usable recorded version, every shipped entry applies and a note says so',
+    unrecorded.every((x) => x !== null && x.from === 'unrecorded' && JSON.stringify(idsOf(x)) === JSON.stringify(['1.0.0#1', '1.1.0#1', '1.1.0#2', '1.2.0#1']) && /every entry the plugin ships applies/.test(x.note || '') && !/latest|pwned/.test(JSON.stringify(x))),
+    JSON.stringify(unrecorded.map((x) => x && { from: x.from, ids: idsOf(x), note: x.note })));
+  const u1 = run(at100, ROOT, ['--adoption', rows([])]);
+  const u2 = run(at100, ROOT, ['--release-notes', '--stamp']);
+  check('257 notes: --adoption without --stamp, and --release-notes beside --stamp, are usage errors that write nothing',
+    u1.status === 1 && /--adoption names the rows file/.test(u1.stderr) && u2.status === 1 && /--release-notes prints the entries/.test(u2.stderr) && snapshot(at100) === untouched,
+    said(u1) + ' | ' + said(u2));
+
+  const missing = project(at('1.0.0'));
+  const missingState = stateOf(missing);
+  r = run(missing, ROOT, ['--stamp']);
+  check('257 stamp: refuses while an entry in range has no row, and names it',
+    r.status === 1 && ['1.1.0#1', '1.1.0#2', '1.2.0#1'].every((id) => r.stderr.includes('no adoption row for ' + id)) && stateOf(missing) === missingState && adoptionOf(missing) === null,
+    said(r));
+  const bad = project(at('1.0.0'));
+  const badState = stateOf(bad);
+  r = run(bad, ROOT, ['--stamp', '--adoption', rows(['1.1.0#1 no action: nothing here', '1.1.0#1 no action: again', '1.1.0#2 no action: nothing here', '1.2.0#1 raised: overlaps .claude/commands/mine.md line 3', '1.3.0#1 no action: above the plugin'])]);
+  check('257 stamp: refuses a row for an id outside the range, a repeated id, and a raised row with no decision',
+    r.status === 1 && /names 1\.3\.0#1, which is not an entry in this range/.test(r.stderr) && /repeats 1\.1\.0#1/.test(r.stderr) && /raises 1\.2\.0#1 with no " Decision: /.test(r.stderr) && stateOf(bad) === badState && adoptionOf(bad) === null,
+    said(r) + ' | ' + outLines(r.stderr).join(' | ').slice(0, 300));
+  const junk = project(at('1.0.0'));
+  r = run(junk, ROOT, ['--stamp', '--adoption', rows(['1.1.0#1 no action: a', '1.1.0#2 no action: b', '1.2.0#1 no action: c', 'a note that is no row'])]);
+  check('257 stamp: refuses a line that is no row', r.status === 1 && /adoption row 4 is not "<id> no action: <why>"/.test(r.stderr) && audited(junk) === '1.0.0' && adoptionOf(junk) === null, said(r));
+
+  const good = project(at('1.0.0'));
+  r = run(good, ROOT, ['--stamp', '--adoption', rows(['1.2.0#1 no action: nothing here touches it', '1.1.0#2 raised: .claude/commands/mine.md line 3 restates it Decision: take the toolkit\'s way', '1.1.0#1 no action: no overlap'])]);
+  const adopted = adoptionOf(good);
+  const section = '## 1.0.0 -> 1.2.0 (' + today + ')\n\n- 1.1.0#1 no action: no overlap\n- 1.1.0#2 raised: .claude/commands/mine.md line 3 restates it Decision: take the toolkit\'s way\n- 1.2.0#1 no action: nothing here touches it\n';
+  check('257 stamp: with every row it writes one section to .claude/toolkit/adoption.md and stamps',
+    r.status === 0 && adopted !== null && /^# \S/.test(adopted) && adopted.endsWith('\n\n' + section) && adopted.split('\n## ').length === 2 && audited(good) === '1.2.0',
+    said(r) + ' | ' + JSON.stringify(adopted));
+  const recorded = '# Adoption record\n\nx\n\n## 1.0.0 -> 1.2.0 (2026-10-01)\n\n- 1.1.0#1 no action: a\n- 1.1.0#2 no action: b\n- 1.2.0#1 no action: c\n';
+  const rerun = project(at('1.0.0'), { '.claude/toolkit/adoption.md': recorded });
+  r = run(rerun, ROOT, ['--stamp']);
+  check('257 stamp: a rerun for a recorded range needs no rows', r.status === 0 && adoptionOf(rerun) === recorded && audited(rerun) === '1.2.0', said(r));
+  const fresh = project(null);
+  r = run(fresh, ROOT, ['--stamp', '--adoption', rows(['1.0.0#1 no action: a', '1.1.0#1 no action: b', '1.1.0#2 no action: c', '1.2.0#1 no action: d'])]);
+  check('257 stamp: an unrecorded start writes its section as unrecorded -> 1.2.0', r.status === 0 && (adoptionOf(fresh) || '').includes('\n## unrecorded -> 1.2.0 (' + today + ')\n\n- 1.0.0#1 no action: a\n') && audited(fresh) === '1.2.0', said(r));
+  const current = project(at('1.2.0'));
+  r = run(current, ROOT, ['--stamp']);
+  check('257 stamp: a range with no entries needs no rows', r.status === 0 && /stamped/.test(r.stderr) && adoptionOf(current) === null, said(r));
+  const noNotes = project(at('1.0.0'));
+  r = run(noNotes, BARE, ['--stamp']);
+  check('257 stamp: a plugin with no notes file stamps with a note', r.status === 0 && /ships no release notes/.test(r.stderr) && audited(noNotes) === '1.2.0' && adoptionOf(noNotes) === null, said(r));
+  const newer = project(at('9.0.0'));
+  const newerState = stateOf(newer);
+  r = run(newer, ROOT, ['--stamp']);
+  check('257 stamp: the newer-record refusal still comes first', r.status === 0 && /not stamping: [^\n]*already records 9\.0\.0/.test(r.stderr) && !/adoption row/.test(r.stderr) && stateOf(newer) === newerState && outLines(r.stderr).length === 1, said(r));
+}
+}
 if (OWN('9b')) {
 
 // --- 9b. project extensions (issue #199) -------------------------------------------
@@ -2636,7 +2771,7 @@ console.log('\n9b. project extensions: the rules-file marker (C-7) and review ki
   r = audit(dir);
   check('C-7: the project\'s own lines under the marker are no finding, even on an older stamp', r.status === 0 && c7(r).length === 0, r.stdout.slice(0, 400));
   const belowBefore = read(path.join(dir, '.claude/rules/toolkit.md'));
-  const st = spawnSync('node', [SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp'], { encoding: 'utf8' });
+  const st = spawnSync('node', stampWithRows([SCRIPT, '--project', dir, '--plugin-root', PLUGIN, '--stamp']), { encoding: 'utf8' });
   const belowAfter = read(path.join(dir, '.claude/rules/toolkit.md'));
   check('C-7: --stamp raises that file\'s stamp and leaves every byte from the marker down unchanged', st.status === 0 && /Toolkit version: 7\.1\.0 \|/.test(belowAfter) && belowAfter.slice(belowAfter.indexOf(MARKER)) === belowBefore.slice(belowBefore.indexOf(MARKER)) && belowAfter.endsWith(OURS), st.stdout + st.stderr);
 
@@ -3165,7 +3300,7 @@ console.log('\n9f. a check step names its command (C-17), the Severity field, an
   d = mkt('tk-plugin', JSON.stringify({ name: 'a-fork', plugins: [{ name: 'other' }, { name: 'tk', source: { source: 'git-subdir' } }] }));
   r = audit763(d);
   check('a marketplace under another name that lists a plugin named tk is refused too', r.status === 1 && REFUSAL.test(r.summary) && r.stdout === '', r.summary);
-  const st = spawnSync('node', [SCRIPT, '--project', d, '--plugin-root', PLUGIN763, '--stamp'], { encoding: 'utf8' });
+  const st = spawnSync('node', stampWithRows([SCRIPT, '--project', d, '--plugin-root', PLUGIN763, '--stamp']), { encoding: 'utf8' });
   check('--stamp there is refused with the same line and leaves the state file as it was', st.status === 1 && REFUSAL.test(st.stderr) && JSON.parse(read(path.join(d, '.claude', '.toolkit-state.json'))).auditedVersion === '7.6.2', st.stderr);
   d = mkt('own-plugin', JSON.stringify({ name: 'acme-tools', owner: { name: 'Acme' }, plugins: [{ name: 'acme', source: { source: 'git-subdir' } }] }));
   r = audit763(d);
@@ -3370,7 +3505,7 @@ console.log('\n11c. a default run whose stable link leads elsewhere writes no ca
   check('with no finding there is no receipt to fail: exit 0 and no line about the link', clean.status === 0 && clean.stdout === '' && !/new session/.test(clean.stderr), clean.status + ' ' + clean.stderr);
   const stampDir = path.join(TMP, 'stamp-228');
   write(stampDir, '.claude/.toolkit-state.json', JSON.stringify({ version: '7.0.0', path: 'plugin', auditedVersion: '7.0.0' }));
-  const stamped = runAs(noLink, ['--stamp'], stampDir);
+  const stamped = runAs(noLink, ['--stamp', '--adoption', rowsFor(runAs(noLink, ['--release-notes'], stampDir))], stampDir);
   check('--stamp is not stopped: it writes no receipt', stamped.status === 0 && JSON.parse(read(path.join(stampDir, '.claude', '.toolkit-state.json'))).auditedVersion === '7.1.0', stamped.stderr);
   const gone = runAs(noLink, ['--receipt', '0123456789abcdef']);
   check('--receipt is not stopped either: an ID no finding carries means the finding no longer stands (one stderr line, exit 1)', gone.status === 1 && gone.stdout === '' && /no longer stands/.test(gone.stderr) && gone.stderr.trim().split('\n').length === 1, gone.status + ' ' + gone.stderr);
