@@ -31,6 +31,7 @@ A landing's cut comes from its `Cut from:` line. A merge without one uses the me
 - **Rule 2:** a line the branch itself added that does not make it into the landing. Copies are counted per file: against git's own merge where the file merges cleanly (so a line both sides added identically counts once), and as main's copies plus the branch's minus the common ancestor's where it conflicts (so a dropped `}` is caught even when another `}` remains).
 - **Cut:** the cut is not on main.
 - **Rule 3:** a decision of this PR that contradicts one a landing after its cut made, in the same file or another (one says go right, the other go left). The `decision-checker` agent judges it from the decisions file below; it is the one check that is judgment, and it runs at landing only.
+- **Deleted and untracked** are listed, never flagged: the files a landing removes from main, and among them the ones the branch's own `.gitignore` files ignore at the landing. A branch that stops tracking a file it means to keep (`git rm --cached` and an ignore line) still deletes every other checkout's copy when the landing reaches it, so `/merge` saves that copy first and puts it back.
 
 `merge-check.js` exits 0 when nothing is flagged, 1 when anything is, and 2 on a usage or git error; each flag is one plain line on stderr. Paths in `.claude/toolkit/generated.json` are skipped. A conflict combined correctly (a new line that keeps both sides' intent) still flags both original lines: a combined line is a judgment, and you confirm it by keeping them on purpose. `weaker` and `not checkable` are notes, never flags, and a gate fails on flags only.
 
@@ -48,7 +49,7 @@ A landing's cut comes from its `Cut from:` line. A merge without one uses the me
 
     Cut from: <full sha that merge-check.js --cut printed>
 
-`## Decisions` lists the plan's Critical Decisions, or `- None recorded` when the cycle had no plan. The changelog fence is four backticks, or one more than the longest run of backticks inside the block; the part is left out when the cycle wrote no changelog block. `node .claude/scripts/merge-check.js --pr <N>` (or `--pr-body <file>`) reads the parts back as JSON (`decisions`, `changelog`, `cutFrom`, each null when absent). A PR opened before these parts existed has none, and `/merge` falls back: the branch log or merge-base for the cut, the PR's text and diff for its decisions, and its own changelog edit kept with both sides.
+`## Decisions` lists the plan's Critical Decisions, or `- None recorded` when the cycle had no plan. The changelog fence is four backticks, or one more than the longest run of backticks inside the block; the part is left out when the cycle wrote no changelog block. `node .claude/scripts/merge-check.js --pr <N>` (or `--pr-body <file>`) reads the parts back as JSON (`decisions`, `changelog`, `cutFrom`, each null when absent). The decisions are the part's list lines only, from its first list line (with indented continuation lines, and blank lines between items) to the first line that is neither, so an attribution line below the list is not read as a decision. `--pr` also prints `ref`, the host's full reference on GitLab (`<project path>!<number>`), null on GitHub. A PR opened before these parts existed has none, and `/merge` falls back: the branch log or merge-base for the cut, the PR's text and diff for its decisions, and its own changelog edit kept with both sides.
 
 ## The landing commit message
 
@@ -61,12 +62,13 @@ A landing's cut comes from its `Cut from:` line. A merge without one uses the me
 
     Cut from: <full sha>
     Kept on purpose: <sha> <file>: <line>
+    See merge request <ref>
 
-The subject is `Merge PR #<N>: <title>` for a merge commit and `<title> (#<N>)` for a squash; a branch landed without a PR names the branch, `Merge <branch>: <title>`. `Kept on purpose:` lines appear only when you kept a flagged line.
+The subject is `Merge PR #<N>: <title>` for a merge commit and `<title> (#<N>)` for a squash; a branch landed without a PR names the branch, `Merge <branch>: <title>`. `Kept on purpose:` lines appear only when you kept a flagged line. `See merge request <ref>` ends a GitLab host-merge message, with the `ref` `merge-check.js --pr` printed: GitLab's merge button writes that line, and `--style` reads it, so a landing `/merge` made through GitLab is not later read as a local merge.
 
 ## The decisions file
 
-`node .claude/scripts/merge-check.js --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]` writes the one file the `decision-checker` agent reads: a `## This PR` part, then one `## Landing <short sha>: <subject>` part per landing on main after the cut, oldest first. A part holds its decision list, from the PR body's `## Decisions` part or a landing message's `Decisions:` lines. A part with none (a PR opened before these parts existed, a list that says `None recorded`, a landing made without `/merge`) holds its text and its changes instead, generated paths left out and cut at 150 lines. A commit made straight on main is not a landing and gets no part; rule 1 still covers its lines. With no landing after the cut there is nothing to contradict, and the agent is not dispatched.
+`node .claude/scripts/merge-check.js --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]` writes the one file the `decision-checker` agent reads: a `## This PR` part, then one `## Landing <short sha>: <subject>` part per landing on main after the cut, oldest first. A part holds its decision list, from the PR body's `## Decisions` part or a landing message's `Decisions:` lines. A part with none (a PR opened before these parts existed, a list that says `None recorded`, a landing made without `/merge`) holds its text and its changes instead, generated paths left out and cut at 150 lines. A commit made straight on main is not a landing and gets no part; rule 1 still covers its lines. With no landing after the cut there is nothing to contradict, and the agent is not dispatched. Each diff in it is word by word (`git diff --word-diff=plain`), and the file says so at its top: `[-...-]` is text that part removed and `{+...+}` text it added. Unmarked text was already there, so text a landing only carried over is not read as its decision.
 
 ## Kept on purpose
 
