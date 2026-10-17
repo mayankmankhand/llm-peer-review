@@ -37,7 +37,8 @@
 //                                 (from the branch log, else merge-base) and print it
 //   --cut <branch> [--pr <N> | --pr-body <file>]
 //                                 the branch's cut point and where it came from
-//   --pr <N>                      read PR <N> through gh or glab; print its parts
+//   --pr <N>                      read PR <N> through gh or glab; print its parts,
+//                                 and `ref`, GitLab's full reference (null on gh)
 //   --pr-body <file|->            print the parts of a PR body (raw text, or the
 //                                 JSON gh or glab prints)
 //   --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>]
@@ -471,6 +472,25 @@ function recordCut(b, mainRef) {
 }
 
 // ---- PR bodies -------------------------------------------------------------------
+// The decisions are the part's list lines only (issue #258 item 8): from its
+// first list line to the first line that is neither a list line, an indented
+// continuation of one, nor a blank line between items. An intro line above the
+// list is skipped, and text below it (the attribution line a PR body ends with)
+// is never read as a decision. Each item comes back on one line, its
+// continuation lines joined to it, because a landing message's `Decisions:`
+// list is read one line per decision (messageDecisions below). null when the
+// part holds no list line.
+const LIST_LINE_RE = /^\s*[-*]\s+\S/;
+function decisionItems(lines) {
+  const items = [];
+  for (const l of lines) {
+    if (LIST_LINE_RE.test(l)) { items.push(l.replace(/\s+$/, '')); continue; }
+    if (!items.length || !l.trim()) continue;
+    if (/^\s+\S/.test(l)) { items[items.length - 1] += ' ' + l.trim(); continue; }
+    break;
+  }
+  return items.length ? items.join('\n') : null;
+}
 // The parts /document writes (merge-rules.md): a `## Decisions` section, a
 // `## Changelog` section holding the block in a fence, and a `Cut from:` line.
 function parseBody(text) {
@@ -482,7 +502,7 @@ function parseBody(text) {
     // The part ends at the next heading, or at the Cut from: line when no
     // Changelog part sits between them.
     for (let i = di + 1; i < lines.length && !/^##\s/.test(lines[i]) && !/^Cut from:/.test(lines[i]); i++) out.push(lines[i]);
-    decisions = out.join('\n').trim() || null;
+    decisions = decisionItems(out);
   }
   const ci = lines.findIndex((l) => /^##\s+Changelog\s*$/.test(l));
   if (ci >= 0) {
@@ -542,9 +562,12 @@ function readPr(n) {
   const r = run(cli, args);
   if (r.error || r.status !== 0) throw new Error(cli + ' could not read #' + n + ': ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
   const j = JSON.parse(r.stdout);
+  // `ref` is GitLab's full reference (`<project path>!<number>`), which a
+  // GitLab host-merge landing message names in its `See merge request` line
+  // (#258 item 6); GitHub marks a host merge by its committer, so gh has none.
   const pr = cli === 'gh'
-    ? { number: j.number, title: j.title, state: j.state, branch: j.headRefName, head: j.headRefOid, body: j.body || '' }
-    : { number: j.iid, title: j.title, state: j.state, branch: j.source_branch, head: j.sha, body: j.description || '' };
+    ? { number: j.number, title: j.title, state: j.state, branch: j.headRefName, head: j.headRefOid, body: j.body || '', ref: null }
+    : { number: j.iid, title: j.title, state: j.state, branch: j.source_branch, head: j.sha, body: j.description || '', ref: j.references && typeof j.references.full === 'string' ? j.references.full : null };
   return Object.assign(pr, parseBody(pr.body), { host: cli });
 }
 

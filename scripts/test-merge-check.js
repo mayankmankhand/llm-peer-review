@@ -424,6 +424,43 @@ section('--pr reads the PR through the host CLI the remote names', () => {
   check('a PR number that is not a number is a usage error', mc(dir, ['--pr', '7;rm'], env).status === 2);
 });
 
+// Issue #258 items 8 and 6: the Decisions part is its list lines only, so an
+// attribution line under the list is never read as a decision, and on GitLab
+// --pr prints the full reference a landing message names.
+section('258: the Decisions part is its list lines, and glab\'s full reference', () => {
+  const dir = newRepo('pr258');
+  write(dir, 'a.txt', 'a\n');
+  commitAll(dir, 'M0');
+  const f = path.join(sandbox, 'body-258.md');
+  // The attribution line sits under the list, with no Changelog part or Cut from: line after it.
+  fs.writeFileSync(f, 'Summary.\n\n## Decisions\n- Keep it - why\n- Name it - so\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n');
+  const a = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: the Decisions part keeps only its list lines', a && a.decisions === '- Keep it - why\n- Name it - so', 'decisions held: ' + JSON.stringify(a && a.decisions));
+  fs.writeFileSync(f, '## Decisions\nThese are the decisions:\n- A - why\n- B\n\nCut from: ' + 'a'.repeat(40) + '\n');
+  const b = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: an intro line above the list is skipped', b && b.decisions === '- A - why\n- B', 'decisions held: ' + JSON.stringify(b && b.decisions));
+  // A continuation line joins its item, so a landing message's Decisions: list
+  // stays one line per decision (messageDecisions stops at the first other line).
+  fs.writeFileSync(f, '## Decisions\n- A - because\n  the reason runs on\n\n- B\n\nMore text after.\n');
+  const c = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: continuation lines of a list item stay with it', c && c.decisions === '- A - because the reason runs on\n- B', 'decisions held: ' + JSON.stringify(c && c.decisions));
+  const bin = path.join(sandbox, 'bin-258');
+  fs.mkdirSync(bin);
+  const body = 'S.\n\n## Decisions\n- D1\n';
+  const glJson = JSON.stringify({ iid: 8, title: 'G', description: body, source_branch: 'gfeat', sha: 'e'.repeat(40), state: 'opened', references: { short: '!8', relative: '!8', full: 'grp/sub/proj!8' } });
+  const ghJson = JSON.stringify({ number: 7, title: 'T', body, headRefName: 'feat', headRefOid: 'd'.repeat(40), state: 'OPEN' });
+  for (const [name, json] of [['gh', ghJson], ['glab', glJson]]) {
+    write(bin, name, '#!/bin/sh\ncat <<\'EOF\'\n' + json + '\nEOF\n');
+    fs.chmodSync(path.join(bin, name), 0o755);
+  }
+  const env = Object.assign({}, ENV, { PATH: bin + path.delimiter + ENV.PATH });
+  g(dir, ['remote', 'add', 'origin', 'git@gitlab.com:grp/sub/proj.git']);
+  const gl = mc(dir, ['--pr', '8'], env);
+  g(dir, ['remote', 'set-url', 'origin', 'git@github.com:x/y.git']);
+  const gh = mc(dir, ['--pr', '7'], env);
+  check('258 pr: glab\'s full reference is printed as ref', gl.json && gl.json.ref === 'grp/sub/proj!8' && gh.json && gh.json.ref === null, 'glab ref ' + JSON.stringify(gl.json && gl.json.ref) + ', gh ref ' + JSON.stringify(gh.json && gh.json.ref));
+});
+
 // --- landings on main, the style, the marker ------------------------------------------------
 section('--since: what counts as a landing, and what cannot be checked', () => {
   const dir = newRepo('since');
