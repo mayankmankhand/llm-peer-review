@@ -59,6 +59,7 @@
     ".claude/scripts/package-lock.json",
     ".claude/scripts/package.json",
     ".claude/scripts/pre-push-check.js",
+    ".claude/scripts/push-guard.js",
     ".claude/scripts/render-html.js",
     ".claude/scripts/run-checks.js",
     ".claude/scripts/session-init.js",
