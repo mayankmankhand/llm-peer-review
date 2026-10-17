@@ -117,9 +117,11 @@ All four key on the branch's **cut point**, the commit it was cut from, which `/
 
 **What stops it.** The first flag, failing test or contradiction stops that PR before anything lands, and tells you in plain English what would be lost and who wrote it. You choose: Claude fixes it, you keep it on purpose, or you stop.
 
+**What it tells you when nothing stops it.** The line saying the PR landed names every file the landing deletes from main. A file the branch stopped tracking but means to keep (removed from git and added to an ignore file) is saved before the merge or the pull would delete your main folder's copy, then put back. A conflict combined inside a command, skill, agent or rules file always waits for your yes, even when every check is clean.
+
 **Keeping a removal on purpose.** Sometimes removing a line is right. Say "keep it" and the landing commit records `Kept on purpose: <sha> <file>: <line>`; after the fact, an empty commit on main carrying the same line does the same. The record names the commit that wrote the line, so the same text written by another commit is still checked.
 
-**How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash.
+**How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash. With the host's merge it first waits, up to 90 seconds, until the host reports the PR mergeable, and when main moved on the host in the meantime it runs your tests once more on the new main before the next PR.
 
 **Open review findings.** A landed branch's review page stays its own. When it still has open findings, the line saying the PR landed ends with how many and the page's link; they are not moved onto main's page.
 

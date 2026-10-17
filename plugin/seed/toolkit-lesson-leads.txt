@@ -14,6 +14,7 @@ A JSON escape for an apostrophe does not survive a model typing the command: the
 A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.
 A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
+A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
 A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.
@@ -63,6 +64,7 @@ A negative-count receipt needs a pattern that cannot match an incidental word.
 A nested worktree has two roots: every list of path prefixes strips the longer one first.
 A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `scripts/seed-history.js`, or every later full test run fails.
 A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".
+A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.
 A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.
@@ -145,6 +147,7 @@ CLI default-acceptance prompts don't fully translate to chat.
 Call sites paraphrase a shared rule into different behaviors on day one.
 Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.
 Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.
+Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.
 Check the permission allow-list before designing a mechanism out of shell commands.
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
 Copying a script and permitting it are two edits, and only the missing copy is loud.
@@ -248,6 +251,7 @@ Smoke-test a new on-demand skill in default permission mode: only that mode show
 Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.
 Subagents do NOT auto-discover project skills.
 Tag vocabulary for prompts:
+Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.
 Test an undo instruction by executing it, not by matching its text.
 Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.
 The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.

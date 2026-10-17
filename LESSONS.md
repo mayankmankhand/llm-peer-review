@@ -501,3 +501,10 @@
 ## Issue 253 (judge denials and the lessons read)
 
 - **Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.**
+
+## Issues 257, 258 and 259 (nothing lost, nothing unread)
+
+- **Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.**
+- **Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.**
+- **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
+- **A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.**

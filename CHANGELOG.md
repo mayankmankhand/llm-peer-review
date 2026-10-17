@@ -2,6 +2,38 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Nothing Lost, Nothing Unread
+
+**Issues #257, #258 and #259.** `/tk:merge` now names every file a landing deletes and keeps the ones a branch stopped tracking, waits for the host before it merges, and stops for you when it combines a prompt file. `/tk:upgrade` reads the release notes since your last upgrade and records what it did about each entry before it stamps. `/tk:review` checks a change to your project's seam files the way it checks commands and skills.
+
+### Changed
+
+- **`/tk:merge` names what a landing deletes.** `merge-check.js --landing` now lists `deleted` (the files the landing removes from main) and `untracked` (the ones among them the branch stopped tracking but means to keep). The landing line names the deleted files, and each untracked file is saved before a merge or a pull would delete it, then put back.
+- **A combined prompt file waits for you.** When `/tk:merge` combines a conflict inside a command, skill, agent or rules file, the PR lands only after you have seen the combined lines and said yes, even when every check is clean.
+- **`/tk:merge` waits for the host.** `merge-check.js --wait --pr <N> --head <sha>` reads the PR every 3 seconds, for up to 90, until the host reports it mergeable at the pushed head.
+- **Tests run again only when main moved on the host** between the check and the merge, in a temporary worktree set up like every other, and a failure stops the batch. At the end of a host-style run the main folder is pulled when it is on main with nothing uncommitted.
+- **A branch guard before any change in a worktree.** `/tk:merge` checks `git branch --show-current` there, and when a `cd` did not stick it names the folder on every command (`git -C <worktree> ...`).
+- **GitLab host merges are recognized.** The landing message ends with `See merge request <ref>`, so `--style` reads the landing as a host merge, not a local one.
+- **PR decisions are the list lines only**, so an attribution line below the list is no longer read as a decision, and a sub-bullet stays with the decision above it.
+- **A temporary worktree is removed with `--force` only when `/tk:merge` made it**, and only after the landing is confirmed.
+- **The decisions file shows each diff word by word**, so the decision checker sees only the words a landing changed, not the text it carried over.
+- **The plugin carries its release notes.** The build writes `CHANGELOG.md` into the plugin: every released version from v6.0.0 up to the plugin's own, never an unreleased block.
+- **`/tk:upgrade` reads what changed before it stamps.** `upgrade-audit.js --release-notes` lists every entry since your recorded version, and the upgrade checks each one against your own files; an entry that touches them goes on the upgrade's one approval page. `upgrade-audit.js --stamp --adoption <file>` refuses until every entry has a row, then records the rows in `.claude/toolkit/adoption.md`, one section per upgrade.
+- **Command Quality reviews your seam files.** `/tk:review` runs the prompt lens when a `.claude/toolkit/*.md` file changes, other than `README.md` and `adoption.md`.
+
+### Not built
+
+- **A helper that runs the host's merge itself** (#258 item 7). It would run under that script's allow row and skip the approval every host merge asks for today, and a mis-quoted merge message already fails loudly.
+
+### Upgrading
+
+- No new permission rows.
+- **From this version on, `/tk:upgrade` reads every release-note entry since your recorded version** and needs a row for each before it stamps, starting with the upgrade to this version. A project with no recorded version, or one from before 6.0.0, reads every entry from v6.0.0, several hundred, once.
+
+### Why
+
+A downstream GitLab project replaced its own merge command with `/tk:merge` after landing three MRs with it, and listed what its command did that `/tk:merge` did not: a branch's own deletions landed without a word, and a file the branch stopped tracking was deleted from the main checkout by the pull after the landing (#258). On another project the 7.6.5 to 8.0.5 upgrade ran clean and still left a guide listing a removed command and a rule naming the wrong review page, because nothing read the 74 release-note entries against the project's own files (#257). And the seam files under `.claude/toolkit/` are pasted into the stages as prompt text, yet a change to one met no prompt review (#259).
+
 ## Unreleased - The Whole Index, Read
 
 **Issue #253.** When the lessons index is too long to print at session start, the startup output now says exactly how to read all of it, and a quality-check run no longer goes to waste because a judge's blocked experiment was refused. Not released yet: the version number is decided at release.

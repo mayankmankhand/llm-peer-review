@@ -32,7 +32,7 @@ Pass `--resume <session-id>` (from the JSON) with the same `--home` to answer a 
 
 **Headless sessions cannot edit files under `.claude/` outside `bypassPermissions`.** A `-p` session cannot answer a prompt: default mode and `acceptEdits` both stop on a `.claude/` path, and project allow rows `Edit(.claude/**)` and `Write(.claude/**)` do not change that. `bypassPermissions` gets through, but it also stops checking shell commands, so it cannot show which steps would ask. When one scenario must both edit prompt files and count prompts, split it before the run: the edit steps in `bypassPermissions`, the prompt count from the default-mode sessions.
 
-**Release order.** Release notes go to `CHANGELOG.md`, never the README: the README stays under 1,500 words and the gate counts it on every run.
+**Release order.** Release notes go to `CHANGELOG.md`, never the README: the README stays under 1,500 words and the gate counts it on every run. Write them first: the plugin ships every released block of `CHANGELOG.md` up to its own version and never an `## Unreleased` block, so turn this release's Unreleased blocks into one `## v<new-version> - <title> (<date>)` block before step 1, and the bump's rebuild carries it into `plugin/CHANGELOG.md`.
 
 **The steps:**
 
@@ -55,7 +55,7 @@ Pass `--resume <session-id>` (from the JSON) with the same `--home` to answer a 
 
 Manual steps for the release commit:
 
-- Add a new section to CHANGELOG.md
+- The new CHANGELOG.md section, written before step 1 (see Release order above)
 - Update AGENT-SETUP.md title and "What's new" block (rename the previous block to "What was new in vX.Y", and keep only the last three blocks inline - older entries point at CHANGELOG.md)
 - If this release bumps a default model, follow the model-bump reminder printed by `bump-version.sh`: append the OLD `DEFAULT_*_MODEL` value to `KNOWN_STALE_*_MODELS` FIRST, then update `DEFAULT_*_MODEL` to the new value, then update `.env.local.example` and `API-KEYS.md`
 - If the installers changed since the last release, run `bash scripts/setup/test-installer-guarantees.sh` (and the `.ps1` mirror on Windows) before tagging; it is not a `scripts/test-*.js` suite, so the gate does not run it
