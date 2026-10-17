@@ -2,6 +2,23 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Every Run Kept
+
+**Issue #252.** A review's receipts folder now keeps the record of every check run in it, so a fix's recheck sits beside the check it answers. Not released yet: the version number is decided at release.
+
+### Changed
+
+- **The receipts record keeps every run.** The checks runner used to rewrite `results.json` on each call, so a fix's recheck erased the row it was checked against. Each call now adds its rows, every row carrying its own run's time and commit, and a `runs` list holds one entry per call. Saves go through a lock and a file renamed into place, and a record that cannot be read is moved to `results.prev-<n>.json` instead of overwritten. A plan step's before and after runs still clear their folder first, so they read exactly as before.
+- **A rerun under the same check id keeps the earlier output.** The earlier `<id>.txt`, and a kept `first-run/<id>.txt`, move to `<id>.prev-<n>.txt`, and the earlier row points there.
+
+### Upgrading
+
+- Nothing to do: no new permission rows, no new upgrade checks, and no review instruction changed.
+
+### Why
+
+Across the 47 receipts folders saved before this change, none of the 27 recheck rows sat beside the check it rechecked, because each call replaced the record. Two changes to how reviews judge fixes were also tested this cycle: labeling a finding's cited lines for the fix verifier, and keeping a finding that another defect hides. Each missed the bar set before its test, so neither shipped.
+
 ## v8.0.5 - Only What Changed (2026-10-16)
 
 **A patch on top of v8.0.4 (#254).** Refreshing the codebase map used to rebuild it from scratch, reading every file again. `/tk:index` now refreshes only the parts of the map whose files changed since the map was made, and keeps the rest as it was.
