@@ -508,3 +508,7 @@
 - **Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.**
 - **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
 - **A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.**
+
+## Release 8.0.6 (the practice run)
+
+- **A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.**

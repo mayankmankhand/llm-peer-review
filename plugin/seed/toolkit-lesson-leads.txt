@@ -77,6 +77,7 @@ A plan's bullet list reads as an order: when one step reads a file another step 
 A plugin CLI command run inside a project also edits that project's settings file.
 A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.
 A prompt cannot declare a user-owned prerequisite done.
+A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.
 A prompt's user-facing message is not enforcement.
 A prose sweep needs the wordings that actually occur, not the one you remember writing.
 A receipt that checks a record exists can be closed by making the record late; check what the record says.

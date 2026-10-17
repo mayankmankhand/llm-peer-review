@@ -1,6 +1,6 @@
 # Seeded blocks older releases shipped, for the upgrade audit (C-15).
 # <hash> <block|file> <project file> <first release that shipped it>
-# Written by scripts/seed-history.js from the release tags v6.0.0 to v8.0.5; regenerate it in the release order, never edit it by hand.
+# Written by scripts/seed-history.js from the release tags v6.0.0 to v8.0.6; regenerate it in the release order, never edit it by hand.
 0e89af0bed8f17df block CLAUDE.md v6.0.0
 5f9c8b07ae0940d4 block CLAUDE.md v6.0.0
 61d9d273b3a7ff53 block CLAUDE.md v6.0.0
@@ -46,6 +46,7 @@ dedc9e85452fb4be file LESSONS.md v7.6.3
 eb7209e40681b73e file LESSONS.md v8.0.3
 1aee1bfc55f910ab file LESSONS.md v8.0.4
 4c5f2a96f9db376a file LESSONS.md v8.0.5
+9e3aaf79a053a955 file LESSONS.md v8.0.6
 528144ebf1bcc41e block DESIGN-PROFILE.md v6.2.0
 6ba9be597090a72d block DESIGN-PROFILE.md v7.1.0
 7d363ac197269d32 block DESIGN-PROFILE.md v7.2.0
@@ -104,9 +105,12 @@ fdc5986c6904f491 block .claude/toolkit/README.md v7.6.4
 6b6e58b3dba5fc51 block .claude/toolkit/README.md v8.0.0
 7d70235b8a1f0336 block .claude/toolkit/README.md v8.0.0
 9e55112f8cbe7394 block .claude/toolkit/README.md v8.0.0
+5b086e9a68637789 block .claude/toolkit/README.md v8.0.6
+afef25bd2918c7a1 block .claude/toolkit/README.md v8.0.6
 af4fbd9ef4b8eacb file .claude/toolkit/README.md v7.4.0
 a789c112f9023d02 file .claude/toolkit/README.md v7.6.0
 c149317436286fef file .claude/toolkit/README.md v7.6.1
 1271174696528338 file .claude/toolkit/README.md v7.6.3
 c4ee6720038bace5 file .claude/toolkit/README.md v7.6.4
 bac4b8400de4523c file .claude/toolkit/README.md v8.0.0
+75e118eba817effc file .claude/toolkit/README.md v8.0.6
