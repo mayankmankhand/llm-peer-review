@@ -56,12 +56,16 @@
 //   * Allowlist. Only the four dirs above are read. node_modules, worktrees,
 //     and every settings*.json are never emitted (61 MB, 65 MB, and a
 //     never-push file respectively, measured 2026-09-12).
-//   * Hooks. One SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//   * Hooks. The SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
 //     session-start.js"`, which links ${CLAUDE_PLUGIN_DATA}/current to the
 //     plugin root (one path for downstream prose and permissions that survives
 //     version bumps, spike 4) and runs the version guard (#174). A node call
 //     parses in every shell the hook may run under, PowerShell included, where
 //     the old `mkdir -p ... && ln -sfn ...` did not; the script always exits 0.
+//     The PreToolUse hook on Bash runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//     push-guard.js"` before every Bash command (#260), so the M11 pre-push
+//     check runs before any push Claude makes; a crash or a hang blocks the
+//     command ("onFailure": "block", Claude Code 2.1.295 or later).
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
 //     manifest (issue #138 shipped the manifest in v5.5.0), and the content
@@ -126,9 +130,10 @@ const KEEP_PROJECT_PATHS = [
   '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
   '.claude/worktrees', '.claude/.no-correction-log', '.claude/CLAUDE.md', '.claude/toolkit',
 ];
-// The session hook's script. The build reports it as unresolved when the source
-// has no such script, so the hook can never point at a missing file.
+// The hooks' scripts. The build reports one as unresolved when the source has
+// no such script, so a hook can never point at a missing file.
 const SESSION_START_SCRIPT = 'session-start.js';
+const PUSH_GUARD_SCRIPT = 'push-guard.js';
 // The stamped files (#183), by emitted path: the three files
 // scripts/setup/bump-version.sh stamps in the source. Each emitted copy gets the
 // build's version in its stamp, by the replacement bump-version.sh makes (the
@@ -699,8 +704,8 @@ function build(src, version) {
     version,
     author: { name: 'Mayank Mankhand' },
   }, null, 2) + '\n');
-  if (!inv.scripts.some(s => s.rel === SESSION_START_SCRIPT)) {
-    unresolved.push('hooks/hooks.json: missing source scripts/' + SESSION_START_SCRIPT);
+  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT]) {
+    if (!inv.scripts.some(s => s.rel === script)) unresolved.push('hooks/hooks.json: missing source scripts/' + script);
   }
   put('hooks/hooks.json', JSON.stringify({
     hooks: {
@@ -709,6 +714,15 @@ function build(src, version) {
         // One node call parses in bash and PowerShell alike. The script makes the
         // link portably and always exits 0, so a hook never blocks a session.
         command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + SESSION_START_SCRIPT + '"',
+      }] }],
+      // The push guard (#260) sees every Bash command and answers only for a
+      // push. It always exits 0, so onFailure fires only on a crash or a
+      // hang, and then blocks the command instead of letting a push through.
+      PreToolUse: [{ matcher: 'Bash', hooks: [{
+        type: 'command',
+        command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + PUSH_GUARD_SCRIPT + '"',
+        timeout: 120,
+        onFailure: 'block',
       }] }],
     },
   }, null, 2) + '\n');

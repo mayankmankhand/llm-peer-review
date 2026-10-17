@@ -4,7 +4,8 @@
 // site overrides #176, quoted inline cats and the inline command guard #172,
 // seeds #173, narrowed seed rows #180; the setup skill's project paths, the
 // plugin-root install rules and the root helper hashes #180, the /document
-// create rows #181, the review scope row #182, stamps that follow --version #183).
+// create rows #181, the review scope row #182, stamps that follow --version #183;
+// the push guard's PreToolUse hook #260).
 //
 // Same shape as the other suites (test-render-html.js, test-pre-push-check.js):
 // dependency-free, prints one line per check, exits non-zero on any failure.
@@ -133,6 +134,7 @@ function makeFixture() {
   write(src, 'scripts/render-html.js', '// shells at path.join(__dirname, "..", "skills", "shared", "shells")\nconsole.log("render");\n');
   write(src, 'scripts/open-artifact.sh', '#!/usr/bin/env bash\necho open\n');
   write(src, 'scripts/session-start.js', '// the SessionStart hook\n');
+  write(src, 'scripts/push-guard.js', '// the PreToolUse hook\n');
   write(src, 'scripts/package.json', '{ "name": "fixture", "dependencies": {} }\n');
   write(src, 'scripts/package-lock.json', '{ "lockfileVersion": 3 }\n');
   write(src, 'scripts/node_modules/left-pad/index.js', 'module.exports = 1;\n');
@@ -367,6 +369,11 @@ const hooks = JSON.parse(read(out, 'hooks/hooks.json'));
 const hookCommands = (hooks.hooks.SessionStart || []).flatMap(h => h.hooks || []).map(h => h.command);
 check('SessionStart hook runs session-start.js through node with the path quoted', hookCommands.length === 1 && hookCommands[0] === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', JSON.stringify(hookCommands));
 check('the hook carries no shell-only syntax', !/mkdir|ln -s|\|\||&&/.test(JSON.stringify(hooks)));
+const guardEntries = hooks.hooks.PreToolUse || [];
+const guardHooks = guardEntries.length === 1 ? (guardEntries[0].hooks || []) : [];
+check('the PreToolUse hook runs push-guard.js and blocks when it fails', guardEntries.length === 1 && guardEntries[0].matcher === 'Bash' && guardHooks.length === 1 &&
+  guardHooks[0].type === 'command' && guardHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/push-guard.js"' && guardHooks[0].timeout === 120 && guardHooks[0].onFailure === 'block',
+  JSON.stringify(hooks.hooks.PreToolUse));
 const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths adds every historical path and skips comments and blanks', managed.paths.includes('.claude/commands/review-code.md') && managed.paths.includes('.claude/skills/shared/output-template.md') && !managed.paths.some(p => p === '' || p.startsWith('#')));
@@ -952,6 +959,12 @@ fs.rmSync(hookAbs);
 let uHook;
 try { uHook = unresolvedOf(); } finally { fs.writeFileSync(hookAbs, hookText); }
 check('a source without scripts/session-start.js is reported unresolved for the hook', uHook.includes('hooks/hooks.json: missing source scripts/session-start.js'), uHook.join('; '));
+const guardAbs = path.join(cp.src, 'scripts', 'push-guard.js');
+const guardText = fs.readFileSync(guardAbs);
+fs.rmSync(guardAbs);
+let uGuard;
+try { uGuard = unresolvedOf(); } finally { fs.writeFileSync(guardAbs, guardText); }
+check('a source without scripts/push-guard.js is reported unresolved for the hook', uGuard.includes('hooks/hooks.json: missing source scripts/push-guard.js'), uGuard.join('; '));
 check('the retired rows seed is exempt from the old-layout check', !unresolvedOf().some(x => x.startsWith('seed/retired-permission-rows.txt')) && read(REPO, 'seed/retired-permission-rows.txt').includes('.claude/scripts/'));
 const cpInv = lib.inventory(cp.src);
 const seedHits = (text, rel) => lib.seedProblems(rel || 'seed/CLAUDE.md', text, cpInv);
