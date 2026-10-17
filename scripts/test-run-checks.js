@@ -1929,6 +1929,43 @@ section('252 keep: results.json keeps every run\'s rows (issue #252)', function 
   check('252 keep: a plan-phase run\'s record holds only its own run',
     Array.isArray(phase.checks) && phase.checks.length === 1 && Array.isArray(phase.runs) && phase.runs.length === 1 && phase.step === '1' && phase.phase === 'before',
     one(JSON.stringify(phase)));
+
+  // A rerun under the same id saves over <id>.txt, so the earlier output is
+  // moved to <id>.prev-1.txt first and the kept row names it (review R1): the
+  // older row still points at what its own run saved.
+  const sameOut = path.join(k.dir, 'reports', 'receipts', 'same-id');
+  const sameList = checksFile([{ id: 'code-1', check: 'grep -n hello f.txt', expect: { exit: 0 } }]);
+  fs.writeFileSync(path.join(k.dir, 'f.txt'), 'hello first\n');
+  run(['--checks', sameList, '--out', sameOut], k.dir);
+  fs.writeFileSync(path.join(k.dir, 'f.txt'), 'hello second\n');
+  const again = run(['--checks', sameList, '--out', sameOut], k.dir);
+  const sameRows = (readJson(path.join(sameOut, 'results.json')) || {}).checks || [];
+  const body = (r) => { try { return fs.readFileSync(path.resolve(k.dir, r.stdoutFile), 'utf8'); } catch (e) { return ''; } };
+  check('252 keep: a same-id rerun moves the earlier output to <id>.prev-1.txt, and the kept row names it',
+    sameRows.length === 2 && /hello first/.test(body(sameRows[0])) && /hello second/.test(body(sameRows[1]))
+      && /code-1\.prev-1\.txt$/.test(sameRows[0].stdoutFile || '') && /code-1\.txt$/.test(sameRows[1].stdoutFile || '')
+      && !!again.json && /code-1\.txt$/.test(again.json.checks[0].stdoutFile || ''),
+    one(JSON.stringify(sameRows)));
+
+  // The same holds for a flaky row's kept first run, which its detail names.
+  const flip = path.join(k.dir, 'flip');
+  fs.mkdirSync(path.join(flip, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(flip, 'package.json'), JSON.stringify({ name: 'flip', version: '1.0.0', private: true, scripts: { test: 'node toggle.js' } }) + '\n');
+  fs.writeFileSync(path.join(flip, 'toggle.js'), "const fs = require('fs');\nif (fs.existsSync('.ran')) process.exit(0);\nfs.writeFileSync('.ran', 'x');\nconsole.log('first run fails ' + fs.readFileSync('n.txt', 'utf8').trim());\nprocess.exit(1);\n");
+  const flipOut = path.join(flip, 'reports', 'out');
+  const flipList = checksFile([{ id: 'suite', check: 'npm test', expect: { exit: 0 } }]);
+  for (const n of ['1', '2']) {
+    fs.rmSync(path.join(flip, '.ran'), { force: true });
+    fs.writeFileSync(path.join(flip, 'n.txt'), n + '\n');
+    run(['--checks', flipList, '--out', flipOut, '--rerun-failures', '--timeout', '60000'], flip);
+  }
+  const flipRows = (readJson(path.join(flipOut, 'results.json')) || {}).checks || [];
+  const named = (r) => { const m = /\((?:the failing run is )(first-run\/[^)]+)\)/.exec(String(r && r.detail)); return m ? m[1] : null; };
+  const firstOf = (r) => { try { return fs.readFileSync(path.join(flipOut, named(r)), 'utf8'); } catch (e) { return ''; } };
+  check('252 keep: a flaky rerun moves the earlier first-run/<id>.txt aside, and the kept row\'s detail names the moved file',
+    flipRows.length === 2 && flipRows.every((r) => r.flaky === true) && named(flipRows[0]) === 'first-run/suite.prev-1.txt' && named(flipRows[1]) === 'first-run/suite.txt'
+      && /fails 1/.test(firstOf(flipRows[0])) && /fails 2/.test(firstOf(flipRows[1])),
+    one(JSON.stringify(flipRows)));
 });
 
 console.log('');

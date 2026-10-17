@@ -81,7 +81,9 @@
 // runs share (a review's receipts) keeps every run's rows (issue #252): each
 // call appends its rows, each row carrying its own run's `at` and `head`, a
 // `runs` list holds one entry per call, and the top-level fields are the
-// latest call's. See saveRecord.
+// latest call's. A rerun under an id first moves the earlier <id>.txt to
+// <id>.prev-<n>.txt (and a kept first-run/<id>.txt the same way) and points
+// the kept row there. See saveRecord.
 //
 // Plan mode (issue #231, rule M17). A plan step names its own checks in one
 // fixed shape, and the runner reads that shape itself, so no model copies a
@@ -1456,7 +1458,24 @@ function attempt(line, expect, opts, cwd, env, file, notYet) {
   return out;
 }
 
-function runOne(c, opts, cwd, outDir, root, env) {
+// An earlier call's output saved under this id, moved to <id>.prev-<n>.txt
+// before this run saves over <id>.txt (issue #252, review R1): results.json
+// keeps that call's row, and saveRecord points it at the moved file, so the
+// older row still names what its own run saved. Null when there was none.
+function moveAside(file) {
+  try { fs.lstatSync(file); } catch (e) { return null; }
+  for (let n = 1; ; n++) {
+    const aside = file.replace(/\.txt$/, '.prev-' + n + '.txt');
+    try { fs.lstatSync(aside); continue; } catch (e) { /* free */ }
+    try { fs.renameSync(file, aside); return aside; } catch (e) {
+      process.stderr.write('run-checks: could not move ' + file + ' aside: ' + e.message + '\n');
+      return null;
+    }
+  }
+}
+
+// `moved` collects { <old shown path>: <moved shown path> } for saveRecord.
+function runOne(c, opts, cwd, outDir, root, env, moved) {
   const row = { id: c.id, verdict: 'error', exit: null, stdoutFile: null, detail: '', ms: null, slow: false, flaky: false };
   // Tokenize, judge, rebuild: bash runs the rebuilt line and never c.check.
   const parsed = tokenize(c.check);
@@ -1469,16 +1488,20 @@ function runOne(c, opts, cwd, outDir, root, env) {
   if (refusal) { row.detail = refusal; return row; }
 
   const file = path.join(outDir, c.id + '.txt');
+  const aside = moveAside(file);
   let a = attempt(line, c.expect, opts, cwd, env, file, c.notYet);
   let slow = a.ms > opts.timeout / 2;
   if (opts.rerunFailures && a.verdict === 'fail' && a.retry) {
     // Keep the failing run where the review and the tally can read it, then
     // run the same judged line again into <id>.txt.
     const firstDir = path.join(outDir, 'first-run');
+    const firstFile = path.join(firstDir, c.id + '.txt');
     let kept = false;
     try {
       fs.mkdirSync(firstDir, { recursive: true });
-      fs.renameSync(file, path.join(firstDir, c.id + '.txt'));
+      const firstAside = moveAside(firstFile);
+      if (firstAside) moved[shownPath(cwd, firstFile)] = shownPath(cwd, firstAside);
+      fs.renameSync(file, firstFile);
       kept = true;
     } catch (e) {
       process.stderr.write('run-checks: ' + c.id + ': could not keep the first run: ' + e.message + '\n');
@@ -1501,6 +1524,13 @@ function runOne(c, opts, cwd, outDir, root, env) {
   row.ms = a.ms;
   row.slow = slow;
   if (a.saved) row.stdoutFile = shownPath(cwd, file);
+  if (aside) {
+    // A run that saved nothing puts the earlier output back where its row points.
+    let saved = true;
+    try { fs.lstatSync(file); } catch (e) { saved = false; }
+    if (!saved) { try { fs.renameSync(aside, file); } catch (e) { moved[shownPath(cwd, file)] = shownPath(cwd, aside); } }
+    else moved[shownPath(cwd, file)] = shownPath(cwd, aside);
+  }
   return row;
 }
 
@@ -1524,8 +1554,9 @@ function runAll(checks, opts, cwd, outDir, extra, decorate) {
   const results = [];
   const summary = { pass: 0, fail: 0, error: 0 };
   const flags = { slow: 0, flaky: 0 };
+  const moved = {};
   for (const c of checks) {
-    const row = runOne(c, opts, cwd, outDir, root, env);
+    const row = runOne(c, opts, cwd, outDir, root, env, moved);
     if (c.role) row.role = c.role;
     if (row.verdict === 'error') process.stderr.write('run-checks: ' + c.id + ': ' + row.detail + '\n');
     summary[row.verdict]++;
@@ -1538,9 +1569,9 @@ function runAll(checks, opts, cwd, outDir, extra, decorate) {
   // Saved only when a check ran: a run whose every check was refused writes
   // nothing at all, as it always has, so a refusal never leaves a record that
   // looks like evidence.
-  if (results.some((r) => r.stdoutFile !== null)) {
+  if (results.some((r) => r.stdoutFile !== null) || Object.keys(moved).length > 0) {
     const rows = results.map((r, i) => Object.assign({}, r, { check: checks[i].check, expect: checks[i].expect }));
-    saveRecord(outDir, Object.assign({ at, head: headCommit(cwd) }, result, { checks: rows }));
+    saveRecord(outDir, Object.assign({ at, head: headCommit(cwd) }, result, { checks: rows }), moved);
   }
   return result;
 }
@@ -1599,7 +1630,9 @@ function setAside(outDir, file) {
     return;
   }
 }
-function saveRecord(outDir, record) {
+// `moved` (from runAll) maps an output path an earlier row names to the file
+// it was moved to before this call saved over it.
+function saveRecord(outDir, record, moved) {
   const file = path.join(outDir, 'results.json');
   const lock = file + '.lock';
   const locked = takeLock(lock);
@@ -1607,13 +1640,26 @@ function saveRecord(outDir, record) {
   const headOf = (r) => (r.head === undefined ? null : r.head);
   const runOf = (r) => Object.assign({ at: r.at, head: headOf(r), summary: r.summary, flags: r.flags }, r.skipped ? { skipped: true } : {});
   const stamp = (rows, r) => rows.map((c) => (c && typeof c === 'object' && c.at === undefined ? Object.assign({}, c, { at: r.at, head: headOf(r) }) : c));
+  const repoint = (rows) => rows.map((c) => {
+    if (!c || typeof c !== 'object' || !moved) return c;
+    let out = c;
+    if (typeof c.stdoutFile === 'string' && moved[c.stdoutFile]) out = Object.assign({}, out, { stdoutFile: moved[c.stdoutFile] });
+    // A flaky row's detail names its kept first run as first-run/<id>.txt.
+    for (const from of Object.keys(moved)) {
+      const name = 'first-run/' + path.basename(from);
+      if (path.basename(path.dirname(from)) === 'first-run' && typeof out.detail === 'string' && out.detail.includes(name)) {
+        out = Object.assign({}, out, { detail: out.detail.split(name).join('first-run/' + path.basename(moved[from])) });
+      }
+    }
+    return out;
+  });
   try {
     let rows = [];
     let runs = [];
     const prior = priorRecord(file);
     if (prior && prior.bad) setAside(outDir, file);
     else if (prior) {
-      rows = stamp(prior.rec.checks, prior.rec);
+      rows = repoint(stamp(prior.rec.checks, prior.rec));
       runs = Array.isArray(prior.rec.runs) ? prior.rec.runs : [runOf(prior.rec)];
     }
     const merged = Object.assign({}, record, { checks: rows.concat(stamp(record.checks, record)), runs: runs.concat([runOf(record)]) });
