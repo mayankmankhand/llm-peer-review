@@ -122,6 +122,17 @@ function makeReviewRun(o) {
   // One skeptic, the judge whose model is checked.
   write(path.join(slugDir, sid, 'subagents', 'agent-s1.jsonl'), JSON.stringify({ type: 'assistant', message: { model: models.judge, role: 'assistant', content: [{ type: 'text', text: 'R1: STANDS' }] } }) + '\n');
   write(path.join(slugDir, sid, 'subagents', 'agent-s1.meta.json'), JSON.stringify({ agentType: 'tk:audit-skeptic', toolUseId: 'toolu_skeptic' }));
+  // o.agents: [{ type, tools, results }], more typed subagents, each making the tool
+  // calls in `tools` and getting the tool results in `results` (#253: a judge's
+  // denied call has to sit in that judge's own transcript).
+  (o.agents || []).forEach((ag, i) => {
+    const recs = [
+      { type: 'assistant', message: { model: ag.type === 'tk:review-code-finder' ? models.finder : models.judge, role: 'assistant', content: ag.tools || [] } },
+      { type: 'user', message: { role: 'user', content: ag.results || [] } },
+    ];
+    write(path.join(slugDir, sid, 'subagents', 'agent-x' + i + '.jsonl'), recs.map(r => JSON.stringify(r)).join('\n') + '\n');
+    write(path.join(slugDir, sid, 'subagents', 'agent-x' + i + '.meta.json'), JSON.stringify({ agentType: ag.type, toolUseId: 'toolu_extra_' + i }));
+  });
   for (const t of o.mainTexts || []) mainRecords.push({ type: 'assistant', message: { model: models.main, role: 'assistant', content: [{ type: 'text', text: t }] } });
   mainRecords.push({ type: 'assistant', message: { model: models.main, role: 'assistant', content: toolUses.concat(o.mainTools || []) } });
   mainRecords.push({ type: 'user', message: { role: 'user', content: o.mainToolResults || [] } });
@@ -364,6 +375,71 @@ section('validity', () => {
   check('a denied call makes the run invalid', !denied.valid && denied.reasons.includes('denied:1'));
   const deniedSub = analyze(makeReviewRun({ mainToolResults: [{ type: 'tool_result', tool_use_id: 'x', is_error: true, content: 'Permission to use Bash with command npm audit --json has been denied.' }] }));
   check('a denial written into a transcript makes the run invalid', !deniedSub.valid && deniedSub.reasons.includes('denied-in-transcript'));
+
+  // #253: a read-only judge's denied scratch experiment is a warning, not an invalid
+  // run. The three shapes below are the real denied calls from the 2026-10-13
+  // d1b-rerun and fix-d3 runs, with this fixture's paths.
+  const PAD = '/tmp/claude-1000/-tmp-qc-run-TEST-project/sess/scratchpad';
+  const DENY = 'Permission to use Bash has been denied. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal, e.g. using head instead of cat.';
+  let denyN = 0;
+  const deniedBy = (type, command, tool) => {
+    const id = 'toolu_deny_' + (++denyN);
+    const input = tool && tool !== 'Bash' ? { file_path: command, content: 'x' } : { command };
+    return { type, tools: [{ type: 'tool_use', id, name: tool || 'Bash', input }], results: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: DENY }] };
+  };
+  const show = r => (r.valid ? 'valid' : 'INVALID') + ' reasons [' + r.reasons.join(', ') + '] warnings [' + r.warnings.join(', ') + ']';
+  const exempt = (r, n) => r.valid && !r.reasons.includes('denied-in-transcript') && r.warnings.includes('denied-experiment:' + n);
+  const skepticWrite = 'd=' + PAD + '/globtest; mkdir -p $d/backups && cd $d && bash -c \'set -euo pipefail; shopt -s failglob; shopt -s nullglob; existing=(); for f in backups/notes-*.json; do existing+=("$f"); done; echo reached ${#existing[@]}\'; echo "exit $?"; bash --version | head -1';
+  const skepticLoop = 'bash -c \'set -euo pipefail; shopt -s failglob; shopt -s nullglob; existing=(); for f in /tmp/qc-run.TEST/project/backups-none/notes-*.json; do existing+=("$f"); done; echo "after loop: ${#existing[@]}"\'; echo "exit $?"';
+  // The fix-d3 verifier's call in full: its comment's "sorts..." is an ellipsis, not a path step.
+  const verifierRun = 'S=' + PAD + '; rm -rf $S/r2; mkdir -p $S/r2/data $S/r2/backups && cd $S/r2 && echo \'[]\' > data/notes.json\nSCR=/tmp/qc-run.TEST/project/scripts/rotate-backups.sh\n# empty backups first run\nbash $SCR; echo "exit=$? count=$(ls backups | wc -l)"\nrm backups/*; for i in 1 2 3 4 5 6 7; do echo old$i > backups/notes-2026010$i-000000.json; done\nbash $SCR >/dev/null; echo "normal: $(ls backups | wc -l)"; ls backups\nbash $SCR >/dev/null; bash $SCR >/dev/null; echo "same-second x2: $(ls backups | wc -l)"; ls backups\n# new copy name sorts... check newest present\nmv data/notes.json data/x; bash $SCR; echo "failcopy exit=$? count=$(ls backups|wc -l)"; mv data/x data/notes.json';
+  const w1 = analyze(makeReviewRun({ agents: [deniedBy('tk:audit-skeptic', skepticWrite)] }));
+  check('253 experiment: a skeptic\'s denied write in its scratchpad is a warning, not an invalid run', exempt(w1, 1), show(w1));
+  const w2 = analyze(makeReviewRun({ agents: [deniedBy('tk:audit-skeptic', skepticLoop)] }));
+  check('253 experiment: a skeptic\'s denied read-only loop over the scratch project is a warning', exempt(w2, 1), show(w2));
+  const w3 = analyze(makeReviewRun({ agents: [deniedBy('tk:fix-verifier', verifierRun)] }));
+  check('253 experiment: a verifier\'s denied call on its scratchpad, the project\'s script and /dev/null is a warning', exempt(w3, 1), show(w3));
+  const w4 = analyze(makeReviewRun({ agents: [deniedBy('tk:audit-skeptic', skepticWrite), deniedBy('fix-verifier', verifierRun)] }));
+  check('253 experiment: two exempt denials in one run, one by an unprefixed agent type, give denied-experiment:2', exempt(w4, 2), show(w4));
+
+  // Every other denial still invalidates the run. The call never ran (it was denied),
+  // so this guards scoring, not safety: a call that names or can reach a place outside
+  // the run is still looked at.
+  const stays = (label, opts) => {
+    const r = analyze(makeReviewRun(opts));
+    check('253 stays invalid: ' + label, !r.valid && r.reasons.includes('denied-in-transcript') && !r.warnings.some(x => /^denied-experiment/.test(x)), show(r));
+  };
+  const judgeSays = command => ({ agents: [deniedBy('tk:audit-skeptic', command)] });
+  stays('a finder\'s denied write in the scratchpad', { agents: [deniedBy('tk:review-code-finder', 'mkdir -p ' + PAD + '/x')] });
+  stays('the main session\'s denied write in the scratchpad', {
+    mainTools: [{ type: 'tool_use', id: 'm-den', name: 'Bash', input: { command: 'mkdir -p ' + PAD + '/x' } }],
+    mainToolResults: [{ type: 'tool_result', tool_use_id: 'm-den', is_error: true, content: DENY }],
+  });
+  stays('a judge\'s call naming a home folder', judgeSays('cat /home/someone/.ssh/id_rsa > ' + PAD + '/x'));
+  stays('a judge\'s call naming /etc/passwd', judgeSays('cat /etc/passwd > ' + PAD + '/x'));
+  stays('a judge\'s call in another run\'s scratchpad', judgeSays('mkdir -p /tmp/claude-1000/-tmp-qc-run-OTHER-project/sess/scratchpad/x'));
+  stays('a judge\'s call in a sibling folder sharing the run\'s prefix', judgeSays('ls /tmp/qc-run.TEST-evil/project > ' + PAD + '/x'));
+  stays('a judge\'s call with a .. escape', judgeSays('cat ' + PAD + '/../../../../etc/passwd'));
+  stays('a judge\'s call with ~', judgeSays('cat ~/.bashrc > ' + PAD + '/x'));
+  stays('a judge\'s call naming a URL', judgeSays('curl https://example.com/x -o ' + PAD + '/x'));
+  stays('a judge\'s call naming no absolute path', judgeSays('mkdir -p backups && ls backups'));
+  stays('a judge\'s call expanding $HOME', judgeSays('cp $HOME/.bashrc ' + PAD + '/x'));
+  stays('a judge\'s call expanding ${HOME}', judgeSays('cp ${HOME}/.bashrc ' + PAD + '/x'));
+  stays('a judge\'s call expanding $TMPDIR', judgeSays('ls $TMPDIR ' + PAD));
+  stays('a judge\'s call expanding $OLDPWD', judgeSays('cd ' + PAD + ' && cd $OLDPWD && ls'));
+  stays('a judge\'s call with a variable it assigns empty', judgeSays('d=; cat ' + PAD + '/x $d/etc/passwd'));
+  stays('a judge\'s call with an indirect expansion', judgeSays('v=HOME; ls ${!v} ' + PAD));
+  stays('a judge\'s call with a backtick', judgeSays('cat `echo /etc/passwd` ' + PAD + '/x'));
+  stays('a judge\'s call with a backslash escape', judgeSays('ls ' + PAD + '; printf \'\\057etc\\057passwd\''));
+  stays('a judge\'s call that splits a path with quotes', judgeSays('cat /e\'\'tc/passwd ' + PAD + '/x'));
+  stays('a judge\'s call with eval', judgeSays('eval cat ' + PAD + '/x'));
+  stays('a judge\'s call with a bare cd', judgeSays('cd ' + PAD + ' && cd && cat .bashrc'));
+  stays('a judge\'s call with cd -', judgeSays('cd ' + PAD + ' && cd - && ls'));
+  stays('a judge\'s call with pushd and popd', judgeSays('pushd ' + PAD + ' && popd && ls'));
+  stays('a judge\'s denied Write in the scratchpad', { agents: [deniedBy('tk:audit-skeptic', PAD + '/x.txt', 'Write')] });
+  // A mixed run is invalid on its other denial; the exempt one is still counted.
+  const mixed = analyze(makeReviewRun({ agents: [deniedBy('tk:audit-skeptic', skepticWrite), deniedBy('tk:audit-skeptic', 'cat /etc/passwd > ' + PAD + '/x')] }));
+  check('253 stays invalid: a run with one exempt and one non-exempt denial', !mixed.valid && mixed.reasons.includes('denied-in-transcript') && mixed.warnings.includes('denied-experiment:1'), show(mixed));
 
   const early = analyze(makeReviewRun({ meta: { exitCode: 1 }, result: { subtype: 'error_max_turns', is_error: true } }));
   check('an early end makes the run invalid', !early.valid && early.reasons.includes('exit:1') && early.reasons.includes('ended:error_max_turns'));
