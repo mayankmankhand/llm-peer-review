@@ -345,6 +345,152 @@ function citationWarnings(merged, opts) {
 }
 
 // ==========================================================================
+// locusLabel: what the fixes did to the lines a finding cites (issue #252)
+// ==========================================================================
+//
+// The fix verifier once called a fix FIXED that deleted the cited sentences
+// and put nothing in their place (#242 B1, bad-R3), and a FIXED was once
+// closed by a plan note while the cited script never changed. Neither is
+// visible from the verdict alone, so this labels the cited lines against the
+// diff of the fixes, from the reviewed tree (`base`) to now:
+//   file  unchanged | changed | deleted | absent (not in the reviewed tree)
+//         | new (created after the review began) | untracked (untracked when
+//         the review began: no starting copy to compare) | ignored (git
+//         ignores it, so no git diff can show a fix to it)
+//   line  untouched | rewritten | removed | unknown (no starting copy)
+//   near  how many changed blocks lie within 3 lines of the cited range
+//         (git's default context: the cited hunk), a pure insertion counted
+//         at its place
+// A changed block (a run of - and + lines between context lines) is
+// `removed` when its new words are a subsequence of its old words and fewer
+// (text cut, nothing put in its place; a cut inside one line is the bad-R3
+// shape a line diff calls rewritten), `untouched` when the words are the same
+// (whitespace only), else `rewritten`. A cited range takes rewritten when any
+// of its lines is, else removed when any is, else untouched; with no line
+// cited the whole file is the range. git joins adjacent changed lines into one
+// block, and a block is labeled whole.
+//
+// The diff is `git diff <base>` in `root` (the working tree against the
+// reviewed tree, as M3 defines the diff of the fixes), or a saved unified diff
+// passed as `patch` (any context size), for a review whose tree has moved on.
+
+// A token is a run of letters, digits and underscores, or one punctuation
+// mark: code keeps punctuation on the word ("notes;", "1,"), so splitting on
+// whitespace alone would read `return notes;` as new text beside
+// `return notes.filter(keep);` rather than as what was left after a cut.
+const wordsOf = (lines) => lines.join(' ').match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) || [];
+// True when every word of `b` appears in `a` in order.
+function isSubsequence(b, a) {
+  let i = 0;
+  for (const w of a) if (i < b.length && w === b[i]) i++;
+  return i === b.length;
+}
+function blockLabel(block) {
+  const was = wordsOf(block.old.map((o) => o.text));
+  const now = wordsOf(block.added);
+  if (was.length === now.length && was.every((w, i) => w === now[i])) return 'untouched';
+  return now.length < was.length && isSubsequence(now, was) ? 'removed' : 'rewritten';
+}
+// git's C-style quoting of an unusual path in a diff header.
+function unquotePath(p) {
+  if (!p.startsWith('"')) return p;
+  const map = { n: '\n', t: '\t', '"': '"', '\\': '\\' };
+  const bytes = [];
+  const s = p.slice(1, p.lastIndexOf('"'));
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '\\') { bytes.push(...Buffer.from(s[i], 'utf8')); continue; }
+    const n = s[i + 1];
+    if (/[0-7]/.test(n)) { bytes.push(parseInt(s.substr(i + 1, 3), 8)); i += 3; } else { bytes.push(...Buffer.from(map[n] !== undefined ? map[n] : n, 'utf8')); i += 1; }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+// A unified diff as Map path -> { status: changed | deleted | added, binary, blocks }.
+// Each block holds the old lines it took out ({ n, text }, n the reviewed tree's
+// line number) and the lines it put in.
+function parsePatch(text) {
+  const files = new Map();
+  let cur = null;
+  let oldNo = 0;
+  let block = null;
+  // The --- and +++ lines are headers only before a file's first @@: inside a
+  // hunk, "--- x" is a removed line whose own text starts with "-- ".
+  let inHeader = false;
+  const flush = () => { if (cur && block && (block.old.length || block.added.length)) cur.blocks.push(block); block = null; };
+  for (const line of String(text || '').split(/\r?\n/)) {
+    if (line.startsWith('diff --git ')) { flush(); cur = { status: 'changed', binary: false, blocks: [], from: null, to: null }; inHeader = true; continue; }
+    if (!cur) continue;
+    if (inHeader && line.startsWith('--- ')) { cur.from = line.slice(4) === '/dev/null' ? null : unquotePath(line.slice(4)).replace(/^a\//, ''); continue; }
+    if (inHeader && line.startsWith('+++ ')) {
+      cur.to = line.slice(4) === '/dev/null' ? null : unquotePath(line.slice(4)).replace(/^b\//, '');
+      if (cur.from === null) cur.status = 'added';
+      if (cur.to === null) cur.status = 'deleted';
+      files.set(cur.from || cur.to, cur);
+      continue;
+    }
+    if (line.startsWith('Binary files ')) { cur.binary = true; const m = / and b\/(.*) differ$/.exec(line); if (m) files.set(m[1], cur); continue; }
+    const h = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/.exec(line);
+    // A hunk that takes out no lines names the line it inserts after, so the
+    // next old line is one further on.
+    if (h) { flush(); inHeader = false; oldNo = Number(h[1]) + (h[2] === '0' ? 1 : 0); continue; }
+    if (inHeader) continue;
+    // `at` is the old line a block starts at; a pure insertion sits just before it.
+    if (line.startsWith('-')) { block = block || { at: oldNo, old: [], added: [] }; block.old.push({ n: oldNo++, text: line.slice(1) }); continue; }
+    if (line.startsWith('+')) { block = block || { at: oldNo, old: [], added: [] }; block.added.push(line.slice(1)); continue; }
+    if (line.startsWith(' ')) { flush(); oldNo++; continue; }
+  }
+  flush();
+  return files;
+}
+// The cited lines as [first, last], or null for the whole file.
+function citedRange(line) {
+  if (line === null || line === undefined || line === '') return null;
+  const m = String(line).trim().match(/^(\d+)(?:\s*[-–]\s*(\d+))?$/);
+  return m ? [Number(m[1]), Number(m[2] || m[1])] : null;
+}
+function locusLabel(relPath, line, opts) {
+  const o = opts || {};
+  const root = path.resolve(o.root || process.cwd());
+  const rel = path.posix.normalize(String(relPath || '').trim().replace(/\\/g, '/')).replace(/^\.\//, '');
+  if (rel === '' || rel === '.' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('../')) return { file: 'absent', line: 'unknown', hunks: 0, near: 0 };
+  // A file git ignores (a plan, a report) never shows in a git diff, so a fix to
+  // it cannot be seen here at all. Asked only when `root` is the repository the
+  // review ran in: by default when a base is given, or when `checkIgnore` says so.
+  const askIgnore = o.checkIgnore !== undefined ? !!o.checkIgnore : !!o.base;
+  if (askIgnore && git(root, ['check-ignore', '-q', '--', rel]).status === 0) return { file: 'ignored', line: 'unknown', hunks: 0, near: 0 };
+  const inBase = o.base ? git(root, ['cat-file', '-e', o.base + ':' + rel]).status === 0 : true;
+  const onDisk = (() => { try { return fs.statSync(path.join(root, rel)).isFile(); } catch (e) { return false; } })();
+  const untrackedAtStart = Array.isArray(o.untrackedAtStart) && o.untrackedAtStart.includes(rel);
+  const patchText = typeof o.patch === 'string' ? o.patch
+    : git(root, ['diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', '--no-textconv', o.base || 'HEAD', '--', ':(literal)' + rel]).stdout;
+  const entry = parsePatch(patchText).get(rel) || null;
+  if (!inBase) {
+    if (untrackedAtStart) return { file: 'untracked', line: 'unknown', hunks: 0, near: 0 };
+    const created = typeof o.patch === 'string' ? !!entry && entry.status === 'added' : onDisk;
+    return { file: created ? 'new' : 'absent', line: 'unknown', hunks: 0, near: 0 };
+  }
+  if (entry && entry.status === 'deleted') return { file: 'deleted', line: 'removed', hunks: entry.blocks.length, near: entry.blocks.length };
+  if (!entry) return { file: 'unchanged', line: 'untouched', hunks: 0, near: 0 };
+  if (entry.binary) return { file: 'changed', line: 'unknown', hunks: 0, near: 0 };
+  const range = citedRange(line);
+  const hit = entry.blocks.filter((b) => !range || b.old.some((x) => x.n >= range[0] && x.n <= range[1]));
+  const labels = hit.map(blockLabel);
+  const lineLabel = labels.includes('rewritten') ? 'rewritten' : labels.includes('removed') ? 'removed' : 'untouched';
+  // `near`: the blocks within NEAR_LINES of the cited range, a pure insertion
+  // counted at its place, so a fix a line or two beside an imprecise citation
+  // still reads as touching that hunk.
+  const near = entry.blocks.filter((b) => {
+    if (!range) return true;
+    const lo = b.old.length ? b.at : b.at - 1;
+    const hi = b.old.length ? b.at + b.old.length - 1 : b.at;
+    return Math.max(0, lo - range[1], range[0] - hi) <= NEAR_LINES;
+  }).length;
+  return { file: entry.blocks.length ? 'changed' : 'unchanged', line: lineLabel, hunks: hit.length, near };
+}
+// git's default diff context: a change within this many lines of the cited
+// range is in the cited hunk.
+const NEAR_LINES = 3;
+
+// ==========================================================================
 // --shards and --verdicts: the audit's bytes and its answers, by script
 // (harness research, P5-C1)
 // ==========================================================================
@@ -723,5 +869,5 @@ function verdictsMain(argv, fail) {
   if (!out.ok) process.exitCode = 1;
 }
 
-module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, main };
+module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, locusLabel, parsePatch, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, main };
 if (require.main === module) main(process.argv.slice(2));

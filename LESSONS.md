@@ -491,3 +491,9 @@
 - **Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.**
 - **Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.**
 - **On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.**
+
+## Issue 252 (fix verification harder to fool)
+
+- **Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.**
+- **Read every fixture case before writing an "all N" bar: "all 7 deletion fixes read removed" counted a fix that hollows a feature out with a new stub.**
+- **Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.**
