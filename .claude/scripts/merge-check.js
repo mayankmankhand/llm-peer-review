@@ -53,7 +53,8 @@
 //                                 first-parent line after <ref>
 //   --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]
 //                                 write the file the decision-checker agent reads:
-//                                 this PR's decisions, then each landing's after the cut
+//                                 this PR's decisions, then each landing's after the cut,
+//                                 any diff in it word by word
 //   --wait --pr <N> --head <sha> [--timeout <seconds>]
 //                                 read PR <N> through gh or glab every 3 seconds,
 //                                 for up to 90 by default, until the host reports
@@ -736,7 +737,11 @@ function changelogPlace(clFile, blockFile) {
 // list; one with none (a PR from before the lists existed, a list that says
 // `None recorded`, a landing whose message has no `Decisions:` lines) holds its
 // text and its changes instead, generated paths left out, cut at DIFF_LINES lines.
+// Each diff is word by word (issue #258 item 10): a line a landing reworded
+// shows only the words it changed, so text it carried over is not read as its
+// decision. WORD_NOTE, the file's first line, says what the markers mean.
 const DIFF_LINES = 150;
+const WORD_NOTE = 'Each diff below is word by word: `[-...-]` is text that part removed and `{+...+}` is text it added. Unmarked text was already there, so it is not that part\'s decision.';
 function listed(lines) {
   const out = lines.filter((l) => /^\s*[-*]\s+\S/.test(l)).map((l) => l.trim());
   if (!out.length || (out.length === 1 && /^[-*]\s+None recorded\.?$/i.test(out[0]))) return null;
@@ -750,9 +755,9 @@ function messageDecisions(message) {
   while (j < lines.length && /^\s*[-*]\s+\S/.test(lines[j])) j++;
   return listed(lines.slice(i + 1, j));
 }
-// A diff in a fence longer than any backtick run inside it.
+// A word-by-word diff in a fence longer than any backtick run inside it.
 function changesOf(a, b, excl) {
-  const out = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U1', a, b, '--', '.'].concat(excl)).replace(/\n$/, '');
+  const out = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--word-diff=plain', '-U1', a, b, '--', '.'].concat(excl)).replace(/\n$/, '');
   if (!out) return '(no changes outside generated paths)';
   const lines = out.split('\n');
   const shown = lines.length > DIFF_LINES ? lines.slice(0, DIFF_LINES).concat('... (' + (lines.length - DIFF_LINES) + ' more lines left out)') : lines;
@@ -779,7 +784,7 @@ function decisionsFile(o, mainRef, excl) {
   const pr = o['--pr'] ? readPr(o['--pr']) : o['--pr-body'] ? readPrArg(o['--pr-body']) : { title: null, body: '' };
   const own = listed(String(parseBody(pr.body).decisions || '').split('\n'));
   const name = o['--pr'] ? 'PR #' + pr.number + ': ' + pr.title : (pr.title || 'The branch at ' + c.tip.slice(0, 7));
-  const out = ['## This PR', '', name, ''];
+  const out = [WORD_NOTE, '', '## This PR', '', name, ''];
   if (own) out.push(...own);
   else {
     out.push('No decision list: read what it decides from its text and its changes.', '');

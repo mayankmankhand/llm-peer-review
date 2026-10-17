@@ -643,6 +643,9 @@ section('--style, --marker and --mark', () => {
 });
 
 // --- the decisions file -----------------------------------------------------------------------
+// The line the decisions file opens with (#258 item 10), exactly as the replay measured it.
+const NOTE = 'Each diff below is word by word: `[-...-]` is text that part removed and `{+...+}` is text it added. Unmarked text was already there, so it is not that part\'s decision.';
+
 // The right/left case in different files (rule 3's case): PR1 lands with its
 // decisions in the landing message; PR2, cut before it, decides the opposite in
 // another file. The file /merge hands the decision-checker holds both, and the
@@ -678,7 +681,7 @@ section('--decisions: the file the decision-checker reads', () => {
   const out = path.join(sandbox, 'decisions-1.md');
   let r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', body, '--out', out]);
   let text = fs.existsSync(out) ? read(sandbox, 'decisions-1.md') : '';
-  check('with lists: exit 0, the file opens with the This PR part and holds its decision', r.status === 0 && /^## This PR\n\nThe branch at [0-9a-f]{7}\n\n- Readers always go left - the left road is shorter\n/.test(text), text.slice(0, 300) + r.stderr);
+  check('with lists: exit 0, the This PR part comes first, under the note, and holds its decision', r.status === 0 && text.startsWith(NOTE + '\n\n') && /^## This PR\n\nThe branch at [0-9a-f]{7}\n\n- Readers always go left - the left road is shorter\n/.test(text.slice(NOTE.length + 2)), text.slice(0, 300) + r.stderr);
   check('with lists: one Landing part, PR1, with its decision; the direct commit is not a part', (text.match(/^## /gm) || []).length === 2 && text.includes('## Landing ' + l1.slice(0, 7) + ': Merge PR #1: Go right\n\n- The direction is right - the map says so') && !text.includes('Add a note'), text);
   check('with lists: the JSON names the file, this PR\'s source and the one landing', r.json && r.json.file === out && r.json.thisPr === 'decisions' && r.json.landings.length === 1 && r.json.landings[0].commit === l1 && r.json.landings[0].decisions === 1, r.stdout);
   // The legacy form: no list in the body, none in the landing message.
@@ -693,8 +696,8 @@ section('--decisions: the file the decision-checker reads', () => {
   const out2 = path.join(sandbox, 'decisions-2.md');
   r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', legacyBody, '--out', out2]);
   text = fs.existsSync(out2) ? read(sandbox, 'decisions-2.md') : '';
-  check('legacy: "None recorded" is no list, so This PR holds its title, its text and its own changes', r.status === 0 && r.json.thisPr === 'text and changes' && /^## This PR\n\nGo left\n\nNo decision list/.test(text) && text.includes('This tells readers to go left.') && text.includes('+Always go left, whatever rules.md says.'), text);
-  check('legacy: the landing with no Decisions lines holds its changes, generated paths left out', text.includes('## Landing ' + l1b.slice(0, 7) + ': Merge PR #1: Go right') && text.includes('+Direction: right') && !text.includes('GENERATED-ONLY') && r.json.landings[0].decisions === 0, text);
+  check('legacy: "None recorded" is no list, so This PR holds its title, its text and its own changes', r.status === 0 && r.json.thisPr === 'text and changes' && /^## This PR\n\nGo left\n\nNo decision list/.test(text.slice(NOTE.length + 2)) && text.includes('This tells readers to go left.') && text.includes('{+Always go left, whatever rules.md says.+}'), text);
+  check('legacy: the landing with no Decisions lines holds its changes, generated paths left out', text.includes('## Landing ' + l1b.slice(0, 7) + ': Merge PR #1: Go right') && text.includes('Direction: [-straight-]{+right+}') && !text.includes('GENERATED-ONLY') && r.json.landings[0].decisions === 0, text);
   // A long change is cut, and the cut is said.
   g(dir, ['checkout', '-q', '-b', 'big']);
   write(dir, 'big.txt', Array.from({ length: 400 }, (x, i) => 'line ' + i).join('\n') + '\n');
@@ -708,6 +711,37 @@ section('--decisions: the file the decision-checker reads', () => {
   check('no landing after the cut: an empty list and a note', mc(dir, ['--decisions', '--cut', 'HEAD', '--tip', tip2, '--pr-body', body, '--out', path.join(sandbox, 'decisions-4.md')]).json.landings.length === 0);
   check('--decisions without --out is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2]).status === 2);
   check('--decisions with a --tip that names nothing is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', 'nope', '--out', out3]).status === 2);
+});
+
+// The reported fault's shape (#258 item 10): a landing after the cut rewords the
+// guide's line and keeps its cite as it was, while the PR re-points that cite.
+// In a line diff the whole line, cite and all, reads as the landing's; word by
+// word, only the words it changed are marked, so the cite it carried over is
+// not read as its decision.
+section('258: the decisions file shows each diff word by word', () => {
+  const dir = newRepo('words');
+  const guide = (line) => '# Landing guide\n\nLand one PR at a time.\n' + line + '\nAsk before anything leaves the machine.\n';
+  write(dir, 'docs/guide.md', guide('Run the checks before you land. The steps are in docs/merge.md section 3.'));
+  commitAll(dir, 'Add the landing guide');
+  const c = cut(dir, 'pr');
+  g(dir, ['checkout', '-q', 'pr']);
+  write(dir, 'docs/guide.md', guide('Run the checks before you land. The steps are in docs/landing.md section 2.'));
+  const tip = commitAll(dir, 'Point the guide at the landing doc');
+  g(dir, ['checkout', '-q', '-b', 'reword', c]);
+  write(dir, 'docs/guide.md', guide('Run every check before you land. The steps are in docs/merge.md section 3.'));
+  commitAll(dir, 'Reword the guide');
+  g(dir, ['checkout', '-q', 'main']);
+  g(dir, ['merge', '--no-ff', '-q', '-m', 'Merge PR #20: Tighten the guide wording', 'reword']);
+  const body = path.join(sandbox, 'words-body.md');
+  fs.writeFileSync(body, 'Point the guide at the new landing doc.\n\n## Decisions\n- Point the guide at docs/landing.md section 2 - the steps moved\n');
+  const out = path.join(sandbox, 'words.md');
+  const r = mc(dir, ['--decisions', '--cut', c, '--tip', tip, '--pr-body', body, '--out', out]);
+  const text = fs.existsSync(out) ? read(sandbox, 'words.md') : '';
+  const at = text.indexOf('## Landing ');
+  const part = at >= 0 ? text.slice(at) : '';
+  check('258 decisions: carried-over words of a landing are unmarked', r.status === 0 && part.includes('Run [-the checks-]{+every check+} before you land. The steps are in docs/merge.md section 3.'), 'word markers: ' + /\[-|\{\+/.test(part) + '; the guide line: ' + JSON.stringify(part.split('\n').find((l) => l.includes('section 3')) || null));
+  const first = text.split('\n')[0];
+  check('258 decisions: the file explains the markers once at its top', first === NOTE && text.split(NOTE).length === 2 && text.startsWith(NOTE + '\n\n## This PR\n'), 'first line: ' + JSON.stringify(first) + ', times: ' + (text.split(NOTE).length - 1));
 });
 
 // --- changelog placement, generated paths, usage ----------------------------------------------
