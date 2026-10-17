@@ -374,7 +374,11 @@ function citationWarnings(merged, opts) {
 // reviewed tree, as M3 defines the diff of the fixes), or a saved unified diff
 // passed as `patch` (any context size), for a review whose tree has moved on.
 
-const wordsOf = (lines) => lines.join(' ').split(/\s+/).filter(Boolean);
+// A token is a run of letters, digits and underscores, or one punctuation
+// mark: code keeps punctuation on the word ("notes;", "1,"), so splitting on
+// whitespace alone would read `return notes;` as new text beside
+// `return notes.filter(keep);` rather than as what was left after a cut.
+const wordsOf = (lines) => lines.join(' ').match(/[\p{L}\p{N}_]+|[^\s\p{L}\p{N}_]/gu) || [];
 // True when every word of `b` appears in `a` in order.
 function isSubsequence(b, a) {
   let i = 0;

@@ -543,6 +543,15 @@ console.log('\n10. 252 locus: each cited line is labeled against the diff of the
   fs.mkdirSync(path.join(repo, 'plans'));
   fs.writeFileSync(path.join(repo, 'plans', 'PLAN-x.md'), 'a plan\n');
   check('252 locus: a cited file git ignores is file ignored, line unknown', shows(at('plans/PLAN-x.md', 1), 'ignored', 'unknown'), JSON.stringify(at('plans/PLAN-x.md', 1)));
+  // Punctuation is its own token: code keeps it on the word ("notes;", "1,"),
+  // so a cut that leaves `return notes;` from `return notes.filter(keep);`, or
+  // drops a JSON entry and the comma before it, is still a cut.
+  const cut = (was, now) => ['diff --git a/c.js b/c.js', '--- a/c.js', '+++ b/c.js', '@@ -1 +1 @@', '-' + was, '+' + now, ''].join('\n');
+  const cutLabel = (was, now) => (label('c.js', 1, { patch: cut(was, now), root: repo }) || {}).line;
+  check('252 locus: punctuation is a token of its own, so a cut that leaves code punctuation behind is removed and new punctuation is not',
+    cutLabel('return notes.filter(keep);', 'return notes;') === 'removed' && cutLabel('"a": 1, "b": 2,', '"a": 1') === 'removed'
+      && cutLabel('return notes;', 'return notes.filter(keep);') === 'rewritten' && cutLabel('let x = 1', 'let x = 1;') === 'rewritten',
+    JSON.stringify([cutLabel('return notes.filter(keep);', 'return notes;'), cutLabel('"a": 1, "b": 2,', '"a": 1'), cutLabel('return notes;', 'return notes.filter(keep);'), cutLabel('let x = 1', 'let x = 1;')]));
   // Inside a hunk, "--- x" is a removed line whose text starts with "-- ", not a header.
   const dashed = ['diff --git a/m.md b/m.md', 'index 1111111..2222222 100644', '--- a/m.md', '+++ b/m.md', '@@ -1,3 +1,2 @@', ' keep', '--- a dashed rule', ' tail', ''].join('\n');
   const dash = label('m.md', 2, { patch: dashed, root: repo }) || {};
