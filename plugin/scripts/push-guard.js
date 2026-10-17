@@ -73,12 +73,33 @@
 // Openers and quotes are found by their spelling, a reading simpler than
 // bash's; where the two differ, only a command written to hide a push gains.
 //
+// The hook, main(): Claude Code runs this file before every Bash command
+// Claude makes, with the call as JSON on stdin. The guard prints one answer,
+// or nothing, and exits 0; a crash or a hang is left to the hook entry's
+// "onFailure": "block".
+//   none  nothing printed: Claude Code's own permission flow runs unchanged.
+//   deny  Claude Code cancels the command and shows Claude the reason.
+//   ask   Claude Code shows the owner an approval prompt with the reason.
+// For a scan, the hook works in the repository the input's cwd is in. It
+// asks when the remote is a mirror or pushes somewhere other than it fetches
+// from, and denies a branch or tag that is not the checked-out commit. Then
+// it runs pre-push-check.js, found beside this file, for <remote>
+// <branch-or-tag>. Exit 0: no answer, except that --no-verify and force
+// pushes are asked about. Exit 1: ask, with the report. Exit 2, a missing
+// check, or a timeout: deny.
+// In bypassPermissions and dontAsk modes no approval prompt is sure to reach
+// the owner, so there an ask becomes a deny, and the owner can still push
+// with !. When the guard itself fails, it denies a command that mentions
+// push and lets any other through.
+//
 // Out of reach, by the owner's bar ("hard to skip, not impossible"): a push
 // inside a script file Claude writes and runs, writes through GitHub's web
 // API, disguised spellings inside text the tokenizer refuses, a shell alias
 // or a git alias set in config that stands for push, and a fake script named
 // pre-push-check.js run right before a push.
 
+const { spawnSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 
 // The characters a pushed word may hold. Nothing here expands in bash.
@@ -461,5 +482,182 @@ function classify(command, depth) {
   if (read.meta[p].some(function (m) { return m.input; })) return deny('plain', 'it reads its input from a file');
   return standardPush(segs[p]);
 }
+
+// --- the hook ----------------------------------------------------------------
+
+// The scan's time limit, inside the hook entry's own 120 s.
+const SCAN_TIMEOUT_MS = 100000;
+const GIT_TIMEOUT_MS = 15000;
+// The most of a scan report one reason carries.
+const MAX_REPORT = 2400;
+// Modes in which no approval prompt is sure to reach the owner.
+const NO_PROMPT_MODES = new Set(['bypassPermissions', 'dontAsk']);
+
+function answer(decision, reason) {
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason } };
+}
+// An ask, or a deny that says why in a mode with no sure prompt.
+function askAnswer(call, reason) {
+  if (!NO_PROMPT_MODES.has(call.permission_mode)) return answer('ask', reason);
+  return answer('deny', reason + ' This session runs in ' + call.permission_mode + ' mode, where no approval prompt is sure to reach the owner, so push-guard blocked the push instead of asking. The owner can push it themselves with ! at the prompt.');
+}
+function scanErrorReason(text) {
+  return 'push-guard blocked this push: the pre-push check could not check it (' + text + '). Fix what it names, then push again. If the owner wants this push anyway, they can run it themselves with ! at the prompt.';
+}
+function hitReason(report, notes) {
+  const shown = report.length > MAX_REPORT ? report.slice(0, MAX_REPORT) + '\n[... cut here; run the pre-push check by hand to see the rest]' : report;
+  return 'push-guard: the pre-push check flagged this push' + (notes.length ? ', and ' + notes.join(', and ') : '') +
+    '. Approve only if everything below is safe to publish; this approval is your "push anyway".\n\n' + shown;
+}
+function failReason(e) {
+  const what = String((e && e.message) || e).split('\n')[0].slice(0, 300);
+  return 'push-guard blocked this command: the guard failed (' + what + ') and the command mentions push, so it was not let through unchecked. ' +
+    'If it is not a push, run it without the word push (put long text in a file); if it is, the owner can run it themselves with ! at the prompt.';
+}
+
+// git in the push's repository: its output, or null when it fails.
+function git(cwd, args) {
+  const r = spawnSync('git', args, { cwd: cwd, encoding: 'utf8', timeout: GIT_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'] });
+  return r.status === 0 ? r.stdout : null;
+}
+function commitOf(top, rev) {
+  const out = git(top, ['rev-parse', '--verify', '-q', rev + '^{commit}']);
+  return out === null ? null : out.trim();
+}
+function isDirectory(p) {
+  try { return fs.statSync(p).isDirectory(); } catch (e) { return false; }
+}
+
+// A remote the scan cannot judge: missing ({ deny }), or a mirror or one that
+// pushes somewhere other than it fetches from ({ ask }). Null when it is fine.
+function remoteProblem(top, remote) {
+  const names = git(top, ['remote']);
+  if (names === null || names.split('\n').indexOf(remote) === -1) return { deny: 'this repository has no remote named ' + remote };
+  if ((git(top, ['config', '--bool', '--get', 'remote.' + remote + '.mirror']) || '').trim() === 'true') {
+    return { ask: 'the remote ' + remote + ' is set up as a mirror, so a push to it sends every branch and tag' };
+  }
+  const fetchUrls = git(top, ['remote', 'get-url', '--all', remote]);
+  const pushUrls = git(top, ['remote', 'get-url', '--push', '--all', remote]);
+  if (fetchUrls === null || pushUrls === null) return { deny: 'git could not read where the remote ' + remote + ' points' };
+  if (fetchUrls.trim() !== pushUrls.trim()) {
+    return { ask: 'the push address of the remote ' + remote + ' differs from its fetch address, so the check would compare with one place while the push goes to another' };
+  }
+  return null;
+}
+
+// The branch or tag name the scan runs for ({ name }), or { deny } when the
+// push does not send the checked-out commit: the scan covers what HEAD adds.
+function destination(top, push) {
+  const head = commitOf(top, 'HEAD');
+  if (head === null) return { deny: 'this repository has no checked-out commit' };
+  if (push.src === 'HEAD') {
+    if (push.dst !== null) return { name: push.dst };
+    const current = git(top, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    if (current === null) return { deny: 'HEAD is detached, so `git push ' + push.remote + ' HEAD` names no branch' };
+    return { name: current.trim() };
+  }
+  const branch = commitOf(top, 'refs/heads/' + push.src);
+  const tag = commitOf(top, 'refs/tags/' + push.src);
+  if (branch === null && tag === null) return { deny: push.src + ' is neither a branch nor a tag in this repository' };
+  for (const [kind, sha] of [['branch', branch], ['tag', tag]]) {
+    if (sha !== null && sha !== head) {
+      return { deny: 'the ' + kind + ' ' + push.src + ' is on ' + sha.slice(0, 12) + ', not the checked-out commit ' + head.slice(0, 12) + ', and the check scans what the checked-out commit adds' };
+    }
+  }
+  return { name: push.src };
+}
+
+// The repository's own pre-push hook, which --no-verify skips too: its path
+// as git reports it (core.hooksPath honored), or null when there is none.
+function ownPrePushHook(top) {
+  const out = git(top, ['rev-parse', '--git-path', 'hooks/pre-push']);
+  if (out === null) return null;
+  const hookPath = out.trim();
+  try { fs.accessSync(path.resolve(top, hookPath), fs.constants.X_OK); return hookPath; } catch (e) { return null; }
+}
+
+// Why a push goes to the owner even when the scan finds nothing.
+function alwaysAskNotes(top, push) {
+  const notes = [];
+  if (push.noVerify) {
+    const own = ownPrePushHook(top);
+    notes.push('it uses --no-verify, the usual way to push past a check' +
+      (own === null ? '' : ", which also skips this repository's own pre-push hook (" + own + ')'));
+  }
+  if (push.force) notes.push('it is a force push, which can replace commits already on ' + push.remote);
+  return notes;
+}
+
+// pre-push-check.js from beside this file, for <remote> <name>:
+// { status: 'clean' | 'hit' | 'error', text }.
+function runScan(top, remote, name) {
+  const scanner = path.join(__dirname, 'pre-push-check.js');
+  if (!fs.existsSync(scanner)) return { status: 'error', text: 'the check is missing: there is no ' + scanner };
+  const r = spawnSync(process.execPath, [scanner, remote, name], { cwd: top, encoding: 'utf8', timeout: SCAN_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.status === 0) return { status: 'clean', text: '' };
+  if (r.status === 1) return { status: 'hit', text: (r.stdout || '').trim() };
+  if (r.error && r.error.code === 'ETIMEDOUT') return { status: 'error', text: 'it did not finish within ' + SCAN_TIMEOUT_MS / 1000 + ' s' };
+  const said = (r.stderr || '').split('\n')
+    .filter(function (l) { return /^pre-push-check: /.test(l) && !/^pre-push-check: (falling back|scanned) /.test(l); })
+    .map(function (l) { return l.slice('pre-push-check: '.length); }).join(' ');
+  return { status: 'error', text: said || 'it exited ' + (r.status === null ? 'on ' + r.signal : r.status) };
+}
+
+// The answer for a standard push: scan it in the repository it runs in.
+function scanAnswer(call, push) {
+  if (typeof call.cwd !== 'string' || !isDirectory(call.cwd)) {
+    return answer('deny', denyReason('the hook input names no folder that exists, so the guard cannot tell which repository the push is from'));
+  }
+  const top = git(call.cwd, ['rev-parse', '--show-toplevel']);
+  if (top === null) return answer('deny', denyReason(call.cwd + ' is not inside a git repository'));
+  const repo = top.trim();
+  const remote = remoteProblem(repo, push.remote);
+  if (remote !== null) return remote.deny ? answer('deny', denyReason(remote.deny)) : askAnswer(call, unscannableReason(remote.ask));
+  const dest = destination(repo, push);
+  if (dest.deny) return answer('deny', denyReason(dest.deny));
+  const scanned = runScan(repo, push.remote, dest.name);
+  if (scanned.status === 'error') return answer('deny', scanErrorReason(scanned.text));
+  const notes = alwaysAskNotes(repo, push);
+  if (scanned.status === 'hit') return askAnswer(call, hitReason(scanned.text, notes));
+  if (notes.length) {
+    return askAnswer(call, 'push-guard: the pre-push check found nothing in this push, but ' + notes.join(', and ') +
+      '. Approve it only if you meant to push it this way; this approval is your "push anyway".');
+  }
+  return null;
+}
+
+// The answer for one Bash call, or null for none.
+function respond(call, command) {
+  const verdict = classify(command);
+  if (verdict.decision === 'none') return null;
+  if (verdict.decision === 'deny') return answer('deny', verdict.reason);
+  if (verdict.decision === 'ask') return askAnswer(call, verdict.reason);
+  return scanAnswer(call, verdict.push);
+}
+
+// The hook's entry: read the call, print the answer. A failure is judged by
+// the command once it is known, by the raw input before that.
+function main() {
+  let judged = '';
+  let result = null;
+  try {
+    const raw = fs.readFileSync(0, 'utf8');
+    judged = raw;
+    let call;
+    try { call = JSON.parse(raw); } catch (e) { throw new Error('its input is not the JSON Claude Code sends'); }
+    if (call === null || typeof call !== 'object' || typeof call.tool_name !== 'string') throw new Error('its input is not a tool call');
+    if (call.tool_name === 'Bash') {
+      const command = call.tool_input && call.tool_input.command;
+      if (typeof command !== 'string') throw new Error('the Bash call carries no command');
+      judged = command;
+      result = respond(call, command);
+    }
+  } catch (e) {
+    result = /push/i.test(judged) ? answer('deny', failReason(e)) : null;
+  }
+  if (result !== null) process.stdout.write(JSON.stringify(result) + '\n');
+}
+
+if (require.main === module) main();
 
 module.exports = { classify: classify, namesGitPush: namesGitPush, prepare: prepare };

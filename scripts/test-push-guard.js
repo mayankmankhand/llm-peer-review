@@ -16,17 +16,31 @@
 // before it reaches a downstream cycle), spellings the tokenizer resolves,
 // hostile shapes, and commands that only mention push.
 //
+// The "hook" cases run the guard the way Claude Code runs it: a separate node
+// process with the PreToolUse JSON on stdin, against scratch repos whose
+// origin is a local bare repo, so nothing leaves the machine. The planted key
+// is assembled at runtime from fragments, so no real-shaped secret sits in
+// this file (LESSONS).
+//
 // The guard is loaded inside a try, so a missing or broken guard fails each
 // case by name instead of crashing the suite. Failure details stay on one
 // line: the release gate shows only the last lines of a failing suite.
 //
 // Usage: node scripts/test-push-guard.js
 
+const { execFileSync, spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const GUARD = path.join(ROOT, '.claude', 'scripts', 'push-guard.js');
+const PLUGIN_GUARD = path.join(ROOT, 'plugin', 'scripts', 'push-guard.js');
+
+// Hermetic git, as in test-pre-push-check.js: no global or system config
+// reaches a scratch repo, the guard's git calls, or the scan it runs.
+process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+process.env.GIT_CONFIG_NOSYSTEM = '1';
 
 let passed = 0;
 const failures = [];
@@ -208,6 +222,166 @@ reader('a file written from a here-document and only added to git is not a push'
 reader('a commit message read from a here-document is not a push', "git commit -q -F - <<'EOF'\nBlock git push --no-verify\nEOF", { decision: 'none', code: 'not-a-push' });
 reader('an inline script from a here-document is not read as shell', "python3 - <<'EOF'\nprint(\"git push origin HEAD:main\")\nEOF", { decision: 'none', code: 'not-a-push' });
 reader('a grep for the words git push is not a push', 'grep -rn "git push" docs/', { decision: 'none', code: 'not-a-push' });
+
+// --- the hook ---------------------------------------------------------------
+
+// One private folder holds every scratch repo and every scan's temp trees
+// (TMPDIR, as in test-pre-push-check.js), and is removed at exit.
+const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), 'push-guard-test-'));
+process.on('exit', function () { try { fs.rmSync(SCRATCH, { recursive: true, force: true }); } catch (e) { /* best effort */ } });
+function childEnv(extra) { return Object.assign({}, process.env, { TMPDIR: SCRATCH, TMP: SCRATCH, TEMP: SCRATCH }, extra || {}); }
+
+// A fake GitLab token: the scan's gitlab-pat pattern matches it.
+const FAKE_KEY = 'gl' + 'pat-' + 'A1b2C3d4E5f6G7h8J9k0';
+
+let repoCount = 0;
+function commitFile(sb, name, contents) {
+  fs.mkdirSync(path.dirname(path.join(sb.repo, name)), { recursive: true });
+  fs.writeFileSync(path.join(sb.repo, name), contents);
+  sb.g(['add', name]);
+  sb.g(['commit', '-qm', 'add ' + name]);
+}
+// A scratch repo on main whose first commit is already on its origin, a local
+// bare repo, so a scan has a remote base as a real branch does.
+function scratchRepo(label) {
+  const root = path.join(SCRATCH, label + '-' + (++repoCount));
+  const sb = { root: root, repo: path.join(root, 'repo'), bare: path.join(root, 'origin.git') };
+  sb.g = function (args) { return execFileSync('git', args, { cwd: sb.repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+  fs.mkdirSync(sb.repo, { recursive: true });
+  execFileSync('git', ['init', '-q', '--bare', sb.bare], { stdio: ['ignore', 'pipe', 'ignore'] });
+  sb.g(['init', '-q']);
+  sb.g(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  sb.g(['config', 'user.email', 'test@example.com']);
+  sb.g(['config', 'user.name', 'Test']);
+  sb.g(['config', 'commit.gpgsign', 'false']);
+  sb.g(['config', 'core.excludesFile', '/dev/null']);
+  sb.g(['remote', 'add', 'origin', sb.bare]);
+  commitFile(sb, 'README.md', 'seed\n');
+  sb.g(['push', '-q', 'origin', 'main']);
+  return sb;
+}
+// A folder holding a copy of the guard and the named files beside it.
+function guardCopy(label, siblings) {
+  const dir = path.join(SCRATCH, label);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of ['push-guard.js'].concat(siblings)) fs.copyFileSync(path.join(ROOT, '.claude', 'scripts', f), path.join(dir, f));
+  return path.join(dir, 'push-guard.js');
+}
+
+// The PreToolUse input Claude Code sends for one Bash call.
+function bashCall(command, cwd, mode) {
+  return { session_id: 'test', transcript_path: '/dev/null', cwd: cwd, permission_mode: mode || 'default',
+    hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: command, description: 'test' }, tool_use_id: 'toolu_test' };
+}
+
+// Every answer any hook run printed, for the never-allow case.
+const answers = [];
+// Runs a guard copy the way Claude Code runs the hook, from a folder of its
+// own (`from`); `script` may be a function that makes the copy to run.
+// Returns the exit status, the raw output, and the answer read
+// from it: 'none' when it printed nothing. A setup error becomes the answer
+// 'setup-failed', so the case still fails by name.
+function runHook(makeInput, opts) {
+  const o = opts || {};
+  try {
+    const input = makeInput();
+    const script = typeof o.script === 'function' ? o.script() : (o.script || GUARD);
+    const r = spawnSync(process.execPath, [script], {
+      cwd: o.from || SCRATCH, input: typeof input === 'string' ? input : JSON.stringify(input),
+      encoding: 'utf8', env: o.env || childEnv(), timeout: 60000,
+    });
+    const got = { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', decision: 'none', reason: '' };
+    if (got.stdout.trim() !== '') {
+      try {
+        const h = JSON.parse(got.stdout).hookSpecificOutput || {};
+        got.decision = h.hookEventName === 'PreToolUse' ? String(h.permissionDecision) : 'not-pretooluse';
+        got.reason = String(h.permissionDecisionReason || '');
+      } catch (e) { got.decision = 'not-json'; }
+    }
+    answers.push(got);
+    return got;
+  } catch (e) {
+    return { status: null, stdout: '', stderr: e.message, decision: 'setup-failed', reason: '' };
+  }
+}
+function show(got) { return 'exit ' + got.status + ', ' + got.decision + ': ' + (got.reason || got.stdout || got.stderr); }
+// One hook case: exit 0, the answer wanted, and a phrase the reason holds.
+function hook(name, got, want, phrase) {
+  check('hook: ' + name, got.status === 0 && got.decision === want && (phrase === undefined || got.reason.indexOf(phrase) !== -1), show(got));
+}
+function setUp(fn) { try { return fn(); } catch (e) { check('hook: a scratch repo is set up', false, e.message); return null; } }
+
+console.log('\n10. the hook, run the way Claude Code runs it');
+const clean = setUp(function () { const sb = scratchRepo('clean'); commitFile(sb, 'src/app.js', 'console.log("ordinary code");\n'); return sb; });
+const keyed = setUp(function () { const sb = scratchRepo('keyed'); commitFile(sb, 'ci/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n'); return sb; });
+
+hook('a clean standard push gets no answer', runHook(function () { return bashCall('git push -u origin HEAD:feature 2>&1 | tail -4', clean.repo); }), 'none');
+hook('HEAD alone is scanned as the checked-out branch', runHook(function () { return bashCall('git push origin HEAD', keyed.repo); }), 'ask', '[gitlab-pat]');
+hook('a scan that cannot check is denied with its reason', runHook(function () {
+  const sb = scratchRepo('both');
+  sb.g(['branch', 'same']);
+  sb.g(['tag', 'same']);
+  return bashCall('git push origin same', sb.repo);
+}), 'deny', 'names both a tag and a branch');
+hook('--no-verify is asked about even when the check is clean', runHook(function () { return bashCall('git push --no-verify origin HEAD:feature', clean.repo); }), 'ask', '--no-verify');
+hook('a force push is asked about even when the check is clean', runHook(function () { return bashCall('git push --force origin HEAD:feature', clean.repo); }), 'ask', 'force push');
+const behind = setUp(function () {
+  const sb = scratchRepo('behind');
+  sb.g(['branch', 'older']);
+  sb.g(['tag', 'v0']);
+  commitFile(sb, 'src/next.js', 'console.log("next");\n');
+  return sb;
+});
+hook('a branch that is not the checked-out commit is denied', runHook(function () { return bashCall('git push origin older', behind.repo); }), 'deny', 'branch older');
+hook('a tag that is not the checked-out commit is denied', runHook(function () { return bashCall('git push origin v0', behind.repo); }), 'deny', 'tag v0');
+hook('a mirror remote is asked about', runHook(function () {
+  const sb = scratchRepo('mirror');
+  sb.g(['config', 'remote.origin.mirror', 'true']);
+  return bashCall('git push origin HEAD:feature', sb.repo);
+}), 'ask', 'mirror');
+hook('a remote whose push address differs from its fetch address is asked about', runHook(function () {
+  const sb = scratchRepo('split');
+  sb.g(['remote', 'set-url', '--push', 'origin', path.join(sb.root, 'elsewhere.git')]);
+  return bashCall('git push origin HEAD:feature', sb.repo);
+}), 'ask', 'push address');
+hook("the scan runs in the input's cwd, not the hook's own folder", runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); }, { from: clean ? clean.repo : SCRATCH }), 'ask', '[gitlab-pat]');
+hook('a push the check cannot scan is asked about', runHook(function () { return bashCall('git push origin --delete old-branch', clean.repo); }), 'ask', 'cannot scan');
+hook('a push in another shape is denied with the standard forms named', runHook(function () { return bashCall('git -C . push origin HEAD:feature', clean.repo); }), 'deny', 'HEAD:<branch>');
+hook('unreadable input that mentions push is denied', runHook(function () { return '{not json: git push origin HEAD:feature'; }), 'deny');
+hook('unreadable input without push gets no answer', runHook(function () { return '{not json'; }), 'none');
+hook('another tool gets no answer', runHook(function () {
+  return Object.assign(bashCall('', clean.repo), { tool_name: 'Read', tool_input: { file_path: '/notes/git-push.md' } });
+}), 'none');
+hook('a missing scanner denies pushes', runHook(function () { return bashCall('git push origin HEAD:feature', clean.repo); },
+  { script: function () { return guardCopy('no-scanner', ['run-checks.js']); } }), 'deny', 'pre-push-check.js');
+hook('a missing run-checks.js beside the guard denies pushes', runHook(function () { return bashCall('git push origin HEAD:feature', clean.repo); },
+  { script: function () { return guardCopy('no-reader', ['pre-push-check.js']); } }), 'deny', 'run-checks.js');
+hook('a missing run-checks.js beside the guard lets other commands through', runHook(function () { return bashCall('ls -la', clean.repo); },
+  { script: path.join(SCRATCH, 'no-reader', 'push-guard.js') }), 'none');
+hook('the built plugin copy asks about a planted-key push', runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); },
+  { script: PLUGIN_GUARD }), 'ask', '[gitlab-pat]');
+hook('--no-verify in a repo with its own pre-push hook names that hook', runHook(function () {
+  const sb = scratchRepo('own-hook');
+  fs.writeFileSync(path.join(sb.repo, '.git', 'hooks', 'pre-push'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return bashCall('git push --no-verify origin HEAD:feature', sb.repo);
+}), 'ask', '.git/hooks/pre-push');
+hook('a flagged push in bypassPermissions mode is denied, since no prompt is sure to show', runHook(function () {
+  return bashCall('git push origin HEAD:feature', keyed.repo, 'bypassPermissions');
+}), 'deny', '[gitlab-pat]');
+const marker = path.join(SCRATCH, 'git-ran');
+const quiet = runHook(function () {
+  const bin = path.join(SCRATCH, 'fake-bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'git'), '#!/bin/sh\necho ran > "' + marker + '"\n', { mode: 0o755 });
+  return bashCall('ls -la && git status --short', clean.repo);
+}, { env: childEnv({ PATH: path.join(SCRATCH, 'fake-bin') }) });
+check('hook: a command with no push gets no answer without running git', quiet.status === 0 && quiet.decision === 'none' && !fs.existsSync(marker),
+  show(quiet) + (fs.existsSync(marker) ? ' (git ran)' : ''));
+check('hook: no answer ever says allow', answers.length > 0 && answers.every(function (a) { return a.decision !== 'allow' && a.stdout.indexOf('"allow"') === -1; }),
+  answers.filter(function (a) { return a.decision === 'allow'; }).map(show).join(' | '));
+hook('a push carrying a planted key is sent to you for approval', runHook(function () {
+  return bashCall('git push -u origin HEAD:feature 2>&1 | tail -4', keyed.repo);
+}), 'ask', '[gitlab-pat]');
 
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.'); process.exit(0); }
