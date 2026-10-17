@@ -534,13 +534,17 @@ function recordCut(b, mainRef) {
 // list is skipped, and text below it (the attribution line a PR body ends with)
 // is never read as a decision. Each item comes back on one line, its
 // continuation lines joined to it, because a landing message's `Decisions:`
-// list is read one line per decision (messageDecisions below). null when the
-// part holds no list line.
+// list is read one line per decision (messageDecisions below). A list line
+// indented past the item above it is a sub-point of that item, a reason rather
+// than a decision, and joins it the same way. null when the part holds no list
+// line.
 const LIST_LINE_RE = /^\s*[-*]\s+\S/;
 function decisionItems(lines) {
   const items = [];
+  let base = -1;
   for (const l of lines) {
-    if (LIST_LINE_RE.test(l)) { items.push(l.replace(/\s+$/, '')); continue; }
+    const indent = /^\s*/.exec(l)[0].length;
+    if (LIST_LINE_RE.test(l) && !(items.length && indent > base)) { base = indent; items.push(l.replace(/\s+$/, '')); continue; }
     if (!items.length || !l.trim()) continue;
     if (/^\s+\S/.test(l)) { items[items.length - 1] += ' ' + l.trim(); continue; }
     break;
@@ -742,8 +746,18 @@ function changelogPlace(clFile, blockFile) {
 // decision. WORD_NOTE, the file's first line, says what the markers mean.
 const DIFF_LINES = 150;
 const WORD_NOTE = 'Each diff below is word by word: `[-...-]` is text that part removed and `{+...+}` is text it added. Unmarked text was already there, so it is not that part\'s decision.';
+// The list lines, one decision each; a list line indented past the one above
+// it is a sub-point of that decision and joins its line, as in decisionItems.
 function listed(lines) {
-  const out = lines.filter((l) => /^\s*[-*]\s+\S/.test(l)).map((l) => l.trim());
+  const out = [];
+  let base = -1;
+  for (const l of lines) {
+    const m = /^(\s*)[-*]\s+\S/.exec(l);
+    if (!m) continue;
+    if (out.length && m[1].length > base) { out[out.length - 1] += ' ' + l.trim(); continue; }
+    base = m[1].length;
+    out.push(l.trim());
+  }
   if (!out.length || (out.length === 1 && /^[-*]\s+None recorded\.?$/i.test(out[0]))) return null;
   return out;
 }

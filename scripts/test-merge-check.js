@@ -713,6 +713,35 @@ section('--decisions: the file the decision-checker reads', () => {
   check('--decisions with a --tip that names nothing is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', 'nope', '--out', out3]).status === 2);
 });
 
+// A sub-bullet under a decision is a reason for it, not a decision of its own
+// (the #258 review): both readers join it to the item above, a PR body's
+// Decisions part and a landing message's Decisions: list alike.
+section('258: a nested sub-bullet stays with its decision', () => {
+  const dir = newRepo('nested258');
+  write(dir, 'a.txt', 'a\n');
+  const m0 = commitAll(dir, 'M0');
+  const cutN = cut(dir, 'prn');
+  g(dir, ['checkout', '-q', '-b', 'pl']);
+  write(dir, 'a.txt', 'b\n');
+  commitAll(dir, 'Change a');
+  g(dir, ['checkout', '-q', 'main']);
+  const msg = path.join(sandbox, 'msg-nested.txt');
+  fs.writeFileSync(msg, 'Merge PR #5: Change a\n\nChange a\n\nDecisions:\n- A - why\n  - because of X\n- B\n\nCut from: ' + m0 + '\n');
+  g(dir, ['merge', '--no-ff', '-q', '-F', msg, 'pl']);
+  g(dir, ['checkout', '-q', 'prn']);
+  write(dir, 'c.txt', 'c\n');
+  const tipN = commitAll(dir, 'Add c');
+  g(dir, ['checkout', '-q', 'main']);
+  const body = path.join(sandbox, 'body-nested.md');
+  fs.writeFileSync(body, '## Decisions\n- C - why\n  - because of Y\n- D\n');
+  const p = mc(dir, ['--pr-body', body]).json;
+  check('258 pr: a nested sub-bullet stays with its decision', p && p.decisions === '- C - why - because of Y\n- D', 'decisions held: ' + JSON.stringify(p && p.decisions));
+  const out = path.join(sandbox, 'decisions-nested.md');
+  const r = mc(dir, ['--decisions', '--cut', cutN, '--tip', tipN, '--pr-body', body, '--out', out]);
+  const text = fs.existsSync(out) ? read(sandbox, 'decisions-nested.md') : '';
+  check('258 decisions: a landing\'s nested sub-bullet stays with its decision', r.status === 0 && r.json.landings.length === 1 && r.json.landings[0].decisions === 2 && text.includes('- A - why - because of X\n- B'), 'landings: ' + JSON.stringify(r.json && r.json.landings) + ' ' + JSON.stringify(text.slice(0, 500)));
+});
+
 // The reported fault's shape (#258 item 10): a landing after the cut rewords the
 // guide's line and keeps its cite as it was, while the PR re-points that cite.
 // In a line diff the whole line, cite and all, reads as the landing's; word by
