@@ -7,13 +7,15 @@
 // never changed (2026-10-03-194128 R11). This scan reads a review report, takes
 // every FIXED line of its Digest, finds the finding's cited `path:line`, and
 // labels it from the fix diff:
-//   hunk touched                  the cited lines were rewritten or removed,
-//                                 or the cited file was deleted
+//   hunk touched                  a change lies within 3 lines of the cited
+//                                 lines (git's default context), or the cited
+//                                 file was deleted
 //   file touched, hunk untouched  the cited file changed, but not there
 //   file untouched                the cited file did not change at all
 //   file absent                   the cited file was not in the reviewed tree
-//   unknown                       no starting copy to compare (a file that was
-//                                 untracked when the review began, or binary)
+//   unknown                       nothing to compare: a file untracked when
+//                                 the review began, a file git ignores (a
+//                                 plan, a report), or a binary file
 // plus the line label from locusLabel in .claude/scripts/merge-findings.js
 // (untouched, rewritten, removed, unknown). It also counts how many recheck
 // rows in the receipts folder's results.json sit beside their original, the
@@ -149,10 +151,12 @@ function rechecks(dir) {
 }
 
 // The four hunk labels, from locusLabel's file and line labels.
+// The cited hunk is the cited lines plus git's 3 lines of context (locusLabel's
+// `near`), so a fix a line beside an imprecise citation is not flagged.
 function hunkLabel(l) {
   if (l.file === 'absent' || l.file === 'new') return 'file absent';
-  if (l.file === 'untracked' || l.line === 'unknown') return 'unknown';
-  if (l.file === 'deleted' || l.line === 'rewritten' || l.line === 'removed') return 'hunk touched';
+  if (l.file === 'untracked' || l.file === 'ignored' || l.line === 'unknown') return 'unknown';
+  if (l.file === 'deleted' || l.line === 'rewritten' || l.line === 'removed' || l.near > 0) return 'hunk touched';
   if (l.file === 'changed') return 'file touched, hunk untouched';
   return 'file untouched';
 }

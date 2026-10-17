@@ -531,6 +531,18 @@ console.log('\n10. 252 locus: each cited line is labeled against the diff of the
     fromPatch('a.txt', 3).line === 'removed' && fromPatch('a.txt', 5).line === 'rewritten' && fromPatch('a.txt', 2).line === 'untouched'
       && fromPatch('a.txt', 11).line === 'untouched' && fromPatch('b.txt', 1).file === 'deleted' && fromPatch('d.txt', 1).file === 'unchanged',
     JSON.stringify([fromPatch('a.txt', 3), fromPatch('a.txt', 5), fromPatch('a.txt', 2), fromPatch('b.txt', 1), fromPatch('d.txt', 1)]));
+  // `near` counts the changed blocks within 3 lines of the cited range (git's
+  // default hunk context), pure insertions included at their place.
+  const ins = ['diff --git a/p.md b/p.md', '--- a/p.md', '+++ b/p.md', '@@ -5,0 +6,1 @@', '+a note after line 5', '@@ -20 +21 @@', '-old twenty', '+new twenty', ''].join('\n');
+  const nearOf = (line) => (label('p.md', line, { patch: ins, root: repo }) || {}).near;
+  check('252 locus: near counts a pure insertion beside the cited line and a change within 3 lines, and not one further away',
+    nearOf(5) === 1 && nearOf(6) === 1 && nearOf(2) === 1 && nearOf(1) === 0 && nearOf(17) === 1 && nearOf(12) === 0 && (label('p.md', 5, { patch: ins, root: repo }) || {}).line === 'untouched',
+    JSON.stringify([nearOf(5), nearOf(6), nearOf(2), nearOf(1), nearOf(17), nearOf(12)]));
+  // A gitignored file never shows in a git diff, so its lines cannot be judged.
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'plans/\n');
+  fs.mkdirSync(path.join(repo, 'plans'));
+  fs.writeFileSync(path.join(repo, 'plans', 'PLAN-x.md'), 'a plan\n');
+  check('252 locus: a cited file git ignores is file ignored, line unknown', shows(at('plans/PLAN-x.md', 1), 'ignored', 'unknown'), JSON.stringify(at('plans/PLAN-x.md', 1)));
   // Inside a hunk, "--- x" is a removed line whose text starts with "-- ", not a header.
   const dashed = ['diff --git a/m.md b/m.md', 'index 1111111..2222222 100644', '--- a/m.md', '+++ b/m.md', '@@ -1,3 +1,2 @@', ' keep', '--- a dashed rule', ' tail', ''].join('\n');
   const dash = label('m.md', 2, { patch: dashed, root: repo }) || {};

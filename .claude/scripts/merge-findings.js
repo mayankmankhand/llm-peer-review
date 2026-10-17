@@ -355,8 +355,12 @@ function citationWarnings(merged, opts) {
 // diff of the fixes, from the reviewed tree (`base`) to now:
 //   file  unchanged | changed | deleted | absent (not in the reviewed tree)
 //         | new (created after the review began) | untracked (untracked when
-//         the review began: no starting copy to compare)
+//         the review began: no starting copy to compare) | ignored (git
+//         ignores it, so no git diff can show a fix to it)
 //   line  untouched | rewritten | removed | unknown (no starting copy)
+//   near  how many changed blocks lie within 3 lines of the cited range
+//         (git's default context: the cited hunk), a pure insertion counted
+//         at its place
 // A changed block (a run of - and + lines between context lines) is
 // `removed` when its new words are a subsequence of its old words and fewer
 // (text cut, nothing put in its place; a cut inside one line is the bad-R3
@@ -420,11 +424,14 @@ function parsePatch(text) {
       continue;
     }
     if (line.startsWith('Binary files ')) { cur.binary = true; const m = / and b\/(.*) differ$/.exec(line); if (m) files.set(m[1], cur); continue; }
-    const h = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
-    if (h) { flush(); inHeader = false; oldNo = Number(h[1]); continue; }
+    const h = /^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/.exec(line);
+    // A hunk that takes out no lines names the line it inserts after, so the
+    // next old line is one further on.
+    if (h) { flush(); inHeader = false; oldNo = Number(h[1]) + (h[2] === '0' ? 1 : 0); continue; }
     if (inHeader) continue;
-    if (line.startsWith('-')) { block = block || { old: [], added: [] }; block.old.push({ n: oldNo++, text: line.slice(1) }); continue; }
-    if (line.startsWith('+')) { block = block || { old: [], added: [] }; block.added.push(line.slice(1)); continue; }
+    // `at` is the old line a block starts at; a pure insertion sits just before it.
+    if (line.startsWith('-')) { block = block || { at: oldNo, old: [], added: [] }; block.old.push({ n: oldNo++, text: line.slice(1) }); continue; }
+    if (line.startsWith('+')) { block = block || { at: oldNo, old: [], added: [] }; block.added.push(line.slice(1)); continue; }
     if (line.startsWith(' ')) { flush(); oldNo++; continue; }
   }
   flush();
@@ -440,7 +447,11 @@ function locusLabel(relPath, line, opts) {
   const o = opts || {};
   const root = path.resolve(o.root || process.cwd());
   const rel = path.posix.normalize(String(relPath || '').trim().replace(/\\/g, '/')).replace(/^\.\//, '');
-  if (rel === '' || rel === '.' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('../')) return { file: 'absent', line: 'unknown', hunks: 0 };
+  if (rel === '' || rel === '.' || path.isAbsolute(rel) || rel === '..' || rel.startsWith('../')) return { file: 'absent', line: 'unknown', hunks: 0, near: 0 };
+  // A file git ignores (a plan, a report) never shows in a git diff, so a fix to
+  // it cannot be seen here at all. Asked only with a base, so `root` is the
+  // repository the review ran in.
+  if (o.base && git(root, ['check-ignore', '-q', '--', rel]).status === 0) return { file: 'ignored', line: 'unknown', hunks: 0, near: 0 };
   const inBase = o.base ? git(root, ['cat-file', '-e', o.base + ':' + rel]).status === 0 : true;
   const onDisk = (() => { try { return fs.statSync(path.join(root, rel)).isFile(); } catch (e) { return false; } })();
   const untrackedAtStart = Array.isArray(o.untrackedAtStart) && o.untrackedAtStart.includes(rel);
@@ -448,19 +459,31 @@ function locusLabel(relPath, line, opts) {
     : git(root, ['diff', '-U0', '--no-renames', '--no-color', '--no-ext-diff', '--no-textconv', o.base || 'HEAD', '--', ':(literal)' + rel]).stdout;
   const entry = parsePatch(patchText).get(rel) || null;
   if (!inBase) {
-    if (untrackedAtStart) return { file: 'untracked', line: 'unknown', hunks: 0 };
+    if (untrackedAtStart) return { file: 'untracked', line: 'unknown', hunks: 0, near: 0 };
     const created = typeof o.patch === 'string' ? !!entry && entry.status === 'added' : onDisk;
-    return { file: created ? 'new' : 'absent', line: 'unknown', hunks: 0 };
+    return { file: created ? 'new' : 'absent', line: 'unknown', hunks: 0, near: 0 };
   }
-  if (entry && entry.status === 'deleted') return { file: 'deleted', line: 'removed', hunks: entry.blocks.length };
-  if (!entry) return { file: 'unchanged', line: 'untouched', hunks: 0 };
-  if (entry.binary) return { file: 'changed', line: 'unknown', hunks: 0 };
+  if (entry && entry.status === 'deleted') return { file: 'deleted', line: 'removed', hunks: entry.blocks.length, near: entry.blocks.length };
+  if (!entry) return { file: 'unchanged', line: 'untouched', hunks: 0, near: 0 };
+  if (entry.binary) return { file: 'changed', line: 'unknown', hunks: 0, near: 0 };
   const range = citedRange(line);
   const hit = entry.blocks.filter((b) => !range || b.old.some((x) => x.n >= range[0] && x.n <= range[1]));
   const labels = hit.map(blockLabel);
   const lineLabel = labels.includes('rewritten') ? 'rewritten' : labels.includes('removed') ? 'removed' : 'untouched';
-  return { file: entry.blocks.length ? 'changed' : 'unchanged', line: lineLabel, hunks: hit.length };
+  // `near`: the blocks within NEAR_LINES of the cited range, a pure insertion
+  // counted at its place, so a fix a line or two beside an imprecise citation
+  // still reads as touching that hunk.
+  const near = entry.blocks.filter((b) => {
+    if (!range) return true;
+    const lo = b.old.length ? b.at : b.at - 1;
+    const hi = b.old.length ? b.at + b.old.length - 1 : b.at;
+    return Math.max(0, lo - range[1], range[0] - hi) <= NEAR_LINES;
+  }).length;
+  return { file: entry.blocks.length ? 'changed' : 'unchanged', line: lineLabel, hunks: hit.length, near };
 }
+// git's default diff context: a change within this many lines of the cited
+// range is in the cited hunk.
+const NEAR_LINES = 3;
 
 // ==========================================================================
 // --shards and --verdicts: the audit's bytes and its answers, by script

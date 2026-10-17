@@ -160,6 +160,20 @@ fs.writeFileSync(roundB, git(['diff', B, F]));
 const rounds = byId((scan([report, '--receipts', receipts, '--diff', roundA, '--diff', roundB, '--json']).rows || [])[0]);
 check('252 scan: with several --diff files a cited line touched by any of them is hunk touched', !!rounds.R3 && rounds.R3.hunk === 'hunk touched' && !!rounds.R1 && rounds.R1.hunk === 'hunk touched', one(JSON.stringify([rounds.R3, rounds.R1])));
 
+// A change within 3 lines of the cited line is the cited hunk (git's default
+// context); one further away is not. A cited file git ignores cannot be judged.
+const near = path.join(repo, 'reports', 'review-near.md');
+write('reports/review-near.md', ['# Near', '', '### Findings', '',
+  '- **R1** [code] ⚠️ `q.js:8` - Should fix. Two lines above the change at 10.',
+  '- **R2** [code] ⚠️ `q.js:3` - Should fix. Seven lines above it.',
+  '- **R3** [plan] ⚠️ `reports/plan-note.md:1` - Should fix. In a gitignored file.',
+  '', '## Digest', '', '- R1: FIXED - done', '- R2: FIXED - done', '- R3: FIXED (plan record) - done', ''].join('\n'));
+write('reports/plan-note.md', 'a note\n');
+const N2 = byId((scan([near, '--receipts', receipts, '--to', F, '--json']).rows || [])[0]);
+check('252 scan: a change within 3 lines of the cited line is hunk touched, one further away is not, and a gitignored cited file is unknown',
+  !!N2.R1 && N2.R1.hunk === 'hunk touched' && N2.R1.line === 'untouched' && !!N2.R2 && N2.R2.hunk === 'file touched, hunk untouched' && !!N2.R3 && N2.R3.hunk === 'unknown',
+  one(JSON.stringify(N2)));
+
 // Recheck pairing over the receipts folder's results.json files.
 const rc = (live.rows && live.rows[0] && live.rows[0].rechecks) || {};
 check('252 scan: a <lens>-<n>-recheck row is paired when its <lens>-<n> row is in the same results.json, and paired, unpaired and unpairable are counted',
