@@ -1,5 +1,49 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.5, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.6, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.6 - Nothing Lost, Nothing Unread (2026-10-17)
+
+**A patch on top of v8.0.5 (#252, #253, #257, #258, #259).** `/tk:merge` now names every file a landing deletes and keeps the ones a branch stopped tracking, waits for the host before it merges, and stops for you when it combines a prompt file. `/tk:upgrade` reads the release notes since your last upgrade and records what it did about each entry before it stamps. `/tk:review` checks a change to your project's seam files the way it checks commands and skills, and its receipts keep the record of every check it ran. When the lessons index is too long to print at session start, the startup output says exactly how to read all of it.
+
+### Changed
+
+- **`/tk:merge` names what a landing deletes.** `merge-check.js --landing` now lists `deleted` (the files the landing removes from main) and `untracked` (the ones among them the branch stopped tracking but means to keep). The landing line names the deleted files, and each untracked file is saved before a merge or a pull would delete it, then put back.
+- **A combined prompt file waits for you.** When `/tk:merge` combines a conflict inside a command, skill, agent or rules file, the PR lands only after you have seen the combined lines and said yes, even when every check is clean.
+- **`/tk:merge` waits for the host.** `merge-check.js --wait --pr <N> --head <sha>` reads the PR every 3 seconds, for up to 90, until the host reports it mergeable at the pushed head.
+- **Tests run again only when main moved on the host** between the check and the merge, in a temporary worktree set up like every other, and a failure stops the batch. At the end of a host-style run the main folder is pulled when it is on main with nothing uncommitted.
+- **A branch guard before any change in a worktree.** `/tk:merge` checks `git branch --show-current` there, and when a `cd` did not stick it names the folder on every command (`git -C <worktree> ...`).
+- **GitLab host merges are recognized.** The landing message ends with `See merge request <ref>`, so `--style` reads the landing as a host merge, not a local one.
+- **PR decisions are the list lines only**, so an attribution line below the list is no longer read as a decision, and a sub-bullet stays with the decision above it.
+- **A temporary worktree is removed with `--force` only when `/tk:merge` made it**, and only after the landing is confirmed.
+- **The decisions file shows each diff word by word**, so the decision checker sees only the words a landing changed, not the text it carried over.
+- **The plugin carries its release notes.** The build writes `CHANGELOG.md` into the plugin: every released version from v6.0.0 up to the plugin's own, never an unreleased block.
+- **`/tk:upgrade` reads what changed before it stamps.** `upgrade-audit.js --release-notes` lists every entry since your recorded version, and the upgrade checks each one against your own files; an entry that touches them goes on the upgrade's one approval page. `upgrade-audit.js --stamp --adoption <file>` refuses until every entry has a row, then records the rows in `.claude/toolkit/adoption.md`, one section per upgrade.
+- **Command Quality reviews your seam files.** `/tk:review` runs the prompt lens when a `.claude/toolkit/*.md` file changes, other than `README.md` and `adoption.md`.
+- **The lessons handle names its reads.** When `LESSONS.md` is over 8 KB, `session-init.js` used to hand back a note that only said to read the file. The handle now carries `ranges`: the line spans that read the whole file, each 28,500 bytes or fewer, worked out from the file on every run. Its note says to read every range with the Read tool, which needs no permission row and is not cut to a preview the way a `cat` through Bash is. The size-budget handle carries the same ranges. On this repository that is two reads, lines 1-407 and 408-499.
+- **The receipts record keeps every run.** The checks runner used to rewrite `results.json` on each call, so a fix's recheck erased the row it was checked against. Each call now adds its rows, every row carrying its own run's time and commit, and a `runs` list holds one entry per call. Saves go through a lock and a file renamed into place, and a record that cannot be read is moved to `results.prev-<n>.json` instead of overwritten. A plan step's before and after runs still clear their folder first, so they read exactly as before.
+- **A rerun under the same check id keeps the earlier output.** The earlier `<id>.txt`, and a kept `first-run/<id>.txt`, move to `<id>.prev-<n>.txt`, and the earlier row points there.
+
+### Not built
+
+- **A helper that runs the host's merge itself** (#258 item 7). It would run under that script's allow row and skip the approval every host merge asks for today, and a mis-quoted merge message already fails loudly.
+
+### For maintainers
+
+- **A judge's blocked scratch experiment no longer voids a quality-check run.** `scripts/quality-check.js` marked a run INVALID whenever any call was denied, and the audit skeptics and fix verifiers, which have no edit tools, still try shell experiments that Claude Code refuses. A denied Bash call from either of those judges is now the warning `denied-experiment:<n>` when every absolute path it names stays inside the run (its temp folder, its scratchpad, or `/dev/null`) and it has none of the shapes that can reach outside without naming a path. Every other denial still invalidates the run. It is a best-effort filter over the text of a call that never ran, so it decides scoring, not safety.
+
+### Upgrading
+
+- On the plugin: `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, then restart Claude Code. No new permission rows.
+- **From this version on, `/tk:upgrade` reads every release-note entry since your recorded version** and needs a row for each before it stamps, starting with the upgrade to this version. A project with no recorded version, or one from before 6.0.0, reads every entry from v6.0.0, several hundred, once.
+- Other editors: re-running `setup.sh` or `setup.ps1` brings in the changed commands and scripts.
+
+### Why
+
+A downstream GitLab project replaced its own merge command with `/tk:merge` after landing three MRs with it, and listed what its command did that `/tk:merge` did not: a branch's own deletions landed without a word, and a file the branch stopped tracking was deleted from the main checkout by the pull after the landing (#258). On another project the 7.6.5 to 8.0.5 upgrade ran clean and still left a guide listing a removed command and a rule naming the wrong review page, because nothing read the 74 release-note entries against the project's own files (#257). And the seam files under `.claude/toolkit/` are pasted into the stages as prompt text, yet a change to one met no prompt review (#259).
+
+In 8 of 9 sessions that got the bare note, no stage read the lessons index in full, and the one `cat` that tried hit the 2 KB preview twice. On the harness side, 2 of the 63 saved runs had been thrown away only for a judge's blocked experiment ($31.79). Rechecking every saved run flipped exactly those two to valid and changed nothing else, and every recorded score comparison came out the same. The third item in the issue, a split of the time spent waiting on questions, was not built: the issue made it conditional on a pain that is not yet confirmed, and it would print 0 today.
+
+Across the 47 receipts folders saved before this change, none of the 27 recheck rows sat beside the check it rechecked, because each call replaced the record. Two changes to how reviews judge fixes were also tested this cycle: labeling a finding's cited lines for the fix verifier, and keeping a finding that another defect hides. Each missed the bar set before its test, so neither shipped.
 
 ## v8.0.5 - Only What Changed (2026-10-16)
 
