@@ -483,7 +483,10 @@ const seedAllow = JSON.parse(fs.readFileSync(path.join(REPO, 'seed', 'settings.l
 const noRows = byName.filter(n => !seedAllow.includes('Skill(tk:' + n + ')') || !seedAllow.includes('Skill(tk:' + n + ':*)'));
 check('live: every skill a command loads by name has both permission rows in the seed', byName.length > 0 && noRows.length === 0, 'missing rows for: ' + noRows.join(', '));
 check('live: the deps criteria audit the plugin root, not scripts/', read(live, 'skills/shared/criteria-deps.md').includes('--prefix "${CLAUDE_PLUGIN_ROOT}"') && !read(live, 'skills/shared/criteria-deps.md').includes('${CLAUDE_PLUGIN_ROOT}/scripts`'));
-const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path.join('shared', 'conventions.md')));
+// conventions.md (data the audit parses) and the release notes (#257, the
+// repository's CHANGELOG.md blocks as written) are not prompts, so the prompt
+// checks over liveMd skip them.
+const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path.join('shared', 'conventions.md')) && f !== path.join(live, 'CHANGELOG.md'));
 const liveUnquoted = liveMd.filter(f => UNQUOTED_CAT.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
 const liveQuoted = liveMd.reduce((n, f) => n + (fs.readFileSync(f, 'utf8').match(QUOTED_CAT) || []).length, 0);
 check('live: every emitted inline cat is quoted', liveUnquoted.length === 0 && liveQuoted > 100, 'unquoted in ' + liveUnquoted.join(', ') + '; quoted ' + liveQuoted);
@@ -751,6 +754,43 @@ if (fullHistory()) {
 } else {
   console.log('  skip history checks for the helper hashes: this checkout has no full git history');
 }
+
+// --- 5b. The release notes ship with the plugin (issue #257) --------------------
+// /tk:upgrade reads what changed since a project's recorded version from the
+// plugin's own CHANGELOG.md: every released block from v6.0.0 up to the build's
+// version, newest first, never an Unreleased block or one above the version.
+console.log('\n5b. the release notes ship with the plugin');
+const notesFx = makeFixture();
+const notesOut = path.join(notesFx.root, 'plugin-notes');
+const noNotes = runBuild(['--source', notesFx.src, '--out', notesOut, '--version', '8.0.0', '--quiet']);
+check('257 notes: a source with no CHANGELOG.md builds without one', noNotes.status === 0 && !exists(notesOut, 'CHANGELOG.md'), noNotes.stderr || 'CHANGELOG.md emitted');
+write(notesFx.root, 'CHANGELOG.md', [
+  '# Changelog', '', '<!-- a maintainer note -->', '',
+  '## Unreleased - x', '', '- entry-unreleased', '',
+  '## v9.0.0 - Later (2027-01-01)', '', '- entry-v9', '',
+  '## v8.0.0 - Now (2026-10-01)', '', '### Added', '- entry-v8a', '  - entry-v8a-nested', '- entry-v8b', '', '',
+  '## v6.0.0 - Floor (2026-08-30)', '', '- entry-v6', '',
+  '## v5.9.0 - Below (2026-08-01)', '', '- entry-v59', '',
+].join('\n'));
+const withNotes = runBuild(['--source', notesFx.src, '--out', notesOut, '--version', '8.0.0', '--quiet']);
+const notes = exists(notesOut, 'CHANGELOG.md') ? read(notesOut, 'CHANGELOG.md') : null;
+const notesLines = notes === null ? [] : notes.split('\n');
+const wantBlocks = '## v8.0.0 - Now (2026-10-01)\n\n### Added\n- entry-v8a\n  - entry-v8a-nested\n- entry-v8b\n\n## v6.0.0 - Floor (2026-08-30)\n\n- entry-v6\n';
+check('257 notes: the plugin ships CHANGELOG.md with every released block from v6.0.0 up to its version',
+  withNotes.status === 0 && notes !== null && /^# \S/.test(notesLines[0]) && notesLines[1].trim() !== '' && notesLines[2] === '' && notesLines.slice(3).join('\n') === wantBlocks,
+  notes === null ? 'no CHANGELOG.md in the build' : 'headings: ' + JSON.stringify(notesLines.filter((x) => /^##? /.test(x))));
+const leaked = ['Unreleased', 'entry-unreleased', 'v9.0.0', 'entry-v9', 'v5.9.0', 'entry-v59', 'a maintainer note'].filter((s) => notes !== null && notes.includes(s));
+check('257 notes: no Unreleased block and no block above the build version ships', notes !== null && leaked.length === 0, notes === null ? 'no CHANGELOG.md in the build' : 'leaked: ' + leaked.join(', '));
+// The live build from section 5: its notes open on the newest released block of
+// the repository's CHANGELOG.md at or below VERSION.
+const liveVersion = read(REPO, 'VERSION').trim().split('.').map(Number);
+const atOrBelow = (m) => { const v = [Number(m[1]), Number(m[2]), Number(m[3])]; for (let i = 0; i < 3; i++) if (v[i] !== liveVersion[i]) return v[i] < liveVersion[i]; return true; };
+const newestReleased = read(REPO, 'CHANGELOG.md').split('\n').find((x) => { const m = /^## v(\d+)\.(\d+)\.(\d+)\b/.exec(x); return m && atOrBelow(m); });
+const liveNotes = exists(live, 'CHANGELOG.md') ? read(live, 'CHANGELOG.md') : null;
+const liveFirst = liveNotes === null ? null : liveNotes.split('\n').find((x) => x.startsWith('## '));
+check('257 notes: the live plugin\'s notes start at the newest released version and hold no Unreleased block',
+  liveNotes !== null && newestReleased !== undefined && liveFirst === newestReleased && !/^## Unreleased/m.test(liveNotes),
+  liveNotes === null ? 'no CHANGELOG.md in the build' : 'first block ' + JSON.stringify(liveFirst) + ', newest released ' + JSON.stringify(newestReleased) + ', Unreleased ' + /^## Unreleased/m.test(liveNotes));
 
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');

@@ -73,6 +73,9 @@
 //   * Stamps (#183). The three files carrying a `<!-- Toolkit version: X |`
 //     stamp are emitted stamped with the build's version, so a scratch build
 //     made with --version carries that version everywhere plugin.json does.
+//   * Release notes (#257). CHANGELOG.md at the plugin root holds every released
+//     block of the repository's CHANGELOG.md from v6.0.0 up to the build's
+//     version, for /tk:upgrade to read; an Unreleased block never ships.
 //
 // Dependency-free by design, like every script under scripts/ and .claude/scripts/.
 
@@ -613,6 +616,45 @@ function firstHeading(text) {
   return m ? m[1].trim() : '';
 }
 
+// The release notes (issue #257): a two-line header, then each released block of
+// the source's CHANGELOG.md (a `## v<x.y.z> ...` heading up to the next `## `
+// heading, trailing blank lines trimmed) from RELEASE_NOTES_FLOOR up to the
+// build's version, in the source's order, newest first. null when the source has
+// no CHANGELOG.md.
+const RELEASE_NOTES_FLOOR = [6, 0, 0];
+const RELEASED_HEADING = /^## v(\d+)\.(\d+)\.(\d+)\b/;
+// The first three dotted numbers of a version, a missing one read as 0.
+function versionParts(v) {
+  const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(v);
+  return m ? [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)] : [0, 0, 0];
+}
+function compareParts(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+function releaseNotes(file, version) {
+  if (!fs.existsSync(file)) return null;
+  const top = versionParts(version);
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = RELEASED_HEADING.exec(lines[i]);
+    if (!m) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^## /.test(lines[end])) end++;
+    const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (compareParts(v, RELEASE_NOTES_FLOOR) >= 0 && compareParts(v, top) <= 0) {
+      const block = lines.slice(i, end);
+      while (block.length && !block[block.length - 1].trim()) block.pop();
+      blocks.push(block.join('\n'));
+    }
+    i = end - 1;
+  }
+  const head = '# Release notes\n'
+    + 'The released blocks of the toolkit\'s CHANGELOG.md from v' + RELEASE_NOTES_FLOOR.join('.') + ' up to this plugin\'s version, ' + version + ', newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.\n';
+  return blocks.length ? head + '\n' + blocks.join('\n\n') + '\n' : head;
+}
+
 function build(src, version) {
   const inv = inventory(src);
   const files = new Map(); // rel -> string | Buffer
@@ -780,6 +822,12 @@ function build(src, version) {
       unresolved.push(rel + ': unquoted ' + ROOT_TOKEN + ' in inline command !`' + cmd + '`');
     }
   }
+  // The release notes (issue #257), for /tk:upgrade to read what changed since a
+  // project's recorded version. No Unreleased block ships, so a cycle's changelog
+  // edit leaves plugin/ as it was; a source with no CHANGELOG.md (a test fixture)
+  // builds without one.
+  const notes = releaseNotes(path.join(repo, 'CHANGELOG.md'), version);
+  if (notes !== null) put('CHANGELOG.md', notes);
   put('README.md', [
     '# tk (generated)',
     '',
