@@ -192,14 +192,23 @@ function scanReport(file, opts, root) {
   const row = Object.assign({ report: file, receipts, base }, baseNote ? { baseNote } : {}, { diff: null, rechecks: rechecks(receipts), fixed: [] });
 
   let patches = null;
+  // Why --to gave no diff, named for the skip line: each cause sends the
+  // maintainer to a different fix.
+  let toWhy = ', no --to';
   if (opts.diffs.length) { patches = opts.diffs.map((d) => fs.readFileSync(d, 'utf8')); row.diff = { source: 'diff', files: opts.diffs }; }
   else if (newestVerifyDiff(receipts)) { const f = newestVerifyDiff(receipts); patches = [fs.readFileSync(f, 'utf8')]; row.diff = { source: 'verify', files: [f] }; }
   else if (opts.to && base) {
     const d = git(root, ['diff', '--no-renames', '--no-color', '--no-ext-diff', '--no-textconv', base, opts.to]);
     if (d.status === 0) { patches = [d.stdout]; row.diff = { source: 'to', files: [], to: opts.to }; }
+    else toWhy = ', and git diff ' + base + ' ' + opts.to + ' failed';
+  }
+  else if (opts.to) {
+    toWhy = baseNote ? ', and --to has no base (the scope\'s base is not in this repository)'
+      : scope ? ', and --to has no base (scope.json names no baseline or range end)'
+        : ', and --to has no base (no scope.json)';
   }
   if (!patches) {
-    row.skipped = 'no fix diff: no --diff, no verify-r<n>-diff.patch in ' + (receipts || 'any receipts folder') + (opts.to ? ', and --to has no base (no scope.json)' : ', no --to');
+    row.skipped = 'no fix diff: no --diff, no verify-r<n>-diff.patch in ' + (receipts || 'any receipts folder') + toWhy;
     return row;
   }
   const digest = parseDigest(md);

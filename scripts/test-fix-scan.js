@@ -152,6 +152,16 @@ check('252 scan: the diff comes from --diff, else the newest verify-r<n>-diff.pa
     && !!V.R3 && V.R3.hunk === 'file untouched' && !!V.R1 && V.R1.hunk === 'hunk touched'
     && typeof N.skipped === 'string' && /no fix diff/.test(N.skipped) && Array.isArray(N.fixed) && N.fixed.length === 0,
   one(JSON.stringify([saved.R1, V.R3, N.skipped])));
+// With --to, the skip names the real cause (review R10): a failed diff, or a
+// scope base this repository does not have, is not a missing scope.json.
+const badTo = (scan([report, '--receipts', receipts, '--to', 'no-such-ref', '--json']).rows || [])[0] || {};
+write('reports/receipts/stamp/scope.json', scope({ range: { base: 'f'.repeat(40), end: 'f'.repeat(40) } }));
+const foreignTo = (scan([report, '--receipts', receipts, '--to', F, '--json']).rows || [])[0] || {};
+write('reports/receipts/stamp/scope.json', scope());
+check('252 scan: with --to, a failed diff or a base not in this repository is named as the skip reason, not a missing scope.json',
+  /git diff .* no-such-ref failed/.test(String(badTo.skipped)) && /not in this repository/.test(String(foreignTo.skipped))
+    && !/no scope\.json/.test(String(badTo.skipped) + String(foreignTo.skipped)),
+  one(JSON.stringify([badTo.skipped, foreignTo.skipped])));
 // Several --diff files (a review fixed in rounds): a line touched by any of them is touched.
 const roundA = path.join(sandbox, 'round1.diff');
 const roundB = path.join(sandbox, 'round2.diff');
