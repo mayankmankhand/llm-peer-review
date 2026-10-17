@@ -461,6 +461,56 @@ section('258: the Decisions part is its list lines, and glab\'s full reference',
   check('258 pr: glab\'s full reference is printed as ref', gl.json && gl.json.ref === 'grp/sub/proj!8' && gh.json && gh.json.ref === null, 'glab ref ' + JSON.stringify(gl.json && gl.json.ref) + ', gh ref ' + JSON.stringify(gh.json && gh.json.ref));
 });
 
+// Issue #258 item 1: --landing names the files a landing deletes, and among
+// them the ones the branch stopped tracking but keeps (its own .gitignore
+// files ignore them at the landing), whose copy in every other checkout the
+// landing deletes. Neither list is a flag. Only the landing commit's committed
+// .gitignore files count: never the user's global excludes.
+section('258: what a landing deletes, and what it stops tracking', () => {
+  const dir = newRepo('deleted258');
+  write(dir, 'keep.txt', 'keep\n');
+  write(dir, 'old.txt', 'old\n');
+  write(dir, 'local.cfg', 'rows: 297\n');
+  write(dir, 'sub/x.cfg', 'x\n');
+  write(dir, 'glob.cfg', 'g\n');
+  write(dir, 'gen/bundle.txt', 'built\n');
+  write(dir, '.claude/toolkit/generated.json', JSON.stringify([{ paths: ['gen/'], rebuild: 'true' }]) + '\n');
+  const m0 = commitAll(dir, 'M0');
+  const cutSha = cut(dir, 'feat');
+  g(dir, ['checkout', '-q', 'feat']);
+  g(dir, ['rm', '-q', 'old.txt']);
+  g(dir, ['rm', '-q', '--cached', 'local.cfg']);
+  write(dir, '.gitignore', 'local.cfg\n');
+  g(dir, ['rm', '-q', '--cached', 'sub/x.cfg']);
+  write(dir, 'sub/.gitignore', 'x.cfg\n');
+  g(dir, ['rm', '-q', '--cached', 'glob.cfg']);   // stopped tracking with no ignore line of its own
+  g(dir, ['rm', '-q', 'gen/bundle.txt']);
+  g(dir, ['add', '.gitignore', 'sub/.gitignore']);
+  g(dir, ['commit', '-q', '-m', 'Stop tracking the local files']);
+  const tip = rev(dir, 'feat');
+  // The files feat stopped tracking stay behind as untracked copies, and main
+  // tracks them, so remove them before switching back (main restores them).
+  for (const rel of ['local.cfg', 'sub/x.cfg', 'glob.cfg']) fs.rmSync(path.join(dir, rel), { force: true });
+  g(dir, ['checkout', '-q', 'main']);
+  // The user's own global excludes list glob.cfg: they say nothing about what the branch meant.
+  const excludes = path.join(sandbox, 'global-excludes-258');
+  fs.writeFileSync(excludes, 'glob.cfg\n');
+  const globalCfg = path.join(sandbox, 'global-config-258');
+  fs.writeFileSync(globalCfg, '[core]\n\texcludesFile = ' + excludes + '\n');
+  const env = Object.assign({}, ENV, { GIT_CONFIG_GLOBAL: globalCfg });
+  const r = mc(dir, ['--landing', '--before', m0, '--after', tip, '--cut', cutSha, '--tip', tip], env);
+  const j = r.json || {};
+  const del = Array.isArray(j.deleted) ? j.deleted.slice().sort() : null;
+  const unt = Array.isArray(j.untracked) ? j.untracked.slice().sort() : null;
+  check('258 deleted: --landing lists a file the branch deletes', del !== null && del.includes('old.txt'), 'deleted: ' + JSON.stringify(j.deleted));
+  check('258 deleted: a file the branch stops tracking and ignores is listed as untracked', unt !== null && unt.includes('local.cfg') && del !== null && del.includes('local.cfg'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: an ignore line in a nested .gitignore counts', unt !== null && unt.includes('sub/x.cfg'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: a file deleted but not ignored is not untracked', unt !== null && !unt.includes('old.txt'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: a file only the user\'s global excludes ignore is not untracked', unt !== null && del !== null && del.includes('glob.cfg') && !unt.includes('glob.cfg'), 'deleted: ' + JSON.stringify(j.deleted) + ', untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: generated paths are left out', del !== null && !del.some((p) => p.startsWith('gen/')), 'deleted: ' + JSON.stringify(j.deleted));
+  check('258 deleted: a clean landing that deletes a file still exits 0', r.status === 0 && j.flagged === 0 && /^note: [^\n]*local\.cfg/m.test(r.stderr), 'exit ' + r.status + ', flagged ' + j.flagged + ', stderr ' + JSON.stringify(r.stderr.split('\n').slice(0, 3)));
+});
+
 // --- landings on main, the style, the marker ------------------------------------------------
 section('--since: what counts as a landing, and what cannot be checked', () => {
   const dir = newRepo('since');

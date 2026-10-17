@@ -45,7 +45,10 @@
 //                                 rules 1, 2 and cut for one landing: main before
 //                                 it, the result (main after it, or the updated
 //                                 branch about to land), the cut point, and the
-//                                 branch's own tip before any update from main
+//                                 branch's own tip before any update from main;
+//                                 also lists `deleted` (files the landing removes
+//                                 from main) and `untracked` (those the result's
+//                                 own .gitignore files ignore), never as flags
 //   --since <ref>                 the same checks for every landing on main's
 //                                 first-parent line after <ref>
 //   --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]
@@ -63,13 +66,15 @@
 // summary line. Exit 0 when nothing is flagged, 1 when anything is, 2 on a
 // usage or git error (one line on stderr). Only --record-cut, --mark and
 // --style with a value write to git config, and only --decisions writes a file,
-// the one --out names. Every git call
+// the one --out names (--landing's ignore check works in a throwaway folder
+// under the OS temp folder and removes it). Every git call
 // takes an argument list, never a shell string, and runs at the repository's
 // top level. Dependency-free.
 //
 //   node merge-check.js --landing --before <sha> --after <sha> --cut <sha> --tip <sha>
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -164,6 +169,51 @@ function changedFiles(a, b, excl) {
     if (modes[0] !== '160000' && modes[1] !== '160000') files.push(raw[i + 1]);
   }
   return files;
+}
+
+// The files a landing removes from main (issue #258 item 1), generated paths
+// left out. No rename detection, so a moved file is a deletion plus an
+// addition, the way every other checkout sees it.
+function deletedFiles(a, b, excl) {
+  return git(['diff', '--name-only', '-z', '--no-renames', '--diff-filter=D', a, b, '--', '.'].concat(excl)).split('\0').filter(Boolean);
+}
+// Of the given files, the ones a commit's own .gitignore files ignore: a branch
+// that stopped tracking a file it means to keep (`git rm --cached` and an
+// ignore line), whose copy in every other checkout the landing deletes.
+// git's own matcher decides, in a throwaway repository that holds only that
+// commit's .gitignore files, with every other source of ignore rules switched
+// off: no global or system config, no default ~/.config/git/ignore (HOME and
+// XDG_CONFIG_HOME point into the throwaway folder), an empty core.excludesFile,
+// an empty template (so no info/exclude), and no inherited GIT_* variable. The
+// user's own ignores say nothing about what the branch meant, and the main
+// folder's rules predate the landing. The folder is removed afterwards.
+function ignoredAt(commit, files) {
+  if (!files.length) return [];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-check-ignore-'));
+  try {
+    const repo = path.join(tmp, 'repo');
+    const empty = path.join(tmp, 'empty');
+    fs.mkdirSync(repo);
+    fs.writeFileSync(empty, '');
+    const env = {};
+    for (const [k, v] of Object.entries(process.env)) if (!/^GIT_/.test(k)) env[k] = v;
+    Object.assign(env, { HOME: tmp, XDG_CONFIG_HOME: tmp, GIT_CONFIG_GLOBAL: empty, GIT_CONFIG_NOSYSTEM: '1' });
+    const isolated = (args, input) => spawnSync('git', ['-c', 'core.excludesFile=' + empty].concat(args), { cwd: repo, encoding: 'utf8', env, input, maxBuffer: MAX_BUFFER });
+    const init = isolated(['init', '-q', '--template=']);
+    if (init.error || init.status !== 0) throw new Error('git init failed for the ignore check: ' + String(init.stderr || init.error || '').trim().split('\n')[0]);
+    for (const rel of git(['ls-tree', '-r', '-z', '--name-only', commit]).split('\0')) {
+      if (rel !== '.gitignore' && !rel.endsWith('/.gitignore')) continue;
+      const abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, git(['show', commit + ':' + rel]));
+    }
+    // Exit 0 when some path is ignored, 1 when none is; anything else failed.
+    const r = isolated(['check-ignore', '--no-index', '-z', '--stdin'], files.join('\0') + '\0');
+    if (r.error || (r.status !== 0 && r.status !== 1)) throw new Error('git check-ignore failed: ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
+    return String(r.stdout || '').split('\0').filter(Boolean);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 // The hunk headers of a zero-context diff of one file. Only `@@ -` lines are
@@ -785,7 +835,12 @@ function main(argv) {
     }
     const r = checkLanding(c, mainRef, excl, kept, notes);
     if (!changedFiles(c.before, c.after, excl).length) notes.push('the landing changes nothing on ' + mainRef + ' outside generated paths and submodule pointers');
-    return finish({ mode: 'landing', main: mainRef, before: c.before, after: c.after, cut: c.cut, tip: c.tip, flags: r.flags }, r.flags, r.suppressed, notes);
+    // Listed, never flagged (#258 item 1): /merge names the deleted files and
+    // saves the main folder's copy of each untracked one around the landing.
+    const deleted = deletedFiles(c.before, c.after, excl);
+    const untracked = ignoredAt(c.after, deleted);
+    for (const f of untracked) notes.push(f + ' is deleted by this landing and ignored on the branch: the branch stopped tracking it, and every other checkout\'s copy goes when the landing reaches it');
+    return finish({ mode: 'landing', main: mainRef, before: c.before, after: c.after, cut: c.cut, tip: c.tip, deleted, untracked, flags: r.flags }, r.flags, r.suppressed, notes);
   }
   if (o['--since']) {
     const r = since(o['--since'], mainRef, excl, kept, notes);
