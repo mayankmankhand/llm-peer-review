@@ -26,10 +26,10 @@
     "commands/execute.md": 6206,
     "commands/explore.md": 6956,
     "commands/index.md": 2968,
-    "commands/merge.md": 5539,
+    "commands/merge.md": 6476,
     "commands/pair-debug.md": 879,
     "commands/peer-review.md": 2150,
-    "commands/review.md": 22999,
+    "commands/review.md": 23019,
     "commands/worktree.md": 1078,
     "session": 2437,
     "skills/audit-html/SKILL.md": 3487,
@@ -59,6 +59,6 @@
     "skills/review-ux/SKILL.md": 17756,
     "skills/security-audit/SKILL.md": 18457,
     "skills/setup/SKILL.md": 1398,
-    "skills/upgrade/SKILL.md": 15744
+    "skills/upgrade/SKILL.md": 16309
   }
 }
