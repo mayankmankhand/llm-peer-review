@@ -436,6 +436,11 @@ section('validity', () => {
   stays('a judge\'s call with a bare cd', judgeSays('cd ' + PAD + ' && cd && cat .bashrc'));
   stays('a judge\'s call with cd -', judgeSays('cd ' + PAD + ' && cd - && ls'));
   stays('a judge\'s call with pushd and popd', judgeSays('pushd ' + PAD + ' && popd && ls'));
+  // Review of #253 (R1, R3): two shapes that leave the run without naming an outside path.
+  stays('a judge\'s call that climbs out through command output', judgeSays('cd "$(dirname "$(pwd)")" && cat secret 2>/dev/null'));
+  stays('a judge\'s call that resolves a path it does not name', judgeSays('cat "$(realpath x)" > ' + PAD + '/x'));
+  stays('a judge\'s call with a parent-folder step right after a variable', judgeSays('d=/tmp/qc-run.TEST/; cat $d../etc 2>/dev/null'));
+  stays('a judge\'s call with a parent-folder step right after a braced variable', judgeSays('d=/tmp/qc-run.TEST/project; cat ${d}../x > ' + PAD + '/x'));
   stays('a judge\'s denied Write in the scratchpad', { agents: [deniedBy('tk:audit-skeptic', PAD + '/x.txt', 'Write')] });
   // A mixed run is invalid on its other denial; the exempt one is still counted.
   const mixed = analyze(makeReviewRun({ agents: [deniedBy('tk:audit-skeptic', skepticWrite), deniedBy('tk:audit-skeptic', 'cat /etc/passwd > ' + PAD + '/x')] }));

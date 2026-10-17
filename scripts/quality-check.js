@@ -673,14 +673,19 @@ function isUnder(p, root) {
 // path, every absolute path it names is /dev/null or lies inside the run (its temp
 // folder, which holds the scratch project and home, or its scratchpad,
 // /tmp/claude-<uid>/<project slug>/), and it has none of the shapes that can reach
-// outside without naming a path: a `..` path step (an ellipsis in a comment is not
-// one: the fix-d3 verifier's call has "sorts..."), `~`, a backtick, a backslash, eval, a bare
-// `cd`, `cd -`, pushd or popd, an indirect `${!x}`, or a variable the command does
-// not itself set to a value. `$(...)` is allowed: its own text is checked like the
-// rest. toolPaths is not reused, because its Bash branch sees only /home, /mnt,
-// /root and /Users, so /etc/passwd would read as inside.
+// outside without naming a path: a `..` path step wherever it sits, `$d../x`
+// included (an ellipsis is not one: the fix-d3 verifier's call has "sorts..."),
+// `~`, a backtick, a backslash, eval, a bare `cd`, `cd -`, pushd or popd, an
+// indirect `${!x}`, a variable the command does not itself set to a value, or a
+// command that turns the working folder into a path (pwd, dirname, realpath,
+// readlink). `$(...)` is allowed: its own text is checked like the rest. This is
+// a best-effort filter over shell text, not a parser: it is built to keep the
+// shapes the real judges used and refuse the escapes found so far, and a new
+// escape gets a new shape and a test. toolPaths is not reused, because its Bash
+// branch sees only /home, /mnt, /root and /Users, so /etc/passwd would read as
+// inside.
 const JUDGE_TYPE_RE = /^(tk:)?(audit-skeptic|fix-verifier)$/;
-const ESCAPE_SHAPES = [/(^|[\/\s=:(<>|;&,{'"])\.\.($|[\/\s;&|)<>,}'"])/, /~/, /`/, /\\/, /\beval\b/, /\$\{!/, /\b(pushd|popd)\b/, /\bcd(\s+-)?\s*($|[;&|)\n])/];
+const ESCAPE_SHAPES = [/(^|[^.])\.\.($|[^.\w-])/, /~/, /`/, /\\/, /\beval\b/, /\$\{!/, /\b(pushd|popd)\b/, /\bcd(\s+-)?\s*($|[;&|)\n])/, /\b(pwd|dirname|realpath|readlink)\b/];
 function scratchExperiment(type, call, paths) {
   if (!JUDGE_TYPE_RE.test(type || '') || !call || call.name !== 'Bash') return false;
   const raw = call.input && call.input.command;
