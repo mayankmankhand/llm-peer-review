@@ -182,18 +182,21 @@ h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6r
 .diagram svg{max-width:100%;height:auto;display:block;color:var(--text);fill:currentColor;}
 
 /* Docs and code disagree (issue #262) - the open items. A ruled list like the
-   running log below, so the page gains no new component. The quoted text is the
-   content, so it keeps the body size; labels and paths stay small and muted, the
-   way the file inventory shows them. */
+   running log below, so the page gains no new component. Each item reads as a
+   sentence, "<doc> says" then "<code> does", rather than under small-caps labels,
+   which would flatten it into the narrative's labels (design critic, round 1).
+   The two sides are set apart by what they are: the doc's claim as a quote, the
+   code on the same muted surface inline code already has, so the code no longer
+   weighs the same as the prose around it (design critic, round 1). */
 .disagree-lead{color:var(--text-muted);font-size:.9rem;margin:0 0 .4rem;max-width:var(--measure);}
 .disagree{list-style:none;margin:0;padding:0;max-width:var(--measure);}
-.disagree li{padding:.9rem 0;border-top:1px solid var(--border);}
-.side{display:grid;grid-template-columns:3rem 1fr;gap:.7rem;margin:0 0 .45rem;}
-.side-label{color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding-top:.2rem;}
-.side-where{display:block;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--text-muted);}
-.side-quote{margin:.1rem 0 0;}
-.side-quote--code{font-family:ui-monospace,Consolas,monospace;font-size:.88rem;}
-.disagree-why{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0 3.7rem;}
+.disagree li{padding:1rem 0 1.1rem;border-top:1px solid var(--border);}
+.side{margin:0 0 .65rem;}
+.side-where{margin:0 0 .3rem;font-size:.85rem;color:var(--text-muted);}
+.side-path{font-family:ui-monospace,Consolas,monospace;font-size:.8rem;color:var(--text);}
+.side-quote{margin:0;padding:.05rem 0 .05rem .9rem;border-left:3px solid var(--border);}
+.side-code{margin:0;padding:.55rem .8rem;background:var(--bg-muted);border-radius:6px;font-family:ui-monospace,Consolas,monospace;font-size:.85rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;}
+.disagree-why{color:var(--text-muted);font-size:.9rem;margin:.1rem 0 0;}
 
 /* Earlier cycles - the running log carried forward from the page this replaces.
    One line each: this is history, so it stays compact and never competes with
@@ -353,8 +356,8 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     data.docMismatches.forEach(function (m) {
       if (!m || !isStr(m.doc)) return;
       var li = el("li");
-      li.appendChild(disagreeSide("Doc", m.doc, m.docLine, m.docText, false));
-      if (isStr(m.code)) li.appendChild(disagreeSide("Code", m.code, m.codeLine, m.codeText, true));
+      li.appendChild(disagreeSide(m.doc, m.docLine, "says", m.docText, false));
+      if (isStr(m.code)) li.appendChild(disagreeSide(m.code, m.codeLine, "does", m.codeText, true));
       var why = [];
       if (isStr(m.why)) why.push(m.why);
       if (isStr(m.since)) why.push("Open since " + m.since + ".");
@@ -364,7 +367,7 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     if (disagree.childNodes.length) {
       body.appendChild(sectionHeading("Docs and code disagree"));
       body.appendChild(text(el("p", "disagree-lead"),
-        "Reported, not fixed: the code looked wrong, or it was unclear which side was. Each stays here until a later run finds the two agreeing."));
+        "Reported, not fixed. Each stays here until a later run finds the doc and the code agreeing."));
       body.appendChild(disagree);
     }
   }
@@ -739,15 +742,16 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     return h2;
   }
 
-  // One side of a doc-code mismatch: a quiet label, where it is (path:line),
-  // and the quoted text. The code side quotes code, so it is set in mono.
-  function disagreeSide(label, where, line, quote, isCode) {
+  // One side of a doc-code mismatch, read as a sentence: "<path:line> says"
+  // over the doc's claim as a quote, or "<path:line> does" over the code on a
+  // code surface. Plain text throughout (see the section above).
+  function disagreeSide(where, line, verb, quote, isCode) {
     var row = el("div", "side");
-    row.appendChild(text(el("span", "side-label"), label));
-    var col = el("div", "side-body");
-    col.appendChild(text(el("span", "side-where"), where + (line ? ":" + line : "")));
-    if (isStr(quote)) col.appendChild(text(el("p", isCode ? "side-quote side-quote--code" : "side-quote"), quote));
-    row.appendChild(col);
+    var head = el("p", "side-where");
+    head.appendChild(text(el("span", "side-path"), where + (line ? ":" + line : "")));
+    head.appendChild(document.createTextNode(" " + verb));
+    row.appendChild(head);
+    if (isStr(quote)) row.appendChild(text(el(isCode ? "pre" : "blockquote", isCode ? "side-code" : "side-quote"), quote));
     return row;
   }
 
