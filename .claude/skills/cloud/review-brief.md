@@ -4,6 +4,8 @@
 
 Review the commits `{{RANGE}}` of this repository and report what the review finds. Report only: fix nothing.
 
+First, switch the working copy to the range's last commit, `git checkout --detach <the commit id after the two dots in {{RANGE}}>`, so the files the review reads are the ones the range ends at; the range need not be on the branch this session started on. A checkout changes no file git would commit.
+
 This repository carries its own review command. Run it with the Skill tool, skill `review`, with these arguments, exactly: `{{RANGE}} report only, no chaining, skip HTML`. "Report only" stops it fixing anything, "no chaining" stops it handing off to the next stage, and "skip HTML" stops it publishing a page of its own. If it asks a question this brief does not settle, take the choice that changes nothing and note it in the report.
 
 ## Report shape

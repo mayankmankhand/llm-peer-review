@@ -261,6 +261,10 @@ const PASTE_LIMIT = 28500;
   }
   // Everything a run produced comes back (owner, 2026-10-18), and a file name
   // read off the page is another session's data, so it must not leave files/.
+  // A review range need not be on the branch the cloud session starts on, so
+  // the review must read the files the range ends at (found in the Verify step).
+  check('263: review-brief.md checks out the range\'s last commit before the review reads any file',
+    optional('.claude/skills/cloud/review-brief.md').includes('git checkout --detach <the commit id after the two dots in {{RANGE}}>'));
   check('263: the skill saves every run file under files/ and keeps each name inside it',
     SRC.includes('class="run-file"') && SRC.includes('so no name can reach outside `files/`'));
   const plugBriefs = BRIEFS.filter((b) => fs.existsSync(path.join(REPO, 'plugin/skills/cloud', b)) && PLUG.includes('${CLAUDE_PLUGIN_ROOT}/skills/cloud/' + b));
