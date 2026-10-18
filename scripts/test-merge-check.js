@@ -887,6 +887,15 @@ section('266: --bring-home on a worktree with only records, a symlink, and error
   });
   const d = mc(blocked.dir, ['--bring-home', 'feat']);
   check('bring-home: a record the main copy cannot take exits 2', d.status === 2 && /reports\/r\.md/.test(d.stderr), one(d));
+  // A rename git sees only in the working tree (intent-to-add, then moved) prints
+  // " R new\0old\0": the old name is the rename's second entry, not a status line.
+  const renamed = homeFixture('home-rename', (dir, wt) => {
+    fs.renameSync(path.join(wt, 'a.txt'), path.join(wt, 'b.txt'));
+    g(wt, ['add', '-N', 'b.txt']);
+  });
+  const e = mc(renamed.dir, ['--bring-home', 'feat']);
+  check('bring-home: a rename in the working tree is listed once, by its new name',
+    e.json && JSON.stringify(e.json.leftover) === '["b.txt"]', one(e));
   const none = homeFixture('home-none');
   g(none.dir, ['branch', 'loose']);
   check('bring-home: a branch with no worktree, or main\'s own copy, is refused',

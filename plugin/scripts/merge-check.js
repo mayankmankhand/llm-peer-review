@@ -801,7 +801,9 @@ function bringHome(b) {
     needsForce = true;
     const xy = e.slice(0, 2);
     const rel = e.slice(3);
-    if (xy[0] === 'R' || xy[0] === 'C') i++;   // the next entry is the old name
+    // A rename or copy, staged or seen only in the working tree (intent-to-add,
+    // then moved), carries the old name as the next entry.
+    if (/[RC]/.test(xy)) i++;
     if (xy === '??' && isRecord(rel)) continue;
     leftover.push(rel);
   }
