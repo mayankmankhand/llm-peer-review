@@ -197,6 +197,7 @@ h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6r
 .side-quote{margin:0;padding:.05rem 0 .05rem .9rem;border-left:3px solid var(--border);}
 .side-code{margin:0;padding:.55rem .8rem;background:var(--bg-muted);border-radius:6px;font-family:ui-monospace,Consolas,monospace;font-size:.85rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;}
 .disagree-why{color:var(--text-muted);font-size:.9rem;margin:.1rem 0 0;}
+.disagree-why .since{white-space:nowrap;}
 
 /* Earlier cycles - the running log carried forward from the page this replaces.
    One line each: this is history, so it stays compact and never competes with
@@ -260,7 +261,11 @@ h2{font-size:1.25rem;margin:2.6rem 0 .7rem;}
 .bar--zero{background:var(--border);}
 .bar-label{font-size:.7rem;color:var(--text-muted);font-family:ui-monospace,Consolas,monospace;text-align:center;line-height:1.2;}
 
-footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem;font-size:.8rem;color:var(--text-muted);}
+/* The footer's rule ends where the column ends. The footer keeps the body's font
+   size so --measure (in ch) resolves to the same width as the prose above it,
+   and only the note inside it is set small. */
+footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem;max-width:var(--measure);}
+footer.note p{margin:0;font-size:.8rem;color:var(--text-muted);}
 .noscript-note{color:var(--text-muted);font-size:.9rem;padding:1rem 0;}
 </style>
 </head>
@@ -358,10 +363,11 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
       var li = el("li");
       li.appendChild(disagreeSide(m.doc, m.docLine, "says", m.docText, false));
       if (isStr(m.code)) li.appendChild(disagreeSide(m.code, m.codeLine, "does", m.codeText, true));
-      var why = [];
-      if (isStr(m.why)) why.push(m.why);
-      if (isStr(m.since)) why.push("Open since " + m.since + ".");
-      if (why.length) li.appendChild(text(el("p", "disagree-why"), why.join(" ")));
+      // The date sits in its own span so it never breaks at its hyphens.
+      var why = el("p", "disagree-why");
+      if (isStr(m.why)) text(why, m.why + (isStr(m.since) ? " " : ""));
+      if (isStr(m.since)) why.appendChild(text(el("span", "since"), "Open since " + m.since + "."));
+      if (why.childNodes.length) li.appendChild(why);
       disagree.appendChild(li);
     });
     if (disagree.childNodes.length) {
@@ -370,33 +376,6 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
         "Reported, not fixed. Each stays here until a later run finds the doc and the code agreeing."));
       body.appendChild(disagree);
     }
-  }
-
-  // ---- earlier cycles (the running log) ---------------------------------
-  if (nonEmpty(data.cycleLog)) {
-    body.appendChild(sectionHeading("Earlier cycles"));
-    var log = el("ul", "log");
-    data.cycleLog.forEach(function (entry) {
-      if (!entry) return;
-      var li = el("li");
-      if (isStr(entry.date)) {
-        var when = el("span", "log-when");
-        text(when, entry.date);
-        li.appendChild(when);
-      }
-      if (isStr(entry.pill)) {
-        var lp = el("span", "log-pill");
-        text(lp, entry.pill);
-        li.appendChild(lp);
-      }
-      if (isStr(entry.line)) {
-        var lt = document.createElement("span");
-        html(lt, entry.line);                // trusted inline HTML
-        li.appendChild(lt);
-      }
-      if (li.childNodes.length) log.appendChild(li);
-    });
-    if (log.childNodes.length) body.appendChild(log);
   }
 
   // ---- documentation deltas ---------------------------------------------
@@ -484,11 +463,40 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     }
   }
 
+  // ---- earlier cycles (the running log) ---------------------------------
+  // Last, after the record of this cycle: it is history, so it never splits the
+  // current cycle's sections apart (design critic).
+  if (nonEmpty(data.cycleLog)) {
+    body.appendChild(sectionHeading("Earlier cycles"));
+    var log = el("ul", "log");
+    data.cycleLog.forEach(function (entry) {
+      if (!entry) return;
+      var li = el("li");
+      if (isStr(entry.date)) {
+        var when = el("span", "log-when");
+        text(when, entry.date);
+        li.appendChild(when);
+      }
+      if (isStr(entry.pill)) {
+        var lp = el("span", "log-pill");
+        text(lp, entry.pill);
+        li.appendChild(lp);
+      }
+      if (isStr(entry.line)) {
+        var lt = document.createElement("span");
+        html(lt, entry.line);                // trusted inline HTML
+        li.appendChild(lt);
+      }
+      if (li.childNodes.length) log.appendChild(li);
+    });
+    if (log.childNodes.length) body.appendChild(log);
+  }
+
   // ---- footer -----------------------------------------------------------
   var footer = el("footer", "note");
-  html(footer, isStr(data.footer)
+  footer.appendChild(html(el("p"), isStr(data.footer)
     ? data.footer
-    : "Generated by the toolkit's document stage. Markdown remains the source of truth; this is the rendered cycle view.");
+    : "Generated by the toolkit's document stage. Markdown remains the source of truth; this is the rendered cycle view."));
   body.appendChild(footer);
 
   document.body.appendChild(body); // attach the assembled <main> once

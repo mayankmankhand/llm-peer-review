@@ -2322,6 +2322,29 @@ function docMismatchTests() {
     isArr(stMain.mismatches) && stMain.mismatches.length === 1 && stMain.mismatches[0].inHistory === false,
     short([stSide, stMain]));
 
+  // A squash landing: the branch's commit never enters main's history, and once
+  // the branch is deleted no branch holds it, so main may close the item.
+  const C = Object.assign({}, A, { docText: 'the squashed branch says so' });
+  let squashed = {}, stGone = {};
+  try {
+    git(['checkout', '-q', '-b', 'squash-me']);
+    fs.writeFileSync(path.join(repo, 'squash.txt'), 'squash\n');
+    git(['add', 'squash.txt']);
+    git(['commit', '-qm', 'squash work']);
+    run(repo, cycle('On squash-me', '2026-10-21', { docMismatches: [C] }));
+    git(['checkout', '-q', 'main']);
+    git(['merge', '-q', '--squash', 'squash-me']);
+    git(['commit', '-qm', 'squash landing']);
+    git(['branch', '-q', '-D', 'squash-me']);
+    stGone = standing();
+    squashed = island(run(repo, cycle('Squashed', '2026-10-22', { docMismatchesFixed: [keyOf(C)] })).html);
+  } catch (e) {
+    check('cycle page: the squash fixture ran', false, String(e && e.message).slice(0, 200));
+  }
+  check('cycle page: an item from a squash-merged and deleted branch can be closed',
+    isArr(stGone.mismatches) && stGone.mismatches.length === 1 && stGone.mismatches[0].inHistory === true &&
+    squashed.docMismatches === undefined, short([stGone.mismatches, squashed.docMismatches]));
+
   fresh();
   const hostile = run(dir, cycle('Hostile', '2026-10-18', { docMismatches: [Object.assign({}, A,
     { docText: '<img src=x onerror=alert(1)>', codeText: '<script>alert(2)</script>', why: '<b>bold</b>' })] }), here);

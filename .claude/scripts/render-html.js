@@ -1415,11 +1415,15 @@ function cleanMismatch(m) {
 
 // Whether `at` is in HEAD's history. No recorded commit (a render outside a
 // repository) means no branch to protect, so it counts as in history. A value
-// that is not a commit hash never reaches git as an argument.
+// that is not a commit hash never reaches git as an argument. A commit outside
+// HEAD's history is out of reach only while another branch still holds it: a
+// branch rebased, or squash-merged and deleted, leaves its commit on no branch
+// (or gone), and an item recorded there could otherwise never close.
 function commitInHistory(at) {
   if (!at) return true;
   if (!/^[0-9a-f]{7,40}$/.test(at)) return false;
-  return gitRead(['merge-base', '--is-ancestor', at, 'HEAD']) !== null;
+  if (gitRead(['merge-base', '--is-ancestor', at, 'HEAD']) !== null) return true;
+  return !gitRead(['branch', '--all', '--contains', at, '--format=%(refname)']);
 }
 
 function carryDocMismatches(data, prior) {
