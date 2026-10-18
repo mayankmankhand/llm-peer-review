@@ -238,7 +238,10 @@ const PASTE_LIMIT = 28500;
     for (let i = at + 1; i < lines.length && /^\s+- /.test(lines[i]); i++) out.push(lines[i].replace(/^\s+- /, '').trim());
     return out;
   };
-  const launchers = (text) => grants(text).filter((g) => g === 'Bash' || /^Bash\((\*|claude|node|bash|sh |CCR_FORCE_BUNDLE|exec)/.test(g));
+  // The one node grant allowed is the skill's own unpack script, which only
+  // reads a saved page and writes files; it cannot start a session.
+  const unpackGrant = /^"?Bash\(node \S*skills\/cloud\/unpack\.js \*\)"?$/;
+  const launchers = (text) => grants(text).filter((g) => !unpackGrant.test(g) && (g === 'Bash' || /^"?Bash\((\*|claude|node|bash|sh |CCR_FORCE_BUNDLE|exec)/.test(g)));
 
   check('263: the cloud skill never fires on its own (disable-model-invocation: true), in the source and the plugin', typedOnly(SRC) && typedOnly(PLUG),
     (SRC ? '' : 'no .claude/skills/cloud/SKILL.md; ') + (PLUG ? '' : 'no plugin/skills/cloud/SKILL.md'));
@@ -265,6 +268,14 @@ const PASTE_LIMIT = 28500;
   // the review must read the files the range ends at (found in the Verify step).
   check('263: review-brief.md checks out the range\'s last commit before the review reads any file',
     optional('.claude/skills/cloud/review-brief.md').includes('git checkout --detach <the commit id after the two dots in {{RANGE}}>'));
+  // Found in the Verify step: the cloud session stops at a prompt before it
+  // publishes, and a page with every run file is too big to pass through the
+  // chat, so the skill warns about the prompt and unpacks the page on disk.
+  check('263: the walk-through warns that the session asks once to publish its page',
+    SRC.includes('the session asks once for permission to publish its page to claude.ai'));
+  check('263: the plugin carries unpack.js and its skill runs and grants it from the plugin',
+    fs.existsSync(path.join(REPO, 'plugin/skills/cloud/unpack.js')) && PLUG.includes('node ${CLAUDE_PLUGIN_ROOT}/skills/cloud/unpack.js --page')
+      && grants(PLUG).some((g) => unpackGrant.test(g) && g.includes('${CLAUDE_PLUGIN_ROOT}')));
   check('263: the skill saves every run file under files/ and keeps each name inside it',
     SRC.includes('class="run-file"') && SRC.includes('so no name can reach outside `files/`'));
   const plugBriefs = BRIEFS.filter((b) => fs.existsSync(path.join(REPO, 'plugin/skills/cloud', b)) && PLUG.includes('${CLAUDE_PLUGIN_ROOT}/skills/cloud/' + b));

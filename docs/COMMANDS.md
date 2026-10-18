@@ -203,7 +203,7 @@ A run goes like this:
 
 1. You type the command. It writes a self-contained brief, which is everything the cloud session will know besides your repository, and a small `start.sh` beside it, and tells you where both are, so you can read what is sent.
 2. You start the session from a terminal by pasting the one line it gives you, `bash <folder>/start.sh`. Claude Code cannot start a cloud session from Claude's own shell, so this step is always yours, and running it is your go-ahead to use the cloud. The line uploads your local repository, unpushed commits included, to Anthropic's cloud (not to GitHub); files named like credentials, and gitignored files, stay on your machine. It prints the session's link and returns.
-3. The session works on its own. Watch it from that link, at claude.ai/code or in the Claude app.
+3. The session works on its own. Watch it from that link, at claude.ai/code or in the Claude app. Near the end it asks once for permission to publish its page to claude.ai: approve it there (the page stays private to you), and soon, because a session waiting on a prompt counts as idle.
 4. When it has finished, say "done" (in a new session, type `/cloud done`). It reads the session's private claude.ai page back, saves the report and every file the run produced (each reader's findings, the checker's verdicts, notes, the review's own report files), and shows you only the summary. In an editor without a tool that reads your claude.ai pages, such as Cursor, it asks you to paste the session's last message instead.
 
 The report lands in `reports/cloud/<date>-<name>/` when your project ignores `reports/`, otherwise in `~/.claude/cloud-reports/<project>/<date>-<name>/`, outside the repository, with the run's other files under `files/`.
