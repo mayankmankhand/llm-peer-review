@@ -316,7 +316,7 @@ const clean = setUp(function () { const sb = scratchRepo('clean'); commitFile(sb
 const keyed = setUp(function () { const sb = scratchRepo('keyed'); commitFile(sb, 'ci/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n'); return sb; });
 
 hook('a clean standard push gets no answer', runHook(function () { return bashCall('git push -u origin HEAD:feature 2>&1 | tail -4', clean.repo); }), 'none');
-hook('HEAD alone is scanned as the checked-out branch', runHook(function () { return bashCall('git push origin HEAD', keyed.repo); }), 'ask', '[gitlab-pat]');
+hook('HEAD alone is scanned as the checked-out branch', runHook(function () { return bashCall('git push origin HEAD', keyed.repo); }), 'deny', '[gitlab-pat]');
 hook('a scan that cannot check is denied with its reason', runHook(function () {
   const sb = scratchRepo('both');
   sb.g(['branch', 'same']);
@@ -344,7 +344,9 @@ hook('a remote whose push address differs from its fetch address is asked about'
   sb.g(['remote', 'set-url', '--push', 'origin', path.join(sb.root, 'elsewhere.git')]);
   return bashCall('git push origin HEAD:feature', sb.repo);
 }), 'ask', 'push address');
-hook("the scan runs in the input's cwd, not the hook's own folder", runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); }, { from: clean ? clean.repo : SCRATCH }), 'ask', '[gitlab-pat]');
+const viaCwd = runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); }, { from: clean ? clean.repo : SCRATCH });
+hook("the scan runs in the input's cwd, not the hook's own folder", viaCwd, 'deny', '[gitlab-pat]');
+hook('a flagged push is blocked with the way round named: the owner types it with !', viaCwd, 'deny', 'with ! at the prompt');
 hook('a push the check cannot scan is asked about', runHook(function () { return bashCall('git push origin --delete old-branch', clean.repo); }), 'ask', 'cannot scan');
 hook('a push in another shape is denied with the standard forms named', runHook(function () { return bashCall('git -C . push origin HEAD:feature', clean.repo); }), 'deny', 'HEAD:<branch>');
 hook('unreadable input that mentions push is denied', runHook(function () { return '{not json: git push origin HEAD:feature'; }), 'deny');
@@ -358,16 +360,16 @@ hook('a missing run-checks.js beside the guard denies pushes', runHook(function 
   { script: function () { return guardCopy('no-reader', ['pre-push-check.js']); } }), 'deny', 'run-checks.js');
 hook('a missing run-checks.js beside the guard lets other commands through', runHook(function () { return bashCall('ls -la', clean.repo); },
   { script: path.join(SCRATCH, 'no-reader', 'push-guard.js') }), 'none');
-hook('the built plugin copy asks about a planted-key push', runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); },
-  { script: PLUGIN_GUARD }), 'ask', '[gitlab-pat]');
+hook('the built plugin copy blocks a planted-key push', runHook(function () { return bashCall('git push origin HEAD:feature', keyed.repo); },
+  { script: PLUGIN_GUARD }), 'deny', '[gitlab-pat]');
 hook('--no-verify in a repo with its own pre-push hook names that hook', runHook(function () {
   const sb = scratchRepo('own-hook');
   fs.writeFileSync(path.join(sb.repo, '.git', 'hooks', 'pre-push'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   return bashCall('git push --no-verify origin HEAD:feature', sb.repo);
 }), 'ask', '.git/hooks/pre-push');
-hook('a flagged push in bypassPermissions mode is denied, since no prompt is sure to show', runHook(function () {
-  return bashCall('git push origin HEAD:feature', keyed.repo, 'bypassPermissions');
-}), 'deny', '[gitlab-pat]');
+hook('a push that would ask is denied in bypassPermissions mode, since no prompt is sure to show', runHook(function () {
+  return bashCall('git push --no-verify origin HEAD:feature', clean.repo, 'bypassPermissions');
+}), 'deny', '--no-verify');
 const marker = path.join(SCRATCH, 'git-ran');
 const quiet = runHook(function () {
   const bin = path.join(SCRATCH, 'fake-bin');
@@ -379,9 +381,9 @@ check('hook: a command with no push gets no answer without running git', quiet.s
   show(quiet) + (fs.existsSync(marker) ? ' (git ran)' : ''));
 check('hook: no answer ever says allow', answers.length > 0 && answers.every(function (a) { return a.decision !== 'allow' && a.stdout.indexOf('"allow"') === -1; }),
   answers.filter(function (a) { return a.decision === 'allow'; }).map(show).join(' | '));
-hook('a push carrying a planted key is sent to you for approval', runHook(function () {
+hook('a push carrying a planted key is blocked', runHook(function () {
   return bashCall('git push -u origin HEAD:feature 2>&1 | tail -4', keyed.repo);
-}), 'ask', '[gitlab-pat]');
+}), 'deny', '[gitlab-pat]');
 
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.'); process.exit(0); }

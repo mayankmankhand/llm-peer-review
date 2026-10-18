@@ -4,8 +4,8 @@
 // on Bash: Claude Code runs it before every Bash command Claude makes, so the
 // M11 pre-push check runs before a push whether or not Claude remembered to
 // run it ("a safeguard the agent can decline to invoke, or reconfigure, is
-// not a safeguard"). Only the owner can let a flagged push through, by
-// answering Claude Code's approval prompt.
+// not a safeguard"). Only the owner can send a flagged push, by typing it
+// with ! at the prompt, which hooks do not see.
 //
 // The reader, classify(command): command text in, a decision out. It makes
 // no git call and runs no scan, so it is tested on text alone
@@ -85,8 +85,9 @@
 // from, and denies a branch or tag that is not the checked-out commit. Then
 // it runs pre-push-check.js, found beside this file, for <remote>
 // <branch-or-tag>. Exit 0: no answer, except that --no-verify and force
-// pushes are asked about. Exit 1: ask, with the report. Exit 2, a missing
-// check, or a timeout: deny.
+// pushes are asked about. Exit 1: deny, with the report and the command the
+// owner types with ! to send it anyway. Exit 2, a missing check, or a
+// timeout: deny.
 // In bypassPermissions and dontAsk modes no approval prompt is sure to reach
 // the owner, so there an ask becomes a deny, and the owner can still push
 // with !. When the guard itself fails, it denies a command that mentions
@@ -504,10 +505,19 @@ function askAnswer(call, reason) {
 function scanErrorReason(text) {
   return 'push-guard blocked this push: the pre-push check could not check it (' + text + '). Fix what it names, then push again. If the owner wants this push anyway, they can run it themselves with ! at the prompt.';
 }
-function hitReason(report, notes) {
+// A flagged push is blocked, not asked: in the live check (#260) both
+// fake-key prompts got a Yes the owner does not remember giving, and a leaked
+// secret cannot be taken back. The owner sends one anyway by typing the push
+// with !, so the reason names that exact command, with the repository's
+// folder, since a ! command runs wherever the session's shell is.
+function hitReason(report, notes, push, repo, own) {
   const shown = report.length > MAX_REPORT ? report.slice(0, MAX_REPORT) + '\n[... cut here; run the pre-push check by hand to see the rest]' : report;
-  return 'push-guard: the pre-push check flagged this push' + (notes.length ? ', and ' + notes.join(', and ') : '') +
-    '. Approve only if everything below is safe to publish; this approval is your "push anyway".\n\n' + shown;
+  const folder = PLAIN_WORD.test(repo) ? repo : "'" + repo.split("'").join("'\\''") + "'";
+  return 'push-guard blocked this push: the pre-push check flagged it' + (notes.length ? ', and ' + notes.join(', and ') : '') +
+    '. Do not push it in another form. Show the owner the report below. If the owner wants it pushed anyway, the owner types it with ! at the prompt, which the guard does not see: `! git -C ' +
+    folder + ' push ' + push.remote + ' ' + push.refspec + '`.' +
+    (own === null ? '' : ' This repository also has its own pre-push hook (' + own + '), which checks that push too; if it blocks the same hit, the owner adds --no-verify.') +
+    '\n\n' + shown;
 }
 function failReason(e) {
   const what = String((e && e.message) || e).split('\n')[0].slice(0, 300);
@@ -618,7 +628,7 @@ function scanAnswer(call, push) {
   const scanned = runScan(repo, push.remote, dest.name);
   if (scanned.status === 'error') return answer('deny', scanErrorReason(scanned.text));
   const notes = alwaysAskNotes(repo, push);
-  if (scanned.status === 'hit') return askAnswer(call, hitReason(scanned.text, notes));
+  if (scanned.status === 'hit') return answer('deny', hitReason(scanned.text, notes, push, repo, ownPrePushHook(repo)));
   if (notes.length) {
     return askAnswer(call, 'push-guard: the pre-push check found nothing in this push, but ' + notes.join(', and ') +
       '. Approve it only if you meant to push it this way; this approval is your "push anyway".');
