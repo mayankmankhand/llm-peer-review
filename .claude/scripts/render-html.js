@@ -595,8 +595,20 @@ if (opts.standing) {
     if (prior.state === 'none') open = 0;
     else if (prior.state === 'ok') open = openFindings(prior.data).length;
   }
-  process.stdout.write(JSON.stringify({ name: page.name, file: file, exists: exists,
-                                        open: open, url: newestUrl(page.name, standingFileOf(page)) }) + '\n');
+  const line = { name: page.name, file: file, exists: exists,
+                 open: open, url: newestUrl(page.name, standingFileOf(page)) };
+  // The cycle page also lists the doc-code mismatches still open (issue #262),
+  // each marked with whether its reported-at commit is in HEAD's history: only
+  // those may be re-checked and closed from here. null when the page cannot be
+  // read, [] when there is no page yet.
+  if (opts.name === 'cycle') {
+    const prior = priorPayload(file);
+    line.mismatches = prior.state === 'none' ? [] : prior.state !== 'ok' ? null
+      : (Array.isArray(prior.data.docMismatches) ? prior.data.docMismatches : [])
+          .filter(function (m) { return m && typeof m === 'object'; })
+          .map(function (m) { return Object.assign({}, m, { key: mismatchKey(m), inHistory: commitInHistory(m.at) }); });
+  }
+  process.stdout.write(JSON.stringify(line) + '\n');
   process.exit(0);
 }
 
@@ -1371,6 +1383,78 @@ function carryCycleLog(data, prior) {
   if (!data.cycleLog.length) delete data.cycleLog; // an empty section renders nothing
 }
 
+// ---- docs and code disagree (issue #262) ---------------------------------
+// A mismatch /document reported but did not fix (the code looks wrong, or it
+// is unclear which side is) stays on the cycle page until a later run finds the
+// doc and the code agreeing. Unlike the cycle log, this IS a standing backlog,
+// and the renderer owns the carrying for the same reason it owns the log: a
+// run that leaves an item out of its payload cannot lose it. Only a key listed
+// in docMismatchesFixed closes one.
+//
+// The key is the doc and its quoted text, never the line number: lines move
+// with every edit above them, and a key that moved with them would close the
+// item and open a copy (the lesson of #210-213: key on the text a finding is
+// about). Each item records the commit it was reported at, and a key listed as
+// fixed closes it only when that commit is in HEAD's history. The page is one
+// log for the whole repository, written from every worktree, so without that
+// rule a sibling branch that never had the change would read the two agreeing
+// and close another branch's report (the lesson of #237).
+const MISMATCH_TEXT = ['doc', 'docText', 'code', 'codeText', 'why'];
+const MISMATCH_LINES = ['docLine', 'codeLine'];
+
+function mismatchKey(m) { return String(m.doc || '') + '\n' + String(m.docText || '').trim(); }
+
+// Keep only the fields the page shows, as strings and line numbers, so a payload
+// cannot smuggle anything else onto the page.
+function cleanMismatch(m) {
+  const out = {};
+  MISMATCH_TEXT.forEach(function (k) { if (typeof m[k] === 'string' && m[k].trim()) out[k] = m[k].trim(); });
+  MISMATCH_LINES.forEach(function (k) { const n = Number(m[k]); if (Number.isInteger(n) && n > 0) out[k] = n; });
+  return out;
+}
+
+// Whether `at` is in HEAD's history. No recorded commit (a render outside a
+// repository) means no branch to protect, so it counts as in history. A value
+// that is not a commit hash never reaches git as an argument.
+function commitInHistory(at) {
+  if (!at) return true;
+  if (!/^[0-9a-f]{7,40}$/.test(at)) return false;
+  return gitRead(['merge-base', '--is-ancestor', at, 'HEAD']) !== null;
+}
+
+function carryDocMismatches(data, prior) {
+  const fixed = new Set(Array.isArray(data.docMismatchesFixed) ? data.docMismatchesFixed.map(String) : []);
+  const isItem = function (m) { return m && typeof m === 'object' && !Array.isArray(m); };
+  const carried = (prior.state === 'ok' && Array.isArray(prior.data.docMismatches))
+    ? prior.data.docMismatches.filter(isItem) : [];
+  const reported = Array.isArray(data.docMismatches) ? data.docMismatches.filter(isItem) : [];
+  const since = cycleDate(data) || new Date().toISOString().slice(0, 10);
+  const at = gitRead(['rev-parse', 'HEAD']) || '';
+
+  const out = [];
+  const byKey = new Map();
+  carried.forEach(function (m) {
+    const key = mismatchKey(m);
+    if (byKey.has(key) || (fixed.has(key) && commitInHistory(m.at))) return;
+    const item = Object.assign(cleanMismatch(m), { key: key, since: String(m.since || ''), at: String(m.at || '') });
+    byKey.set(key, item);
+    out.push(item);
+  });
+  reported.forEach(function (m) {
+    const clean = cleanMismatch(m);
+    const key = mismatchKey(clean);
+    if (!clean.doc || !clean.docText) return; // nothing to key on, nothing to show
+    // Reported again: take this run's lines and text, keep when and where it
+    // was first reported.
+    if (byKey.has(key)) { Object.assign(byKey.get(key), clean); return; }
+    const item = Object.assign(clean, { key: key, since: since, at: at });
+    byKey.set(key, item);
+    out.push(item);
+  });
+  data.docMismatches = out;
+  if (!out.length) delete data.docMismatches; // an empty section renders nothing
+}
+
 // One sentence about what changed since the reader last opened this page. The
 // three prior states stay distinct here for the same reason they do on the
 // review page: "no page yet" and "a page I could not read" are different facts.
@@ -1648,8 +1732,11 @@ if (opts.shell === 'review') {
 if (opts.shell === 'document' && opts.stable) {
   const priorCycle = priorPayload(path.join(pageDir, safeName + '.html'));
   carryCycleLog(parsed, priorCycle);
+  carryDocMismatches(parsed, priorCycle);
   markCycleChanged(parsed, priorCycle);
 }
+// The fixed list is an instruction to the carry above, never page content.
+if (opts.shell === 'document') delete parsed.docMismatchesFixed;
 // The debate page carries the same finding shape in its Recommended Actions,
 // and the retired labels were refused only on the review shell (v6.3.0
 // review, R23). Same rule, same note.

@@ -78,6 +78,22 @@
       "docs": [ "CHANGELOG.md", "LESSONS.md" ]
     },
 
+    // Docs and code disagree (issue #262) - the mismatches /document reported
+    // and did not fix (the code looks wrong, or it is unclear which side is).
+    // Each is the two-sided receipt: the doc line and the code line it
+    // contradicts. All plain text, never HTML: these fields quote a doc and the
+    // code, so they render through textContent. In stable mode the renderer
+    // carries every open item forward from the page it replaces and adds key,
+    // since and at itself; only a key listed in docMismatchesFixed closes one,
+    // and only when the commit it was reported at is in HEAD's history. The
+    // fixed list never reaches the page. Skipped when none is open.
+    "docMismatches": [
+      { "doc":"docs/usage.md", "docLine":12, "docText":"add() rejects negative numbers",
+        "code":"src/math.js",  "codeLine":4,  "codeText":"return a + b;",
+        "why":"The commit says no behavior change, and the test still expects a rejection." }
+    ],
+    "docMismatchesFixed": [ "docs/usage.md\nadd() rejects negative numbers" ],
+
     // Documentation deltas - one line each for the docs that changed. file is
     // the bold doc name; note (HTML allowed) is the one-line description.
     "docDeltas": [
@@ -164,6 +180,20 @@ h1 .pill{display:inline-block;font-size:.78rem;font-weight:600;padding:.2rem .6r
    stroke is deliberately NOT set: its initial value is none, so inheriting a colour
    would draw outlines the author never asked for. */
 .diagram svg{max-width:100%;height:auto;display:block;color:var(--text);fill:currentColor;}
+
+/* Docs and code disagree (issue #262) - the open items. A ruled list like the
+   running log below, so the page gains no new component. The quoted text is the
+   content, so it keeps the body size; labels and paths stay small and muted, the
+   way the file inventory shows them. */
+.disagree-lead{color:var(--text-muted);font-size:.9rem;margin:0 0 .4rem;max-width:var(--measure);}
+.disagree{list-style:none;margin:0;padding:0;max-width:var(--measure);}
+.disagree li{padding:.9rem 0;border-top:1px solid var(--border);}
+.side{display:grid;grid-template-columns:3rem 1fr;gap:.7rem;margin:0 0 .45rem;}
+.side-label{color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding-top:.2rem;}
+.side-where{display:block;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;color:var(--text-muted);}
+.side-quote{margin:.1rem 0 0;}
+.side-quote--code{font-family:ui-monospace,Consolas,monospace;font-size:.88rem;}
+.disagree-why{color:var(--text-muted);font-size:.9rem;margin:.2rem 0 0 3.7rem;}
 
 /* Earlier cycles - the running log carried forward from the page this replaces.
    One line each: this is history, so it stays compact and never competes with
@@ -312,6 +342,32 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
   // ---- diagram (optional) -----------------------------------------------
   var diagram = renderDiagram(data.diagram);
   if (diagram) body.appendChild(diagram);
+
+  // ---- docs and code disagree (issue #262) -------------------------------
+  // The open items, right after the story of the cycle and before the record,
+  // because they are the one part of this page that asks the reader to act.
+  // Every field quotes a doc or the code, so all of it goes through text(),
+  // never html(): a quoted `<img>` must read as the characters it is.
+  if (nonEmpty(data.docMismatches)) {
+    var disagree = el("ul", "disagree");
+    data.docMismatches.forEach(function (m) {
+      if (!m || !isStr(m.doc)) return;
+      var li = el("li");
+      li.appendChild(disagreeSide("Doc", m.doc, m.docLine, m.docText, false));
+      if (isStr(m.code)) li.appendChild(disagreeSide("Code", m.code, m.codeLine, m.codeText, true));
+      var why = [];
+      if (isStr(m.why)) why.push(m.why);
+      if (isStr(m.since)) why.push("Open since " + m.since + ".");
+      if (why.length) li.appendChild(text(el("p", "disagree-why"), why.join(" ")));
+      disagree.appendChild(li);
+    });
+    if (disagree.childNodes.length) {
+      body.appendChild(sectionHeading("Docs and code disagree"));
+      body.appendChild(text(el("p", "disagree-lead"),
+        "Reported, not fixed: the code looked wrong, or it was unclear which side was. Each stays here until a later run finds the two agreeing."));
+      body.appendChild(disagree);
+    }
+  }
 
   // ---- earlier cycles (the running log) ---------------------------------
   if (nonEmpty(data.cycleLog)) {
@@ -681,6 +737,18 @@ footer.note{margin-top:2rem;border-top:1px solid var(--border);padding-top:.8rem
     var h2 = el("h2");
     text(h2, label);
     return h2;
+  }
+
+  // One side of a doc-code mismatch: a quiet label, where it is (path:line),
+  // and the quoted text. The code side quotes code, so it is set in mono.
+  function disagreeSide(label, where, line, quote, isCode) {
+    var row = el("div", "side");
+    row.appendChild(text(el("span", "side-label"), label));
+    var col = el("div", "side-body");
+    col.appendChild(text(el("span", "side-where"), where + (line ? ":" + line : "")));
+    if (isStr(quote)) col.appendChild(text(el("p", isCode ? "side-quote side-quote--code" : "side-quote"), quote));
+    row.appendChild(col);
+    return row;
   }
 
   function escapeHtml(s) {
