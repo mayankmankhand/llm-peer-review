@@ -21,6 +21,10 @@
 - **Docs and code disagree, on the cycle page (#262).** A mismatch where the code looks wrong, or it is unclear which side is, is never fixed in the code. It is listed on the cycle summary with both lines quoted and stays until a later run finds the two agreeing. An item reported on another branch can only be closed from a branch that holds its commit, or once that branch is gone (squash-merged and deleted, or rebased).
 - **`/review-full` checks the docs against the code (#262)** at a release gate, including code the release did not change, so older drift surfaces too.
 
+### Changed
+
+- **The cycle summary's history moved to the bottom.** "Earlier cycles" now comes after this cycle's doc changes and files, and the footer line ends at the text column's edge.
+
 ### Upgrading
 
 - On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
