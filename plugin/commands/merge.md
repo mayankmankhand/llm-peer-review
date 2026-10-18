@@ -14,7 +14,7 @@ allowed-tools:
 # Land Worktree PRs
 
 **Use this when:** One or more PRs from worktree branches are finished and you want them on main, in an order you choose, with proof that no work was lost on the way.
-**Don't use this when:** The work is still in progress (finish it with `/tk:document`, which opens the PR), or you only want to see what landed (`git log --first-parent main`).
+**Don't use this when:** The work is still in progress (finish it with `/tk:document`, which opens the PR or, where the repo lands locally, saves its text for `/tk:merge`), or you only want to see what landed (`git log --first-parent main`).
 
 `/tk:merge 241 242` lands PR #241 and then PR #242, one at a time, in the order given. Which PR lands first is your call, so `/tk:merge` is human-triggered and never chained into, and it hands off to nothing (M14). A branch with no PR is named by its branch name instead of a number.
 
