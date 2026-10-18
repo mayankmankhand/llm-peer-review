@@ -32,7 +32,7 @@ We follow this flow for features. You type the steps marked **(you)**; the rest 
 2. `/tk:create-plan` - *chains from `/tk:explore` once the conversation converges* - Create a step-by-step plan with status tracking, then stop for approval
 3. `/tk:execute` - **(you: approve the plan)** Build it, updating the plan as we go
 4. `/tk:review` - *chains from `/tk:execute` on a clean finish* - it finds issues, dedups them, audits them (M2), auto-fixes the survivors, re-verifies, and exits each finding as page, digest, or log - see command table below. Use a specific `/tk:review-*` command instead when you know which lens you need
-5. `/tk:document` - *chains from `/tk:review` once the loop settles* - Update documentation; from a worktree it opens the PR
+5. `/tk:document` - *chains from `/tk:review` once the loop settles* - Update documentation; from a worktree it opens the PR, or, where the repo lands locally, saves the PR text for `/tk:merge`
 6. `/tk:merge` - **(you, for worktree PRs)** Land finished PRs on main in the order you name, each checked for lost work and contradicting decisions before it lands
 
 **Not steps in the chain.** `/tk:ask-gpt`, `/tk:ask-gemini`, `/tk:peer-review`, and `/tk:merge` are human-triggered and never chained into (M14): which PR lands first is your call. Because `/tk:review` hands off to `/tk:document` directly, there is no pause between them in which to type one. To get that window, drive the two stages yourself: say "no chaining" when you approve the plan (`/tk:execute` then runs and stops), type `/tk:review no chaining` (the review runs and stops), run the debate, then type `/tk:document`. Their Recommended Actions are auto-processed through the same loop once you do.
