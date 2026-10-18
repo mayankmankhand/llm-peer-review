@@ -489,6 +489,28 @@ const byName = [...new Set(['commands', 'skills', 'agents'].flatMap(d => mdUnder
 const seedAllow = JSON.parse(fs.readFileSync(path.join(REPO, 'seed', 'settings.local.json'), 'utf8')).permissions.allow;
 const noRows = byName.filter(n => !seedAllow.includes('Skill(tk:' + n + ')') || !seedAllow.includes('Skill(tk:' + n + ':*)'));
 check('live: every skill a command loads by name has both permission rows in the seed', byName.length > 0 && noRows.length === 0, 'missing rows for: ' + noRows.join(', '));
+// Three rule-set skills a review loads by name mid-run (#261): each inlines
+// exactly its shared fragments by plugin path and nothing else, is not a
+// command, and has both seed rows, or default permission mode stops on the
+// first load. A missing skill is a miss here, never a crash, so the case name
+// shows in the failure list.
+const RULE_SKILLS = {
+  'loop-rules': ['hitl-loop.md', 'hitl-stages.md'],
+  'report-rules': ['report-format.md', 'finding-contract.md', 'html-outputs.md'],
+  'review-page': ['html-render-review.md', 'html-viewing.md'],
+};
+const ruleSkillMisses = [];
+for (const [name, files] of Object.entries(RULE_SKILLS)) {
+  const rel = 'skills/' + name + '/SKILL.md';
+  if (!fs.existsSync(path.join(live, rel))) { ruleSkillMisses.push(rel + ' missing'); continue; }
+  const text = read(live, rel);
+  if (!/^user-invocable: false$/m.test(text)) ruleSkillMisses.push(rel + ' is user-invocable');
+  const cats = [...text.matchAll(/!`cat "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/shared\/([^"]+)"`/g)].map(m => m[1]).sort();
+  if (cats.join(',') !== files.slice().sort().join(',')) ruleSkillMisses.push(rel + ' inlines [' + cats.join(', ') + ']');
+  if ((text.match(/!`cat /g) || []).length !== files.length) ruleSkillMisses.push(rel + ' inlines a file outside skills/shared');
+  for (const row of ['Skill(tk:' + name + ')', 'Skill(tk:' + name + ':*)']) if (!seedAllow.includes(row)) ruleSkillMisses.push('seed lacks ' + row);
+}
+check('live: loop-rules, report-rules and review-page build with plugin-scoped inlines and all six seed rows', ruleSkillMisses.length === 0, ruleSkillMisses.join('; '));
 check('live: the deps criteria audit the plugin root, not scripts/', read(live, 'skills/shared/criteria-deps.md').includes('--prefix "${CLAUDE_PLUGIN_ROOT}"') && !read(live, 'skills/shared/criteria-deps.md').includes('${CLAUDE_PLUGIN_ROOT}/scripts`'));
 // conventions.md (data the audit parses) and the release notes (#257, the
 // repository's CHANGELOG.md blocks as written) are not prompts, so the prompt
