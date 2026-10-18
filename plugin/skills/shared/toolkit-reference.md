@@ -74,6 +74,7 @@ The lessons captured at `/tk:document` are read back at the start of the next `/
 | `/tk:codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/tk:playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /tk:explore vision mode) |
 | `/tk:audit-html` | Scan your project's own markdown for files that would benefit from an HTML view. Report-only by default; opt-in static view generation (skill). |
+| `/tk:cloud` | Run research, or a report-only review (in a repository that carries the toolkit's own files), on cloud in a Claude Code cloud session. You start it by pasting one line into a terminal; on "done" the report and every file the run produced come back, and only the summary is shown (skill - runs only when typed) |
 | `/tk:worktree` | Create an isolated parallel session in a new worktree |
 | `/tk:merge` | Land finished worktree PRs on main, one at a time, in the order you give: update each branch from main, fix the conflicts, then land only when the tests pass, no line of other work or of the PR itself is lost, and no decision contradicts one that landed after its cut (human-triggered, never chained into) |
 | `/tk:index` | (Re)generate `CODEBASE_MAP.md` - a semantic map of module purposes, conventions, and gotchas. Read by `/tk:explore`, `/tk:create-plan`, `/tk:pair-debug`. |

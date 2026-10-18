@@ -15,11 +15,13 @@
   - **A push in any other shape,** a push after a shell word such as `if`, `then`, `do` or `!` included: blocked, with the standard form named.
 - **It never answers "allow",** so it can only add a prompt or a block, never remove one. In bypassPermissions or dontAsk mode, where no prompt is sure to show, a push that would ask is blocked instead. When the guard cannot read its input, a command that mentions push is blocked, and the hook entry sets `"onFailure": "block"` and `"timeout": 120`, so a crash or a hang blocks too.
 - **Hard to skip, not impossible.** It cannot see a push inside a script Claude writes and then runs, a write through GitHub's web API, a shell or git alias that stands for push, a spelling built to hide a push, or a cloud session, which loads no plugin hooks. A push you type in a terminal yourself is not checked.
+- **Run research and review on cloud: `/cloud` (issue #263).** `/cloud research "<question>"` runs a research report, and `/cloud review [<range>]` a report-only review, in a Claude Code cloud session instead of on your machine. It writes a self-contained brief and gives you one line to paste into a terminal, because Claude Code cannot start a cloud session from Claude's own shell. When you say "done", it brings back the report and every file the run produced, and shows you only the summary. It runs only when you type it. Review needs the toolkit's own files in the repository, because cloud sessions never load plugins.
 
 ### Upgrading
 
 - On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
 - **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
+- `/cloud` adds no permission rows, and nothing pre-approves its start line: you run that line yourself, in a terminal.
 
 ### For maintainers
 
