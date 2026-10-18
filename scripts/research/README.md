@@ -20,6 +20,7 @@ Every reader keeps its findings in a file, not in its reply, so the run does not
   - `DISAGREES: <claim A> | <source A> || <claim B> | <source B>` when the reader sees two sources say different things.
 - The last line, written only when the reader has finished its whole share, is `DONE: <N> claims`, where N counts its finding lines.
 - The reader's reply to the lead is only its done line. The lead reads the notes files, not the replies.
+- The lead waits for the readers' notifications and never schedules a timed wake-up. In a headless run (`claude -p`), a scheduled wake-up keeps the session alive until it fires, so start a headless lead with `--disallowedTools ScheduleWakeup`. In the practice run, one lead sat idle for 27 minutes after its work was done.
 
 ## Resuming a run
 
@@ -29,7 +30,7 @@ Before it starts any reader, the lead looks in `notes/`. This is how a run picks
 - A file without a `DONE:` line was cut off. Rerun that reader alone, give it the path of its file, and tell it to keep every line already there and add only what its share still needs. It must not rewrite, reorder or repeat the lines it finds.
 - No file means the reader never started. Start it fresh.
 
-The same rule covers a reader that comes back during the run without writing its `DONE:` line: rerun it alone, from its file.
+The same rule covers a reader that comes back during the run without writing its `DONE:` line: rerun it alone, from its file. This case has not been run yet: the 2026-10-18 practice run tested only a new lead resuming after the old one was stopped.
 
 ## Where sources disagree
 
@@ -37,7 +38,7 @@ Before writing the report, the lead compares the claims across all the notes fil
 
 The report has a section with exactly this heading: `## Where sources disagree`. For each disagreement it gives:
 
-- both claims, each with its source written out as the URL or file path it came from, not only a reference number, so a reader can judge the disagreement from this section alone;
+- both claims, each with its source written out as the URL or file path it came from, not only a reference number, so someone reading the report can judge the disagreement from this section alone;
 - which one the report trusts;
 - why, in one line. A direct test beats a summary of one, a primary source beats a report about it, and on a fact that changes over time, newer beats older.
 
@@ -60,4 +61,4 @@ The report's last line is exactly:
 - **Search scripts**, meaning code the AI writes to run many searches or page reads at once. Readers already work in parallel, a freshly written script asks for approval on every run, and searching from a script needs a paid search API key. Reopen when a run's notes show readers waiting on one-at-a-time lookups.
 - **A script that checks the notes files.** The lead tells a finished file from a cut-off one by its `DONE:` line. Reopen when a lead misjudges that, keeping a cut-off file or rerunning a finished one.
 - **A `/research` command.** Research is specific to its topic, so each run writes its own brief.
-- **A rule to read the `.md` copy of a page.** Claude Code's page reader already asks for Markdown (its request starts `Accept: text/markdown`). Of 36 documentation pages measured on 2026-10-18, 21 already returned Markdown at their normal address, 12 had none, and only 3 had a Markdown copy at `.md` alone. On 5 pages from those 3 sites, the `.md` copy differed from the page a person sees on 3: trimmed and rewritten on 2, a different document on 1. Read the normal address.
+- **A rule to read the `.md` copy of a page.** Claude Code's WebFetch tool already asks for Markdown (its request starts `Accept: text/markdown`). Of 36 documentation pages measured on 2026-10-18, 21 already returned Markdown at their normal address, 12 had none, and only 3 had a Markdown copy at `.md` alone. On 5 pages from those 3 sites, the `.md` copy differed from the page a person sees on 3: trimmed and rewritten on 2, a different document on 1. Read the normal address.
