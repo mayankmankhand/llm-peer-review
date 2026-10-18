@@ -24,6 +24,7 @@
 ### For maintainers
 
 - **At the release that ships this, take the `hooks` block out of this repository's `.claude/settings.json`.** It switches the guard on here before any release, and once the plugin's own hook is installed the guard would run twice.
+- **A research kit for research runs (issue #264).** `scripts/research/README.md` holds the reusable parts of a research run, and each run's own brief in `reports/<topic>/` points at it with one line. Helpers keep their notes in files that end with a done line, so a new lead resumes from the files after a lost helper or a lost session. The report shows each disagreement between sources with both written out, and the checker verifies both sides. A practice run proved the resume and the disagreement section. Search scripts, a script that checks the notes files, a `/research` command and a `.md` reading rule are recorded in the kit as left out, with why.
 
 ### Why
 
