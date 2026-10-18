@@ -226,6 +226,13 @@ if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/merge-check.js" ]; then
   PREFLIGHT_OK=false
 fi
 
+# Check doc-check script (dependency-free; the docs-against-code check /document
+# runs each cycle, issue #262)
+if [ ! -f "$TOOLKIT_ROOT/.claude/scripts/doc-check.js" ]; then
+  echo "  Error: source file not found: $TOOLKIT_ROOT/.claude/scripts/doc-check.js"
+  PREFLIGHT_OK=false
+fi
+
 # Check files that will be copied to the target project
 for f in VERSION CLAUDE.md LESSONS.md LESSONS-detail.md .env.local.example .claude/settings.local.json .claude/rules/toolkit.md .claude/skills/shared/html-outputs.md .claude/skills/shared/toolkit-reference.md artifacts/README.md .gitignore .gitattributes .claude/skills/shared/design-profile-template.md; do
   if [ ! -f "$TOOLKIT_ROOT/$f" ]; then
@@ -658,7 +665,7 @@ if [ -d "$TOOLKIT_ROOT/.claude/agents" ]; then
   done
   shopt -u nullglob; shopt -s failglob
 fi
-for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js merge-findings.js run-checks.js merge-check.js; do
+for pf_name in ask-gpt.js ask-gemini.js env-local.js browse.js package.json generate-index.js open-artifact.sh render-html.js session-init.js pre-push-check.js correction-ledger.js gen-media.js merge-findings.js run-checks.js merge-check.js doc-check.js; do
   preflight_record_diff "$TOOLKIT_ROOT/.claude/scripts/$pf_name" ".claude/scripts/$pf_name"
 done
 if [ -f "$TOOLKIT_ROOT/.claude/scripts/package-lock.json" ]; then
@@ -1312,6 +1319,11 @@ safe_copy "$TOOLKIT_ROOT/.claude/scripts/run-checks.js" "$TARGET/.claude/scripts
 # landing, keyed on the branch's recorded cut point, and /worktree records the cut.
 echo "  Copying .claude/scripts/merge-check.js ..."
 safe_copy "$TOOLKIT_ROOT/.claude/scripts/merge-check.js" "$TARGET/.claude/scripts/merge-check.js"
+
+# doc-check.js finds where the docs and the code disagree for certain (issue #262):
+# /document runs it each cycle, and /review-full at a release gate.
+echo "  Copying .claude/scripts/doc-check.js ..."
+safe_copy "$TOOLKIT_ROOT/.claude/scripts/doc-check.js" "$TARGET/.claude/scripts/doc-check.js"
 
 # ─── Project-owned files (skip if already exist) ─────────────
 # Capture whether LESSONS.md predates this run BEFORE the loop copies it, so the paired
