@@ -8,6 +8,8 @@ allowed-tools:
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-check.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
@@ -47,12 +49,18 @@ Keep README.md and CLAUDE.md consistent with each other.
 - Note any new files, deleted files, or renamed files
 
 ## 2. Verify Current Implementation
-Existing documentation may describe old behavior, so read the actual code rather than trusting the docs.
+Existing documentation may describe old behavior, so read the actual code rather than trusting the docs. A place where a doc and the code disagree is a finding to resolve, not proof that the doc is stale: sometimes the code is the side that is wrong.
 
-For each changed file:
-- Read the current implementation
-- Understand actual behavior (not documented behavior)
-- Note any discrepancies with existing docs
+1. **Run the checks** (M16): `node ${CLAUDE_PLUGIN_ROOT}/scripts/doc-check.js --window <window>`, with `<window>` the range Step 1 took, prints one JSON line: `links` (every relative link or heading anchor in the docs that no longer resolves) and `oldNames` (every doc that still names a file or command this window deleted or renamed, with `was` saying where it went). Then `node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --standing --name cycle` prints the cycle page's line, whose `mismatches` lists the ones earlier runs reported and are still open; an item marked `inHistory: false` was reported on a branch this one does not contain, so leave it alone.
+2. **For each changed file**, read the current implementation and its actual behavior (not documented behavior), and compare it with the docs that describe it.
+3. **Write a receipt for every mismatch**: each script hit, each place step 2 found, and each open item marked `inHistory: true`. The receipt is two-sided: the doc line and the code line it contradicts, each as `path:line` with its quoted text. Then decide which side is wrong and end it in one of these states:
+   - **The doc is wrong:** fix it in Step 3.
+   - **The code looks wrong, or it is unclear which side is:** report it and never edit the code. It goes into the digest and onto the cycle page (Section 9), where it stays until a later run finds the two agreeing.
+   - **The doc is a prompt file** (a command, skill, agent or rules file): a prompt file asks first (M9).
+   - **Not a mismatch** (a doc that names a removed file on purpose, such as a list of retired files): one digest line saying why.
+
+   Every mismatch gets one digest line: its end state and its receipt.
+4. After Step 3, run `doc-check.js` again with the same window: a hit it still prints is not fixed, unless this run dismissed it as not a mismatch.
 
 ## 3. Update Relevant Documentation
 
@@ -262,6 +270,7 @@ Do NOT hand-write the HTML. Produce a JSON payload matching the schema documente
 - **Do NOT author `sinceLast` or `cycleLog`.** The renderer owns both and overwrites whatever you supply: `sinceLast` is what changed since the reader last opened the page, and `cycleLog` is the running history, built from the page this run replaces.
 - **Files changed by category** (commands, skills, scripts, docs) from `git diff --name-status <window>` -> `filesByCategory`
 - **Documentation deltas** - which of README / CLAUDE.md / CHANGELOG / LESSONS changed, one line each -> `docDeltas`
+- **Docs and code disagree** -> `docMismatches` and `docMismatchesFixed`. `docMismatches` holds each mismatch this run reported (Step 2's "code looks wrong, or it is unclear" state), one object each: `{"doc": "<path>", "docLine": <n>, "docText": "<the quoted doc text>", "code": "<path>", "codeLine": <n>, "codeText": "<the quoted code text>", "why": "<one line: why it was not fixed>"}`. `docMismatchesFixed` lists the `key` of each open item Step 2 re-checked and found agreeing. A carried item is never dropped by leaving it out: the renderer carries every open item forward unless its key is in `docMismatchesFixed`, and records each new item's date and commit itself.
 - **PR link** - the PR from Section 8 (worktree runs), else the most recent PR via the **"Most recent PR / MR (URL)" row** for the detected host (the URL field is named differently on each host, so read it off that row), else omit -> `prLink` / `prNote`
 - **Mini commit chart** - commits per day across the window, from `git log --format=%ad --date=short <window>` -> `commitChart` (the shell renders the inline bars)
 - **Where the time went** -> `timeBreakdown`. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/correction-ledger.js --cycle-time`, then `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js --history --since <the window.start it printed>`, and set `timeBreakdown` to `{"cycle": <the first JSON>, "testCost": <the second JSON>}`, each pasted as printed: the shell reads those exact fields, and both hold numbers only, so nothing from the conversation rides along. When the first prints `optedOut` or `"window": null`, or either command fails, leave `timeBreakdown` out and say why in one digest line.
