@@ -1381,6 +1381,67 @@ section('Output fits under the host\'s cut (harness research, P6-C1)', function 
   check('the cut map is still sound and fresh', m.json.map.malformed === false && m.json.map.commitsBehind === 0, JSON.stringify(m.json.map).slice(0, 200));
 });
 
+// --- 265: where /document's cycle window starts -------------------------------------
+// A fresh worktree has no cycle marker of its own, and /document's fallback after
+// it (the last merged PR) reached 59 commits back. --cycle-start tries the working
+// copy's marker, then the newest plan's Start commit, then the main copy's marker,
+// each only when HEAD contains it.
+section('265 cycle-start: the working copy\'s marker, the newest plan, the main copy\'s marker', function () {
+  const repo = newRepo('cycle-main');
+  write(repo, '.gitignore', 'plans/PLAN-*.md\nartifacts/html/\n.claude/worktrees/\n');
+  write(repo, 'a.txt', 'a\n');
+  const c1 = commitAll(repo, 'one');
+  write(repo, 'a.txt', 'a\nb\n');
+  const c2 = commitAll(repo, 'two');
+  write(repo, 'artifacts/html/.last-cycle', c1 + '\n');
+  const wt = path.join(repo, '.claude', 'worktrees', 'w1');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat', wt]);
+  write(wt, 'b.txt', 'b\n');
+  commitAll(wt, 'three');
+  const start = function (cwd) { return runScript(['--cycle-start'], cwd).json; };
+  // A plan in the worktree, as /execute leaves it.
+  write(wt, 'plans/PLAN-feat.md', '# Feat\n\n**Overall Progress:** `0%`\n**Start commit:** ' + c2 + '\n**Models:** fit\n');
+  const a = start(wt);
+  check('cycle-start: a worktree with no marker starts at the newest plan\'s Start commit',
+    a.start === c2 && a.source === 'plan' && a.plan === 'PLAN-feat.md', JSON.stringify(a));
+  fs.rmSync(path.join(wt, 'plans'), { recursive: true, force: true });
+  const b = start(wt);
+  check('cycle-start: with no plan, a worktree starts at the main copy\'s marker when HEAD contains it',
+    b.start === c1 && b.source === 'main-marker' && b.plan === null, JSON.stringify(b));
+  const m = start(repo);
+  check('cycle-start: the main copy reads its own marker', m.start === c1 && m.source === 'marker', JSON.stringify(m));
+  // A marker HEAD does not contain: a commit made on another branch.
+  git(repo, ['checkout', '-q', '-b', 'side', c1]);
+  write(repo, 'side.txt', 's\n');
+  const side = commitAll(repo, 'side');
+  git(repo, ['checkout', '-q', 'main']);
+  write(wt, 'artifacts/html/.last-cycle', side + '\n');
+  const c = start(wt);
+  check('cycle-start: a marker HEAD does not contain is passed over', c.start === c1 && c.source === 'main-marker', JSON.stringify(c));
+  write(repo, 'artifacts/html/.last-cycle', side + '\n');
+  write(wt, 'artifacts/html/.last-cycle', '--not-a-sha\n');
+  const d = start(wt);
+  check('cycle-start: nothing usable prints a null start', d.start === null && d.source === null && runScript(['--cycle-start'], wt).status === 0, JSON.stringify(d));
+});
+
+// --- 265: the lessons check /document runs, without redirects -------------------------
+section('265 lessons: duplicated leads and leads with no write-up', function () {
+  const repo = newRepo('lessons-check');
+  write(repo, 'LESSONS.md', '# Lessons\n\n- **Alpha lead.**\n- **Beta lead.**\n- **Alpha lead.**\n- **Gamma lead.**\n');
+  write(repo, 'LESSONS-detail.md', '# Detail\n\n- **Alpha lead.** The write-up.\n- **Beta lead.** Another.\n');
+  commitAll(repo, 'init');
+  const a = runScript(['--lessons'], repo).json;
+  check('lessons: a lead listed twice and a lead with no write-up are both reported',
+    JSON.stringify(a.duplicates) === '["Alpha lead."]' && JSON.stringify(a.noWriteUp) === '["Gamma lead."]', JSON.stringify(a));
+  write(repo, 'LESSONS.md', '# Lessons\n\n- **Alpha lead.**\n- **Beta lead.**\n');
+  const b = runScript(['--lessons'], repo).json;
+  check('lessons: clean files print two empty lists',
+    Array.isArray(b.duplicates) && b.duplicates.length === 0 && Array.isArray(b.noWriteUp) && b.noWriteUp.length === 0, JSON.stringify(b));
+  fs.rmSync(path.join(repo, 'LESSONS-detail.md'));
+  const c = runScript(['--lessons'], repo).json;
+  check('lessons: with no detail file every lead has no write-up', JSON.stringify(c.noWriteUp) === '["Alpha lead.","Beta lead."]', JSON.stringify(c));
+});
+
 console.log('');
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');

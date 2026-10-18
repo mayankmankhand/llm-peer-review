@@ -34,6 +34,8 @@
 //   node session-init.js --scope [<range>] --out reports/receipts/<stamp>/scope.json
 //                                                 the same, saved by the script (#250, below)
 //   node session-init.js --models                 only the model mode (#205, below)
+//   node session-init.js --cycle-start            where /document's cycle window starts (#265, below)
+//   node session-init.js --lessons                duplicated lesson leads and leads with no write-up (#265, below)
 // Each takes an optional --mode <best|fit|cheap>, the mode a command's "mode:" word
 // asked for, and each output carries the resolved "models" object.
 //
@@ -1480,6 +1482,98 @@ function saveScope(payload, given, root) {
   return { savedTo: path.relative(root, target).split(path.sep).join("/") };
 }
 
+// ==========================================================================
+// --cycle-start: where /document's cycle window starts (#265)
+// ==========================================================================
+//
+// /document summarizes the commits since its last run, kept as a marker per
+// working copy (artifacts/html/.last-cycle). A fresh worktree has none, and the
+// fallback after it, the last merged PR, reaches far back in a repo that lands
+// its cycles as local commits on main (#265: 59 commits instead of the cycle's
+// own). Two closer starts come first. In order, each taken only when HEAD
+// contains it:
+//   marker       this working copy's own marker
+//   plan         the `**Start commit:**` line of the newest plan in this working
+//                copy's plans/ (plans are ignored, so a fresh worktree's plans/
+//                holds only the plans its own cycle wrote)
+//   main-marker  the main copy's marker, read from a worktree
+// Nothing usable prints a null start, and /document goes on to its own fallbacks.
+//
+//   {"start": "<sha>" | null, "source": "marker" | "plan" | "main-marker" | null,
+//    "plan": "<PLAN-name.md>" | null}
+const MARKER_TEXT = /^[0-9a-fA-F]{7,40}$/;
+function markerIn(dir) {
+  try {
+    const text = fs.readFileSync(path.join(dir, "artifacts", "html", ".last-cycle"), "utf8").trim();
+    return MARKER_TEXT.test(text) ? text : null;
+  } catch {
+    return null;
+  }
+}
+// The main copy: the folder holding the shared git folder, or the folder its
+// core.worktree names (a submodule), as render-html.js and merge-check.js find it.
+function mainCopyOf(root) {
+  const common = gitText(["rev-parse", "--git-common-dir"], root);
+  if (common === null) return null;
+  const commonAbs = path.resolve(root, common);
+  const wt = gitText(["--git-dir=" + commonAbs, "config", "--get", "core.worktree"], root);
+  return wt ? path.resolve(commonAbs, wt) : path.dirname(commonAbs);
+}
+function cycleStart() {
+  const out = { start: null, source: null, plan: null };
+  const root = modelsRoot();
+  if (root === null) return Object.assign(out, { error: "not inside a git working tree" });
+  const head = resolveCommit("HEAD", root);
+  if (head === null) return Object.assign(out, { error: "HEAD names no commit yet" });
+  const usable = (sha) => {
+    const c = sha ? resolveCommit(sha, root) : null;
+    return c !== null && isAncestor(c, head, root) === true ? c : null;
+  };
+  let c = usable(markerIn(root));
+  if (c) return Object.assign(out, { start: c, source: "marker" });
+  const newest = readPlans(root).plans[0] || null;
+  if (newest && (c = usable(newest.startCommit))) return Object.assign(out, { start: c, source: "plan", plan: newest.name });
+  const main = mainCopyOf(root);
+  if (main && path.resolve(main) !== path.resolve(root) && (c = usable(markerIn(main)))) return Object.assign(out, { start: c, source: "main-marker" });
+  return out;
+}
+
+// ==========================================================================
+// --lessons: the lesson-index check /document runs (#265)
+// ==========================================================================
+//
+// /document compared the leads with grep, sort and comm through `>` redirects,
+// and default permission mode asks before every redirect. The same comparison,
+// with no redirect: a lead is a `- **...**` line in LESSONS.md, and it has a
+// write-up when the same bold text appears anywhere in LESSONS-detail.md (the
+// old `comm -23` against every bold span there). Leads print without their
+// asterisks. A missing detail file leaves every lead without a write-up.
+//
+//   {"duplicates": ["<lead>", ...], "noWriteUp": ["<lead>", ...], "detailFile": true | false}
+function lessonsCheck() {
+  const root = modelsRoot() || cwd;
+  const read = (name) => {
+    try { return fs.readFileSync(path.join(root, name), "utf8"); } catch { return null; }
+  };
+  const index = read("LESSONS.md");
+  if (index === null) return { duplicates: [], noWriteUp: [], detailFile: false, error: "no LESSONS.md in " + root };
+  const strip = (bold) => bold.slice(2, -2);
+  const leads = (index.match(/^- \*\*[^*]+\*\*/gm) || []).map((l) => strip(l.slice(2)));
+  const detail = read("LESSONS-detail.md");
+  const written = new Set(((detail || "").match(/\*\*[^*]+\*\*/g) || []).map(strip));
+  const seen = new Set();
+  const twice = new Set();
+  for (const l of leads) {
+    if (seen.has(l)) twice.add(l);
+    seen.add(l);
+  }
+  return {
+    duplicates: Array.from(twice).sort(),
+    noWriteUp: Array.from(seen).filter((l) => !written.has(l)).sort(),
+    detailFile: detail !== null,
+  };
+}
+
 // The printed object after a save: the scope without its long lists, which the
 // saved file holds. Only arrays under these names go; every count stays.
 function withoutLists(value) {
@@ -1508,6 +1602,10 @@ if (outGiven && cliArgs[0] !== "--scope") {
   emit(fitSessionStart(withModels(sessionStart())), (o) => ordered(o, SESSION_START_ORDER));
 } else if (cliArgs[0] === "--models" && cliArgs.length === 1) {
   emit(withModels({ generatedAt: new Date().toISOString(), cwd }), (o) => ordered(o, ["generatedAt", "models", "cwd"]));
+} else if (cliArgs[0] === "--cycle-start" && cliArgs.length === 1) {
+  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, cycleStart(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "start", "source", "plan"]));
+} else if (cliArgs[0] === "--lessons" && cliArgs.length === 1) {
+  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp"]));
 } else if (cliArgs[0] === "--scope") {
   let result;
   try {
@@ -1525,5 +1623,5 @@ if (outGiven && cliArgs[0] !== "--scope") {
     else emit(Object.assign(withoutLists(full), { savedTo: saved.savedTo }), (o) => ordered(o, ["generatedAt", "error", "scopeLine", "savedTo"]));
   }
 } else {
-  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>] or --models, each with an optional --mode <best|fit|cheap>)", cwd });
+  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>], --models, --cycle-start or --lessons, each with an optional --mode <best|fit|cheap>)", cwd });
 }
