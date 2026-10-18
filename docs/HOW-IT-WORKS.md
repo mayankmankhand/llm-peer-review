@@ -81,13 +81,13 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/document-dark.svg">
-  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR; writes the cycle page of what changed and why; and ends the line." width="719">
+  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR, or saves its text for merge; writes the cycle page of what changed and why; and ends the line." width="719">
 </picture>
 
 - **The docs catch up with the code:** README, CLAUDE.md, the changelog, the lessons file and the design profile.
 - **It notices what you had to correct** and keeps it in a correction ledger that never leaves your machine. Nothing is saved until you accept it.
 - **A cycle page says what changed and why,** refreshed every run.
-- **From a worktree it pushes the branch and opens a pull request** (a `/tk:document` you type yourself asks first), which you land with `/tk:merge`. The line ends here.
+- **From a worktree it pushes the branch and opens a pull request** (a `/tk:document` you type yourself asks first), which you land with `/tk:merge`. Where your branches land on your machine instead, it opens no pull request and saves its text for `/tk:merge`. The line ends here.
 
 ### `/tk:merge`: land parallel work without losing any
 
@@ -100,6 +100,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 - **Four checks before anything lands:** the project's tests, plus three rules keyed on where the branch was cut. Would this landing remove work another one added? Do all of this branch's own lines arrive? Does one of its decisions contradict a decision that landed after it was cut? A fresh decision checker judges the last one.
 - **Any flag stops that pull request** and asks you: fix it, keep it on purpose, land it as it is, or stop.
 - **Landing on GitHub or GitLab asks you once** per run.
+- **Then it brings each worktree's records home:** the plans, reports and receipts git does not track, which removing the worktree would delete. One question at the end offers to remove each worktree and its branch.
 
 
 ## Gate in and gate out
