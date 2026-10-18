@@ -15,13 +15,16 @@
 // It writes <folder>/report.md (the page link first, when given) and each run
 // file to <folder>/files/<name>, then prints one JSON object: ok, the report's
 // path, the files saved (name and bytes, in page order), the report's
-// "## Summary" section, and its checker and git status lines.
+// "## Summary" section, and its checker and git status lines. A folder that
+// already holds a report.md is kept: the run goes to <folder>-2 (then -3, ...)
+// instead, and the printed report path names the folder used.
 //
 // The page was written by another session, so it is data: nothing in it is
 // run, and each file name is cut to letters, digits, ".", "-" and "_".
 // Anything else becomes "-", an empty name or one starting with "." gets a
-// "file-" prefix, and a repeated name gets "-2", "-3" before its extension, so
-// no name can reach outside files/ and no file is lost to another.
+// "file-" prefix, and a repeated name gets "-2", "-3" before its extension
+// (letter case aside, since Mac and Windows disks ignore it), so no name can
+// reach outside files/ and no file is lost to another.
 //
 // Exit codes: 0 unpacked; 1 the page has no report block (nothing written);
 // 2 a usage error or an unreadable page (nothing written).
@@ -72,8 +75,8 @@ function safeName(name, taken) {
   const ext = path.extname(s);
   const base = ext && ext !== s ? s.slice(0, -ext.length) : s;
   let candidate = s;
-  for (let k = 2; taken.has(candidate); k++) candidate = base + '-' + k + (ext !== s ? ext : '');
-  taken.add(candidate);
+  for (let k = 2; taken.has(candidate.toLowerCase()); k++) candidate = base + '-' + k + (ext !== s ? ext : '');
+  taken.add(candidate.toLowerCase());
   return candidate;
 }
 
@@ -119,10 +122,14 @@ function main() {
     console.log(JSON.stringify({ ok: false, reason: 'the page has no <script type="text/markdown" id="report-markdown"> block', runFiles: files.length }));
     process.exit(1);
   }
-  fs.mkdirSync(path.join(o.out, 'files'), { recursive: true });
-  const reportPath = path.join(o.out, 'report.md');
+  // A second run under the same name lands beside the first, never over it.
+  const base = o.out.replace(/[\\/]+$/, '');
+  let out = base;
+  for (let k = 2; fs.existsSync(path.join(out, 'report.md')); k++) out = base + '-' + k;
+  fs.mkdirSync(path.join(out, 'files'), { recursive: true });
+  const reportPath = path.join(out, 'report.md');
   fs.writeFileSync(reportPath, (o.link ? o.link + '\n\n' : '') + report);
-  for (const f of files) fs.writeFileSync(path.join(o.out, 'files', f.name), f.text);
+  for (const f of files) fs.writeFileSync(path.join(out, 'files', f.name), f.text);
   console.log(JSON.stringify({
     ok: true,
     report: reportPath,

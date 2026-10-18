@@ -241,7 +241,11 @@ const PASTE_LIMIT = 28500;
   // The one node grant allowed is the skill's own unpack script, which only
   // reads a saved page and writes files; it cannot start a session.
   const unpackGrant = /^"?Bash\(node \S*skills\/cloud\/unpack\.js \*\)"?$/;
-  const launchers = (text) => grants(text).filter((g) => !unpackGrant.test(g) && (g === 'Bash' || /^"?Bash\((\*|claude|node|bash|sh |CCR_FORCE_BUNDLE|exec)/.test(g)));
+  // A known-safe set, not a ban list, so a new grant (`Bash(env *)`, `Bash(npx *)`)
+  // fails here until someone checks it cannot start a session: the file tools,
+  // four read-only git commands, the unpack script, and the plugin's mktemp row.
+  const SAFE = [/^Read$/, /^Write$/, /^Bash\(git (ls-files|rev-parse|merge-base|check-ignore) \*\)$/, unpackGrant, /^"?Bash\(mktemp -d \/tmp\/\*\)"?$/];
+  const launchers = (text) => grants(text).filter((g) => !SAFE.some((re) => re.test(g)));
 
   check('263: the cloud skill never fires on its own (disable-model-invocation: true), in the source and the plugin', typedOnly(SRC) && typedOnly(PLUG),
     (SRC ? '' : 'no .claude/skills/cloud/SKILL.md; ') + (PLUG ? '' : 'no plugin/skills/cloud/SKILL.md'));
@@ -282,6 +286,8 @@ const PASTE_LIMIT = 28500;
   check('263: the plugin carries both briefs and its skill reads them from the plugin', plugBriefs.length === BRIEFS.length, 'found ' + plugBriefs.join(', '));
   const untyped = SRC.replace(/^disable-model-invocation:.*\r?\n/m, '');
   check('263: mutation: the skill without disable-model-invocation trips the first case', SRC !== '' && untyped !== SRC && !typedOnly(untyped));
+  const widened = SRC.replace(/^allowed-tools:\r?\n/m, (m) => m + '  - Bash(env *)\n');
+  check('263: mutation: a new grant outside the known-safe set trips the no-launch case', widened !== SRC && launchers(widened).join() === 'Bash(env *)', launchers(widened).join(', '));
 }
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');

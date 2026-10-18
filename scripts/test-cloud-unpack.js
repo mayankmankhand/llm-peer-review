@@ -113,6 +113,34 @@ if (!fs.existsSync(SCRIPT)) {
     const r = run(null);
     check('an unreadable page is exit 2 and writes nothing', r.status === 2 && !fs.existsSync(r.out), r.status + ' ' + r.stderr);
   }
+  // 6. Mac and Windows disks treat Notes.md and notes.md as one file, so a
+  // name that differs from another only by letter case gets a number too.
+  {
+    const r = run(page(
+      block('type="text/markdown" id="report-markdown"', REPORT),
+      block('type="text/plain" class="run-file" data-name="Notes.md"', 'upper'),
+      block('type="text/plain" class="run-file" data-name="notes.md"', 'lower'),
+    ));
+    const names = r.json && r.json.files ? r.json.files.map((f) => f.name) : [];
+    check('a name that differs from another only by letter case gets a number, so neither file is lost on a case-blind disk', JSON.stringify(names) === JSON.stringify(['Notes.md', 'notes-2.md']), JSON.stringify(names));
+  }
+  // 7. The same run unpacked twice (or two runs with one name on one day)
+  // must not overwrite the first: the second lands in a numbered folder.
+  {
+    const dir = path.join(ROOT, 'case-' + (++n));
+    fs.mkdirSync(dir);
+    const pageFile = path.join(dir, 'index.html');
+    fs.writeFileSync(pageFile, page(block('type="text/markdown" id="report-markdown"', REPORT)));
+    const out = path.join(dir, 'out');
+    const once = spawnSync(process.execPath, [SCRIPT, '--page', pageFile, '--out', out, '--link', 'FIRST'], { encoding: 'utf8' });
+    const twice = spawnSync(process.execPath, [SCRIPT, '--page', pageFile, '--out', out + path.sep, '--link', 'SECOND'], { encoding: 'utf8' });
+    let second = null;
+    try { second = JSON.parse(twice.stdout); } catch (e) { /* left null: the case reports it */ }
+    check('a second unpack into a folder that already holds a report goes to a numbered folder beside it and leaves the first untouched',
+      once.status === 0 && twice.status === 0 && second !== null && second.report === path.join(out + '-2', 'report.md')
+        && fs.readFileSync(path.join(out, 'report.md'), 'utf8').startsWith('FIRST\n'),
+      twice.status + ' ' + JSON.stringify(second));
+  }
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });
