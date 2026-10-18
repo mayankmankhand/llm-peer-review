@@ -10,6 +10,8 @@ allowed-tools:
   - Bash(git rev-parse *)
   - Bash(git merge-base *)
   - Bash(git check-ignore *)
+  - Bash(git rev-list *)
+  - Bash(git status *)
   - Bash(node .claude/skills/cloud/unpack.js *)
 ---
 
@@ -41,6 +43,7 @@ Review runs only where the toolkit's own files live in the repository, because c
 - **Page title:** `Cloud research: <date>-<slug>` or `Cloud review: <date>-<slug>`. Section 5 finds the page by this exact title.
 - **Range (review only):** two full commit ids, settled here because the cloud copy has no plan file to take a default range from. With `<range>` given, `git rev-parse <base> <head>` prints both. Otherwise the base is where this branch left the remote's default branch: `git rev-parse --abbrev-ref origin/HEAD` names that branch (use `origin/main` when it prints no `origin/` name), `git merge-base HEAD <that branch>` prints the base, and `git rev-parse HEAD` prints the head. When base and head are the same commit, say there is nothing to review, and stop.
 - **Save folder:** when `git check-ignore reports/cloud/` prints `reports/cloud/`, the report goes to `reports/cloud/<date>-<slug>/`. Otherwise it goes to `~/.claude/cloud-reports/<repository folder name>/<date>-<slug>/`, outside the repository, so it can never be committed.
+- **What the upload carries that GitHub does not:** `git rev-list --count HEAD --not --remotes` prints how many commits on this branch no remote has yet, and `git status --porcelain --untracked-files=no` prints one line per tracked file with uncommitted edits. Count both; section 4 names them.
 
 ## 3. Write the brief and the start script
 
@@ -66,7 +69,11 @@ Review runs only where the toolkit's own files live in the repository, because c
 
 ## 4. Walk the user through starting it
 
-**Never run `start.sh` or `claude --cloud` yourself.** Claude Code refuses to start a cloud session from Claude's own shell (it needs an interactive terminal), and the user running the line is their consent to the cloud usage it spends. Send these steps, filled in, in one message:
+**Never run `start.sh` or `claude --cloud` yourself.** Claude Code refuses to start a cloud session from Claude's own shell (it needs an interactive terminal), and the user running the line is their consent to the cloud usage it spends.
+
+When either count from section 2 is above 0, open the message with this line, filled in, leaving out a part whose count is 0: "This upload carries <N> commits and <M> edited files that GitHub does not have yet. The brief forbids committing and pushing, but a session that broke that rule would push them to a GitHub branch, where anyone who can see the repository can read them." Running the line after reading that is consent to it too.
+
+Send these steps, filled in, in one message:
 
 1. Open a terminal on this machine, in the same environment as this session (in VS Code: Terminal, then New Terminal; on Windows with WSL, a WSL terminal, so it sees this `/tmp`).
 2. Paste this one line: `bash <folder>/start.sh`

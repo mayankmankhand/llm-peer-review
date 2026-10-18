@@ -243,8 +243,8 @@ const PASTE_LIMIT = 28500;
   const unpackGrant = /^"?Bash\(node \S*skills\/cloud\/unpack\.js \*\)"?$/;
   // A known-safe set, not a ban list, so a new grant (`Bash(env *)`, `Bash(npx *)`)
   // fails here until someone checks it cannot start a session: the file tools,
-  // four read-only git commands, the unpack script, and the plugin's mktemp row.
-  const SAFE = [/^Read$/, /^Write$/, /^Bash\(git (ls-files|rev-parse|merge-base|check-ignore) \*\)$/, unpackGrant, /^"?Bash\(mktemp -d \/tmp\/\*\)"?$/];
+  // six read-only git commands, the unpack script, and the plugin's mktemp row.
+  const SAFE = [/^Read$/, /^Write$/, /^Bash\(git (ls-files|rev-parse|merge-base|check-ignore|rev-list|status) \*\)$/, unpackGrant, /^"?Bash\(mktemp -d \/tmp\/\*\)"?$/];
   const launchers = (text) => grants(text).filter((g) => !SAFE.some((re) => re.test(g)));
 
   check('263: the cloud skill never fires on its own (disable-model-invocation: true), in the source and the plugin', typedOnly(SRC) && typedOnly(PLUG),
@@ -286,6 +286,12 @@ const PASTE_LIMIT = 28500;
   check('263: the plugin carries both briefs and its skill reads them from the plugin', plugBriefs.length === BRIEFS.length, 'found ' + plugBriefs.join(', '));
   const untyped = SRC.replace(/^disable-model-invocation:.*\r?\n/m, '');
   check('263: mutation: the skill without disable-model-invocation trips the first case', SRC !== '' && untyped !== SRC && !typedOnly(untyped));
+  // The upload carries unpushed work on purpose, so before the start line the
+  // walk-through says how much of it GitHub does not have, and what a session
+  // that broke the no-push rule would expose (review of 46bf362..2d1061a, R2).
+  check('263: the walk-through counts the commits and edits GitHub does not have and warns before the start line',
+    SRC.includes('`git rev-list --count HEAD --not --remotes`') && SRC.includes('`git status --porcelain --untracked-files=no`')
+      && SRC.includes('GitHub does not have yet') && SRC.indexOf('GitHub does not have yet') < SRC.indexOf('Paste this one line'));
   const widened = SRC.replace(/^allowed-tools:\r?\n/m, (m) => m + '  - Bash(env *)\n');
   check('263: mutation: a new grant outside the known-safe set trips the no-launch case', widened !== SRC && launchers(widened).join() === 'Bash(env *)', launchers(widened).join(', '));
 }
