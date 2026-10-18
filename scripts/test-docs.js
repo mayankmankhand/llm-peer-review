@@ -151,92 +151,18 @@ const PLANNED = ['overview', 'explore', 'create-plan', 'execute', 'review', 'doc
 
 // ---- links -------------------------------------------------------------------
 
-// The human-readable docs: README, the root guides and everything under docs/.
-// CHANGELOG is history (its old links name files as they were), and the rest
-// are the owner's working files, read by Claude rather than by visitors.
-const NOT_DOCS = new Set(['CHANGELOG.md', 'CLAUDE.md', 'CODEBASE_MAP.md', 'DESIGN-PROFILE.md', 'LESSONS.md', 'LESSONS-detail.md']);
-function docFiles() {
-  const files = fs.readdirSync(REPO).filter(n => n.endsWith('.md') && !NOT_DOCS.has(n));
-  const walk = rel => {
-    for (const ent of fs.readdirSync(path.join(REPO, rel), { withFileTypes: true })) {
-      const child = rel + '/' + ent.name;
-      if (ent.isDirectory()) walk(child);
-      else if (ent.name.endsWith('.md')) files.push(child);
-    }
-  };
-  if (fs.existsSync(path.join(REPO, 'docs'))) walk('docs');
-  return files.sort();
+// The walk lives in the shipped .claude/scripts/doc-check.js (issue #262), so
+// the link check every project's documentation stage runs is this one: which
+// docs count, how fences, comments and inline code are skipped, and how
+// GitHub's heading anchors are named are all defined there, once. Loaded
+// lazily, so a missing script is a failed case, not a crash.
+let docCheck = null;
+try { docCheck = require('../.claude/scripts/doc-check.js'); } catch (e) { docCheck = null; }
+if (!docCheck) check('every relative link and anchor in the docs resolves', false, '.claude/scripts/doc-check.js could not be loaded');
+else {
+  const broken = docCheck.brokenLinks(REPO).map(b => b.doc + ':' + b.line + ': ' + b.target + ' (' + b.problem + ')');
+  check('every relative link and anchor in the docs resolves', broken.length === 0, broken.length + ' broken: ' + broken.join('; '));
 }
-
-// The text a scanner should read: fenced blocks and HTML comments removed, so
-// an example path is never mistaken for a link. Inline code goes first, before
-// the comment pass, because docs quote `<!--` in code and that must not open a
-// comment that swallows the headings below it. Links drop inline code; anchors
-// keep its text (keepCode), as GitHub does when it names a heading.
-function prose(text, keepCode) {
-  const out = [];
-  let fence = null;
-  for (const line of text.split(/\r?\n/)) {
-    const m = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fence) { if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null; out.push(''); continue; }
-    if (m) { fence = m[1]; out.push(''); continue; }
-    out.push(line);
-  }
-  return out.join('\n')
-    .replace(/``([^`\n]*)``|`([^`\n]*)`/g, (all, a, b) => keepCode ? (a != null ? a : b).replace(/<!--|-->/g, '') : '')
-    .replace(/<!--[\s\S]*?-->/g, '');
-}
-
-// GitHub's heading anchors: lowercase, punctuation dropped (letters, numbers,
-// spaces, hyphens and underscores kept), each space a hyphen, and a repeated
-// heading suffixed -1, -2 in order.
-function anchors(text) {
-  const seen = new Map();
-  const out = new Set();
-  for (const line of prose(text, true).split('\n')) {
-    const h = line.match(/^#{1,6}\s+(.*?)\s*#*\s*$/);
-    if (h) {
-      const base = h[1].replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/<[^>]+>/g, '')
-        .toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
-      const n = seen.get(base) || 0;
-      seen.set(base, n + 1);
-      out.add(n ? base + '-' + n : base);
-    }
-    for (const a of line.matchAll(/<a\s+(?:id|name)="([^"]+)"/g)) out.add(a[1].toLowerCase());
-  }
-  return out;
-}
-
-function targets(text) {
-  const body = prose(text);
-  const found = [];
-  for (const m of body.matchAll(/!?\[(?:[^\][]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g)) found.push(m[1]);
-  for (const m of body.matchAll(/^\s*\[[^\]]+\]:\s*<?(\S+?)>?(?:\s|$)/gm)) found.push(m[1]);
-  for (const m of body.matchAll(/\b(?:src|href|srcset)\s*=\s*"([^"]+)"/g)) found.push(m[1].split(',')[0].trim().split(/\s+/)[0]);
-  return found.filter(t => t && !/^[a-z][a-z0-9+.-]*:/i.test(t) && !t.startsWith('//'));
-}
-
-const anchorCache = new Map();
-const broken = [];
-for (const rel of docFiles()) {
-  const text = fs.readFileSync(path.join(REPO, rel), 'utf8');
-  for (const t of targets(text)) {
-    const hash = t.indexOf('#');
-    const pathPart = hash === -1 ? t : t.slice(0, hash);
-    const anchor = hash === -1 ? '' : t.slice(hash + 1);
-    let decoded;
-    try { decoded = decodeURIComponent(pathPart); } catch (e) { broken.push(rel + ': ' + t + ' (bad escape)'); continue; }
-    const abs = decoded === '' ? path.join(REPO, rel)
-      : decoded.startsWith('/') ? path.join(REPO, decoded) : path.resolve(REPO, path.dirname(rel), decoded);
-    if (path.relative(REPO, abs).startsWith('..')) { broken.push(rel + ': ' + t + ' (outside the repository)'); continue; }
-    if (!fs.existsSync(abs)) { broken.push(rel + ': ' + t + ' (no such file)'); continue; }
-    if (anchor && abs.endsWith('.md')) {
-      if (!anchorCache.has(abs)) anchorCache.set(abs, anchors(fs.readFileSync(abs, 'utf8')));
-      if (!anchorCache.get(abs).has(decodeURIComponent(anchor).toLowerCase())) broken.push(rel + ': ' + t + ' (no such heading)');
-    }
-  }
-}
-check('every relative link and anchor in the docs resolves', broken.length === 0, broken.length + ' broken: ' + broken.join('; '));
 
 // ---- summary -------------------------------------------------------------------
 

@@ -519,3 +519,7 @@
 - **To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.**
 - **A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.**
 - **Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.**
+
+## Issue 262 (docs and code disagree)
+
+- **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**

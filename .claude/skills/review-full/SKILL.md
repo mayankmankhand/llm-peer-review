@@ -49,6 +49,8 @@ Then pick one of two modes:
 
 These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no focus name runs them on its auto-detect path, with or without a range.
 
+**Docs match the code.** On every run, small or big, the runner authors the docs findings itself, because a typed worker takes its rules from its preloaded criteria and never sees this table. Run `node .claude/scripts/doc-check.js --window <base>..HEAD` (M16), with `<base>` where this run's changed files are measured from (the previous release tag on a release gate). Each entry under `links` and `oldNames` is a finding. Then read the docs against the code they describe, including code that did not change in the range, because older drift is what a release gate is for. Each place they disagree is a finding too. Every one carries the two-sided receipt and goes into the same `findings.jsonl` as the workers' lines, so M2 audits it like any other.
+
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 
 The Design & Completeness row is the one whose worker can need input: the plan criteria open by asking which plan to compare against, and a dispatched finder cannot ask, so with no plan file it would return nothing. That is why the row switches workers when no plan exists, the same guard `/review` applies with its `[plan] ⏭️ skipped (no plan file)` chip.
