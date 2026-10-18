@@ -203,7 +203,7 @@
 - **A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.**
 - **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
 - **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
-- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.** (recurred in #260, see detail)
+- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.** (recurred in #260 and #263, see detail)
 - **A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.**
 
 ### The standing cycle page (issue #163)
@@ -519,3 +519,8 @@
 - **To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.**
 - **A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.**
 - **Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.**
+
+## Issue 263 (the /cloud skill)
+
+- **A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.**
+- **A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.**

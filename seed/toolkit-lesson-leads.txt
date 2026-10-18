@@ -28,6 +28,7 @@ A checked subtask means its wording shipped, not that the nearby diff did.
 A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
 A co-location rule is only as strong as its weakest call site.
 A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.
+A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.
 A containment check that compares path strings is not containment.
 A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.
 A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.
@@ -40,6 +41,7 @@ A diff review of already-closed work still earns its keep.
 A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.
 A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.
 A file that is both the maintainer's live config and the downstream seed leaks in both directions.
+A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.
 A filter whose misses are undetectable must reject only the certain non-matches, never guess the matches.
 A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.
 A fixture that already satisfies one term of a compound gate cannot tell that term from the others; build the fixture from the gate, not from what is nearby.
