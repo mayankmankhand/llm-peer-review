@@ -148,6 +148,7 @@ Ask a consequential choice in plain text, not as clickable options: an answer ca
 Ask what a change means for repos that already installed the last version, before writing the plan.
 Audit before converting.
 Auto-start lifecycle code is hard to verify without a real dev server.
+Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.
 Before engineering a smarter limit, lift the old one once and see whether it binds.
 Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.
 Boundary annotations in few-shot examples teach thresholds, not just format.
@@ -193,6 +194,7 @@ Harden every field on a whitelist, or the whitelist is not a boundary.
 Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.
 Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.
 Hybrid approach beats all-or-nothing.
+In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.
 In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.
 In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.
 In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.
@@ -309,6 +311,7 @@ XML tags in prompts are a real thing, not just hype.
 `failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.
 `for i in "${!array[@]}"` is the idiomatic Bash way to iterate parallel indexed arrays.
 `gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.
+`npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.
 `plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.
 `settings.json` can get modified by research subagents.
 `user-invocable: false` works as documented.

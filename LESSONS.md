@@ -440,7 +440,7 @@
 ## Issues 244 and 245 (dropped files and the paste limit)
 
 - **A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.**
-- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.**
+- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.** (second occurrence in detail: #265/#266)
 - **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
 - **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
 
@@ -458,7 +458,7 @@
 
 ## Docs visual tour (diagrams, /package-review removed)
 
-- **When a fix corrects a fact, search every doc for its other copies before calling it done.**
+- **When a fix corrects a fact, search every doc for its other copies before calling it done.** (second occurrence in detail: #265/#266)
 - **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**
 
 ## Issue 248 (cycle time and test cost)
@@ -524,6 +524,7 @@
 
 - **A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.**
 - **A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.**
+
 ## Issue 264 (the research kit)
 
 - **Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.**
@@ -531,6 +532,13 @@
 - **A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.**
 - **Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.**
 - **When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.**
+
 ## Issue 262 (docs and code disagree)
 
 - **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**
+
+## Issues 265 and 266 (worktree records come home)
+
+- **`npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.**
+- **Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.**
+- **In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.**
