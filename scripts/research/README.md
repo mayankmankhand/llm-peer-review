@@ -37,7 +37,7 @@ Before writing the report, the lead compares the claims across all the notes fil
 
 The report has a section with exactly this heading: `## Where sources disagree`. For each disagreement it gives:
 
-- both claims, each with the source it came from;
+- both claims, each with its source written out as the URL or file path it came from, not only a reference number, so a reader can judge the disagreement from this section alone;
 - which one the report trusts;
 - why, in one line. A direct test beats a summary of one, a primary source beats a report about it, and on a fact that changes over time, newer beats older.
 
