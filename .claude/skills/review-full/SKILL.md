@@ -42,12 +42,14 @@ Then pick one of two modes:
 | Sub-agent | What it checks |
 |-----------|----------------|
 | **Code & Architecture** (`subagent_type=review-code-finder`) | Security red flags, architectural soundness, obvious logic issues, performance risks |
-| **Design & Completeness** (`subagent_type=review-plan-finder` only when a plan file exists; otherwise `general-purpose` carrying this row's charter minus plan alignment, and the summary says "plan alignment skipped (no plan file)") | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
+| **Design & Completeness** (`subagent_type=review-plan-finder` only when a plan file exists; otherwise `general-purpose` carrying this row's charter minus plan alignment, and the summary says "plan alignment skipped (no plan file)") | Plan alignment, feature gaps, scope drift, test coverage, docs updated, docs match the code |
 | **UX & Accessibility** (`subagent_type=review-ux-finder`) | Usability quick-check, WCAG AA basics, error states, key user flows |
 | **Security** (`subagent_type=review-security-finder`) | Secrets in code, injection, auth and unsafe sinks; quiet by rule when the change touches none of these |
 | **Operations** (`general-purpose`, this row's charter pasted in: no typed finder covers it) | Logging and monitoring, deployment readiness, rollback plan, config and migration safety |
 
 These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no focus name runs them on its auto-detect path, with or without a range.
+
+**Docs match the code** (#262). On every run, small or big, the runner authors the docs findings itself, because a typed worker takes its rules from its preloaded criteria and never sees this table. Run `node .claude/scripts/doc-check.js --window <base>..HEAD` (M16), with `<base>` where this run's changed files are measured from (the previous release tag on a release gate). Each entry under `links` and `oldNames` is a finding. Then read the docs against the code they describe, including code that did not change in the range, because older drift is what a release gate is for. Each place they disagree is a finding too. Every one carries the two-sided receipt and goes into the same `findings.jsonl` as the workers' lines, so M2 audits it like any other.
 
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 
