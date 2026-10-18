@@ -801,6 +801,109 @@ section('generated paths: a broken generated.json is a note, and then nothing is
   check('without the declaration, B\'s rebuilt bundle line is flagged', b.json && b.json.flags.some((f) => f.file === 'gen/bundle.txt'), b.stderr);
 });
 
+// --- 266: bringing a worktree's records home ----------------------------------------
+// A main copy with its worktree nested under .claude/worktrees/, as /worktree makes
+// it. The worktree holds every kind of file the mode has to sort: records (ignored
+// plans and reports, an untracked note under plans/, a dated page), files that stay
+// behind (the cycle marker, the artifact index, a standing page, the map, packages),
+// a record the main copy already has, and one the main copy holds differently.
+function homeFixture(label, extra) {
+  const dir = newRepo(label);
+  write(dir, '.gitignore', 'plans/PLAN-*.md\nreports/\nartifacts/html/\nnode_modules/\nCODEBASE_MAP.md\n.claude/worktrees/\n');
+  write(dir, 'a.txt', 'a\n');
+  commitAll(dir, 'M0');
+  const wt = path.join(dir, '.claude', 'worktrees', 'w1');
+  g(dir, ['worktree', 'add', '-q', '-b', 'feat', wt]);
+  if (extra) extra(dir, wt);
+  return { dir, wt };
+}
+const OLD_TIME = new Date('2020-01-02T03:04:05Z');
+// One line of a run's output for a failure detail: the suite's failure list is
+// read from its last lines, so a detail must never break across lines.
+function one(r) { return (r.stdout + ' ' + r.stderr).replace(/\s+/g, ' ').trim().slice(0, 300); }
+function fullWorktree(dir, wt) {
+  write(wt, 'plans/PLAN-x.md', '# plan x\n');
+  fs.utimesSync(path.join(wt, 'plans/PLAN-x.md'), OLD_TIME, OLD_TIME);
+  write(wt, 'plans/notes.md', 'an untracked note\n');
+  write(wt, 'reports/r1.md', 'report one\n');
+  write(wt, 'reports/sub/r2.md', 'report two\n');
+  write(wt, 'reports/same.md', 'already home\n');
+  write(dir, 'reports/same.md', 'already home\n');
+  write(wt, 'reports/clash.md', 'the worktree\'s version\n');
+  write(dir, 'reports/clash.md', 'the main copy\'s version\n');
+  write(wt, 'artifacts/html/explore-topic-2026-10-18-101010.html', '<p>dated</p>\n');
+  write(wt, 'artifacts/html/.last-cycle', 'abc\n');
+  write(wt, 'artifacts/html/index.jsonl', '{}\n');
+  write(wt, 'artifacts/html/cycle.html', '<p>standing</p>\n');
+  write(wt, 'CODEBASE_MAP.md', '# map\n');
+  write(wt, 'node_modules/x.js', 'x\n');
+  write(wt, 'stray.txt', 'never committed\n');
+  write(wt, 'a.txt', 'a changed\n');
+}
+
+section('266: --bring-home copies a worktree\'s records into the main copy', () => {
+  const { dir, wt } = homeFixture('home', fullWorktree);
+  const r = mc(dir, ['--bring-home', 'feat']);
+  const j = r.json || {};
+  const copiedOk = ['plans/PLAN-x.md', 'plans/notes.md', 'reports/r1.md', 'reports/sub/r2.md', 'artifacts/html/explore-topic-2026-10-18-101010.html']
+    .every((f) => fs.existsSync(path.join(dir, f)) && fs.readFileSync(path.join(dir, f)).equals(fs.readFileSync(path.join(wt, f))));
+  check('bring-home: a record the main copy lacks is copied and matches byte for byte', copiedOk && j.copied === 5 && j.same === 1, one(r));
+  check('bring-home: a record whose main copy differs is listed and not overwritten',
+    r.status === 1 && JSON.stringify(j.differs) === '["reports/clash.md"]' && read(dir, 'reports/clash.md') === 'the main copy\'s version\n' && /reports\/clash\.md/.test(r.stderr), one(r));
+  const mt = (d) => fs.existsSync(path.join(d, 'plans/PLAN-x.md')) ? Math.floor(fs.statSync(path.join(d, 'plans/PLAN-x.md')).mtimeMs / 1000) : null;
+  check('bring-home: a copied record keeps its modified time', mt(dir) === mt(wt) && mt(dir) === Math.floor(OLD_TIME.getTime() / 1000), mt(dir) + ' vs ' + mt(wt));
+  check('bring-home: an untracked file outside the records is listed as left over', Array.isArray(j.leftover) && j.leftover.includes('stray.txt') && /stray\.txt/.test(r.stderr), one(r));
+  check('bring-home: an uncommitted change to a tracked file is listed as left over', Array.isArray(j.leftover) && j.leftover.includes('a.txt'), one(r));
+  const stayed = ['artifacts/html/.last-cycle', 'artifacts/html/index.jsonl', 'artifacts/html/cycle.html', 'CODEBASE_MAP.md', 'node_modules/x.js'].every((f) => !fs.existsSync(path.join(dir, f)));
+  check('bring-home: the cycle marker, the artifact index and an undated page stay behind', stayed && !(j.leftover || []).some((f) => /last-cycle|index\.jsonl|cycle\.html|CODEBASE_MAP|node_modules/.test(f)), one(r));
+  check('bring-home: the main copy, its worktree and the counts are named', j.mode === 'bring-home' && j.branch === 'feat' && fs.realpathSync(j.worktree) === fs.realpathSync(wt) && fs.realpathSync(j.mainCopy) === fs.realpathSync(dir) && j.needsForce === true, one(r));
+  // Run again from inside the worktree: the main copy is found from there too.
+  const again = mc(wt, ['--bring-home', 'feat']);
+  check('bring-home: a second run copies nothing and counts every record as the same', again.json && again.json.copied === 0 && again.json.same === 6 && fs.realpathSync(again.json.mainCopy) === fs.realpathSync(dir), one(again));
+});
+
+section('266: --bring-home on a worktree with only records, a symlink, and errors', () => {
+  const only = homeFixture('home-records', (dir, wt) => {
+    write(wt, 'reports/r.md', 'r\n');
+    write(wt, 'plans/notes.md', 'untracked under plans/\n');
+  });
+  const a = mc(only.dir, ['--bring-home', 'feat']);
+  check('bring-home: an untracked record inside plans/ is copied and needsForce is true',
+    a.status === 0 && a.json && a.json.copied === 2 && a.json.leftover.length === 0 && a.json.needsForce === true && fs.existsSync(path.join(only.dir, 'plans/notes.md')), one(a));
+  const ignoredOnly = homeFixture('home-ignored', (dir, wt) => write(wt, 'reports/r.md', 'r\n'));
+  const b = mc(ignoredOnly.dir, ['--bring-home', 'feat']);
+  check('bring-home: ignored records alone need no --force', b.status === 0 && b.json && b.json.needsForce === false && b.json.copied === 1, one(b));
+  const link = homeFixture('home-link', (dir, wt) => {
+    write(wt, 'reports/r.md', 'r\n');
+    fs.symlinkSync('r.md', path.join(wt, 'reports/link.md'));
+  });
+  const c = mc(link.dir, ['--bring-home', 'feat']);
+  check('bring-home: a symlink among the records is listed as left over, not copied',
+    c.status === 1 && c.json && c.json.leftover.includes('reports/link.md') && !fs.existsSync(path.join(link.dir, 'reports/link.md')), one(c));
+  // The main copy has a file named reports, so no record can go under it.
+  const blocked = homeFixture('home-blocked', (dir, wt) => {
+    write(dir, 'reports', 'a file, not a folder\n');
+    write(wt, 'reports/r.md', 'r\n');
+  });
+  const d = mc(blocked.dir, ['--bring-home', 'feat']);
+  check('bring-home: a record the main copy cannot take exits 2', d.status === 2 && /reports\/r\.md/.test(d.stderr), one(d));
+  const none = homeFixture('home-none');
+  g(none.dir, ['branch', 'loose']);
+  check('bring-home: a branch with no worktree, or main\'s own copy, is refused',
+    mc(none.dir, ['--bring-home', 'loose']).status === 2 && mc(none.dir, ['--bring-home', 'main']).status === 2 && mc(none.dir, ['--bring-home', 'no-such-branch']).status === 2);
+});
+
+section('266: the landing file /document writes for /merge', () => {
+  const { dir } = homeFixture('home-landing');
+  const c0 = rev(dir, 'main');
+  const f = path.join(sandbox, 'landing-feat.md');
+  fs.writeFileSync(f, 'Bring records home\n\nWhat the branch does.\n\n## Decisions\n- Records come home - removal deletes them\n- Ask once - deletion\n\n## Changelog\n````\n### Added\n- records come home\n````\n\nCut from: ' + c0 + '\n');
+  const p = mc(dir, ['--pr-body', f]).json || {};
+  const cutRun = mc(dir, ['--cut', 'feat', '--pr-body', f]).json || {};
+  check('pr-body: a landing file in the shape /document writes gives its decisions, changelog and cut',
+    /Records come home - removal deletes them/.test(p.decisions || '') && p.changelog === '### Added\n- records come home' && p.cutFrom === c0 && cutRun.source === 'pr-body' && cutRun.cut === c0, JSON.stringify(p) + ' ' + JSON.stringify(cutRun));
+});
+
 section('usage: a bad call exits 2 and runs nothing', () => {
   const dir = newRepo('usage');
   write(dir, 'a.txt', 'a\n');

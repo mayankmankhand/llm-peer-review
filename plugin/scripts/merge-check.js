@@ -65,6 +65,12 @@
 //   --changelog-place <changelog> <block>
 //                                 the line number a changelog block goes before
 //   --marker | --mark <sha>       read or write the last checked landing
+//   --bring-home <branch>         copy the records of the worktree that holds
+//                                 <branch> into the main copy (issue #266): the
+//                                 files git does not track under plans/ and
+//                                 reports/, and the dated pages in artifacts/html/.
+//                                 Never overwrites; lists what differs and what is
+//                                 left over (anything else uncommitted)
 // Common: --main <ref> names the default branch (otherwise the remote's default
 // branch, else `main`, else `master`).
 //
@@ -73,7 +79,8 @@
 // usage or git error (one line on stderr). Only --record-cut, --mark and
 // --style with a value write to git config, and only --decisions writes a file,
 // the one --out names (--landing's ignore check works in a throwaway folder
-// under the OS temp folder and removes it). Every git call
+// under the OS temp folder and removes it), apart from --bring-home, which
+// writes only files the main copy did not have. Every git call
 // takes an argument list, never a shell string, and runs at the repository's
 // top level. Dependency-free.
 //
@@ -90,7 +97,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>]';
 
 class UsageError extends Error {}
 
@@ -734,6 +741,103 @@ function changelogPlace(clFile, blockFile) {
   return { line: at + 1, rule: 'after the title' };
 }
 
+// ---- bringing a worktree's records home (issue #266) -------------------------------
+// `git worktree remove` deletes every ignored file without a word and refuses
+// only untracked ones (measured on git 2.43.0), so a worktree's plans, reports and
+// receipts went with it. The records are a fixed list: the files git does not
+// track under plans/ and reports/, and the dated pages under artifacts/html/.
+// Nothing else comes home: the map, the cycle marker, packages and .env.local are
+// rebuilt or copied in fresh, and the standing pages and the artifact index
+// already live in the main copy. A fixed list, because a project's other ignored
+// folders can hold its whole build output.
+const RECORD_PATHS = ['plans', 'reports', 'artifacts/html'];
+const DATED_PAGE_RE = /^artifacts\/html\/[^/]+-\d{4}-\d{2}-\d{2}-\d{6}(?:-\d+)?\.html$/;
+function isRecord(rel) {
+  if (rel.startsWith('artifacts/html/')) return DATED_PAGE_RE.test(rel);
+  return rel.startsWith('plans/') || rel.startsWith('reports/');
+}
+function gitAt(dir, args) {
+  const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: MAX_BUFFER });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error('git ' + args[0] + ' failed in ' + dir + ': ' + String(r.stderr || '').trim().split('\n')[0]);
+  return r.stdout;
+}
+// The main copy: the folder that holds the shared git folder, or the folder its
+// core.worktree names (a submodule), the way render-html.js finds it.
+function mainCopyRoot() {
+  const common = path.resolve(TOP, git(['rev-parse', '--git-common-dir']).trim());
+  const wt = gitTry(['--git-dir=' + common, 'config', '--get', 'core.worktree']);
+  return wt && wt.trim() ? path.resolve(common, wt.trim()) : path.dirname(common);
+}
+// The worktree whose branch line is refs/heads/<b>, from git's own list.
+function worktreeOf(b) {
+  for (const block of git(['worktree', 'list', '--porcelain']).split(/\n\n+/)) {
+    const wt = /^worktree (.+)$/m.exec(block);
+    const br = /^branch (.+)$/m.exec(block);
+    if (wt && br && br[1] === 'refs/heads/' + b) return wt[1];
+  }
+  return null;
+}
+function sameBytes(a, b) { return fs.readFileSync(a).equals(fs.readFileSync(b)); }
+function bringHome(b) {
+  checkBranch(b);
+  const main = mainCopyRoot();
+  const wt = worktreeOf(b);
+  if (!wt) throw new UsageError('no worktree holds ' + b + ', so there is nothing to bring home');
+  const realMain = fs.realpathSync(main);
+  if (fs.realpathSync(wt) === realMain) throw new UsageError(b + ' is checked out in the main copy itself, so there is nothing to bring home');
+  // Untracked files under the record folders, ignored or not. -z keeps names unquoted.
+  const listOthers = (extra) => gitAt(wt, ['ls-files', '-z', '--others', '--exclude-standard'].concat(extra, ['--'], RECORD_PATHS)).split('\0').filter(Boolean);
+  const records = Array.from(new Set(listOthers([]).concat(listOthers(['--ignored'])))).filter(isRecord).sort();
+  // Everything git would refuse a plain `git worktree remove` over: untracked
+  // files and changes to tracked ones. An untracked record is copied below, so
+  // only what is not a record is left over.
+  const status = gitAt(wt, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).split('\0');
+  const leftover = [];
+  let needsForce = false;
+  for (let i = 0; i < status.length; i++) {
+    const e = status[i];
+    if (!e) continue;
+    needsForce = true;
+    const xy = e.slice(0, 2);
+    const rel = e.slice(3);
+    if (xy[0] === 'R' || xy[0] === 'C') i++;   // the next entry is the old name
+    if (xy === '??' && isRecord(rel)) continue;
+    leftover.push(rel);
+  }
+  let copied = 0;
+  let same = 0;
+  const differs = [];
+  for (const rel of records) {
+    const src = path.join(wt, rel);
+    const dst = path.join(main, rel);
+    const st = fs.lstatSync(src);
+    if (!st.isFile()) { leftover.push(rel); continue; }   // a symlink or a nested repository is not copied
+    let have = null;
+    try { have = fs.lstatSync(dst); } catch (e) { have = null; }
+    if (have) {
+      if (have.isFile() && sameBytes(src, dst)) same++;
+      else differs.push(rel);
+      continue;
+    }
+    try {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      // A folder on the way that is a link out of the main copy is refused, so a
+      // record never lands outside it.
+      const realDir = fs.realpathSync(path.dirname(dst));
+      if (realDir !== realMain && !realDir.startsWith(realMain + path.sep)) throw new Error('its folder leads outside the main copy');
+      fs.copyFileSync(src, dst, fs.constants.COPYFILE_EXCL);
+      // Kept, because session-init.js picks the newest plan by modified time.
+      fs.utimesSync(dst, st.atime, st.mtime);
+      if (!sameBytes(src, dst)) throw new Error('the copy does not match');
+    } catch (e) {
+      throw new Error('could not bring home ' + rel + ': ' + (e && e.message ? e.message : String(e)) + ' (' + copied + ' copied before it stay)');
+    }
+    copied++;
+  }
+  return { branch: b, worktree: wt, mainCopy: main, copied, same, differs, leftover: leftover.sort(), needsForce };
+}
+
 // ---- the decisions file (rule 3) ---------------------------------------------------
 // The one file the decision-checker agent reads (merge-rules.md, "The decisions
 // file"): a `## This PR` part, then a `## Landing <short sha>: <subject>` part for
@@ -845,7 +949,7 @@ function finish(result, flags, suppressed, notes) {
 }
 
 // ---- arguments ---------------------------------------------------------------------
-const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout']);
+const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout', '--bring-home']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
 const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait']);
 function parseArgs(argv) {
@@ -901,6 +1005,15 @@ function main(argv) {
     if (!sha) throw new UsageError('--mark ' + o['--mark'] + ' does not name a commit');
     git(['config', 'tk.landingChecked', sha]);
     return finish({ mode: 'mark', marker: sha, written: true }, [], 0, notes);
+  }
+  if (o['--bring-home']) {
+    const r = bringHome(o['--bring-home']);
+    process.stdout.write(JSON.stringify(Object.assign({ mode: 'bring-home' }, r)) + '\n');
+    for (const f of r.differs) process.stderr.write(f + ': the main copy already has a different file there, which was kept; this copy is not home\n');
+    for (const f of r.leftover) process.stderr.write(f + ': left over (not a record, or not committed); removing the worktree deletes it\n');
+    const listed = r.differs.length + r.leftover.length;
+    process.stderr.write('merge-check: ' + r.copied + ' copied, ' + r.same + ' already home' + (listed ? ', ' + r.differs.length + ' differ, ' + r.leftover.length + ' left over' : '') + '\n');
+    return listed ? 1 : 0;
   }
   const mainRef = defaultMain(o['--main']);
   if (o['--record-cut']) {
