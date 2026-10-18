@@ -8,6 +8,8 @@
 
 **Issue #262.** When a doc and the code disagree, `/document` now turns it into a finding with a receipt, the doc line and the code line it contradicts, and ends it on purpose: the doc fixed, the mismatch reported to you, or, for a prompt file, a question first. It no longer just notes it.
 
+**Issue #266.** A worktree's plans and reports no longer go when the worktree does. After `/merge` lands a branch it copies them into your main folder, then asks once whether to remove the worktree and its branch.
+
 ### Added
 
 - **The push guard.** `push-guard.js` is a `PreToolUse` hook on Bash that the plugin wires in beside its session-start hook. It reads each command before it runs:
@@ -21,16 +23,22 @@
 - **Docs and code disagree, on the cycle page (#262).** A mismatch where the code looks wrong, or it is unclear which side is, is never fixed in the code. It is listed on the cycle summary with both lines quoted and stays until a later run finds the two agreeing. An item reported on another branch can only be closed from a branch that holds its commit, or once that branch is gone (squash-merged and deleted, or rebased).
 - **`/review-full` checks the docs against the code (#262)** at a release gate, including code the release did not change, so older drift surfaces too.
 - **Run research and review on cloud: `/cloud` (issue #263).** `/cloud research "<question>"` runs a research report, and `/cloud review [<range>]` a report-only review, in a Claude Code cloud session instead of on your machine. It writes a self-contained brief and gives you one line to paste into a terminal, because Claude Code cannot start a cloud session from Claude's own shell. Before that line, it tells you how many commits and edited files the upload carries that GitHub does not have yet. When you say "done", it brings back the report and every file the run produced, and shows you only the summary. It runs only when you type it. Review needs the toolkit's own files in the repository, because cloud sessions never load plugins.
+- **Worktree records come home (#266).** Removing a worktree deletes every file git ignores in it without a word. After `/merge` lands a branch, it now copies the records its worktree holds (the files git does not track under `plans/` and `reports/`, and the dated pages under `artifacts/html/`) into the main folder, never over a file already there, keeping each file's date. At the end one question offers to remove each worktree and delete its branch; a record the main folder holds differently, or a file never committed, is named in that question and needs a yes of its own.
 
 ### Changed
 
 - **The cycle summary's history moved to the bottom.** "Earlier cycles" now comes after this cycle's doc changes and files, and the footer line ends at the text column's edge.
+- **`/document` in a repo that lands on your machine (#266)** opens no PR and pushes nothing: it saves the PR text to `reports/landing/<branch>.md`, which `/merge <branch>` reads. Where it does open a PR, its offer to remove the worktree copies the records home first.
+- **A fresh worktree's cycle summary starts where its cycle did (#265):** at its plan's start commit, or the main folder's last summary, instead of the last merged PR, which could reach 59 commits back.
+- **The lessons check no longer asks for permission (#265).** It is one script call now, with no redirect for default permission mode to stop on.
+- **Two doc-check edges (#265).** `/review-full` dismisses a doc that lists removed files on purpose instead of filing it, and its read of code the release did not change stops at 20 files. `/document` says what a broken link's receipt holds, and gives a fixed doc that still fails the check one more fix before reporting it.
 
 ### Upgrading
 
 - On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
 - **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
 - `/cloud` adds no permission rows, and nothing pre-approves its start line: you run that line yourself, in a terminal.
+- #265 and #266 add no permission rows either: the new checks are new options on two scripts that already have them.
 - **The first `/document` after upgrading checks every doc's links (#262),** so an older project can get a larger doc change than usual in that one cycle. On the plugin, `/document` can run the new script without asking. If it starts asking for permission after you answer one of its questions, re-run setup: it adds the permission rows that stop that. A copy-install gets the script from `setup.sh` and `setup.ps1`.
 
 ### For maintainers
