@@ -199,6 +199,13 @@ reader('a push inside bash -c still counts in an unreadable command', "bash -c '
 reader('a push inside a double-quoted command substitution still counts', 'echo "$(git push origin HEAD:feature)"', { decision: 'deny', code: 'unreadable' });
 reader('a push after a comment with an apostrophe still counts', "bash <<'EOF'\n# don't stop here\ngit push origin HEAD:feature\nEOF", { decision: 'deny', code: 'unreadable' });
 reader('a push next to a quoted argument still counts', 'git push origin "HEAD:$B"', { decision: 'deny', code: 'unreadable' });
+// Review R1: a shell keyword before git still runs it.
+reader('a push after if is denied', 'if git push --force origin HEAD:main; then echo ok; fi', { decision: 'deny', code: 'keyword' });
+reader('a push after then is denied', 'if git status; then git push origin HEAD:feature; fi', { decision: 'deny', code: 'keyword' });
+reader('a push negated with ! is denied', '! git push --no-verify origin HEAD:main', { decision: 'deny', code: 'keyword' });
+reader('a push inside a loop is denied', 'while true; do git push -f origin main; done', { decision: 'deny', code: 'keyword' });
+reader('a push under coproc is denied', 'coproc git push origin HEAD:feature', { decision: 'deny', code: 'keyword' });
+reader('a keyword before an echo of git push is not a push', 'if true; then echo git push; fi', { decision: 'none', code: 'not-a-push' });
 
 console.log('\n9. commands that only mention push get no answer');
 reader('an ordinary command gets no answer', 'ls -la', { decision: 'none', code: 'not-a-push' });
@@ -348,6 +355,18 @@ const viaCwd = runHook(function () { return bashCall('git push origin HEAD:featu
 hook("the scan runs in the input's cwd, not the hook's own folder", viaCwd, 'deny', '[gitlab-pat]');
 hook('a flagged push is blocked with the way round named: the owner types it with !', viaCwd, 'deny', 'with ! at the prompt');
 hook('a push the check cannot scan is asked about', runHook(function () { return bashCall('git push origin --delete old-branch', clean.repo); }), 'ask', 'cannot scan');
+// Review R5: a flagged push reshaped into a shape the check cannot scan is
+// still blocked, because the checked-out branch is scanned first.
+hook('a clean push of every branch still asks', runHook(function () { return bashCall('git push --all origin', clean.repo); }), 'ask', 'cannot scan');
+hook('a push of every branch carrying a planted key is blocked', runHook(function () { return bashCall('git push --all origin', keyed.repo); }), 'deny', '[gitlab-pat]');
+hook('a planted key pushed to a mirror remote is blocked', runHook(function () {
+  const sb = scratchRepo('keyed-mirror');
+  commitFile(sb, 'ci/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n');
+  sb.g(['config', 'remote.origin.mirror', 'true']);
+  return bashCall('git push origin HEAD:feature', sb.repo);
+}), 'deny', '[gitlab-pat]');
+// Review R15: the command the owner types keeps the push's own flags.
+hook('the push-anyway command keeps the push\'s own flags', runHook(function () { return bashCall('git push -f origin HEAD:feature', keyed.repo); }), 'deny', 'push -f origin HEAD:feature');
 hook('a push in another shape is denied with the standard forms named', runHook(function () { return bashCall('git -C . push origin HEAD:feature', clean.repo); }), 'deny', 'HEAD:<branch>');
 hook('unreadable input that mentions push is denied', runHook(function () { return '{not json: git push origin HEAD:feature'; }), 'deny');
 hook('unreadable input without push gets no answer', runHook(function () { return '{not json'; }), 'none');

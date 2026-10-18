@@ -18,8 +18,10 @@
 //         destination first; push.askAlways marks --no-verify and force
 //         pushes, which go to the owner even when the check is clean.
 //   ask   a push the check cannot scan (a delete, --mirror, --all, --tags,
-//         --follow-tags, --prune). The owner decides.
-//   deny  a push in any other shape. Blocked, with the standard forms named.
+//         --follow-tags, --prune). The owner decides, except that the hook
+//         first scans what the checked-out branch adds and blocks a hit.
+//   deny  a push in any other shape, a push after a shell keyword (if, then,
+//         do, ! and the like) included. Blocked, with the standard forms named.
 //
 // The guard never answers "allow": a hook's allow skips prompts the owner's
 // settings or auto mode would show, so the guard can only add a prompt or a
@@ -81,13 +83,12 @@
 //   deny  Claude Code cancels the command and shows Claude the reason.
 //   ask   Claude Code shows the owner an approval prompt with the reason.
 // For a scan, the hook works in the repository the input's cwd is in. It
-// asks when the remote is a mirror or pushes somewhere other than it fetches
-// from, and denies a branch or tag that is not the checked-out commit. Then
-// it runs pre-push-check.js, found beside this file, for <remote>
-// <branch-or-tag>. Exit 0: no answer, except that --no-verify and force
-// pushes are asked about. Exit 1: deny, with the report and the command the
-// owner types with ! to send it anyway. Exit 2, a missing check, or a
-// timeout: deny.
+// denies a branch or tag that is not the checked-out commit, then runs
+// pre-push-check.js, found beside this file, for <remote> <branch-or-tag>.
+// Exit 0: no answer, except that --no-verify and force pushes, and a remote
+// that is a mirror or pushes somewhere other than it fetches from, are asked
+// about. Exit 1: deny, with the report and the command the owner types with
+// ! to send it anyway. Exit 2, a missing check, or a timeout: deny.
 // In bypassPermissions and dontAsk modes no approval prompt is sure to reach
 // the owner, so there an ask becomes a deny, and the owner can still push
 // with !. When the guard itself fails, it denies a command that mentions
@@ -115,6 +116,9 @@ const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish', 'su',
 const WRAPPERS = new Set(['env', 'command', 'exec', 'builtin', 'nohup', 'nice', 'ionice', 'timeout', 'time',
   'stdbuf', 'setsid', 'sudo', 'doas', 'xargs', 'find', 'parallel', 'watch', 'flock', 'unbuffer', 'chronic',
   'caffeinate', 'strace', 'ltrace', 'chroot', 'nsenter', 'unshare', 'systemd-run']);
+// Shell words that start a command and still run the git after them
+// (if git push ...; then, ! git push, a loop's do, coproc).
+const KEYWORDS = new Set(['if', 'then', 'elif', 'else', 'do', 'while', 'until', '!', 'coproc']);
 // What may read a push's output through a pipe.
 const OUTPUT_FILTERS = new Set(['tail', 'head', 'grep', 'egrep', 'fgrep', 'cat', 'wc']);
 // git's own options that take the next word as their value.
@@ -147,7 +151,7 @@ function unscannableReason(what) {
 }
 function none(code) { return { decision: 'none', code: code, reason: null, push: null }; }
 function scan(code, push) { return { decision: 'scan', code: code, reason: null, push: push }; }
-function ask(code, reason) { return { decision: 'ask', code: code, reason: reason, push: null }; }
+function ask(code, reason, push) { return { decision: 'ask', code: code, reason: reason, push: push || null }; }
 function deny(code, why, hint) { return { decision: 'deny', code: code, reason: denyReason(why, hint), push: null }; }
 
 function base(word) { return word.split('/').pop(); }
@@ -341,10 +345,12 @@ function isOutputFilter(words) {
     !words.some(function (w) { return /^-[A-Za-z]*i/.test(w) || w.startsWith('--in-place'); });
 }
 
-// Who runs the git at words[g]: git itself, git from a path, a wrapper (or a
-// variable prefix) that runs it, or nobody (echo git push is text).
+// Who runs the git at words[g]: git itself, git from a path, shell keywords
+// only, a wrapper (or a variable prefix) that runs it, or nobody (echo git
+// push is text).
 function runnerOf(words, g) {
   if (g === 0) return words[0] === 'git' ? 'git' : 'path';
+  if (words.slice(0, g).every(function (w) { return KEYWORDS.has(w); })) return 'keyword';
   if (ASSIGNMENT.test(words[0]) || WRAPPERS.has(base(words[0]))) return 'wrapper';
   return 'data';
 }
@@ -387,6 +393,9 @@ function segmentPush(words, level) {
     return definesAlias ? { deny: deny('options', 'it defines a git alias with -c, which could stand for push') } : null;
   }
   if (runner === 'wrapper') return { deny: deny('wrapper', 'git runs under ' + words[0] + ', which the guard cannot see through') };
+  if (runner === 'keyword') {
+    return { deny: deny('keyword', 'the push follows the shell word ' + words.slice(0, g).join(' ') + ', so it is not a plain push; check its result in a separate command') };
+  }
   if (runner === 'path') return { deny: deny('git-path', 'it runs git from a path (' + words[g] + ')') };
   if (options.length) return { deny: deny('options', 'git options come before push (' + options.join(' ') + ')') };
   return { standard: true };
@@ -425,7 +434,10 @@ function standardPush(words) {
   if (!REMOTE_NAME.test(remote) || remote.includes('//') || remote.includes('..')) {
     return deny('remote', 'its remote ' + JSON.stringify(remote) + ' is not the name of a remote, and a URL or a path cannot be checked');
   }
-  if (seen.unscannable.length) return ask('unscannable', unscannableReason('it uses ' + seen.unscannable.join(' ')));
+  if (seen.unscannable.length) {
+    const sends = seen.unscannable.some(function (f) { return f !== '--delete' && f !== '-d'; });
+    return ask('unscannable', unscannableReason('it uses ' + seen.unscannable.join(' ')), { remote: remote, words: words, sendsCommits: sends });
+  }
   const refspecs = positional.slice(1);
   if (refspecs.length === 0) return deny('no-destination', 'it names no destination, so what git would push depends on settings the check cannot see');
   if (refspecs.length > 1) return deny('refspec', 'it names more than one destination, and the check covers one at a time');
@@ -444,7 +456,7 @@ function standardPush(words) {
   } else if (src !== 'HEAD' && (src === '' || src.startsWith('refs/') || src.startsWith('-'))) {
     return deny('refspec', 'it pushes ' + JSON.stringify(src) + ', which is not a branch or tag name');
   }
-  const push = { remote: remote, refspec: refspecs[0], src: src, dst: dst, askAlways: seen.noVerify || seen.force, noVerify: seen.noVerify, force: seen.force };
+  const push = { remote: remote, refspec: refspecs[0], src: src, dst: dst, askAlways: seen.noVerify || seen.force, noVerify: seen.noVerify, force: seen.force, words: words };
   if (seen.noVerify) return scan('no-verify', push);
   if (seen.force) return scan('force', push);
   return scan('standard', push);
@@ -508,14 +520,15 @@ function scanErrorReason(text) {
 // A flagged push is blocked, not asked: in the live check (#260) both
 // fake-key prompts got a Yes the owner does not remember giving, and a leaked
 // secret cannot be taken back. The owner sends one anyway by typing the push
-// with !, so the reason names that exact command, with the repository's
-// folder, since a ! command runs wherever the session's shell is.
+// with !, so the reason names that exact command: the push's own words, flags
+// included, with the repository's folder, since a ! command runs wherever the
+// session's shell is.
 function hitReason(report, notes, push, repo, own) {
   const shown = report.length > MAX_REPORT ? report.slice(0, MAX_REPORT) + '\n[... cut here; run the pre-push check by hand to see the rest]' : report;
   const folder = PLAIN_WORD.test(repo) ? repo : "'" + repo.split("'").join("'\\''") + "'";
   return 'push-guard blocked this push: the pre-push check flagged it' + (notes.length ? ', and ' + notes.join(', and ') : '') +
     '. Do not push it in another form. Show the owner the report below. If the owner wants it pushed anyway, the owner types it with ! at the prompt, which the guard does not see: `! git -C ' +
-    folder + ' push ' + push.remote + ' ' + push.refspec + '`.' +
+    folder + ' ' + push.words.slice(1).join(' ') + '`.' +
     (own === null ? '' : ' This repository also has its own pre-push hook (' + own + '), which checks that push too; if it blocks the same hit, the owner adds --no-verify.') +
     '\n\n' + shown;
 }
@@ -622,13 +635,15 @@ function scanAnswer(call, push) {
   if (top === null) return answer('deny', denyReason(call.cwd + ' is not inside a git repository'));
   const repo = top.trim();
   const remote = remoteProblem(repo, push.remote);
-  if (remote !== null) return remote.deny ? answer('deny', denyReason(remote.deny)) : askAnswer(call, unscannableReason(remote.ask));
+  if (remote !== null && remote.deny) return answer('deny', denyReason(remote.deny));
   const dest = destination(repo, push);
   if (dest.deny) return answer('deny', denyReason(dest.deny));
   const scanned = runScan(repo, push.remote, dest.name);
   if (scanned.status === 'error') return answer('deny', scanErrorReason(scanned.text));
   const notes = alwaysAskNotes(repo, push);
   if (scanned.status === 'hit') return answer('deny', hitReason(scanned.text, notes, push, repo, ownPrePushHook(repo)));
+  // A mirror, or a push address that differs: scanned all the same, then asked.
+  if (remote !== null) return askAnswer(call, unscannableReason(remote.ask));
   if (notes.length) {
     return askAnswer(call, 'push-guard: the pre-push check found nothing in this push, but ' + notes.join(', and ') +
       '. Approve it only if you meant to push it this way; this approval is your "push anyway".');
@@ -636,12 +651,32 @@ function scanAnswer(call, push) {
   return null;
 }
 
+// An unscannable push that can send commits (--all, --mirror, --tags...):
+// what the checked-out branch adds is scanned first, and a hit blocks, so a
+// flagged push cannot go out in this shape on one stray Yes. When that scan
+// cannot run (no branch checked out, no such remote, not a repository), the
+// owner is asked as before.
+function unscannableAnswer(call, verdict) {
+  const push = verdict.push;
+  const top = typeof call.cwd === 'string' && isDirectory(call.cwd) ? git(call.cwd, ['rev-parse', '--show-toplevel']) : null;
+  if (top !== null) {
+    const repo = top.trim();
+    const branch = git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    const remotes = git(repo, ['remote']);
+    if (branch !== null && remotes !== null && remotes.split('\n').indexOf(push.remote) !== -1) {
+      const scanned = runScan(repo, push.remote, branch.trim());
+      if (scanned.status === 'hit') return answer('deny', hitReason(scanned.text, [], push, repo, ownPrePushHook(repo)));
+    }
+  }
+  return askAnswer(call, verdict.reason);
+}
+
 // The answer for one Bash call, or null for none.
 function respond(call, command) {
   const verdict = classify(command);
   if (verdict.decision === 'none') return null;
   if (verdict.decision === 'deny') return answer('deny', verdict.reason);
-  if (verdict.decision === 'ask') return askAnswer(call, verdict.reason);
+  if (verdict.decision === 'ask') return verdict.push && verdict.push.sendsCommits ? unscannableAnswer(call, verdict) : askAnswer(call, verdict.reason);
   return scanAnswer(call, verdict.push);
 }
 
