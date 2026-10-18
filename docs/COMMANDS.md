@@ -197,6 +197,29 @@ A refresh switches to a full rebuild on its own, and says why, when there is no 
 
 Full prompt: [`.claude/commands/index.md`](../.claude/commands/index.md)
 
+### `/cloud` - run research and review on cloud
+
+Runs a piece of work on cloud, in a Claude Code cloud session on Anthropic's machines, instead of on yours. `/cloud research "<question>"` runs a research report in any project; `/cloud review [<range>]` runs a report-only review of a range of commits. Add `model:<name>` or `effort:<level>` to set the cloud session's model and effort; the research readers (the six helpers that do the reading) run on Sonnet either way. It runs only when you type it: nothing else in the toolkit asks whether to use the cloud.
+
+A run goes like this:
+
+1. You type the command. It writes a self-contained brief, which is everything the cloud session will know besides your repository, and a small `start.sh` beside it, and tells you where both are, so you can read what is sent.
+2. You start the session from a terminal by pasting the one line it gives you, `bash <folder>/start.sh`. Claude Code cannot start a cloud session from Claude's own shell, so this step is always yours, and running it is your go-ahead to use the cloud. The line uploads your local repository, unpushed commits included, to Anthropic's cloud (not to GitHub); files named like credentials, and gitignored files, stay on your machine. When the upload carries commits or edits GitHub does not have yet, `/cloud` tells you how many first, because a session that broke its no-push rule would publish them. It prints the session's link and returns.
+3. The session works on its own. Watch it from that link, at claude.ai/code or in the Claude app. Near the end it asks once for permission to publish its page to claude.ai: approve it there (the page stays private to you), and soon, because a session waiting on a prompt counts as idle: its cloud machine pauses, and a paused machine can later be reclaimed, losing the run's files.
+4. When it has finished, say "done" (in a new session, type `/cloud done`). It reads the session's private claude.ai page back, saves the report and every file the run produced (each reader's findings, the checker's verdicts, notes, the review's own report files), and shows you only the summary. In an editor without a tool that reads your claude.ai pages, such as Cursor, it asks you to paste the session's last message instead.
+
+The report lands in `reports/cloud/<date>-<name>/` when your project ignores `reports/`, otherwise in `~/.claude/cloud-reports/<project>/<date>-<name>/`, outside the repository, with the run's other files under `files/`.
+
+Before your first run: the Claude Code command line must be signed in with your claude.ai account (`claude auth login`). Because the repository is uploaded, the cloud does not need to reach it on GitHub. For research, set the cloud environment's network to Full: on the default Trusted level, a web page fetch failed when we tested it.
+
+Limits:
+
+- Review runs only in a repository that carries the toolkit's own files, such as this toolkit's own repository, because cloud sessions never load plugins. In a project that uses the plugin, `/cloud review` says so and starts nothing; `/cloud research` works there.
+- The review's plan check has nothing to compare in the cloud: plan files are gitignored, so they do not travel.
+- The brief tells the cloud session to change nothing git would commit and to end its report with the output of `git status --porcelain`. When that line is not empty, `/cloud` tells you, because the session's branch may then have been pushed to GitHub.
+
+Full prompt: [`.claude/skills/cloud/SKILL.md`](../.claude/skills/cloud/SKILL.md)
+
 ---
 
 ## Which review command do I use?
@@ -213,3 +236,4 @@ Full prompt: [`.claude/commands/index.md`](../.claude/commands/index.md)
 | QA a running web app via headless browser | `/review-browser` |
 | Check if copy is clear to a fresh reader | `/review-copy` |
 | Pre-release go/no-go check across all domains | `/review-full` |
+| Run a report-only review on cloud (a repository that carries the toolkit's own files) | `/cloud review` |

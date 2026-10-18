@@ -211,5 +211,90 @@ const PASTE_LIMIT = 28500;
     keysDrift(DOC, renamedShell) !== '' && keysDrift(renamedDoc, SHELL) !== '', keysDrift(DOC, renamedShell) + ' | ' + keysDrift(renamedDoc, SHELL));
 }
 
+// --- /cloud: typed only, never a launch Claude can start (issue #263) ----------
+// The skill hands a self-contained brief to a Claude Code cloud session. Claude
+// Code refuses to start one from Claude's own shell ("interactive only"), so the
+// skill writes a start.sh beside the brief and the user runs it from a terminal.
+// These cases pin what keeps that safe: the skill never loads on its own, no
+// copy of it pre-approves a command that could start a session (the plugin build
+// adds a grant for every toolkit script a skill runs, and allowed-tools grants
+// whatever it lists), the start line puts the task text right after --cloud
+// (which takes it as its own value), both briefs carry the rules that keep a
+// cloud copy from pushing anything, and the plugin carries the briefs where its
+// skill reads them. Missing files read as empty, so they fail here, not crash.
+{
+  const optional = (rel) => (fs.existsSync(path.join(REPO, rel)) ? read(rel) : '');
+  const SRC = optional('.claude/skills/cloud/SKILL.md');
+  const PLUG = optional('plugin/skills/cloud/SKILL.md');
+  const BRIEFS = ['research-brief.md', 'review-brief.md'];
+  const frontmatter = (text) => (/^---\r?\n([\s\S]*?)\r?\n---/.exec(text) || [])[1] || '';
+  const typedOnly = (text) => /^disable-model-invocation:\s*true\s*$/m.test(frontmatter(text));
+  // allowed-tools entries, in the inline form and the YAML list form.
+  const grants = (text) => {
+    const lines = frontmatter(text).split(/\r?\n/);
+    const at = lines.findIndex((l) => /^allowed-tools:/.test(l));
+    if (at < 0) return [];
+    const out = lines[at].replace(/^allowed-tools:\s*/, '').split(/,\s*/).filter(Boolean);
+    for (let i = at + 1; i < lines.length && /^\s+- /.test(lines[i]); i++) out.push(lines[i].replace(/^\s+- /, '').trim());
+    return out;
+  };
+  // The one node grant allowed is the skill's own unpack script, which only
+  // reads a saved page and writes files; it cannot start a session.
+  const unpackGrant = /^"?Bash\(node \S*skills\/cloud\/unpack\.js \*\)"?$/;
+  // A known-safe set, not a ban list, so a new grant (`Bash(env *)`, `Bash(npx *)`)
+  // fails here until someone checks it cannot start a session: the file tools,
+  // six read-only git commands, the unpack script, and the plugin's mktemp row.
+  const SAFE = [/^Read$/, /^Write$/, /^Bash\(git (ls-files|rev-parse|merge-base|check-ignore|rev-list|status) \*\)$/, unpackGrant, /^"?Bash\(mktemp -d \/tmp\/\*\)"?$/];
+  const launchers = (text) => grants(text).filter((g) => !SAFE.some((re) => re.test(g)));
+
+  check('263: the cloud skill never fires on its own (disable-model-invocation: true), in the source and the plugin', typedOnly(SRC) && typedOnly(PLUG),
+    (SRC ? '' : 'no .claude/skills/cloud/SKILL.md; ') + (PLUG ? '' : 'no plugin/skills/cloud/SKILL.md'));
+  check('263: no copy of the cloud skill pre-approves a command that could start a cloud session', SRC !== '' && PLUG !== '' && launchers(SRC).length === 0 && launchers(PLUG).length === 0,
+    [...launchers(SRC), ...launchers(PLUG)].join(', '));
+  const startLine = /CCR_FORCE_BUNDLE=1 exec claude [^\n]*--cloud "\$\(cat [^)\n]*brief\.md\)"/.exec(SRC);
+  check('263: the start script the skill writes puts the task text right after --cloud', !!startLine && !/--cloud\s+-/.test(startLine[0]), startLine ? startLine[0] : 'no CCR_FORCE_BUNDLE=1 exec claude ... --cloud "$(cat ...brief.md)" line');
+  check('263: the skill tells the user to run its one start line and never runs it itself', /`bash [^`\s]*start\.sh`/.test(SRC) && SRC.includes('Never run `start.sh` or `claude --cloud` yourself'));
+  // The plugin copy must still ask git about the project's own file: the build
+  // keeps that phrase (a SITE_OVERRIDES entry) instead of rewriting it to the
+  // plugin's folder, where git ls-files would never find it.
+  const repoCheck = '`git ls-files .claude/commands/review.md`';
+  check('263: review mode runs only where the toolkit lives in the repo, and names why elsewhere, in the source and the plugin',
+    [SRC, PLUG].every((t) => t.includes(repoCheck) && t.includes('cloud sessions never load plugins')));
+  for (const brief of BRIEFS) {
+    const text = optional('.claude/skills/cloud/' + brief);
+    const rules = ['Never commit, push, create a branch or open a pull request.', 'Never call `add_repo`', 'Make no change git would commit', '/tmp', '`git status --porcelain`', 'The summary comes first', '<script type="text/markdown" id="report-markdown">', '<script type="text/plain" class="run-file" data-name="'];
+    const missing = rules.filter((r) => !text.includes(r));
+    check('263: ' + brief + ' carries the no-push rules, the summary-first shape, the report block and the run-file blocks', text !== '' && missing.length === 0, text ? 'missing: ' + missing.join(' | ') : 'no .claude/skills/cloud/' + brief);
+  }
+  // Everything a run produced comes back (owner, 2026-10-18), and a file name
+  // read off the page is another session's data, so it must not leave files/.
+  // A review range need not be on the branch the cloud session starts on, so
+  // the review must read the files the range ends at (found in the Verify step).
+  check('263: review-brief.md checks out the range\'s last commit before the review reads any file',
+    optional('.claude/skills/cloud/review-brief.md').includes('git checkout --detach <the commit id after the two dots in {{RANGE}}>'));
+  // Found in the Verify step: the cloud session stops at a prompt before it
+  // publishes, and a page with every run file is too big to pass through the
+  // chat, so the skill warns about the prompt and unpacks the page on disk.
+  check('263: the walk-through warns that the session asks once to publish its page',
+    SRC.includes('the session asks once for permission to publish its page to claude.ai'));
+  check('263: the plugin carries unpack.js and its skill runs and grants it from the plugin',
+    fs.existsSync(path.join(REPO, 'plugin/skills/cloud/unpack.js')) && PLUG.includes('node ${CLAUDE_PLUGIN_ROOT}/skills/cloud/unpack.js --page')
+      && grants(PLUG).some((g) => unpackGrant.test(g) && g.includes('${CLAUDE_PLUGIN_ROOT}')));
+  check('263: the skill saves every run file under files/ and keeps each name inside it',
+    SRC.includes('class="run-file"') && SRC.includes('so no name can reach outside `files/`'));
+  const plugBriefs = BRIEFS.filter((b) => fs.existsSync(path.join(REPO, 'plugin/skills/cloud', b)) && PLUG.includes('${CLAUDE_PLUGIN_ROOT}/skills/cloud/' + b));
+  check('263: the plugin carries both briefs and its skill reads them from the plugin', plugBriefs.length === BRIEFS.length, 'found ' + plugBriefs.join(', '));
+  const untyped = SRC.replace(/^disable-model-invocation:.*\r?\n/m, '');
+  check('263: mutation: the skill without disable-model-invocation trips the first case', SRC !== '' && untyped !== SRC && !typedOnly(untyped));
+  // The upload carries unpushed work on purpose, so before the start line the
+  // walk-through says how much of it GitHub does not have, and what a session
+  // that broke the no-push rule would expose (review of 46bf362..2d1061a, R2).
+  check('263: the walk-through counts the commits and edits GitHub does not have and warns before the start line',
+    SRC.includes('`git rev-list --count HEAD --not --remotes`') && SRC.includes('`git status --porcelain --untracked-files=no`')
+      && SRC.includes('GitHub does not have yet') && SRC.indexOf('GitHub does not have yet') < SRC.indexOf('Paste this one line'));
+  const widened = SRC.replace(/^allowed-tools:\r?\n/m, (m) => m + '  - Bash(env *)\n');
+  check('263: mutation: a new grant outside the known-safe set trips the no-launch case', widened !== SRC && launchers(widened).join() === 'Bash(env *)', launchers(widened).join(', '));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

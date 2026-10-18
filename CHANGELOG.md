@@ -20,6 +20,7 @@
 - **Docs and code checks (#262).** `doc-check.js` reports the two cases a script can be sure of: a relative link or heading anchor in your docs that no longer resolves (every doc, every run), and a doc that still names a file or command the cycle deleted or renamed. It stays quiet on other names that do not exist, because docs name those on purpose: files in a reader's own project, retired files, placeholders.
 - **Docs and code disagree, on the cycle page (#262).** A mismatch where the code looks wrong, or it is unclear which side is, is never fixed in the code. It is listed on the cycle summary with both lines quoted and stays until a later run finds the two agreeing. An item reported on another branch can only be closed from a branch that holds its commit, or once that branch is gone (squash-merged and deleted, or rebased).
 - **`/review-full` checks the docs against the code (#262)** at a release gate, including code the release did not change, so older drift surfaces too.
+- **Run research and review on cloud: `/cloud` (issue #263).** `/cloud research "<question>"` runs a research report, and `/cloud review [<range>]` a report-only review, in a Claude Code cloud session instead of on your machine. It writes a self-contained brief and gives you one line to paste into a terminal, because Claude Code cannot start a cloud session from Claude's own shell. Before that line, it tells you how many commits and edited files the upload carries that GitHub does not have yet. When you say "done", it brings back the report and every file the run produced, and shows you only the summary. It runs only when you type it. Review needs the toolkit's own files in the repository, because cloud sessions never load plugins.
 
 ### Changed
 
@@ -29,6 +30,7 @@
 
 - On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
 - **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
+- `/cloud` adds no permission rows, and nothing pre-approves its start line: you run that line yourself, in a terminal.
 - **The first `/document` after upgrading checks every doc's links (#262),** so an older project can get a larger doc change than usual in that one cycle. On the plugin, `/document` can run the new script without asking. If it starts asking for permission after you answer one of its questions, re-run setup: it adds the permission rows that stop that. A copy-install gets the script from `setup.sh` and `setup.ps1`.
 
 ### For maintainers

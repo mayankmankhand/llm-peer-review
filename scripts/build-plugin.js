@@ -188,6 +188,10 @@ const SITE_OVERRIDES = {
     // The same detection, in the summary line's skip reason.
     { phrase: 'skipped - no .claude/scripts/package.json)', keep: true },
   ],
+  'skills/cloud/SKILL.md': [
+    // Review mode asks git whether the PROJECT tracks its own review command (issue #263); the plugin's copy is never in the project's git.
+    { phrase: '`git ls-files .claude/commands/review.md`', keep: true },
+  ],
   'skills/project-context/SKILL.md': [
     // An example of the reviewed project's file structure conventions.
     { phrase: 'commands in `.claude/commands/`, skills in `.claude/skills/`', keep: true },
