@@ -50,6 +50,7 @@
     ".claude/scripts/ask-gpt.js",
     ".claude/scripts/browse.js",
     ".claude/scripts/correction-ledger.js",
+    ".claude/scripts/doc-check.js",
     ".claude/scripts/env-local.js",
     ".claude/scripts/gen-media.js",
     ".claude/scripts/generate-index.js",

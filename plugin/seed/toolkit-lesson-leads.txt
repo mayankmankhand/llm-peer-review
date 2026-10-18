@@ -47,6 +47,7 @@ A fixture that fails on both pages tells them apart no better than one that pass
 A gate must be countable against the output the model actually produces.
 A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
 A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
+A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.
 A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
 A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.
 A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.

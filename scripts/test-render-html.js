@@ -2227,11 +2227,149 @@ function timePageTests() {
   check('248 time page: an opted-out or empty breakdown shows no rows', !/Claude working/.test(text(page({ cycle: { optedOut: true } }))), '');
 }
 
+// ---------------------------------------------------------------------------
+// Docs and code disagree, on the cycle page (issue #262).
+//
+// /document reports a mismatch it did not fix (the code looks wrong, or it is
+// unclear which side is) and the page keeps it until a later run finds the doc
+// and the code agreeing. The renderer owns the carrying, the same way it owns
+// the cycle log: a run that leaves an item out cannot lose it, and an item
+// reported at a commit HEAD does not contain (another branch's work) cannot be
+// closed from here, because this branch never had the change.
+// ---------------------------------------------------------------------------
+function docMismatchTests() {
+  console.log('\ndocs and code disagree, on the cycle page (issue #262)');
+  const dir = tmpdir('mismatch');
+  let n = 0;
+  function run(cwd, data, extraArgs) {
+    const dataPath = path.join(dir, 'in-' + (++n) + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    const r = spawnSync('node', [SCRIPT, '--shell', 'document', '--name', 'cycle', '--stable', '--data', dataPath]
+      .concat(extraArgs || []), { encoding: 'utf-8', cwd: cwd });
+    const out = (r.stdout || '').trim();
+    return { status: r.status, err: r.stderr || '', html: out && fs.existsSync(out) ? fs.readFileSync(out, 'utf-8') : '' };
+  }
+  const island = function (html) { return html ? JSON.parse(dataIsland(html)) : {}; };
+  const cycle = function (title, date, extra) {
+    return Object.assign({ title: title, pill: 'v1', subtitle: date + ' &middot; window <code>a..b</code>', commitCount: 1 }, extra || {});
+  };
+  const A = { doc: 'docs/usage.md', docLine: 5, docText: 'add() rejects negative numbers',
+              code: 'src/math.js', codeLine: 2, codeText: 'return a + b;', why: 'The commit says no behavior change.' };
+  const keyOf = function (m) { return m.doc + '\n' + m.docText; };
+  // The temp dir is not a repository, so these renders record no commit and
+  // any item they carry may be closed from anywhere.
+  const here = ['--out-dir', dir];
+  const fresh = function () { fs.rmSync(path.join(dir, 'cycle.html'), { force: true }); };
+  const short = function (x) { return JSON.stringify(x === undefined ? null : x).slice(0, 300); };
+
+  const r1 = island(run(dir, cycle('First', '2026-10-18', { docMismatches: [A] }), here).html);
+  const r2 = island(run(dir, cycle('Second', '2026-10-19'), here).html);
+  const r3 = island(run(dir, cycle('Third', '2026-10-20', { docMismatchesFixed: [keyOf(A)] }), here).html);
+  check('cycle page: a reported doc mismatch stays on the page until a run marks it fixed',
+    isArr(r1.docMismatches) && r1.docMismatches.length === 1 && r1.docMismatches[0].key === keyOf(A) &&
+    r1.docMismatches[0].since === '2026-10-18' &&
+    isArr(r2.docMismatches) && r2.docMismatches.length === 1 && r2.docMismatches[0].docText === A.docText &&
+    r3.docMismatches === undefined && r3.docMismatchesFixed === undefined,
+    short([r1.docMismatches, r2.docMismatches, r3.docMismatches]));
+
+  fresh();
+  run(dir, cycle('One', '2026-10-18', { docMismatches: [A] }), here);
+  const moved = island(run(dir, cycle('Two', '2026-10-21', { docMismatches: [Object.assign({}, A, { docLine: 9 })] }), here).html);
+  check('cycle page: a mismatch keeps its key when its line number moves',
+    isArr(moved.docMismatches) && moved.docMismatches.length === 1 && moved.docMismatches[0].docLine === 9 &&
+    moved.docMismatches[0].since === '2026-10-18', short(moved.docMismatches));
+
+  // A branch: the item is reported on `side`, so `main` (which never had that
+  // commit) cannot close it, and the merge that brings the commit in can.
+  const repo = path.join(dir, 'repo');
+  fs.mkdirSync(repo);
+  const git = function (args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); };
+  const standing = function () {
+    const r = spawnSync('node', [SCRIPT, '--standing', '--name', 'cycle'], { cwd: repo, encoding: 'utf-8' });
+    try { return JSON.parse(r.stdout); } catch (e) { return { unparsed: (r.stdout || '') + (r.stderr || '') }; }
+  };
+  const B = Object.assign({}, A, { docText: 'the side branch says so' });
+  let onSide = {}, onMain = {}, merged = {}, stSide = {}, stMain = {}, side = '';
+  try {
+    git(['init', '-q', '-b', 'main']);
+    git(['config', 'user.email', 't@example.com']);
+    git(['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repo, 'README.md'), 'x\n');
+    git(['add', 'README.md']);
+    git(['commit', '-qm', 'init']);
+    git(['checkout', '-q', '-b', 'side']);
+    fs.writeFileSync(path.join(repo, 'side.txt'), 'side\n');
+    git(['add', 'side.txt']);
+    git(['commit', '-qm', 'side work']);
+    side = git(['rev-parse', 'HEAD']);
+    onSide = island(run(repo, cycle('On side', '2026-10-18', { docMismatches: [B] })).html);
+    stSide = standing();
+    git(['checkout', '-q', 'main']);
+    stMain = standing();
+    onMain = island(run(repo, cycle('On main', '2026-10-19', { docMismatchesFixed: [keyOf(B)] })).html);
+    git(['merge', '-q', '--ff-only', 'side']);
+    merged = island(run(repo, cycle('Merged', '2026-10-20', { docMismatchesFixed: [keyOf(B)] })).html);
+  } catch (e) {
+    check('cycle page: the branch fixture ran', false, String(e && e.message).slice(0, 200));
+  }
+  check('cycle page: an item reported at a commit HEAD does not contain stays even when listed fixed',
+    isArr(onSide.docMismatches) && onSide.docMismatches[0].at === side &&
+    isArr(onMain.docMismatches) && onMain.docMismatches.length === 1 && onMain.docMismatches[0].key === keyOf(B) &&
+    merged.docMismatches === undefined, short([onSide.docMismatches, onMain.docMismatches, merged.docMismatches]));
+  check('cycle page: --standing --name cycle lists the open mismatches',
+    stSide.open === null && isArr(stSide.mismatches) && stSide.mismatches.length === 1 &&
+    stSide.mismatches[0].key === keyOf(B) && stSide.mismatches[0].inHistory === true &&
+    isArr(stMain.mismatches) && stMain.mismatches.length === 1 && stMain.mismatches[0].inHistory === false,
+    short([stSide, stMain]));
+
+  // A squash landing: the branch's commit never enters main's history, and once
+  // the branch is deleted no branch holds it, so main may close the item.
+  const C = Object.assign({}, A, { docText: 'the squashed branch says so' });
+  let squashed = {}, stGone = {};
+  try {
+    git(['checkout', '-q', '-b', 'squash-me']);
+    fs.writeFileSync(path.join(repo, 'squash.txt'), 'squash\n');
+    git(['add', 'squash.txt']);
+    git(['commit', '-qm', 'squash work']);
+    run(repo, cycle('On squash-me', '2026-10-21', { docMismatches: [C] }));
+    git(['checkout', '-q', 'main']);
+    git(['merge', '-q', '--squash', 'squash-me']);
+    git(['commit', '-qm', 'squash landing']);
+    git(['branch', '-q', '-D', 'squash-me']);
+    stGone = standing();
+    squashed = island(run(repo, cycle('Squashed', '2026-10-22', { docMismatchesFixed: [keyOf(C)] })).html);
+  } catch (e) {
+    check('cycle page: the squash fixture ran', false, String(e && e.message).slice(0, 200));
+  }
+  check('cycle page: an item from a squash-merged and deleted branch can be closed',
+    isArr(stGone.mismatches) && stGone.mismatches.length === 1 && stGone.mismatches[0].inHistory === true &&
+    squashed.docMismatches === undefined, short([stGone.mismatches, squashed.docMismatches]));
+
+  fresh();
+  const hostile = run(dir, cycle('Hostile', '2026-10-18', { docMismatches: [Object.assign({}, A,
+    { docText: '<img src=x onerror=alert(1)>', codeText: '<script>alert(2)</script>', why: '<b>bold</b>' })] }), here);
+  let dom = '';
+  try { dom = renderDom(hostile.html); } catch (e) { dom = 'renderDom threw: ' + e.message; }
+  check('cycle page: quoted doc and code text renders as text, not HTML',
+    /Docs and code disagree/.test(dom) && /&lt;img src=x onerror=alert\(1\)&gt;/.test(dom) && !/<img|<script|<b>/.test(dom),
+    dom.slice(0, 300));
+
+  fresh();
+  const none = run(dir, cycle('Nothing Open', '2026-10-18'), here);
+  let noneDom = '';
+  try { noneDom = renderDom(none.html); } catch (e) { noneDom = 'renderDom threw: ' + e.message; }
+  check('cycle page: no mismatch section when none is open',
+    none.status === 0 && island(none.html).docMismatches === undefined && !/Docs and code disagree|renderDom threw/.test(noneDom),
+    noneDom.slice(0, 200));
+}
+function isArr(x) { return Array.isArray(x); }
+
 cycleStandingPageTests();
 issue237Tests();
 submoduleRootTest();
 branchNameCollisionTest();
 timePageTests();
+docMismatchTests();
 
 console.log('');
 if (failures.length === 0) {

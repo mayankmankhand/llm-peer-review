@@ -527,3 +527,6 @@
 - **A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.**
 - **Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.**
 - **When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.**
+## Issue 262 (docs and code disagree)
+
+- **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**
