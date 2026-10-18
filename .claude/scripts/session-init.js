@@ -1547,7 +1547,9 @@ function cycleStart() {
 // with no redirect: a lead is a `- **...**` line in LESSONS.md, and it has a
 // write-up when the same bold text appears anywhere in LESSONS-detail.md (the
 // old `comm -23` against every bold span there). Leads print without their
-// asterisks. A missing detail file leaves every lead without a write-up.
+// asterisks. A missing detail file leaves every lead without a write-up. A bold
+// span never crosses a line end, as with grep: otherwise a lone `**` (a glob
+// such as `**/x`) pairs with the next line's bold text and hides real write-ups.
 //
 //   {"duplicates": ["<lead>", ...], "noWriteUp": ["<lead>", ...], "detailFile": true | false}
 function lessonsCheck() {
@@ -1558,9 +1560,9 @@ function lessonsCheck() {
   const index = read("LESSONS.md");
   if (index === null) return { duplicates: [], noWriteUp: [], detailFile: false, error: "no LESSONS.md in " + root };
   const strip = (bold) => bold.slice(2, -2);
-  const leads = (index.match(/^- \*\*[^*]+\*\*/gm) || []).map((l) => strip(l.slice(2)));
+  const leads = (index.match(/^- \*\*[^*\r\n]+\*\*/gm) || []).map((l) => strip(l.slice(2)));
   const detail = read("LESSONS-detail.md");
-  const written = new Set(((detail || "").match(/\*\*[^*]+\*\*/g) || []).map(strip));
+  const written = new Set(((detail || "").match(/\*\*[^*\r\n]+\*\*/g) || []).map(strip));
   const seen = new Set();
   const twice = new Set();
   for (const l of leads) {

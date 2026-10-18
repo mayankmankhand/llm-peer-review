@@ -1437,6 +1437,11 @@ section('265 lessons: duplicated leads and leads with no write-up', function () 
   const b = runScript(['--lessons'], repo).json;
   check('lessons: clean files print two empty lists',
     Array.isArray(b.duplicates) && b.duplicates.length === 0 && Array.isArray(b.noWriteUp) && b.noWriteUp.length === 0, JSON.stringify(b));
+  // A lone ** on an earlier line (a glob) must not pair with the next line's lead.
+  write(repo, 'LESSONS-detail.md', '# Detail\n\nUse a glob such as `scripts/**` here.\n\n- **Alpha lead.** The write-up.\n- **Beta lead.** Another.\n');
+  const lone = runScript(['--lessons'], repo).json;
+  check('lessons: a bold span never runs across lines, as grep reads it',
+    Array.isArray(lone.noWriteUp) && lone.noWriteUp.length === 0, JSON.stringify(lone));
   fs.rmSync(path.join(repo, 'LESSONS-detail.md'));
   const c = runScript(['--lessons'], repo).json;
   check('lessons: with no detail file every lead has no write-up', JSON.stringify(c.noWriteUp) === '["Alpha lead.","Beta lead."]', JSON.stringify(c));
