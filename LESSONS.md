@@ -524,3 +524,13 @@
 
 - **A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.**
 - **A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.**
+## Issue 264 (the research kit)
+
+- **Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.**
+- **A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.**
+- **A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.**
+- **Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.**
+- **When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.**
+## Issue 262 (docs and code disagree)
+
+- **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**

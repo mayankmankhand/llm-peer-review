@@ -49,7 +49,10 @@ A fixture that fails on both pages tells them apart no better than one that pass
 A gate must be countable against the output the model actually produces.
 A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
 A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
+A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.
 A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
+A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.
+A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
 A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.
 A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.
@@ -155,6 +158,7 @@ Centralizing a rule and hand-writing its call-site preamble in the same commit s
 Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.
 Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.
 Check the permission allow-list before designing a mechanism out of shell commands.
+Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
 Copying a script and permitting it are two edits, and only the missing copy is loud.
 Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.
@@ -245,6 +249,7 @@ Review your own AI-generated code before shipping.
 Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.
 Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.
 Run debates on plans, not just finished work.
+Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.
 Run your own receipt before you report it as confirmation.
 Scope parity gaps explicitly when fixing one of several.
 Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
@@ -281,6 +286,7 @@ Watch for tool output artifacts in reviews.
 When a fix corrects a fact, search every doc for its other copies before calling it done.
 When a hand-kept list decides what runs, check the list against what exists: a missing entry otherwise passes as all green.
 When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.
+When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.
 When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.
 When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
 When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.

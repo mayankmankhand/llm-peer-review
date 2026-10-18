@@ -6,6 +6,8 @@
 
 **Issue #260.** Before any push Claude makes, a Claude Code hook now runs the pre-push check itself, so the check no longer depends on Claude remembering it. A push the check flags is blocked, and only you can send it, by typing the push yourself with `!` at the prompt. Plugin installs only.
 
+**Issue #262.** When a doc and the code disagree, `/document` now turns it into a finding with a receipt, the doc line and the code line it contradicts, and ends it on purpose: the doc fixed, the mismatch reported to you, or, for a prompt file, a question first. It no longer just notes it.
+
 ### Added
 
 - **The push guard.** `push-guard.js` is a `PreToolUse` hook on Bash that the plugin wires in beside its session-start hook. It reads each command before it runs:
@@ -15,21 +17,32 @@
   - **A push in any other shape,** a push after a shell word such as `if`, `then`, `do` or `!` included: blocked, with the standard form named.
 - **It never answers "allow",** so it can only add a prompt or a block, never remove one. In bypassPermissions or dontAsk mode, where no prompt is sure to show, a push that would ask is blocked instead. When the guard cannot read its input, a command that mentions push is blocked, and the hook entry sets `"onFailure": "block"` and `"timeout": 120`, so a crash or a hang blocks too.
 - **Hard to skip, not impossible.** It cannot see a push inside a script Claude writes and then runs, a write through GitHub's web API, a shell or git alias that stands for push, a spelling built to hide a push, or a cloud session, which loads no plugin hooks. A push you type in a terminal yourself is not checked.
+- **Docs and code checks (#262).** `doc-check.js` reports the two cases a script can be sure of: a relative link or heading anchor in your docs that no longer resolves (every doc, every run), and a doc that still names a file or command the cycle deleted or renamed. It stays quiet on other names that do not exist, because docs name those on purpose: files in a reader's own project, retired files, placeholders.
+- **Docs and code disagree, on the cycle page (#262).** A mismatch where the code looks wrong, or it is unclear which side is, is never fixed in the code. It is listed on the cycle summary with both lines quoted and stays until a later run finds the two agreeing. An item reported on another branch can only be closed from a branch that holds its commit, or once that branch is gone (squash-merged and deleted, or rebased).
+- **`/review-full` checks the docs against the code (#262)** at a release gate, including code the release did not change, so older drift surfaces too.
 - **Run research and review on cloud: `/cloud` (issue #263).** `/cloud research "<question>"` runs a research report, and `/cloud review [<range>]` a report-only review, in a Claude Code cloud session instead of on your machine. It writes a self-contained brief and gives you one line to paste into a terminal, because Claude Code cannot start a cloud session from Claude's own shell. Before that line, it tells you how many commits and edited files the upload carries that GitHub does not have yet. When you say "done", it brings back the report and every file the run produced, and shows you only the summary. It runs only when you type it. Review needs the toolkit's own files in the repository, because cloud sessions never load plugins.
+
+### Changed
+
+- **The cycle summary's history moved to the bottom.** "Earlier cycles" now comes after this cycle's doc changes and files, and the footer line ends at the text column's edge.
 
 ### Upgrading
 
 - On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
 - **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
 - `/cloud` adds no permission rows, and nothing pre-approves its start line: you run that line yourself, in a terminal.
+- **The first `/document` after upgrading checks every doc's links (#262),** so an older project can get a larger doc change than usual in that one cycle. On the plugin, `/document` can run the new script without asking. If it starts asking for permission after you answer one of its questions, re-run setup: it adds the permission rows that stop that. A copy-install gets the script from `setup.sh` and `setup.ps1`.
 
 ### For maintainers
 
 - **At the release that ships this, take the `hooks` block out of this repository's `.claude/settings.json`.** It switches the guard on here before any release, and once the plugin's own hook is installed the guard would run twice.
+- **A research kit for research runs (issue #264).** `scripts/research/README.md` holds the reusable parts of a research run, and each run's own brief in `reports/<topic>/` points at it with one line. Helpers keep their notes in files that end with a done line, so a new lead resumes from the files after a lost helper or a lost session. The report shows each disagreement between sources with both written out, and the checker verifies both sides. A practice run proved the resume and the disagreement section. Search scripts, a script that checks the notes files, a `/research` command and a `.md` reading rule are recorded in the kit as left out, with why.
 
 ### Why
 
 The pre-push check was a rule Claude followed by remembering it, and a safeguard the agent can decline to run is not a safeguard. The first build asked you about a flagged push instead of blocking it. In the live check, both planted-key pushes that asked went through on a Yes at the prompt, so a flagged push now blocks, and the way round it is one you type on purpose.
+
+Drift between the docs and the code was left to be noticed by chance (#262): `/document` noted a mismatch, and the note went nowhere. A mismatch is a finding to resolve, not proof that the doc is stale, so it now gets both lines quoted and a decision about which side is wrong. The automatic part stays narrow on purpose: a probe of this repository's docs found 87 backticked file names and 13 slash commands that did not exist, and none of them was drift.
 
 ## v8.0.6 - Nothing Lost, Nothing Unread (2026-10-17)
 
