@@ -80,6 +80,7 @@ A prompt cannot declare a user-owned prerequisite done.
 A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.
 A prompt's user-facing message is not enforcement.
 A prose sweep needs the wordings that actually occur, not the one you remember writing.
+A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.
 A receipt that checks a record exists can be closed by making the record late; check what the record says.
 A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.
 A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.
@@ -129,6 +130,7 @@ Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, 
 After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
+An approval prompt is not a gate for a rare, costly action: both planted-key test pushes that asked were approved at the prompt, so a flagged push now blocks.
 An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.
 An audit agent with Bash can open the real ledger: when the work under review is the ledger, say in the dispatch that its files are off limits.
 An audit with only pass and kill discards correct findings that carry the wrong label.
@@ -137,6 +139,7 @@ An everyday test command cannot be the release gate, because the gate's version 
 An exclusion applied to one arm of a comparison must apply to the other arm too.
 An inherited CSS property belongs on the shared root, not copied into each file.
 An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
+Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.
 Ask what a change means for repos that already installed the last version, before writing the plan.
 Audit before converting.
 Auto-start lifecycle code is hard to verify without a real dev server.
@@ -261,6 +264,7 @@ The design critic finds rendering bugs the test suite cannot see.
 The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.
 The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
+To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
 Tokenising the shared layer does not tokenise its consumers.
 Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.

@@ -2,6 +2,33 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - The Check That Runs Itself
+
+**Issue #260.** Before any push Claude makes, a Claude Code hook now runs the pre-push check itself, so the check no longer depends on Claude remembering it. A push the check flags is blocked, and only you can send it, by typing the push yourself with `!` at the prompt. Plugin installs only.
+
+### Added
+
+- **The push guard.** `push-guard.js` is a `PreToolUse` hook on Bash that the plugin wires in beside its session-start hook. It reads each command before it runs:
+  - **No push, or a dry run:** it says nothing, and Claude Code's normal permission flow runs unchanged.
+  - **A standard push** (`git push -u <remote> HEAD:<branch>`, or `git push <remote> <tag>` for a tag on the checked-out commit, alone in its command or right after the pre-push check): it runs the pre-push check for that destination first. A hit blocks the push and shows the report. A clean force push or `--no-verify` push then asks you.
+  - **A push the check cannot scan** (a delete, `--mirror`, `--all`, `--tags`): it asks you. When the push can send commits, it first scans what the checked-out branch adds, and a hit blocks it.
+  - **A push in any other shape,** a push after a shell word such as `if`, `then`, `do` or `!` included: blocked, with the standard form named.
+- **It never answers "allow",** so it can only add a prompt or a block, never remove one. In bypassPermissions or dontAsk mode, where no prompt is sure to show, a push that would ask is blocked instead. When the guard cannot read its input, a command that mentions push is blocked, and the hook entry sets `"onFailure": "block"` and `"timeout": 120`, so a crash or a hang blocks too.
+- **Hard to skip, not impossible.** It cannot see a push inside a script Claude writes and then runs, a write through GitHub's web API, a shell or git alias that stands for push, a spelling built to hide a push, or a cloud session, which loads no plugin hooks. A push you type in a terminal yourself is not checked.
+
+### Upgrading
+
+- On the plugin, the guard arrives with the update that ships it. No new permission rows. A copy-install gets no guard: `setup.sh` and `setup.ps1` copy no hooks.
+- **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
+
+### For maintainers
+
+- **At the release that ships this, take the `hooks` block out of this repository's `.claude/settings.json`.** It switches the guard on here before any release, and once the plugin's own hook is installed the guard would run twice.
+
+### Why
+
+The pre-push check was a rule Claude followed by remembering it, and a safeguard the agent can decline to run is not a safeguard. The first build asked you about a flagged push instead of blocking it. In the live check, both planted-key pushes that asked went through on a Yes at the prompt, so a flagged push now blocks, and the way round it is one you type on purpose.
+
 ## v8.0.6 - Nothing Lost, Nothing Unread (2026-10-17)
 
 **A patch on top of v8.0.5 (#252, #253, #257, #258, #259).** `/tk:merge` now names every file a landing deletes and keeps the ones a branch stopped tracking, waits for the host before it merges, and stops for you when it combines a prompt file. `/tk:upgrade` reads the release notes since your last upgrade and records what it did about each entry before it stamps. `/tk:review` checks a change to your project's seam files the way it checks commands and skills, and its receipts keep the record of every check it ran. When the lessons index is too long to print at session start, the startup output says exactly how to read all of it.
