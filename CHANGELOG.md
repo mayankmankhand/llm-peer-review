@@ -10,6 +10,8 @@
 
 **Issue #266.** A worktree's plans and reports no longer go when the worktree does. After `/merge` lands a branch it copies them into your main folder, then asks once whether to remove the worktree and its branch.
 
+**Issue #261.** `/review` no longer loads every rule before it starts. It used to read 23,019 words of rules before it read a line of code, most of them for phases it had not reached; it now starts at about 8,300, loads the loop and report rules when it reaches its dispatch phase, and loads the page rules only when a page renders. The release gate now fails when any one prompt file loads more than 11,000 words, so the cut cannot grow back unnoticed, and `/upgrade` passes the same guidance to your project as a question, not a rule.
+
 ### Added
 
 - **The push guard.** `push-guard.js` is a `PreToolUse` hook on Bash that the plugin wires in beside its session-start hook. It reads each command before it runs:
@@ -24,6 +26,8 @@
 - **`/review-full` checks the docs against the code (#262)** at a release gate, including code the release did not change, so older drift surfaces too.
 - **Run research and review on cloud: `/cloud` (issue #263).** `/cloud research "<question>"` runs a research report, and `/cloud review [<range>]` a report-only review, in a Claude Code cloud session instead of on your machine. It writes a self-contained brief and gives you one line to paste into a terminal, because Claude Code cannot start a cloud session from Claude's own shell. Before that line, it tells you how many commits and edited files the upload carries that GitHub does not have yet. When you say "done", it brings back the report and every file the run produced, and shows you only the summary. It runs only when you type it. Review needs the toolkit's own files in the repository, because cloud sessions never load plugins.
 - **Worktree records come home (#266).** Removing a worktree deletes every file git ignores in it without a word. After `/merge` lands a branch, it now copies the records its worktree holds (the files git does not track under `plans/` and `reports/`, and the dated pages under `artifacts/html/`) into the main folder, never over a file already there, keeping each file's date. At the end one question offers to remove each worktree and delete its branch; a record the main folder holds differently, or a file never committed, is named in that question and needs a yes of its own.
+- **Rules load by phase (#261).** Three skills loaded by name now hold the shared rules twelve files used to paste at the top of every run: `loop-rules` (the loop, M1 to M17), `report-rules` (the report template, the finding contract and the HTML output rules) and `review-page` (how the review page is rendered and reaches you). `/review` loads the first two when it reaches its dispatch phase, a directly typed `/review-*` skill or `/security-audit` at its audit, and `/upgrade` at the start of its procedure; the page rules load only when a review's page renders. Each load sentence reads the same in all twelve files, held by a test that also fails when one drifts out of its phase.
+- **C-20, guidance on what a session loads (#261).** A manual convention at warn that runs on the upgrade that brings it. It says what the toolkit did and why, then has the model measure your own prompt files and always-on files and judge whether the same split fits your workflow. It raises a finding only for a file over the line your project chooses, and imposes no number.
 
 ### Changed
 
@@ -39,18 +43,23 @@
 - **The guard's block-on-failure setting needs Claude Code 2.1.295 or later.** An older Claude Code does not read `onFailure`, so a guard that crashes outright would let that push through.
 - `/cloud` adds no permission rows, and nothing pre-approves its start line: you run that line yourself, in a terminal.
 - #265 and #266 add no permission rows either: the new checks are new options on two scripts that already have them.
+- **`/setup` adds six permission rows (#261):** `Skill(tk:loop-rules)`, `Skill(tk:report-rules)` and `Skill(tk:review-page)`, each with its `:*` twin. Without them, a review in default permission mode stops to ask before it loads its rules. Re-run `/setup` once after updating.
+- **`/upgrade` brings C-20 (#261)** on the upgrade to this release: one question about your own files, judged by the model, with no number imposed.
 - **The first `/document` after upgrading checks every doc's links (#262),** so an older project can get a larger doc change than usual in that one cycle. On the plugin, `/document` can run the new script without asking. If it starts asking for permission after you answer one of its questions, re-run setup: it adds the permission rows that stop that. A copy-install gets the script from `setup.sh` and `setup.ps1`.
 
 ### For maintainers
 
 - **At the release that ships this, take the `hooks` block out of this repository's `.claude/settings.json`.** It switches the guard on here before any release, and once the plugin's own hook is installed the guard would run twice.
 - **A research kit for research runs (issue #264).** `scripts/research/README.md` holds the reusable parts of a research run, and each run's own brief in `reports/<topic>/` points at it with one line. Helpers keep their notes in files that end with a done line, so a new lead resumes from the files after a lost helper or a lost session. The report shows each disagreement between sources with both written out, and the checker verifies both sides. A practice run proved the resume and the disagreement section. Search scripts, a script that checks the notes files, a `/research` command and a `.md` reading rule are recorded in the kit as left out, with why.
+- **The prompt ceiling (#261).** `npm test` now fails when any one command, skill or agent loads more than `PROMPT_LOAD_CEILING` words: 11,000, from `commands/document.md` at 9,898 times 1.1, rounded up to the next 500. When it trips, trim a fragment the file pastes or load it at the phase that needs it; raise the constant only with the new measurement and its date in its comment. `docs/RELEASING.md` has the details.
 
 ### Why
 
 The pre-push check was a rule Claude followed by remembering it, and a safeguard the agent can decline to run is not a safeguard. The first build asked you about a flagged push instead of blocking it. In the live check, both planted-key pushes that asked went through on a Yes at the prompt, so a flagged push now blocks, and the way round it is one you type on purpose.
 
 Drift between the docs and the code was left to be noticed by chance (#262): `/document` noted a mismatch, and the note went nowhere. A mismatch is a finding to resolve, not proof that the doc is stale, so it now gets both lines quoted and a decision about which side is wrong. The automatic part stays narrow on purpose: a probe of this repository's docs found 87 backticked file names and 13 slash commands that did not exist, and none of them was drift.
+
+Every model call re-reads everything loaded before it (#261). In one measured review the orchestrator re-read its own rulebook on 74 of its 75 calls, about 2.2 million of the 5 million cached tokens that run paid for, most of it rules for phases it had not reached. Loading by phase changes when the rules arrive, not how many a full run carries: on the planted-bug test, old and new builds caught the same six of seven bugs in every run, the seventh was raised in every run and dropped once by the audit, and cost per run did not fall ($5.94 old, $6.20 new, two runs each). What it buys is a shorter context through the early phases, and a run that stops before a phase never loads that phase's rules. A size limit alone would not have done this, which is why the ceiling came with the split rather than instead of it.
 
 ## v8.0.6 - Nothing Lost, Nothing Unread (2026-10-17)
 
