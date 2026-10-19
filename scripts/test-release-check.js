@@ -80,6 +80,11 @@ function line(out, name) {
 }
 const isOk = (out, name) => line(out, name).startsWith('  ok   ');
 const isFail = (out, name) => line(out, name).startsWith('  FAIL ');
+// One line of a run's output for a failure detail: the release-check summary
+// line, else the output's last 200 characters joined. Never the whole output:
+// the gate shows only a failing suite's last 15 lines, and a multi-line
+// detail pushes the case names out of that window (LESSONS, #250).
+const summaryLine = (out) => out.split('\n').find(l => /^release-check: \d+ passed/.test(l)) || out.slice(-200).replace(/\n/g, ' ');
 
 // The scratch repos' origin, which the gate reads as "this repository". Only
 // its name is ever used; nothing talks to it.
@@ -692,7 +697,7 @@ function releaseRepo(version, tag, opt) {
   let r = run(repo, ['--suites', 'stubs/pass.js']);
   check('full gate on the unreleasable repo: fails on the release checks', r.status === 1 && isOk(r.out, 'suites') && isFail(r.out, 'version bump') && isFail(r.out, 'marketplace ref'), r.out);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
-  check('--tests-only on the same repo: exits 0 with suites, build and readme budget ok', r.status === 0 && isOk(r.out, 'suites') && isOk(r.out, 'build') && isOk(r.out, 'readme budget') && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+  check('--tests-only on the same repo: exits 0 with suites, build and readme budget ok', r.status === 0 && isOk(r.out, 'suites') && isOk(r.out, 'build') && isOk(r.out, 'readme budget') && /release-check: 5 passed, 0 failed/.test(r.out), summaryLine(r.out));
   check('--tests-only: one line says the release checks were skipped and why', isOk(r.out, 'release checks') && /skipped \(--tests-only\)/.test(line(r.out, 'release checks')) && /version bump/.test(line(r.out, 'release checks')), r.out);
   check('--tests-only: no release check ran', !line(r.out, 'version bump') && !line(r.out, 'marketplace ref') && !line(r.out, 'release tag') && !line(r.out, 'tag version'), r.out);
 
@@ -720,16 +725,41 @@ function releaseRepo(version, tag, opt) {
   const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
   let r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('no scripts/prompt-load.js: no prompt-load line at all', r.status === 0 && !/prompt load/.test(r.out), r.out);
-  write(repo, 'scripts/prompt-load.js', "console.log('baseline scripts/prompt-load-baseline.json: 1 grew, 0 new, 0 removed, 0 shrank');\n"
+  write(repo, 'scripts/prompt-load.js', "if (process.argv.includes('--json')) { console.log(JSON.stringify({ rows: { 'commands/a.md': 2 } })); process.exit(0); }\n"
+    + "console.log('baseline scripts/prompt-load-baseline.json: 1 grew, 0 new, 0 removed, 0 shrank');\n"
     + "console.log('  grew     commands/a.md 1 -> 2 (+1)');\n");
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('prompt-load report: printed as an info line with its warnings',
     r.status === 0 && /^ {2}info prompt load - baseline scripts\/prompt-load-baseline\.json: 1 grew/m.test(r.out) && /grew {5}commands\/a\.md 1 -> 2 \(\+1\)/.test(r.out), r.out);
-  check('prompt-load report: not counted as a check', /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+  check('prompt-load report: not counted as a check', /release-check: 5 passed, 0 failed/.test(r.out), summaryLine(r.out));
   write(repo, 'scripts/prompt-load.js', "console.error('boom');\nprocess.exit(1);\n");
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
-  check('prompt-load report that fails: says so, and the run still exits 0',
-    r.status === 0 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+  check('prompt-load report that fails: the info line says so, and the prompt ceiling check fails with it',
+    r.status === 1 && /info prompt load - report unavailable: prompt-load\.js exited 1/.test(r.out) && /boom/.test(r.out) && isFail(r.out, 'prompt ceiling') && /release-check: 4 passed, 1 failed/.test(r.out), summaryLine(r.out));
+}
+
+// --- check: the prompt ceiling (#261) ------------------------------------------------------
+// A fixed line on what any one prompt file loads, beside the README budget. The
+// stub answers --json with rows the way prompt-load.js does and keeps a text
+// line for the info case above; the ceiling is read from the script so these
+// cases follow the constant when a split lowers it. The session row is planted
+// far over the line to prove it is left out.
+{
+  const CEILING = Number((/PROMPT_LOAD_CEILING = (\d+)/.exec(fs.readFileSync(SCRIPT, 'utf8')) || [])[1]);
+  const repo = makeRepo('1.0.0', gitSubdir('v1.0.0'));
+  let r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt ceiling: no scripts/prompt-load.js skips with a note', r.status === 0 && isOk(r.out, 'prompt ceiling') && /skipped: no scripts\/prompt-load\.js/.test(line(r.out, 'prompt ceiling')), line(r.out, 'prompt ceiling') || summaryLine(r.out));
+  const stub = (rows) => "if (process.argv.includes('--json')) { console.log(JSON.stringify({ rows: " + JSON.stringify(rows) + " })); process.exit(0); }\n"
+    + "console.log('baseline scripts/prompt-load-baseline.json: 0 grew, 0 new, 0 removed, 0 shrank');\n";
+  write(repo, 'scripts/prompt-load.js', stub({ 'commands/a.md': 100, 'skills/b/SKILL.md': CEILING, session: CEILING * 9 }));
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt ceiling: every row at or under the line passes and names the biggest', r.status === 0 && isOk(r.out, 'prompt ceiling') && new RegExp('biggest skills/b/SKILL\\.md at ' + CEILING + ' words, ceiling ' + CEILING).test(line(r.out, 'prompt ceiling')), line(r.out, 'prompt ceiling') || summaryLine(r.out));
+  write(repo, 'scripts/prompt-load.js', stub({ 'commands/a.md': CEILING + 1, 'skills/b/SKILL.md': 10 }));
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt ceiling: a row over the line fails and names the row', r.status === 1 && isFail(r.out, 'prompt ceiling') && new RegExp('commands/a\\.md loads ' + (CEILING + 1) + ' words, 1 over the ceiling of ' + CEILING).test(line(r.out, 'prompt ceiling')) && /prompt-load\.js lists the fragments/.test(line(r.out, 'prompt ceiling')), line(r.out, 'prompt ceiling') || summaryLine(r.out));
+  write(repo, 'scripts/prompt-load.js', "console.log('not json');\n");
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('prompt ceiling: a report that cannot be read fails', r.status === 1 && isFail(r.out, 'prompt ceiling') && /report unavailable/.test(line(r.out, 'prompt ceiling')), line(r.out, 'prompt ceiling') || summaryLine(r.out));
 }
 
 // --- info: the catch-rate line (harness research, item 7) prints, is never counted, never fails
@@ -768,7 +798,7 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('a review-path file changed since the build is listed; a file off the path is not',
     r.status === 0 && /; 1 review-path file changed in plugin\/ since that build/.test(r.out) && /^ {7}commands\/review\.md$/m.test(r.out) && !/^ {7}README\.md$/m.test(r.out), r.out);
-  check('the catch-rate line is not counted as a check', /release-check: 4 passed, 0 failed/.test(r.out), r.out);
+  check('the catch-rate line is not counted as a check', /release-check: 5 passed, 0 failed/.test(r.out), summaryLine(r.out));
 
   runDir('2026-10-05-000000-review-ship-z', { role: 'review', arm: 'ship', build: { sha: '0123456789abcdef0123456789abcdef01234567', version: '1.0.0' }, startedAt: '2026-10-05T00:00:00Z' }, true);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);

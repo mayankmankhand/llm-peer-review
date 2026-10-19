@@ -66,6 +66,12 @@
 //                    judges the real file. Skipped with a note when the repo
 //                    has no README.md (the tests' scratch repos). Runs in
 //                    every mode, --tests-only included.
+//   C. Ceiling     - no prompt file (command, skill or agent) loads more than
+//                    PROMPT_LOAD_CEILING words, counted by scripts/prompt-load.js
+//                    with every fragment it pastes (#261). The session row is
+//                    left out; skipped with a note when the repo has no
+//                    prompt-load.js; a report that cannot be read fails. Runs
+//                    in every mode, --tests-only included.
 //   T. Tag version - only with --pushing-tag: each pushed tag must be exactly
 //                    v<plugin.json version> of the commit the tag points at.
 //   3. Version     - compares the checked commit with the previous release: the
@@ -147,6 +153,15 @@ const path = require('path');
 // Check R: the most words README.md may hold. The rewrite of 2026-10-09 landed
 // at 865; the headroom is for a paragraph per release, not for a manual.
 const README_WORD_BUDGET = 1500;
+// The most words one prompt file (a command, a skill or an agent) may put into
+// the context when it runs, counted the way scripts/prompt-load.js counts: the
+// body with every fragment it pastes and, for an agent, every skill it
+// preloads (#261). Formula: the biggest row prompt-load.js reports, times 1.1,
+// rounded up to the next 500. Measured 2026-10-18, after the #261 cycle moved
+// the review rules behind name-loaded skills: commands/document.md at 9,898
+// words, so 10,888, rounded up to 11,000. Lower it when a split lands; raise it
+// only with the new measurement and its date written here.
+const PROMPT_LOAD_CEILING = 11000;
 
 const USAGE = 'usage: node scripts/release-check.js [--repo <dir>] [--suites <list|glob>] [--skip-suites] [--tests-only] [--jobs <n>] [--reuse-pass] [--commit <sha>] [--pushing-tag <tag>[:<sha>]]... [--remote <name|url>]';
 // Git exports GIT_DIR (and, with --git-dir/--work-tree, GIT_WORK_TREE) to a
@@ -510,6 +525,34 @@ function checkReadmeBudget() {
   const words = fs.readFileSync(file, 'utf8').split(/\s+/).filter(Boolean).length;
   if (words <= README_WORD_BUDGET) { report('readme budget', true, words + ' words, budget ' + README_WORD_BUDGET); return; }
   report('readme budget', false, words + ' words, ' + (words - README_WORD_BUDGET) + ' over the budget of ' + README_WORD_BUDGET + '; the README is the front door, move the detail into docs/');
+}
+
+// --- C. prompt ceiling (issue #261) ------------------------------------------------------
+// The README budget's twin for prompt files: a fixed line on what any one
+// command, skill or agent loads, so a fragment edit that grows twelve files at
+// once fails here, at the commit that caused it. The growth warning below
+// stays and names each word of growth inside the line. The session row is
+// left out (it is not a prompt file). A repo without the measurement script
+// passes with a note (the tests' scratch repos), as the README check does. A
+// report that cannot be read is a failed check: a gate that cannot measure
+// does not pass.
+function checkPromptCeiling() {
+  const script = path.join(REPO, 'scripts', 'prompt-load.js');
+  if (!fs.existsSync(script)) { report('prompt ceiling', true, 'skipped: no scripts/prompt-load.js in this repo'); return; }
+  const r = spawnSync('node', [script, '--json'], { cwd: REPO, env: CHILD_ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0) { report('prompt ceiling', false, 'report unavailable: prompt-load.js exited ' + r.status); return; }
+  let rows = null;
+  try { rows = JSON.parse(r.stdout).rows; } catch (e) { rows = null; }
+  if (!rows || typeof rows !== 'object') { report('prompt ceiling', false, 'report unavailable: prompt-load.js --json printed no rows'); return; }
+  const over = [];
+  let biggest = null;
+  for (const [row, n] of Object.entries(rows)) {
+    if (row === 'session' || typeof n !== 'number') continue;
+    if (!biggest || n > biggest.n) biggest = { row, n };
+    if (n > PROMPT_LOAD_CEILING) over.push(row + ' loads ' + n + ' words, ' + (n - PROMPT_LOAD_CEILING) + ' over the ceiling of ' + PROMPT_LOAD_CEILING);
+  }
+  if (over.length) { report('prompt ceiling', false, over.join(' | ') + '; trim a fragment it pastes or load it at the phase that needs it (node scripts/prompt-load.js lists the fragments)'); return; }
+  report('prompt ceiling', true, biggest ? 'biggest ' + biggest.row + ' at ' + biggest.n + ' words, ceiling ' + PROMPT_LOAD_CEILING : 'no rows, ceiling ' + PROMPT_LOAD_CEILING);
 }
 
 // --- info: prompt load (issue #206) --------------------------------------------------------
@@ -880,6 +923,7 @@ function checkCommits() {
   await checkSuites();
   checkBuild();
   checkReadmeBudget();
+  checkPromptCeiling();
   infoPromptLoad();
   infoCatchRate();
   if (opts.testsOnly) report('release checks', true, 'skipped (--tests-only): tag version, version bump, marketplace ref, release tag and landings judge a release, not an everyday test run; run without the flag for the full gate');
