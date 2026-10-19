@@ -165,7 +165,7 @@ const PARTS = {
   1: ['0', '1', '2', '3', '3b', '4', '4b', '4c', '4d', '4e', '4f', '4g', '4h', '4i', '4j'],
   2: ['4k', '7d', '9b'],
   3: ['4l', '4m', '4n', '4o', '5', '6', '7', '7b', '7c', '8', '9', '10', '11', '11b', '11c', '11d', '11e', '11f'],
-  4: ['9c', '9d', '9e', '9f', '9g', '9h'],
+  4: ['9c', '9d', '9e', '9f', '9g', '9h', '9i'],
 };
 const PART_COUNT = Object.keys(PARTS).length;
 const argAfter = (flag) => { const at = process.argv.indexOf(flag); return at < 0 ? null : (process.argv[at + 1] || ''); };
@@ -3439,7 +3439,7 @@ console.log('\n9h. a pasted project file over the paste limit (C-19)');
   check('C-19: the 8.0.0 build does not run it', r.status === 0 && c19(r).length === 0 && !/C-19/.test(r.summary), r.summary);
 }
 }
-if (OWN('10')) {
+if (OWN('9i')) {
 
 console.log('\n9i. the guidance on what a session loads (C-20)');
 {
@@ -3460,6 +3460,8 @@ console.log('\n9i. the guidance on what a session loads (C-20)');
   check('C-20: the entry is manual, warn, scoped to prompt files and CLAUDE.md, and imposes no number',
     /^- \*\*Since:\*\* 8\.0\.7$/m.test(entry) && /^- \*\*Scope:\*\* prompt-files\+claude-md$/m.test(entry) && /^- \*\*Detector:\*\* manual$/m.test(entry) && /^- \*\*Severity:\*\* warn$/m.test(entry) && /No number is imposed/.test(entry), entry.slice(0, 200));
 }
+}
+if (OWN('10')) {
 
 console.log('\n10. errors and usage');
 var bad1 = spawnSync('node', [SCRIPT, '--project', MIG, '--plugin-root', PLUGIN, '--conventions', path.join(TMP, 'nonexistent.md')], { encoding: 'utf8' });

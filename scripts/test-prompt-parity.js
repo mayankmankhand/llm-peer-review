@@ -296,7 +296,6 @@ const PASTE_LIMIT = 28500;
   check('263: mutation: a new grant outside the known-safe set trips the no-launch case', widened !== SRC && launchers(widened).join() === 'Bash(env *)', launchers(widened).join(', '));
 }
 
-console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 console.log('\n7. the rules a review loads by name (#261)');
 // Twelve files run the loop and used to paste its rules at the top of every
 // run. They now load them through three skills at the point the rules are
@@ -320,13 +319,26 @@ const PAGE_LINE = '**When the gate fires, load the page rules now**, through the
 const LOOP_FRAGMENTS = ['hitl-loop.md', 'hitl-stages.md', 'report-format.md', 'finding-contract.md', 'html-outputs.md'];
 const PAGE_FRAGMENTS = ['html-render-review.md', 'html-viewing.md'];
 const pasteOf = (name) => '!`cat .claude/skills/shared/' + name + '`';
+// Where the load sentence must sit: after the heading that opens the phase
+// that first needs the rules, before the next heading. A sentence that counts
+// once but drifted below its phase would load the rules too late (review #261).
+const loadSpan = (rel) => rel.endsWith('/review.md') ? ['### Phase 2: Dispatch', '### Phase 3']
+  : rel.includes('/upgrade/') ? ['## Procedure', '<procedure>'] : ['## Audit Before the Report', '## Output Format'];
+// The paste-era wordings the twelve files used for a fragment they no longer
+// hold: a position ("inlined under", "inlined below", "inlined at the end",
+// "inlined in Phase 2"), "the inlined template" or "are inlined for". Pastes that remain (the
+// criteria, the dispatch format) may still be described as inlined.
+const STALE_PASTE = /\binlined (below|under|here|at the end|in Phase \d)\b|\bthe inlined\b|\b(is|are) inlined (for|below|under|at the end)\b/i;
 {
   const misses = [];
   for (const rel of LOOP_FILES) {
     const text = read(rel);
     if (count(text, LOAD_LINE) !== 1) misses.push(rel + ': load sentence x' + count(text, LOAD_LINE));
+    const [opens, closes] = loadSpan(rel);
+    const at = text.indexOf(LOAD_LINE), from = text.indexOf(opens), to = text.indexOf(closes, from + 1);
+    if (at >= 0 && !(from >= 0 && to > from && at > from && at < to)) misses.push(rel + ': load sentence outside ' + opens + ' .. ' + closes);
     for (const n of LOOP_FRAGMENTS) if (text.includes(pasteOf(n))) misses.push(rel + ' still pastes ' + n);
-    const stale = text.split(/\r?\n/).filter(l => /\binlined\b/.test(l)).length;
+    const stale = text.split(/\r?\n/).filter(l => STALE_PASTE.test(l)).length;
     if (stale) misses.push(rel + ': ' + stale + ' line(s) still say a fragment is inlined');
   }
   check('the 12 loop files load loop-rules and report-rules before Phase 3 with one wording and paste none of their five fragments', misses.length === 0, misses.join('; '));
@@ -344,5 +356,7 @@ const pasteOf = (name) => '!`cat .claude/skills/shared/' + name + '`';
   for (const n of PAGE_FRAGMENTS) if (upgrade.includes(pasteOf(n))) misses.push('upgrade pastes ' + n);
   check('the 11 page files load review-page at the gate with one wording and paste neither of its fragments', misses.length === 0, misses.join('; '));
 }
+
+console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }
