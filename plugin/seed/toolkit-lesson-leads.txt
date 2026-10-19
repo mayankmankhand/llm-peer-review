@@ -158,6 +158,8 @@ Call sites paraphrase a shared rule into different behaviors on day one.
 Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.
 Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.
 Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.
+Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.
+Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.
 Check the permission allow-list before designing a mechanism out of shell commands.
 Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
