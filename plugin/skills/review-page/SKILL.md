@@ -12,6 +12,8 @@ allowed-tools:
 
 # Review Page Rules (loaded by name)
 
+<!-- html-viewing.md is also the whole body of the html-viewing skill, which /tk:explore and /tk:audit-html load for pages with no review shell. It is pasted here as well because an inline is one level deep (a skill cannot pull in another skill's inlines) and one load at the gate is cheaper than two. Edit the fragment, never a copy. -->
+
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md"`

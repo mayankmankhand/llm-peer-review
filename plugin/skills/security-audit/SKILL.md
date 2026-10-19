@@ -122,7 +122,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 **When the gate fires, load the page rules now**, through the Skill tool: `Skill(tk:review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["security-audit"]` and each finding's `specialist` to `security-audit`, and omit the `chips` array (single-specialist context). The audit has its own lens token on purpose: sharing `security` with the change-scoped review would let the next small code change report every unfixed audit finding as resolved without re-examining it.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules), set `lenses` to `["security-audit"]` and each finding's `specialist` to `security-audit`, and omit the `chips` array (single-specialist context). The audit has its own lens token on purpose: sharing `security` with the change-scoped review would let the next small code change report every unfixed audit finding as resolved without re-examining it.
 
 ### Security Architect Check
 

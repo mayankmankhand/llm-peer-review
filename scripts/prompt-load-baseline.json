@@ -29,9 +29,9 @@
     "commands/merge.md": 7012,
     "commands/pair-debug.md": 879,
     "commands/peer-review.md": 2150,
-    "commands/review.md": 8344,
+    "commands/review.md": 8354,
     "commands/worktree.md": 1078,
-    "session": 2611,
+    "session": 2628,
     "skills/audit-html/SKILL.md": 3487,
     "skills/cloud/SKILL.md": 1504,
     "skills/design-rules/SKILL.md": 4379,
@@ -54,7 +54,7 @@
     "skills/review-deps-criteria/SKILL.md": 3794,
     "skills/review-deps/SKILL.md": 2688,
     "skills/review-full/SKILL.md": 3506,
-    "skills/review-page/SKILL.md": 3964,
+    "skills/review-page/SKILL.md": 4034,
     "skills/review-plan-criteria/SKILL.md": 4059,
     "skills/review-plan/SKILL.md": 3026,
     "skills/review-security-criteria/SKILL.md": 4867,
@@ -63,6 +63,6 @@
     "skills/review-ux/SKILL.md": 3069,
     "skills/security-audit/SKILL.md": 3770,
     "skills/setup/SKILL.md": 1398,
-    "skills/upgrade/SKILL.md": 5535
+    "skills/upgrade/SKILL.md": 5556
   }
 }

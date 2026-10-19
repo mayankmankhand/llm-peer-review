@@ -1,6 +1,6 @@
 # Review HTML Render
 
-Shared reference for turning a review's findings into an HTML view. Inlined into the review skills and the `/tk:review` orchestrator via `` !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"` ``.
+Shared reference for turning a review's findings into an HTML view. Loaded into the review skills and the `/tk:review` orchestrator through the `review-page` skill when the HTML gate fires (`Skill(tk:review-page)` pastes this file and `html-viewing.md`).
 
 This file documents WHEN to render (the gate) and HOW to render (data injection into the prebuilt shell). The HTML structure and visual look live in the shell template and `tokens.css`, not here: you never hand-write the HTML.
 

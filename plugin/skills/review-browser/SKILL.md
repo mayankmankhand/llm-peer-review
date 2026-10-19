@@ -98,7 +98,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 **When the gate fires, load the page rules now**, through the Skill tool: `Skill(tk:review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["browser"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Expected, Actual, Screenshot as an `<img>` value, Evidence as a `<pre>` value); the review shell renders them as extra field rows inside each finding card.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules), set `lenses` to `["browser"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Expected, Actual, Screenshot as an `<img>` value, Evidence as a `<pre>` value); the review shell renders them as extra field rows inside each finding card.
 
 ### Staff QA Check
 
