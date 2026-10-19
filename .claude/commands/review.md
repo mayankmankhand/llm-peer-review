@@ -12,7 +12,7 @@ Run the right reviews automatically, combine findings into one report.
 <rules>
 
 1. **Reviewers never edit** - Specialists and the report phase never modify files; findings are their product
-2. **Audit, then continue into the auto loop** - Findings are deduped and audited (M2: receipts, skeptical pass, three-vote for Blocks) BEFORE the report, so the report shows survivors only. After the report, do not wait for a human "fix it": auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, inlined under "After the Report" below. Saying "report only" keeps this run report-first (M10)
+2. **Audit, then continue into the auto loop** - Findings are deduped and audited (M2: receipts, skeptical pass, three-vote for Blocks) BEFORE the report, so the report shows survivors only. After the report, do not wait for a human "fix it": auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, loaded by name at Phase 2 (the `loop-rules` skill). Saying "report only" keeps this run report-first (M10)
 3. **Explain simply** - Use plain English, avoid jargon
 4. **Respect the concurrency cap** - Max 4 parallel subagents per run
 
@@ -105,13 +105,15 @@ The inline path continues into the same auto loop after the report (see "After t
 
 ### Phase 2: Dispatch
 
+**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context. The first specialist to return has receipts to run under them.
+
 Each specialist is a typed finder agent that already carries its expertise. The agent's `skills:` frontmatter preloads its `review-<kind>-criteria` skill (the How to Review criteria, reading budget, severity anchors, finding ids, and the finding contract) and the `dispatch-contract` skill (single pass, JSONL out, never audits its own findings), and its expert role is the first line of its body. Nothing from a SKILL.md is read here or pasted into a prompt: the prompt carries only what differs per run.
 
 1. Gather project context with the `project-context` skill: invoke it through the Skill tool (`Skill(project-context)`; it is agent-only, never a slash command) and follow its instructions. Its summary goes into every finder prompt.
 2. Read the changed files once, here, so each finder receives the relevant excerpts instead of re-opening every file (paste-don't-read). A change committed in the range shows in `git diff <range.base> <range.end> -- <path>`, and uncommitted work in `git diff HEAD -- <path>` (an untracked file is new in full); single-quote a path that holds a space.
 3. Spawn one subagent per selected specialist with the Agent tool, using the exact `subagent_type=` value in the Finder column of the Phase 1 table (one typed finder per kind; the table holds the dispatchable name, so copy it rather than composing one), with `model` set to its `models.perRole` value, where `session`, or a model above your own, means your own model family's alias; a project kind's own agent has no entry there and takes no model. Its effort and tool set (no file-editing tools) come from its frontmatter per the roster in `.claude/skills/shared/model-routing.md`. Fallback per that rule: when the type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload) and retry; still not found, dispatch `general-purpose` carrying the same `model` plus what the agent's two skills would have preloaded, pasted as the fragments those skills include rather than the SKILL.md files, whose include lines do not expand when pasted: every file named on an include line of `.claude/skills/review-<kind>-criteria/SKILL.md`, in its order (for most kinds `criteria-<kind>.md`, `reading-budget.md`, `severity-anchors.md`, `finding-id-system.md`, and `finding-contract.md` from `.claude/skills/shared/`; security adds `do-not-report.md` and browser adds `browse-api.md`), then the contract paragraph of `.claude/skills/dispatch-contract/SKILL.md` followed by `.claude/skills/shared/dispatch-format.md`. A project review kind has no such fallback, because its criteria live only in its agent: when that type is not found, skip the kind and say so in the digest, naming the row (`/upgrade` reports a row whose agent is missing, C-12).
 
-**Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder - in practice most runs select 1 to 4 specialists, so the second wave is the exception, not the norm. Browser QA is always sequential (it drives a browser), so it runs last if included. As each specialist returns, write its findings' receipts to a checks file and run them through `run-checks.js` right away (the save form under "Where the report is written" in the shared template, inlined below) instead of waiting for the whole wave - M2's Concurrency note (inlined under "After the Report") is authoritative for this tier-1 overlap.
+**Concurrency:** Dispatch up to 4 subagents in parallel. If more than 4 specialists are relevant, run the first 4 in parallel, wait for results, then run the remainder - in practice most runs select 1 to 4 specialists, so the second wave is the exception, not the norm. Browser QA is always sequential (it drives a browser), so it runs last if included. As each specialist returns, write its findings' receipts to a checks file and run them through `run-checks.js` right away (the save form under "Where the report is written" in the report rules loaded at the start of this phase) instead of waiting for the whole wave - M2's Concurrency note (in the loop rules loaded at the start of this phase) is authoritative for this tier-1 overlap.
 
 **Subagent prompt template:**
 ```
@@ -128,11 +130,11 @@ Run notes:
 [ONLY WHAT THIS RUN NEEDS, OR OMIT THE SECTION: the focus arguments; the plan file path for the plan finder; the dev server URL for the browser finder; for the browser finder, each `[behaviour]` must-check line verbatim, with "exercise the stateful controls on this surface that the design loop's pass did not cover"; which other specialists run alongside, so copy and UX split meaning from usability.]
 ```
 
-The role, the criteria, the review lens and the single-pass contract live in the agent and the two skills it preloads, so a dispatch does not carry them. What the finder returns is fixed by the `dispatch-contract` skill; the orchestrator parses that format, so it is inlined here from the one file both share:
+The role, the criteria, the review lens and the single-pass contract live in the agent and the two skills it preloads, so a dispatch does not carry them. What the finder returns is fixed by the `dispatch-contract` skill; the orchestrator parses that format, so it is pasted here from the one file both share:
 
 !`cat .claude/skills/shared/dispatch-format.md`
 
-**If a subagent fails** (error, timeout, empty response, or output that will not parse as JSONL; a `NOT CHECKED:` line beside the JSONL or `NO FINDINGS` is part of the format, not a parse failure), re-dispatch that one finder once with the same prompt - and when it ran on a cheaper model than yours, dispatch the retry on your own model per guardrail 2 in `.claude/skills/shared/model-routing.md`. Malformed output counts as a failure precisely because it is silent: a specialist that returns prose instead of JSONL has produced nothing the run can use. Whether a return parses is the merge helper's call, not a reading: write it as `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` and run `node .claude/scripts/merge-findings.js` on that folder; exit 1 with `{"error":"bad_line"}` on stderr is the parse failure, while `NO FINDINGS` and `NOT CHECKED:` lines are skipped and exit 0 (M16). Still failing after the one retry: a hard stop, handled per "When a finder fails" in M2 (`.claude/skills/shared/hitl-loop.md`, inlined under "After the Report"): page with retry, continue anyway, or stop, and hold the chain until the answer. Do not improvise a variant, and never let it pass as a note.
+**If a subagent fails** (error, timeout, empty response, or output that will not parse as JSONL; a `NOT CHECKED:` line beside the JSONL or `NO FINDINGS` is part of the format, not a parse failure), re-dispatch that one finder once with the same prompt - and when it ran on a cheaper model than yours, dispatch the retry on your own model per guardrail 2 in `.claude/skills/shared/model-routing.md`. Malformed output counts as a failure precisely because it is silent: a specialist that returns prose instead of JSONL has produced nothing the run can use. Whether a return parses is the merge helper's call, not a reading: write it as `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` and run `node .claude/scripts/merge-findings.js` on that folder; exit 1 with `{"error":"bad_line"}` on stderr is the parse failure, while `NO FINDINGS` and `NOT CHECKED:` lines are skipped and exit 0 (M16). Still failing after the one retry: a hard stop, handled per "When a finder fails" in M2 (`.claude/skills/shared/hitl-loop.md`, in the loop rules loaded at Phase 2): page with retry, continue anyway, or stop, and hold the chain until the answer. Do not improvise a variant, and never let it pass as a note.
 
 ### Phase 3: Synthesize
 
@@ -143,7 +145,7 @@ The role, the criteria, the review lens and the single-pass contract live in the
 - `file`: for a design or interaction line, the surface's source file as the Surface row of the plan's UI/UX Design section names it; for a plan line, the file it names; otherwise omitted.
 - `what`, `context`, `fix`: written from the line to the finding contract.
 - `fields`: a `Source` row carrying the line verbatim, the one attachment every seeded finding has; a design line adds its `Screenshot`.
-- `key`: per the dispatch format inlined in Phase 2.
+- `key`: per the dispatch format pasted in Phase 2.
 - `receipt`: written by the orchestrator against the work as delivered (the code, the tests, and the evidence the plan's Outcomes cite), never against the plan text the gap was raised on, with a machine `expect` so the checks script decides it: `{"exit": 0}` for a test run or a `test -f`, `{"match": "<pattern>"}` for a grep or file read. A design line's re-capture of the surface runs `browse.js` directly when a server is reachable (the script runs read-only commands only): one screenshot per surface, not the failing-action re-run M2 rules out before the report; the orchestrator copies that capture into `reports/receipts/<run-stamp>/` with its own file tool first (browse.js saves to /tmp, which the runner refuses to read) and the receipt's check reads the copy (`test -f reports/receipts/<run-stamp>/<name>.png` with `{"exit": 0}`). An interaction line re-runs its session the same way, its receipt a `grep` over the saved session output with `{"match": ...}` on the result the line names. With no server, either one falls back to what the design loop saved (the screenshot, or the session's failing output) and the finding says it was not re-checked. A plan line's check is a grep, file read, or test run whose output shows the gap still holds. A `[check]` line's check reads the record the line names: a grep over that `results.json` with `{"match": ...}` on the flagged row (its `"flaky":true`, its `"slow":true`, or a guard's failing verdict), and for a flake a grep over the kept `first-run/<id>.txt` and the passing `<id>.txt` beside it.
 
 **Seed the plan's tally.** When the selected plan carries check lines (`grep -cE '^ *- Check( +(target|guard)\b| *:)' plans/<plan>.md`, the start the runner reads as a check line, prints more than 0; M16), run `node .claude/scripts/run-checks.js --plan plans/<plan>.md --tally` (M16): its one JSON object gives each step a status (M17). Each step whose status is `unproved`, `missing` or `problem` becomes one finding in the same shape, `specialist` `check-first`, its `what` the step and the tally's reasons; so does each entry in the tally's top-level `problems` list, and each id in a step's `flaky`, `slow` or `brokenBefore` list that no `[check]` line already names (its receipt a grep over that step's `results.json` for the flagged row). A `proved` step is done and a `noTarget` step opted out; a step's `notes` (a record that names no command) go to the digest, not a finding. The tally cannot be a receipt, because the checks script runs only read-only commands and refuses itself, so the receipt reads the evidence the status rests on: `test -f reports/checks/<plan>/step-<N>/<phase>/results.json` with `{"exit": 1}` for a missing record, a grep over that `results.json` with `{"match": ...}` on a failing or changed row, and for a missing or broken check line a grep over the plan with `{"match": ...}` on the line, or `{"lines": {"max": 0}}` on the step's check lines when it has none. A finding seeded from a step's status or from a top-level problem is report-only: a step either showed its stated failure before its work and passed after it, or it did not, and running a phase now cannot change that, so the digest lists it as needing the user, who decides whether to redo the step or accept it. A flagged check (`flaky`, `slow`, `brokenBefore`) is fixed like any finding.
@@ -157,7 +159,7 @@ Collect the JSONL findings from all subagents (a specialist that emitted `NO FIN
 
 ### Phase 4: Audit (M2)
 
-The three-tier audit runs here, between dedup and the report: the orchestrator is M2's *runner*. M2 in `.claude/skills/shared/hitl-loop.md` (inlined under "After the Report") holds every mechanic - the tiers and what each covers, the skeptic instruction, the verdict formats, dispatch hygiene, the concurrency note, and the redispatch-on-failure rule. Do not restate them here and do not improvise a variant.
+The three-tier audit runs here, between dedup and the report: the orchestrator is M2's *runner*. M2 in `.claude/skills/shared/hitl-loop.md` (in the loop rules loaded at Phase 2) holds every mechanic - the tiers and what each covers, the skeptic instruction, the verdict formats, dispatch hygiene, the concurrency note, and the redispatch-on-failure rule. Do not restate them here and do not improvise a variant.
 
 What is specific to this path:
 
@@ -166,14 +168,14 @@ What is specific to this path:
 - **The inline path is not exempt.** When Phase 1.5 reviewed the diff inline, the orchestrator authors receipts for its own findings and runs tier 1 the same way, but tiers 2 and 3 still dispatch fresh `audit-skeptic` agents. M2's never-judge-your-own-findings rule applies here exactly as it does to dispatched specialists.
 - **Seeded items are audited like any finding.** The orchestrator wrote their receipts in Phase 3, as it does on the inline path, and tiers 2 and 3 judge them exactly as they judge a finder's. In the receipts folder their `<lens>` is the seeded specialist (`plan-critic`, `design-critic`, `interaction-pass`, `check-first`).
 - **The skeptics are typed.** Tier 2 shards and tier 3 voters are `subagent_type=audit-skeptic` dispatches (no edit tools, `effort: high`, session model, per the roster in `.claude/skills/shared/model-routing.md`); the whole prompt is M2's one line naming the tier and the shard file `--shards` wrote, which carries the verbatim bytes. Fallback per that file: when the agent type is not found, run `/reload-plugins` once (an agent added by a plugin install or update, or written this session, registers only after a reload), then `general-purpose` with no model parameter and M2's instruction for that tier pasted in.
-- **Save each check's output as it runs**, with the form under "Where the report is written" in the shared template inlined below (the folder, the `<run-stamp>`, the `<lens>-<n>` id and file name, the checks file and the `run-checks.js` call). It lives in the template so a directly typed skill follows the same form; do not restate it here. On this path `<lens>` is the specialist that authored the finding, or `inline` on the Phase 1.5 path.
+- **Save each check's output as it runs**, with the form under "Where the report is written" in the report rules loaded at Phase 2 (the folder, the `<run-stamp>`, the `<lens>-<n>` id and file name, the checks file and the `run-checks.js` call). It lives in the template so a directly typed skill follows the same form; do not restate it here. On this path `<lens>` is the specialist that authored the finding, or `inline` on the Phase 1.5 path.
 
 Killed findings exit to the Audited out log (never fixed); survivors proceed to Phase 5 with receipts attached.
 
 ### Phase 5: Report
 
 1. **Derive the markdown report** from the surviving findings using the format below, opening with the Phase 0 scope line: each finding's `what` becomes the dash summary line, each `fields[]` row becomes a labeled sub-bullet in order, and each finding's `receipt` plus the output tier 1 captured for it fills the template's final **Receipt:** row. Killed findings render in the template's Audited out section.
-2. **Write that markdown to disk** per the "Where the report is written" section of the shared template inlined below. Use `orchestrator` as the `<who>` segment. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
+2. **Write that markdown to disk** per the "Where the report is written" section of the report rules loaded at Phase 2. Use `orchestrator` as the `<who>` segment. The section holds the path shape, the stderr rule, and why the on-disk copy is the canonical one; do not restate them here.
 3. **Derive the HTML** (when the gate fires) from the SAME findings structure, at the END of the run - see HTML Companion below. On an auto run that is after the loop below has settled, so the page shows what was fixed and what is still open; on a "report only" run it is right after this report, since nothing gets fixed. The findings are authored once (by the specialists) and formatted twice (markdown + HTML); they are never re-written. The HTML is a reader's view and may carry less than the markdown; the markdown never carries less than the HTML.
 
 </procedure>
@@ -193,15 +195,11 @@ When Phase 3 seeded must-check items or tally findings, the line ends with one m
 
 ### Base Structure
 
-The orchestrator report uses the two-sentence finding contract inlined below from the shared template. This is the single source of truth - do not duplicate it elsewhere. The `<shared_template>` tags isolate the inlined content from this file's own heading hierarchy so the template's headings do not collide with the orchestrator's structure.
+The orchestrator report uses the two-sentence finding contract from the report rules loaded at Phase 2. This is the single source of truth - do not duplicate it elsewhere.
 
 The orchestrator fills this structure from the surviving JSON findings (Phases 3-4): each finding's `what` becomes the dash summary line, `context` becomes the unlabeled sub-bullet under it when present, `fix` becomes the **Fix:** row, and any `fields[]` attachments become labeled sub-bullets in order. It does not re-author the prose - it formats what the specialists already wrote.
 
-<shared_template>
-!`cat .claude/skills/shared/report-format.md`
-
-!`cat .claude/skills/shared/finding-contract.md`
-</shared_template>
+The template and the contract are in the report rules loaded at Phase 2.
 
 ### Orchestrator Supplement
 
@@ -209,11 +207,11 @@ The orchestrator adds a `[specialist]` tag right after each finding ID, indicati
 
 The Top Issues line also carries the tag: `🚫 X Blocks: R1 [code] (file:line - one-line What)`.
 
-**Suppress the inlined Summary block.** The shared template inside `<shared_template>` includes its own `### Summary` block. Do NOT render it. Use only the orchestrator-specific Summary below (which adds Specialists run and Deduplicated findings). Otherwise the report ends with two Summary blocks and the reader cannot tell which is authoritative.
+**Suppress the template's Summary block.** The report template (in the report rules loaded at Phase 2) includes its own `### Summary` block. Do NOT render it. Use only the orchestrator-specific Summary below (which adds Specialists run and Deduplicated findings). Otherwise the report ends with two Summary blocks and the reader cannot tell which is authoritative.
 
 **Merging code+browser findings.** When both the code and browser specialists flag the same issue, the helper keeps every field from both: the browser evidence fields (Expected, Actual, Screenshot, Evidence) pair with the code root cause to form a unified evidence-plus-fix report, in the template's field order, unchanged.
 
-The tag is the only thing this section adds to a finding. Every row - the three prose keys (`what`, `context`, `fix`), the browser evidence fields, and the audit-time **Receipt** row - is defined by the inlined template and rendered from there:
+The tag is the only thing this section adds to a finding. Every row - the three prose keys (`what`, `context`, `fix`), the browser evidence fields, and the audit-time **Receipt** row - is defined by the report template loaded at Phase 2 and rendered from there:
 
 - **R1** [code] 🚫 `file:line` - [What]
   - [field rows per the template, **Receipt** last]
@@ -231,7 +229,7 @@ Derive all four from the run you just did. None of them is a new judgement: the 
 
 ### Overall Verdict, readability, and the security nudge (orchestrator)
 
-The inlined template defines the **Overall Verdict** line, the **readability backstop**, and the receipt rule. Apply each across the merged run rather than per specialist. Two things are specific to this path:
+The report template loaded at Phase 2 defines the **Overall Verdict** line, the **readability backstop**, and the receipt rule. Apply each across the merged run rather than per specialist. Two things are specific to this path:
 
 - **Compute the Verdict from the audit survivors**, not from everything the specialists reported. A Block the Phase 4 audit killed does not make the run `changes-requested`; the same goes for the readability backstop's count.
 - **Security escalation nudge:** if the changed files touch a genuine trust boundary - a new route/endpoint, file upload, or webhook; authentication logic; crypto; or secret handling - append one line after the report: _"Consider `/security-audit`: this change touches [X], which deserves a deeper whole-repo pass."_ Only when a trigger is genuinely present; the Security specialist also emits this when called directly.
@@ -253,24 +251,22 @@ End the report with one line so the user knows what happens next: _"The loop now
 
 ## HTML Companion (when gate fires)
 
-After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template (it covers the gate and the data-injection steps):
+After writing the markdown report, evaluate whether to also generate an HTML view.
 
-!`cat .claude/skills/shared/html-render-review.md`
+**The gate:** render the review page whenever this run has any surviving finding, or this branch's standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.
+
+**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
 
 For orchestrator output specifically:
 - Pass `--name review --stable` to the helper: the HTML is one standing page per branch (the renderer names it), not one per run. Set `lenses` to the specialists this run dispatched, so the renderer replaces only their findings and carries the other lenses' open findings forward (the fragment above says how), and `reviewedFiles` to every `path` in the scope's file lists (`range.files` when there is a range, plus `uncommitted.staged.files`, `uncommitted.unstaged.files` and `uncommitted.untracked.files`), read back from `reports/receipts/<run-stamp>/scope.json` (`grep -oE '"path": *"[^"]+"' reports/receipts/<run-stamp>/scope.json | cut -d'"' -f4 | sort -u` lists them; M16). Two paths dispatch nothing and still need the right value: on `/review full`, omit `lenses` and `reviewedFiles` exactly as `/review-full` does, because a full check replaces the whole page; on the Phase 1.5 inline path, set `lenses` to the domains the file-type table flagged for the diff, because those are the lenses this run checked, and `reviewedFiles` the same way as above
 - Include the `chips` array when 2 or more specialists were dispatched; omit it for single-specialist orchestrator runs
 - Use the `groups[]` array (findings grouped by specialist); the renderer ranks them itself, so the order you send does not matter. These finding objects ARE the surviving Phase 4 findings - same `severity`, `specialist`, `file`, `what`, `context`, `fix`, `fields` shape - grouped by specialist with the assigned `id`, each `receipt` carrying the `stdoutFile` and `exit` from its row in the Phase 4 run's `checks[]` JSON. Do NOT re-derive findings from the markdown prose; map the structured findings directly.
 - On an auto run the render happens after the loop (After the Report, step 6): the findings the loop fixed go to `alreadyFixed`, one line each with the check that confirmed the fix, and only the unfixed ones stay in `groups[]`
-- The Receipt field rows and the Audited out group render per the audit rows rule in the shared HTML fragment above; the orchestrator's only addition is the `[specialist]` tag carried inside each finding's `what`/`id` as everywhere else.
+- The Receipt field rows and the Audited out group render per the audit rows rule in the page rules; the orchestrator's only addition is the `[specialist]` tag carried inside each finding's `what`/`id` as everywhere else.
 
 ## After the Report (auto loop)
 
-What happens after the report is governed by the shared auto-loop fragment (the M-rule IDs cited in this file refer to it):
-
-!`cat .claude/skills/shared/hitl-loop.md`
-
-!`cat .claude/skills/shared/hitl-stages.md`
+What happens after the report is governed by the loop rules, in context since Phase 2 (the M-rule IDs cited in this file refer to them).
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -290,11 +286,7 @@ Two separate per-run opt-outs: saying "report only" on the invocation keeps the 
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
-
-!`cat .claude/skills/shared/html-outputs.md`
-
-!`cat .claude/skills/shared/html-viewing.md`
+When to render and the temporary-folder steps are in the report rules loaded at Phase 2; how a page reaches the user is in the page rules loaded at the gate. Nothing is pasted here.
 
 <rules>
 ## REMEMBER: Specialists report; the loop fixes. After the report, continue per the auto loop above and chain into `/document` (M14); "report only" keeps a run report-first (M10), "no chaining" stops after this stage.

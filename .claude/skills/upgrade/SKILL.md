@@ -34,6 +34,8 @@ Every convention this run checks is written down once, with its id, the version 
 
 ## Procedure
 
+**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context. Step 1b makes a folder under the report rules' temporary-folder steps, and step 4 audits under the loop rules.
+
 <procedure>
 
 ### 1. Audit for candidates
@@ -63,7 +65,7 @@ It prints one JSON object, the range and `entries`: one per entry of the release
 3. **New seams:** does the entry add a seam or an option the project's own files could use?
 4. **Removals:** does the entry remove or rename something (a command, skill, agent, file, flag or page name) that a file in the repository still names?
 
-Make this run's stamp folder, `mktemp -d /tmp/upgrade-stamp.XXXXXX`, per "Temporary folders" in the HTML rules inlined at the end, and write one row per entry into `adoption.txt` there with the Write tool: `<id> no action: <why, in a few words>` when no question finds anything, or `<id> raised: <what you found, with the file and line>`. When the range has no entries, write the file empty: step 7 names it every time, and the stamp refuses a file it cannot read. Each raised entry goes on step 6's batch page with its options and their tradeoffs (take the toolkit's way, keep the project's own, or change nothing); once the user answers, end its row with ` Decision: <their choice>`. Step 7's stamp reads this file, refuses while an entry in the range has no row or a raised row has no decision, and writes the rows into `.claude/toolkit/adoption.md`, this project's record of what each upgrade read and decided.
+Make this run's stamp folder, `mktemp -d /tmp/upgrade-stamp.XXXXXX`, per "Temporary folders" in the report rules loaded at the start of this procedure, and write one row per entry into `adoption.txt` there with the Write tool: `<id> no action: <why, in a few words>` when no question finds anything, or `<id> raised: <what you found, with the file and line>`. When the range has no entries, write the file empty: step 7 names it every time, and the stamp refuses a file it cannot read. Each raised entry goes on step 6's batch page with its options and their tradeoffs (take the toolkit's way, keep the project's own, or change nothing); once the user answers, end its row with ` Decision: <their choice>`. Step 7's stamp reads this file, refuses while an entry in the range has no row or a raised row has no decision, and writes the rows into `.claude/toolkit/adoption.md`, this project's record of what each upgrade read and decided.
 
 ### 2. Open the cycle's issue
 
@@ -88,11 +90,7 @@ The rest go through step 4's audit and step 6's one batch page like every other 
 
 ### 4. Audit (M2)
 
-You are the runner. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that file, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one's `key` and record the merge in the report's dedup notes. A finding of the script's keeps its convention id as `sourceId`, which the report's summary line shows beside the number. Then run the three tiers exactly as M2 describes: execute every `receipt.check` yourself and save each output under `reports/receipts/<run-stamp>/` per "Where the report is written" below; dispatch tier 2 shards over the surviving Warns and Suggests and, should any finding be a Block, three tier 3 voters, all as `subagent_type=audit-skeptic`, each carrying only its findings' verbatim bytes and the receipt output; tally the verdicts. The typical kill here is C-1 matching a file the project itself owns: the receipt shows the path exists in the project and the skeptic refutes it. The loop's rules are inlined here so nothing is improvised:
-
-!`cat .claude/skills/shared/hitl-loop.md`
-
-!`cat .claude/skills/shared/hitl-stages.md`
+You are the runner. Write every finding line this run collected, the workers' lines and any the runner authored itself, into `findings.jsonl` in a fresh folder from `mktemp -d /tmp/review-merge.XXXXXX` with the Write tool, then run `node .claude/scripts/merge-findings.js` on that file, typed as literal words: its stdout is the deduplicated, sorted, numbered set (R1 onward, no gaps) and its stderr line carries the raw and merged counts. Two findings that describe one defect under different keys are the one judgment this pass leaves to you: before running the helper, give the later one the earlier one's `key` and record the merge in the report's dedup notes. A finding of the script's keeps its convention id as `sourceId`, which the report's summary line shows beside the number. Then run the three tiers exactly as M2 describes: execute every `receipt.check` yourself and save each output under `reports/receipts/<run-stamp>/` per "Where the report is written" below; dispatch tier 2 shards over the surviving Warns and Suggests and, should any finding be a Block, three tier 3 voters, all as `subagent_type=audit-skeptic`, each carrying only its findings' verbatim bytes and the receipt output; tally the verdicts. The typical kill here is C-1 matching a file the project itself owns: the receipt shows the path exists in the project and the skeptic refutes it. The loop's rules have been in context since the start of this procedure, so nothing is improvised.
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -102,9 +100,7 @@ You are the runner. Write every finding line this run collected, the workers' li
 
 Write the report per the format below, with `upgrade` as the `<who>` segment of the path and every surviving finding carrying its convention id in the summary line (`**R1** [C-1] ⚠️`). Killed findings go to the Audited out section with their verdict lines. This report is markdown only: the standing review page belongs to the sample cycle in step 8, not to this audit.
 
-!`cat .claude/skills/shared/report-format.md`
-
-!`cat .claude/skills/shared/finding-contract.md`
+The report template and the finding contract are in the report rules loaded at the start of this procedure.
 
 ### 6. Fix and re-verify
 
@@ -148,6 +144,4 @@ The repair checks (C-9 to C-11) run on every upgrade, as the rules stamp check (
 
 ## HTML Output Rules
 
-This audit's own report is markdown only, and the sample cycle in step 8 runs `/review`, which carries its own page rules. The shared rules are inlined for the temporary-folder steps this run takes (the issue body in step 2, and step 1b's stamp folder):
-
-!`cat .claude/skills/shared/html-outputs.md`
+This audit's own report is markdown only, and the sample cycle in step 8 runs `/review`, which carries its own page rules. The HTML output rules, with the temporary-folder steps this run takes (the issue body in step 2, and step 1b's stamp folder), are in the report rules loaded at the start of this procedure.

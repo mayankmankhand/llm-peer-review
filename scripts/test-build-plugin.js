@@ -511,6 +511,25 @@ for (const [name, files] of Object.entries(RULE_SKILLS)) {
   for (const row of ['Skill(tk:' + name + ')', 'Skill(tk:' + name + ':*)']) if (!seedAllow.includes(row)) ruleSkillMisses.push('seed lacks ' + row);
 }
 check('live: loop-rules, report-rules and review-page build with plugin-scoped inlines and all six seed rows', ruleSkillMisses.length === 0, ruleSkillMisses.join('; '));
+// The twelve files that load those skills by name must carry the plugin-scoped
+// form in the built tree (#261): a load line the build left unscoped would stop
+// a downstream session on a skill that does not exist there, which a harness
+// run in bypassPermissions would never show.
+const LOOP_LOADERS = ['commands/review.md', 'skills/review-browser/SKILL.md', 'skills/review-code/SKILL.md',
+  'skills/review-commands/SKILL.md', 'skills/review-copy/SKILL.md', 'skills/review-deps/SKILL.md',
+  'skills/review-plan/SKILL.md', 'skills/review-security/SKILL.md', 'skills/review-ux/SKILL.md',
+  'skills/review-full/SKILL.md', 'skills/security-audit/SKILL.md', 'skills/upgrade/SKILL.md'];
+const scopedMisses = [];
+for (const rel of LOOP_LOADERS) {
+  if (!fs.existsSync(path.join(live, rel))) { scopedMisses.push(rel + ' missing'); continue; }
+  const text = read(live, rel);
+  for (const name of ['loop-rules', 'report-rules']) if (!text.includes('`Skill(tk:' + name + ')`')) scopedMisses.push(rel + ' lacks Skill(tk:' + name + ')');
+  const page = text.includes('`Skill(tk:review-page)`');
+  if (rel.includes('/upgrade/') ? page : !page) scopedMisses.push(rel + (page ? ' loads' : ' lacks') + ' Skill(tk:review-page)');
+  if (/Skill\((loop-rules|report-rules|review-page)\)/.test(text)) scopedMisses.push(rel + ' keeps an unscoped load');
+}
+check('live: the twelve loop files load Skill(tk:loop-rules) and Skill(tk:report-rules), and the eleven page files Skill(tk:review-page)', scopedMisses.length === 0, scopedMisses.join('; '));
+
 check('live: the deps criteria audit the plugin root, not scripts/', read(live, 'skills/shared/criteria-deps.md').includes('--prefix "${CLAUDE_PLUGIN_ROOT}"') && !read(live, 'skills/shared/criteria-deps.md').includes('${CLAUDE_PLUGIN_ROOT}/scripts`'));
 // conventions.md (data the audit parses) and the release notes (#257, the
 // repository's CHANGELOG.md blocks as written) are not prompts, so the prompt

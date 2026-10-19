@@ -297,4 +297,52 @@ const PASTE_LIMIT = 28500;
 }
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
+console.log('\n7. the rules a review loads by name (#261)');
+// Twelve files run the loop and used to paste its rules at the top of every
+// run. They now load them through three skills at the point the rules are
+// first needed, and all twelve say so in one sentence, so a skipped load is
+// the one failure this change adds and a drifted sentence is what this
+// section catches. The page rules load only when the gate fires, and the gate
+// itself stays inline so the decision never waits on a fragment loaded after it.
+const LOOP_FILES = [
+  '.claude/commands/review.md',
+  '.claude/skills/review-browser/SKILL.md', '.claude/skills/review-code/SKILL.md',
+  '.claude/skills/review-commands/SKILL.md', '.claude/skills/review-copy/SKILL.md',
+  '.claude/skills/review-deps/SKILL.md', '.claude/skills/review-plan/SKILL.md',
+  '.claude/skills/review-security/SKILL.md', '.claude/skills/review-ux/SKILL.md',
+  '.claude/skills/review-full/SKILL.md', '.claude/skills/security-audit/SKILL.md',
+  '.claude/skills/upgrade/SKILL.md',
+];
+const PAGE_FILES = LOOP_FILES.filter(f => !f.includes('/upgrade/'));
+const LOAD_LINE = '**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context.';
+const GATE_LINE = '**The gate:** render the review page whenever this run has any surviving finding, or this branch\'s standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.';
+const PAGE_LINE = '**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.';
+const LOOP_FRAGMENTS = ['hitl-loop.md', 'hitl-stages.md', 'report-format.md', 'finding-contract.md', 'html-outputs.md'];
+const PAGE_FRAGMENTS = ['html-render-review.md', 'html-viewing.md'];
+const pasteOf = (name) => '!`cat .claude/skills/shared/' + name + '`';
+{
+  const misses = [];
+  for (const rel of LOOP_FILES) {
+    const text = read(rel);
+    if (count(text, LOAD_LINE) !== 1) misses.push(rel + ': load sentence x' + count(text, LOAD_LINE));
+    for (const n of LOOP_FRAGMENTS) if (text.includes(pasteOf(n))) misses.push(rel + ' still pastes ' + n);
+    const stale = text.split(/\r?\n/).filter(l => /\binlined\b/.test(l)).length;
+    if (stale) misses.push(rel + ': ' + stale + ' line(s) still say a fragment is inlined');
+  }
+  check('the 12 loop files load loop-rules and report-rules before Phase 3 with one wording and paste none of their five fragments', misses.length === 0, misses.join('; '));
+}
+{
+  const misses = [];
+  for (const rel of PAGE_FILES) {
+    const text = read(rel);
+    if (count(text, GATE_LINE) !== 1) misses.push(rel + ': gate sentence x' + count(text, GATE_LINE));
+    if (count(text, PAGE_LINE) !== 1) misses.push(rel + ': page load sentence x' + count(text, PAGE_LINE));
+    for (const n of PAGE_FRAGMENTS) if (text.includes(pasteOf(n))) misses.push(rel + ' still pastes ' + n);
+  }
+  const upgrade = read('.claude/skills/upgrade/SKILL.md');
+  if (upgrade.includes('Skill(review-page)')) misses.push('upgrade loads review-page, which renders no review page');
+  for (const n of PAGE_FRAGMENTS) if (upgrade.includes(pasteOf(n))) misses.push('upgrade pastes ' + n);
+  check('the 11 page files load review-page at the gate with one wording and paste neither of its fragments', misses.length === 0, misses.join('; '));
+}
+
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }
