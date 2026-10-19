@@ -2,6 +2,28 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased - Your Own Labels
+
+**Issue #268.** A project can now set the questions `/tk:create-issue` asks and the labels it applies, in a ninth file in `.claude/toolkit/`: `issue-labels.md`. With no such file, the command works as before.
+
+### Added
+
+- **`.claude/toolkit/issue-labels.md`.** Two short lists: your questions, and every label their answers can map to. Each list replaces the command's own only when it has entries, so a file with questions but no labels keeps the toolkit's label set, and a file holding only a comment changes nothing. When the file lists labels, the command applies no other label. It is the one prose file in the folder that replaces the toolkit's text rather than adding to it.
+
+### Changed
+
+- **`/tk:create-issue` asks the questions in its list, skipping any you already answered,** where it used to ask a fixed two or three.
+- **The command now says what each host does with a label the repository lacks.** GitHub refuses it, so the command drops it and says which; GitLab creates it without a word. The old line said the create command fails, which held on GitHub only.
+- `/tk:upgrade`'s paste-size check (C-19) covers `issue-labels.md` too. It finds pasted files by reading the commands, so the check itself did not change.
+
+### Upgrading
+
+- Nothing to do unless you want your own questions or labels. Then write `.claude/toolkit/issue-labels.md` in the shape the folder's README describes; a newly seeded README lists nine files. A project that told Claude to use its own labels from a line in its rules file can move that line into the new file.
+
+### Why
+
+The command's question and label list lived in the plugin, so a project with its own labels had to override them from its rules file: a rule that held only while it was in context, beside a command that said the opposite. On GitLab, which creates any label an issue names, following the command's own list could quietly bring back a label the project had retired.
+
 ## v8.0.7 - The Check That Runs Itself (2026-10-19)
 
 **A patch on top of v8.0.6 (#260 to #266).** Before any push Claude makes, a hook now runs the pre-push check and blocks a push it flags. `/tk:review` loads its rules when each phase starts instead of all at once, and the release gate holds every prompt file to a line. `/tk:document` turns a doc that disagrees with the code into a finding with both lines quoted, `/tk:merge` brings a worktree's records home before the worktree goes, and `/tk:cloud` runs a research report or a review in a Claude Code cloud session.
