@@ -542,3 +542,8 @@
 - **`npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.**
 - **Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.**
 - **In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.**
+
+## Issue 261 (load the review rules by phase)
+
+- **Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.**
+- **Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.**
