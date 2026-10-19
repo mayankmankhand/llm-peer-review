@@ -273,7 +273,7 @@
 
 - **An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.**
 - **Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.**
-- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.**
+- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.** (another occurrence in detail: #268)
 - **A check that defers to another check must ask whether that other check runs in this range.**
 - **In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.**
 
@@ -440,7 +440,7 @@
 ## Issues 244 and 245 (dropped files and the paste limit)
 
 - **A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.**
-- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.** (second occurrence in detail: #265/#266)
+- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.** (second and third occurrences in detail: #265/#266, #268)
 - **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
 - **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
 
@@ -465,7 +465,7 @@
 
 - **A runner mode several callers share changes only behind a flag the new caller passes.**
 - **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
-- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.**
+- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.** (third occurrence in detail: #268)
 
 ## Issue 249 (the test gate speed)
 
