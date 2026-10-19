@@ -185,7 +185,7 @@ Full prompt: [`.claude/skills/error-analysis/SKILL.md`](../.claude/skills/error-
 
 ### `/create-issue` - issues that don't bloat
 
-Asks a few clarifying questions first (your project's own, and only its labels, when `.claude/toolkit/issue-labels.md` sets them), then creates a short (10-15 line) issue via `gh issue create` on GitHub or `glab issue create` on GitLab. It picks the right one by reading your git remote, so there is nothing to configure. No implementation details; that's what `/explore` and `/create-plan` are for. Good for capturing bugs and ideas without context-switching out of your editor.
+Asks a few clarifying questions first, then creates a short (10-15 line) issue via `gh issue create` on GitHub or `glab issue create` on GitLab, labelled from your answers. It picks the right one by reading your git remote, so there is nothing to configure. When `.claude/toolkit/issue-labels.md` sets them, the questions and labels are your project's own, and no other label is applied. No implementation details; that's what `/explore` and `/create-plan` are for. Good for capturing bugs and ideas without context-switching out of your editor.
 
 Full prompt: [`.claude/commands/create-issue.md`](../.claude/commands/create-issue.md)
 

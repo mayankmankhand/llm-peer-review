@@ -176,7 +176,7 @@ The `/audit-html` skill applies the same principle to the project's own markdown
 - Anything new discovered while re-verifying follows M5's one-generation rule: fixed and re-verified once, then further discoveries land in the digest as open items
 
 **When Running /create-issue:**
-- Ask the clarifying questions first: the project's, and then only its labels, when `.claude/toolkit/issue-labels.md` sets them
+- Ask the clarifying questions first, the project's own when `.claude/toolkit/issue-labels.md` sets them, and apply only the project's labels when it lists any
 - Keep issues short, about 10-15 lines, so `/explore` starts from the problem rather than a solution
 - No implementation details - that's for /explore and /create-plan
 
@@ -196,7 +196,7 @@ A project adds its own rules to the toolkit through nine files in `.claude/toolk
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
 | `checks.json` | `/execute`, at its full test step (a parallel checkpoint, the plan's Verify step, and every step of a plan with no check lines), through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines`; when the file exists it replaces the default test run, so it must name the project's test command, and a failed or refused check fails that run, apart from a `flaky` older check, which M17 carries as a `[check]` line, as it does a passing `slow` row |
 | `generated.json` | `/merge`, when it checks and lands a PR | The files the project rebuilds rather than merges, as a JSON array of `{paths, rebuild}`: the lost-work checks skip those paths, and a landing rebuilds them with `rebuild`, run as an ordinary command under the project's permission rules (`.claude/skills/shared/merge-rules.md`) |
-| `issue-labels.md` | `/create-issue`, before it asks its questions | The project's questions and labels. The one prose file that replaces rather than adds: its questions replace the command's list, its labels replace the toolkit's set, and only labels it names are applied |
+| `issue-labels.md` | `/create-issue`, before it asks its questions | The project's questions and labels. The one prose file that replaces rather than adds, each list only when it has entries: its questions replace the command's list, its labels replace the toolkit's set, and then only labels it names are applied |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/review-full` says in its charter that project kinds are not in its fan-out. `/upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
