@@ -97,7 +97,8 @@
 //     receipt shows the file and stops confirming once it is trimmed; a file at
 //     the limit, an absent one, and an oversized file nothing pastes are no
 //     finding; on the real commands and skills the pasted files are exactly
-//     the six #244 names; the 8.0.0 build does not run it.
+//     the six #244 names plus #268's issue-labels.md; the 8.0.0 build does not
+//     run it.
 // Every receipt an explicit run emits is run through `bash -c` from its fixture
 // project and must show the evidence it names. A small fixture conventions file covers the
 // parser mechanics the real file does not exercise. Mutation checks prove the
@@ -3134,12 +3135,12 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
 
   // ---- (e) the extension README: one paragraph still v7.4.0's beside one the project rewrote ----
   const README_NOW = seed760('toolkit-README.md');
-  check('the current extension README says eight files', README_NOW.includes('## The eight files'));
-  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The eight files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
+  check('the current extension README says nine files', README_NOW.includes('## The nine files'));
+  d = seededCase('old-readme-heading', { '.claude/toolkit/README.md': README_NOW.replace('## The nine files', '## The five files').replace('Each file has a fixed name. Create only the ones you need.', 'Each file has a fixed name. We keep all of them, even empty ones.') });
   r = audit760(d);
   f = c15(r);
   out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
-  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The eight files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
+  check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The nine files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
 
   // ---- (f) a whole file that is an older seed's ----
   const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md - this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).');
@@ -3406,7 +3407,8 @@ console.log('\n9h. a pasted project file over the paste limit (C-19)');
   const audit801 = (d) => audit(d, [], { pluginRoot: PLUGIN801 });
   const c19 = (res) => res.findings.filter(f => f.id === 'C-19');
   const LIMIT = 28500;
-  const SIX = ['do-not-report.md', 'execute-gate.md', 'fix-rules.md', 'plan-gate.md', 'review-kinds.md', 'severity-anchors.md'].map(n => '.claude/toolkit/' + n);
+  // Sorted, because the check compares it with the findings' sorted paths.
+  const SEVEN = ['do-not-report.md', 'execute-gate.md', 'fix-rules.md', 'issue-labels.md', 'plan-gate.md', 'review-kinds.md', 'severity-anchors.md'].map(n => '.claude/toolkit/' + n);
   // A project last audited at `audited` (8.0.1 by default, so only the
   // every-upgrade entries are in range), holding each [path, size] given.
   const c19Case = (name, files, audited) => {
@@ -3433,8 +3435,8 @@ console.log('\n9h. a pasted project file over the paste limit (C-19)');
   check('C-19: a project with no pasted files is no finding', r.status === 0 && c19(r).length === 0, r.summary);
   r = audit801(c19Case('unpasted', [['.claude/toolkit/notes.md', LIMIT * 2]]));
   check('C-19: an oversized file in .claude/toolkit/ that nothing pastes is no finding', r.status === 0 && c19(r).length === 0, JSON.stringify(c19(r)).slice(0, 300));
-  r = audit801(c19Case('all-six', SIX.map(rel => [rel, LIMIT + 1])));
-  check('C-19: on the real commands and skills the pasted files are exactly the six #244 names', r.status === 0 && JSON.stringify(c19(r).map(x => x.file.relPath).sort()) === JSON.stringify(SIX), JSON.stringify(c19(r).map(x => x.file.relPath)));
+  r = audit801(c19Case('all-seven', SEVEN.map(rel => [rel, LIMIT + 1])));
+  check('C-19: on the real commands and skills the pasted files are exactly the seven #244 and #268 names', r.status === 0 && JSON.stringify(c19(r).map(x => x.file.relPath).sort()) === JSON.stringify(SEVEN), JSON.stringify(c19(r).map(x => x.file.relPath)));
   r = audit(c19Case('old-root', [['.claude/toolkit/fix-rules.md', LIMIT + 1]], '7.6.5'), [], { pluginRoot: path.join(TMP, 'plugin800') });
   check('C-19: the 8.0.0 build does not run it', r.status === 0 && c19(r).length === 0 && !/C-19/.test(r.summary), r.summary);
 }

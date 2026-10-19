@@ -4,7 +4,7 @@ This folder is yours. The LLM Peer Review plugin reads the files below when they
 
 Use it when your project needs the toolkit to follow a rule of its own: a kind of review the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
 
-## The eight files
+## The nine files
 
 Each file has a fixed name. Create only the ones you need.
 
@@ -18,8 +18,9 @@ Each file has a fixed name. Create only the ones you need.
 | `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security finder `/tk:review` dispatches), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
 | `checks.json` | `/tk:execute`, at its test step, through the toolkit's checks runner | Your project's checks: a JSON array of `{ "id", "check", "expect" }`, for example `[{"id": "tests", "check": "npm test", "expect": {"exit": 0}}]`; what an `id` and a `check` may contain is spelled out below the table |
 | `generated.json` | `/tk:merge`, when it checks and lands a PR | The files your project rebuilds rather than merges, and the command that rebuilds them (format below) |
+| `issue-labels.md` | `/tk:create-issue`, before it asks its questions | Your questions, and every label their answers can map to (format below) |
 
-Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's.
+Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's. `issue-labels.md` is the one prose file that replaces the toolkit's lists rather than adding to them: when it lists questions or labels, `/tk:create-issue` uses those instead of its own.
 
 `adoption.md` is the one file here you never write. `/tk:upgrade` adds a section to it at every upgrade: one row for each release-note entry in the range, saying whether the entry touched this project's own files and, when it did, what you decided. The upgrade's stamp reads it and does not finish until every entry has a row; no stage reads it as instructions. Keep it in git.
 
@@ -70,6 +71,24 @@ A project kind runs when `/tk:review` detects changes on its own. A focus, such 
 ## do-not-report.md
 
 One bullet per category: `- <category> - <why it is noise here>`. Keep entries specific: a vague entry ("style stuff") suppresses real findings, a specific one ("trailing-whitespace-only changes in generated files") does not. An entry only suppresses noise and never lowers a real severity: the toolkit's Universal Anchors (an exposed secret, injection, insecure auth, data loss, an accessibility blocker) win over any match.
+
+## issue-labels.md
+
+Two short lists: the questions `/tk:create-issue` asks before it files an issue, and every label the answers can map to. For example:
+
+```
+Questions:
+- Area: web or api?
+- Kind: bug, feature or chore?
+- Priority? (high/medium/low)
+
+Labels:
+- `area-web`, `area-api`
+- `bug`, `feature`, `chore`
+- `priority-high`, `priority-medium`, `priority-low`
+```
+
+The command applies only labels listed here, so list every label you use: a label you retire and leave off the list is never applied again. Each list replaces the toolkit's own only when it has entries. A file with questions but no labels keeps the toolkit's label set, and a file with neither (only a comment, or nothing) changes nothing. This matters most on GitLab, which creates any label an issue names: a label outside your list would come back as a new one without a word.
 
 ## fix-rules.md and the two gates are additive only
 

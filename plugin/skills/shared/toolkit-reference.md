@@ -176,7 +176,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 - Anything new discovered while re-verifying follows M5's one-generation rule: fixed and re-verified once, then further discoveries land in the digest as open items
 
 **When Running /tk:create-issue:**
-- Ask 2-3 clarifying questions first
+- Ask the clarifying questions first: the project's, and then only its labels, when `.claude/toolkit/issue-labels.md` sets them
 - Keep issues short, about 10-15 lines, so `/tk:explore` starts from the problem rather than a solution
 - No implementation details - that's for /tk:explore and /tk:create-plan
 
@@ -184,7 +184,7 @@ The `/tk:audit-html` skill applies the same principle to the project's own markd
 
 ### Project Extensions
 
-A project adds its own rules to the toolkit through eight files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
+A project adds its own rules to the toolkit through nine files in `.claude/toolkit/`, a folder the project owns. Each is read when present and changes nothing when absent; setup seeds a README there and never touches the folder again (`/tk:upgrade` may offer the current seed's text for a README paragraph that is still an older seed's, C-15, and applies nothing without approval). On the plugin this is the only way to extend a stage, because the plugin's own files are read-only in a project.
 
 | File | Read by | Carries |
 |---|---|---|
@@ -196,10 +196,11 @@ A project adds its own rules to the toolkit through eight files in `.claude/tool
 | `do-not-report.md` | the security reviewers, right after the toolkit's own list | Finding categories that are noise in this project; an entry suppresses a category and never lowers a severity, and the Universal Anchors still win |
 | `checks.json` | `/tk:execute`, at its full test step (a parallel checkpoint, the plan's Verify step, and every step of a plan with no check lines), through the checks runner | The project's checks as a JSON array of `{id, check, expect}`: `check` a read-only command the runner allows, `expect` one of `exit`, `match`, `noMatch`, `lines`; when the file exists it replaces the default test run, so it must name the project's test command, and a failed or refused check fails that run, apart from a `flaky` older check, which M17 carries as a `[check]` line, as it does a passing `slow` row |
 | `generated.json` | `/tk:merge`, when it checks and lands a PR | The files the project rebuilds rather than merges, as a JSON array of `{paths, rebuild}`: the lost-work checks skip those paths, and a landing rebuilds them with `rebuild`, run as an ordinary command under the project's permission rules (`${CLAUDE_PLUGIN_ROOT}/skills/shared/merge-rules.md`) |
+| `issue-labels.md` | `/tk:create-issue`, before it asks its questions | The project's questions and labels. The one prose file that replaces rather than adds: its questions replace the command's list, its labels replace the toolkit's set, and only labels it names are applied |
 
 - A project kind is dispatched by the name in its row, with the same per-run prompt and through the same M2 audit as a toolkit kind. It runs on the auto-detect path only, always through its agent (never the under-50-lines inline path), and a row whose agent is not found is skipped with a digest line. A focused run that names a project kind says so in one line instead of reporting clean, and `/tk:review-full` says in its charter that project kinds are not in its fan-out. `/tk:upgrade` checks every row (C-12): three cells, an agent of the project's own, present, and without edit tools.
 - A project agent can preload the plugin's skills by their scoped names in its `skills:` frontmatter (`tk:dispatch-contract`, `tk:review-code-criteria`, and so on; verified on Claude Code 2.1.278), so its body carries only what is specific to the project.
-- When a file is absent, Claude Code shows the read as a note that the command printed nothing. Each read is labeled so that note reads as "this project adds none".
+- When a file is absent, Claude Code shows the read as a note that the command printed nothing. Each read is labeled so that note reads as "this project adds none" (for `issue-labels.md`, "the toolkit's own questions and labels apply").
 - The seeded rules file ends with a marker line that starts `<!-- Project section:`. Everything under it is the project's: C-7 stops comparing there and nothing rewrites it. A rules file seeded before this feature has no marker and nothing adds one, because a file that still matches the seed is current: the owner copies the seed's marker line to the end of the file.
 
 ### Subagent Strategy

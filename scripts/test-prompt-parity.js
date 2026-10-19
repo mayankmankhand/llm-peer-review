@@ -2,7 +2,7 @@
 'use strict';
 // Tests that the sentences several prompt files must carry word for word still
 // agree (review fix R5, 2026-10-05): the disclosure line a dispatched finder may
-// return (`NOT CHECKED: <one sentence>`), the eight project seam files under
+// return (`NOT CHECKED: <one sentence>`), the nine project seam files under
 // `.claude/toolkit/`, the reload-then-fallback sentence the commands share, and
 // the PR parts, the kept-on-purpose key and the decisions file /merge relies on,
 // and the check-at-source sentence the rules seed and the manual share (#241).
@@ -53,9 +53,9 @@ const bareDisclosures = prompts.filter(([, t]) => /NOT CHECKED[^:]/.test(t.repla
 check('every prompt file that names the line spells it with its colon', bareDisclosures.length === 0, bareDisclosures.join(', '));
 
 console.log('\n2. the project seam files');
-const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md', 'checks.json', 'generated.json'];
+const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md', 'checks.json', 'generated.json', 'issue-labels.md'];
 const seamReadme = read('seed/toolkit-README.md');
-check('the seed README lists the eight files under a heading that counts them', /## The eight files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
+check('the seed README lists the nine files under a heading that counts them', /## The nine files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
 const named = new Map();
 for (const [file, text] of prompts) {
   for (const m of text.matchAll(/\.claude\/toolkit\/([A-Za-z-]+\.(?:md|json))/g)) {
@@ -67,18 +67,23 @@ for (const [file, text] of prompts) {
 // record /tk:upgrade's stamp writes (issue #257).
 const NOT_SEAMS = ['README.md', 'adoption.md'];
 const unknown = [...named.keys()].filter(n => !NOT_SEAMS.includes(n) && !SEAMS.includes(n));
-check('every seam a prompt file names is one of the eight, the README setup seeds, or the adoption record the stamp writes', unknown.length === 0, unknown.join(', '));
+check('every seam a prompt file names is one of the nine, the README setup seeds, or the adoption record the stamp writes', unknown.length === 0, unknown.join(', '));
 const unread = SEAMS.filter(s => !named.has(s));
-check('each of the eight is read by at least one prompt file', unread.length === 0, unread.join(', '));
+check('each of the nine is read by at least one prompt file', unread.length === 0, unread.join(', '));
 // Issue #221: the seventh seam is JSON, not prose, and its reader is the checks runner, called from the execute stage's test step.
 check('checks.json is read by the runner call in execute.md, at the test step', /node \.claude\/scripts\/run-checks\.js --checks \.claude\/toolkit\/checks\.json --out/.test(read('.claude/commands/execute.md')));
 const securityReaders = ['.claude/skills/review-security/SKILL.md', '.claude/skills/security-audit/SKILL.md', '.claude/skills/review-security-criteria/SKILL.md'];
 check('the three security reviewers read do-not-report.md, right after the toolkit\'s own list', securityReaders.every(f => read(f).includes('.claude/toolkit/do-not-report.md')), securityReaders.filter(f => !read(f).includes('.claude/toolkit/do-not-report.md')).join(', '));
 // The sentence moved from README.md to docs/EXTENDING.md on 2026-10-09, when the README became a front door and the manual moved into docs/.
-check('the toolkit reference and the extending guide count the same eight files', /eight files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Eight files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
+check('the toolkit reference and the extending guide count the same nine files', /nine files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Nine files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
 check('the extending guide lists checks.json', /^\| `checks\.json` \|/m.test(read('docs/EXTENDING.md')));
 // Issue #232: the eighth seam is JSON too, read by the merge-check script through the merge rules.
 check('the extending guide lists generated.json, and merge-rules.md defines it', /^\| `generated\.json` \|/m.test(read('docs/EXTENDING.md')) && read('.claude/skills/shared/merge-rules.md').includes('.claude/toolkit/generated.json'));
+// Issue #268: the ninth seam replaces /create-issue's questions and labels instead of adding to them.
+// Its read carries a label, because an absent file pastes Claude Code's "no output" note, and the
+// command says what each host does with a label the repository lacks (GitLab creates it silently).
+const createIssue = read('.claude/commands/create-issue.md');
+check('create-issue reads the issue-labels seam under its label and states each host on a missing label', createIssue.includes('!`cat .claude/toolkit/issue-labels.md 2>/dev/null || true`') && createIssue.includes('(from `.claude/toolkit/issue-labels.md`)') && createIssue.includes('GitLab creates') && !createIssue.includes('makes the create command fail') && /^\| `issue-labels\.md` \|/m.test(read('docs/EXTENDING.md')));
 // Issue #231 added rule M17, so the fix-rules sentence every loop stage carries counts to M17. It is
 // pinned word for word so the next rule's sweep is one grep and a drift in one file is caught here.
 const FIX_RULES = 'Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void.';

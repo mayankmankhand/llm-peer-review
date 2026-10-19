@@ -15,12 +15,18 @@ I'll handle the rest.
 ## Rules
 
 <rules>
-1. **Ask 2-3 questions before creating the issue** - the answers set the labels and fill the body.
+1. **Ask the questions below before creating the issue, skipping any the user already answered** - the answers set the labels and fill the body.
 2. **Keep issues short** - about 10-15 lines in the body format below, so `/explore` starts from the problem rather than a solution.
 3. **Capture the what, not the how** - no code, file paths, or technical approach; `/explore` and `/create-plan` decide those later with the codebase in front of them.
 </rules>
 
 ## Questions to Ask
+
+**Project questions and labels** (from `.claude/toolkit/issue-labels.md`). Its questions, when it lists any, replace the list below; its labels, when it lists any, replace the Labels list, and then only labels it names are applied. A note that the command printed nothing, or a file with no questions or labels in it, means the toolkit's lists apply.
+
+!`cat .claude/toolkit/issue-labels.md 2>/dev/null || true`
+
+The toolkit's questions, when the project sets none:
 
 - Bug, feature, or improvement?
 - Priority? (high/medium/low)
@@ -48,11 +54,13 @@ Then run the **"Create issue" row** for the detected host, from the project dire
 
 ## Labels
 
-Use labels the repository already has: a label it lacks makes the create command fail, so drop any the host refuses and say which. The toolkit's usual set:
+When the project's file above lists labels, apply only those, never a label it does not name. Otherwise use the toolkit's usual set:
 
 - `bug`, `feature`, `improvement`
 - `priority-high`, `priority-medium`, `priority-low`
 - `setup`
+
+The hosts differ on a label the repository lacks. GitHub refuses it and the create command fails: drop it, run the command again, and say which you dropped. GitLab creates the label without a word, so on GitLab a label outside the list adds a new label to the project.
 
 ## REMEMBER
 - Ask questions first
