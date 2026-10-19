@@ -3441,6 +3441,26 @@ console.log('\n9h. a pasted project file over the paste limit (C-19)');
 }
 if (OWN('10')) {
 
+console.log('\n9i. the guidance on what a session loads (C-20)');
+{
+  // C-20 arrives in 8.0.7 as a manual convention: /upgrade presents the
+  // toolkit's numbers and reasoning once and the project judges whether the
+  // same split fits its workflow. The script lists it in the range and emits
+  // no finding of its own, because the judgment is the model's, not a regex.
+  const PLUGIN807 = path.join(TMP, 'plugin807');
+  const b807 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN807, '--version', '8.0.7'], { cwd: REPO, encoding: 'utf8' });
+  check('C-20: build-plugin.js builds a 8.0.7 plugin root', b807.status === 0 && fs.existsSync(path.join(PLUGIN807, '.claude-plugin', 'plugin.json')), (b807.stdout + b807.stderr).slice(-300));
+  const d = path.join(TMP, 'c20-audited-806');
+  write(d, '.claude/.toolkit-state.json', JSON.stringify({ version: '8.0.6', path: 'plugin', auditedVersion: '8.0.6' }, null, 2));
+  write(d, 'CLAUDE.md', '# Project\n\nA project with a few rules of its own.\n');
+  const r = audit(d, [], { pluginRoot: PLUGIN807 });
+  check('C-20: a project audited at 8.0.6 sees C-20 in range as a manual convention with no script finding',
+    r.status === 0 && /8\.0\.6 -> 8\.0\.7 \[[^\]]*\bC-20\]/.test(r.summary) && r.findings.every(f => f.id !== 'C-20'), r.summary);
+  const entry = fs.readFileSync(path.join(REPO, '.claude', 'skills', 'shared', 'conventions.md'), 'utf8').split('\n### C-20:')[1] || '';
+  check('C-20: the entry is manual, warn, scoped to prompt files and CLAUDE.md, and imposes no number',
+    /^- \*\*Since:\*\* 8\.0\.7$/m.test(entry) && /^- \*\*Scope:\*\* prompt-files\+claude-md$/m.test(entry) && /^- \*\*Detector:\*\* manual$/m.test(entry) && /^- \*\*Severity:\*\* warn$/m.test(entry) && /No number is imposed/.test(entry), entry.slice(0, 200));
+}
+
 console.log('\n10. errors and usage');
 var bad1 = spawnSync('node', [SCRIPT, '--project', MIG, '--plugin-root', PLUGIN, '--conventions', path.join(TMP, 'nonexistent.md')], { encoding: 'utf8' });
 check('a missing conventions file exits 1', bad1.status === 1 && /not found/.test(bad1.stderr));

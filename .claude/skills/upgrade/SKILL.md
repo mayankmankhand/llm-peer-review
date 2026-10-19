@@ -75,7 +75,7 @@ Every cycle has an issue, and this is one, but opening it is an outward send (M9
 
 ### 3. Judge the manual conventions
 
-For each convention in range whose detector is `manual` (C-4 today; C-13 has its own step, 3b), read every file in its scope yourself and judge it against the `Looks behind` prose. Emit a finding for each miss in the same JSON shape, with the file, the line the judgment rests on, and a receipt whose `check` is a read of that file (`sed -n '<start>,<end>p' <file>`) and whose `expect` is `{"match": "<regex>"}` for the text the judgment rests on, since the checks runner refuses a prose expect. A judgment with no receipt fails tier 1 by definition.
+For each convention in range whose detector is `manual` (C-4 and C-20 today; C-13 has its own step, 3b), read every file in its scope yourself and judge it against the `Looks behind` prose. Emit a finding for each miss in the same JSON shape, with the file, the line the judgment rests on, and a receipt whose `check` is a read of that file (`sed -n '<start>,<end>p' <file>`) and whose `expect` is `{"match": "<regex>"}` for the text the judgment rests on, since the checks runner refuses a prose expect. A judgment with no receipt fails tier 1 by definition.
 
 ### 3b. Run the prompt audit (C-13)
 
