@@ -939,6 +939,20 @@ section('270: --bring-home refreshes its own copies and records what it copied',
   check('bring-home: a record changed in the main copy after it was brought home is listed as differing',
     third.status === 1 && third.json && third.json.refreshed === 0 && JSON.stringify(third.json.differs) === '["reports/r1.md"]' &&
     read(dir, 'reports/r1.md') === 'edited in the main copy\n' && fs.existsSync(recordFile), one(third));
+
+  // A record already home, byte for byte, before any record existed (an earlier
+  // version copied it and kept none): the run that finds it the same records it,
+  // so a later run refreshes it once the worktree's copy moves on (review of #270, R13).
+  const pre = homeFixture('home-pre-record', (d, w) => {
+    write(w, 'plans/PLAN-y.md', '# plan y, step 1\n');
+    write(d, 'plans/PLAN-y.md', '# plan y, step 1\n');
+  });
+  const p1 = mc(pre.dir, ['--bring-home', 'feat']);
+  write(pre.wt, 'plans/PLAN-y.md', '# plan y, all steps done\n');
+  const p2 = mc(pre.dir, ['--bring-home', 'feat']);
+  check('bring-home: a record already home before any record existed is refreshed once the worktree moves on',
+    p1.status === 0 && p1.json && p1.json.same === 1 && p2.status === 0 && p2.json && p2.json.refreshed === 1 &&
+    read(pre.dir, 'plans/PLAN-y.md') === '# plan y, all steps done\n', one(p2));
 });
 
 section('270: --bring-home names other ignored files, and keys its record by a safe branch name', () => {

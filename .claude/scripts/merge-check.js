@@ -880,7 +880,10 @@ function bringHome(b) {
     try { have = fs.lstatSync(dst); } catch (e) { have = null; }
     let replace = false;
     if (have) {
-      if (have.isFile() && sameBytes(src, dst)) { same++; continue; }
+      // Already home byte for byte: recorded too, so a copy an earlier version
+      // brought home without a record can still be refreshed once the worktree's
+      // copy moves on (review of #270, R13). Its bytes are the branch's own.
+      if (have.isFile() && sameBytes(src, dst)) { home[rel] = sha256(dst); same++; continue; }
       // Replaced only when this mode put it there and it still holds those bytes.
       if (have.isFile() && typeof home[rel] === 'string' && home[rel] === sha256(dst)) replace = true;
       else { differs.push(rel); continue; }
