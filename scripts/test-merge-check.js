@@ -902,6 +902,80 @@ section('266: --bring-home on a worktree with only records, a symlink, and error
     mc(none.dir, ['--bring-home', 'loose']).status === 2 && mc(none.dir, ['--bring-home', 'main']).status === 2 && mc(none.dir, ['--bring-home', 'no-such-branch']).status === 2);
 });
 
+// --- 270: bringing records home on every /document run -------------------------------
+// Claude Code deletes a clean worktree session's folder when the session ends, so
+// /document now copies the records home at the end of every worktree run, and
+// /merge copies again before it offers a removal. A second copy must be able to
+// refresh what the first one brought home, through a record of what it copied,
+// without ever touching a file anyone else wrote. And the ignored files outside
+// the records, which a removal deletes without a word, are named.
+section('270: --bring-home refreshes its own copies and records what it copied', () => {
+  const { dir, wt } = homeFixture('home-refresh', (d, w) => {
+    write(w, 'plans/PLAN-x.md', '# plan x, step 1 done\n');
+    write(w, 'reports/r1.md', 'report one\n');
+  });
+  const first = mc(dir, ['--bring-home', 'feat']);
+  const recordFile = path.join(dir, 'reports', 'landing', 'feat.brought-home.json');
+  let record = null;
+  try { record = JSON.parse(fs.readFileSync(recordFile, 'utf8')); } catch (e) { record = null; }
+  const files = record && record.files ? record.files : {};
+  check('bring-home: every copied file is listed in the branch\'s brought-home record',
+    first.status === 0 && first.json && first.json.manifest && fs.realpathSync(first.json.manifest) === fs.realpathSync(recordFile) &&
+    JSON.stringify(Object.keys(files).sort()) === '["plans/PLAN-x.md","reports/r1.md"]' &&
+    Object.keys(files).every((f) => /^[0-9a-f]{64}$/.test(files[f])), one(first) + ' ' + JSON.stringify(record));
+
+  // The plan moves on in the worktree after the first copy: the newer one comes home.
+  write(wt, 'plans/PLAN-x.md', '# plan x, all steps done\n');
+  const second = mc(dir, ['--bring-home', 'feat']);
+  check('bring-home: a record it brought home before and nobody changed since is refreshed',
+    second.status === 0 && second.json && second.json.refreshed === 1 && second.json.differs.length === 0 &&
+    read(dir, 'plans/PLAN-x.md') === '# plan x, all steps done\n', one(second));
+
+  // Someone edits the main copy's report, and the worktree's moves on too: the
+  // main copy's edit is kept, and the worktree's version is listed as differing.
+  write(dir, 'reports/r1.md', 'edited in the main copy\n');
+  write(wt, 'reports/r1.md', 'report one, revised\n');
+  const third = mc(dir, ['--bring-home', 'feat']);
+  check('bring-home: a record changed in the main copy after it was brought home is listed as differing',
+    third.status === 1 && third.json && third.json.refreshed === 0 && JSON.stringify(third.json.differs) === '["reports/r1.md"]' &&
+    read(dir, 'reports/r1.md') === 'edited in the main copy\n' && fs.existsSync(recordFile), one(third));
+});
+
+section('270: --bring-home names other ignored files, and keys its record by a safe branch name', () => {
+  const { dir, wt } = homeFixture('home-ignored-named', (d, w) => {
+    write(d, '.gitignore', 'plans/PLAN-*.md\nreports/\nartifacts/html/\nnode_modules/\nCODEBASE_MAP.md\n.claude/worktrees/\n.env.local\ndist/\n.venv/\n.pytest_cache/\n');
+    write(d, '.env.local', 'KEY=same\n');
+    commitAll(d, 'ignore more');
+    g(w, ['merge', '-q', 'main']);
+    write(w, '.env.local', 'KEY=same\n');
+    write(w, 'CODEBASE_MAP.md', '# map built in the worktree\n');
+    write(w, 'dist/app.js', 'built\n');
+    write(w, 'node_modules/x.js', 'x\n');
+    write(w, '.venv/lib.py', 'x\n');
+    write(w, '.pytest_cache/v', 'x\n');
+    write(w, 'artifacts/html/.last-cycle', 'abc\n');
+    write(w, 'artifacts/html/notes.html', '<p>an undated page</p>\n');
+    write(w, 'reports/r.md', 'a record\n');
+  });
+  const r = mc(dir, ['--bring-home', 'feat']);
+  const ig = (r.json && r.json.ignored) || [];
+  check('bring-home: other ignored files are named, without dependency folders or files the main copy holds unchanged',
+    r.status === 0 && r.json.copied === 1 && JSON.stringify(ig) === '["CODEBASE_MAP.md","artifacts/html/notes.html","dist/"]' &&
+    r.json.needsForce === false && /CODEBASE_MAP\.md/.test(r.stderr), one(r) + ' ' + JSON.stringify(ig));
+
+  const slash = homeFixture('home-slash', (d) => {
+    const w2 = path.join(d, '.claude', 'worktrees', 'w2');
+    g(d, ['worktree', 'add', '-q', '-b', 'feature/x', w2]);
+    write(w2, 'reports/r.md', 'r\n');
+  });
+  const s = mc(slash.dir, ['--bring-home', 'feature/x']);
+  const landing = path.join(slash.dir, 'reports', 'landing');
+  check('bring-home: a branch whose name has a slash keeps its record in one file',
+    s.status === 0 && s.json && s.json.manifest && path.dirname(fs.realpathSync(s.json.manifest)) === fs.realpathSync(landing) &&
+    /^feature-x-[0-9a-f]{6}\.brought-home\.json$/.test(path.basename(s.json.manifest)) && !fs.existsSync(path.join(landing, 'feature')),
+    one(s));
+});
+
 section('266: the landing file /document writes for /merge', () => {
   const { dir } = homeFixture('home-landing');
   const c0 = rev(dir, 'main');

@@ -69,8 +69,11 @@
 //                                 <branch> into the main copy (issue #266): the
 //                                 files git does not track under plans/ and
 //                                 reports/, and the dated pages in artifacts/html/.
-//                                 Never overwrites; lists what differs and what is
-//                                 left over (anything else uncommitted)
+//                                 Replaces only a file it brought home itself and
+//                                 nobody changed since (issue #270), recorded in
+//                                 reports/landing/<branch>.brought-home.json;
+//                                 lists what differs, what is left over (anything
+//                                 else uncommitted) and the other ignored files
 // Common: --main <ref> names the default branch (otherwise the remote's default
 // branch, else `main`, else `master`).
 //
@@ -80,12 +83,14 @@
 // --style with a value write to git config, and only --decisions writes a file,
 // the one --out names (--landing's ignore check works in a throwaway folder
 // under the OS temp folder and removes it), apart from --bring-home, which
-// writes only files the main copy did not have. Every git call
+// writes files the main copy did not have, refreshes the ones it brought home
+// itself, and keeps its record of them. Every git call
 // takes an argument list, never a shell string, and runs at the repository's
 // top level. Dependency-free.
 //
 //   node merge-check.js --landing --before <sha> --after <sha> --cut <sha> --tip <sha>
 
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -749,8 +754,46 @@ function changelogPlace(clFile, blockFile) {
 // Nothing else comes home: the map, the cycle marker, packages and .env.local are
 // rebuilt or copied in fresh, and the standing pages and the artifact index
 // already live in the main copy. A fixed list, because a project's other ignored
-// folders can hold its whole build output.
+// folders can hold its whole build output; those are named instead (`ignored`).
+//
+// Since issue #270 /document runs this at the end of every worktree run, not
+// only before a removal: Claude Code deletes a clean worktree session's folder
+// when the session ends, without a word and without a hook that could step in,
+// so /document is the last moment the folder is sure to exist. /merge runs it
+// again before it offers a removal. A second run must refresh what the first
+// brought home (the plan moved on), so the main copy keeps a record of what
+// came home, and a file is replaced only while it still holds exactly the
+// bytes this mode copied there. A file anyone else wrote or changed is never
+// touched; it is listed under `differs` as before.
 const RECORD_PATHS = ['plans', 'reports', 'artifacts/html'];
+// Folders a removal may take without a word, because an install or a run
+// rebuilds them: a path through one of these, or through any folder whose name
+// ends in "cache", is never named in `ignored`.
+const REBUILT_DIRS = new Set(['node_modules', '.venv', 'venv', '__pycache__']);
+function isRebuilt(rel) {
+  const parts = rel.replace(/\/$/, '').split('/');
+  const folders = rel.endsWith('/') ? parts : parts.slice(0, -1);
+  return folders.some((p) => REBUILT_DIRS.has(p) || /cache$/i.test(p));
+}
+function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+// The record of what came home for a branch: reports/landing/<name>.brought-home.json
+// in the main copy, beside the landing file /document writes there. The branch
+// is named the way render-html.js names a branch's standing page (standingPage
+// there): sanitized, plus a short hash of the real name when sanitizing changed
+// it, so `feature/x` is one file rather than a folder, and never meets
+// `feature-x`'s record.
+function homeRecordPath(main, b) {
+  const safe = b.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_');
+  const tag = safe !== b ? '-' + crypto.createHash('sha1').update(b).digest('hex').slice(0, 6) : '';
+  return path.join(main, 'reports', 'landing', safe + tag + '.brought-home.json');
+}
+function readHomeRecord(file) {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (j && j.files && typeof j.files === 'object' && !Array.isArray(j.files)) return Object.assign({}, j.files);
+  } catch (e) { /* no record yet, or one that cannot be read: nothing came home before */ }
+  return {};
+}
 const DATED_PAGE_RE = /^artifacts\/html\/[^/]+-\d{4}-\d{2}-\d{2}-\d{6}(?:-\d+)?\.html$/;
 function isRecord(rel) {
   if (rel.startsWith('artifacts/html/')) return DATED_PAGE_RE.test(rel);
@@ -808,8 +851,26 @@ function bringHome(b) {
     leftover.push(rel);
   }
   let copied = 0;
+  let refreshed = 0;
   let same = 0;
   const differs = [];
+  const recordFile = homeRecordPath(main, b);
+  const home = readHomeRecord(recordFile);
+  // Written after the copies, and before an error is passed on, so a run that
+  // stops part way still records what it copied. A record that cannot be
+  // written costs only the refresh: the next run lists those files as differing.
+  let manifest = null;
+  const saveRecord = () => {
+    try {
+      fs.mkdirSync(path.dirname(recordFile), { recursive: true });
+      const files = {};
+      for (const k of Object.keys(home).sort()) files[k] = home[k];
+      fs.writeFileSync(recordFile, JSON.stringify({ branch: b, files }, null, 2) + '\n');
+      manifest = recordFile;
+    } catch (e) {
+      process.stderr.write('merge-check: could not write the record of what came home, ' + recordFile + ': ' + (e && e.message ? e.message : String(e)) + '\n');
+    }
+  };
   for (const rel of records) {
     const src = path.join(wt, rel);
     const dst = path.join(main, rel);
@@ -817,10 +878,12 @@ function bringHome(b) {
     if (!st.isFile()) { leftover.push(rel); continue; }   // a symlink or a nested repository is not copied
     let have = null;
     try { have = fs.lstatSync(dst); } catch (e) { have = null; }
+    let replace = false;
     if (have) {
-      if (have.isFile() && sameBytes(src, dst)) same++;
-      else differs.push(rel);
-      continue;
+      if (have.isFile() && sameBytes(src, dst)) { same++; continue; }
+      // Replaced only when this mode put it there and it still holds those bytes.
+      if (have.isFile() && typeof home[rel] === 'string' && home[rel] === sha256(dst)) replace = true;
+      else { differs.push(rel); continue; }
     }
     try {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
@@ -828,16 +891,50 @@ function bringHome(b) {
       // record never lands outside it.
       const realDir = fs.realpathSync(path.dirname(dst));
       if (realDir !== realMain && !realDir.startsWith(realMain + path.sep)) throw new Error('its folder leads outside the main copy');
-      fs.copyFileSync(src, dst, fs.constants.COPYFILE_EXCL);
+      fs.copyFileSync(src, dst, replace ? 0 : fs.constants.COPYFILE_EXCL);
       // Kept, because session-init.js picks the newest plan by modified time.
       fs.utimesSync(dst, st.atime, st.mtime);
       if (!sameBytes(src, dst)) throw new Error('the copy does not match');
+      home[rel] = sha256(dst);
     } catch (e) {
-      throw new Error('could not bring home ' + rel + ': ' + (e && e.message ? e.message : String(e)) + ' (' + copied + ' copied before it stay)');
+      saveRecord();
+      throw new Error('could not bring home ' + rel + ': ' + (e && e.message ? e.message : String(e)) + ' (' + (copied + refreshed) + ' copied before it stay)');
     }
-    copied++;
+    if (replace) refreshed++;
+    else copied++;
   }
-  return { branch: b, worktree: wt, mainCopy: main, copied, same, differs, leftover: leftover.sort(), needsForce };
+  saveRecord();
+  return { branch: b, worktree: wt, mainCopy: main, copied, refreshed, same, differs, leftover: leftover.sort(),
+           ignored: otherIgnored(wt, main), needsForce, manifest };
+}
+
+// The ignored files outside the records, which `git worktree remove` deletes
+// without a word (issue #270): named, never copied, so the removal question can
+// say what goes. Left out: the records themselves, the folders an install or a
+// run rebuilds (isRebuilt), the cycle marker, and any file the main copy holds
+// byte for byte (.env.local copied in by /worktree, say). A folder git ignores
+// whole is one entry, with its trailing slash; artifacts/html, which projects
+// ignore whole, is listed file by file so its undated pages can be named.
+function otherIgnored(wt, main) {
+  const list = (extra, paths) => gitAt(wt, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard'].concat(extra, ['--'], paths)).split('\0').filter(Boolean);
+  const sameIn = (rel) => {
+    try { return fs.lstatSync(path.join(main, rel)).isFile() && fs.lstatSync(path.join(wt, rel)).isFile() && sameBytes(path.join(wt, rel), path.join(main, rel)); }
+    catch (e) { return false; }
+  };
+  const underRecords = (rel) => {
+    const top = rel.replace(/\/$/, '');
+    return RECORD_PATHS.some((p) => top === p || top.startsWith(p + '/') || p.startsWith(top + '/'));
+  };
+  const out = new Set();
+  for (const rel of list(['--directory'], ['.'])) {
+    if (isRebuilt(rel) || underRecords(rel) || (!rel.endsWith('/') && sameIn(rel))) continue;
+    out.add(rel);
+  }
+  for (const rel of list([], ['artifacts/html'])) {
+    if (isRecord(rel) || rel === 'artifacts/html/.last-cycle' || isRebuilt(rel) || sameIn(rel)) continue;
+    out.add(rel);
+  }
+  return Array.from(out).sort();
 }
 
 // ---- the decisions file (rule 3) ---------------------------------------------------
@@ -1013,8 +1110,11 @@ function main(argv) {
     process.stdout.write(JSON.stringify(Object.assign({ mode: 'bring-home' }, r)) + '\n');
     for (const f of r.differs) process.stderr.write(f + ': the main copy already has a different file there, which was kept; this copy is not home\n');
     for (const f of r.leftover) process.stderr.write(f + ': left over (not a record, or not committed); removing the worktree deletes it\n');
+    for (const f of r.ignored) process.stderr.write(f + ': ignored and not a record, so it stays in the worktree; removing the worktree deletes it\n');
     const listed = r.differs.length + r.leftover.length;
-    process.stderr.write('merge-check: ' + r.copied + ' copied, ' + r.same + ' already home' + (listed ? ', ' + r.differs.length + ' differ, ' + r.leftover.length + ' left over' : '') + '\n');
+    process.stderr.write('merge-check: ' + r.copied + ' copied, ' + (r.refreshed ? r.refreshed + ' refreshed, ' : '') + r.same + ' already home' +
+      (listed ? ', ' + r.differs.length + ' differ, ' + r.leftover.length + ' left over' : '') +
+      (r.ignored.length ? ', ' + r.ignored.length + ' other ignored' : '') + (r.manifest ? '; record: ' + r.manifest : '') + '\n');
     return listed ? 1 : 0;
   }
   const mainRef = defaultMain(o['--main']);
