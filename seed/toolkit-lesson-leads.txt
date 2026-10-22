@@ -24,6 +24,7 @@ A caveat in release notes is a deferred defect, not a resolution.
 A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.
 A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.
 A check that defers to another check must ask whether that other check runs in this range.
+A check-first target that only asserts a bad thing did not happen can pass before the work: also assert the work ran.
 A checked subtask means its wording shipped, not that the nearby diff did.
 A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
 A co-location rule is only as strong as its weakest call site.
@@ -212,6 +213,7 @@ Keeping a record means keeping what it points at: results.json kept every run's 
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
 Lazy locators don't throw - validate at parse, not at construction.
 Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.
+List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.
 Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.
 Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.
 Masking the match that triggered the report is not masking the line.
@@ -280,6 +282,7 @@ To ignore what the default branch already has, compare content from the merge ba
 Tokenising the shared layer does not tokenise its consumers.
 Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.
 Two halves of one feature, written in one session, can each be right and still not meet.
+Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.
 Update (v4.4.0, issue #97):
 Use deterministic scripts for structural data, not LLMs.
 Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.

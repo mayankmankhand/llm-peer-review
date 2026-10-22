@@ -547,3 +547,9 @@
 
 - **Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.**
 - **Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.**
+
+## Issues 269 and 270 (a cycle page per branch, records kept)
+
+- **Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.**
+- **List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.**
+- **A check-first target that only asserts a bad thing did not happen can pass before the work: also assert the work ran.**
