@@ -364,26 +364,25 @@ function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs,
 //    again, and a sibling worktree's copy of that file never had the other
 //    branch's change, so it would mark that branch's findings fixed. The rule
 //    covers the render, --index-url and --index-add alike, so every lookup
-//    and every record keys the page the render wrote. No other name changes.
+//    and every record keys the page the render wrote. Since issue #269 the
+//    cycle page follows the same rule (`cycle`, `cycle-<branch>`,
+//    `cycle-detached-<short sha>`): one shared log let worktrees running
+//    cycles on the same day replace each other's headline on one link, and a
+//    publish was refused when the live page came from another session. A
+//    branch's first cycle page starts from the main page (cyclePredecessor),
+//    and /merge folds it back with --fold-cycle. No other name changes.
 // 2. The standing review and cycle pages live in the MAIN copy's
 //    artifacts/html/ (REPO_ROOT, the root the index already uses), read and
 //    written there whichever working copy renders them. A worktree folder is
 //    deleted when its cycle ends, so a page inside it, or an index row
 //    pointing into it, outlives nothing; the main copy outlives every
-//    worktree, which is also how /merge finds a landed branch's page. The
-//    cycle page keeps its one name: it is a log of past cycles, so parallel
-//    cycles add to it, and there is no finding for one to close falsely.
+//    worktree, which is also how /merge finds a landed branch's page.
 //
 // Rule 2 fires only for a render bound for the working copy's own
 // artifacts/html (the default, or the prompts' explicit
 // `--out-dir artifacts/html`); any other --out-dir keeps its name and folder.
 // When the default branch cannot be told (no origin/HEAD, no main, no master)
-// or this is not a repository, the name stays `review`, as before.
-//
-// Known limit: two renders of the shared cycle page in the same second both
-// read the same predecessor, and the later write wins, dropping the earlier
-// run's entry. A render takes well under a second, so this is documented
-// rather than locked.
+// or this is not a repository, the name stays `review` or `cycle`, as before.
 function gitRead(args) {
   const r = require('child_process').spawnSync('git', args,
     { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -405,15 +404,19 @@ function defaultBranch() {
 // one string in the file name, the index and the lookup alike.
 function safeFileName(n) { return n.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_'); }
 
-// Which page a bare `review` means here: { name, label }, where label is the
-// branch to show in the page title ('' when the name is unchanged). `branch`
-// names a branch other than the current one.
+// The two standing pages the branch rule covers, each with the shell that
+// renders it (the cycle page renders through the document shell).
+const STANDING_SHELL = { review: 'review', cycle: 'document' };
+
+// Which page a bare `review` or `cycle` means here: { name, label }, where
+// label is the branch ('' when the name is unchanged). `branch` names a branch
+// other than the current one.
 function standingPage(name, branch) {
-  if (name !== 'review') return { name: name, label: '' };
+  if (!Object.prototype.hasOwnProperty.call(STANDING_SHELL, name)) return { name: name, label: '' };
   let b = branch || gitRead(['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (!b) {
     const sha = gitRead(['rev-parse', '--short', 'HEAD']);
-    return sha ? { name: 'review-detached-' + sha, label: 'detached ' + sha } : { name: name, label: '' };
+    return sha ? { name: name + '-detached-' + sha, label: 'detached ' + sha } : { name: name, label: '' };
   }
   const main = defaultBranch();
   if (!main || b === main) return { name: name, label: '' };
@@ -423,7 +426,20 @@ function standingPage(name, branch) {
   const safe = safeFileName(b);
   const tag = (safe !== b || /^detached-/.test(b))
     ? '-' + require('crypto').createHash('sha1').update(b).digest('hex').slice(0, 6) : '';
-  return { name: 'review-' + safe + tag, label: b };
+  return { name: name + '-' + safe + tag, label: b };
+}
+
+// The page a cycle render (or --standing) reads as the one it replaces. A
+// branch's own page when it has one; otherwise, for a branch page, the main
+// page, so a branch's first cycle summary starts from the repository's log and
+// its open doc mismatches instead of from nothing (issue #269). `seeded` tells
+// the since-line to say so. Only the data island is read, never the file, so
+// the main page's hosted stamp is never carried onto a branch's page.
+function cyclePredecessor(file, page) {
+  const own = priorPayload(file);
+  if (own.state !== 'none' || !page.label) return own;
+  const fromMain = priorPayload(path.join(path.dirname(file), 'cycle.html'));
+  return fromMain.state === 'ok' ? Object.assign(fromMain, { seeded: page.label }) : own;
 }
 
 // The file a branch's page lives in, or '' for an unchanged name. A branch
@@ -600,9 +616,10 @@ if (opts.standing) {
   // The cycle page also lists the doc-code mismatches still open (issue #262),
   // each marked with whether its reported-at commit is in HEAD's history: only
   // those may be re-checked and closed from here. null when the page cannot be
-  // read, [] when there is no page yet.
+  // read, [] when there is no page yet. A branch with no page yet lists the
+  // main page's, the ones its first render will start from (issue #269).
   if (opts.name === 'cycle') {
-    const prior = priorPayload(file);
+    const prior = cyclePredecessor(file, page);
     line.mismatches = prior.state === 'none' ? [] : prior.state !== 'ok' ? null
       : (Array.isArray(prior.data.docMismatches) ? prior.data.docMismatches : [])
           .filter(function (m) { return m && typeof m === 'object'; })
@@ -672,16 +689,18 @@ if (!opts.outDir) die('--out-dir given without a directory');
 // (in --stable mode there is no guard: overwriting is the intended behavior).
 //
 // A standing review or cycle page bound for this working copy's artifacts/html
-// is read and written in the main copy's instead, and a bare `review` becomes
-// this branch's page (issue #237; the rules sit beside standingPage above).
+// is read and written in the main copy's instead, and a bare `review` or
+// `cycle` becomes this branch's page (issues #237 and #269; the rules sit
+// beside standingPage above).
 let pageDir = path.resolve(process.cwd(), opts.outDir);
 let branchLabel = '';
+let pageRef = { name: opts.name, label: '' };
 if (opts.stable && (opts.shell === 'review' || opts.shell === 'document') && isStandardDir(opts.outDir)) {
   pageDir = path.join(REPO_ROOT, 'artifacts', 'html');
-  if (opts.shell === 'review') {
-    const page = standingPage(opts.name);
-    opts.name = page.name;
-    branchLabel = page.label;
+  if (STANDING_SHELL[opts.name] === opts.shell) {
+    pageRef = standingPage(opts.name);
+    opts.name = pageRef.name;
+    branchLabel = pageRef.label;
   }
 }
 const safeName = safeFileName(opts.name);
@@ -1462,15 +1481,24 @@ function carryDocMismatches(data, prior) {
 // One sentence about what changed since the reader last opened this page. The
 // three prior states stay distinct here for the same reason they do on the
 // review page: "no page yet" and "a page I could not read" are different facts.
-function markCycleChanged(data, prior) {
+// A branch's first page read the main page (issue #269), which its reader
+// never opened as this page, so it says where its history came from instead.
+// `branch` is the page's branch label, '' on the default branch.
+function markCycleChanged(data, prior, branch) {
   const c = cycleCounts(data);
   const scope = c.commits || c.files
     ? plural(c.commits, 'commit') + ' across ' + plural(c.files, 'file')
     : '';
 
   if (prior.state === 'none') {
-    data.sinceLast = 'First cycle summary recorded for this repository'
+    data.sinceLast = 'First cycle summary recorded for this ' + (branch ? 'branch' : 'repository')
       + (scope ? ': ' + scope + '.' : '.');
+    return;
+  }
+  if (prior.seeded) {
+    data.sinceLast = 'First cycle summary on branch ' + prior.seeded
+      + ', starting from the main page\'s earlier cycles and open doc mismatches'
+      + (scope ? '. This cycle: ' + scope + '.' : '.');
     return;
   }
   if (prior.state === 'unreadable') {
@@ -1732,12 +1760,13 @@ if (opts.shell === 'review') {
 // The cycle summary is the second identity-keyed page (issue #163). Same memory
 // mechanism as review, different vocabulary: events, not open findings. The path
 // is derived from outDir + safeName exactly as above, so it follows the --name
-// the caller passed (`cycle`) rather than hardcoding a filename.
+// the caller passed (`cycle`, or this branch's `cycle-<branch>`) rather than
+// hardcoding a filename. A branch's first page starts from the main page.
 if (opts.shell === 'document' && opts.stable) {
-  const priorCycle = priorPayload(path.join(pageDir, safeName + '.html'));
+  const priorCycle = cyclePredecessor(path.join(pageDir, safeName + '.html'), pageRef);
   carryCycleLog(parsed, priorCycle);
   carryDocMismatches(parsed, priorCycle);
-  markCycleChanged(parsed, priorCycle);
+  markCycleChanged(parsed, priorCycle, pageRef.label);
 }
 // The fixed list is an instruction to the carry above, never page content.
 if (opts.shell === 'document') delete parsed.docMismatchesFixed;

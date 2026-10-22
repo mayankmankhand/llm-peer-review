@@ -1898,7 +1898,7 @@ function cycleStandingPageTests() {
 // Issue #237: cycles running in parallel worktrees overwrote one standing
 // page, and a worktree render started from nothing because the page it
 // replaced was read from the worktree's own (empty) artifacts/html/. The
-// review page is now one page per branch and the cycle page one shared log,
+// review page is now one page per branch, as the cycle page is since #269,
 // and both live in the MAIN copy's artifacts/html/ whichever working copy
 // renders them, so a removed worktree takes neither with it.
 // Own temp repo with a real branch worktree, and every command runs inside
@@ -1997,11 +1997,11 @@ function issue237Tests() {
     check('237: an explicit --out-dir keeps the plain name and folder',
           explicitTmp.out === path.join(elsewhere, 'review.html'), explicitTmp.out + explicitTmp.err);
 
-    // The cycle page is one shared log: a worktree's render reads the main
-    // copy's page and adds to it.
+    // The cycle page follows the same branch rule since #269: a worktree's
+    // render writes its branch's page, starting from the main copy's log.
     renderIn(main, 'document', 'cycle', cycle('Main Cycle'));
     const wtCycle = renderIn(wt, 'document', 'cycle', cycle('Worktree Cycle'));
-    const log = wtCycle.out === path.join(pages, 'cycle.html') ? island(wtCycle.out).cycleLog : null;
+    const log = wtCycle.out === path.join(pages, 'cycle-wt-237.html') ? island(wtCycle.out).cycleLog : null;
     check('237: a worktree cycle render keeps the main copy\'s cycle log',
           Array.isArray(log) && log.length >= 1 && log[0].line === 'Main Cycle',
           wtCycle.out + ' ' + JSON.stringify(log) + wtCycle.err);
@@ -2029,7 +2029,7 @@ function issue237Tests() {
           JSON.stringify([here, onMainStanding]));
     const cyc = standing(wt, ['--name', 'cycle']);
     check('237 standing: the cycle page reports its file with open null',
-          cyc.name === 'cycle' && cyc.file === path.join(pages, 'cycle.html') && cyc.exists === true && cyc.open === null,
+          cyc.name === 'cycle-wt-237' && cyc.file === path.join(pages, 'cycle-wt-237.html') && cyc.exists === true && cyc.open === null,
           JSON.stringify(cyc));
 
     // A detached checkout never writes the main page.
@@ -2055,6 +2055,108 @@ function issue237Tests() {
 
   check('237: this repository\'s own artifacts/html is untouched by the cases',
         realState() === realBefore, realBefore + ' -> ' + realState());
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Issue #269: the cycle page was one shared log for the whole repository, so
+// worktrees running cycles on the same day replaced each other's headline on
+// one link, and a publish was refused when the live page came from another
+// session. The cycle page now follows the review page's branch rule: `cycle`
+// on the default branch, `cycle-<branch>` elsewhere. A branch's first page
+// starts from the main page, so it inherits the log and the open doc
+// mismatches, but never the main page's hosted link.
+// ---------------------------------------------------------------------------
+function issue269CycleTests() {
+  console.log('\nthe cycle page per branch (issue #269)');
+  const root = tmpdir('269');
+  const main = path.join(root, 'main');
+  const pages = path.join(main, 'artifacts', 'html');
+  fs.mkdirSync(main);
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  function run(cwd, args) {
+    const r = spawnSync('node', [SCRIPT].concat(args), { cwd: cwd, encoding: 'utf-8' });
+    return { status: r.status, out: (r.stdout || '').trim(), err: r.stderr || '' };
+  }
+  let n = 0;
+  function renderIn(cwd, data) {
+    const dataPath = path.join(root, 'in-' + (++n) + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    return run(cwd, ['--shell', 'document', '--name', 'cycle', '--stable', '--data', dataPath]);
+  }
+  const island = function (file) { return fs.existsSync(file) ? JSON.parse(dataIsland(fs.readFileSync(file, 'utf-8'))) : {}; };
+  const standing = function (cwd) {
+    const r = run(cwd, ['--standing', '--name', 'cycle']);
+    try { return JSON.parse(r.out); } catch (e) { return { unparsed: r.out + r.err }; }
+  };
+  const cycle = function (title, extra) {
+    return Object.assign({ title: title, pill: 'v1', subtitle: '2026-10-22 &middot; window <code>a..b</code>', commitCount: 1 }, extra || {});
+  };
+  const M = { doc: 'docs/usage.md', docLine: 5, docText: 'the main page says so', code: 'src/a.js',
+              codeLine: 1, codeText: 'return 1;', why: 'Reported on main.' };
+
+  try {
+    git(main, ['init', '-q', '-b', 'main']);
+    git(main, ['config', 'user.email', 't@example.com']);
+    git(main, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(main, 'README.md'), 'x\n');
+    git(main, ['add', '.']);
+    git(main, ['commit', '-qm', 'init']);
+
+    // The main page: two cycles in its log, one open mismatch, a hosted link.
+    const mainPage = path.join(pages, 'cycle.html');
+    renderIn(main, cycle('Older Main Cycle'));
+    renderIn(main, cycle('Main Cycle', { docMismatches: [M] }));
+    run(main, ['--index-add', '--type', 'document', '--name', 'cycle', '--local', mainPage,
+               '--url', 'https://example.com/main-cycle']);
+    const mainBytes = fs.existsSync(mainPage) ? fs.readFileSync(mainPage, 'utf-8') : '';
+    const wt = path.join(root, 'wt');
+    const wt2 = path.join(root, 'wt2');
+    git(main, ['worktree', 'add', '-q', '-b', 'wt-269', wt]);
+    git(main, ['worktree', 'add', '-q', '-b', 'wt-269b', wt2]);
+    const branchPage = path.join(pages, 'cycle-wt-269.html');
+
+    const first = renderIn(wt, cycle('Branch Cycle'));
+    const firstHtml = fs.existsSync(branchPage) ? fs.readFileSync(branchPage, 'utf-8') : '';
+    check('a branch renders its own cycle page and leaves the main page as it was',
+      first.status === 0 && first.out === branchPage && mainBytes !== '' &&
+      fs.readFileSync(mainPage, 'utf-8') === mainBytes && firstHtml !== '' && firstHtml.indexOf('<!-- hosted:') === -1,
+      first.out + first.err);
+    const fd = island(branchPage);
+    check('a branch\'s first cycle page starts from the main page\'s log and open mismatches',
+      isArr(fd.cycleLog) && fd.cycleLog.length === 2 && fd.cycleLog[0].line === 'Main Cycle' &&
+      fd.cycleLog[1].line === 'Older Main Cycle' &&
+      isArr(fd.docMismatches) && fd.docMismatches.length === 1 && fd.docMismatches[0].docText === M.docText &&
+      /First cycle summary on branch wt-269/.test(fd.sinceLast || ''),
+      JSON.stringify({ log: fd.cycleLog, mismatches: fd.docMismatches, since: fd.sinceLast }));
+    renderIn(wt, cycle('Second Branch Cycle'));
+    const sd = island(branchPage);
+    check('269: a second render on a branch reads its own page, not the main page',
+      isArr(sd.cycleLog) && sd.cycleLog[0].line === 'Branch Cycle' && /Since you last opened/.test(sd.sinceLast || ''),
+      JSON.stringify({ log: sd.cycleLog, since: sd.sinceLast }));
+
+    const st = standing(wt2);
+    check('standing on a branch with no cycle page yet lists the main page\'s open mismatches',
+      st.name === 'cycle-wt-269b' && st.file === path.join(pages, 'cycle-wt-269b.html') && st.exists === false &&
+      st.url === '' && isArr(st.mismatches) && st.mismatches.length === 1 && st.mismatches[0].docText === M.docText,
+      JSON.stringify(st));
+
+    run(wt, ['--index-add', '--type', 'document', '--name', 'cycle', '--local', branchPage,
+             '--url', 'https://example.com/branch-cycle']);
+    const lookups = { wt: run(wt, ['--index-url', '--name', 'cycle']).out,
+                      main: run(main, ['--index-url', '--name', 'cycle']).out,
+                      wt2: run(wt2, ['--index-url', '--name', 'cycle']).out };
+    check('the index lookup for cycle on a branch finds only that branch\'s page',
+      lookups.wt === 'https://example.com/branch-cycle' && lookups.main === 'https://example.com/main-cycle' &&
+      lookups.wt2 === '', JSON.stringify(lookups));
+
+    git(main, ['worktree', 'remove', '--force', wt]);
+    git(main, ['worktree', 'remove', '--force', wt2]);
+  } catch (e) {
+    check('issue 269 cycle tests ran without an exception', false, e.message);
+  }
   fs.rmSync(root, { recursive: true, force: true });
 }
 
@@ -2279,8 +2381,10 @@ function docMismatchTests() {
     isArr(moved.docMismatches) && moved.docMismatches.length === 1 && moved.docMismatches[0].docLine === 9 &&
     moved.docMismatches[0].since === '2026-10-18', short(moved.docMismatches));
 
-  // A branch: the item is reported on `side`, so `main` (which never had that
-  // commit) cannot close it, and the merge that brings the commit in can.
+  // A branch: the item is reported on main after `older` was cut, and since
+  // #269 it reaches `older` by seeding, when that branch's first page starts
+  // from the main page. `older` never had that commit, so it cannot close the
+  // item, and the merge that brings the commit in can.
   const repo = path.join(dir, 'repo');
   fs.mkdirSync(repo);
   const git = function (args) { return execFileSync('git', args, { cwd: repo, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); };
@@ -2288,8 +2392,8 @@ function docMismatchTests() {
     const r = spawnSync('node', [SCRIPT, '--standing', '--name', 'cycle'], { cwd: repo, encoding: 'utf-8' });
     try { return JSON.parse(r.stdout); } catch (e) { return { unparsed: (r.stdout || '') + (r.stderr || '') }; }
   };
-  const B = Object.assign({}, A, { docText: 'the side branch says so' });
-  let onSide = {}, onMain = {}, merged = {}, stSide = {}, stMain = {}, side = '';
+  const B = Object.assign({}, A, { docText: 'main says so after the cut' });
+  let onOlder = {}, merged = {}, stOlder = {}, stMain = {}, at = '';
   try {
     git(['init', '-q', '-b', 'main']);
     git(['config', 'user.email', 't@example.com']);
@@ -2297,53 +2401,54 @@ function docMismatchTests() {
     fs.writeFileSync(path.join(repo, 'README.md'), 'x\n');
     git(['add', 'README.md']);
     git(['commit', '-qm', 'init']);
-    git(['checkout', '-q', '-b', 'side']);
-    fs.writeFileSync(path.join(repo, 'side.txt'), 'side\n');
-    git(['add', 'side.txt']);
-    git(['commit', '-qm', 'side work']);
-    side = git(['rev-parse', 'HEAD']);
-    onSide = island(run(repo, cycle('On side', '2026-10-18', { docMismatches: [B] })).html);
-    stSide = standing();
-    git(['checkout', '-q', 'main']);
+    git(['branch', 'older']);
+    fs.writeFileSync(path.join(repo, 'main.txt'), 'main\n');
+    git(['add', 'main.txt']);
+    git(['commit', '-qm', 'main work']);
+    at = git(['rev-parse', 'HEAD']);
+    run(repo, cycle('On main', '2026-10-18', { docMismatches: [B] }));
     stMain = standing();
-    onMain = island(run(repo, cycle('On main', '2026-10-19', { docMismatchesFixed: [keyOf(B)] })).html);
-    git(['merge', '-q', '--ff-only', 'side']);
+    git(['checkout', '-q', 'older']);
+    stOlder = standing();
+    onOlder = island(run(repo, cycle('On older', '2026-10-19', { docMismatchesFixed: [keyOf(B)] })).html);
+    git(['merge', '-q', '--ff-only', 'main']);
     merged = island(run(repo, cycle('Merged', '2026-10-20', { docMismatchesFixed: [keyOf(B)] })).html);
   } catch (e) {
     check('cycle page: the branch fixture ran', false, String(e && e.message).slice(0, 200));
   }
   check('cycle page: an item reported at a commit HEAD does not contain stays even when listed fixed',
-    isArr(onSide.docMismatches) && onSide.docMismatches[0].at === side &&
-    isArr(onMain.docMismatches) && onMain.docMismatches.length === 1 && onMain.docMismatches[0].key === keyOf(B) &&
-    merged.docMismatches === undefined, short([onSide.docMismatches, onMain.docMismatches, merged.docMismatches]));
+    isArr(onOlder.docMismatches) && onOlder.docMismatches.length === 1 && onOlder.docMismatches[0].key === keyOf(B) &&
+    onOlder.docMismatches[0].at === at && merged.docMismatches === undefined,
+    short([onOlder.docMismatches, merged.docMismatches]));
   check('cycle page: --standing --name cycle lists the open mismatches',
-    stSide.open === null && isArr(stSide.mismatches) && stSide.mismatches.length === 1 &&
-    stSide.mismatches[0].key === keyOf(B) && stSide.mismatches[0].inHistory === true &&
-    isArr(stMain.mismatches) && stMain.mismatches.length === 1 && stMain.mismatches[0].inHistory === false,
-    short([stSide, stMain]));
+    stMain.open === null && isArr(stMain.mismatches) && stMain.mismatches.length === 1 &&
+    stMain.mismatches[0].key === keyOf(B) && stMain.mismatches[0].inHistory === true &&
+    stOlder.name === 'cycle-older' && isArr(stOlder.mismatches) && stOlder.mismatches.length === 1 &&
+    stOlder.mismatches[0].inHistory === false,
+    short([stMain, stOlder]));
 
-  // A squash landing: the branch's commit never enters main's history, and once
-  // the branch is deleted no branch holds it, so main may close the item.
-  const C = Object.assign({}, A, { docText: 'the squashed branch says so' });
-  let squashed = {}, stGone = {};
+  // A commit on no branch any more: a rebase rewrote it away, or a squash
+  // landing deleted the branch that held it. It never enters HEAD's history,
+  // so an item recorded there may be closed, or it would stay forever.
+  const C = Object.assign({}, A, { docText: 'the rewritten commit says so' });
+  let rewritten = {}, stGone = {};
   try {
-    git(['checkout', '-q', '-b', 'squash-me']);
-    fs.writeFileSync(path.join(repo, 'squash.txt'), 'squash\n');
-    git(['add', 'squash.txt']);
-    git(['commit', '-qm', 'squash work']);
-    run(repo, cycle('On squash-me', '2026-10-21', { docMismatches: [C] }));
     git(['checkout', '-q', 'main']);
-    git(['merge', '-q', '--squash', 'squash-me']);
-    git(['commit', '-qm', 'squash landing']);
-    git(['branch', '-q', '-D', 'squash-me']);
+    fs.writeFileSync(path.join(repo, 'gone.txt'), 'gone\n');
+    git(['add', 'gone.txt']);
+    git(['commit', '-qm', 'work later rewritten']);
+    run(repo, cycle('Before the rewrite', '2026-10-21', { docMismatches: [C] }));
+    git(['reset', '-q', '--hard', 'HEAD~1']);
     stGone = standing();
-    squashed = island(run(repo, cycle('Squashed', '2026-10-22', { docMismatchesFixed: [keyOf(C)] })).html);
+    rewritten = island(run(repo, cycle('After the rewrite', '2026-10-22', { docMismatchesFixed: [keyOf(C)] })).html);
   } catch (e) {
-    check('cycle page: the squash fixture ran', false, String(e && e.message).slice(0, 200));
+    check('cycle page: the rewrite fixture ran', false, String(e && e.message).slice(0, 200));
   }
-  check('cycle page: an item from a squash-merged and deleted branch can be closed',
-    isArr(stGone.mismatches) && stGone.mismatches.length === 1 && stGone.mismatches[0].inHistory === true &&
-    squashed.docMismatches === undefined, short([stGone.mismatches, squashed.docMismatches]));
+  const goneItem = isArr(stGone.mismatches) ? stGone.mismatches.filter(function (m) { return m.key === keyOf(C); })[0] : null;
+  check('cycle page: an item whose commit is on no branch any more can be closed',
+    goneItem && goneItem.inHistory === true && rewritten.title === 'After the rewrite' &&
+    !(isArr(rewritten.docMismatches) && rewritten.docMismatches.some(function (m) { return m.key === keyOf(C); })),
+    short([stGone.mismatches, rewritten.docMismatches]));
 
   fresh();
   const hostile = run(dir, cycle('Hostile', '2026-10-18', { docMismatches: [Object.assign({}, A,
@@ -2366,6 +2471,7 @@ function isArr(x) { return Array.isArray(x); }
 
 cycleStandingPageTests();
 issue237Tests();
+issue269CycleTests();
 submoduleRootTest();
 branchNameCollisionTest();
 timePageTests();
