@@ -1,5 +1,37 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.7, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.8, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.8 - Your Own Labels, Your Own Pages (2026-10-22)
+
+**A patch on top of v8.0.7 (#268 to #270).** A project can set the questions `/tk:create-issue` asks and the labels it applies. Each branch gets its own cycle summary page, and a worktree's plans and reports reach your main folder on every `/tk:document` run.
+
+**Issue #268.** A project can now set the questions `/tk:create-issue` asks and the labels it applies, in a ninth file in `.claude/toolkit/`: `issue-labels.md`. With no such file, the command works as before.
+
+**Issues #269 and #270.** Worktrees running cycles side by side each get their own cycle summary page, and a worktree's plans and reports reach your main folder even when Claude Code deletes the worktree on its own.
+
+### Added
+
+- **`.claude/toolkit/issue-labels.md`.** Two short lists: your questions, and every label their answers can map to. Each list replaces the command's own only when it has entries, so a file with questions but no labels keeps the toolkit's label set, and a file holding only a comment changes nothing. When the file lists labels, the command applies no other label. It is the one prose file in the folder that replaces the toolkit's text rather than adding to it.
+
+### Changed
+
+- **`/tk:create-issue` asks the questions in its list, skipping any you already answered,** where it used to ask a fixed two or three.
+- **The command now says what each host does with a label the repository lacks.** GitHub refuses it, so the command drops it and says which; GitLab creates it without a word. The old line said the create command fails, which held on GitHub only.
+- `/tk:upgrade`'s paste-size check (C-19) covers `issue-labels.md` too. It finds pasted files by reading the commands, so the check itself did not change.
+- **The cycle summary is one page per branch,** as the review page already was: `cycle` on your default branch, `cycle-<branch>` on any other, each with its own link. A branch's first page starts from the main page's history and open doc mismatches, and `/tk:merge` folds the branch's page back into the main one when it lands: its cycles join the history, the mismatches it found stay open there, and the ones it fixed close.
+- **`/tk:document` copies a worktree's records home on every run,** in both landing styles, not only before it offers to remove the worktree. The copy lists what it brought home in `reports/landing/<branch>.brought-home.json` and may replace a file only while it still holds what the copy put there, so a second run refreshes your plan and never touches a file anyone else wrote.
+- **The removal questions in `/tk:document` and `/tk:merge` name the other ignored files** a removal deletes, such as a build folder or a map built in the worktree, leaving out package and cache folders.
+
+### Upgrading
+
+- Nothing to do unless you want your own questions or labels. Then write `.claude/toolkit/issue-labels.md` in the shape the folder's README describes; a newly seeded README lists nine files. A project that told Claude to use its own labels from a line in its rules file can move that line into the new file.
+- Nothing to do for the cycle pages and the records. A cycle page published before this release stays your default branch's page; a worktree's next `/tk:document` publishes a page of its own.
+
+### Why
+
+The command's question and label list lived in the plugin, so a project with its own labels had to override them from its rules file: a rule that held only while it was in context, beside a command that said the opposite. On GitLab, which creates any label an issue names, following the command's own list could quietly bring back a label the project had retired.
+
+One shared cycle page meant that two worktrees documenting on the same day replaced each other's headline on one link, and a publish was refused when the live page came from another session. And a worktree's gitignored records were copied home only on the way to a removal the toolkit made, while Claude Code deletes a finished worktree session's folder on its own, with no hook the toolkit could use to step in first.
 
 ## v8.0.7 - The Check That Runs Itself (2026-10-19)
 

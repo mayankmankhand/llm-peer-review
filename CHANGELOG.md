@@ -2,7 +2,9 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
-## Unreleased - Your Own Labels
+## v8.0.8 - Your Own Labels, Your Own Pages (2026-10-22)
+
+**A patch on top of v8.0.7 (#268 to #270).** A project can set the questions `/tk:create-issue` asks and the labels it applies. Each branch gets its own cycle summary page, and a worktree's plans and reports reach your main folder on every `/tk:document` run.
 
 **Issue #268.** A project can now set the questions `/tk:create-issue` asks and the labels it applies, in a ninth file in `.claude/toolkit/`: `issue-labels.md`. With no such file, the command works as before.
 
