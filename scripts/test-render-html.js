@@ -2161,6 +2161,143 @@ function issue269CycleTests() {
 }
 
 // ---------------------------------------------------------------------------
+// Issue #269, the other half: when a branch lands, /merge folds its cycle
+// page into the main page with --fold-cycle, so the main page stays the
+// history of everything that landed. The branch's cycles join the main log,
+// the mismatches it found join the main page, the ones it fixed close there,
+// and one the main page closed meanwhile never comes back. The main page keeps
+// its headline and its hosted stamp, and the branch page is marked folded, so
+// a later cycle on a reused branch name starts again from the main page.
+// ---------------------------------------------------------------------------
+function issue269FoldTests() {
+  console.log('\nfolding a landed branch\'s cycle page into the main page (issue #269)');
+  const root = tmpdir('269fold');
+  function git(cwd, args) {
+    return execFileSync('git', args, { cwd: cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  }
+  function run(cwd, args) {
+    const r = spawnSync('node', [SCRIPT].concat(args), { cwd: cwd, encoding: 'utf-8' });
+    return { status: r.status, out: (r.stdout || '').trim(), err: r.stderr || '' };
+  }
+  let n = 0;
+  function renderIn(cwd, data) {
+    const dataPath = path.join(root, 'in-' + (++n) + '.json');
+    fs.writeFileSync(dataPath, JSON.stringify(data), 'utf-8');
+    return run(cwd, ['--shell', 'document', '--name', 'cycle', '--stable', '--data', dataPath]);
+  }
+  const island = function (file) { return fs.existsSync(file) ? JSON.parse(dataIsland(fs.readFileSync(file, 'utf-8'))) : {}; };
+  const fold = function (cwd, branch) {
+    const r = run(cwd, ['--fold-cycle', '--branch', branch]);
+    try { return Object.assign(JSON.parse(r.out), { status: r.status }); } catch (e) { return { status: r.status, unparsed: r.out + r.err }; }
+  };
+  const cycle = function (title, extra) {
+    return Object.assign({ title: title, pill: 'v1', subtitle: '2026-10-22 &middot; window <code>a..b</code>', commitCount: 1 }, extra || {});
+  };
+  const item = function (docText) {
+    return { doc: 'docs/usage.md', docLine: 5, docText: docText, code: 'src/a.js', codeLine: 1, codeText: 'return 1;', why: 'Seen.' };
+  };
+  const keyOf = function (m) { return m.doc + '\n' + m.docText; };
+  const lines = function (d) { return (d.cycleLog || []).map(function (e) { return e.line; }); };
+  const keys = function (d) { return (d.docMismatches || []).map(function (m) { return m.key; }); };
+  function repo(name) {
+    const dir = path.join(root, name);
+    fs.mkdirSync(dir);
+    git(dir, ['init', '-q', '-b', 'main']);
+    git(dir, ['config', 'user.email', 't@example.com']);
+    git(dir, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n');
+    git(dir, ['add', '.']);
+    git(dir, ['commit', '-qm', 'init']);
+    return dir;
+  }
+
+  try {
+    const main = repo('main');
+    const pages = path.join(main, 'artifacts', 'html');
+    const mainPage = path.join(pages, 'cycle.html');
+    const stampMain = function () {
+      run(main, ['--index-add', '--type', 'document', '--name', 'cycle', '--local', mainPage, '--url', 'https://example.com/main-cycle']);
+    };
+    // M is fixed on the branch, N is closed on main after the branch started
+    // from it, and F is found on the branch.
+    const M = item('fixed on the branch'), N = item('closed on main meanwhile'), F = item('found on the branch');
+    renderIn(main, cycle('Main Cycle', { docMismatches: [M, N] }));
+    const wt = path.join(root, 'wt');
+    git(main, ['worktree', 'add', '-q', '-b', 'wt-fold', wt]);
+    const branchPage = path.join(pages, 'cycle-wt-fold.html');
+    renderIn(wt, cycle('Branch Cycle One', { docMismatches: [F], docMismatchesFixed: [keyOf(M)] }));
+    renderIn(wt, cycle('Branch Cycle Two'));
+    renderIn(main, cycle('Main Cycle Two', { docMismatchesFixed: [keyOf(N)] }));
+    stampMain();
+
+    const first = fold(main, 'wt-fold');
+    const md = island(mainPage);
+    const mainHtml = fs.existsSync(mainPage) ? fs.readFileSync(mainPage, 'utf-8') : '';
+    check('folding a landed branch adds its cycles to the main log and keeps the main headline',
+      first.status === 0 && first.folded === 2 && md.title === 'Main Cycle Two' &&
+      lines(md).indexOf('Branch Cycle Two') !== -1 && lines(md).indexOf('Branch Cycle One') !== -1 &&
+      lines(md).filter(function (l) { return l === 'Main Cycle'; }).length === 1,
+      JSON.stringify({ result: first, title: md.title, log: lines(md) }));
+    check('folding carries the branch\'s open mismatches onto the main page',
+      first.mismatches === 1 && keys(md).indexOf(keyOf(F)) !== -1, JSON.stringify({ result: first, keys: keys(md) }));
+    check('folding closes on the main page a mismatch the branch fixed',
+      first.closed === 1 && keys(md).indexOf(keyOf(M)) === -1, JSON.stringify({ result: first, keys: keys(md) }));
+    // Both of these also hold when no fold ran at all, so each first asks that it did.
+    check('269 fold: a mismatch the main page closed after the branch started never comes back',
+      first.status === 0 && first.folded > 0 && keys(md).indexOf(keyOf(N)) === -1, JSON.stringify(keys(md)));
+    check('folding keeps the main page\'s hosted stamp',
+      first.status === 0 && first.folded > 0 && lines(md).indexOf('Branch Cycle Two') !== -1 &&
+      mainHtml.split('\n')[0] === '<!-- hosted: https://example.com/main-cycle -->' &&
+      md.docMismatchesSeeded === undefined && md.docMismatchesClosed === undefined && md.foldedAt === undefined,
+      mainHtml.split('\n')[0]);
+
+    const again = fold(main, 'wt-fold');
+    check('folding the same branch twice adds nothing the second time',
+      again.status === 0 && again.folded === 0 && again.mismatches === 0 && again.closed === 0 &&
+      JSON.stringify(lines(island(mainPage))) === JSON.stringify(lines(md)), JSON.stringify(again));
+
+    renderIn(wt, cycle('Branch Cycle Three'));
+    const restarted = island(branchPage);
+    check('a branch page that was folded starts again from the main page on its next render',
+      /First cycle summary on branch wt-fold/.test(restarted.sinceLast || '') && lines(restarted)[0] === 'Main Cycle Two' &&
+      restarted.foldedAt === undefined, JSON.stringify({ since: restarted.sinceLast, log: lines(restarted) }));
+
+    const slashWt = path.join(root, 'slash');
+    git(main, ['worktree', 'add', '-q', '-b', 'feature/x', slashWt]);
+    renderIn(slashWt, cycle('Slash Cycle'));
+    const slash = fold(main, 'feature/x');
+    check('folding a branch whose name has a slash finds its page',
+      slash.status === 0 && slash.folded === 1 && lines(island(mainPage)).indexOf('Slash Cycle') !== -1 &&
+      !fs.existsSync(path.join(pages, 'cycle-feature')), JSON.stringify(slash));
+
+    const nothing = fold(main, 'no-such-branch');
+    check('269 fold: a branch with no cycle page folds nothing',
+      nothing.status === 0 && nothing.folded === 0 && nothing.mismatches === 0, JSON.stringify(nothing));
+
+    // A repository whose main page does not exist yet: the branch's page
+    // becomes the main page, without the branch's own hosted link.
+    const bare = repo('bare');
+    const barePages = path.join(bare, 'artifacts', 'html');
+    const bareWt = path.join(root, 'bare-wt');
+    git(bare, ['worktree', 'add', '-q', '-b', 'only', bareWt]);
+    renderIn(bareWt, cycle('Only Cycle', { docMismatches: [F] }));
+    run(bareWt, ['--index-add', '--type', 'document', '--name', 'cycle', '--local', path.join(barePages, 'cycle-only.html'),
+                 '--url', 'https://example.com/only-cycle']);
+    const made = fold(bare, 'only');
+    const bareMain = path.join(barePages, 'cycle.html');
+    const bd = island(bareMain);
+    const bareHtml = fs.existsSync(bareMain) ? fs.readFileSync(bareMain, 'utf-8') : '';
+    check('269 fold: with no main page yet the branch\'s page becomes the main page, without its hosted link',
+      made.status === 0 && bd.title === 'Only Cycle' && keys(bd).indexOf(keyOf(F)) !== -1 &&
+      bareHtml.indexOf('<!-- hosted:') === -1 && bd.docMismatchesSeeded === undefined && bd.foldedAt === undefined,
+      JSON.stringify({ made: made, title: bd.title, first: bareHtml.split('\n')[0] }));
+  } catch (e) {
+    check('issue 269 fold tests ran without an exception', false, e.message);
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
 // Review of #237, R2: inside a git submodule the shared git folder is the
 // superproject's .git/modules/<name>, so "the parent of the common folder" was
 // .git/modules itself, one folder every submodule shares: the index and, since
@@ -2472,6 +2609,7 @@ function isArr(x) { return Array.isArray(x); }
 cycleStandingPageTests();
 issue237Tests();
 issue269CycleTests();
+issue269FoldTests();
 submoduleRootTest();
 branchNameCollisionTest();
 timePageTests();
