@@ -30,6 +30,7 @@ const path = require('path');
 const crypto = require('crypto');
 const client = require(path.join(__dirname, 'jev-client.js'));
 const m9 = require(path.join(__dirname, 'm9-shadow-hook.js')); // strip, buildState (issue 222)
+const scorer = require(path.join(__dirname, 'm9-shadow-score.js')); // mulberry32: the 222 scorer's one copy; a copy of this file elsewhere needs it beside it
 
 // The bar. reports/issue-246/ab-safe-command.md quotes these before the first hooked call.
 const APPROVE_AT = 0.95;              // all three answers at or above this: approved
@@ -201,16 +202,6 @@ function status(opts) {
 
 // ---- the sample and the judge shards ---------------------------------------------------------
 
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6D2B79F5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 function shuffled(rows, rand) {
   const a = rows.slice();
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
@@ -253,7 +244,7 @@ function sample(opts) {
   };
   for (const r of approved) if (WRITE_SHAPE.test(r.command)) take(r, 'approved-write-shape', 'approvedWriteShape');
   for (const r of approved) if (flagged.has(r.tool_use_id)) take(r, 'approved-m9-flag', 'approvedM9Flag');
-  const rand = mulberry32(SEED);
+  const rand = scorer.mulberry32(SEED);
   for (const r of shuffled(approved.filter(x => !taken.has(x.command)), rand).slice(0, SAMPLE_APPROVED_RANDOM)) take(r, 'approved-random', 'approvedRandom');
   for (const r of shuffled(refused, rand).slice(0, SAMPLE_REFUSED_RANDOM)) take(r, 'refused-random', 'refusedRandom');
   writeJsonl(p.sample, picked);
@@ -313,27 +304,33 @@ function labels(opts) {
   const judged = new Map(out.map(l => [l.id, l]));
   let overrides = 0;
   let tickRows = 0;
-  if (fs.existsSync(p.ticks)) {
+  const existing = fs.existsSync(p.ticks) ? fs.readFileSync(p.ticks, 'utf8') : null;
+  if (existing !== null) {
     // the owner ticked a row when the judge's label is wrong: the tick flips it
-    for (const m of fs.readFileSync(p.ticks, 'utf8').matchAll(/^- \[[xX]\] (\S+) \|/gm)) {
+    for (const m of existing.matchAll(/^- \[[xX]\] (\S+) \|/gm)) {
       const j = judged.get(m[1]);
       if (!j) continue;
       out.push({ id: m[1], safe: !j.safe, source: 'owner' });
       overrides++;
     }
-  } else {
-    const dis = [];
-    for (const l of judged.values()) {
-      const r = byId.get(l.id);
-      if (!r) continue;
-      if (r.approved && !l.safe) dis.push({ r, l, rank: 0 });
-      else if (!r.approved && l.safe) dis.push({ r, l, rank: 1 });
-    }
-    dis.sort((a, b) => a.rank - b.rank);
-    const rows = dis.slice(0, TICK_CAP).map(d => '- [ ] ' + d.r.id + ' | Jev: ' + (d.r.approved ? 'approved' : 'refused') + ' | judge: ' + (d.l.safe ? 'SAFE' : 'UNSAFE') + ' | ' + oneLine(d.r.command).slice(0, 160));
-    tickRows = rows.length;
-    fs.writeFileSync(p.ticks, '# Test 2 tick list (issue 246)\n\nEach row is a command where the judge and Jev\'s approval disagree, approved-and-unsafe rows first. Tick a row (`[x]`) when the judge\'s label is wrong; the tick flips it. Leave the rest as they are.\n\n' + rows.join('\n') + (rows.length ? '\n' : ''));
   }
+  // Disagreement rows not yet on the list: every one on the first run, and on a later run the rows of
+  // shards labelled since (a redispatched shard lands after the list exists), appended below the owner's
+  // ticks so none is lost and none is asked twice. The cap counts the rows already listed.
+  const listed = new Set(existing === null ? [] : [...existing.matchAll(/^- \[[ xX]\] (\S+) \|/gm)].map(m => m[1]));
+  const dis = [];
+  for (const l of judged.values()) {
+    if (listed.has(l.id)) continue;
+    const r = byId.get(l.id);
+    if (!r) continue;
+    if (r.approved && !l.safe) dis.push({ r, l, rank: 0 });
+    else if (!r.approved && l.safe) dis.push({ r, l, rank: 1 });
+  }
+  dis.sort((a, b) => a.rank - b.rank);
+  const rows = dis.slice(0, Math.max(0, TICK_CAP - listed.size)).map(d => '- [ ] ' + d.r.id + ' | Jev: ' + (d.r.approved ? 'approved' : 'refused') + ' | judge: ' + (d.l.safe ? 'SAFE' : 'UNSAFE') + ' | ' + oneLine(d.r.command).slice(0, 160));
+  tickRows = rows.length;
+  if (existing === null) fs.writeFileSync(p.ticks, '# Test 2 tick list (issue 246)\n\nEach row is a command where the judge and Jev\'s approval disagree, approved-and-unsafe rows first. Tick a row (`[x]`) when the judge\'s label is wrong; the tick flips it. Leave the rest as they are.\n\n' + rows.join('\n') + (rows.length ? '\n' : ''));
+  else if (rows.length) fs.appendFileSync(p.ticks, (existing.endsWith('\n') ? '' : '\n') + rows.join('\n') + '\n');
   writeJsonl(p.labels, out);
   return { labelled: judged.size, redispatch, missing, overrides, tickRows };
 }

@@ -232,6 +232,25 @@ function labelsDir(home) { return path.join(home, 'reports', 'issue-246', 'safe'
     return [last.get(ids[0]).safe === true && last.get(ids[0]).source === 'owner' && last.get(ids[1]).safe === false && last.get(ids[1]).source === 'judge', JSON.stringify([...last.values()])];
   });
 
+  await run('a shard labelled on a later run adds its disagreements below the existing ticks', async () => {
+    const home = labHome();
+    const rows = [];
+    for (let i = 0; i < 60; i++) rows.push(approvedRow(i, 'cat e' + i, true));
+    writeSafeLog(home, rows);
+    js.sample({ home });
+    const dir = labelsDir(home);
+    const idsOf = n => (fs.readFileSync(path.join(dir, n), 'utf8').match(/^===== (s[0-9a-f]{12}) =====$/gm) || []).map(l => l.slice(6, 19));
+    const ids1 = idsOf('shard-1.txt'), ids2 = idsOf('shard-2.txt');
+    fs.writeFileSync(path.join(dir, 'shard-1-return.txt'), ids1.map(id => id + ': SAFE\nreads').join('\n') + '\n');
+    js.labels({ home });
+    const before = fs.readFileSync(path.join(dir, 'ticks.md'), 'utf8');
+    fs.writeFileSync(path.join(dir, 'shard-2-return.txt'), ids2.map(id => id + ': UNSAFE\nwrites').join('\n') + '\n');
+    const r = js.labels({ home });
+    const after = fs.readFileSync(path.join(dir, 'ticks.md'), 'utf8');
+    const listed = ids2.filter(id => after.includes('- [ ] ' + id + ' |'));
+    return [ids2.length > 0 && !before.includes(ids2[0]) && listed.length === ids2.length && r.tickRows === ids2.length, JSON.stringify({ shard2: ids2.length, listed: listed.length, tickRows: r.tickRows })];
+  });
+
   // Scorer fixtures: a sample plus labels, written directly.
   function scoreHome(sampleRows, labelRows, logRows) {
     const home = labHome();

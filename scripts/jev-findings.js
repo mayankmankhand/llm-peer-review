@@ -33,6 +33,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const client = require(path.join(__dirname, 'jev-client.js'));
 const m9 = require(path.join(__dirname, 'm9-shadow-hook.js')); // withholdReason, for --dry
+const scorer = require(path.join(__dirname, 'm9-shadow-score.js')); // auroc, ece, percentile: the 222 scorer's one copy
+const { auroc, ece, percentile } = scorer; // a copy of this file elsewhere needs m9-shadow-score.js beside it
 
 // The bar. reports/issue-246/ab-findings.md quotes these before the first call.
 const MIN_PER_CLASS = 10;   // fewer STANDS or REFUTED rows than this: INSUFFICIENT
@@ -40,7 +42,6 @@ const GOOD_AUROC = 0.80;    // AUROC of `holds` against STANDS at or above this:
 const POOR_AUROC = 0.70;    // below this: NOT GOOD AT; between the two: MIXED
 const THRESHOLD = 0.5;      // a probability at or above this is a "yes"
 const MAX_STATE = 12000;    // characters of one finding block sent; the rest becomes a marker
-const ECE_BINS = 10;
 const BUILDS = [client.MODEL, client.MODEL_114];
 
 // Two wordings in one request: the verdict hangs on `holds`; `refuted` asks the inverse, so a pair
@@ -242,30 +243,7 @@ async function trigger(input, opts) {
 
 // ---- score -----------------------------------------------------------------------------------
 
-function auroc(pos, neg) {
-  if (!pos.length || !neg.length) return null;
-  let wins = 0;
-  for (const a of pos) for (const b of neg) wins += a > b ? 1 : (a === b ? 0.5 : 0);
-  return wins / (pos.length * neg.length);
-}
-function ece(pairs) {
-  if (!pairs.length) return null;
-  const bins = Array.from({ length: ECE_BINS }, () => ({ n: 0, conf: 0, acc: 0 }));
-  for (const { p, y } of pairs) {
-    const conf = p >= THRESHOLD ? p : 1 - p;
-    const pred = p >= THRESHOLD ? 1 : 0;
-    const bin = bins[Math.min(ECE_BINS - 1, Math.floor(conf * ECE_BINS))];
-    bin.n++; bin.conf += conf; bin.acc += pred === y ? 1 : 0;
-  }
-  let total = 0;
-  for (const bin of bins) if (bin.n) total += (bin.n / pairs.length) * Math.abs(bin.acc / bin.n - bin.conf / bin.n);
-  return total;
-}
-function percentile(values, q) {
-  if (!values.length) return null;
-  const sorted = values.slice().sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
-}
+// auroc, ece and percentile come from m9-shadow-score.js: one copy, imported above (review 2026-10-24).
 function round(v) { return v === null || v === undefined ? null : Number(v.toFixed(3)); }
 
 function metrics(rows) {

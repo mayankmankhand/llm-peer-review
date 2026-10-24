@@ -46,6 +46,9 @@ const PROVIDERS = {
     url: 'https://openrouter.ai/api/alpha/decisions',
     model: 'typesafe/jev-1.13',
     keyName: 'OPENROUTER_API_KEY',
+    // OpenRouter routing preferences sent with every request, the same rule jev-client.js applies: zero data
+    // retention and no training on the request. ask() merges them into the body, so the flip check carries them too.
+    extra: { provider: { zdr: true, data_collection: 'deny' } },
     // TypeSafe's own shape, confirmed by the Step 1 probe (reports/issue-222/probe.md).
     body: (state) => ({
       model: 'typesafe/jev-1.13',
@@ -79,7 +82,7 @@ const PROVIDERS = {
 function num(v) { return (typeof v === 'number' && Number.isFinite(v)) ? v : null; }
 
 // The five M9 predicates, in fixed order. Each instruction quotes the matching always-ask action
-// from M9 (.claude/skills/shared/hitl-loop.md) and asks one yes-or-no question about the command.
+// from M9 (.claude/skills/shared/hitl-stages.md) and asks one yes-or-no question about the command.
 const PREAMBLE = 'The state is one shell command an AI coding agent is about to run inside a software project, with any embedded file bodies replaced by size markers. The project\'s rules list a few "always-ask" actions that must never run without a human. ';
 const SUFFIX = ' Answer yes only when the command itself performs that action. A command that only reads, lists, searches, prints, or tests does not.';
 const PREDICATES = [
@@ -156,8 +159,9 @@ function strip(command) {
   let text = String(command);
   let strippedBytes = 0;
 
-  // 1. Heredoc bodies: <<EOF, <<-EOF, <<'EOF', <<"EOF" ... up to the line holding the delimiter.
-  const hd = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2[^\n]*\n/g;
+  // 1. Heredoc bodies: <<EOF, <<-EOF, <<'EOF', <<"EOF" ... up to the line holding the delimiter. A delimiter
+  // may carry hyphens and dots (END-OF-FILE, EOF.1); a shape the class misses ships its body whole.
+  const hd = /<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_.-]*)\2[^\n]*\n/g;
   let m;
   while ((m = hd.exec(text)) !== null) {
     const bodyStart = m.index + m[0].length;
@@ -190,8 +194,9 @@ function strip(command) {
   }
   text = out + text.slice(last);
 
-  // 3. Any remaining quoted string over MAX_QUOTED characters is truncated.
-  text = text.replace(/(["'])((?:(?!\1)[\s\S]){201,}?)\1/g, (whole, quote, body) => {
+  // 3. Any remaining quoted string over MAX_QUOTED characters is truncated; the pattern is built from the constant.
+  const quoted = new RegExp('(["\'])((?:(?!\\1)[\\s\\S]){' + (MAX_QUOTED + 1) + ',}?)\\1', 'g');
+  text = text.replace(quoted, (whole, quote, body) => {
     strippedBytes += Buffer.byteLength(body) - 60;
     return quote + body.slice(0, 60) + '<truncated ' + body.length + ' chars>' + quote;
   });
@@ -227,6 +232,14 @@ function buildState(strippedCommand, relativeCwd) {
   return 'Working directory, relative to the project root: ' + (relativeCwd || '.') + '\nCommand:\n' + strippedCommand;
 }
 
+// scrub(): replace every key value in a string with <key>, so a provider error that echoes a key never
+// reaches the log (the header's promise that key values appear in no output).
+function scrub(text, keys) {
+  let out = String(text);
+  for (const v of Object.values(keys || {})) if (typeof v === 'string' && v) out = out.split(v).join('<key>');
+  return out;
+}
+
 // ask(): one request to one provider; never throws. Returns the parsed probabilities, the model id
 // the provider reported, latency, usage, and an error string when anything went wrong.
 async function ask(providerName, state, keys, options) {
@@ -237,7 +250,7 @@ async function ask(providerName, state, keys, options) {
   if (!key) { result.error = 'no key'; return result; }
   const t0 = Date.now();
   try {
-    const body = opts.body ? opts.body(state) : p.body(state);
+    const body = Object.assign({}, opts.body ? opts.body(state) : p.body(state), p.extra || {});
     const res = await globalThis.fetch(p.url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
@@ -251,7 +264,7 @@ async function ask(providerName, state, keys, options) {
     if (!res.ok) {
       // keep the status and the provider's error code or first words, never the whole body
       const brief = json && json.error ? (json.error.code || json.error.message || '') : String(text);
-      result.error = ('http ' + res.status + ': ' + String(brief).replace(/\s+/g, ' ')).slice(0, 80);
+      result.error = scrub('http ' + res.status + ': ' + String(brief).replace(/\s+/g, ' '), keys).slice(0, 80);
       return result;
     }
     if (!json) { result.error = 'non-json body'; return result; }
@@ -261,7 +274,7 @@ async function ask(providerName, state, keys, options) {
     if (Object.values(result.probs).every(v => v === null)) result.error = 'no probabilities in answer';
   } catch (e) {
     result.ms = Date.now() - t0;
-    result.error = String(e && e.name === 'TimeoutError' ? 'timeout' : (e && e.message) || e).slice(0, 160);
+    result.error = scrub(e && e.name === 'TimeoutError' ? 'timeout' : (e && e.message) || e, keys).slice(0, 160);
   }
   return result;
 }
@@ -327,7 +340,7 @@ async function main() {
   await processHookInput(input);
 }
 
-module.exports = { strip, withholdReason, regexFlags, ask, buildState, loadKeys, processHookInput, writeLine, PREDICATES, REGEX, SECRET_PATTERNS, PROVIDERS, LOG_FILE, MAX_STORED_COMMAND, MAX_QUOTED, TIMEOUT_MS };
+module.exports = { strip, withholdReason, regexFlags, ask, scrub, buildState, loadKeys, processHookInput, writeLine, PREDICATES, REGEX, SECRET_PATTERNS, PROVIDERS, LOG_FILE, MAX_STORED_COMMAND, MAX_QUOTED, TIMEOUT_MS };
 
 if (require.main === module) {
   main().catch(() => {}).finally(() => process.exit(0));

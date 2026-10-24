@@ -44,6 +44,16 @@ function tmpdir(label) { return fs.mkdtempSync(path.join(os.tmpdir(), 'm9-shadow
 
   const plain = hook.strip('git status --porcelain');
   check('a command with nothing to strip is unchanged', plain.text === 'git status --porcelain' && plain.strippedBytes === 0);
+
+  // review 2026-10-24 (R7, R12): delimiters with a hyphen or a dot, and the quoted-string cap's boundary
+  const hy = hook.strip("cat <<'END-OF-FILE' > out.txt\nsecret body line\nEND-OF-FILE\n");
+  check('strip: a quoted heredoc delimiter with a hyphen is stripped', hy.text.includes('<heredoc') && !hy.text.includes('secret body'), hy.text);
+  const dot = hook.strip('cat <<EOF.1\nsecret body line\nEOF.1\n');
+  check('strip: a heredoc delimiter with a dot is stripped', dot.text.includes('<heredoc') && !dot.text.includes('secret body'), dot.text);
+  const keep = hook.strip('echo "' + 'a'.repeat(hook.MAX_QUOTED) + '"');
+  check('strip: a quoted string of exactly MAX_QUOTED characters is kept whole', !keep.text.includes('<truncated'), keep.text.length);
+  const cut = hook.strip('echo "' + 'a'.repeat(hook.MAX_QUOTED + 1) + '"');
+  check('strip: a quoted string one over MAX_QUOTED is truncated', cut.text.includes('<truncated ' + (hook.MAX_QUOTED + 1) + ' chars>'), cut.text);
 }
 
 // ---- withholding (fixtures assembled at runtime) -------------------------------------------------
@@ -153,6 +163,7 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     check('the Jev request uses the probed shape', sent.some(s => s.url.includes('openrouter') && s.body.state && s.body.questions && s.body.questions.forcePush && s.body.questions.forcePush.type === 'noul'));
     check('the OpenAI request uses the documented shape', sent.some(s => s.url.includes('openai.com') && typeof s.body.input === 'string' && Array.isArray(s.body.questions) && s.body.questions[0].type === 'predicate'));
     check('usage is kept for cost', parsed && parsed.providers.jev.usage.cost === 0.0000126);
+    check('the Jev request carries the no-retention flags', sent.some(s => s.url.includes('openrouter') && s.body.provider && s.body.provider.zdr === true && s.body.provider.data_collection === 'deny'), JSON.stringify(sent.map(s => s.body.provider)));
 
     // a force push hidden inside an inline body: a raw regex hit the models cannot see
     const hidden = await hook.processHookInput(hookInput("bash -c 'git push --force origin main'"), { keys, logFile: log });
@@ -173,6 +184,19 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     globalThis.fetch = fakeFetch(() => ({ status: 401, body: { error: { code: 'invalid_api_key' } } }));
     const h = await hook.processHookInput(hookInput('ls -la'), { keys, logFile: log });
     check('an http error is recorded as an error string', /^http 401/.test(h.providers.openai.error));
+
+    // a provider error that quotes a key is scrubbed before it is logged (review 2026-10-24, R15)
+    globalThis.fetch = fakeFetch(() => ({ status: 401, body: { error: { message: 'key k2 was rejected' } } }));
+    const leak = await hook.processHookInput(hookInput('ls -l'), { keys, logFile: log });
+    check('a provider error that quotes the key is scrubbed before it is logged', !leak.providers.jev.error.includes('k2') && leak.providers.jev.error.includes('<key>'), leak.providers.jev.error);
+    globalThis.fetch = fakeFetch(() => new Error('boom k1 k2'));
+    const leak2 = await hook.processHookInput(hookInput('ls -l'), { keys, logFile: log });
+    check('a thrown error that quotes either key is scrubbed too', !/k1|k2/.test(leak2.providers.openai.error + leak2.providers.jev.error) && leak2.providers.jev.error.includes('<key>'), leak2.providers.openai.error + ' / ' + leak2.providers.jev.error);
+
+    // a timed-out fetch: the error is recorded as "timeout" and no probabilities are kept (R18)
+    globalThis.fetch = fakeFetch(() => { const t = new Error('The operation was aborted due to timeout'); t.name = 'TimeoutError'; return t; });
+    const to = await hook.processHookInput(hookInput('ls'), { keys, logFile: log });
+    check('a timed-out fetch writes a line with the error "timeout" and no probabilities', to.providers.jev.error === 'timeout' && to.providers.openai.error === 'timeout' && to.providers.jev.probs === null, JSON.stringify(to.providers));
 
     // no key: no fetch
     globalThis.fetch = fakeFetch(() => { throw new Error('must not be called'); });

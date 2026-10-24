@@ -478,3 +478,7 @@
 - **Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.**
 - **Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.**
 - **Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.**
+
+## Issue 222 (the shadow M9 gate)
+
+- **A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.**

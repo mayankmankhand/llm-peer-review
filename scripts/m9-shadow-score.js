@@ -411,7 +411,7 @@ async function flipCheck(dir, askFn) {
     let errors = 0;
     for (let i = 0; i < rows.length; i += 4) {
       const batch = rows.slice(i, i + 4);
-      const results = await Promise.all(batch.map(r => ask(p, hook.buildState(r.command, null), keys, { body: paraphrasedBody(p) })));
+      const results = await Promise.all(batch.map(r => ask(p, hook.buildState(r.command, r.cwd || null), keys, { body: paraphrasedBody(p) })));
       results.forEach((res, k) => {
         if (res.error || !res.probs) { errors++; return; }
         for (const id of PREDICATE_IDS) {
@@ -445,6 +445,6 @@ async function main() {
   process.exit(2);
 }
 
-module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, readJsonl, readLabels, rowId, mulberry32, flagKey, rawHit, hiddenHit, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
+module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, percentile, readJsonl, readLabels, rowId, mulberry32, flagKey, rawHit, hiddenHit, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
 
 if (require.main === module) main().catch(e => { console.error(String(e && e.message || e)); process.exit(1); });

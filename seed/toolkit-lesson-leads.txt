@@ -1,13 +1,13 @@
-# Bold leads the toolkit's own LESSONS.md has carried, for the upgrade audit (C-16).
-# The copy-installers copy that file into a fresh project and the v7.0.x plugin seed carried the same
-# lessons, so a project bullet with one of these leads is the toolkit's lesson. One lead per line.
-# Written by scripts/seed-history.js from the release tags and the working tree; never edit it by hand.
 "Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.
 "Do I understand it?" vs "Can I use it?" is the right split for review skills.
 "Fails before, passes after" needs the after expect held against the before output too.
 "Falls back" is not "degrades to nothing" - read what the fallback actually produces.
 "Same command, two gears" vs "new command" decision pattern.
 "Touches no file" is a claim to measure: `git stash create` takes the index lock.
+# Bold leads the toolkit's own LESSONS.md has carried, for the upgrade audit (C-16).
+# The copy-installers copy that file into a fresh project and the v7.0.x plugin seed carried the same
+# Written by scripts/seed-history.js from the release tags and the working tree; never edit it by hand.
+# lessons, so a project bullet with one of these leads is the toolkit's lesson. One lead per line.
 A "nothing defines X" finding must first refute the generic rule that already covers X.
 A "nothing reads this file" claim must check every grep hit, test suites included.
 A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.
@@ -56,6 +56,7 @@ A lone `cd` call, then plain commands, matches the permission rows; a subshell, 
 A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.
 A major version bump on additive-only work needs explicit framing.
 A measurable claim in a commit message is a claim until you measure it.
+A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.
 A missing finding is invisible to the audit; a wrong one is not.
 A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.
 A name that is also a key is a migration decision, not a preference.
