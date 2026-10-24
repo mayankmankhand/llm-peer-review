@@ -859,8 +859,8 @@ function shardsMain(argv, fail) {
 // fixes, the untracked files M3's rule puts beside that diff, and the count of
 // rounds per finding that M5 bounds. --verify writes all of it from the bytes
 // on disk, the same way every run, and keeps <out>/ledger.json: the call count,
-// each finding's path, round and verdicts, and the checkpoints M4 records and
-// M5's revert reads. Which path a finding takes stays the runner's judgment:
+// each finding's key, path, round and verdicts, and the checkpoints M4 records
+// and M5's revert reads. Which path a finding takes stays the runner's judgment:
 // it names the mechanical, judgment and browser IDs, and the mode refuses an
 // ID named twice or one the merge did not produce, so nothing is skipped in
 // silence.
@@ -885,8 +885,13 @@ function invertExpect(expect) {
 }
 
 function emptyLedger() { return { calls: 0, findings: {}, checkpoints: [], lastGreen: null }; }
-function readLedger(file) {
-  if (!fs.existsSync(file)) return emptyLedger();
+// Outside --verify the ledger must already exist (mustExist): a mistyped path
+// would otherwise start a second ledger with no green checkpoint in it.
+function readLedger(file, mustExist) {
+  if (!fs.existsSync(file)) {
+    if (mustExist) throw badInput('not_found', null, file + ' does not exist; --verify writes the ledger, so run the mode first or check the path');
+    return emptyLedger();
+  }
   let parsed;
   try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { throw badInput('bad_ledger', null, file + ' is not JSON: ' + e.message); }
   if (!parsed || typeof parsed !== 'object' || !parsed.findings || typeof parsed.findings !== 'object') throw badInput('bad_ledger', null, file + ' does not hold a ledger');
@@ -969,6 +974,29 @@ function buildVerify(parsed, scope, opts) {
 
   const ledgerFile = path.join(opts.out, 'ledger.json');
   const ledger = readLedger(ledgerFile);
+  // A ledger entry follows its finding's key, not its position: a follow-up
+  // finding appended to the file (M5's one generation) sorts into the merge and
+  // shifts every ID after it, so each entry moves to the ID its key holds now.
+  // An entry whose key the merge no longer has is kept under `retired`, so no
+  // record is lost; an entry from before keys were recorded stays where it is.
+  const keyOf = new Map(merged.map((m) => [m.id, m.key]));
+  const idOf = new Map(merged.map((m) => [m.key, m.id]));
+  const renumbered = {};
+  const kept = {};
+  const retired = ledger.retired || {};
+  for (const id of Object.keys(ledger.findings)) {
+    const f = ledger.findings[id];
+    let to = id;
+    if (f.key) {
+      if (idOf.has(f.key)) to = idOf.get(f.key);
+      else { retired[f.key] = f; continue; }
+    } else if (keyOf.has(id)) f.key = keyOf.get(id);
+    if (kept[to]) throw badInput('bad_ledger', null, 'two ledger entries map to ' + to + '; the ledger at ' + ledgerFile + ' does not fit this findings file');
+    kept[to] = f;
+    if (to !== id) renumbered[id] = to;
+  }
+  ledger.findings = kept;
+  if (Object.keys(retired).length) ledger.retired = retired;
   const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS);
   if (exhausted.length) {
     const e = badInput('rounds_exhausted', null, exhausted.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5): revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
@@ -1077,14 +1105,15 @@ function buildVerify(parsed, scope, opts) {
   ledger.calls = call;
   const rounds = {};
   for (const id of named) {
-    const f = ledger.findings[id] || (ledger.findings[id] = { path: pathOf[id], round: 0, verdicts: [], rechecks: {} });
+    const f = ledger.findings[id] || (ledger.findings[id] = { key: keyOf.get(id), path: pathOf[id], round: 0, verdicts: [], rechecks: {} });
+    f.key = keyOf.get(id);
     f.path = pathOf[id];
     f.round += 1;
     if (!f.rechecks) f.rechecks = {};
     if (recheckRows[id]) f.rechecks[String(f.round)] = recheckRows[id];
     rounds[id] = f.round;
   }
-  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds };
+  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds, renumbered };
 }
 
 // --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> --mechanical <ids> --judgment <ids> [--browser <ids>] [--end <sha>] [--root <dir>]
@@ -1144,16 +1173,21 @@ function verifyMain(argv, fail) {
     diffFrom: built.diffFrom,
     untracked: built.untracked,
     ledger: { file: built.ledgerFile, rounds: built.rounds },
+    renumbered: built.renumbered,
   }) + '\n');
 }
 
-// A verifier's return, recorded under each finding's current round.
+// A verifier's return, recorded under each finding's current round. --verify
+// names every finding before a verifier runs, so an ID the ledger has not seen
+// is a mistake to refuse, never an entry to create by position.
 function recordVerdicts(file, verdicts, source, from, fail) {
   let ledger;
-  try { ledger = readLedger(file); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
+  try { ledger = readLedger(file, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
+  const unknown = Object.keys(verdicts).sort(byNumber).filter((id) => !ledger.findings[id]);
+  if (unknown.length) fail('unknown_id', null, unknown.join(', ') + ' not in the ledger at ' + file + '; --verify names a finding before its verdict can be recorded, so check the IDs or run the mode first');
   const at = new Date().toISOString();
   for (const id of Object.keys(verdicts).sort(byNumber)) {
-    const f = ledger.findings[id] || (ledger.findings[id] = { path: 'judgment', round: 1, verdicts: [], rechecks: {} });
+    const f = ledger.findings[id];
     f.verdicts.push({ round: f.round, verdict: verdicts[id], source, from, at });
   }
   writeLedger(file, ledger);
@@ -1163,21 +1197,26 @@ function recordVerdicts(file, verdicts, source, from, fail) {
 // The checks runner's results over the recheck rows, recorded per finding: FIXED
 // when every row passed, NOT FIXED when one failed, and NOT VERIFIED (no round
 // consumed by the verdict, nothing decided) when a row is missing or the runner
-// refused it, which is what a placeholder expect left unfilled looks like.
+// refused it, which is what a placeholder expect left unfilled looks like. A
+// finding none of whose rows are in this results file was not rechecked by it
+// (an earlier round's finding, when a later round's file is recorded): it keeps
+// its verdicts and is listed under notInResults.
 function recordRechecks(opts, read, fail) {
   let ledger;
-  try { ledger = readLedger(opts.ledger); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
+  try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
   let results;
   try { results = JSON.parse(read(opts.recheck)); } catch (e) { fail('bad_results', null, opts.recheck + ' is not the checks runner\'s JSON: ' + e.message); }
   const rows = new Map((results && Array.isArray(results.checks) ? results.checks : []).map((c) => [c.id, c]));
   const recorded = {};
   const unverified = [];
+  const notInResults = [];
   const at = new Date().toISOString();
   for (const id of Object.keys(ledger.findings).sort(byNumber)) {
     const f = ledger.findings[id];
     const rowIds = f.rechecks && f.rechecks[String(f.round)];
     if (!rowIds || !rowIds.length) continue;
     const found = rowIds.map((r) => rows.get(r) || null);
+    if (found.every((c) => c === null)) { notInResults.push(id); continue; }
     const missing = rowIds.filter((r, k) => found[k] === null);
     const refused = found.filter((c) => c && c.verdict === 'error');
     let verdict;
@@ -1191,7 +1230,7 @@ function recordRechecks(opts, read, fail) {
     if (verdict === 'NOT VERIFIED') unverified.push(id); else recorded[id] = verdict;
   }
   writeLedger(opts.ledger, ledger);
-  process.stdout.write(JSON.stringify({ recorded, unverified, ledger: opts.ledger }) + '\n');
+  process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger }) + '\n');
 }
 
 // --checkpoint --ledger <ledger.json> [--root <dir>]: HEAD as the last green (M4),
@@ -1213,7 +1252,7 @@ function checkpointMain(argv, fail) {
   if (!opts.ledger) fail('usage', null, usage);
   const root = opts.root || process.cwd();
   let ledger;
-  try { ledger = readLedger(opts.ledger); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
+  try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
   const head = git(root, ['rev-parse', 'HEAD']);
   if (head.status !== 0 || !/^[0-9a-f]{40}/.test(head.stdout)) fail('git', null, 'git rev-parse HEAD failed in ' + root + '; is it a git repository with a commit?');
   const status = git(root, ['status', '--porcelain', '--untracked-files=no']);

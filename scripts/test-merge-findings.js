@@ -712,6 +712,51 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('an ID named twice, or named but not merged, refuses',
     twice.status === 1 && /usage/.test(twice.stderr) && /R2/.test(twice.stderr) && unknown.status === 1 && /usage/.test(unknown.stderr) && /R40/.test(unknown.stderr) && led().calls === 2, twice.stderr + unknown.stderr);
 
+  // Review of #267 (2026-10-24), R1: a round-two results file holds rows for the
+  // findings named in round two only. A finding from an earlier round whose rows
+  // are all absent was not rechecked this time, so it keeps its verdicts; it is
+  // listed under notInResults, never written up as NOT VERIFIED.
+  const rcOut2 = path.join(sandbox, 'rc-out-11-r2');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(out, 'recheck-2.json'), '--out', rcOut2], { cwd: repo, encoding: 'utf8' });
+  const v3 = run(['--verdicts', '--ledger', ledger, '--recheck', path.join(rcOut2, 'results.json')]);
+  const v3j = parse(v3) || {};
+  check11('recording a later round\'s recheck results leaves a finding whose rows are not in that file untouched, and lists it under notInResults',
+    v3.status === 0 && v3j.recorded && v3j.recorded.R1 === 'FIXED' && led().findings.R1.verdicts.filter((x) => x.round === 2).length === 1
+      && led().findings.R2.verdicts.length === 1 && led().findings.R3.verdicts.length === 1 && (v3j.unverified || []).length === 0 && (v3j.notInResults || []).join() === 'R2,R3',
+    v3.stderr + v3.stdout.slice(0, 300) + ' R2 verdicts: ' + JSON.stringify((led().findings.R2 || {}).verdicts));
+  // R2: IDs are positions in the sorted merge, so a follow-up finding appended
+  // to the file (M5's one generation) shifts every ID after it. A ledger entry
+  // follows its finding's key: the exhausted finding is still refused, under the
+  // ID it holds now, and a call that proceeds writes the ledger under the new IDs.
+  const late = f('security', 'src/z.js', 1, 'src/z.js:late', 'Blocks. A late finding sorts first.', { check: 'cat src/z.js', expect: { exit: 0 } });
+  late.severity = 'block';
+  const file3 = jsonl(rows.concat([late]));
+  const renumRefused = run(['--verify', file3, '--receipts', receipts, '--scope', scope, '--out', out, '--root', repo, '--judgment', 'R7']);
+  check11('after a follow-up finding renumbers the merge, a ledger entry follows its key: the exhausted finding is refused under its new ID',
+    renumRefused.status === 1 && /"error":"rounds_exhausted"/.test(renumRefused.stderr) && /"R7"/.test(renumRefused.stderr) && !has('verify-3-1.txt') && led().calls === 2,
+    renumRefused.stderr + renumRefused.stdout.slice(0, 200));
+  const renum = run(['--verify', file3, '--receipts', receipts, '--scope', scope, '--out', out, '--root', repo, '--judgment', 'R5']);
+  const mr = parse(renum) || {};
+  check11('a renumbered ledger is written under the new IDs and the call reports each move',
+    renum.status === 0 && mr.renumbered && mr.renumbered.R6 === 'R7' && mr.renumbered.R1 === 'R2' && led().findings.R7.round === 2 && led().findings.R5.round === 2
+      && led().findings.R2.path === 'mechanical' && !led().findings.R1 && led().findings.R13.path === 'browser' && led().calls === 3,
+    renum.stderr + renum.stdout.slice(0, 300));
+  // R16: outside --verify the ledger must already exist; a mistyped path would
+  // otherwise start a second ledger with no green checkpoint in it.
+  const ghost = path.join(sandbox, 'no-such-ledger.json');
+  const cpGhost = run(['--checkpoint', '--ledger', ghost, '--root', repo]);
+  const vdGhost = run(['--verdicts', path.join(out, 'verify-1-1.txt'), good, '--ledger', ghost]);
+  check11('a ledger path that does not exist is refused outside --verify, and nothing is created there',
+    cpGhost.status === 1 && /"error":"not_found"/.test(cpGhost.stderr) && vdGhost.status === 1 && /"error":"not_found"/.test(vdGhost.stderr) && !fs.existsSync(ghost),
+    cpGhost.stderr + cpGhost.stdout.slice(0, 100) + vdGhost.stderr + vdGhost.stdout.slice(0, 100));
+  // The follow-up the verifier noted (R24 of that review): --verify names every
+  // finding before a verdict can be recorded, so a verdict for an ID the ledger
+  // has never seen is a mistake to refuse, not an entry to create by position.
+  const strayRet = ret('R40: FIXED\nnot a finding this run has\n');
+  const stray = run(['--verdicts', '--tier', 'verify', '--ids', 'R40', strayRet, '--ledger', ledger]);
+  check11('a verdict for an ID the ledger has never seen is refused and creates no entry',
+    stray.status === 1 && /"error":"unknown_id"/.test(stray.stderr) && /R40/.test(stray.stderr) && !led().findings.R40, stray.stderr + stray.stdout.slice(0, 200));
+
   // The diff's starting point when the scope has no snapshot, and when it has no range.
   const scopeEnd = scopeFile('scope-11-end.json', { range: { base: end, end }, uncommitted: { baseline: null, untracked: { files: untrackedAtStart, added: 3, deleted: 0 } } });
   const outEnd = path.join(sandbox, 'verify-out-11-end');
