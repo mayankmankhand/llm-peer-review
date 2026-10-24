@@ -166,7 +166,7 @@ const PARTS = {
   1: ['0', '1', '2', '3', '3b', '4', '4b', '4c', '4d', '4e', '4f', '4g', '4h', '4i', '4j'],
   2: ['4k', '7d', '9b'],
   3: ['4l', '4m', '4n', '4o', '5', '6', '7', '7b', '7c', '8', '9', '10', '11', '11b', '11c', '11d', '11e', '11f'],
-  4: ['9c', '9d', '9e', '9f', '9g', '9h', '9i'],
+  4: ['9c', '9d', '9e', '9f', '9g', '9h', '9i', '9j'],
 };
 const PART_COUNT = Object.keys(PARTS).length;
 const argAfter = (flag) => { const at = process.argv.indexOf(flag); return at < 0 ? null : (process.argv[at + 1] || ''); };
@@ -187,7 +187,7 @@ function OWN(section) { return PART !== null && PARTS[PART].includes(section); }
 function defaultRunsChecks(T) {
   const byConvention = (a, b) => parseInt(a.slice(2), 10) - parseInt(b.slice(2), 10);
   // Every convention the script detects (C-4 and C-13 are judged by hand).
-  const SCRIPT_DETECTED = ['C-1', 'C-2', 'C-3', 'C-5', 'C-6', 'C-7', 'C-8', 'C-9', 'C-10', 'C-11', 'C-12', 'C-14', 'C-15', 'C-16', 'C-17'];
+  const SCRIPT_DETECTED = ['C-1', 'C-2', 'C-3', 'C-5', 'C-6', 'C-7', 'C-8', 'C-9', 'C-10', 'C-11', 'C-12', 'C-14', 'C-15', 'C-16', 'C-17', 'C-21'];
   console.log('\n11. (every part) the session-shaped runs, added up');
   // Floors under the counts, about four fifths of what this suite produced when
   // the layer was written (305 runs, 659 findings, 33 receipt shapes): a change
@@ -3461,6 +3461,36 @@ console.log('\n9i. the guidance on what a session loads (C-20)');
   const entry = fs.readFileSync(path.join(REPO, '.claude', 'skills', 'shared', 'conventions.md'), 'utf8').split('\n### C-20:')[1] || '';
   check('C-20: the entry is manual, warn, scoped to prompt files and CLAUDE.md, and imposes no number',
     /^- \*\*Since:\*\* 8\.0\.7$/m.test(entry) && /^- \*\*Scope:\*\* prompt-files\+claude-md$/m.test(entry) && /^- \*\*Detector:\*\* manual$/m.test(entry) && /^- \*\*Severity:\*\* warn$/m.test(entry) && /No number is imposed/.test(entry), entry.slice(0, 200));
+}
+}
+if (OWN('9j')) {
+
+console.log('\n9j. the re-verify round runs through the mode (C-21)');
+{
+  // C-21 arrives in 8.0.9 as a regex convention over a project's own prompt
+  // files (issue #267): a line that dispatches the fix verifier is pointed at
+  // the mode that writes its shard, recheck rows and ledger. A project with no
+  // loop command of its own gets no finding. Built at the release about to
+  // ship, beside a clean file, so the finding comes from the line and not the
+  // version alone.
+  const PLUGIN809 = path.join(TMP, 'plugin809');
+  const b809 = spawnSync('node', [path.join(REPO, 'scripts', 'build-plugin.js'), '--out', PLUGIN809, '--version', '8.0.9'], { cwd: REPO, encoding: 'utf8' });
+  check('C-21: build-plugin.js builds a 8.0.9 plugin root', b809.status === 0 && fs.existsSync(path.join(PLUGIN809, '.claude-plugin', 'plugin.json')), (b809.stdout + b809.stderr).slice(-300));
+  const d = path.join(TMP, 'c21-audited-808');
+  write(d, '.claude/.toolkit-state.json', JSON.stringify({ version: '8.0.8', path: 'plugin', auditedVersion: '8.0.8' }, null, 2));
+  write(d, '.claude/commands/myteam/fix-loop.md', '# Fix loop\n\nAfter the fixes land:\n\n1. Build a shard by hand with the finding text and the diff.\n2. Dispatch `subagent_type=tk:fix-verifier` with that shard.\n3. Read the verdicts.\n');
+  write(d, '.claude/commands/myteam/deploy.md', '# Deploy\n\n1. Run the tests: `npm test`\n2. Push the tag.\n');
+  const r = audit(d, [], { pluginRoot: PLUGIN809 });
+  const f = r.findings.filter(x => x.id === 'C-21');
+  check('C-21: a project command that dispatches the fix verifier gets one warn finding on that line',
+    r.status === 0 && /8\.0\.8 -> 8\.0\.9 \[[^\]]*\bC-21\]/.test(r.summary) && f.length === 1 && f[0].file.relPath === '.claude/commands/myteam/fix-loop.md' && f[0].file.line === 6
+      && f[0].severity === 'warn' && /--verify/.test(f[0].fix) && f[0].since === '8.0.9' && allReceiptsShow(d, f).length === 0,
+    (r.summary + ' ' + JSON.stringify(f.map(x => [x.file, x.severity, x.since])) + ' ' + allReceiptsShow(d, f).join(' | ')).replace(/\s+/g, ' ').slice(0, 300));
+  const entry = ((fs.readFileSync(path.join(REPO, '.claude', 'skills', 'shared', 'conventions.md'), 'utf8').split('\n### C-21:')[1] || '').split(/\n#{2,3} /)[0]);
+  const why = entry.split('\nWhy:')[1] || '';
+  check('C-21: the entry is regex, warn, scoped to prompt files, since 8.0.9, and its Why imposes no number and spares a project with no loop command',
+    /^- \*\*Since:\*\* 8\.0\.9$/m.test(entry) && /^- \*\*Scope:\*\* prompt-files$/m.test(entry) && /^- \*\*Detector:\*\* regex$/m.test(entry) && /^- \*\*Severity:\*\* warn$/m.test(entry)
+      && /no loop command of its own/.test(why) && !/\d{3,}/.test(why), entry.replace(/\s+/g, ' ').slice(0, 200));
 }
 }
 if (OWN('10')) {
