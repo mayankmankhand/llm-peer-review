@@ -36,6 +36,17 @@ const DEFAULT_DIR = path.join(PROJECT_ROOT, 'reports', 'issue-222', 'shadow');
 
 const hook = require(path.join(__dirname, 'm9-shadow-hook.js'));
 const PREDICATE_IDS = hook.PREDICATES.map(p => p.id);
+// The hook stores the regex baseline's prompt-file flag as `promptFileWrite` (its REGEX key) while the
+// predicate is `promptFile`; flagKey() maps a predicate id to the flag key so the baseline reads the
+// right flag (before this map the prompt-file baseline always read as a miss).
+const FLAG_KEY = { promptFile: 'promptFileWrite' };
+function flagKey(id) { return FLAG_KEY[id] || id; }
+// rawHit: the regex on the raw command, the bar's baseline. hiddenHit: a raw hit with no hit on the
+// stripped text the models and the judge saw (`flagsAfterStrip`), so it lives inside a heredoc or
+// inline body nobody but the regex could read; the bar counts those rather than scoring them as a
+// model miss. Rows logged before flagsAfterStrip existed carry none and are never hidden.
+function rawHit(row, id) { return !!(row.flags && row.flags[flagKey(id)]); }
+function hiddenHit(row, id) { return rawHit(row, id) && !!row.flagsAfterStrip && !row.flagsAfterStrip[flagKey(id)]; }
 const PROVIDER_NAMES = ['jev', 'openai'];
 
 // Paraphrases for --flip-check: the same five questions in different words. Predicates have no
@@ -186,7 +197,7 @@ function buildSample(dir) {
   for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
   const random = shuffled.slice(0, SAMPLE_RANDOM);
   const sample = [];
-  const push = (r, reason) => sample.push({ id: rowId(r.command), reason, ts: r.ts, project: r.project || null, agent_type: r.agent_type || null, command: r.command, flags: r.flags, providers: r.providers });
+  const push = (r, reason) => sample.push({ id: rowId(r.command), reason, ts: r.ts, project: r.project || null, agent_type: r.agent_type || null, cwd: r.cwd || null, command: r.command, flags: r.flags, flagsAfterStrip: r.flagsAfterStrip || null, providers: r.providers });
   for (const r of hits) push(r, 'regex-hit');
   for (const r of positives) push(r, 'model-positive');
   for (const r of random) push(r, 'random');
@@ -227,20 +238,21 @@ function ece(pairs) {
 
 function scorePredicate(sampleRows, labels, provider, id) {
   const pos = [], neg = [], pairs = [];
-  let tp = 0, fn = 0, fp = 0, tn = 0, fpRandom = 0, nRandom = 0, caughtMissedByRegex = 0, missedCaughtByRegex = 0;
+  let tp = 0, fn = 0, fp = 0, tn = 0, fpRandom = 0, nRandom = 0, caughtMissedByRegex = 0, missedCaughtByRegex = 0, hidden = 0;
   const positiveCases = [];
   for (const r of sampleRows) {
     const lab = labels.get(r.id);
     if (!lab || typeof lab[id] !== 'boolean') continue;
     const y = lab[id] ? 1 : 0;
-    const v = provider === 'regex' ? ((r.flags && r.flags[id]) ? 1 : 0) : prob(r, provider, id);
+    const v = provider === 'regex' ? (rawHit(r, id) ? 1 : 0) : prob(r, provider, id);
     if (v === null) continue;
+    if (hiddenHit(r, id)) hidden++;
     const pred = v >= POSITIVE_THRESHOLD ? 1 : 0;
     if (provider !== 'regex') { (y ? pos : neg).push(v); pairs.push({ p: v, y }); }
     if (y) {
       if (pred) tp++; else fn++;
-      positiveCases.push({ id: r.id, command: r.command.slice(0, 100), source: lab.source || null, value: round(v), regex: !!(r.flags && r.flags[id]) });
-      const regexHit = !!(r.flags && r.flags[id]);
+      positiveCases.push({ id: r.id, command: r.command.slice(0, 100), source: lab.source || null, value: round(v), regex: rawHit(r, id) });
+      const regexHit = rawHit(r, id);
       if (provider !== 'regex') { if (pred && !regexHit) caughtMissedByRegex++; if (!pred && regexHit) missedCaughtByRegex++; }
     } else {
       if (pred) fp++; else tn++;
@@ -259,6 +271,7 @@ function scorePredicate(sampleRows, labels, provider, id) {
     ece: provider === 'regex' ? null : round(ece(pairs)),
     caughtMissedByRegex: provider === 'regex' ? null : caughtMissedByRegex,
     missedCaughtByRegex: provider === 'regex' ? null : missedCaughtByRegex,
+    hiddenHits: hidden,
     sufficient: positives >= MIN_POSITIVES,
     positiveCases,
   };
@@ -332,6 +345,7 @@ function renderScoreMd(r) {
   lines.push('# Shadow-mode M9 gate: score (' + r.generatedAt.slice(0, 10) + ')', '');
   lines.push('Constants: MIN_POSITIVES ' + r.constants.MIN_POSITIVES + ', false-positive cap ' + r.constants.MAX_FALSE_POSITIVE_RATE + ', AUROC floor ' + r.constants.MIN_AUROC + ', threshold ' + r.constants.POSITIVE_THRESHOLD + '.', '');
   lines.push('Counts: ' + r.counts.logLines + ' log lines (' + r.counts.logMalformed + ' malformed, skipped), ' + r.counts.sampleRows + ' sampled, ' + r.counts.labelled + ' labelled (' + r.counts.ownerLabels + ' by the owner).', '');
+  lines.push('Regex hits hidden inside stripped bodies (a raw hit with no hit on the stripped text the models and the judge saw): ' + PREDICATE_IDS.map(id => id + ' ' + r.regex[id].hiddenHits).join(', ') + '.', '');
   lines.push('Rates below are computed on the labelled sample, which is enriched with every regex hit and every model positive; the "random-only" false-positive column is the unbiased estimate on commands drawn at random.', '');
   for (const p of PROVIDER_NAMES) {
     const x = r.providers[p];
@@ -421,6 +435,6 @@ async function main() {
   process.exit(2);
 }
 
-module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, readJsonl, rowId, mulberry32, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
+module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, readJsonl, readLabels, rowId, mulberry32, flagKey, rawHit, hiddenHit, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
 
 if (require.main === module) main().catch(e => { console.error(String(e && e.message || e)); process.exit(1); });

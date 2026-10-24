@@ -296,6 +296,31 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     check('flip check appends to score.md', fs.readFileSync(path.join(dir, 'score.md'), 'utf8').includes('## Flip check'));
   }
 
+  // ---- scorer: the flag key map, hidden hits, and the sample's cwd and flagsAfterStrip (2026-10-24) ----
+  {
+    const dir = tmpdir('flagkey');
+    const low = Object.fromEntries(hook.PREDICATES.map(p => [p.id, 0.05]));
+    const off = Object.fromEntries(Object.keys(hook.REGEX).map(k => [k, false]));
+    const line = (command, flags, after, probs) => JSON.stringify({ v: 1, ts: '2026-10-13T10:00:00.000Z', session_id: 's', cwd: 'src', command, flags: Object.assign({}, off, flags), flagsAfterStrip: Object.assign({}, off, after), providers: { jev: { model: 'm', probs: Object.assign({}, low, probs), ms: 400, usage: { cost: 0.00001 }, error: null }, openai: { error: 'no key', probs: null } } });
+    const lines = [
+      line('sed -i s/a/b/ .claude/commands/x.md', { promptFileWrite: true }, { promptFileWrite: true }, { promptFile: 0.9 }),
+      line("bash -c '<inline 30 bytes>'", { forcePush: true }, { forcePush: false }, { forcePush: 0.1 }),
+      line('ls', {}, {}, {}),
+    ];
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'decisions.jsonl'), lines.join('\n') + '\n');
+    const s = scorer.buildSample(dir);
+    const sampled = fs.readFileSync(path.join(dir, 'sample.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+    check('flag key: the prompt-file predicate reads the promptFileWrite flag, the others their own name', scorer.flagKey('promptFile') === 'promptFileWrite' && scorer.flagKey('release') === 'release');
+    check('sample rows carry cwd and flagsAfterStrip', s.hits === 2 && sampled.length === 3 && sampled.every(r => r.cwd === 'src' && r.flagsAfterStrip && typeof r.flagsAfterStrip.forcePush === 'boolean'), JSON.stringify(sampled.map(r => [r.cwd, r.flagsAfterStrip])));
+    const lab = (r, over) => Object.assign({ id: r.id, source: 'judge' }, Object.fromEntries(hook.PREDICATES.map(p => [p.id, false])), over);
+    fs.writeFileSync(path.join(dir, 'labels.jsonl'), sampled.map(r => JSON.stringify(lab(r, /sed/.test(r.command) ? { promptFile: true } : {}))).join('\n') + '\n');
+    const r = scorer.score(dir);
+    check('scorer: the regex baseline sees a promptFileWrite flag as a promptFile hit', r.regex.promptFile.positives === 1 && r.regex.promptFile.recall === 1, JSON.stringify(r.regex.promptFile));
+    check('scorer: a raw hit with no hit on the stripped text is counted as hidden', r.regex.forcePush.hiddenHits === 1 && r.regex.promptFile.hiddenHits === 0, JSON.stringify([r.regex.forcePush.hiddenHits, r.regex.promptFile.hiddenHits]));
+    check('scorer: score.md names the hidden hits', fs.readFileSync(path.join(dir, 'score.md'), 'utf8').includes('hidden inside stripped bodies'));
+  }
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('not ok - test runner threw :: ' + (e && e.stack || e)); process.exit(1); });
