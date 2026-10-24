@@ -1,5 +1,33 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.8, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.9, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.9 - The Round the Script Remembers (2026-10-24)
+
+**A patch on top of v8.0.8 (#267, phase 1).** The fix loop's re-verify round runs through one script mode that writes what each verifier sees and keeps a ledger of rounds, verdicts and checkpoints, so a third attempt is refused by the script and the revert target is recorded rather than remembered. A new convention, C-21, points a project's own loop command at the mode.
+
+**Issue #267, phase 1.** `/tk:review`'s re-verify round (M3) used to be rebuilt by hand on every run: the recheck rows with their expects inverted, the verifier shards with the finding text and the diff of the fixes, and the count of rounds per finding that M5 bounds. One mode now writes all of it from the bytes on disk, the same way every run. Phase 2, the stage handoffs (M14), is a later cycle.
+
+### Added
+
+- **`merge-findings.js --verify`.** Told which findings are mechanical, judgment or browser, it writes `recheck-<c>.json` (each receipt's expect inverted; an `exit 0` or `lines` expect gets a placeholder the checks runner refuses until the runner writes the expect), one `verify-<c>-<k>.txt` per seven judgment findings (each finding's line as its finder wrote it, its file:line and round, then the diff of the fixes from the review's starting snapshot, with new or changed untracked files beside it), and `ledger.json`. It refuses an ID named twice or never merged, an empty diff when a judgment finding is named, a shard file that already exists, and a third round for any finding, naming the last green checkpoint to revert to.
+- **`--verdicts ... --ledger`, `--verdicts --ledger --recheck <results.json>` and `--checkpoint --ledger`.** A verifier's return and the checks runner's recheck results land in the ledger under the finding's round; a checkpoint records HEAD as the last green, with the IDs fixed that round and a count of tracked changes still uncommitted.
+- **Convention C-21.** A command or skill of your own that dispatches the fix verifier is pointed at the mode, with the exact calls as its fix and the scope file's source named. A project with no loop command of its own sees nothing. It runs once, on the upgrade that brings it.
+
+### Changed
+
+- **M3 to M5 name the mode** in the loop rules, and the fix-verifier agent quotes M3 whole, held byte for byte by a parity test. The rule keeps every judgment call (which path a finding takes, the browser and check-first paths, the trust order) and drops the hand mechanics. The wording grew rather than shrank: the M3 rule from 654 to 745 words, the agent from 750 to 989.
+- **`/tk:review`'s re-verify step is the calls in order:** the mode, the expects it could not invert, the checks runner, the verifier dispatches, the records, the checkpoint. `/tk:upgrade` step 6 sends a manual finding through the mode and saves the scope before the first fix.
+- **The review of this change found eleven gaps in the mode and its wording, all fixed before release:** recording a later round's recheck results no longer overwrites earlier verdicts; a ledger entry follows its finding's key when a follow-up finding renumbers the merge; a ledger file that does not exist, or a finding ID the ledger never saw, is refused instead of silently creating an entry; a not-verified recheck keeps its round; a runner with no scope call saves the scope file; a revert with no checkpoint recorded has a named target; a checkpoint commit carries only fixes that read FIXED, and a refused call's other findings wait; the browser flag is optional; the upgrade skill records its checkpoint; C-21 names where the scope file comes from.
+- The prompt-load baseline was refreshed. It also absorbed growth from the 8.0.8 cycle in 14 rows this cycle never touched: `commands/document.md` +271, `commands/merge.md` +157, `commands/create-issue.md` +116, and eleven rows of +2 to +27 words.
+
+### Upgrading
+
+- `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, restart Claude Code, then `/tk:upgrade` in each project: it brings C-21. No new permission rows: the mode lives on a script whose rows setup already seeds, and C-9 reports a project that lacks them.
+- A loop command of your own that dispatches `tk:fix-verifier` gets one C-21 finding with the mode's calls as its fix; the shard it typed by hand, its recheck rows and its round counting go.
+
+### Why
+
+A shard typed by hand paraphrases the finding and drops the diff's edges; a round counted from memory runs a third time; a checkpoint nobody recorded cannot be reverted to. The plan gate measured the mode on the harness fix role, two runs of each build: cost flat ($8.82 to $8.78 a run), time 20.7 to 15.0 minutes, no false FIXED on the new build where one old run had one. The chained review of the change was the mode's first live run here: three calls, two judgment shards and two recheck files, every verdict in the ledger. What still needs a decision (three planted bugs each missed once before the fix loop, the rule that grew instead of halving, the mechanical flag still listed as if always present) is #272.
 
 ## v8.0.8 - Your Own Labels, Your Own Pages (2026-10-22)
 

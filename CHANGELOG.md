@@ -28,7 +28,7 @@
 
 ### Why
 
-A shard typed by hand paraphrases the finding and drops the diff's edges; a round counted from memory runs a third time; a checkpoint nobody recorded cannot be reverted to. The plan gate measured the mode on the harness fix role, two runs of each build: cost flat ($8.82 to $8.78 a run), time 20.7 to 15.0 minutes, no false FIXED on the new build where one old run had one. The chained review of the change was the mode's first live run here: three calls, two judgment shards and two recheck files, every verdict in the ledger. What still needs a decision (three planted bugs each missed once before the fix loop, the rule that grew instead of halving, the mechanical flag still listed as if always present) is filed as a follow-up issue with this release.
+A shard typed by hand paraphrases the finding and drops the diff's edges; a round counted from memory runs a third time; a checkpoint nobody recorded cannot be reverted to. The plan gate measured the mode on the harness fix role, two runs of each build: cost flat ($8.82 to $8.78 a run), time 20.7 to 15.0 minutes, no false FIXED on the new build where one old run had one. The chained review of the change was the mode's first live run here: three calls, two judgment shards and two recheck files, every verdict in the ledger. What still needs a decision (three planted bugs each missed once before the fix loop, the rule that grew instead of halving, the mechanical flag still listed as if always present) is #272.
 
 ## v8.0.8 - Your Own Labels, Your Own Pages (2026-10-22)
 

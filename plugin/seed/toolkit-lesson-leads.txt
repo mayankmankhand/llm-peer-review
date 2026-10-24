@@ -152,6 +152,7 @@ Auto-start lifecycle code is hard to verify without a real dev server.
 Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.
 Before engineering a smarter limit, lift the old one once and see whether it binds.
 Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.
+Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.
 Boundary annotations in few-shot examples teach thresholds, not just format.
 Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.
 CLI default-acceptance prompts don't fully translate to chat.
