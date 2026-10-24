@@ -810,6 +810,62 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
     noSaved.status === 1 && /"error":"missing_receipt"/.test(noSaved.stderr) && /code-2\.txt/.test(noSaved.stderr) && fs.readdirSync(out4).length === 0, noSaved.stderr);
   const bare = run(['--verify', file]);
   check11('--verify without its folders and lists is a usage error', bare.status === 1 && /usage/.test(bare.stderr), bare.stderr);
+  check11('the usage shows every ID flag as optional',
+    bare.stderr.includes('[--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>]'), bare.stderr.slice(0, 300));
+
+  // Issue #272: the mode prints what consumes each file it wrote, in order, so a
+  // rule can say "run what it prints" instead of restating the calls. The suite
+  // runs the script by its absolute path from a folder outside the repository,
+  // so the printed script paths are absolute here; under the project root they
+  // are relative to it.
+  const outNext = path.join(sandbox, 'verify-out-11-next');
+  fs.mkdirSync(outNext);
+  const ledgerNext = path.join(outNext, 'ledger.json');
+  const rNext = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outNext, '--root', repo, '--mechanical', 'R1', '--judgment', 'R4']);
+  const mNext = parse(rNext) || {};
+  const nx = Array.isArray(mNext.next) ? mNext.next : [];
+  const recheckNext = path.join(outNext, 'recheck-1.json');
+  const shardNext = path.join(outNext, 'verify-1-1.txt');
+  const returnNext = path.join(outNext, 'verify-1-1-return.txt');
+  check11('--verify prints the command that consumes each file it wrote',
+    rNext.status === 0 && nx.length === 3
+      && nx[0].do === 'run' && nx[0].command === 'node ' + RUN_CHECKS + ' --checks ' + recheckNext + ' --out ' + outNext
+      && nx[0].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + ledgerNext + ' --recheck ' + path.join(outNext, 'results.json')
+      && nx[1].do === 'dispatch' && nx[1].agent === 'fix-verifier' && nx[1].file === shardNext && nx[1].save === returnNext
+      && nx[1].prompt === 'Your findings, M3\'s instruction and the diff of the fixes are in ' + shardNext + '; read it in full and follow it exactly.'
+      && nx[1].record === 'node ' + SCRIPT + ' --verdicts ' + shardNext + ' ' + returnNext + ' --ledger ' + ledgerNext
+      && nx[2].do === 'run' && nx[2].after === 'the checkpoint commit' && nx[2].command === 'node ' + SCRIPT + ' --checkpoint --ledger ' + ledgerNext + ' --root ' + repo,
+    rNext.stderr + JSON.stringify(nx).slice(0, 600));
+  const outWrite = path.join(sandbox, 'verify-out-11-write');
+  fs.mkdirSync(outWrite);
+  const rWrite = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outWrite, '--root', repo, '--mechanical', 'R2']);
+  const mWrite = parse(rWrite) || {};
+  const nw = Array.isArray(mWrite.next) ? mWrite.next : [];
+  check11('a needsExpect row puts a write entry first',
+    rWrite.status === 0 && nw.length === 3 && nw[0].do === 'write' && (nw[0].ids || []).join() === 'R2' && nw[0].file === path.join(outWrite, 'recheck-1.json') && nw[1].do === 'run' && nw[2].do === 'run',
+    rWrite.stderr + JSON.stringify(nw).slice(0, 400));
+  // The placeholder row is refused by the checks runner, so the record lists the
+  // finding under unverified and prints what to do next: write the expect, run
+  // the recheck file again, record again.
+  const rcOutWrite = path.join(sandbox, 'rc-out-11-write');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(outWrite, 'recheck-1.json'), '--out', rcOutWrite], { cwd: repo, encoding: 'utf8' });
+  const recWrite = run(['--verdicts', '--ledger', path.join(outWrite, 'ledger.json'), '--recheck', path.join(rcOutWrite, 'results.json')]);
+  const mRec = parse(recWrite) || {};
+  const nr = Array.isArray(mRec.next) ? mRec.next : [];
+  check11('a recheck record lists its unverified rows under next',
+    recWrite.status === 0 && (mRec.unverified || []).join() === 'R2' && nr.length === 2
+      && nr[0].do === 'write' && (nr[0].ids || []).join() === 'R2' && nr[0].file === path.join(outWrite, 'recheck-1.json')
+      && nr[1].do === 'run' && nr[1].command === 'node ' + RUN_CHECKS + ' --checks ' + path.join(outWrite, 'recheck-1.json') + ' --out ' + rcOutWrite
+      && nr[1].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + path.join(outWrite, 'ledger.json') + ' --recheck ' + path.join(rcOutWrite, 'results.json'),
+    recWrite.stderr + JSON.stringify(mRec).slice(0, 500));
+  const outOne = path.join(sandbox, 'verify-out-11-one');
+  fs.mkdirSync(outOne);
+  const rOne = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outOne, '--root', repo, '--judgment', 'R4']);
+  const mOne = parse(rOne) || {};
+  const no = Array.isArray(mOne.next) ? mOne.next : [];
+  check11('an ID flag may be left out when its list is empty',
+    rOne.status === 0 && fs.existsSync(path.join(outOne, 'verify-1-1.txt')) && !fs.existsSync(path.join(outOne, 'recheck-1.json')) && mOne.recheck === null && no.length === 2 && no[0].do === 'dispatch' && no[1].do === 'run',
+    rOne.stderr + JSON.stringify(no).slice(0, 300));
   // The verifier instruction lives in three places and a change to one must
   // fail here rather than drift, as section 8 holds M2's two instructions.
   const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');

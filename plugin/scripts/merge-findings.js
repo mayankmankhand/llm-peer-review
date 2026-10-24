@@ -18,9 +18,11 @@
 //   node merge-findings.js --verdicts --tier <2|3|verify> --ids R1,R2 <return file>...
 //                                     checks what the judges sent back (below)
 //   node merge-findings.js --verify <file or folder> --receipts <dir> --scope <scope.json> --out <dir>
-//                          --mechanical R1,R5 --judgment R2,R3 [--browser R7] [--end <sha>] [--root <dir>]
+//                          [--mechanical R1,R5] [--judgment R2,R3] [--browser R7] [--end <sha>] [--root <dir>]
 //                                     writes the fix loop's recheck rows, verifier
-//                                     shards and ledger (issue #267; below)
+//                                     shards and ledger (issue #267; below); at
+//                                     least one ID flag, and `next` in its output
+//                                     says what consumes each file (issue #272)
 //   node merge-findings.js --verdicts <verify shard> <return file> --ledger <ledger.json>
 //   node merge-findings.js --verdicts --ledger <ledger.json> --recheck <results.json>
 //                                     records a verifier's return, or the checks
@@ -1116,9 +1118,48 @@ function buildVerify(parsed, scope, opts) {
   return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds, renumbered };
 }
 
-// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> --mechanical <ids> --judgment <ids> [--browser <ids>] [--end <sha>] [--root <dir>]
+// The script's own path and its sibling the checks runner, as the printed `next`
+// commands name them (issue #272): relative to the working directory when the
+// script sits under it (this repository, a copy-install), absolute otherwise
+// (the plugin, whose scripts live under the user's home). Node resolves
+// process.argv[1] to an absolute path whatever the runner typed.
+function selfPath() {
+  const abs = path.resolve(process.argv[1]);
+  const rel = path.relative(process.cwd(), abs);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
+}
+function besideSelf(name) { return path.join(path.dirname(selfPath()), name); }
+
+// What consumes each file --verify wrote, in the order the runner runs it (issue
+// #272), so a rule can say "run what it prints" instead of restating the calls:
+// a `write` entry names the rows whose expect the runner fills first (needsExpect);
+// a `run` entry is one Bash call, with `record` the call that lands its result in
+// the ledger; a `dispatch` entry is one Agent call, its return saved where `save`
+// says before its `record`; the last `run` is the checkpoint record after the
+// checkpoint commit (M4). --root is carried onto the checkpoint call when the
+// runner gave one, since that call reads HEAD there.
+function verifyNext(built, opts) {
+  const self = selfPath();
+  const runner = besideSelf('run-checks.js');
+  const next = [];
+  const recheck = built.files.find((f) => f.kind === 'recheck');
+  if (recheck) {
+    const file = path.join(opts.out, recheck.name);
+    if (built.needsExpect.length) next.push({ do: 'write', ids: built.needsExpect, file, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
+    next.push({ do: 'run', command: 'node ' + runner + ' --checks ' + file + ' --out ' + opts.out, record: 'node ' + self + ' --verdicts --ledger ' + built.ledgerFile + ' --recheck ' + path.join(opts.out, 'results.json') });
+  }
+  for (const f of built.files.filter((x) => x.kind === 'shard')) {
+    const file = path.join(opts.out, f.name);
+    const save = path.join(opts.out, f.name.replace(/\.txt$/, '') + '-return.txt');
+    next.push({ do: 'dispatch', agent: 'fix-verifier', file, ids: f.ids, prompt: 'Your findings, M3\'s instruction and the diff of the fixes are in ' + file + '; read it in full and follow it exactly.', save, record: 'node ' + self + ' --verdicts ' + file + ' ' + save + ' --ledger ' + built.ledgerFile });
+  }
+  next.push({ do: 'run', after: 'the checkpoint commit', command: 'node ' + self + ' --checkpoint --ledger ' + built.ledgerFile + (opts.rootGiven ? ' --root ' + opts.root : '') });
+  return next;
+}
+
+// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--end <sha>] [--root <dir>]
 function verifyMain(argv, fail) {
-  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> --mechanical <R-ids> --judgment <R-ids> [--browser <R-ids>] [--end <sha>] [--root <dir>]';
+  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--end <sha>] [--root <dir>]; at least one ID flag';
   const opts = {};
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
@@ -1137,6 +1178,7 @@ function verifyMain(argv, fail) {
     if (!opts[k].every((id) => /^R\d+$/.test(id))) fail('usage', null, '--' + k + ' takes R-ids, comma separated. ' + usage);
   }
   if (opts.end !== undefined && !/^[0-9a-f]{7,40}$/.test(opts.end)) fail('usage', null, '--end takes a commit id. ' + usage);
+  opts.rootGiven = opts.root !== undefined;
   opts.root = opts.root || process.cwd();
   let file = positional[0];
   try { if (fs.statSync(file).isDirectory()) file = path.join(file, 'findings.jsonl'); } catch (e) { /* the read below reports it */ }
@@ -1174,7 +1216,23 @@ function verifyMain(argv, fail) {
     untracked: built.untracked,
     ledger: { file: built.ledgerFile, rounds: built.rounds },
     renumbered: built.renumbered,
+    next: verifyNext(built, opts),
   }) + '\n');
+}
+
+// The recheck file beside the ledger that holds a row of one of the given
+// findings' current round: the newest call's file first, since a finding is
+// listed as unverified by the record of the run that just read it (issue #272).
+function recheckFileFor(ledgerFile, ledger, ids) {
+  const dir = path.dirname(ledgerFile);
+  const rowIds = new Set([].concat(...ids.map((id) => (ledger.findings[id].rechecks || {})[String(ledger.findings[id].round)] || [])));
+  for (let c = ledger.calls; c >= 1; c--) {
+    const file = path.join(dir, 'recheck-' + c + '.json');
+    let rows;
+    try { rows = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { continue; }
+    if (Array.isArray(rows) && rows.some((r) => r && rowIds.has(r.id))) return file;
+  }
+  return null;
 }
 
 // A verifier's return, recorded under each finding's current round. --verify
@@ -1230,7 +1288,16 @@ function recordRechecks(opts, read, fail) {
     if (verdict === 'NOT VERIFIED') unverified.push(id); else recorded[id] = verdict;
   }
   writeLedger(opts.ledger, ledger);
-  process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger }) + '\n');
+  // An unverified finding keeps its round, and what to do next is printed the
+  // way --verify prints it (issue #272): fill the expect of each refused or
+  // missing row, run the recheck file again, record again.
+  const next = [];
+  const again = unverified.length ? recheckFileFor(opts.ledger, ledger, unverified) : null;
+  if (again) {
+    next.push({ do: 'write', ids: unverified, file: again, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
+    next.push({ do: 'run', command: 'node ' + besideSelf('run-checks.js') + ' --checks ' + again + ' --out ' + path.dirname(opts.recheck), record: 'node ' + selfPath() + ' --verdicts --ledger ' + opts.ledger + ' --recheck ' + opts.recheck });
+  }
+  process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
 }
 
 // --checkpoint --ledger <ledger.json> [--root <dir>]: HEAD as the last green (M4),
