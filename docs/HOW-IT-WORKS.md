@@ -72,7 +72,7 @@ More on all three: [How key commands work](COMMANDS.md#how-key-commands-work).
 - **Finders look, one per lens:** code, security, UX, copy, plan compliance and more, picked by what changed.
 - **Every finding brings a check anyone can run.** A finding whose check does not show what it claims is dropped before anyone argues about it.
 - **Skeptics try to knock the rest down:** one skeptic per seven findings, and three independent votes on anything marked Block. What they refute goes to the audited-out log, not into your code.
-- **Survivors get fixed, and the fixer never grades its own fix.** A separate verifier, or the original check run again, decides.
+- **Survivors get fixed, and the fixer never grades its own fix.** A separate verifier, or the original check run again, decides. A script writes what each verifier sees (the finding as found, the diff of the fixes) and keeps the count of rounds, so a third try is refused rather than forgotten.
 - **Two tries, then stop.** A fix still failing after two tries is undone and you are asked.
 
 More: [How key commands work](COMMANDS.md#how-key-commands-work).

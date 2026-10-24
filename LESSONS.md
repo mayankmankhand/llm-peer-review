@@ -553,3 +553,7 @@
 - **Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.**
 - **List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.**
 - **A check-first target that only asserts a bad thing did not happen can pass before the work: also assert the work ran.**
+
+## Issue 267 (the verify mode)
+
+- **Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.**
