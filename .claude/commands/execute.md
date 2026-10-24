@@ -140,14 +140,14 @@ A stable URL whose content has gone stale is worse than no page.
 
 ## Chain Into /review (M14)
 
-On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool with the argument `<start>..HEAD`, where `<start>` is the sha on the plan's `**Start commit:**` line. The range is what the review covers: this run committed every step, so uncommitted work alone would show the review nothing. When the plan has no start line, invoke `/review` with no argument, and it covers the newest unpushed commits instead.
+Run `node .claude/scripts/session-init.js --chain execute` (M16); M14 is authoritative for the conditions, and the script decides the countable ones: the plan at 100%, every step proved or noTarget in its tally, a commit after the start, no file the plan committed modified again. On `pass`, announce the handoff in one line ("Execution complete - chaining into `/review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/review` through the Skill tool with the `handoff.range` it printed, the range from the plan's `**Start commit:**` line to HEAD: this run committed every step, so uncommitted work alone would show the review nothing. When the plan has no start line, the script fails on that condition; invoke `/review` with no argument, and it covers the newest unpushed commits instead.
 
-**Do not chain** when either brake is engaged:
+**Do not chain** when either brake is engaged, which the script shows as a step left unproved:
 
 - The critical-blocker path above fired. A blocker is a hard stop that pages the human (M1); chaining past it would review work that was never finished.
 - A step exhausted its 3-attempt retry bound. Same reasoning: the bound exists to stop the run, not to hand a broken state to the next stage.
 
-In both cases, stop and page as described above. The chain resumes only after the human decides what to do.
+In both cases, stop and page as described above, quoting the condition the script printed. The chain resumes only after the human decides what to do.
 
 Saying "no chaining" on this run stops here (M14). That is a different opt-out from "report only" (M10), which governs whether findings get auto-fixed rather than whether the next stage fires.
 
