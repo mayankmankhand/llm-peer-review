@@ -1,5 +1,33 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.9, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.10, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.10 - Run What It Prints (2026-10-24)
+
+**A patch on top of v8.0.9 (#272).** The verify mode prints what to run next and the rule says run what it prints; each stage handoff is decided by a script that reads what is on disk.
+
+**Issue #272 (follow-ups from #267, phase 1).** The verify mode now prints what to run next, so the M3 rule says "run what it prints" instead of listing the calls, and the stage handoffs (M14, the phase 2 that #267 deferred) are decided by a script that reads what is on disk.
+
+### Added
+
+- **`merge-findings.js --verify` prints `next`:** the calls that consume each file it wrote, in order, each with the record that lands its result in the ledger: a `write` entry for any recheck row whose expect it could not invert, a `run` entry for the checks runner on the recheck file, a `dispatch` entry per verifier shard (the agent, the file, the prompt, where to save the return), a `browser` entry per browser finding, and the checkpoint record after the round's commit. `--verdicts --ledger --recheck` prints the same for rows left unverified. The three ID flags are each optional (at least one), and a path with a space is quoted.
+- **`session-init.js --chain explore|execute|review`:** the countable part of each M14 brake, decided from files. `explore` reads the closing summary; `execute` reads the newest plan (or `--plan`), its tally and the tree; `review` reads the report's Digest and the run's ledger. Each prints `pass` with its `handoff`, or every `failed` condition with its detail; a missing or shapeless input is refused with exit 1, never read as a pass.
+- **`/tk:explore` writes its closing summary to `reports/explore/<stamp>-<slug>.md`** in a fixed shape (Mode, Scope dial, Models, Direction, Decisions, Design direction, Open questions, in any bullet style), runs the chain check on it, and hands the path to `/tk:create-plan`, whose plan critic reads it instead of a pasted summary. Typed on its own, `/tk:create-plan` takes the newest summary for the topic, else writes one.
+
+### Changed
+
+- **M3 reads as a judgment** (814 to 432 words): which path each finding takes stays the rule's, the mechanics are the mode's, and the runner's job is to run what it prints. The fix-verifier agent quotes the two sentences it applies (the trust order and the verifier instruction), 1,124 to 376 words, held by the parity test, which now also holds M3 at or under 450 words.
+- **M14 names the script and each gate's conditions:** explore passes when no question is open (vision: the dial reads Hold or Reduce); execute when the plan is at 100%, every step is proved or has no target, a commit follows the start, and no file the plan committed is modified again (a file the plan never committed is a note); review when the Digest holds no PAGED or NOT FIXED line and, with a ledger, every finding's latest verdict is FIXED and the last checkpoint came after it. A stage chains only on `pass`; on a fail it stops and says the condition and the next step, a plan with no start line included (the review of this change caught the old text chaining past that fail).
+- **`/tk:review` step 3 is the one call and "run what it prints"** (298 to 219 words); step 7 and `/tk:execute`'s chain section run the check; `/tk:upgrade` step 6 and C-21 name the one ID flag a run needs. M14 grew (1,014 to 1,166 words) because the summary shape and the gate conditions now live in the rule rather than at four call sites.
+- **The review of this change** (10 survivors, 8 fixed, 2 single gate misses accepted as noise): a path with a space is quoted in every printed command; a digest line is read with or without its dash; starred and numbered open questions count; the summary lookup for a plan typed alone; the suites cover the relative script path and hold M3's word bar.
+
+### Upgrading
+
+- `claude plugin marketplace update llm-peer-review`, then `claude plugin update tk@llm-peer-review`, restart Claude Code, then `/tk:upgrade` in each project. No new permission rows: the chain checks run on `session-init.js`, whose rows setup already seeds, and the summary file lands under `reports/`, which setup gitignores.
+- A loop command of your own that runs the verify mode can drop its listed calls and run what the mode prints; C-21's fix now says so.
+
+### Why
+
+Phase 1 moved the re-verify mechanics into a script and the words went up. A rule that lists a script's calls restates the script and drifts from it; a rule that says what the script prints and "run what it prints" cannot. The same move applies to the stage handoffs: each brake was prose that four call sites paraphrased, and a script that reads the files on disk makes each one countable, so a chain fires on evidence and a wrong-shaped file is refused rather than read as a pass. The gate measured it on the harness fix role: per run, cost $9.57 to $8.14 and time 25.8 to 15.2 minutes, no false FIXED on either build, and two planted bugs each missed once by one new run and caught by every old run, both carried into the review as must-check items.
 
 ## v8.0.9 - The Round the Script Remembers (2026-10-24)
 
