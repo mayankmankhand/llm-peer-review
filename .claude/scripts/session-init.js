@@ -1576,6 +1576,212 @@ function lessonsCheck() {
   };
 }
 
+// ==========================================================================
+// --chain <stage>: the countable part of M14's stage handoffs (#272)
+// ==========================================================================
+//
+// M14's transitions used to be judged from chat by each stage. This mode reads
+// what is on disk and prints pass with the handoff, or each condition that
+// failed, so the stage chains on `pass` and names the condition otherwise:
+//   explore   --summary <file>            the closing summary /explore wrote
+//   execute   [--plan <file>]             the newest plan (by mtime) or the named
+//                                         one: its progress, its tally, its start
+//                                         commit, the tree
+//   review    --report <file> [--ledger <file>]
+//                                         the report's Digest and the fix loop's
+//                                         ledger
+// A missing input is refused (error not_found), and so is one of the wrong
+// shape (error bad_shape, with the detail naming what is missing): a pass is
+// never vacuous. Those refusals are the one place this script exits 1, so a
+// shell reading the exit code never takes a refusal for a pass; every other
+// mode keeps exit 0 (fail-soft, section 11 of its suite). Two stops the script
+// cannot see stay the runner's to name (M14): a specialist that failed its
+// retry with its page unanswered, and an M11 tripwire hit.
+//
+//   {"stage": "...", "pass": true | false, "failed": [{"condition": "...", "detail": "..."}],
+//    "handoff": {...}, "notes": ["..."]}
+//   {"stage": "...", "error": "usage" | "not_found" | "bad_shape", "detail": "..."}
+const CHAIN_USAGE = "usage: session-init.js --chain explore --summary <file> | --chain execute [--plan <file>] | --chain review --report <file> [--ledger <file>]";
+function chainArgs(argv) {
+  const opts = { stage: argv[0] || null };
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--summary" || a === "--plan" || a === "--report" || a === "--ledger") {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith("--")) return { stage: opts.stage, error: "usage", detail: a + " needs a file path" };
+      opts[a.slice(2)] = v;
+      i++;
+    } else return { stage: opts.stage, error: "usage", detail: "unknown argument: " + a };
+  }
+  return opts;
+}
+function readText(file) {
+  try { return fs.readFileSync(file, "utf8"); } catch { return null; }
+}
+function refuse(stage, error, detail) { return { stage, error, detail }; }
+function chainVerdict(stage, failed, handoff, notes) { return { stage, pass: failed.length === 0, failed, handoff, notes }; }
+// A `## ` section's body (up to the next `## ` heading) and its `- ` bullets.
+function sectionBody(text, heading) {
+  const re = new RegExp("^## +" + heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "[ \t]*\r?$", "mi");
+  const m = re.exec(text);
+  if (!m) return null;
+  const rest = text.slice(m.index + m[0].length);
+  const next = /^## /m.exec(rest);
+  return next ? rest.slice(0, next.index) : rest;
+}
+function bullets(body) {
+  return (body.match(/^- .*$/gm) || []).map((l) => l.slice(2).trim()).filter((l) => l !== "");
+}
+
+// explore -> create-plan: the closing summary file, in the shape M14 gives
+// (**Mode:**, **Scope dial:**, **Models:**, ## Direction, ## Open questions).
+function chainExplore(opts) {
+  if (!opts.summary) return refuse("explore", "usage", "--chain explore needs --summary <file>. " + CHAIN_USAGE);
+  const text = readText(path.resolve(cwd, opts.summary));
+  if (text === null) return refuse("explore", "not_found", opts.summary + " could not be read");
+  const mode = (text.match(/^\*\*Mode:\*\*[ \t]+(scoping|vision)\b/im) || [])[1];
+  if (!mode) return refuse("explore", "bad_shape", opts.summary + " has no **Mode:** line (scoping or vision)");
+  const open = sectionBody(text, "Open questions");
+  if (open === null) return refuse("explore", "bad_shape", opts.summary + " has no ## Open questions section");
+  const dialLine = (text.match(/^\*\*Scope dial:\*\*[ \t]+([^\r\n]+)/im) || [])[1];
+  const dial = dialLine ? dialLine.trim() : "not offered";
+  const models = (text.match(/^\*\*Models:\*\*[ \t]+(best|fit|cheap)\b/im) || [])[1] || null;
+  const direction = sectionBody(text, "Direction");
+  const directions = direction === null ? [] : bullets(direction);
+  const questions = bullets(open).filter((q) => !/^none\.?$/i.test(q));
+  const failed = [];
+  const notes = [];
+  if (questions.length) failed.push({ condition: "open-questions", detail: questions.length + " open question" + (questions.length === 1 ? "" : "s") + ": " + questions[0] });
+  if (mode.toLowerCase() === "vision") {
+    if (/^(hold|reduce)$/i.test(dial)) notes.push("the scope dial reads " + dial);
+    else if (/^expand$/i.test(dial)) failed.push({ condition: "scope-dial", detail: "the scope dial reads Expand; the conversation has not narrowed" });
+    else if (directions.length === 1) notes.push("the dial was never offered and one direction is named, read as Hold");
+    else if (directions.length > 1) failed.push({ condition: "scope-dial", detail: "offer the dial: " + directions.length + " directions are named and the dial was never offered" });
+    else failed.push({ condition: "scope-dial", detail: "no direction is named and the dial was never offered" });
+  }
+  if (!models) notes.push("no **Models:** line; /create-plan writes fit");
+  return chainVerdict("explore", failed, { summary: opts.summary, mode: mode.toLowerCase(), dial, models: models ? models.toLowerCase() : null }, notes);
+}
+
+// execute -> review: the plan at 100%, every step proved or noTarget in the
+// tally, a commit after the start, and no file the plan committed modified
+// again. A tracked file the plan never committed (a settings file) is a note.
+function chainExecute(opts) {
+  const root = modelsRoot();
+  if (root === null) return refuse("execute", "not_found", "not inside a git working tree");
+  let planAbs;
+  let planRel;
+  if (opts.plan) {
+    planAbs = path.resolve(cwd, opts.plan);
+    planRel = opts.plan;
+  } else {
+    const newest = readPlans(root).plans[0] || null;
+    if (!newest) return refuse("execute", "not_found", "no plans/PLAN-*.md in " + root);
+    planAbs = path.join(root, "plans", newest.name);
+    planRel = "plans/" + newest.name;
+  }
+  const text = readText(planAbs);
+  if (text === null) return refuse("execute", "not_found", planRel + " could not be read");
+  const pm = text.match(/^\s*\**Overall Progress:\**\s*`?(\d{1,3})%/im);
+  if (!pm) return refuse("execute", "bad_shape", planRel + " has no Overall Progress line");
+  const progress = parseInt(pm[1], 10);
+  const failed = [];
+  const notes = [];
+  if (progress !== 100) failed.push({ condition: "progress", detail: "the plan is at " + progress + "%" });
+  const tally = spawnSync(process.execPath, [path.join(__dirname, "run-checks.js"), "--plan", planAbs, "--tally"], { cwd: root, encoding: "utf8" });
+  let tj = null;
+  try { tj = JSON.parse(tally.stdout); } catch { tj = null; }
+  if (!tj || !Array.isArray(tj.steps)) return refuse("execute", "bad_shape", "run-checks.js --tally could not read " + planRel + ": " + (String(tally.stderr || "").trim().split("\n")[0] || "no output"));
+  const notGreen = tj.steps.filter((s) => s.status !== "proved" && s.status !== "noTarget");
+  if (notGreen.length) failed.push({ condition: "steps", detail: notGreen.map((s) => "step " + s.step + " (" + s.name + "): " + s.status + (s.reasons && s.reasons.length ? ", " + s.reasons.join("; ") : "")).join(" | ") });
+  if (Array.isArray(tj.problems) && tj.problems.length) failed.push({ condition: "tally-problems", detail: tj.problems.map((p) => (p.line ? "line " + p.line + ": " : "") + p.problem).join(" | ") });
+  const sc = text.match(START_COMMIT_LINE);
+  const start = sc ? resolveCommit(sc[1], root) : null;
+  const head = resolveCommit("HEAD", root);
+  if (!sc) failed.push({ condition: "start-commit", detail: planRel + " has no **Start commit:** line; /execute writes it before the first step" });
+  else if (!start) failed.push({ condition: "start-commit", detail: "the start commit " + sc[1] + " names no commit here" });
+  else {
+    const count = gitText(["rev-list", "--count", start + "..HEAD"], root);
+    if (count === null || count === "0") failed.push({ condition: "commits", detail: "no commit after the start commit " + start.slice(0, 7) + "; every green step is committed (M4)" });
+    const committed = new Set((gitText(["diff", "--name-only", start + "..HEAD"], root) || "").split("\n").filter(Boolean));
+    const modified = [];
+    let untracked = 0;
+    for (const line of (gitText(["status", "--porcelain"], root) || "").split("\n")) {
+      if (!line) continue;
+      if (line.startsWith("??")) { untracked++; continue; }
+      const p = line.slice(3);
+      const arrow = p.indexOf(" -> ");
+      modified.push(arrow === -1 ? p : p.slice(arrow + 4));
+    }
+    const again = modified.filter((p) => committed.has(p));
+    const other = modified.filter((p) => !committed.has(p));
+    if (again.length) failed.push({ condition: "uncommitted", detail: "modified again after the plan committed it: " + again.join(", ") });
+    if (other.length) notes.push("uncommitted tracked changes the plan never committed: " + other.join(", "));
+    if (untracked) notes.push(untracked + " untracked file" + (untracked === 1 ? "" : "s"));
+  }
+  return chainVerdict("execute", failed, { plan: path.basename(planRel), start, head, range: start ? start + "..HEAD" : null }, notes);
+}
+
+// review -> document: no PAGED or NOT FIXED line in the report's Digest; with a
+// ledger, every finding's latest verdict is FIXED for its round, and the last
+// checkpoint came after the last verdict. The checkpoint's dirty count is a
+// note, as M4 flags it.
+function chainReview(opts) {
+  if (!opts.report) return refuse("review", "usage", "--chain review needs --report <file>. " + CHAIN_USAGE);
+  const text = readText(path.resolve(cwd, opts.report));
+  if (text === null) return refuse("review", "not_found", opts.report + " could not be read");
+  const digest = sectionBody(text, "Digest");
+  if (digest === null) return refuse("review", "bad_shape", opts.report + " has no ## Digest section");
+  const failed = [];
+  const notes = [];
+  let fixedLines = 0;
+  let otherLines = 0;
+  for (const line of digest.split("\n")) {
+    if (!/^- R\d/.test(line)) continue;
+    const m = line.match(/^- (R\d+(?:,\s*R\d+)*):\s*(.+)$/);
+    if (!m) return refuse("review", "bad_shape", "a Digest line is not in the shape `- R<n>: <VERDICT>`: " + line.trim().slice(0, 120));
+    const verdict = m[2].trim();
+    if (/^PAGED\b/.test(verdict)) failed.push({ condition: "digest", detail: m[1] + ": PAGED, a page is waiting on the human" });
+    else if (/^NOT FIXED\b/.test(verdict)) failed.push({ condition: "digest", detail: m[1] + ": NOT FIXED in the digest" });
+    else if (/^FIXED\b/.test(verdict)) fixedLines++;
+    else otherLines++;
+  }
+  notes.push("digest: " + fixedLines + " FIXED line" + (fixedLines === 1 ? "" : "s") + ", " + otherLines + " other");
+  let lastGreen = null;
+  if (opts.ledger) {
+    let ledger;
+    try { ledger = require(path.join(__dirname, "merge-findings.js")).readLedger(path.resolve(cwd, opts.ledger), true); }
+    catch (e) { return refuse("review", e && e.error === "not_found" ? "not_found" : "bad_shape", String(e && e.message)); }
+    lastGreen = ledger.lastGreen || null;
+    const ids = Object.keys(ledger.findings).sort((a, b) => parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
+    let lastVerdictAt = null;
+    for (const id of ids) {
+      const f = ledger.findings[id];
+      const inRound = (f.verdicts || []).filter((v) => v.round === f.round);
+      const latest = inRound[inRound.length - 1] || null;
+      for (const v of f.verdicts || []) if (v.at && (lastVerdictAt === null || v.at > lastVerdictAt)) lastVerdictAt = v.at;
+      if (!latest) failed.push({ condition: "ledger", detail: id + " has no verdict in round " + f.round });
+      else if (latest.verdict === "NOT FIXED") failed.push({ condition: "ledger", detail: id + " NOT FIXED at round " + f.round + (f.round >= 2 ? "; the M5 revert to the last green (" + (lastGreen || "none recorded") + ") is open" : "; round 2 has not run") });
+      else if (latest.verdict !== "FIXED") failed.push({ condition: "ledger", detail: id + " is " + latest.verdict + " in round " + f.round });
+    }
+    const checkpoints = Array.isArray(ledger.checkpoints) ? ledger.checkpoints : [];
+    const last = checkpoints[checkpoints.length - 1] || null;
+    if (ids.length && !last) failed.push({ condition: "checkpoint", detail: "no checkpoint recorded; commit the fixes and run --checkpoint --ledger (M4)" });
+    else if (last && lastVerdictAt && last.at < lastVerdictAt) failed.push({ condition: "checkpoint", detail: "verdicts recorded after the last checkpoint " + String(last.sha).slice(0, 7) + "; commit the fixes and record the checkpoint (M4)" });
+    if (last && last.dirty) notes.push("the last checkpoint " + String(last.sha).slice(0, 7) + " left " + last.dirty + " uncommitted tracked change" + (last.dirty === 1 ? "" : "s") + ", as M4 flags it");
+    if (!ids.length) notes.push("the ledger names no finding");
+  } else notes.push("no ledger given; its conditions were not checked");
+  return chainVerdict("review", failed, { report: opts.report, ledger: opts.ledger || null, lastGreen }, notes);
+}
+function chainCheck(argv) {
+  const parsed = chainArgs(argv);
+  if (parsed.error) return refuse(parsed.stage, parsed.error, parsed.detail + ". " + CHAIN_USAGE);
+  if (parsed.stage === "explore") return chainExplore(parsed);
+  if (parsed.stage === "execute") return chainExecute(parsed);
+  if (parsed.stage === "review") return chainReview(parsed);
+  return refuse(parsed.stage, "usage", (parsed.stage ? "unknown stage: " + parsed.stage : "--chain needs a stage") + ". " + CHAIN_USAGE);
+}
+
 // The printed object after a save: the scope without its long lists, which the
 // saved file holds. Only arrays under these names go; every count stays.
 function withoutLists(value) {
@@ -1608,6 +1814,12 @@ if (outGiven && cliArgs[0] !== "--scope") {
   emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, cycleStart(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "start", "source", "plan"]));
 } else if (cliArgs[0] === "--lessons" && cliArgs.length === 1) {
   emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp"]));
+} else if (cliArgs[0] === "--chain") {
+  const result = chainCheck(cliArgs.slice(1));
+  // A refused input exits 1 (#272): the one mode where the exit code matters,
+  // because a shell must never read a refusal as a pass.
+  if (result.error) process.exitCode = 1;
+  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, result, { cwd })), (o) => ordered(o, ["generatedAt", "stage", "error", "detail", "pass", "failed", "handoff", "notes"]));
 } else if (cliArgs[0] === "--scope") {
   let result;
   try {
@@ -1625,5 +1837,5 @@ if (outGiven && cliArgs[0] !== "--scope") {
     else emit(Object.assign(withoutLists(full), { savedTo: saved.savedTo }), (o) => ordered(o, ["generatedAt", "error", "scopeLine", "savedTo"]));
   }
 } else {
-  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>], --models, --cycle-start or --lessons, each with an optional --mode <best|fit|cheap>)", cwd });
+  emit({ generatedAt: new Date().toISOString(), error: "unknown argument: " + cliArgs[0] + " (expected no argument, --scope [<base>..<end>], --models, --cycle-start, --lessons or --chain <stage>, each with an optional --mode <best|fit|cheap>)", cwd });
 }
