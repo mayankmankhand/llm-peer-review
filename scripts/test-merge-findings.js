@@ -765,6 +765,13 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
     noSaved.status === 1 && /"error":"missing_receipt"/.test(noSaved.stderr) && /code-2\.txt/.test(noSaved.stderr) && fs.readdirSync(out4).length === 0, noSaved.stderr);
   const bare = run(['--verify', file]);
   check11('--verify without its folders and lists is a usage error', bare.status === 1 && /usage/.test(bare.stderr), bare.stderr);
+  // The verifier instruction lives in three places and a change to one must
+  // fail here rather than drift, as section 8 holds M2's two instructions.
+  const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');
+  const VERIFIER = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'agents', 'fix-verifier.md'), 'utf8');
+  check11('M3_INSTRUCTION is the verifier sentence hitl-loop.md and fix-verifier.md carry',
+    typeof mod.M3_INSTRUCTION === 'string' && HITL.includes(mod.M3_INSTRUCTION) && VERIFIER.includes(mod.M3_INSTRUCTION),
+    'in hitl-loop.md: ' + HITL.includes(mod.M3_INSTRUCTION) + '; in the agent: ' + VERIFIER.includes(mod.M3_INSTRUCTION));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });

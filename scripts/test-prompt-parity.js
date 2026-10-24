@@ -117,6 +117,16 @@ check('no prompt file keeps the old by-hand wording of the pass', byHand.length 
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
 check('the three fragments that describe the pass name the helper', describers.every(f => read(f).includes('merge-findings.js')), describers.filter(f => !read(f).includes('merge-findings.js')).join(', '));
 check('the helper exists where the sentence points', fs.existsSync(path.join(REPO, '.claude/scripts/merge-findings.js')));
+// Issue #267: the re-verify round runs through merge-findings.js --verify, and
+// the fix-verifier agent quotes the M3 bullet whole so the rule and the agent
+// cannot drift apart. The bullet must name the mode, so this case fails on the
+// pair that predates it rather than passing on any two matching copies.
+{
+  const m3 = (read('.claude/skills/shared/hitl-loop.md').split('\n').find((l) => l.startsWith('- **M3.')) || '').replace(/^- /, '');
+  const agent = read('.claude/agents/fix-verifier.md');
+  check('the fix-verifier agent quotes M3 word for word', m3.length > 0 && m3.includes('merge-findings.js --verify') && count(agent, m3) === 1,
+    m3.length ? count(agent, m3) + ' copies in the agent; the bullet names the mode: ' + m3.includes('merge-findings.js --verify') : 'no M3 bullet found');
+}
 
 console.log('\n5. the merge parts (#232)');
 // /document writes the PR body parts, merge-rules.md defines them, and /merge
