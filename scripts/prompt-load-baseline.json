@@ -6,7 +6,7 @@
     "agents/decision-checker.md": 375,
     "agents/design-comparer.md": 183,
     "agents/design-critic.md": 199,
-    "agents/fix-verifier.md": 989,
+    "agents/fix-verifier.md": 1058,
     "agents/index-mapper.md": 40,
     "agents/plan-critic.md": 388,
     "agents/review-browser-finder.md": 6691,
@@ -29,7 +29,7 @@
     "commands/merge.md": 7169,
     "commands/pair-debug.md": 879,
     "commands/peer-review.md": 2150,
-    "commands/review.md": 8385,
+    "commands/review.md": 8451,
     "commands/worktree.md": 1078,
     "session": 2628,
     "skills/audit-html/SKILL.md": 3512,
@@ -39,7 +39,7 @@
     "skills/error-analysis/SKILL.md": 2677,
     "skills/html-viewing/SKILL.md": 2012,
     "skills/learning-opportunity/SKILL.md": 259,
-    "skills/loop-rules/SKILL.md": 6490,
+    "skills/loop-rules/SKILL.md": 6634,
     "skills/playground/SKILL.md": 4167,
     "skills/project-context/SKILL.md": 343,
     "skills/report-rules/SKILL.md": 4612,
@@ -63,6 +63,6 @@
     "skills/review-ux/SKILL.md": 3069,
     "skills/security-audit/SKILL.md": 3770,
     "skills/setup/SKILL.md": 1398,
-    "skills/upgrade/SKILL.md": 5601
+    "skills/upgrade/SKILL.md": 5626
   }
 }
