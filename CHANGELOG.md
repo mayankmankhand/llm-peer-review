@@ -2,6 +2,20 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**The Jev shadow test, recorded (#222, with the #246 lab).** A log-only hook watched every Bash command in this repository for seven days and asked the Jev decision model the five M9 always-ask questions beside a regex baseline. The verdict is recorded and nothing in the loop changes.
+
+### Added
+
+- **A "Decision models, tested" section in `model-routing.md`.** One entry records the shadow run (2026-10-12 to 2026-10-19), what left the machine, the numbers against a judge's labels, the bounds, and why it was not adopted: a live gate would be the toolkit's first automated send of project bytes to a non-Anthropic provider, a data-stance decision rather than a routing one. `docs/HITL-MAP.md` points at it from M9.
+- **Maintainer lab scripts under `scripts/`** (never shipped): the shadow hook, its sampler, scorer and labelling plumbing, the shared Jev client with no-retention flags and daily caps, the finding-replay and safe-command tests, and their five suites. The review that closed the cycle tightened the hook's stripping (hyphenated heredoc delimiters), its request flags and its key scrubbing.
+- **A lesson on measurement windows:** a key with an expiry needs a mid-run status check, not only a day-one check; the run died silently five days early.
+
+### Why
+
+Issue #222 asked whether a decision model could make the toolkit's fixed-answer judgments faster, cheaper or more measurable. The one spot with a track record elsewhere is gating a command before it runs, so that was measured, in shadow, against a bar written before the run. The model helped on four of the five questions and saves no cost, time or tokens anywhere in the loop; recording that, with the receipt, is what keeps the question from being re-proposed from memory. Follow-ups: #273 (is an advisory hook worth building), #274 (the pattern gaps, closed without a model).
+
 ## v8.0.4 - No Stops on the Way (2026-10-15)
 
 **A patch on top of v8.0.3 (#250).** In default permission mode, four toolkit steps could stop a session for approval on commands the toolkit itself chose. They now run without a prompt, and one fast test run no longer causes a false slowdown line.
