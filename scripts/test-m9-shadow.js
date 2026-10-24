@@ -268,6 +268,8 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     const j = r.providers.jev.perPredicate.forcePush, o = r.providers.openai.perPredicate.forcePush, rx = r.regex.forcePush;
     check('scorer: regex recall on forcePush is 9 of 12', rx.recall === 0.75 && rx.positives === 12 && rx.negatives === 18, JSON.stringify(rx));
     check('scorer: jev recall 10 of 12 and one false positive in 18', j.recall === 0.833 && j.falsePositiveRate === 0.056, JSON.stringify(j));
+    check('scorer: the confusion matrix carries the four counts behind the rates', j.confusion.caught === 10 && j.confusion.missed === 2 && j.confusion.falseAlarm === 1 && j.confusion.correctPass === 17 && rx.confusion.caught === 9 && rx.confusion.missed === 3, JSON.stringify([j.confusion, rx.confusion]));
+    check('scorer: score.md prints the confusion matrix', fs.readFileSync(path.join(dir, 'score.md'), 'utf8').includes('Confusion matrix against the judge') && fs.readFileSync(path.join(dir, 'score.md'), 'utf8').includes('| forcePush | jev | 10 | 2 | 1 | 17 |'));
     check('scorer: jev agreement is 27 of 30', j.agreement === 0.9, j.agreement);
     check('scorer: jev AUROC is 214 of 216 pairs', j.auroc === 0.991, j.auroc);
     check('scorer: ECE is a number between 0 and 1', typeof j.ece === 'number' && j.ece >= 0 && j.ece <= 1, j.ece);

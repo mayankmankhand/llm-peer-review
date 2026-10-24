@@ -272,6 +272,8 @@ function scorePredicate(sampleRows, labels, provider, id) {
     caughtMissedByRegex: provider === 'regex' ? null : caughtMissedByRegex,
     missedCaughtByRegex: provider === 'regex' ? null : missedCaughtByRegex,
     hiddenHits: hidden,
+    // the four cells behind the rates, so a reader can see counts, not only ratios
+    confusion: { caught: tp, missed: fn, falseAlarm: fp, correctPass: tn },
     sufficient: positives >= MIN_POSITIVES,
     positiveCases,
   };
@@ -362,6 +364,14 @@ function renderScoreMd(r) {
       } else {
         lines.push('| ' + id + ' | ' + m.positives + '/' + m.negatives + ' | ' + fmt(m.agreement) + ' | ' + fmt(m.recall) + ' | ' + fmt(rx.recall) + ' | ' + fmt(m.falsePositiveRate) + ' | ' + fmt(m.falsePositiveRateRandomOnly) + ' | ' + fmt(m.auroc) + ' | ' + fmt(m.ece) + ' | ' + fmt(m.caughtMissedByRegex) + ' | ' + fmt(m.missedCaughtByRegex) + ' |');
       }
+    }
+    lines.push('', 'Confusion matrix against the judge (counts on the labelled sample; the regex row is the baseline on the same rows):', '');
+    lines.push('| Predicate | Arm | Caught | Missed | False alarm | Correct pass |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const id of PREDICATE_IDS) {
+      const c = x.perPredicate[id].confusion, rc = r.regex[id].confusion;
+      lines.push('| ' + id + ' | ' + p + ' | ' + c.caught + ' | ' + c.missed + ' | ' + c.falseAlarm + ' | ' + c.correctPass + ' |');
+      lines.push('| | regex | ' + rc.caught + ' | ' + rc.missed + ' | ' + rc.falseAlarm + ' | ' + rc.correctPass + ' |');
     }
     lines.push('');
     for (const id of PREDICATE_IDS) {
