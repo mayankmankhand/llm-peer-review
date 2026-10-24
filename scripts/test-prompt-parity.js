@@ -133,6 +133,11 @@ check('the helper exists where the sentence points', fs.existsSync(path.join(REP
     m3.length > 0 && m3.includes('merge-findings.js --verify') && m3.includes(TRUST) && m3.includes(M3_INSTRUCTION)
       && count(agent, TRUST) === 1 && count(agent, M3_INSTRUCTION) === 1 && !agent.includes('--mechanical'),
     m3.length ? 'trust order in the agent: ' + count(agent, TRUST) + ', instruction: ' + count(agent, M3_INSTRUCTION) + ', --mechanical in the agent: ' + agent.includes('--mechanical') + '; the bullet names the mode: ' + m3.includes('merge-findings.js --verify') : 'no M3 bullet found');
+  // R3 of the #272 review: the 450-word bar on M3 was measured by hand when the
+  // rule was trimmed (814 -> 432); this case holds it, so a rule that grows back
+  // past the bar fails here instead of passing every check.
+  const m3Words = m3.split(/\s+/).filter(Boolean).length;
+  check('the M3 bullet stays at or under 450 words (#272)', m3Words > 0 && m3Words <= 450, m3Words + ' words');
 }
 
 console.log('\n5. the merge parts (#232)');

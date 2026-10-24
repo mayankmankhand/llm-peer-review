@@ -1629,8 +1629,10 @@ function sectionBody(text, heading) {
   const next = /^## /m.exec(rest);
   return next ? rest.slice(0, next.index) : rest;
 }
+// M14 says "one bullet per question", so a dash, a star or a number counts
+// (R14 of the #272 review): a question in any of them is a question.
 function bullets(body) {
-  return (body.match(/^- .*$/gm) || []).map((l) => l.slice(2).trim()).filter((l) => l !== "");
+  return (body.match(/^(?:[-*]|\d+\.) .*$/gm) || []).map((l) => l.replace(/^(?:[-*]|\d+\.) /, "").trim()).filter((l) => l !== "");
 }
 
 // explore -> create-plan: the closing summary file, in the shape M14 gives
@@ -1737,8 +1739,10 @@ function chainReview(opts) {
   let fixedLines = 0;
   let otherLines = 0;
   for (const line of digest.split("\n")) {
-    if (!/^- R\d/.test(line)) continue;
-    const m = line.match(/^- (R\d+(?:,\s*R\d+)*):\s*(.+)$/);
+    // The review prompt shows the line as `R<n>: <VERDICT>` and the rule as a
+    // dash bullet; both carry the verdict, so both are read (R7 of the #272 review).
+    if (!/^(?:- )?R\d/.test(line)) continue;
+    const m = line.match(/^(?:- )?(R\d+(?:,\s*R\d+)*):\s*(.+)$/);
     if (!m) return refuse("review", "bad_shape", "a Digest line is not in the shape `- R<n>: <VERDICT>`: " + line.trim().slice(0, 120));
     const verdict = m[2].trim();
     if (/^PAGED\b/.test(verdict)) failed.push({ condition: "digest", detail: m[1] + ": PAGED, a page is waiting on the human" });

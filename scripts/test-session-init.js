@@ -1545,6 +1545,14 @@ section('272. --chain <stage>: the countable part of M14', function () {
   check('refuses a digest line that is not in the verdict shape',
     badLine.status === 1 && badLine.json.error === 'bad_shape' && /R1 FIXED/.test(String(badLine.json.detail)), brief(badLine) + JSON.stringify(badLine.json));
 
+  // R7 of the #272 review: the review prompt shows a digest line as
+  // `R<n>: <VERDICT>` with no dash, so a digest written that way carries the
+  // same verdicts, and a NOT FIXED or PAGED line in it must stop the chain too.
+  write(repo, 'reports/review-bare.md', report('R1: FIXED - ok\nR2: NOT FIXED - still there\n'));
+  const bare = runScript(['--chain', 'review', '--report', 'reports/review-bare.md'], repo);
+  check('a digest line with no leading dash is read, so a bare NOT FIXED line fails the chain',
+    bare.status === 0 && bare.json.pass === false && has(bare, 'digest', /R2.*NOT FIXED/), brief(bare) + JSON.stringify(bare.json));
+
   // explore: the closing summary file
   const summary = function (mode, dial, directions, open) {
     return '# Exploration summary\n\n**Mode:** ' + mode + '\n**Scope dial:** ' + dial + '\n**Models:** best\n\n## Direction\n\n' +
@@ -1559,6 +1567,12 @@ section('272. --chain <stage>: the countable part of M14', function () {
   write(repo, 'reports/explore/s2.md', summary('scoping', 'not offered', ['Trim the rule'], ['Which folder holds the file?']));
   const s2 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s2.md'], repo);
   check('fails on an open question', s2.json.pass === false && has(s2, 'open-questions', /folder/), JSON.stringify(s2.json.failed));
+  // R14 of the #272 review: M14 says "one bullet per question", not a dash
+  // bullet, so a starred or numbered question is a question too.
+  write(repo, 'reports/explore/s7.md', summary('scoping', 'not offered', ['Trim the rule'], []) + '* Which folder holds the file?\n1. Which slug names it?\n');
+  const s7 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s7.md'], repo);
+  check('a starred or numbered open question fails the explore chain too',
+    s7.json.pass === false && has(s7, 'open-questions', /2 open questions: Which folder/), JSON.stringify(s7.json));
   write(repo, 'reports/explore/s3.md', summary('vision', 'Expand', ['Big'], []));
   const s3 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s3.md'], repo);
   check('fails a vision summary whose dial reads Expand', s3.json.pass === false && has(s3, 'scope-dial', /Expand/), JSON.stringify(s3.json.failed));

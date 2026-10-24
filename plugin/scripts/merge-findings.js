@@ -1129,6 +1129,13 @@ function selfPath() {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
 }
 function besideSelf(name) { return path.join(path.dirname(selfPath()), name); }
+// A path in a printed command is quoted when the shell would split or expand
+// it (a space, a quote, a `$`), so the runner pastes the line as it is; a
+// plain path stays bare, so the common case reads the way the rule shows it.
+function shellWord(p) {
+  const s = String(p);
+  return /^[A-Za-z0-9_@%+=:,.\/-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
+}
 
 // What consumes each file --verify wrote, in the order the runner runs it (issue
 // #272), so a rule can say "run what it prints" instead of restating the calls:
@@ -1139,28 +1146,29 @@ function besideSelf(name) { return path.join(path.dirname(selfPath()), name); }
 // checkpoint commit (M4). --root is carried onto the checkpoint call when the
 // runner gave one, since that call reads HEAD there.
 function verifyNext(built, opts) {
-  const self = selfPath();
-  const runner = besideSelf('run-checks.js');
+  const self = shellWord(selfPath());
+  const runner = shellWord(besideSelf('run-checks.js'));
+  const ledgerWord = shellWord(built.ledgerFile);
   const next = [];
   const recheck = built.files.find((f) => f.kind === 'recheck');
   if (recheck) {
     const file = path.join(opts.out, recheck.name);
     if (built.needsExpect.length) next.push({ do: 'write', ids: built.needsExpect, file, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
-    next.push({ do: 'run', command: 'node ' + runner + ' --checks ' + file + ' --out ' + opts.out, record: 'node ' + self + ' --verdicts --ledger ' + built.ledgerFile + ' --recheck ' + path.join(opts.out, 'results.json') });
+    next.push({ do: 'run', command: 'node ' + runner + ' --checks ' + shellWord(file) + ' --out ' + shellWord(opts.out), record: 'node ' + self + ' --verdicts --ledger ' + ledgerWord + ' --recheck ' + shellWord(path.join(opts.out, 'results.json')) });
   }
   for (const f of built.files.filter((x) => x.kind === 'shard')) {
     const file = path.join(opts.out, f.name);
     const save = path.join(opts.out, f.name.replace(/\.txt$/, '') + '-return.txt');
-    next.push({ do: 'dispatch', agent: 'fix-verifier', file, ids: f.ids, prompt: 'Your findings, M3\'s instruction and the diff of the fixes are in ' + file + '; read it in full and follow it exactly.', save, record: 'node ' + self + ' --verdicts ' + file + ' ' + save + ' --ledger ' + built.ledgerFile });
+    next.push({ do: 'dispatch', agent: 'fix-verifier', file, ids: f.ids, prompt: 'Your findings, M3\'s instruction and the diff of the fixes are in ' + file + '; read it in full and follow it exactly.', save, record: 'node ' + self + ' --verdicts ' + shellWord(file) + ' ' + shellWord(save) + ' --ledger ' + ledgerWord });
   }
   // A browser finding's check was written by the runner before the fix (M3),
   // so the mode cannot run it; the entry names the re-run, where its output
   // goes, and the record that lands the verdict.
   for (const id of built.browser) {
     const save = path.join(opts.out, 'browser-' + built.call + '-' + id + '-return.txt');
-    next.push({ do: 'browser', ids: [id], what: 'run the browse.js check written before the fix for ' + id + ' again and save its output, with "' + id + ': FIXED" or "' + id + ': NOT FIXED" as the first line, to ' + save, save, record: 'node ' + self + ' --verdicts --tier verify --ids ' + id + ' ' + save + ' --ledger ' + built.ledgerFile });
+    next.push({ do: 'browser', ids: [id], what: 'run the browse.js check written before the fix for ' + id + ' again and save its output, with "' + id + ': FIXED" or "' + id + ': NOT FIXED" as the first line, to ' + save, save, record: 'node ' + self + ' --verdicts --tier verify --ids ' + id + ' ' + shellWord(save) + ' --ledger ' + ledgerWord });
   }
-  next.push({ do: 'run', after: 'the checkpoint commit', command: 'node ' + self + ' --checkpoint --ledger ' + built.ledgerFile + (opts.rootGiven ? ' --root ' + opts.root : '') });
+  next.push({ do: 'run', after: 'the checkpoint commit', command: 'node ' + self + ' --checkpoint --ledger ' + ledgerWord + (opts.rootGiven ? ' --root ' + shellWord(opts.root) : '') });
   return next;
 }
 
@@ -1302,7 +1310,7 @@ function recordRechecks(opts, read, fail) {
   const again = unverified.length ? recheckFileFor(opts.ledger, ledger, unverified) : null;
   if (again) {
     next.push({ do: 'write', ids: unverified, file: again, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
-    next.push({ do: 'run', command: 'node ' + besideSelf('run-checks.js') + ' --checks ' + again + ' --out ' + path.dirname(opts.recheck), record: 'node ' + selfPath() + ' --verdicts --ledger ' + opts.ledger + ' --recheck ' + opts.recheck });
+    next.push({ do: 'run', command: 'node ' + shellWord(besideSelf('run-checks.js')) + ' --checks ' + shellWord(again) + ' --out ' + shellWord(path.dirname(opts.recheck)), record: 'node ' + shellWord(selfPath()) + ' --verdicts --ledger ' + shellWord(opts.ledger) + ' --recheck ' + shellWord(opts.recheck) });
   }
   process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
 }

@@ -816,8 +816,8 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   // Issue #272: the mode prints what consumes each file it wrote, in order, so a
   // rule can say "run what it prints" instead of restating the calls. The suite
   // runs the script by its absolute path from a folder outside the repository,
-  // so the printed script paths are absolute here; under the project root they
-  // are relative to it.
+  // which takes the absolute branch of the printed script paths; the case after
+  // the next runs from the project root and takes the relative one.
   const outNext = path.join(sandbox, 'verify-out-11-next');
   fs.mkdirSync(outNext);
   const ledgerNext = path.join(outNext, 'ledger.json');
@@ -836,6 +836,35 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
       && nx[1].record === 'node ' + SCRIPT + ' --verdicts ' + shardNext + ' ' + returnNext + ' --ledger ' + ledgerNext
       && nx[2].do === 'run' && nx[2].after === 'the checkpoint commit' && nx[2].command === 'node ' + SCRIPT + ' --checkpoint --ledger ' + ledgerNext + ' --root ' + repo,
     rNext.stderr + JSON.stringify(nx).slice(0, 600));
+  // R9 of the #272 review: the relative branch, the one every run from a
+  // project root takes. Run from this repository's root, the printed script
+  // paths are relative to it, as the rule's commands show them.
+  const ROOT = path.resolve(__dirname, '..');
+  const outRel = path.join(sandbox, 'verify-out-11-rel');
+  fs.mkdirSync(outRel);
+  const rRel = spawnSync(process.execPath, [SCRIPT, '--verify', file, '--receipts', receipts, '--scope', scope, '--out', outRel, '--root', repo, '--mechanical', 'R1'], { cwd: ROOT, encoding: 'utf8' });
+  let nRel = [];
+  try { nRel = JSON.parse(rRel.stdout).next || []; } catch (e) { nRel = []; }
+  check11('run from the project root, the printed commands name the scripts by their relative paths',
+    rRel.status === 0 && nRel.length === 2 && String(nRel[0].command).startsWith('node .claude/scripts/run-checks.js --checks ')
+      && String(nRel[0].record).startsWith('node .claude/scripts/merge-findings.js --verdicts ') && String(nRel[1].command).startsWith('node .claude/scripts/merge-findings.js --checkpoint '),
+    rRel.stderr + JSON.stringify(nRel).slice(0, 400));
+  // R10 of the #272 review: a path with a space (a Windows home folder, a
+  // project under "My Projects") is quoted in every printed command and
+  // record, so the runner can paste the line as it is; a plain path stays bare.
+  const outSpace = path.join(sandbox, 'verify out 11');
+  fs.mkdirSync(outSpace);
+  const q = (p) => "'" + p + "'";
+  const rSpace = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outSpace, '--root', repo, '--mechanical', 'R1', '--judgment', 'R4']);
+  const mSpace = parse(rSpace) || {};
+  const ns = Array.isArray(mSpace.next) ? mSpace.next : [];
+  check11('a space in the out folder is quoted in every printed command and record',
+    rSpace.status === 0 && ns.length === 3
+      && ns[0].command === 'node ' + RUN_CHECKS + ' --checks ' + q(path.join(outSpace, 'recheck-1.json')) + ' --out ' + q(outSpace)
+      && ns[0].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + q(path.join(outSpace, 'ledger.json')) + ' --recheck ' + q(path.join(outSpace, 'results.json'))
+      && ns[1].record === 'node ' + SCRIPT + ' --verdicts ' + q(path.join(outSpace, 'verify-1-1.txt')) + ' ' + q(path.join(outSpace, 'verify-1-1-return.txt')) + ' --ledger ' + q(path.join(outSpace, 'ledger.json'))
+      && ns[2].command === 'node ' + SCRIPT + ' --checkpoint --ledger ' + q(path.join(outSpace, 'ledger.json')) + ' --root ' + repo,
+    rSpace.stderr + JSON.stringify(ns).slice(0, 600));
   const outWrite = path.join(sandbox, 'verify-out-11-write');
   fs.mkdirSync(outWrite);
   const rWrite = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outWrite, '--root', repo, '--mechanical', 'R2']);
