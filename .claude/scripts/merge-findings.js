@@ -1153,6 +1153,13 @@ function verifyNext(built, opts) {
     const save = path.join(opts.out, f.name.replace(/\.txt$/, '') + '-return.txt');
     next.push({ do: 'dispatch', agent: 'fix-verifier', file, ids: f.ids, prompt: 'Your findings, M3\'s instruction and the diff of the fixes are in ' + file + '; read it in full and follow it exactly.', save, record: 'node ' + self + ' --verdicts ' + file + ' ' + save + ' --ledger ' + built.ledgerFile });
   }
+  // A browser finding's check was written by the runner before the fix (M3),
+  // so the mode cannot run it; the entry names the re-run, where its output
+  // goes, and the record that lands the verdict.
+  for (const id of built.browser) {
+    const save = path.join(opts.out, 'browser-' + built.call + '-' + id + '-return.txt');
+    next.push({ do: 'browser', ids: [id], what: 'run the browse.js check written before the fix for ' + id + ' again and save its output, with "' + id + ': FIXED" or "' + id + ': NOT FIXED" as the first line, to ' + save, save, record: 'node ' + self + ' --verdicts --tier verify --ids ' + id + ' ' + save + ' --ledger ' + built.ledgerFile });
+  }
   next.push({ do: 'run', after: 'the checkpoint commit', command: 'node ' + self + ' --checkpoint --ledger ' + built.ledgerFile + (opts.rootGiven ? ' --root ' + opts.root : '') });
   return next;
 }

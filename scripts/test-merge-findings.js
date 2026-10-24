@@ -866,6 +866,16 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('an ID flag may be left out when its list is empty',
     rOne.status === 0 && fs.existsSync(path.join(outOne, 'verify-1-1.txt')) && !fs.existsSync(path.join(outOne, 'recheck-1.json')) && mOne.recheck === null && no.length === 2 && no[0].do === 'dispatch' && no[1].do === 'run',
     rOne.stderr + JSON.stringify(no).slice(0, 300));
+  // The first call above named R12 under --browser: its re-run is the runner's
+  // (the check was written before the fix), so the entry names the re-run, the
+  // return file and the record, and sits before the checkpoint entry.
+  const n1 = Array.isArray(m1.next) ? m1.next : [];
+  const bEntry = n1.find((e) => e.do === 'browser') || {};
+  check11('a browser ID gets a browser entry naming its re-run, its return file and its record, before the checkpoint entry',
+    (bEntry.ids || []).join() === 'R12' && bEntry.save === path.join(out, 'browser-1-R12-return.txt') && /R12: FIXED/.test(bEntry.what)
+      && bEntry.record === 'node ' + SCRIPT + ' --verdicts --tier verify --ids R12 ' + bEntry.save + ' --ledger ' + ledger
+      && n1.indexOf(bEntry) < n1.length - 1 && n1[n1.length - 1].do === 'run' && /--checkpoint/.test(n1[n1.length - 1].command),
+    JSON.stringify(n1).slice(0, 600));
   // The verifier instruction lives in three places and a change to one must
   // fail here rather than drift, as section 8 holds M2's two instructions.
   const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');
