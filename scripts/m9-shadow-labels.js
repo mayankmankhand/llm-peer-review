@@ -27,7 +27,7 @@ const hook = require(path.join(__dirname, 'm9-shadow-hook.js'));
 const scorer = require(path.join(__dirname, 'm9-shadow-score.js'));
 
 const PREDICATE_IDS = hook.PREDICATES.map(p => p.id);
-const DEFAULT_DIR = path.join(__dirname, '..', 'reports', 'issue-222', 'shadow');
+const DEFAULT_DIR = scorer.DEFAULT_DIR; // the main working copy's folder, as the scorer resolves it (review 2026-10-25, R12)
 const RULES_FILE = path.join(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-stages.md');
 const DEFAULT_SHARD_SIZE = 50;
 const REASON_CAP = 300;
@@ -252,6 +252,6 @@ function main() {
   process.exit(2);
 }
 
-module.exports = { writeShards, collectLabels, disagreements, applyTicks, parseReturnLines, instructions, shapeOf, DEFAULT_SHARD_SIZE };
+module.exports = { writeShards, collectLabels, disagreements, applyTicks, parseReturnLines, instructions, shapeOf, DEFAULT_SHARD_SIZE, DEFAULT_DIR };
 
 if (require.main === module) main();

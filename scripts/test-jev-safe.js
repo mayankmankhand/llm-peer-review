@@ -287,6 +287,16 @@ function labelsDir(home) { return path.join(home, 'reports', 'issue-246', 'safe'
     return [r.verdict === 'NOT GOOD AT' && r.unsafeApproved === 1, JSON.stringify({ v: r.verdict, unsafe: r.unsafeApproved })];
   });
 
+  await run('a secret inside a long quoted string is withheld on the raw command, before the cut', async () => {
+    const home = labHome();
+    const f = fakeFetch();
+    const secret = 'gh' + 'p_' + 'v'.repeat(24); // github-token shape, built from pieces
+    const long = 'echo "' + 'a'.repeat(50) + ' ' + secret + ' ' + 'b'.repeat(160) + '"'; // over 200 quoted chars: the cut lands inside the key
+    await js.hook(hookInput(long), { home, wording: 1, fetch: f });
+    const rows = logOf(home);
+    return [f.calls.length === 0 && rows.length === 1 && rows[0].withheld === 'github-token' && rows[0].command === undefined && !JSON.stringify(rows).includes('gh' + 'p_'), JSON.stringify(rows).slice(0, 300)];
+  });
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('not ok - test runner threw :: ' + (e && e.stack || e)); process.exit(1); });

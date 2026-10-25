@@ -347,6 +347,13 @@ const keys = { OPENAI_API_KEY: 'k1', OPENROUTER_API_KEY: 'k2' };
     check('scorer: score.md names the hidden hits', fs.readFileSync(path.join(dir, 'score.md'), 'utf8').includes('hidden inside stripped bodies'));
   }
 
+  {
+    const client = require(path.join(__dirname, 'jev-client.js'));
+    const labels = require(path.join(__dirname, 'm9-shadow-labels.js'));
+    const expected = path.join(client.mainCopyRoot(__dirname), 'reports', 'issue-222', 'shadow');
+    check('default data folder: the scorer and the labeller resolve it in the main working copy, as the client does', scorer.DEFAULT_DIR === expected && labels.DEFAULT_DIR === expected, JSON.stringify([scorer.DEFAULT_DIR, labels.DEFAULT_DIR, expected]));
+  }
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('not ok - test runner threw :: ' + (e && e.stack || e)); process.exit(1); });

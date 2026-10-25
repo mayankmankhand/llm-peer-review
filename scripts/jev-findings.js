@@ -63,6 +63,13 @@ function withholdPath(checkText) {
   for (const rule of PATH_RULES) if (rule.re.test(String(checkText))) return rule.reason;
   return null;
 }
+// The same rule over a receipt's saved output: a check that reads nothing private (a recursive grep
+// from the root) can still print lines from plans/ or reports/, and the whole block is what is sent
+// (review 2026-10-25, R2).
+function withholdOutput(outputText) {
+  const r = withholdPath(outputText);
+  return r ? 'output names ' + r.slice('reads '.length) : null;
+}
 
 const RETURN_RE = /reports\/receipts\/[^/\s'"]+\/audit-tier2-\d+(?:-return|\.return)\.txt/;
 
@@ -123,8 +130,15 @@ function parseBlocks(text) {
 // What a block says about itself: its finders' lenses, its severity and every receipt check.
 function blockMeta(text) {
   const lines = text.split('\n');
-  const meta = { lenses: [], severity: null, checks: [], parseOk: true };
+  const meta = { lenses: [], severity: null, checks: [], outputs: [], parseOk: true };
   for (let i = 0; i < lines.length; i++) {
+    if (/^Receipt output \(.*\):$/.test(lines[i])) {
+      let j = i + 1;
+      while (j < lines.length && !/^Finding \(.+, as its finder wrote it\):$/.test(lines[j])) j++;
+      meta.outputs.push(lines.slice(i + 1, j).join('\n'));
+      i = j - 1;
+      continue;
+    }
     if (!/^Finding \(.+, as its finder wrote it\):$/.test(lines[i])) continue;
     let f = null;
     try { f = JSON.parse(lines[i + 1]); } catch (e) { meta.parseOk = false; continue; }
@@ -187,7 +201,7 @@ async function replay(opts) {
       s.labelled++;
       const meta = blockMeta(b.text);
       const key = sh.stamp + '/audit-tier2-' + sh.n + '/' + b.id;
-      const pathReason = meta.parseOk ? (meta.checks.map(withholdPath).find(Boolean) || null) : 'unreadable finding';
+      const pathReason = meta.parseOk ? (meta.checks.map(withholdPath).find(Boolean) || meta.outputs.map(withholdOutput).find(Boolean) || null) : 'unreadable finding';
       const capped = capState(b.text);
       if (capped.truncated) s.truncated++;
       if (o.dry) {
@@ -198,7 +212,7 @@ async function replay(opts) {
       for (const build of BUILDS) {
         if (done.has(key + '|' + build)) { s.alreadyDone++; continue; }
         const base = { v: 1, ts: new Date().toISOString(), key, root: path.basename(sh.root), stamp: sh.stamp, shard: 'audit-tier2-' + sh.n, id: b.id, build, lenses: meta.lenses, severity: meta.severity, label, chars: b.text.length, truncated: capped.truncated };
-        if (pathReason) { bump(s.withheld, pathReason); writeLine(p.log, Object.assign(base, { withheld: pathReason, holds: null, refuted: null })); continue; }
+        if (pathReason) { bump(s.withheld, pathReason); writeLine(p.log, Object.assign(base, { withheld: pathReason, holds: null, refuted: null })); done.add(key + '|' + build); continue; }
         if (s.capReached || s.refused) { s.pending++; continue; }
         const r = await client.decide({ test: 'findings', questions: QUESTIONS, state: capped.state, bar: p.bar, model: build, home, fetch: o.fetch, now: o.now });
         if (!r.sent) {
@@ -206,6 +220,7 @@ async function replay(opts) {
             const reason = r.error.slice('withheld: '.length);
             bump(s.withheld, reason);
             writeLine(p.log, Object.assign(base, { withheld: reason, holds: null, refuted: null }));
+            done.add(key + '|' + build);
           } else {
             if (r.error === 'cap') s.capReached = true; else s.refused = r.error; // no bar, no key: nothing can be asked this run
             s.pending++;
@@ -215,6 +230,7 @@ async function replay(opts) {
         s.asked++;
         if (r.error) s.errors++; else s.answered++;
         writeLine(p.log, Object.assign(base, { model: r.model, holds: r.probs ? r.probs.holds : null, refuted: r.probs ? r.probs.refuted : null, ms: r.ms, usage: r.usage, error: r.error }));
+        if (!r.error) done.add(key + '|' + build); // asked once per run, however many copies hold the shard (review 2026-10-25, R13)
       }
     }
   }

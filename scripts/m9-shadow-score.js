@@ -31,7 +31,11 @@ const SEED = 222;
 const PRICE_PER_MILLION_INPUT = { jev: 0.042, openai: 0.10 }; // USD, pinned 2026-10-12
 const ECE_BINS = 10;
 
-const PROJECT_ROOT = process.env.CLAUDE_PROJECT_DIR || path.resolve(__dirname, '..');
+// The data home is the main working copy (the folder holding the shared .git), found the way the
+// 246 client finds it: a run from a worktree, where CLAUDE_PROJECT_DIR names a copy with no reports/,
+// would otherwise look beside itself and find nothing (review 2026-10-25, R12). --dir still overrides.
+const client = require(path.join(__dirname, 'jev-client.js'));
+const PROJECT_ROOT = client.mainCopyRoot(__dirname);
 const DEFAULT_DIR = path.join(PROJECT_ROOT, 'reports', 'issue-222', 'shadow');
 
 const hook = require(path.join(__dirname, 'm9-shadow-hook.js'));
@@ -445,6 +449,6 @@ async function main() {
   process.exit(2);
 }
 
-module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, percentile, readJsonl, readLabels, rowId, mulberry32, flagKey, rawHit, hiddenHit, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
+module.exports = { status, buildSample, score, flipCheck, scorePredicate, verdictFor, auroc, ece, percentile, readJsonl, readLabels, rowId, mulberry32, flagKey, rawHit, hiddenHit, DEFAULT_DIR, PARAPHRASES, MIN_POSITIVES, MAX_FALSE_POSITIVE_RATE, MIN_AUROC, POSITIVE_THRESHOLD, SAMPLE_RANDOM, PRICE_PER_MILLION_INPUT };
 
 if (require.main === module) main().catch(e => { console.error(String(e && e.message || e)); process.exit(1); });

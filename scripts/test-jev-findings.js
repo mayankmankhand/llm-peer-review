@@ -257,6 +257,29 @@ const rep = (n, v) => Array.from({ length: n }, () => v);
     return [r.primary.verdict === 'GOOD AT' && Math.abs(r.primary.auroc - 0.8) < 1e-9, JSON.stringify({ v: r.primary.verdict, a: r.primary.auroc })];
   });
 
+  await run('a receipt whose output names plans/ is withheld even when its check does not', async () => {
+    const home = tmpdir('home');
+    addHomeFiles(home);
+    const d = path.join(home, 'reports', 'receipts', '2026-01-01-000009');
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'audit-tier2-1.txt'), shard([block('R9', 'code-1', finding('warn', 'code', 'grep -rn needle .'), 'code-1.txt', './plans/PLAN-secret.md:4:needle here\n./src/a.js:3:needle\nexit 0')]));
+    fs.writeFileSync(path.join(d, 'audit-tier2-1-return.txt'), 'R9: STANDS\nIt holds.\n');
+    const f = fakeFetch();
+    await jf.replay({ home, roots: [home], fetch: f });
+    const rows = logRows(home).filter(r => r.id === 'R9');
+    return [f.calls.length === 0 && rows.length === 2 && rows.every(r => r.withheld === 'output names plans/'), JSON.stringify(rows).slice(0, 300)];
+  });
+
+  await run('one run asks a finding once even when two working copies hold the same receipts', async () => {
+    const home = fixtureHome();
+    const twin = tmpdir('twin');
+    addReceipts(twin);
+    const f = fakeFetch();
+    await jf.replay({ home, roots: [home, twin], fetch: f });
+    const r2 = logRows(home).filter(r => r.id === 'R2');
+    return [f.calls.length === 4 && r2.length === 2, JSON.stringify({ calls: f.calls.length, withheldRows: r2.length })];
+  });
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('not ok - test runner threw :: ' + (e && e.stack || e)); process.exit(1); });

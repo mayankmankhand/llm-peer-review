@@ -137,6 +137,11 @@ async function hook(input, opts) {
   const n = Number(o.wording);
   if (!Number.isInteger(n) || n < 1 || n > WORDINGS.length) { line.error = 'no wording'; writeLine(p.log, line); return line; }
   line.wording = n;
+  // The secret check runs on the raw command, before the cut: strip() keeps the first 60 characters of
+  // a long quoted string, so a key the cut lands inside would otherwise travel as a fragment the
+  // client's check on the stripped state can no longer recognise (review 2026-10-25, R1).
+  const reason = m9.withholdReason(raw);
+  if (reason) { line.withheld = reason; writeLine(p.log, line); return line; } // the text is never stored
   const stripped = m9.strip(raw).text;
   const r = await client.decide({ test: 'safe', questions: WORDINGS[n - 1], state: m9.buildState(stripped, line.cwd), bar: p.bar, home, fetch: o.fetch });
   if (!r.sent && /^withheld: /.test(r.error || '')) {
