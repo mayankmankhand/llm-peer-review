@@ -569,3 +569,9 @@
 ## Issue 267 (the verify mode)
 
 - **Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.**
+
+## Issue 275 (who and what else a change reaches)
+
+- **Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.**
+- **A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.**
+- **The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.**
