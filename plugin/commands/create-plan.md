@@ -164,7 +164,7 @@ Key architectural/implementation choices made during exploration:
 - Decision 2: [choice] - [brief rationale]
 
 ## Reaches
-<!-- Copied from the exploration summary's Reaches section (M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md); each item names the step that handles it, or `no step - <why>`. When the summary has no Reaches section (written before the shape had one, or let through by "plan it anyway"), fill the three items from the conversation. The plan critic checks every item. -->
+<!-- Copied from the exploration summary's Reaches section (M14 in ${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md); each item names the step that handles it, or `no step - <why>`. When the summary has no Reaches section (written before the shape had one), or an item was let through by "plan it anyway" as a bare none, fill the three items from the conversation. The plan critic checks every item. -->
 - **Other installs:** [the summary's answer] - [Step N | no step - why]
 - **Other sessions and unreleased work:** [the summary's answer] - [Step N | no step - why]
 - **What the user gets back:** [the summary's answer] - [Step N | no step - why]
@@ -246,7 +246,7 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 ### Build the JSON Payload
 
-Produce a JSON payload matching the schema documented in the header comment of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `tldr`, `goalState`, `uiux`, `decisions`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
+Produce a JSON payload matching the schema documented in the header comment of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `tldr`, `goalState`, `uiux`, `decisions`, `reaches`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
 
 - Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
 - Each step takes an optional `status` of `todo` | `doing` | `done`. At creation every step is `todo`, so it may be omitted entirely; `/tk:execute` fills it in as it re-renders. Markdown stays the source of truth.

@@ -1619,6 +1619,13 @@ section('272. --chain <stage>: the countable part of M14', function () {
     '- other installs: none - one copy\n- other sessions and unreleased work: none - no other worktree\n- what the user gets back: the gate names the item\n'));
   const r5 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r5.md'], repo);
   check('passes a Reaches section whose labels are lower-case and unbolded', r5.status === 0 && r5.json.pass === true, brief(r5) + JSON.stringify(r5.json));
+  // R9 of the #275 review: the template is `none - <reason>`, so a none with
+  // the dash written and the reason forgotten is a bare none too
+  write(repo, 'reports/explore/r8.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'],
+    '- **Other installs:** none - one copy\n- **Other sessions and unreleased work:** none - no other worktree\n- **What the user gets back:** none -\n'));
+  const r8 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r8.md'], repo);
+  check('fails when a Reaches item reads none with a dash and no reason',
+    r8.json.pass === false && has(r8, 'reaches', /What the user gets back.*no reason/), JSON.stringify(r8.json));
   // the vision-mode summary is the same shape
   write(repo, 'reports/explore/r6.md', summary('vision', 'Hold', ['One way'], ['none']));
   const r6 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r6.md'], repo);

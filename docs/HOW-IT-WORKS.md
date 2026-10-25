@@ -33,7 +33,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 - **It reads before it asks:** the issue, earlier plans, the code the change touches and your lessons file, so it never asks what the repo already answers.
 - **Two quick choices first:** scoping (narrow a concrete idea) or vision (think bigger), and which models to use: best, fit or cheap.
 - **Then questions, in rounds:** three or four at a time, over two or three rounds. In vision mode a scope dial lets you expand, hold or reduce. Work with a screen gets a design step: three directions drawn for you to pick from.
-- **It hands off only when nothing is left open.** With an open question, or a reach item left blank (who and what else the change reaches: other installs, other sessions and unreleased work, what you get back), it stops and says what it needs, or you say "plan it anyway".
+- **It hands off only when nothing is left open.** With an open question, or a Reaches item left blank or answered with a bare "none" (who and what else the change reaches: other installs of the code, other sessions and unreleased work in the same repo, and what you get back when a step ends and when something is found wrong), it stops and says what it needs, or you say "plan it anyway".
 
 ### `/tk:create-plan`: a plan with a check on every step
 

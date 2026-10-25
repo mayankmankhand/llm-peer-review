@@ -105,7 +105,7 @@ Only ask what's genuinely unclear. Skip what's already answered.
 - **What's the definition of done?** (Minimum viable scope - what's in, what's out?)
 - **What are we trading off?** (What else could we build instead? What's the cost?)
 - **Does this contradict anything?** (Existing decisions, scope, or priorities?)
-- **Who and what else does this reach?** (Other installs or copies of the code, and what they are told; other sessions and unreleased work in the same repo; what the user gets back when a step ends and after a finding. The three answers are the summary's Reaches section, so an item the conversation leaves unsettled stops the chain the way an open question does)
+- **Who and what else does this reach?** (Other installs or copies of the code, and what they are told; other sessions and unreleased work in the same repo; what the user gets back, meaning the person running the loop, when a step ends and after a finding. The three answers are the summary's Reaches section, so ask it in round 1 of every run unless the issue or the code already answers it; an item left unsettled stops the chain the way an open question does)
 - **What should this look like?** (Layout, style, visual direction) - when the feature involves a UI, leave this to the Design exploration step below rather than asking it here
 - **How should this behave?** (Interactions, flows, states) - same: the Design exploration step owns it for UI features
 
@@ -120,6 +120,7 @@ Start with premise and challenge questions, then move to analogy and benchmarkin
 - **What would you scrap entirely?** (If you started over today, what would you throw away and rethink?)
 - **What are we afraid of?** (What's the risk we're not talking about?)
 - **Who else does this well?** (What can we learn from how others solved this?)
+- **Who and what else does this reach?** (The same three items as in scoping mode: other installs; other sessions and unreleased work; what the person running the loop gets back. The summary's Reaches section needs them in either mode, so ask it once a direction is in sight)
 
 ### Synthesis Checkpoints (vision mode only)
 Between rounds, briefly summarize what you're hearing before asking more questions: "Here's what I'm hearing so far: [2-3 bullet summary]. Does that track?" This keeps the conversation grounded and helps the user see their own thinking reflected back.
@@ -133,7 +134,7 @@ Once the user's answers start pointing toward a direction (usually round 2, some
 
 **After the user picks:**
 - **Expand** - continue with vision mode questions, push even bigger. If the user picks Expand twice, re-offer the Scope Dial after one more round. If they pick Expand a third time, gently suggest Hold: "We've explored a lot of territory - want to lock in what we have and move to planning?"
-- **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria) but keep the vision mode tone. This avoids conversational whiplash. Also bring in Design exploration if the feature involves a UI.
+- **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria, and the reach question, since the summary's Reaches section needs its three answers) but keep the vision mode tone. This avoids conversational whiplash. Also bring in Design exploration if the feature involves a UI.
 - Phase 2 stays optional regardless of which dial option was chosen
 
 ### Design exploration (scoping mode, or vision mode after Hold/Reduce)

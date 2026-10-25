@@ -79,6 +79,11 @@
     // Critical Decisions bullet list (each item trusted inline HTML ok).
     "decisions": [ "string", "..." ],
 
+    // Reaches rows (#275) - label/value pairs mirroring the plan's Reaches
+    // section: the three items and the step that handles each. label is
+    // plain text; value is trusted inline HTML ok. Omitted -> section skipped.
+    "reaches": [ { "label": "Other installs", "value": "none - one copy - no step" } ],
+
     // Tasks table rows, in order. The renderer numbers steps itself
     // ("1. ", "2. ", ...) - do NOT include the number in "name".
     "steps": [
@@ -294,6 +299,26 @@ th.narrow{width:1%;}
     if (decList.childNodes.length) {
       decSec.appendChild(decList);
       body.appendChild(decSec);
+    }
+  }
+
+  // ---- Reaches (label/value rows, #275): who and what else the change
+  // reaches, and the step that handles each item; mirrors the plan's section.
+  if (nonEmptyArr(data.reaches)) {
+    var reachSec = el('section', null);
+    reachSec.appendChild(textEl('h2', null, 'Reaches'));
+    var reachList = el('ul', null);
+    data.reaches.forEach(function (row) {
+      if (!row || !isNonEmpty(row.label)) return;
+      var rli = el('li', null);
+      rli.appendChild(textEl('strong', null, row.label + ':'));
+      rli.appendChild(document.createTextNode(' '));
+      rli.appendChild(htmlEl('span', null, row.value != null ? String(row.value) : ''));
+      reachList.appendChild(rli);
+    });
+    if (reachList.childNodes.length) {
+      reachSec.appendChild(reachList);
+      body.appendChild(reachSec);
     }
   }
 

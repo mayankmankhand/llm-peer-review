@@ -190,6 +190,23 @@ console.log('\n6. the check-at-source sentence (#241)');
   check('241: mutation: one changed word in the manual\'s copy trips the word-for-word check', sentence !== '' && mutatedPart !== part && count(mutatedPart, sentence) === 0);
 }
 
+// 275: the explore gate matches the three reach labels literally (REACH_LABELS
+// in session-init.js), and three prompt files spell them out for the model that
+// writes the summary, so a label that drifts in one place fails the chain in
+// every project. Read the code's list and hold each prompt copy to it.
+{
+  const gate = read('.claude/scripts/session-init.js');
+  const m = /const REACH_LABELS = \[([^\]]+)\];/.exec(gate);
+  const labels = m ? m[1].split(',').map(s => s.trim().replace(/^"|"$/g, '')) : [];
+  const EXPECTED = ['Other installs', 'Other sessions and unreleased work', 'What the user gets back'];
+  check('275: session-init.js names the three reach labels M14 fixes', labels.join('|') === EXPECTED.join('|'), labels.join(' | '));
+  for (const file of ['.claude/skills/shared/hitl-stages.md', '.claude/commands/explore.md', '.claude/commands/create-plan.md']) {
+    const text = read(file).toLowerCase();
+    const missing = labels.filter(l => !text.includes(l.toLowerCase()));
+    check('275: ' + file + ' spells every reach label the gate matches', labels.length === 3 && missing.length === 0, missing.length ? 'missing: ' + missing.join(' | ') : '');
+  }
+}
+
 // 8.0.0: Claude Code swaps any single pasted command output over about 30,000
 // bytes for a 2 KB preview (measured 2026-10-13: 30,000 arrived whole, 30,500
 // did not), so a file a command or skill pastes whole with an inline cat must

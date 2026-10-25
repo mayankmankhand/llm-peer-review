@@ -1649,7 +1649,9 @@ function reachItems(body) {
     const hit = items.map((i) => i.match(re)).find((m) => m);
     if (!hit) { problems.push(label + " is missing"); continue; }
     const answer = hit[1].trim();
-    if (answer === "" || /^none\.?$/i.test(answer)) problems.push(label + " reads none with no reason");
+    // a none followed by nothing, or by punctuation alone (`none -`, the
+    // template with its reason forgotten), is a bare none (R9, #275 review)
+    if (answer === "" || /^none[\s.:;,-]*$/i.test(answer)) problems.push(label + " reads none with no reason");
   }
   return problems;
 }
@@ -1677,7 +1679,7 @@ function chainExplore(opts) {
   const notes = [];
   if (questions.length) failed.push({ condition: "open-questions", detail: questions.length + " open question" + (questions.length === 1 ? "" : "s") + ": " + questions[0] });
   const reach = reachItems(reachBody);
-  if (reach.length) failed.push({ condition: "reaches", detail: reach.length + " reach item" + (reach.length === 1 ? "" : "s") + " to answer: " + reach[0] });
+  if (reach.length) failed.push({ condition: "reaches", detail: reach.length + " Reaches item" + (reach.length === 1 ? "" : "s") + " to answer: " + reach[0] });
   if (mode.toLowerCase() === "vision") {
     if (/^(hold|reduce)$/i.test(dial)) notes.push("the scope dial reads " + dial);
     else if (/^expand$/i.test(dial)) failed.push({ condition: "scope-dial", detail: "the scope dial reads Expand; the conversation has not narrowed" });
