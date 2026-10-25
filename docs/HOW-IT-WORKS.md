@@ -139,6 +139,18 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 More: [How It Works: File Architecture](EXTENDING.md#how-it-works-file-architecture).
 
+## What leaves your machine
+
+The toolkit sorts everything it could send into three rings, and only the first one is ever automated.
+
+- **Ring 1, automated, and only in the toolkit's own public repository:** stripped command text (file bodies replaced by size markers, long quoted strings cut, anything secret-shaped withheld), file paths, the toolkit's own prompt text, review findings with their code excerpts, receipt output and diffs. Never in this ring: anything under `plans/`, `artifacts/` or `reports/` (except `reports/receipts/`), any env file, the correction ledger.
+- **Ring 2, your project:** nothing automated leaves it without an opt-in you write for that project, naming what each spot sends and to whom. Today no toolkit stage sends anything from your project to a model other than the one your session runs on.
+- **Ring 3, never automated anywhere:** your words and your users' words (prompts, transcripts, the correction ledger, error-analysis rows), secrets, screenshots, env files.
+
+The sends a human types stay as they are: `/tk:ask-gpt`, `/tk:ask-gemini` and `/tk:peer-review` go to the model you name, an issue or pull request comment goes to your host, and a rendered page goes to a private `claude.ai` page that only you can open until you share it. The pre-push tripwire scans every push the toolkit makes.
+
+One sentence on the toolkit's own tests: in October 2026 its maintainers ran measured, log-only tests in this repository that sent Ring 1 bytes to one decision-model provider under the owner's approval, recorded the verdicts in `model-routing.md`, and removed the hooks; nothing from those tests runs in the plugin.
+
 ## Every command and skill
 
 **Commands you type.**
