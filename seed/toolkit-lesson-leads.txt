@@ -63,6 +63,7 @@ A lone `cd` call, then plain commands, matches the permission rows; a subshell, 
 A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.
 A major version bump on additive-only work needs explicit framing.
 A measurable claim in a commit message is a claim until you measure it.
+A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.
 A missing finding is invisible to the audit; a wrong one is not.
 A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.
 A name that is also a key is a migration decision, not a preference.
@@ -79,6 +80,7 @@ A permission you cannot self-provision may have an already-permitted equivalent.
 A pipeline's exit status is the last command's, so `grep | head` always succeeds.
 A plan line that says what another script does is a claim: read the script before the line goes in the plan.
 A plan that promises a one-commit revert must say what happens once later work moves the text.
+A plan's Start commit written on main is not a branch's review range: when the work moves to a worktree forked later, re-pin the review and the cycle window at the fork.
 A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.
 A plugin CLI command run inside a project also edits that project's settings file.
 A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.
@@ -194,6 +196,7 @@ Give a finder a neutral copy of what it judges: a fixture's name and comments st
 Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.
 Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.
 HTML output is useless if the user only gets a file link - it opens as source in the editor.
+Hand a non-technical owner the decision, not the rows: a 276-row tick list and a hedged evaluation got no answer, two yes-or-no questions and one recommendation did.
 Harden every field on a whitelist, or the whitelist is not a boundary.
 Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.
 Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.
@@ -234,6 +237,7 @@ Per-session temp file paths solve concurrent-tab collisions; session-ID recovery
 Permission approvals can land in the wrong settings file.
 Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.
 Pin subagents freely; never switch the main-loop model mid-session.
+Point a finding's receipt at the line the fix will change, never at its premise: the fix loop inverts the receipt into the recheck, and a premise check inverts into nonsense.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
 Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.
@@ -259,6 +263,7 @@ Run debates on plans, not just finished work.
 Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.
 Run your own receipt before you report it as confirmation.
 Scope parity gaps explicitly when fixing one of several.
+Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.
 Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
 Self-enforce release-time conventions in the artifact or the checklist, not in memory.
 Set shell variables before a backgrounded `&&` chain, never inside it.
@@ -298,6 +303,7 @@ When a race decides whether a test can run at all, change the setup so the order
 When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.
 When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
 When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.
+When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.
 When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.
 When changing user-facing copy, grep for the same description elsewhere.
 When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.
@@ -319,5 +325,6 @@ XML tags in prompts are a real thing, not just hype.
 `gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.
 `npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.
 `plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.
+`session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.
 `settings.json` can get modified by research subagents.
 `user-invocable: false` works as documented.
