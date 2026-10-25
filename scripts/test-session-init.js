@@ -1554,9 +1554,14 @@ section('272. --chain <stage>: the countable part of M14', function () {
     bare.status === 0 && bare.json.pass === false && has(bare, 'digest', /R2.*NOT FIXED/), brief(bare) + JSON.stringify(bare.json));
 
   // explore: the closing summary file
-  const summary = function (mode, dial, directions, open) {
+  // #275: a Reaches section sits between Design direction and Open questions.
+  // `reaches` is that section's body: left out, the three labelled items in
+  // the form /explore writes (`- **Label:** ...`); null leaves the section out.
+  const REACHES = '- **Other installs:** none - one copy\n- **Other sessions and unreleased work:** none - no other worktree\n- **What the user gets back:** the gate names the item\n';
+  const summary = function (mode, dial, directions, open, reaches) {
+    const reach = reaches === null ? '' : '## Reaches\n\n' + (reaches === undefined ? REACHES : reaches) + '\n';
     return '# Exploration summary\n\n**Mode:** ' + mode + '\n**Scope dial:** ' + dial + '\n**Models:** best\n\n## Direction\n\n' +
-      directions.map(function (d) { return '- ' + d + '\n'; }).join('') + '\n## Decisions\n\n- one\n\n## Design direction\n\n- none\n\n## Open questions\n\n' +
+      directions.map(function (d) { return '- ' + d + '\n'; }).join('') + '\n## Decisions\n\n- one\n\n## Design direction\n\n- none\n\n' + reach + '## Open questions\n\n' +
       open.map(function (q) { return '- ' + q + '\n'; }).join('');
   };
   write(repo, 'reports/explore/s1.md', summary('scoping', 'not offered', ['Trim the rule'], ['none']));
@@ -1587,6 +1592,41 @@ section('272. --chain <stage>: the countable part of M14', function () {
   const s6 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s6.md'], repo);
   check('--chain explore refuses a summary with no Open questions section',
     s6.status === 1 && s6.json.error === 'bad_shape' && /Open questions/.test(String(s6.json.detail)), brief(s6) + JSON.stringify(s6.json));
+  // #275: the Reaches section. No section is a shape refusal, like Open
+  // questions; a missing item or a bare "none" fails the chain and names the
+  // item, so the stage can ask for it the way it asks an open question.
+  write(repo, 'reports/explore/r1.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'], null));
+  const r1 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r1.md'], repo);
+  check('--chain explore refuses a summary with no Reaches section',
+    r1.status === 1 && r1.json.error === 'bad_shape' && /Reaches/.test(String(r1.json.detail)), brief(r1) + JSON.stringify(r1.json));
+  write(repo, 'reports/explore/r2.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'],
+    '- **Other installs:** none - one copy\n- **What the user gets back:** the gate names the item\n'));
+  const r2 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r2.md'], repo);
+  check('fails when a Reaches item is missing, naming it',
+    r2.status === 0 && r2.json.pass === false && has(r2, 'reaches', /Other sessions and unreleased work/), brief(r2) + JSON.stringify(r2.json));
+  write(repo, 'reports/explore/r3.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'],
+    '- **Other installs:** none - one copy\n- **Other sessions and unreleased work:** none - no other worktree\n- **What the user gets back:** none\n'));
+  const r3 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r3.md'], repo);
+  check('fails when a Reaches item reads a bare none',
+    r3.json.pass === false && has(r3, 'reaches', /What the user gets back.*no reason/), JSON.stringify(r3.json));
+  write(repo, 'reports/explore/r4.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'],
+    '- **Other installs:** none - one copy\n- **Other sessions and unreleased work:** none - no other worktree\n- **What the user gets back:** none - nothing is shown\n'));
+  const r4 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r4.md'], repo);
+  check('passes a Reaches item written none with a reason', r4.status === 0 && r4.json.pass === true, brief(r4) + JSON.stringify(r4.json));
+  // the labels match case-insensitively with the bold markers optional, so a
+  // hand-written summary passes too
+  write(repo, 'reports/explore/r5.md', summary('scoping', 'not offered', ['Trim the rule'], ['none'],
+    '- other installs: none - one copy\n- other sessions and unreleased work: none - no other worktree\n- what the user gets back: the gate names the item\n'));
+  const r5 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r5.md'], repo);
+  check('passes a Reaches section whose labels are lower-case and unbolded', r5.status === 0 && r5.json.pass === true, brief(r5) + JSON.stringify(r5.json));
+  // the vision-mode summary is the same shape
+  write(repo, 'reports/explore/r6.md', summary('vision', 'Hold', ['One way'], ['none']));
+  const r6 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r6.md'], repo);
+  write(repo, 'reports/explore/r7.md', summary('vision', 'Hold', ['One way'], ['none'], null));
+  const r7 = runScript(['--chain', 'explore', '--summary', 'reports/explore/r7.md'], repo);
+  check('a vision summary passes with the Reaches section and is refused without it',
+    r6.status === 0 && r6.json.pass === true && r7.status === 1 && r7.json.error === 'bad_shape' && /Reaches/.test(String(r7.json.detail)),
+    JSON.stringify(r6.json) + ' | ' + JSON.stringify(r7.json));
   const missing = runScript(['--chain', 'review', '--report', 'reports/nope.md'], repo);
   const noStage = runScript(['--chain'], repo);
   check('--chain with a missing input exits 1 with error',

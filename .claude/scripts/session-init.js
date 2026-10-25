@@ -1635,8 +1635,28 @@ function bullets(body) {
   return (body.match(/^(?:[-*]|\d+\.) .*$/gm) || []).map((l) => l.replace(/^(?:[-*]|\d+\.) /, "").trim()).filter((l) => l !== "");
 }
 
+// #275: the three items M14's `## Reaches` section names, one bullet each. A
+// bullet's label is matched with the case ignored and the bold markers
+// optional, so `- **Other installs:** ...` and `- other installs: ...` are the
+// same item. Returns one line per item that is missing or answered with a
+// bare "none" (a reason after the none is what the rule asks for).
+const REACH_LABELS = ["Other installs", "Other sessions and unreleased work", "What the user gets back"];
+function reachItems(body) {
+  const items = bullets(body);
+  const problems = [];
+  for (const label of REACH_LABELS) {
+    const re = new RegExp("^(?:\\*\\*)?" + label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:\\*\\*)?[ \t]*:(?:\\*\\*)?[ \t]*([\\s\\S]*)$", "i");
+    const hit = items.map((i) => i.match(re)).find((m) => m);
+    if (!hit) { problems.push(label + " is missing"); continue; }
+    const answer = hit[1].trim();
+    if (answer === "" || /^none\.?$/i.test(answer)) problems.push(label + " reads none with no reason");
+  }
+  return problems;
+}
+
 // explore -> create-plan: the closing summary file, in the shape M14 gives
-// (**Mode:**, **Scope dial:**, **Models:**, ## Direction, ## Open questions).
+// (**Mode:**, **Scope dial:**, **Models:**, ## Direction, ## Reaches,
+// ## Open questions).
 function chainExplore(opts) {
   if (!opts.summary) return refuse("explore", "usage", "--chain explore needs --summary <file>. " + CHAIN_USAGE);
   const text = readText(path.resolve(cwd, opts.summary));
@@ -1645,6 +1665,8 @@ function chainExplore(opts) {
   if (!mode) return refuse("explore", "bad_shape", opts.summary + " has no **Mode:** line (scoping or vision)");
   const open = sectionBody(text, "Open questions");
   if (open === null) return refuse("explore", "bad_shape", opts.summary + " has no ## Open questions section");
+  const reachBody = sectionBody(text, "Reaches");
+  if (reachBody === null) return refuse("explore", "bad_shape", opts.summary + " has no ## Reaches section (one bullet each: " + REACH_LABELS.join("; ") + ")");
   const dialLine = (text.match(/^\*\*Scope dial:\*\*[ \t]+([^\r\n]+)/im) || [])[1];
   const dial = dialLine ? dialLine.trim() : "not offered";
   const models = (text.match(/^\*\*Models:\*\*[ \t]+(best|fit|cheap)\b/im) || [])[1] || null;
@@ -1654,6 +1676,8 @@ function chainExplore(opts) {
   const failed = [];
   const notes = [];
   if (questions.length) failed.push({ condition: "open-questions", detail: questions.length + " open question" + (questions.length === 1 ? "" : "s") + ": " + questions[0] });
+  const reach = reachItems(reachBody);
+  if (reach.length) failed.push({ condition: "reaches", detail: reach.length + " reach item" + (reach.length === 1 ? "" : "s") + " to answer: " + reach[0] });
   if (mode.toLowerCase() === "vision") {
     if (/^(hold|reduce)$/i.test(dial)) notes.push("the scope dial reads " + dial);
     else if (/^expand$/i.test(dial)) failed.push({ condition: "scope-dial", detail: "the scope dial reads Expand; the conversation has not narrowed" });
