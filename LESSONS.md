@@ -485,3 +485,9 @@
 - **Hand a non-technical owner the decision, not the rows: a 276-row tick list and a hedged evaluation got no answer, two yes-or-no questions and one recommendation did.**
 - **Point a finding's receipt at the line the fix will change, never at its premise: the fix loop inverts the receipt into the recheck, and a premise check inverts into nonsense.**
 - **A plan's Start commit written on main is not a branch's review range: when the work moves to a worktree forked later, re-pin the review and the cycle window at the fork.**
+
+## Issue 246 (the Jev lab)
+
+- **Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.**
+- **When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.**
+- **`session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.**
