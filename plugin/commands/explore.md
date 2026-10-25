@@ -118,6 +118,7 @@ Only ask what's genuinely unclear. Skip what's already answered.
 - **What's the definition of done?** (Minimum viable scope - what's in, what's out?)
 - **What are we trading off?** (What else could we build instead? What's the cost?)
 - **Does this contradict anything?** (Existing decisions, scope, or priorities?)
+- **Who and what else does this reach?** (Other installs or copies of the code, and what they are told; other sessions and unreleased work in the same repo; what the user gets back when a step ends and after a finding. The three answers are the summary's Reaches section, so an item the conversation leaves unsettled stops the chain the way an open question does)
 - **What should this look like?** (Layout, style, visual direction) - when the feature involves a UI, leave this to the Design exploration step below rather than asking it here
 - **How should this behave?** (Interactions, flows, states) - same: the Design exploration step owns it for UI features
 
@@ -208,6 +209,7 @@ If they say skip, present a vision-mode closing summary:
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/tk:create-plan`'s Goal State section.
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
 - **Design direction** - when the design step fired: load level, design system (state and where), direction name, brief, seed, the two unpicked directions' names and seeds, divergence allowed. `/tk:create-plan` copies this line into its UI/UX Design section.
+- **Reaches** - the three items M14 names (other installs; other sessions and unreleased work; what the user gets back), each answered or written `none - <reason>`; this is the summary's `## Reaches` section, and an item the conversation did not settle is asked now, since the gate fails on it
 - **Models** - the Models answer (best, fit or cheap); `/tk:create-plan` writes it as the plan's Models line
 - **Open questions** - anything unresolved that `/tk:create-plan` should address during execution
 - **ASCII diagram** - if the direction involves flows or multi-step processes, include a lightweight diagram (see Phase 2 for style guidance)
@@ -253,6 +255,7 @@ Give the user a brief summary of what you found:
 - How the feature integrates
 - Any technical concerns or trade-offs
 - Design direction, when the design step fired (load level, design system, direction name, brief, seed, the two unpicked directions' names and seeds, divergence allowed)
+- Reaches: the three items M14 names (other installs; other sessions and unreleased work; what the user gets back), each answered or written `none - <reason>`; an item the conversation did not settle is asked now, since the gate fails on it
 - Models: the Models answer (best, fit or cheap)
 - Remaining questions (if any)
 
