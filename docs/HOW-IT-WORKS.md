@@ -33,7 +33,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 - **It reads before it asks:** the issue, earlier plans, the code the change touches and your lessons file, so it never asks what the repo already answers.
 - **Two quick choices first:** scoping (narrow a concrete idea) or vision (think bigger), and which models to use: best, fit or cheap.
 - **Then questions, in rounds:** three or four at a time, over two or three rounds. In vision mode a scope dial lets you expand, hold or reduce. Work with a screen gets a design step: three directions drawn for you to pick from.
-- **It hands off only when nothing is left open.** With an open question it stops and says what it needs, or you say "plan it anyway".
+- **It hands off only when nothing is left open.** With an open question, or a reach item left blank (who and what else the change reaches: other installs, other sessions and unreleased work, what you get back), it stops and says what it needs, or you say "plan it anyway".
 
 ### `/tk:create-plan`: a plan with a check on every step
 
@@ -43,7 +43,7 @@ Two phrases change a run: "report only" stops the editing, "no chaining" stops t
 </picture>
 
 - **Every step carries its own proof:** a check that must fail before the work, for a reason written in advance, and pass after it. A lint confirms each check line can actually run.
-- **A plan critic reads it cold.** It sees only the plan and the exploration's summary, never who wrote it or what earlier critics said, and names the biggest gaps.
+- **A plan critic reads it cold.** It sees only the plan and the exploration's summary, never who wrote it or what earlier critics said, and names the biggest gaps, including whether the plan covers everyone and everything the exploration said the change reaches.
 - **Two rounds of fixes at most.** Gaps still open after round two are not argued away; they go on the review's must-check list.
 - **This is where you approve.** The plan opens as a page; nothing is built until you say go.
 
