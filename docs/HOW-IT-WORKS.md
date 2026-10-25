@@ -142,6 +142,18 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 More: [How It Works: File Architecture](EXTENDING.md#how-it-works-file-architecture).
 
+## What leaves your machine
+
+The toolkit sorts everything it could send into three rings. Only the first is automated out of the box; the second needs an opt-in you write; the third is never automated.
+
+- **Ring 1, automated, and only in the toolkit's own public repository:** stripped command text (file bodies replaced by size markers, long quoted strings cut, anything secret-shaped withheld), file paths, the toolkit's own prompt text, review findings with their code excerpts, receipt output and diffs. Never in this ring: anything under `plans/`, `artifacts/` or `reports/` (except `reports/receipts/`), any env file, the correction ledger.
+- **Ring 2, your project:** nothing automated leaves it without an opt-in you write for that project, naming what each spot sends and to whom. Today no toolkit stage sends anything from your project to a model other than the one your session runs on.
+- **Ring 3, never automated anywhere:** your words and your users' words (prompts, transcripts, the correction ledger, error-analysis rows), secrets, screenshots, env files.
+
+The sends a human types stay as they are: `/tk:ask-gpt` and `/tk:ask-gemini` go to the model you name (`/tk:peer-review` sends nothing: it weighs feedback you paste in), an issue or pull request comment goes to your host, and a rendered page goes to a private `claude.ai` page that only you can open until you share it. Gate out, the pre-push check, scans every push the toolkit makes.
+
+One note on the toolkit's own tests: in October 2026 its maintainers ran measured, log-only tests in this repository, under the owner's approval, that sent Ring 1 bytes to one outside provider (TypeSafe's Jev, a model that answers a fixed yes-or-no question with a probability, reached through OpenRouter). The test hooks were removed from the maintainers' own settings when the tests ended, the verdicts are recorded under "Decision models, tested" in `.claude/skills/shared/model-routing.md`, and nothing from those tests runs in the plugin.
+
 ## Every command and skill
 
 **Commands you type.**

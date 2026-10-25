@@ -479,6 +479,18 @@
 - **Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.**
 - **Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.**
 
+## Issue 222 (the shadow M9 gate)
+
+- **A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.**
+- **Hand a non-technical owner the decision, not the rows: a 276-row tick list and a hedged evaluation got no answer, two yes-or-no questions and one recommendation did.**
+- **Point a finding's receipt at the line the fix will change, never at its premise: the fix loop inverts the receipt into the recheck, and a premise check inverts into nonsense.**
+- **A plan's Start commit written on main is not a branch's review range: when the work moves to a worktree forked later, re-pin the review and the cycle window at the fork.**
+
+## Issue 246 (the Jev lab)
+
+- **Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.**
+- **When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.**
+- **`session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.**
 ## Issue 247 (21 agent papers against the toolkit's problems)
 
 - **Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.**
