@@ -1214,7 +1214,8 @@ section('14. check first: run time, slow flag, re-run and results file (issue #2
   let saved = null;
   try { saved = JSON.parse(fs.readFileSync(resultsFile, 'utf8')); } catch (e) { saved = null; }
   const headNow = git(['rev-parse', 'HEAD']).trim();
-  const printedRows = (rows) => rows.map((r) => { const o = Object.assign({}, r); delete o.check; delete o.expect; return o; });
+  // A saved row also carries its run's `at` and `head` (#252), which the printed row does not.
+  const printedRows = (rows) => rows.map((r) => { const o = Object.assign({}, r); delete o.check; delete o.expect; delete o.at; delete o.head; return o; });
   check('the result is also saved as results.json', !!saved && !!t.json && JSON.stringify(printedRows(saved.checks)) === JSON.stringify(t.json.checks) && JSON.stringify(saved.summary) === JSON.stringify(t.json.summary) && typeof saved.at === 'string' && !isNaN(Date.parse(saved.at)) && saved.head === headNow, one(saved ? JSON.stringify({ at: saved.at, head: saved.head }) : 'no results.json'));
   check('results.json rows carry the command and expect that ran', !!saved && saved.checks.length === 2 && saved.checks[1].check === 'sleep 1' && JSON.stringify(saved.checks[1].expect) === '{"exit":0}' && t.json && t.json.checks.every((r) => r.check === undefined), one(saved ? JSON.stringify(saved.checks) : 'no results.json'));
 });
@@ -1826,6 +1827,145 @@ section('248 skip: a full run on unchanged code is skipped with a note (issue #2
   const p1 = run(['--plan', 'plans/PLAN-s.md', '--step', '1', '--phase', 'before'], s.dir);
   const p2 = run(['--plan', 'plans/PLAN-s.md', '--step', '1', '--phase', 'before'], s.dir);
   check('248 skip: a plan step run twice on the same tree runs both times', !!p1.json && !!p2.json && !p1.json.skipped && !p2.json.skipped && (p2.byId.n || {}).verdict === 'pass', one(p2.stdout + p2.stderr));
+});
+
+// --- 252 keep: results.json keeps every run's rows (issue #252, item 1) --------
+// A review's recheck run writes into the same --out folder as the receipts that
+// proved the finding. results.json used to be rewritten on every call, so the
+// recheck deleted the row it was checking against (0 of 19 saved rechecks sat
+// beside their original). Each call now appends its rows, every row carrying its
+// own run's `at` and `head`, and a `runs` list keeps one entry per call.
+section('252 keep: results.json keeps every run\'s rows (issue #252)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const k = freshRepo('k252');
+  const out = path.join(k.dir, 'reports', 'receipts', 'stamp');
+  const file = path.join(out, 'results.json');
+  const head1 = k.git(['rev-parse', 'HEAD']).trim();
+  const first = run(['--checks', checksFile([{ id: 'code-1', check: 'grep -c hello f.txt', expect: { exit: 0 } },
+    { id: 'code-2', check: 'test -f f.txt', expect: { exit: 0 } }]), '--out', out], k.dir);
+  fs.writeFileSync(path.join(k.dir, 'f.txt'), 'hello again\n');
+  k.git(['commit', '-qam', 'fix']);
+  const head2 = k.git(['rev-parse', 'HEAD']).trim();
+  const second = run(['--checks', checksFile([{ id: 'code-1-recheck', check: 'grep -c again f.txt', expect: { exit: 0 } },
+    { id: 'code-1', check: 'grep -c hello f.txt', expect: { exit: 0 } }]), '--out', out], k.dir);
+  const saved = readJson(file) || {};
+  const rows = Array.isArray(saved.checks) ? saved.checks : [];
+  const runs = Array.isArray(saved.runs) ? saved.runs : [];
+  check('252 keep: two --checks calls into one --out keep both runs\' rows, the first run\'s first, each with its run\'s at and head',
+    first.status === 0 && second.status === 0 && rows.map((r) => r.id).join(',') === 'code-1,code-2,code-1-recheck,code-1'
+      && rows[0].head === head1 && rows[1].head === head1 && rows[2].head === head2 && rows[3].head === head2
+      && runs.length === 2 && rows[0].at === runs[0].at && rows[2].at === runs[1].at && rows[2].check === 'grep -c again f.txt',
+    one(JSON.stringify(saved)));
+  check('252 keep: an id used in both calls keeps both rows', rows.filter((r) => r.id === 'code-1').length === 2, one(JSON.stringify(rows)));
+  check('252 keep: runs holds one entry per call, and the top-level at, head, summary and flags are the latest call\'s',
+    runs.length === 2 && runs[0].head === head1 && runs[1].head === head2 && saved.at === runs[1].at && saved.head === head2
+      && !!second.json && JSON.stringify(saved.summary) === JSON.stringify(second.json.summary) && JSON.stringify(runs[1].summary) === JSON.stringify(second.json.summary)
+      && JSON.stringify(saved.flags) === JSON.stringify(second.json.flags) && !!first.json && JSON.stringify(runs[0].summary) === JSON.stringify(first.json.summary),
+    one(JSON.stringify({ at: saved.at, head: saved.head, runs })));
+  check('252 keep: the printed object holds only this call\'s rows',
+    !!second.json && second.json.checks.map((r) => r.id).join(',') === 'code-1-recheck,code-1' && second.json.runs === undefined
+      && second.json.checks.every((r) => r.at === undefined && r.head === undefined),
+    one(second.stdout));
+
+  // A record written before #252 (no runs list, rows without at) counts as one run.
+  const oldOut = path.join(k.dir, 'reports', 'receipts', 'old');
+  fs.mkdirSync(oldOut, { recursive: true });
+  fs.writeFileSync(path.join(oldOut, 'results.json'), JSON.stringify({ at: '2026-10-01T00:00:00.000Z', head: 'abc1234', checks: [{ id: 'ux-1', verdict: 'pass' }], summary: { pass: 1, fail: 0, error: 0 }, flags: { slow: 0, flaky: 0 } }) + '\n');
+  run(['--checks', checksFile([{ id: 'ux-1-recheck', check: 'test -f f.txt', expect: { exit: 0 } }]), '--out', oldOut], k.dir);
+  const was = readJson(path.join(oldOut, 'results.json')) || {};
+  check('252 keep: a record from before #252 is kept as one run, its rows given its at and head',
+    Array.isArray(was.runs) && was.runs.length === 2 && was.runs[0].at === '2026-10-01T00:00:00.000Z' && was.runs[0].head === 'abc1234'
+      && Array.isArray(was.checks) && was.checks.length === 2 && was.checks[0].at === '2026-10-01T00:00:00.000Z' && was.checks[0].head === 'abc1234' && was.checks[1].id === 'ux-1-recheck',
+    one(JSON.stringify(was)));
+
+  // A file that is not a readable record is moved aside, never overwritten.
+  const badOut = path.join(k.dir, 'reports', 'receipts', 'bad');
+  fs.mkdirSync(badOut, { recursive: true });
+  const list = checksFile([{ id: 'code-9', check: 'test -f f.txt', expect: { exit: 0 } }]);
+  fs.writeFileSync(path.join(badOut, 'results.json'), 'not json, first\n');
+  const bad1 = run(['--checks', list, '--out', badOut], k.dir);
+  fs.writeFileSync(path.join(badOut, 'results.json'), 'not json, second\n');
+  const bad2 = run(['--checks', list, '--out', badOut], k.dir);
+  const fresh = readJson(path.join(badOut, 'results.json')) || {};
+  const prev = (n) => { const p = path.join(badOut, 'results.prev-' + n + '.json'); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; };
+  check('252 keep: an unreadable results.json becomes results.prev-1.json (then -2), with one stderr line, and the new record is written fresh',
+    prev(1) === 'not json, first\n' && prev(2) === 'not json, second\n' && Array.isArray(fresh.runs) && fresh.runs.length === 1 && fresh.checks.length === 1
+      && /results\.prev-1\.json/.test(bad1.stderr) && /results\.prev-2\.json/.test(bad2.stderr),
+    one(bad1.stderr + ' | ' + bad2.stderr + ' | ' + JSON.stringify(fresh)));
+
+  // A lock left behind by a run that crashed mid-save does not stop the next one.
+  const lockOut = path.join(k.dir, 'reports', 'receipts', 'lock');
+  fs.mkdirSync(lockOut, { recursive: true });
+  const lock = path.join(lockOut, 'results.json.lock');
+  fs.writeFileSync(lock, '');
+  const old = new Date(Date.now() - 120000);
+  fs.utimesSync(lock, old, old);
+  const locked = run(['--checks', list, '--out', lockOut], k.dir);
+  const lockSaved = readJson(path.join(lockOut, 'results.json')) || {};
+  check('252 keep: a stale lock left by a crashed run is cleared and the record is still saved',
+    locked.status === 0 && Array.isArray(lockSaved.checks) && lockSaved.checks.length === 1 && !fs.existsSync(lock), one(locked.stderr + ' ' + JSON.stringify(lockSaved)));
+
+  // The --full skip writes its record through the same merge.
+  const fullOut = path.join(k.dir, 'reports', 'full');
+  const fullList = checksFile([{ id: 'tests', check: 'grep -c hello f.txt', expect: { exit: 0 } }]);
+  const f1 = run(['--checks', fullList, '--out', fullOut, '--full'], k.dir);
+  const f2 = run(['--checks', fullList, '--out', fullOut, '--full'], k.dir);
+  const fullSaved = readJson(path.join(fullOut, 'results.json')) || {};
+  check('252 keep: a --full skip record merges the same way and stays marked skipped',
+    !!f1.json && !f1.json.skipped && !!f2.json && !!f2.json.skipped && !!fullSaved.skipped
+      && Array.isArray(fullSaved.runs) && fullSaved.runs.length === 2 && fullSaved.runs[1].skipped === true && !fullSaved.runs[0].skipped
+      && Array.isArray(fullSaved.checks) && fullSaved.checks.length === 2,
+    one(JSON.stringify(fullSaved)));
+
+  // A plan phase clears its own folder first, so its record is its own run only.
+  fs.mkdirSync(path.join(k.dir, 'plans'), { recursive: true });
+  fs.writeFileSync(path.join(k.dir, 'plans', 'PLAN-k.md'), ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: K** `[sequential]`',
+    '  - Check target `n`: `grep -c again f.txt` - before `{"match": "^1$"}` - after `{"match": "^2$"}`', ''].join('\n'));
+  run(['--plan', 'plans/PLAN-k.md', '--step', '1', '--phase', 'before'], k.dir);
+  run(['--plan', 'plans/PLAN-k.md', '--step', '1', '--phase', 'before'], k.dir);
+  const phase = readJson(path.join(k.dir, 'reports', 'checks', 'PLAN-k', 'step-1', 'before', 'results.json')) || {};
+  check('252 keep: a plan-phase run\'s record holds only its own run',
+    Array.isArray(phase.checks) && phase.checks.length === 1 && Array.isArray(phase.runs) && phase.runs.length === 1 && phase.step === '1' && phase.phase === 'before',
+    one(JSON.stringify(phase)));
+
+  // A rerun under the same id saves over <id>.txt, so the earlier output is
+  // moved to <id>.prev-1.txt first and the kept row names it (review R1): the
+  // older row still points at what its own run saved.
+  const sameOut = path.join(k.dir, 'reports', 'receipts', 'same-id');
+  const sameList = checksFile([{ id: 'code-1', check: 'grep -n hello f.txt', expect: { exit: 0 } }]);
+  fs.writeFileSync(path.join(k.dir, 'f.txt'), 'hello first\n');
+  run(['--checks', sameList, '--out', sameOut], k.dir);
+  fs.writeFileSync(path.join(k.dir, 'f.txt'), 'hello second\n');
+  const again = run(['--checks', sameList, '--out', sameOut], k.dir);
+  const sameRows = (readJson(path.join(sameOut, 'results.json')) || {}).checks || [];
+  const body = (r) => { try { return fs.readFileSync(path.resolve(k.dir, r.stdoutFile), 'utf8'); } catch (e) { return ''; } };
+  check('252 keep: a same-id rerun moves the earlier output to <id>.prev-1.txt, and the kept row names it',
+    sameRows.length === 2 && /hello first/.test(body(sameRows[0])) && /hello second/.test(body(sameRows[1]))
+      && /code-1\.prev-1\.txt$/.test(sameRows[0].stdoutFile || '') && /code-1\.txt$/.test(sameRows[1].stdoutFile || '')
+      && !!again.json && /code-1\.txt$/.test(again.json.checks[0].stdoutFile || ''),
+    one(JSON.stringify(sameRows)));
+
+  // The same holds for a flaky row's kept first run, which its detail names.
+  const flip = path.join(k.dir, 'flip');
+  fs.mkdirSync(path.join(flip, 'reports'), { recursive: true });
+  fs.writeFileSync(path.join(flip, 'package.json'), JSON.stringify({ name: 'flip', version: '1.0.0', private: true, scripts: { test: 'node toggle.js' } }) + '\n');
+  fs.writeFileSync(path.join(flip, 'toggle.js'), "const fs = require('fs');\nif (fs.existsSync('.ran')) process.exit(0);\nfs.writeFileSync('.ran', 'x');\nconsole.log('first run fails ' + fs.readFileSync('n.txt', 'utf8').trim());\nprocess.exit(1);\n");
+  const flipOut = path.join(flip, 'reports', 'out');
+  const flipList = checksFile([{ id: 'suite', check: 'npm test', expect: { exit: 0 } }]);
+  for (const n of ['1', '2']) {
+    fs.rmSync(path.join(flip, '.ran'), { force: true });
+    fs.writeFileSync(path.join(flip, 'n.txt'), n + '\n');
+    run(['--checks', flipList, '--out', flipOut, '--rerun-failures', '--timeout', '60000'], flip);
+  }
+  const flipRows = (readJson(path.join(flipOut, 'results.json')) || {}).checks || [];
+  const named = (r) => { const m = /\((?:the failing run is )(first-run\/[^)]+)\)/.exec(String(r && r.detail)); return m ? m[1] : null; };
+  const firstOf = (r) => { try { return fs.readFileSync(path.join(flipOut, named(r)), 'utf8'); } catch (e) { return ''; } };
+  check('252 keep: a flaky rerun moves the earlier first-run/<id>.txt aside, and the kept row\'s detail names the moved file',
+    flipRows.length === 2 && flipRows.every((r) => r.flaky === true) && named(flipRows[0]) === 'first-run/suite.prev-1.txt' && named(flipRows[1]) === 'first-run/suite.txt'
+      && /fails 1/.test(firstOf(flipRows[0])) && /fails 2/.test(firstOf(flipRows[1])),
+    one(JSON.stringify(flipRows)));
 });
 
 console.log('');

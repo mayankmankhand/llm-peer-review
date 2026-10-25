@@ -56,12 +56,16 @@
 //   * Allowlist. Only the four dirs above are read. node_modules, worktrees,
 //     and every settings*.json are never emitted (61 MB, 65 MB, and a
 //     never-push file respectively, measured 2026-09-12).
-//   * Hooks. One SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//   * Hooks. The SessionStart hook runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
 //     session-start.js"`, which links ${CLAUDE_PLUGIN_DATA}/current to the
 //     plugin root (one path for downstream prose and permissions that survives
 //     version bumps, spike 4) and runs the version guard (#174). A node call
 //     parses in every shell the hook may run under, PowerShell included, where
 //     the old `mkdir -p ... && ln -sfn ...` did not; the script always exits 0.
+//     The PreToolUse hook on Bash runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
+//     push-guard.js"` before every Bash command (#260), so the M11 pre-push
+//     check runs before any push Claude makes; a crash or a hang blocks the
+//     command ("onFailure": "block", Claude Code 2.1.295 or later).
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
 //     manifest (issue #138 shipped the manifest in v5.5.0), and the content
@@ -73,6 +77,9 @@
 //   * Stamps (#183). The three files carrying a `<!-- Toolkit version: X |`
 //     stamp are emitted stamped with the build's version, so a scratch build
 //     made with --version carries that version everywhere plugin.json does.
+//   * Release notes (#257). CHANGELOG.md at the plugin root holds every released
+//     block of the repository's CHANGELOG.md from v6.0.0 up to the build's
+//     version, for /tk:upgrade to read; an Unreleased block never ships.
 //
 // Dependency-free by design, like every script under scripts/ and .claude/scripts/.
 
@@ -123,9 +130,10 @@ const KEEP_PROJECT_PATHS = [
   '.claude/.toolkit-manifest.json', '.claude/.toolkit-state.json', '.claude/.toolkit-migration.json',
   '.claude/worktrees', '.claude/.no-correction-log', '.claude/CLAUDE.md', '.claude/toolkit',
 ];
-// The session hook's script. The build reports it as unresolved when the source
-// has no such script, so the hook can never point at a missing file.
+// The hooks' scripts. The build reports one as unresolved when the source has
+// no such script, so a hook can never point at a missing file.
 const SESSION_START_SCRIPT = 'session-start.js';
+const PUSH_GUARD_SCRIPT = 'push-guard.js';
 // The stamped files (#183), by emitted path: the three files
 // scripts/setup/bump-version.sh stamps in the source. Each emitted copy gets the
 // build's version in its stamp, by the replacement bump-version.sh makes (the
@@ -179,6 +187,10 @@ const SITE_OVERRIDES = {
     { phrase: '(a `.claude/scripts/package.json` exists in the worktree)', keep: true },
     // The same detection, in the summary line's skip reason.
     { phrase: 'skipped - no .claude/scripts/package.json)', keep: true },
+  ],
+  'skills/cloud/SKILL.md': [
+    // Review mode asks git whether the PROJECT tracks its own review command (issue #263); the plugin's copy is never in the project's git.
+    { phrase: '`git ls-files .claude/commands/review.md`', keep: true },
   ],
   'skills/project-context/SKILL.md': [
     // An example of the reviewed project's file structure conventions.
@@ -613,6 +625,45 @@ function firstHeading(text) {
   return m ? m[1].trim() : '';
 }
 
+// The release notes (issue #257): a two-line header, then each released block of
+// the source's CHANGELOG.md (a `## v<x.y.z> ...` heading up to the next `## `
+// heading, trailing blank lines trimmed) from RELEASE_NOTES_FLOOR up to the
+// build's version, in the source's order, newest first. null when the source has
+// no CHANGELOG.md.
+const RELEASE_NOTES_FLOOR = [6, 0, 0];
+const RELEASED_HEADING = /^## v(\d+)\.(\d+)\.(\d+)\b/;
+// The first three dotted numbers of a version, a missing one read as 0.
+function versionParts(v) {
+  const m = /^(\d+)(?:\.(\d+))?(?:\.(\d+))?/.exec(v);
+  return m ? [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)] : [0, 0, 0];
+}
+function compareParts(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  return 0;
+}
+function releaseNotes(file, version) {
+  if (!fs.existsSync(file)) return null;
+  const top = versionParts(version);
+  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = RELEASED_HEADING.exec(lines[i]);
+    if (!m) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^## /.test(lines[end])) end++;
+    const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+    if (compareParts(v, RELEASE_NOTES_FLOOR) >= 0 && compareParts(v, top) <= 0) {
+      const block = lines.slice(i, end);
+      while (block.length && !block[block.length - 1].trim()) block.pop();
+      blocks.push(block.join('\n'));
+    }
+    i = end - 1;
+  }
+  const head = '# Release notes\n'
+    + 'The released blocks of the toolkit\'s CHANGELOG.md from v' + RELEASE_NOTES_FLOOR.join('.') + ' up to this plugin\'s version, ' + version + ', newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.\n';
+  return blocks.length ? head + '\n' + blocks.join('\n\n') + '\n' : head;
+}
+
 function build(src, version) {
   const inv = inventory(src);
   const files = new Map(); // rel -> string | Buffer
@@ -657,8 +708,8 @@ function build(src, version) {
     version,
     author: { name: 'Mayank Mankhand' },
   }, null, 2) + '\n');
-  if (!inv.scripts.some(s => s.rel === SESSION_START_SCRIPT)) {
-    unresolved.push('hooks/hooks.json: missing source scripts/' + SESSION_START_SCRIPT);
+  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT]) {
+    if (!inv.scripts.some(s => s.rel === script)) unresolved.push('hooks/hooks.json: missing source scripts/' + script);
   }
   put('hooks/hooks.json', JSON.stringify({
     hooks: {
@@ -667,6 +718,15 @@ function build(src, version) {
         // One node call parses in bash and PowerShell alike. The script makes the
         // link portably and always exits 0, so a hook never blocks a session.
         command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + SESSION_START_SCRIPT + '"',
+      }] }],
+      // The push guard (#260) sees every Bash command and answers only for a
+      // push. It always exits 0, so onFailure fires only on a crash or a
+      // hang, and then blocks the command instead of letting a push through.
+      PreToolUse: [{ matcher: 'Bash', hooks: [{
+        type: 'command',
+        command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + PUSH_GUARD_SCRIPT + '"',
+        timeout: 120,
+        onFailure: 'block',
       }] }],
     },
   }, null, 2) + '\n');
@@ -780,6 +840,12 @@ function build(src, version) {
       unresolved.push(rel + ': unquoted ' + ROOT_TOKEN + ' in inline command !`' + cmd + '`');
     }
   }
+  // The release notes (issue #257), for /tk:upgrade to read what changed since a
+  // project's recorded version. No Unreleased block ships, so a cycle's changelog
+  // edit leaves plugin/ as it was; a source with no CHANGELOG.md (a test fixture)
+  // builds without one.
+  const notes = releaseNotes(path.join(repo, 'CHANGELOG.md'), version);
+  if (notes !== null) put('CHANGELOG.md', notes);
   put('README.md', [
     '# tk (generated)',
     '',

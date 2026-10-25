@@ -477,6 +477,443 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('a tier 2 shard takes exactly one return', tooMany.status === 1 && /usage/.test(tooMany.stderr), tooMany.stderr);
 }
 
+console.log('\n10. 252 locus: each cited line is labeled against the diff of the fixes (issue #252)');
+{
+  // The fix verifier once called a fix FIXED that deleted the cited sentences
+  // and put nothing in their place (#242 B1, bad-R3): the cut was inside one
+  // line, so a line diff calls it rewritten. locusLabel compares words: a
+  // changed block whose new words are a subsequence of its old words (text
+  // cut, nothing added) is `removed`. Changed lines sit apart below because git
+  // joins adjacent changed lines into one block, and a block is labeled whole.
+  const mod = require(SCRIPT);
+  const label = typeof mod.locusLabel === 'function' ? mod.locusLabel : () => ({});
+  const repo = path.join(sandbox, 'locus');
+  fs.mkdirSync(repo);
+  const g = (args) => spawnSync('git', ['-C', repo, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g(['init', '-q']);
+  const base = ['one', 'keep this line', 'gamma delta epsilon', 'four', 'zeta eta', 'six', 'theta whole', 'eight', 'iota kappa lambda', 'ten', 'mu   nu', 'twelve'];
+  fs.writeFileSync(path.join(repo, 'a.txt'), base.join('\n') + '\n');
+  fs.writeFileSync(path.join(repo, 'b.txt'), 'doomed\n');
+  fs.writeFileSync(path.join(repo, 'd.txt'), 'left alone\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'reviewed tree']);
+  const sha = g(['rev-parse', 'HEAD']).stdout.trim();
+  const now = base.slice();
+  now[2] = 'gamma epsilon';               // line 3: a word cut, nothing added (bad-R3)
+  now[4] = 'completely different words';  // line 5: replaced
+  now[8] = 'iota mu-new lambda';          // line 9: a word cut and a new one added
+  now[10] = 'mu nu';                      // line 11: whitespace only
+  now.splice(6, 1);                       // line 7: the whole line deleted
+  fs.writeFileSync(path.join(repo, 'a.txt'), now.join('\n') + '\n');
+  fs.rmSync(path.join(repo, 'b.txt'));
+  fs.writeFileSync(path.join(repo, 'n.txt'), 'made by the fix\n');
+  fs.writeFileSync(path.join(repo, 'u.txt'), 'untracked before the review\n');
+  const at = (rel, line, extra) => label(rel, line, Object.assign({ root: repo, base: sha }, extra || {})) || {};
+  const shows = (r, file, line) => r.file === file && r.line === line;
+  check('252 locus: a cited line in a changed file but in no changed block is untouched, file changed', shows(at('a.txt', 2), 'changed', 'untouched'), JSON.stringify(at('a.txt', 2)));
+  check('252 locus: a replaced line is rewritten', shows(at('a.txt', 5), 'changed', 'rewritten'), JSON.stringify(at('a.txt', 5)));
+  check('252 locus: a whole-line deletion is removed', shows(at('a.txt', 7), 'changed', 'removed'), JSON.stringify(at('a.txt', 7)));
+  check('252 locus: a word cut from inside a line with nothing added (the bad-R3 shape) is removed', shows(at('a.txt', 3), 'changed', 'removed'), JSON.stringify(at('a.txt', 3)));
+  check('252 locus: a cut plus new words is rewritten', shows(at('a.txt', 9), 'changed', 'rewritten'), JSON.stringify(at('a.txt', 9)));
+  check('252 locus: a whitespace-only change is untouched', shows(at('a.txt', 11), 'changed', 'untouched'), JSON.stringify(at('a.txt', 11)));
+  check('252 locus: a cited range with one rewritten line is rewritten, and one with a removed line and no rewrite is removed',
+    at('a.txt', '4-6').line === 'rewritten' && at('a.txt', '6-8').line === 'removed', JSON.stringify([at('a.txt', '4-6'), at('a.txt', '6-8')]));
+  check('252 locus: a deleted file is removed with file deleted', shows(at('b.txt', 1), 'deleted', 'removed'), JSON.stringify(at('b.txt', 1)));
+  check('252 locus: a file that was not in the reviewed tree is file absent', at('c.txt', 1).file === 'absent', JSON.stringify(at('c.txt', 1)));
+  check('252 locus: an unchanged file is file unchanged, its line untouched', shows(at('d.txt', 1), 'unchanged', 'untouched'), JSON.stringify(at('d.txt', 1)));
+  check('252 locus: no cited line labels the whole file', at('a.txt', null).line === 'rewritten' && at('a.txt', null).file === 'changed', JSON.stringify(at('a.txt', null)));
+  check('252 locus: an untracked file missing from the scope\'s starting list is file new; one on the list is file untracked, line unknown',
+    at('n.txt', 1, { untrackedAtStart: ['u.txt'] }).file === 'new' && shows(at('u.txt', 1, { untrackedAtStart: ['u.txt'] }), 'untracked', 'unknown'),
+    JSON.stringify([at('n.txt', 1, { untrackedAtStart: ['u.txt'] }), at('u.txt', 1, { untrackedAtStart: ['u.txt'] })]));
+  // A saved patch with context lines (the retrospective's fix diffs) reads the same.
+  const patch = g(['diff', sha]).stdout;
+  const fromPatch = (rel, line) => label(rel, line, { patch, root: repo, base: sha }) || {};
+  check('252 locus: a saved patch with context lines labels the same as the live tree',
+    fromPatch('a.txt', 3).line === 'removed' && fromPatch('a.txt', 5).line === 'rewritten' && fromPatch('a.txt', 2).line === 'untouched'
+      && fromPatch('a.txt', 11).line === 'untouched' && fromPatch('b.txt', 1).file === 'deleted' && fromPatch('d.txt', 1).file === 'unchanged',
+    JSON.stringify([fromPatch('a.txt', 3), fromPatch('a.txt', 5), fromPatch('a.txt', 2), fromPatch('b.txt', 1), fromPatch('d.txt', 1)]));
+  // `near` counts the changed blocks within 3 lines of the cited range (git's
+  // default hunk context), pure insertions included at their place.
+  const ins = ['diff --git a/p.md b/p.md', '--- a/p.md', '+++ b/p.md', '@@ -5,0 +6,1 @@', '+a note after line 5', '@@ -20 +21 @@', '-old twenty', '+new twenty', ''].join('\n');
+  const nearOf = (line) => (label('p.md', line, { patch: ins, root: repo }) || {}).near;
+  check('252 locus: near counts a pure insertion beside the cited line and a change within 3 lines, and not one further away',
+    nearOf(5) === 1 && nearOf(6) === 1 && nearOf(2) === 1 && nearOf(1) === 0 && nearOf(17) === 1 && nearOf(12) === 0 && (label('p.md', 5, { patch: ins, root: repo }) || {}).line === 'untouched',
+    JSON.stringify([nearOf(5), nearOf(6), nearOf(2), nearOf(1), nearOf(17), nearOf(12)]));
+  // A gitignored file never shows in a git diff, so its lines cannot be judged.
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'plans/\n');
+  fs.mkdirSync(path.join(repo, 'plans'));
+  fs.writeFileSync(path.join(repo, 'plans', 'PLAN-x.md'), 'a plan\n');
+  check('252 locus: a cited file git ignores is file ignored, line unknown', shows(at('plans/PLAN-x.md', 1), 'ignored', 'unknown'), JSON.stringify(at('plans/PLAN-x.md', 1)));
+  // Punctuation is its own token: code keeps it on the word ("notes;", "1,"),
+  // so a cut that leaves `return notes;` from `return notes.filter(keep);`, or
+  // drops a JSON entry and the comma before it, is still a cut.
+  const cut = (was, now) => ['diff --git a/c.js b/c.js', '--- a/c.js', '+++ b/c.js', '@@ -1 +1 @@', '-' + was, '+' + now, ''].join('\n');
+  const cutLabel = (was, now) => (label('c.js', 1, { patch: cut(was, now), root: repo }) || {}).line;
+  check('252 locus: punctuation is a token of its own, so a cut that leaves code punctuation behind is removed and new punctuation is not',
+    cutLabel('return notes.filter(keep);', 'return notes;') === 'removed' && cutLabel('"a": 1, "b": 2,', '"a": 1') === 'removed'
+      && cutLabel('return notes;', 'return notes.filter(keep);') === 'rewritten' && cutLabel('let x = 1', 'let x = 1;') === 'rewritten',
+    JSON.stringify([cutLabel('return notes.filter(keep);', 'return notes;'), cutLabel('"a": 1, "b": 2,', '"a": 1'), cutLabel('return notes;', 'return notes.filter(keep);'), cutLabel('let x = 1', 'let x = 1;')]));
+  // Inside a hunk, "--- x" is a removed line whose text starts with "-- ", not a header.
+  const dashed = ['diff --git a/m.md b/m.md', 'index 1111111..2222222 100644', '--- a/m.md', '+++ b/m.md', '@@ -1,3 +1,2 @@', ' keep', '--- a dashed rule', ' tail', ''].join('\n');
+  const dash = label('m.md', 2, { patch: dashed, root: repo }) || {};
+  check('252 locus: a removed line whose own text starts with "-- " is read as a removed line, not a file header', dash.file === 'changed' && dash.line === 'removed', JSON.stringify(dash));
+}
+
+// --- 11. --verify: the fix loop's ledger (issue #267) ----------------------------
+// M3's re-verify round used to be rebuilt by hand on every run: the recheck
+// rows, the verifier shards, the diff of the fixes and the count of rounds per
+// finding. --verify writes them from the bytes on disk, and ledger.json keeps
+// the rounds, the verdicts and the checkpoints M4 and M5 read.
+console.log('\n11. --verify writes the recheck rows, the verify shards and the ledger');
+{
+  const mod = require(SCRIPT);
+  // One line per failure detail: through the release gate a failing suite shows
+  // only its last 15 lines, and a multi-line detail pushes the case names out.
+  const check11 = (name, cond, detail) => check(name, cond, String(detail === undefined ? '' : detail).replace(/\s+/g, ' ').slice(0, 300));
+  const RUN_CHECKS = path.resolve(__dirname, '..', '.claude', 'scripts', 'run-checks.js');
+  const repo = path.join(sandbox, 'verify-11');
+  fs.mkdirSync(repo);
+  const g = (args) => spawnSync('git', ['-C', repo, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g(['init', '-q']);
+  const w = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo, rel)), { recursive: true }); fs.writeFileSync(path.join(repo, rel), text); };
+  w('src/a.js', 'const token = login();\nconsole.log(token);\nexport default token;\n');
+  w('src/b.js', 'try { run(); } catch (e) {}\n');
+  w('src/c.js', '// TODO: tidy\nmodule.exports = 1;\n');
+  w('src/d.js', 'untouched by any fix\n');
+  w('docs/x.md', ['# Guide', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'].join('\n') + '\n');
+  g(['add', '-A']); g(['commit', '-q', '-m', 'reviewed tree']);
+  const end = g(['rev-parse', 'HEAD']).stdout.trim();
+  // The user's own work in progress when the review started: an edit to d.js
+  // and two untracked files. The scope's snapshot holds the edit; its list
+  // holds the untracked files with their line counts, as session-init writes them.
+  w('src/d.js', 'edited by the user before the review\n');
+  w('notes.txt', 'n1\nn2\n');
+  w('keep.txt', 'keep me\n');
+  const baseline = g(['stash', 'create']).stdout.trim();
+  check11('fixture: git stash create gives the baseline snapshot', /^[0-9a-f]{40}$/.test(baseline), baseline);
+  const untrackedAtStart = [{ path: 'notes.txt', added: 2, deleted: 0, binary: false }, { path: 'keep.txt', added: 1, deleted: 0, binary: false }];
+  const scopeFile = (name, scope) => { const f = path.join(sandbox, name); fs.writeFileSync(f, JSON.stringify(scope)); return f; };
+  const scope = scopeFile('scope-11.json', { range: { base: end, end }, uncommitted: { baseline, untracked: { files: untrackedAtStart, added: 3, deleted: 0 } } });
+  // The fixes: a.js loses its log line and gains a test, b.js rethrows, x.md
+  // is rewritten, notes.txt grows a line, new.txt and a binary appear.
+  w('src/a.js', 'const token = login();\nexport default token;\n');
+  w('src/a.test.js', 'test("token", () => {});\n');
+  w('src/b.js', 'try { run(); } catch (e) { throw e; }\n');
+  w('docs/x.md', ['# Guide', 'one fixed', 'two fixed', 'three', 'four', 'five', 'six', 'seven', 'eight'].join('\n') + '\n');
+  w('notes.txt', 'n1\nn2\nn3\n');
+  w('new.txt', 'made by the fix\n');
+  fs.writeFileSync(path.join(repo, 'img.bin'), Buffer.from([0x89, 0x50, 0x00, 0x47, 0x0a, 0x00]));
+  // Findings: R1 is a merged pair of mechanical findings with two receipts, R2
+  // and R3 are mechanical with receipts the mode cannot invert, R4 to R11 are
+  // judgment findings, R12 a browser finding.
+  const f = (specialist, rel, line, key, what, receipt) => ({ severity: 'warn', specialist, file: { relPath: rel, line }, what, fix: 'Fix it. Ten minutes, or leave it.', key, receipt });
+  const rows = [
+    f('code', 'src/a.js', 2, 'src/a.js:token-log', 'Should fix. The login token is logged to the console.', { check: "grep -n 'console.log(token)' src/a.js", expect: { match: 'token' } }),
+    f('security', 'src/a.js', 2, 'src/a.js:token-log', 'Should fix. The token log has no test guarding it.', { check: 'test -e src/a.test.js', expect: { exit: 1 } }),
+    f('code', 'src/b.js', 1, 'src/b.js:swallow', 'Should fix. The catch swallows the error.', { check: 'grep -c catch src/b.js', expect: { exit: 0 } }),
+    f('code', 'src/c.js', 1, 'src/c.js:todo', 'Should fix. A TODO ships.', { check: 'grep -n TODO src/c.js', expect: { lines: { min: 1 } } }),
+  ];
+  for (let i = 1; i <= 8; i++) rows.push(f('ux', 'docs/x.md', i + 1, 'docs/x.md:j' + i, 'Should fix. Paragraph ' + i + ' of the guide never says who it is for.', { check: 'sed -n ' + (i + 1) + 'p docs/x.md', expect: { match: '.' } }));
+  rows.push(f('browser', 'src/a.js', 1, 'ui:focus', 'Should fix. Focus is lost after the dialog closes.', { check: 'cat reports/receipts/x/shot.png', expect: { exit: 0 } }));
+  const file = jsonl(rows);
+  const rawLines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+  const receipts = path.join(sandbox, 'receipts-11');
+  fs.mkdirSync(receipts);
+  const stems = ['code-1', 'security-1', 'code-2', 'code-3'].concat([1, 2, 3, 4, 5, 6, 7, 8].map((i) => 'ux-' + i)).concat(['browser-1']);
+  for (const s of stems) fs.writeFileSync(path.join(receipts, s + '.txt'), 'saved output of ' + s + '\nexit 0\n');
+  const out = path.join(sandbox, 'verify-out-11');
+  fs.mkdirSync(out);
+  const ledger = path.join(out, 'ledger.json');
+  const parse = (r) => { try { return JSON.parse(r.stdout); } catch (e) { return null; } };
+  const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return null; } };
+  const led = () => readJson(ledger) || { findings: {} };
+  const has = (name) => fs.existsSync(path.join(out, name));
+  const count = (text, needle) => text.split(needle).length - 1;
+  const JUDGMENT = 'R4,R5,R6,R7,R8,R9,R10,R11';
+  const V = ['--verify', file, '--receipts', receipts, '--scope', scope, '--out', out, '--root', repo];
+
+  const r1 = run(V.concat(['--mechanical', 'R1,R2,R3', '--judgment', JUDGMENT, '--browser', 'R12']));
+  const m1 = parse(r1) || {};
+  check11('--verify writes the recheck rows, the verify shards and the ledger from the bytes on disk',
+    r1.status === 0 && m1.call === 1 && has('recheck-1.json') && has('verify-1-1.txt') && has('verify-1-2.txt') && has('ledger.json') && Array.isArray(m1.browser) && m1.browser.join() === 'R12' && led().findings.R12 && led().findings.R12.path === 'browser',
+    r1.stderr + r1.stdout.slice(0, 300));
+  const rc1 = readJson(path.join(out, 'recheck-1.json')) || [];
+  const row = (id) => rc1.find((x) => x.id === id) || {};
+  check11('a match receipt inverts to noMatch and a non-zero exit to exit 0, one recheck row per source receipt',
+    JSON.stringify(row('code-1-recheck-r1').expect) === JSON.stringify({ noMatch: 'token' }) && row('code-1-recheck-r1').check === "grep -n 'console.log(token)' src/a.js"
+      && JSON.stringify(row('security-1-recheck-r1').expect) === JSON.stringify({ exit: 0 }) && rc1.length === 4, JSON.stringify(rc1).slice(0, 400));
+  check11('an exit 0 or lines receipt gets the prose placeholder and is listed under needsExpect',
+    row('code-2-recheck-r1').expect === 'write the expect the fix must now satisfy' && row('code-3-recheck-r1').expect === 'write the expect the fix must now satisfy' && (m1.needsExpect || []).join() === 'R2,R3',
+    JSON.stringify(m1.needsExpect) + JSON.stringify(row('code-2-recheck-r1')));
+  // The checks runner on the recheck file as written: a placeholder row is
+  // refused on its own and the others run (measured 2026-10-23, plan #267).
+  const rcOut = path.join(sandbox, 'rc-out-11');
+  const rc = spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(out, 'recheck-1.json'), '--out', rcOut], { cwd: repo, encoding: 'utf8' });
+  const rcj = (() => { try { return JSON.parse(rc.stdout); } catch (e) { return null; } })() || { checks: [] };
+  const verdictOf = (id) => (rcj.checks.find((c) => c.id === id) || {}).verdict;
+  check11('the checks runner returns a placeholder row as error and runs the others',
+    rc.status === 0 && verdictOf('code-1-recheck-r1') === 'pass' && verdictOf('security-1-recheck-r1') === 'pass' && verdictOf('code-2-recheck-r1') === 'error' && verdictOf('code-3-recheck-r1') === 'error' && fs.existsSync(path.join(rcOut, 'results.json')),
+    rc.stderr.slice(0, 300) + JSON.stringify(rcj.checks.map((c) => [c.id, c.verdict])));
+  const s1 = has('verify-1-1.txt') ? fs.readFileSync(path.join(out, 'verify-1-1.txt'), 'utf8') : '';
+  const s2 = has('verify-1-2.txt') ? fs.readFileSync(path.join(out, 'verify-1-2.txt'), 'utf8') : '';
+  check11('eight judgment IDs give two shards named by call, with the header, the instruction, each finder\'s line, file:line and round, and the diff once',
+    s1.split('\n')[0] === 'M3 verify shard: call 1, shard 1 of 2, ids R4 R5 R6 R7 R8 R9 R10' && s2.split('\n')[0] === 'M3 verify shard: call 1, shard 2 of 2, ids R11'
+      && typeof mod.M3_INSTRUCTION === 'string' && s1.includes('"' + mod.M3_INSTRUCTION + '"') && [4, 5, 6, 7, 8, 9, 10].every((i) => s1.includes('\n' + rawLines[i] + '\n'))
+      && s1.includes('===== R4 (round 1) =====') && /docs\/x\.md:2\b/.test(s1) && count(s1, 'diff --git a/src/a.js') === 1 && count(s2, 'diff --git a/src/a.js') === 1 && (m1.shards || []).length === 2,
+    s1.slice(0, 300));
+  check11('the diff comes from the baseline, so the user\'s pre-review edit is not in it',
+    m1.diffFrom && m1.diffFrom.kind === 'baseline' && m1.diffFrom.sha === baseline && s1.includes('-console.log(token);') && !s1.includes('src/d.js'),
+    JSON.stringify(m1.diffFrom) + (s1.includes('src/d.js') ? ' d.js leaked' : ''));
+  check11('a new untracked file is in full, a changed starting-list file is in full and flagged, an unchanged one is a path, a binary is a path',
+    s1.includes('made by the fix') && /new\.txt/.test(s1) && s1.includes('n3') && /notes\.txt[^\n]*2 -> 3/.test(s1) && /starting content was not captured/.test(s1)
+      && /keep\.txt/.test(s1) && !s1.includes('keep me') && /img\.bin/.test(s1)
+      && (m1.untracked || {}).new && m1.untracked.new.join() === 'img.bin,new.txt,src/a.test.js' && m1.untracked.changed.join() === 'notes.txt' && m1.untracked.unchanged.join() === 'keep.txt' && m1.untracked.binary.join() === 'img.bin',
+    JSON.stringify(m1.untracked) + s1.slice(-500));
+
+  // Verdicts: a verifier's return against the first shard, recorded under round 1,
+  // then the checks runner's results recorded for the mechanical findings.
+  const ret = (text) => { const p = path.join(sandbox, 'vret-' + (++counter) + '.txt'); fs.writeFileSync(p, text); return p; };
+  const good = ret('R4: FIXED\nthe sentence names the reader now\nR5: FIXED\nr\nR6: NOT FIXED\nstill silent\nR7: FIXED\nr\nR8: FIXED\nr\nR9: FIXED\nr\nR10: FIXED\nr\n');
+  const v1 = run(['--verdicts', path.join(out, 'verify-1-1.txt'), good, '--ledger', ledger]);
+  const vj = parse(v1) || {};
+  check11('--verdicts reads the verify header and --ledger records the return under the finding\'s round',
+    v1.status === 0 && vj.tier === 'verify' && vj.verdicts && vj.verdicts.R4 === 'FIXED' && vj.verdicts.R6 === 'NOT FIXED'
+      && led().findings.R4 && led().findings.R4.verdicts.length === 1 && led().findings.R4.verdicts[0].round === 1 && led().findings.R4.verdicts[0].verdict === 'FIXED' && led().findings.R6.verdicts[0].verdict === 'NOT FIXED',
+    v1.stdout.slice(0, 300) + v1.stderr);
+  const v2 = run(['--verdicts', '--ledger', ledger, '--recheck', path.join(rcOut, 'results.json')]);
+  const v2j = parse(v2) || {};
+  check11('--verdicts --ledger --recheck records FIXED only when every row passed, and an error row as not verified',
+    v2.status === 0 && v2j.recorded && v2j.recorded.R1 === 'FIXED' && (v2j.unverified || []).join() === 'R2,R3' && led().findings.R1.verdicts[0].verdict === 'FIXED' && led().findings.R1.verdicts[0].source === 'recheck'
+      && !led().findings.R2.verdicts.some((x) => x.verdict === 'FIXED' || x.verdict === 'NOT FIXED'),
+    v2.stdout.slice(0, 300) + v2.stderr);
+  // The checkpoint: the fixes committed (M4), then HEAD recorded as the last green.
+  // d.js stays uncommitted, so the dirty count is 1: tracked changes only.
+  g(['add', 'src/a.js', 'src/a.test.js', 'src/b.js', 'docs/x.md']); g(['commit', '-q', '-m', 'fixes']);
+  const head1 = g(['rev-parse', 'HEAD']).stdout.trim();
+  const c1 = run(['--checkpoint', '--ledger', ledger, '--root', repo]);
+  const cj = parse(c1) || {};
+  check11('--checkpoint --ledger records HEAD with a dirty count and the IDs FIXED this round',
+    c1.status === 0 && cj.checkpoint && cj.checkpoint.sha === head1 && cj.checkpoint.dirty === 1 && cj.lastGreen === head1 && cj.checkpoint.fixed.join() === 'R1,R4,R5,R7,R8,R9,R10' && led().lastGreen === head1,
+    c1.stdout.slice(0, 300) + c1.stderr);
+
+  // Round 2 for the NOT FIXED judgment finding and the merged mechanical one.
+  const r2 = run(V.concat(['--mechanical', 'R1', '--judgment', 'R6']));
+  const m2 = parse(r2) || {};
+  const s21 = has('verify-2-1.txt') ? fs.readFileSync(path.join(out, 'verify-2-1.txt'), 'utf8') : '';
+  check11('a second call names its files by the call number and marks the repeated IDs round 2',
+    r2.status === 0 && m2.call === 2 && has('recheck-2.json') && (readJson(path.join(out, 'recheck-2.json')) || []).some((x) => x.id === 'code-1-recheck-r2')
+      && s21.split('\n')[0] === 'M3 verify shard: call 2, shard 1 of 1, ids R6' && s21.includes('===== R6 (round 2) =====')
+      && led().findings.R6.round === 2 && led().findings.R1.round === 2 && led().findings.R5.round === 1 && led().calls === 2,
+    r2.stderr + s21.slice(0, 120));
+  const r3 = run(V.concat(['--judgment', 'R6']));
+  check11('a third round refuses with rounds_exhausted and the last green sha, and writes nothing',
+    r3.status === 1 && /"error":"rounds_exhausted"/.test(r3.stderr) && /"R6"/.test(r3.stderr) && r3.stderr.includes(head1) && !has('verify-3-1.txt') && led().calls === 2, r3.stderr);
+  const twice = run(V.concat(['--mechanical', 'R2', '--judgment', 'R2']));
+  const unknown = run(V.concat(['--judgment', 'R40']));
+  check11('an ID named twice, or named but not merged, refuses',
+    twice.status === 1 && /usage/.test(twice.stderr) && /R2/.test(twice.stderr) && unknown.status === 1 && /usage/.test(unknown.stderr) && /R40/.test(unknown.stderr) && led().calls === 2, twice.stderr + unknown.stderr);
+
+  // Review of #267 (2026-10-24), R1: a round-two results file holds rows for the
+  // findings named in round two only. A finding from an earlier round whose rows
+  // are all absent was not rechecked this time, so it keeps its verdicts; it is
+  // listed under notInResults, never written up as NOT VERIFIED.
+  const rcOut2 = path.join(sandbox, 'rc-out-11-r2');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(out, 'recheck-2.json'), '--out', rcOut2], { cwd: repo, encoding: 'utf8' });
+  const v3 = run(['--verdicts', '--ledger', ledger, '--recheck', path.join(rcOut2, 'results.json')]);
+  const v3j = parse(v3) || {};
+  check11('recording a later round\'s recheck results leaves a finding whose rows are not in that file untouched, and lists it under notInResults',
+    v3.status === 0 && v3j.recorded && v3j.recorded.R1 === 'FIXED' && led().findings.R1.verdicts.filter((x) => x.round === 2).length === 1
+      && led().findings.R2.verdicts.length === 1 && led().findings.R3.verdicts.length === 1 && (v3j.unverified || []).length === 0 && (v3j.notInResults || []).join() === 'R2,R3',
+    v3.stderr + v3.stdout.slice(0, 300) + ' R2 verdicts: ' + JSON.stringify((led().findings.R2 || {}).verdicts));
+  // R2: IDs are positions in the sorted merge, so a follow-up finding appended
+  // to the file (M5's one generation) shifts every ID after it. A ledger entry
+  // follows its finding's key: the exhausted finding is still refused, under the
+  // ID it holds now, and a call that proceeds writes the ledger under the new IDs.
+  const late = f('security', 'src/z.js', 1, 'src/z.js:late', 'Blocks. A late finding sorts first.', { check: 'cat src/z.js', expect: { exit: 0 } });
+  late.severity = 'block';
+  const file3 = jsonl(rows.concat([late]));
+  const renumRefused = run(['--verify', file3, '--receipts', receipts, '--scope', scope, '--out', out, '--root', repo, '--judgment', 'R7']);
+  check11('after a follow-up finding renumbers the merge, a ledger entry follows its key: the exhausted finding is refused under its new ID',
+    renumRefused.status === 1 && /"error":"rounds_exhausted"/.test(renumRefused.stderr) && /"R7"/.test(renumRefused.stderr) && !has('verify-3-1.txt') && led().calls === 2,
+    renumRefused.stderr + renumRefused.stdout.slice(0, 200));
+  const renum = run(['--verify', file3, '--receipts', receipts, '--scope', scope, '--out', out, '--root', repo, '--judgment', 'R5']);
+  const mr = parse(renum) || {};
+  check11('a renumbered ledger is written under the new IDs and the call reports each move',
+    renum.status === 0 && mr.renumbered && mr.renumbered.R6 === 'R7' && mr.renumbered.R1 === 'R2' && led().findings.R7.round === 2 && led().findings.R5.round === 2
+      && led().findings.R2.path === 'mechanical' && !led().findings.R1 && led().findings.R13.path === 'browser' && led().calls === 3,
+    renum.stderr + renum.stdout.slice(0, 300));
+  // R16: outside --verify the ledger must already exist; a mistyped path would
+  // otherwise start a second ledger with no green checkpoint in it.
+  const ghost = path.join(sandbox, 'no-such-ledger.json');
+  const cpGhost = run(['--checkpoint', '--ledger', ghost, '--root', repo]);
+  const vdGhost = run(['--verdicts', path.join(out, 'verify-1-1.txt'), good, '--ledger', ghost]);
+  check11('a ledger path that does not exist is refused outside --verify, and nothing is created there',
+    cpGhost.status === 1 && /"error":"not_found"/.test(cpGhost.stderr) && vdGhost.status === 1 && /"error":"not_found"/.test(vdGhost.stderr) && !fs.existsSync(ghost),
+    cpGhost.stderr + cpGhost.stdout.slice(0, 100) + vdGhost.stderr + vdGhost.stdout.slice(0, 100));
+  // The follow-up the verifier noted (R24 of that review): --verify names every
+  // finding before a verdict can be recorded, so a verdict for an ID the ledger
+  // has never seen is a mistake to refuse, not an entry to create by position.
+  const strayRet = ret('R40: FIXED\nnot a finding this run has\n');
+  const stray = run(['--verdicts', '--tier', 'verify', '--ids', 'R40', strayRet, '--ledger', ledger]);
+  check11('a verdict for an ID the ledger has never seen is refused and creates no entry',
+    stray.status === 1 && /"error":"unknown_id"/.test(stray.stderr) && /R40/.test(stray.stderr) && !led().findings.R40, stray.stderr + stray.stdout.slice(0, 200));
+
+  // The diff's starting point when the scope has no snapshot, and when it has no range.
+  const scopeEnd = scopeFile('scope-11-end.json', { range: { base: end, end }, uncommitted: { baseline: null, untracked: { files: untrackedAtStart, added: 3, deleted: 0 } } });
+  const outEnd = path.join(sandbox, 'verify-out-11-end');
+  fs.mkdirSync(outEnd);
+  const rEnd = run(['--verify', file, '--receipts', receipts, '--scope', scopeEnd, '--out', outEnd, '--root', repo, '--judgment', 'R4']);
+  const mEnd = parse(rEnd) || {};
+  const sEnd = fs.existsSync(path.join(outEnd, 'verify-1-1.txt')) ? fs.readFileSync(path.join(outEnd, 'verify-1-1.txt'), 'utf8') : '';
+  check11('without a baseline the diff comes from range.end, and the pre-review edit is then part of it as M3 says',
+    rEnd.status === 0 && mEnd.diffFrom && mEnd.diffFrom.kind === 'end' && mEnd.diffFrom.sha === end && sEnd.includes('src/d.js'), rEnd.stderr + JSON.stringify(mEnd.diffFrom));
+  const scopeNone = scopeFile('scope-11-none.json', { range: null, uncommitted: { baseline: null, untracked: { files: [], added: 0, deleted: 0 } } });
+  const outNone = path.join(sandbox, 'verify-out-11-none');
+  fs.mkdirSync(outNone);
+  const noEnd = run(['--verify', file, '--receipts', receipts, '--scope', scopeNone, '--out', outNone, '--root', repo, '--judgment', 'R4']);
+  const writtenByRefusal = fs.readdirSync(outNone).length;
+  const withEnd = run(['--verify', file, '--receipts', receipts, '--scope', scopeNone, '--out', outNone, '--root', repo, '--judgment', 'R4', '--end', end]);
+  check11('a scope with neither baseline nor range refuses without --end, and takes --end',
+    noEnd.status === 1 && /--end/.test(noEnd.stderr) && writtenByRefusal === 0 && withEnd.status === 0 && ((parse(withEnd) || {}).diffFrom || {}).sha === end, 'with --end: ' + withEnd.stderr + withEnd.stdout.slice(0, 200) + ' | without: ' + noEnd.stderr);
+
+  // An empty diff: nothing after the starting point changed, so there is no fix
+  // for a verifier to judge; a recheck still runs, and fails honestly.
+  const repo2 = path.join(sandbox, 'verify-11-clean');
+  fs.mkdirSync(repo2);
+  const g2 = (args) => spawnSync('git', ['-C', repo2, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g2(['init', '-q']);
+  fs.writeFileSync(path.join(repo2, 'a.js'), 'console.log(token);\n');
+  g2(['add', '-A']); g2(['commit', '-q', '-m', 'clean']);
+  const head2 = g2(['rev-parse', 'HEAD']).stdout.trim();
+  const scope2 = scopeFile('scope-11-clean.json', { range: { base: head2, end: head2 }, uncommitted: { baseline: null, untracked: { files: [], added: 0, deleted: 0 } } });
+  const file2 = jsonl([rows[0], rows[4]]);
+  const out2 = path.join(sandbox, 'verify-out-11-clean');
+  fs.mkdirSync(out2);
+  const empty = run(['--verify', file2, '--receipts', receipts, '--scope', scope2, '--out', out2, '--root', repo2, '--mechanical', 'R1', '--judgment', 'R2']);
+  const writtenByEmpty = fs.readdirSync(out2).length;
+  const mechOnly = run(['--verify', file2, '--receipts', receipts, '--scope', scope2, '--out', out2, '--root', repo2, '--mechanical', 'R1']);
+  check11('an empty diff with a judgment ID refuses with empty_diff and writes nothing; a mechanical-only call proceeds',
+    empty.status === 1 && /"error":"empty_diff"/.test(empty.stderr) && writtenByEmpty === 0 && mechOnly.status === 0 && fs.existsSync(path.join(out2, 'recheck-1.json')), 'mechanical only: ' + mechOnly.stderr + mechOnly.stdout.slice(0, 200) + ' | empty: ' + empty.stderr);
+
+  // The guards --shards already keeps: an existing file, a missing receipt, a bare call.
+  const out3 = path.join(sandbox, 'verify-out-11-taken');
+  fs.mkdirSync(out3);
+  fs.writeFileSync(path.join(out3, 'verify-1-1.txt'), 'an earlier run\n');
+  const taken = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', out3, '--root', repo, '--judgment', 'R4']);
+  check11('a shard file that already exists for the call number is never replaced',
+    taken.status === 1 && /"error":"exists"/.test(taken.stderr) && fs.readFileSync(path.join(out3, 'verify-1-1.txt'), 'utf8') === 'an earlier run\n' && !fs.existsSync(path.join(out3, 'ledger.json')), taken.stderr);
+  const thin = path.join(sandbox, 'receipts-11-thin');
+  fs.mkdirSync(thin);
+  const out4 = path.join(sandbox, 'verify-out-11-thin');
+  fs.mkdirSync(out4);
+  const noSaved = run(['--verify', file, '--receipts', thin, '--scope', scope, '--out', out4, '--root', repo, '--mechanical', 'R2']);
+  check11('a mechanical ID with no saved tier 1 output stops the run and names the file',
+    noSaved.status === 1 && /"error":"missing_receipt"/.test(noSaved.stderr) && /code-2\.txt/.test(noSaved.stderr) && fs.readdirSync(out4).length === 0, noSaved.stderr);
+  const bare = run(['--verify', file]);
+  check11('--verify without its folders and lists is a usage error', bare.status === 1 && /usage/.test(bare.stderr), bare.stderr);
+  check11('the usage shows every ID flag as optional',
+    bare.stderr.includes('[--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>]'), bare.stderr.slice(0, 300));
+
+  // Issue #272: the mode prints what consumes each file it wrote, in order, so a
+  // rule can say "run what it prints" instead of restating the calls. The suite
+  // runs the script by its absolute path from a folder outside the repository,
+  // which takes the absolute branch of the printed script paths; the case after
+  // the next runs from the project root and takes the relative one.
+  const outNext = path.join(sandbox, 'verify-out-11-next');
+  fs.mkdirSync(outNext);
+  const ledgerNext = path.join(outNext, 'ledger.json');
+  const rNext = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outNext, '--root', repo, '--mechanical', 'R1', '--judgment', 'R4']);
+  const mNext = parse(rNext) || {};
+  const nx = Array.isArray(mNext.next) ? mNext.next : [];
+  const recheckNext = path.join(outNext, 'recheck-1.json');
+  const shardNext = path.join(outNext, 'verify-1-1.txt');
+  const returnNext = path.join(outNext, 'verify-1-1-return.txt');
+  check11('--verify prints the command that consumes each file it wrote',
+    rNext.status === 0 && nx.length === 3
+      && nx[0].do === 'run' && nx[0].command === 'node ' + RUN_CHECKS + ' --checks ' + recheckNext + ' --out ' + outNext
+      && nx[0].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + ledgerNext + ' --recheck ' + path.join(outNext, 'results.json')
+      && nx[1].do === 'dispatch' && nx[1].agent === 'fix-verifier' && nx[1].file === shardNext && nx[1].save === returnNext
+      && nx[1].prompt === 'Your findings, M3\'s instruction and the diff of the fixes are in ' + shardNext + '; read it in full and follow it exactly.'
+      && nx[1].record === 'node ' + SCRIPT + ' --verdicts ' + shardNext + ' ' + returnNext + ' --ledger ' + ledgerNext
+      && nx[2].do === 'run' && nx[2].after === 'the checkpoint commit' && nx[2].command === 'node ' + SCRIPT + ' --checkpoint --ledger ' + ledgerNext + ' --root ' + repo,
+    rNext.stderr + JSON.stringify(nx).slice(0, 600));
+  // R9 of the #272 review: the relative branch, the one every run from a
+  // project root takes. Run from this repository's root, the printed script
+  // paths are relative to it, as the rule's commands show them.
+  const ROOT = path.resolve(__dirname, '..');
+  const outRel = path.join(sandbox, 'verify-out-11-rel');
+  fs.mkdirSync(outRel);
+  const rRel = spawnSync(process.execPath, [SCRIPT, '--verify', file, '--receipts', receipts, '--scope', scope, '--out', outRel, '--root', repo, '--mechanical', 'R1'], { cwd: ROOT, encoding: 'utf8' });
+  let nRel = [];
+  try { nRel = JSON.parse(rRel.stdout).next || []; } catch (e) { nRel = []; }
+  check11('run from the project root, the printed commands name the scripts by their relative paths',
+    rRel.status === 0 && nRel.length === 2 && String(nRel[0].command).startsWith('node .claude/scripts/run-checks.js --checks ')
+      && String(nRel[0].record).startsWith('node .claude/scripts/merge-findings.js --verdicts ') && String(nRel[1].command).startsWith('node .claude/scripts/merge-findings.js --checkpoint '),
+    rRel.stderr + JSON.stringify(nRel).slice(0, 400));
+  // R10 of the #272 review: a path with a space (a Windows home folder, a
+  // project under "My Projects") is quoted in every printed command and
+  // record, so the runner can paste the line as it is; a plain path stays bare.
+  const outSpace = path.join(sandbox, 'verify out 11');
+  fs.mkdirSync(outSpace);
+  const q = (p) => "'" + p + "'";
+  const rSpace = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outSpace, '--root', repo, '--mechanical', 'R1', '--judgment', 'R4']);
+  const mSpace = parse(rSpace) || {};
+  const ns = Array.isArray(mSpace.next) ? mSpace.next : [];
+  check11('a space in the out folder is quoted in every printed command and record',
+    rSpace.status === 0 && ns.length === 3
+      && ns[0].command === 'node ' + RUN_CHECKS + ' --checks ' + q(path.join(outSpace, 'recheck-1.json')) + ' --out ' + q(outSpace)
+      && ns[0].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + q(path.join(outSpace, 'ledger.json')) + ' --recheck ' + q(path.join(outSpace, 'results.json'))
+      && ns[1].record === 'node ' + SCRIPT + ' --verdicts ' + q(path.join(outSpace, 'verify-1-1.txt')) + ' ' + q(path.join(outSpace, 'verify-1-1-return.txt')) + ' --ledger ' + q(path.join(outSpace, 'ledger.json'))
+      && ns[2].command === 'node ' + SCRIPT + ' --checkpoint --ledger ' + q(path.join(outSpace, 'ledger.json')) + ' --root ' + repo,
+    rSpace.stderr + JSON.stringify(ns).slice(0, 600));
+  const outWrite = path.join(sandbox, 'verify-out-11-write');
+  fs.mkdirSync(outWrite);
+  const rWrite = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outWrite, '--root', repo, '--mechanical', 'R2']);
+  const mWrite = parse(rWrite) || {};
+  const nw = Array.isArray(mWrite.next) ? mWrite.next : [];
+  check11('a needsExpect row puts a write entry first',
+    rWrite.status === 0 && nw.length === 3 && nw[0].do === 'write' && (nw[0].ids || []).join() === 'R2' && nw[0].file === path.join(outWrite, 'recheck-1.json') && nw[1].do === 'run' && nw[2].do === 'run',
+    rWrite.stderr + JSON.stringify(nw).slice(0, 400));
+  // The placeholder row is refused by the checks runner, so the record lists the
+  // finding under unverified and prints what to do next: write the expect, run
+  // the recheck file again, record again.
+  const rcOutWrite = path.join(sandbox, 'rc-out-11-write');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(outWrite, 'recheck-1.json'), '--out', rcOutWrite], { cwd: repo, encoding: 'utf8' });
+  const recWrite = run(['--verdicts', '--ledger', path.join(outWrite, 'ledger.json'), '--recheck', path.join(rcOutWrite, 'results.json')]);
+  const mRec = parse(recWrite) || {};
+  const nr = Array.isArray(mRec.next) ? mRec.next : [];
+  check11('a recheck record lists its unverified rows under next',
+    recWrite.status === 0 && (mRec.unverified || []).join() === 'R2' && nr.length === 2
+      && nr[0].do === 'write' && (nr[0].ids || []).join() === 'R2' && nr[0].file === path.join(outWrite, 'recheck-1.json')
+      && nr[1].do === 'run' && nr[1].command === 'node ' + RUN_CHECKS + ' --checks ' + path.join(outWrite, 'recheck-1.json') + ' --out ' + rcOutWrite
+      && nr[1].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + path.join(outWrite, 'ledger.json') + ' --recheck ' + path.join(rcOutWrite, 'results.json'),
+    recWrite.stderr + JSON.stringify(mRec).slice(0, 500));
+  const outOne = path.join(sandbox, 'verify-out-11-one');
+  fs.mkdirSync(outOne);
+  const rOne = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outOne, '--root', repo, '--judgment', 'R4']);
+  const mOne = parse(rOne) || {};
+  const no = Array.isArray(mOne.next) ? mOne.next : [];
+  check11('an ID flag may be left out when its list is empty',
+    rOne.status === 0 && fs.existsSync(path.join(outOne, 'verify-1-1.txt')) && !fs.existsSync(path.join(outOne, 'recheck-1.json')) && mOne.recheck === null && no.length === 2 && no[0].do === 'dispatch' && no[1].do === 'run',
+    rOne.stderr + JSON.stringify(no).slice(0, 300));
+  // The first call above named R12 under --browser: its re-run is the runner's
+  // (the check was written before the fix), so the entry names the re-run, the
+  // return file and the record, and sits before the checkpoint entry.
+  const n1 = Array.isArray(m1.next) ? m1.next : [];
+  const bEntry = n1.find((e) => e.do === 'browser') || {};
+  check11('a browser ID gets a browser entry naming its re-run, its return file and its record, before the checkpoint entry',
+    (bEntry.ids || []).join() === 'R12' && bEntry.save === path.join(out, 'browser-1-R12-return.txt') && /R12: FIXED/.test(bEntry.what)
+      && bEntry.record === 'node ' + SCRIPT + ' --verdicts --tier verify --ids R12 ' + bEntry.save + ' --ledger ' + ledger
+      && n1.indexOf(bEntry) < n1.length - 1 && n1[n1.length - 1].do === 'run' && /--checkpoint/.test(n1[n1.length - 1].command),
+    JSON.stringify(n1).slice(0, 600));
+  // The verifier instruction lives in three places and a change to one must
+  // fail here rather than drift, as section 8 holds M2's two instructions.
+  const HITL = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'shared', 'hitl-loop.md'), 'utf8');
+  const VERIFIER = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'agents', 'fix-verifier.md'), 'utf8');
+  check11('M3_INSTRUCTION is the verifier sentence hitl-loop.md and fix-verifier.md carry',
+    typeof mod.M3_INSTRUCTION === 'string' && HITL.includes(mod.M3_INSTRUCTION) && VERIFIER.includes(mod.M3_INSTRUCTION),
+    'in hitl-loop.md: ' + HITL.includes(mod.M3_INSTRUCTION) + '; in the agent: ' + VERIFIER.includes(mod.M3_INSTRUCTION));
+}
+
 fs.rmSync(sandbox, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }

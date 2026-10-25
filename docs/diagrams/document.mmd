@@ -6,7 +6,7 @@ config:
 ---
 flowchart TB
   accTitle: Inside /tk:document
-  accDescr: Document follows review once the review loop has settled. It updates the README, CLAUDE.md, the changelog, the lessons and the design profile, and runs index when the codebase map is missing or 10 or more commits old. It looks for the places you corrected Claude and keeps them in a private correction ledger on your machine, saving nothing until you accept it. It commits, writes the cycle page saying what changed and why, and in a worktree pushes the branch and opens a pull request. The line ends here.
+  accDescr: Document follows review once the review loop has settled. It updates the README, CLAUDE.md, the changelog, the lessons and the design profile, and runs index when the codebase map is missing or 10 or more commits old. It looks for the places you corrected Claude and keeps them in a private correction ledger on your machine, saving nothing until you accept it. It commits, writes the cycle page saying what changed and why, and in a worktree pushes the branch and opens a pull request, or, where branches land on your machine, saves its text for merge. The line ends here.
 
   %% Facts from .claude/commands/document.md (what it updates, the ledger, the
   %% commits, the worktree PR, the cycle page) and M12 and M14 in hitl-stages.md.
@@ -14,7 +14,7 @@ flowchart TB
   A("/tk:document<br/>follows review") --- U("Updates README, CLAUDE.md,<br/>CHANGELOG, LESSONS<br/>and the design profile") --- L("Correction ledger<br/>what you corrected, kept on your machine") --- C("Commits") --- P("Cycle page<br/>what changed and why") --- E("End of the line")
   U --- I("/tk:index<br/>when the map is missing or stale")
   L -.- Y("Nothing saved<br/>until you accept it")
-  C --- W("In a worktree:<br/>pushes and opens a PR")
+  C --- W("In a worktree:<br/>pushes and opens a PR,<br/>or saves its text for /tk:merge")
 
   classDef stn fill:{{bg}},stroke:{{text}},stroke-width:3px,color:{{text}}
   classDef side fill:{{bg}},stroke:{{warn}},stroke-width:2px,color:{{text}}

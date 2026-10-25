@@ -67,6 +67,11 @@
 //                 the missing and skipped paths on stderr, and exits 0 either
 //                 way.
 //
+//   node .claude/scripts/render-html.js --fold-cycle --branch <b>
+//   --fold-cycle  fold a landed branch's cycle page into the main cycle page
+//                 and print one JSON line (issue #269; the block that runs it
+//                 sits beside --standing and says what it merges).
+//
 //   The hosted stamp. After a publish, line 1 of the local mirror is
 //     <!-- hosted: <url> -->
 //   and the file's own first line (the doctype) becomes line 2. The index row
@@ -139,9 +144,9 @@ const opts = {
   shell: '', name: '', data: '', outDir: 'artifacts/html', stable: false,
   noAbs: false,
   // index modes (issue #154; --index-sync from the holistic pass; --standing
-  // and its --branch from issue #237)
+  // and its --branch from issue #237; --fold-cycle from issue #269)
   indexAdd: false, indexUrl: false, indexSync: false, type: '', local: '', url: '',
-  standing: false, branch: ''
+  standing: false, branch: '', foldCycle: false
 };
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -155,6 +160,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--index-url') opts.indexUrl = true; // boolean flag
   else if (a === '--index-sync') opts.indexSync = true; // boolean flag
   else if (a === '--standing') opts.standing = true; // boolean flag
+  else if (a === '--fold-cycle') opts.foldCycle = true; // boolean flag
   else if (a === '--branch') opts.branch = argv[++i] || '';
   else if (a === '--type') opts.type = argv[++i] || '';
   else if (a === '--local') opts.local = argv[++i] || '';
@@ -364,26 +370,25 @@ function underRepoRoot(abs) { return underRoot(abs, REPO_ROOT) || underRoot(abs,
 //    again, and a sibling worktree's copy of that file never had the other
 //    branch's change, so it would mark that branch's findings fixed. The rule
 //    covers the render, --index-url and --index-add alike, so every lookup
-//    and every record keys the page the render wrote. No other name changes.
+//    and every record keys the page the render wrote. Since issue #269 the
+//    cycle page follows the same rule (`cycle`, `cycle-<branch>`,
+//    `cycle-detached-<short sha>`): one shared log let worktrees running
+//    cycles on the same day replace each other's headline on one link, and a
+//    publish was refused when the live page came from another session. A
+//    branch's first cycle page starts from the main page (cyclePredecessor),
+//    and /merge folds it back with --fold-cycle. No other name changes.
 // 2. The standing review and cycle pages live in the MAIN copy's
 //    artifacts/html/ (REPO_ROOT, the root the index already uses), read and
 //    written there whichever working copy renders them. A worktree folder is
 //    deleted when its cycle ends, so a page inside it, or an index row
 //    pointing into it, outlives nothing; the main copy outlives every
-//    worktree, which is also how /merge finds a landed branch's page. The
-//    cycle page keeps its one name: it is a log of past cycles, so parallel
-//    cycles add to it, and there is no finding for one to close falsely.
+//    worktree, which is also how /merge finds a landed branch's page.
 //
 // Rule 2 fires only for a render bound for the working copy's own
 // artifacts/html (the default, or the prompts' explicit
 // `--out-dir artifacts/html`); any other --out-dir keeps its name and folder.
 // When the default branch cannot be told (no origin/HEAD, no main, no master)
-// or this is not a repository, the name stays `review`, as before.
-//
-// Known limit: two renders of the shared cycle page in the same second both
-// read the same predecessor, and the later write wins, dropping the earlier
-// run's entry. A render takes well under a second, so this is documented
-// rather than locked.
+// or this is not a repository, the name stays `review` or `cycle`, as before.
 function gitRead(args) {
   const r = require('child_process').spawnSync('git', args,
     { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -405,15 +410,23 @@ function defaultBranch() {
 // one string in the file name, the index and the lookup alike.
 function safeFileName(n) { return n.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_'); }
 
-// Which page a bare `review` means here: { name, label }, where label is the
-// branch to show in the page title ('' when the name is unchanged). `branch`
-// names a branch other than the current one.
+// The two standing pages the branch rule covers, each with the shell that
+// renders it (the cycle page renders through the document shell).
+const STANDING_SHELL = { review: 'review', cycle: 'document' };
+// How many past cycles the cycle page's log keeps: the page is a summary, not
+// an archive. Declared up here because --fold-cycle, which runs before the
+// render code below is reached, caps the main page's log too.
+const CYCLE_LOG_MAX = 12;
+
+// Which page a bare `review` or `cycle` means here: { name, label }, where
+// label is the branch ('' when the name is unchanged). `branch` names a branch
+// other than the current one.
 function standingPage(name, branch) {
-  if (name !== 'review') return { name: name, label: '' };
+  if (!Object.prototype.hasOwnProperty.call(STANDING_SHELL, name)) return { name: name, label: '' };
   let b = branch || gitRead(['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (!b) {
     const sha = gitRead(['rev-parse', '--short', 'HEAD']);
-    return sha ? { name: 'review-detached-' + sha, label: 'detached ' + sha } : { name: name, label: '' };
+    return sha ? { name: name + '-detached-' + sha, label: 'detached ' + sha } : { name: name, label: '' };
   }
   const main = defaultBranch();
   if (!main || b === main) return { name: name, label: '' };
@@ -423,7 +436,43 @@ function standingPage(name, branch) {
   const safe = safeFileName(b);
   const tag = (safe !== b || /^detached-/.test(b))
     ? '-' + require('crypto').createHash('sha1').update(b).digest('hex').slice(0, 6) : '';
-  return { name: 'review-' + safe + tag, label: b };
+  return { name: name + '-' + safe + tag, label: b };
+}
+
+// The page a cycle render (or --standing) reads as the one it replaces. A
+// branch's own page when it has one; otherwise, for a branch page, the main
+// page, so a branch's first cycle summary starts from the repository's log and
+// its open doc mismatches instead of from nothing (issue #269). `seeded` tells
+// the since-line to say so. Only the data island is read, never the file, so
+// the main page's hosted stamp is never carried onto a branch's page. A branch
+// page that /merge already folded into the main page counts as no page: a
+// later cycle on a reused branch name starts again from the main page.
+function cyclePredecessor(file, page) {
+  let own = priorPayload(file);
+  if (own.state === 'ok' && own.data.foldedAt) own = { state: 'none' };
+  if (own.state !== 'none' || !page.label) return own;
+  const fromMain = priorPayload(path.join(path.dirname(file), 'cycle.html'));
+  return fromMain.state === 'ok' ? Object.assign(fromMain, { seeded: page.label }) : own;
+}
+
+// The JSON a page carries in its data island: every "<" escaped, so the JSON can
+// live inside a <script> block without "</script>" ever ending it early (the
+// shell's JSON.parse decodes it back), and the two line separators JavaScript
+// strings cannot hold raw escaped too.
+function islandJson(data) {
+  return JSON.stringify(data)
+    .replace(/</g, '\\u003c')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+// A page this script wrote, with only its data island swapped for `data`. The
+// shell, the tokens and a hosted stamp on line 1 stay as they are, so a fold
+// changes what a page says and nothing about how it looks or where it lives.
+function withIsland(html, data) {
+  return html.replace(/(<script[^>]*id="render-data"[^>]*>)[\s\S]*?(<\/script>)/, function (all, open, close) {
+    return open + islandJson(data) + close;
+  });
 }
 
 // The file a branch's page lives in, or '' for an unchanged name. A branch
@@ -485,9 +534,9 @@ function readIndexRows() {
   return rows;
 }
 
-const indexModes = [opts.indexAdd, opts.indexUrl, opts.indexSync, opts.standing].filter(Boolean).length;
-if (indexModes > 1) die('--index-add, --index-url, --index-sync, and --standing are mutually exclusive');
-if (opts.branch && !opts.standing) die('--branch is read only by --standing');
+const indexModes = [opts.indexAdd, opts.indexUrl, opts.indexSync, opts.standing, opts.foldCycle].filter(Boolean).length;
+if (indexModes > 1) die('--index-add, --index-url, --index-sync, --standing, and --fold-cycle are mutually exclusive');
+if (opts.branch && !opts.standing && !opts.foldCycle) die('--branch is read only by --standing and --fold-cycle');
 
 // The index modes return early, before any render validation, so a command line
 // that mixes them with render flags would silently win: exit 0, nothing rendered,
@@ -595,9 +644,119 @@ if (opts.standing) {
     if (prior.state === 'none') open = 0;
     else if (prior.state === 'ok') open = openFindings(prior.data).length;
   }
-  process.stdout.write(JSON.stringify({ name: page.name, file: file, exists: exists,
-                                        open: open, url: newestUrl(page.name, standingFileOf(page)) }) + '\n');
+  const line = { name: page.name, file: file, exists: exists,
+                 open: open, url: newestUrl(page.name, standingFileOf(page)) };
+  // The cycle page also lists the doc-code mismatches still open (issue #262),
+  // each marked with whether its reported-at commit is in HEAD's history: only
+  // those may be re-checked and closed from here. null when the page cannot be
+  // read, [] when there is no page yet. A branch with no page yet lists the
+  // main page's, the ones its first render will start from (issue #269).
+  if (opts.name === 'cycle') {
+    const prior = cyclePredecessor(file, page);
+    line.mismatches = prior.state === 'none' ? [] : prior.state !== 'ok' ? null
+      : (Array.isArray(prior.data.docMismatches) ? prior.data.docMismatches : [])
+          .filter(function (m) { return m && typeof m === 'object'; })
+          .map(function (m) { return Object.assign({}, m, { key: mismatchKey(m), inHistory: commitInHistory(m.at) }); });
+  }
+  process.stdout.write(JSON.stringify(line) + '\n');
   process.exit(0);
+}
+
+// Fold a landed branch's cycle page into the main page (issue #269). /merge
+// runs it once per landed branch, after the landing, so the main page stays
+// the history of everything that landed: the branch's cycles join the main
+// log (newest first, CYCLE_LOG_MAX kept, none twice), the mismatches it found
+// join the main page's, the ones it fixed close there, and a seeded one the
+// main page closed meanwhile stays closed. Only the two pages' data islands
+// change (withIsland), so the main page keeps its headline, its look and its
+// hosted stamp. Nothing is published: the hosted main page catches up at its
+// next /document publish. The branch page is marked foldedAt, so a second
+// fold adds nothing and a later cycle on the same branch name starts from the
+// main page. With no main page yet, the branch's page becomes it, minus its
+// own hosted stamp and its branch-only keys. Prints one JSON line: folded (log
+// entries added, the branch's headline among them), mismatches (added),
+// closed, file (the main page) and url (the branch page's hosted link).
+//     node .claude/scripts/render-html.js --fold-cycle --branch <b>
+if (opts.foldCycle) {
+  if (!opts.branch) die('--fold-cycle requires --branch <branch>');
+  const page = standingPage('cycle', opts.branch);
+  if (!page.label) {
+    die('--fold-cycle --branch ' + opts.branch + ' names the main cycle page itself (or the default branch ' +
+        'cannot be told), so there is nothing to fold');
+  }
+  const dir = path.join(REPO_ROOT, 'artifacts', 'html');
+  const branchFile = path.join(dir, safeFileName(page.name) + '.html');
+  const mainFile = path.join(dir, 'cycle.html');
+  const result = { folded: 0, mismatches: 0, closed: 0, file: mainFile,
+                   url: newestUrl(page.name, standingFileOf(page)) };
+  const done = function () { process.stdout.write(JSON.stringify(result) + '\n'); process.exit(0); };
+
+  const branch = priorPayload(branchFile);
+  if (branch.state === 'none') done();
+  if (branch.state !== 'ok') die('the branch\'s cycle page cannot be read: ' + branchFile);
+  const bd = branch.data;
+  if (bd.foldedAt) done();
+  const main = priorPayload(mainFile);
+  if (main.state === 'unreadable') die('the main cycle page cannot be read: ' + mainFile);
+  const branchHtml = fs.readFileSync(branchFile, 'utf-8');
+  const branchLog = Array.isArray(bd.cycleLog) ? bd.cycleLog.filter(isPlainObject) : [];
+  const branchItems = Array.isArray(bd.docMismatches) ? bd.docMismatches.filter(isPlainObject) : [];
+  let md, mainHtml;
+
+  if (main.state === 'none') {
+    md = Object.assign({}, bd);
+    ['docMismatchesSeeded', 'docMismatchesClosed', 'foldedAt'].forEach(function (k) { delete md[k]; });
+    md.sinceLast = 'The first cycle summary on the main page, folded in from branch ' + opts.branch + '.';
+    result.folded = 1 + branchLog.length;
+    result.mismatches = branchItems.length;
+    const nl = branchHtml.indexOf('\n');
+    mainHtml = nl !== -1 && STAMP_RE.test(branchHtml.slice(0, nl)) ? branchHtml.slice(nl + 1) : branchHtml;
+  } else {
+    md = main.data;
+    mainHtml = fs.readFileSync(mainFile, 'utf-8');
+    // The log: the branch's headline and its log entries, less any the main
+    // page already shows (a branch seeded from it carries the main page's).
+    const entryKey = function (e) { return String(e.date || '') + '\n' + String(e.line || ''); };
+    const mainLog = Array.isArray(md.cycleLog) ? md.cycleLog.filter(isPlainObject) : [];
+    const have = new Set(mainLog.map(entryKey));
+    have.add(entryKey({ date: cycleDate(md), line: typeof md.title === 'string' ? md.title.trim() : '' }));
+    const headline = typeof bd.title === 'string' ? bd.title.trim() : '';
+    const candidates = headline && !/^cycle summary$/i.test(headline)
+      ? [{ date: cycleDate(bd), pill: typeof bd.pill === 'string' ? bd.pill : '', line: headline }] : [];
+    const added = candidates.concat(branchLog).filter(function (e) {
+      const k = entryKey(e);
+      if (have.has(k)) return false;
+      have.add(k);
+      return true;
+    });
+    result.folded = added.length;
+    if (added.length) {
+      md.cycleLog = added.concat(mainLog)
+        .sort(function (a, b) { return String(b.date || '').localeCompare(String(a.date || '')); })
+        .slice(0, CYCLE_LOG_MAX);
+    }
+    // The mismatches: close what the branch fixed, then add what it found.
+    const seeded = new Set(stringList(bd.docMismatchesSeeded));
+    const fixedOnBranch = new Set(stringList(bd.docMismatchesClosed));
+    let items = Array.isArray(md.docMismatches) ? md.docMismatches.filter(isPlainObject) : [];
+    const before = items.length;
+    items = items.filter(function (m) { return !fixedOnBranch.has(mismatchKey(m)); });
+    result.closed = before - items.length;
+    const open = new Set(items.map(mismatchKey));
+    branchItems.forEach(function (m) {
+      const k = mismatchKey(m);
+      if (open.has(k) || seeded.has(k)) return;
+      items.push(m);
+      open.add(k);
+      result.mismatches++;
+    });
+    md.docMismatches = items;
+    if (!items.length) delete md.docMismatches;
+  }
+
+  fs.writeFileSync(mainFile, withIsland(mainHtml, md), 'utf-8');
+  fs.writeFileSync(branchFile, withIsland(branchHtml, Object.assign({}, bd, { foldedAt: new Date().toISOString() })), 'utf-8');
+  done();
 }
 
 if (opts.indexUrl) {
@@ -660,16 +819,18 @@ if (!opts.outDir) die('--out-dir given without a directory');
 // (in --stable mode there is no guard: overwriting is the intended behavior).
 //
 // A standing review or cycle page bound for this working copy's artifacts/html
-// is read and written in the main copy's instead, and a bare `review` becomes
-// this branch's page (issue #237; the rules sit beside standingPage above).
+// is read and written in the main copy's instead, and a bare `review` or
+// `cycle` becomes this branch's page (issues #237 and #269; the rules sit
+// beside standingPage above).
 let pageDir = path.resolve(process.cwd(), opts.outDir);
 let branchLabel = '';
+let pageRef = { name: opts.name, label: '' };
 if (opts.stable && (opts.shell === 'review' || opts.shell === 'document') && isStandardDir(opts.outDir)) {
   pageDir = path.join(REPO_ROOT, 'artifacts', 'html');
-  if (opts.shell === 'review') {
-    const page = standingPage(opts.name);
-    opts.name = page.name;
-    branchLabel = page.label;
+  if (STANDING_SHELL[opts.name] === opts.shell) {
+    pageRef = standingPage(opts.name);
+    opts.name = pageRef.name;
+    branchLabel = pageRef.label;
   }
 }
 const safeName = safeFileName(opts.name);
@@ -1319,9 +1480,8 @@ function priorPayload(file) {
 // A cycle summary has no standing backlog: its items are events that happened
 // once. So it reuses priorPayload() above verbatim and nothing else - not
 // carryForward (lens-merging is a review concept; a /document run always sees
-// the whole cycle), not stableFindingKey, not openFindings.
-
-const CYCLE_LOG_MAX = 12; // the page is a summary, not an archive
+// the whole cycle), not stableFindingKey, not openFindings. Its log keeps
+// CYCLE_LOG_MAX entries (declared beside standingPage).
 
 // The date this cycle is filed under. /document may set `date` outright; if it
 // does not, the subtitle it already writes begins with one.
@@ -1371,18 +1531,133 @@ function carryCycleLog(data, prior) {
   if (!data.cycleLog.length) delete data.cycleLog; // an empty section renders nothing
 }
 
+// ---- docs and code disagree (issue #262) ---------------------------------
+// A mismatch /document reported but did not fix (the code looks wrong, or it
+// is unclear which side is) stays on the cycle page until a later run finds the
+// doc and the code agreeing. Unlike the cycle log, this IS a standing backlog,
+// and the renderer owns the carrying for the same reason it owns the log: a
+// run that leaves an item out of its payload cannot lose it. Only a key listed
+// in docMismatchesFixed closes one.
+//
+// The key is the doc and its quoted text, never the line number: lines move
+// with every edit above them, and a key that moved with them would close the
+// item and open a copy (the lesson of #210-213: key on the text a finding is
+// about). Each item records the commit it was reported at, and a key listed as
+// fixed closes it only when that commit is in HEAD's history. The page is one
+// log for the whole repository, written from every worktree, so without that
+// rule a sibling branch that never had the change would read the two agreeing
+// and close another branch's report (the lesson of #237).
+const MISMATCH_TEXT = ['doc', 'docText', 'code', 'codeText', 'why'];
+const MISMATCH_LINES = ['docLine', 'codeLine'];
+
+function mismatchKey(m) { return String(m.doc || '') + '\n' + String(m.docText || '').trim(); }
+
+// Keep only the fields the page shows, as strings and line numbers, so a payload
+// cannot smuggle anything else onto the page.
+function cleanMismatch(m) {
+  const out = {};
+  MISMATCH_TEXT.forEach(function (k) { if (typeof m[k] === 'string' && m[k].trim()) out[k] = m[k].trim(); });
+  MISMATCH_LINES.forEach(function (k) { const n = Number(m[k]); if (Number.isInteger(n) && n > 0) out[k] = n; });
+  return out;
+}
+
+// Whether `at` is in HEAD's history. No recorded commit (a render outside a
+// repository) means no branch to protect, so it counts as in history. A value
+// that is not a commit hash never reaches git as an argument. A commit outside
+// HEAD's history is out of reach only while another branch still holds it: a
+// branch rebased, or squash-merged and deleted, leaves its commit on no branch
+// (or gone), and an item recorded there could otherwise never close.
+function commitInHistory(at) {
+  if (!at) return true;
+  if (!/^[0-9a-f]{7,40}$/.test(at)) return false;
+  if (gitRead(['merge-base', '--is-ancestor', at, 'HEAD']) !== null) return true;
+  return !gitRead(['branch', '--all', '--contains', at, '--format=%(refname)']);
+}
+
+function isPlainObject(x) { return !!x && typeof x === 'object' && !Array.isArray(x); }
+function stringList(x) { return Array.isArray(x) ? x.filter(function (s) { return typeof s === 'string'; }) : []; }
+
+// Returns the keys this run closed, for trackBranchMismatches below.
+function carryDocMismatches(data, prior) {
+  const fixed = new Set(Array.isArray(data.docMismatchesFixed) ? data.docMismatchesFixed.map(String) : []);
+  const carried = (prior.state === 'ok' && Array.isArray(prior.data.docMismatches))
+    ? prior.data.docMismatches.filter(isPlainObject) : [];
+  const reported = Array.isArray(data.docMismatches) ? data.docMismatches.filter(isPlainObject) : [];
+  const since = cycleDate(data) || new Date().toISOString().slice(0, 10);
+  const at = gitRead(['rev-parse', 'HEAD']) || '';
+
+  const out = [];
+  const byKey = new Map();
+  const closed = [];
+  carried.forEach(function (m) {
+    const key = mismatchKey(m);
+    if (byKey.has(key)) return;
+    if (fixed.has(key) && commitInHistory(m.at)) { closed.push(key); return; }
+    const item = Object.assign(cleanMismatch(m), { key: key, since: String(m.since || ''), at: String(m.at || '') });
+    byKey.set(key, item);
+    out.push(item);
+  });
+  reported.forEach(function (m) {
+    const clean = cleanMismatch(m);
+    const key = mismatchKey(clean);
+    if (!clean.doc || !clean.docText) return; // nothing to key on, nothing to show
+    // Reported again: take this run's lines and text, keep when and where it
+    // was first reported.
+    if (byKey.has(key)) { Object.assign(byKey.get(key), clean); return; }
+    const item = Object.assign(clean, { key: key, since: since, at: at });
+    byKey.set(key, item);
+    out.push(item);
+  });
+  data.docMismatches = out;
+  if (!out.length) delete data.docMismatches; // an empty section renders nothing
+  return closed;
+}
+
+// A branch's page remembers two key lists for /merge's fold (issue #269): the
+// open mismatches it started from (docMismatchesSeeded: the main page's, when
+// its first page was seeded) and the ones it closed (docMismatchesClosed). The
+// fold closes on the main page what the branch fixed, and leaves out a seeded
+// item the main page no longer holds: the main page closed it meanwhile, and
+// it must not come back. The renderer owns both lists and foldedAt, the way it
+// owns the log, so a payload never sets them; the main page carries none.
+function trackBranchMismatches(data, prior, closedNow, branch) {
+  delete data.docMismatchesSeeded;
+  delete data.docMismatchesClosed;
+  delete data.foldedAt;
+  if (!branch || prior.state !== 'ok') {
+    if (branch && closedNow.length) data.docMismatchesClosed = closedNow;
+    return;
+  }
+  const was = prior.data;
+  const seeded = prior.seeded
+    ? (Array.isArray(was.docMismatches) ? was.docMismatches.filter(isPlainObject).map(mismatchKey) : [])
+    : stringList(was.docMismatchesSeeded);
+  const closed = Array.from(new Set((prior.seeded ? [] : stringList(was.docMismatchesClosed)).concat(closedNow)));
+  if (seeded.length) data.docMismatchesSeeded = seeded;
+  if (closed.length) data.docMismatchesClosed = closed;
+}
+
 // One sentence about what changed since the reader last opened this page. The
 // three prior states stay distinct here for the same reason they do on the
 // review page: "no page yet" and "a page I could not read" are different facts.
-function markCycleChanged(data, prior) {
+// A branch's first page read the main page (issue #269), which its reader
+// never opened as this page, so it says where its history came from instead.
+// `branch` is the page's branch label, '' on the default branch.
+function markCycleChanged(data, prior, branch) {
   const c = cycleCounts(data);
   const scope = c.commits || c.files
     ? plural(c.commits, 'commit') + ' across ' + plural(c.files, 'file')
     : '';
 
   if (prior.state === 'none') {
-    data.sinceLast = 'First cycle summary recorded for this repository'
+    data.sinceLast = 'First cycle summary recorded for this ' + (branch ? 'branch' : 'repository')
       + (scope ? ': ' + scope + '.' : '.');
+    return;
+  }
+  if (prior.seeded) {
+    data.sinceLast = 'First cycle summary on branch ' + prior.seeded
+      + ', starting from the main page\'s earlier cycles and open doc mismatches'
+      + (scope ? '. This cycle: ' + scope + '.' : '.');
     return;
   }
   if (prior.state === 'unreadable') {
@@ -1644,12 +1919,17 @@ if (opts.shell === 'review') {
 // The cycle summary is the second identity-keyed page (issue #163). Same memory
 // mechanism as review, different vocabulary: events, not open findings. The path
 // is derived from outDir + safeName exactly as above, so it follows the --name
-// the caller passed (`cycle`) rather than hardcoding a filename.
+// the caller passed (`cycle`, or this branch's `cycle-<branch>`) rather than
+// hardcoding a filename. A branch's first page starts from the main page.
 if (opts.shell === 'document' && opts.stable) {
-  const priorCycle = priorPayload(path.join(pageDir, safeName + '.html'));
+  const priorCycle = cyclePredecessor(path.join(pageDir, safeName + '.html'), pageRef);
   carryCycleLog(parsed, priorCycle);
-  markCycleChanged(parsed, priorCycle);
+  const closedNow = carryDocMismatches(parsed, priorCycle);
+  trackBranchMismatches(parsed, priorCycle, closedNow, pageRef.label);
+  markCycleChanged(parsed, priorCycle, pageRef.label);
 }
+// The fixed list is an instruction to the carry above, never page content.
+if (opts.shell === 'document') delete parsed.docMismatchesFixed;
 // The debate page carries the same finding shape in its Recommended Actions,
 // and the retired labels were refused only on the review shell (v6.3.0
 // review, R23). Same rule, same note.
@@ -1664,13 +1944,9 @@ if (opts.shell === 'debate' && parsed.synthesis && Array.isArray(parsed.synthesi
 embedImages(parsed);
 if (opts.noAbs) stripAbsPaths(parsed);
 
-// Re-stringify with every "<" escaped to < so the JSON can live inside a
-// <script> block without "</script>" ever terminating it early. JSON.parse in
-// the shell decodes < back to "<" transparently.
-const safeJson = JSON.stringify(parsed)
-  .replace(/</g, '\\u003c')
-  .replace(/\u2028/g, '\\u2028')
-  .replace(/\u2029/g, '\\u2029');
+// Re-stringify with every "<" escaped (islandJson) so the JSON can live inside
+// a <script> block without "</script>" ever terminating it early.
+const safeJson = islandJson(parsed);
 
 const shellHtml = fs.readFileSync(shellPath, 'utf-8');
 const tokensCss = fs.readFileSync(tokensPath, 'utf-8');

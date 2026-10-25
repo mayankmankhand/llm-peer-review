@@ -1274,6 +1274,37 @@ section('The 16,000-character budget holds as a total (review R13)', function ()
   const L = out.json.lessons || {};
   check('the budget turns the inline lessons into a handle first, and the note says why',
     L.content === undefined && L.bytes === Buffer.byteLength(lessons) && typeof L.head === 'string' && /size budget/.test(L.note || ''), JSON.stringify({ content: typeof L.content, bytes: L.bytes, note: L.note }));
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: the size-budget handle carries ranges that cover the whole file in order', cover.ok, cover.why);
+});
+
+// #253: how a lessons handle's ranges cover the file. They must start at line 1, run
+// in order with no gap or overlap, end on the last line, and hold 28,500 bytes or
+// fewer each, except a single line over that, which gets a range of its own.
+function rangeCoverage(text, ranges) {
+  const lines = text.split(/(?<=\n)/);
+  if (!Array.isArray(ranges) || ranges.length === 0) return { ok: false, why: 'ranges ' + JSON.stringify(ranges) };
+  let next = 1;
+  for (const r of ranges) {
+    if (r.from !== next || !(r.to >= r.from)) return { ok: false, why: 'range ' + JSON.stringify(r) + ' should start at line ' + next };
+    const bytes = Buffer.byteLength(lines.slice(r.from - 1, r.to).join(''));
+    if (bytes > 28500 && r.to !== r.from) return { ok: false, why: 'range ' + JSON.stringify(r) + ' holds ' + bytes + ' bytes' };
+    next = r.to + 1;
+  }
+  if (next !== lines.length + 1) return { ok: false, why: 'ranges end on line ' + (next - 1) + ' of ' + lines.length };
+  return { ok: true, why: JSON.stringify(ranges) };
+}
+
+section('A lessons handle lists every line to read (#253)', function () {
+  // One line over 28,500 bytes cannot be split at a line end, so it is read alone.
+  const repo = newRepo('ranges-long-line');
+  const lessons = '# Lessons\n\n- **short**\n' + '- **' + 'x'.repeat(30000) + '**\n' + '- **after**\n';
+  write(repo, 'LESSONS.md', lessons);
+  commitAll(repo, 'init');
+  const out = runScript([], repo);
+  const L = (out.json && out.json.lessons) || {};
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: a single line over 28,500 bytes gets a range of its own', cover.ok && (L.ranges || []).some(r => r.from === 4 && r.to === 4), cover.why);
 });
 
 section('Output fits under the host\'s cut (harness research, P6-C1)', function () {
@@ -1306,6 +1337,11 @@ section('Output fits under the host\'s cut (harness research, P6-C1)', function 
   check('a LESSONS.md over 8 KB becomes a handle: path, bytes, lines and head, no content',
     L.exists === true && L.path === 'LESSONS.md' && L.content === undefined && L.bytes === Buffer.byteLength(lessons) && L.lines === 404 && typeof L.head === 'string' && lessons.startsWith(L.head) && L.head.length <= 1500 && L.head.endsWith('\n'),
     JSON.stringify({ path: L.path, bytes: L.bytes, lines: L.lines, head: (L.head || '').length, content: typeof L.content }));
+  // #253: the 404-line fixture is about 33.5 KB, so it takes two reads.
+  const cover = rangeCoverage(lessons, L.ranges);
+  check('253 ranges: the handle\'s ranges cover lines 1 to 404 in order, each 28,500 bytes or fewer, in at least 2 reads',
+    cover.ok && L.ranges.length >= 2 && L.ranges[L.ranges.length - 1].to === 404, cover.why);
+  check('253 ranges: the note says to read every range with the Read tool', /Read tool/.test(L.note || '') && /ranges/.test(L.note || ''), String(L.note));
   const plans = start.json.plans || [];
   check('the newest 10 plans keep full entries, the next 40 keep names, the rest are counted',
     plans.length === 50 && plans.slice(0, 10).every((x) => typeof x.progress === 'number' && typeof x.status === 'string') && plans.slice(10).every((x) => Object.keys(x).join() === 'name') && start.json.plansOmitted === 30 && plans[0].name === 'PLAN-issue-180.md',
@@ -1343,6 +1379,219 @@ section('Output fits under the host\'s cut (harness research, P6-C1)', function 
     Buffer.byteLength(overview) > 8192 && mo.length <= 1500 && overview.startsWith(mo) && typeof m.json.map.overviewCut === 'string' && /CODEBASE_MAP\.md/.test(m.json.map.overviewCut),
     'overview ' + mo.length + ' chars, overviewCut ' + JSON.stringify(m.json.map.overviewCut));
   check('the cut map is still sound and fresh', m.json.map.malformed === false && m.json.map.commitsBehind === 0, JSON.stringify(m.json.map).slice(0, 200));
+});
+
+// --- 265: where /document's cycle window starts -------------------------------------
+// A fresh worktree has no cycle marker of its own, and /document's fallback after
+// it (the last merged PR) reached 59 commits back. --cycle-start tries the working
+// copy's marker, then the newest plan's Start commit, then the main copy's marker,
+// each only when HEAD contains it.
+section('265 cycle-start: the working copy\'s marker, the newest plan, the main copy\'s marker', function () {
+  const repo = newRepo('cycle-main');
+  write(repo, '.gitignore', 'plans/PLAN-*.md\nartifacts/html/\n.claude/worktrees/\n');
+  write(repo, 'a.txt', 'a\n');
+  const c1 = commitAll(repo, 'one');
+  write(repo, 'a.txt', 'a\nb\n');
+  const c2 = commitAll(repo, 'two');
+  write(repo, 'artifacts/html/.last-cycle', c1 + '\n');
+  const wt = path.join(repo, '.claude', 'worktrees', 'w1');
+  git(repo, ['worktree', 'add', '-q', '-b', 'feat', wt]);
+  write(wt, 'b.txt', 'b\n');
+  commitAll(wt, 'three');
+  const start = function (cwd) { return runScript(['--cycle-start'], cwd).json; };
+  // A plan in the worktree, as /execute leaves it.
+  write(wt, 'plans/PLAN-feat.md', '# Feat\n\n**Overall Progress:** `0%`\n**Start commit:** ' + c2 + '\n**Models:** fit\n');
+  const a = start(wt);
+  check('cycle-start: a worktree with no marker starts at the newest plan\'s Start commit',
+    a.start === c2 && a.source === 'plan' && a.plan === 'PLAN-feat.md', JSON.stringify(a));
+  fs.rmSync(path.join(wt, 'plans'), { recursive: true, force: true });
+  const b = start(wt);
+  check('cycle-start: with no plan, a worktree starts at the main copy\'s marker when HEAD contains it',
+    b.start === c1 && b.source === 'main-marker' && b.plan === null, JSON.stringify(b));
+  const m = start(repo);
+  check('cycle-start: the main copy reads its own marker', m.start === c1 && m.source === 'marker', JSON.stringify(m));
+  // A marker HEAD does not contain: a commit made on another branch.
+  git(repo, ['checkout', '-q', '-b', 'side', c1]);
+  write(repo, 'side.txt', 's\n');
+  const side = commitAll(repo, 'side');
+  git(repo, ['checkout', '-q', 'main']);
+  write(wt, 'artifacts/html/.last-cycle', side + '\n');
+  const c = start(wt);
+  check('cycle-start: a marker HEAD does not contain is passed over', c.start === c1 && c.source === 'main-marker', JSON.stringify(c));
+  write(repo, 'artifacts/html/.last-cycle', side + '\n');
+  write(wt, 'artifacts/html/.last-cycle', '--not-a-sha\n');
+  const d = start(wt);
+  check('cycle-start: nothing usable prints a null start', d.start === null && d.source === null && runScript(['--cycle-start'], wt).status === 0, JSON.stringify(d));
+});
+
+// --- 265: the lessons check /document runs, without redirects -------------------------
+section('265 lessons: duplicated leads and leads with no write-up', function () {
+  const repo = newRepo('lessons-check');
+  write(repo, 'LESSONS.md', '# Lessons\n\n- **Alpha lead.**\n- **Beta lead.**\n- **Alpha lead.**\n- **Gamma lead.**\n');
+  write(repo, 'LESSONS-detail.md', '# Detail\n\n- **Alpha lead.** The write-up.\n- **Beta lead.** Another.\n');
+  commitAll(repo, 'init');
+  const a = runScript(['--lessons'], repo).json;
+  check('lessons: a lead listed twice and a lead with no write-up are both reported',
+    JSON.stringify(a.duplicates) === '["Alpha lead."]' && JSON.stringify(a.noWriteUp) === '["Gamma lead."]', JSON.stringify(a));
+  write(repo, 'LESSONS.md', '# Lessons\n\n- **Alpha lead.**\n- **Beta lead.**\n');
+  const b = runScript(['--lessons'], repo).json;
+  check('lessons: clean files print two empty lists',
+    Array.isArray(b.duplicates) && b.duplicates.length === 0 && Array.isArray(b.noWriteUp) && b.noWriteUp.length === 0, JSON.stringify(b));
+  // A lone ** on an earlier line (a glob) must not pair with the next line's lead.
+  write(repo, 'LESSONS-detail.md', '# Detail\n\nUse a glob such as `scripts/**` here.\n\n- **Alpha lead.** The write-up.\n- **Beta lead.** Another.\n');
+  const lone = runScript(['--lessons'], repo).json;
+  check('lessons: a bold span never runs across lines, as grep reads it',
+    Array.isArray(lone.noWriteUp) && lone.noWriteUp.length === 0, JSON.stringify(lone));
+  fs.rmSync(path.join(repo, 'LESSONS-detail.md'));
+  const c = runScript(['--lessons'], repo).json;
+  check('lessons: with no detail file every lead has no write-up', JSON.stringify(c.noWriteUp) === '["Alpha lead.","Beta lead."]', JSON.stringify(c));
+});
+
+// --- 272. the chain check: M14's countable gates, decided from files -------------
+// M14's transitions were judged from chat by each stage. --chain <stage> reads
+// what is on disk (the closing summary, the plan and its tally, the report's
+// digest and the ledger) and prints pass with the handoff, or the condition
+// that failed. A shapeless input is refused with bad_shape, never passed.
+section('272. --chain <stage>: the countable part of M14', function () {
+  const repo = newRepo('chain');
+  write(repo, '.gitignore', 'plans/\nreports/\n');
+  write(repo, 'a.txt', 'a\n');
+  write(repo, 'c.txt', 'c\n');
+  const base = commitAll(repo, 'base');
+  const plan = function (progress, start, steps) {
+    return '# Plan\n\n**Overall Progress:** `' + progress + '%`\n**Start commit:** ' + start + '\n**Models:** fit\n\n## Tasks\n\n' + steps;
+  };
+  const noTargetSteps = '- [x] 🟩 **Step 1: One** `[sequential]` → delivers: a\n  - [x] 🟩 Do it\n  - Check: no target - a config step\n\n' +
+    '- [x] 🟩 **Step 2: Two** `[sequential]` → depends on: Step 1\n  - [x] 🟩 Do it\n  - Check: no target - a config step\n';
+  write(repo, 'plans/PLAN-issue-5.md', plan(100, base, noTargetSteps));
+  write(repo, 'a.txt', 'a changed\n');
+  commitAll(repo, 'one');
+  write(repo, 'b.txt', 'b\n');
+  const tip = commitAll(repo, 'two');
+  const failed = function (o) { return Array.isArray(o.json.failed) ? o.json.failed : []; };
+  const notes = function (o) { return Array.isArray(o.json.notes) ? o.json.notes : []; };
+  const has = function (o, condition, re) { return failed(o).some(function (f) { return f.condition === condition && re.test(String(f.detail)); }); };
+
+  const ex = runScript(['--chain', 'execute'], repo);
+  check('--chain execute passes a finished plan and prints its range',
+    ex.status === 0 && ex.json.stage === 'execute' && ex.json.pass === true && dig(ex.json, 'handoff.range') === base + '..HEAD' &&
+    dig(ex.json, 'handoff.plan') === 'PLAN-issue-5.md' && dig(ex.json, 'handoff.start') === base && dig(ex.json, 'handoff.head') === tip,
+    brief(ex) + JSON.stringify(ex.json.failed) + JSON.stringify(ex.json.handoff));
+  write(repo, 'plans/PLAN-issue-5.md', plan(60, base, noTargetSteps));
+  const unfinished = runScript(['--chain', 'execute'], repo);
+  const targetSteps = '- [x] 🟩 **Step 1: One** `[sequential]` → delivers: a\n  - [x] 🟩 Do it\n  - Check target `t1`: `grep -c changed a.txt` - before `{"match": "^0"}` - after `{"match": "^1"}`\n';
+  write(repo, 'plans/PLAN-issue-6.md', plan(100, base, targetSteps));
+  const unproved = runScript(['--chain', 'execute', '--plan', 'plans/PLAN-issue-6.md'], repo);
+  check('--chain execute fails an unfinished plan and names the step',
+    unfinished.status === 0 && unfinished.json.pass === false && has(unfinished, 'progress', /60/) &&
+    unproved.status === 0 && unproved.json.pass === false && has(unproved, 'steps', /step 1\b.*unproved/i),
+    brief(unfinished) + JSON.stringify(unfinished.json.failed) + ' | ' + JSON.stringify(unproved.json.failed));
+  fs.rmSync(path.join(repo, 'plans', 'PLAN-issue-6.md'));
+  write(repo, 'plans/PLAN-issue-5.md', plan(100, base, noTargetSteps));
+  write(repo, 'a.txt', 'a changed again\n');
+  const dirtyPlan = runScript(['--chain', 'execute'], repo);
+  check('--chain execute fails when a file the plan committed is modified again',
+    dirtyPlan.json.pass === false && has(dirtyPlan, 'uncommitted', /a\.txt/), JSON.stringify(dirtyPlan.json.failed));
+  write(repo, 'a.txt', 'a changed\n');
+  write(repo, 'c.txt', 'c edited by the user\n');
+  const dirtyOther = runScript(['--chain', 'execute'], repo);
+  check('a modified file the plan never committed is a note, not a fail',
+    dirtyOther.json.pass === true && notes(dirtyOther).some(function (n) { return /c\.txt/.test(n); }), JSON.stringify(dirtyOther.json));
+  write(repo, 'c.txt', 'c\n');
+  write(repo, 'plans/PLAN-issue-7.md', '# Plan\n\n**Start commit:** ' + base + '\n\n## Tasks\n\n' + noTargetSteps);
+  const noProgress = runScript(['--chain', 'execute', '--plan', 'plans/PLAN-issue-7.md'], repo);
+  check('--chain execute refuses a plan with no progress line',
+    noProgress.status === 1 && noProgress.json.error === 'bad_shape' && /progress/i.test(String(noProgress.json.detail)), brief(noProgress) + JSON.stringify(noProgress.json));
+  fs.rmSync(path.join(repo, 'plans', 'PLAN-issue-7.md'));
+
+  // review: the report's digest and the ledger
+  const t = function (m) { return '2026-10-24T10:0' + m + ':00.000Z'; };
+  const ledgerOf = function (round, verdict, checkpointAt) {
+    return {
+      calls: 1,
+      findings: { R1: { key: 'a.txt:k', path: 'judgment', round: round, verdicts: [{ round: round, verdict: verdict, source: 'verifier', from: 'x', at: t(1) }], rechecks: {} } },
+      checkpoints: checkpointAt ? [{ sha: tip, at: checkpointAt, call: 1, fixed: ['R1'], notFixed: [], dirty: 1 }] : [],
+      lastGreen: checkpointAt ? tip : null,
+    };
+  };
+  const report = function (digest) { return '# Review\n\n## Findings\n\n- R1 something\n\n## Digest\n\n' + digest; };
+  write(repo, 'reports/review-settled.md', report('- R1: FIXED - the grep is empty now\n- R2, R3: FIXED in round 2 (prose)\n- R4: OPEN, needs the owner - a decision\n'));
+  write(repo, 'reports/receipts/x/ledger.json', JSON.stringify(ledgerOf(1, 'FIXED', t(2))));
+  const settled = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/x/ledger.json'], repo);
+  check('--chain review passes a settled digest and ledger',
+    settled.status === 0 && settled.json.stage === 'review' && settled.json.pass === true && dig(settled.json, 'handoff.lastGreen') === tip &&
+    notes(settled).some(function (n) { return /uncommitted/.test(n); }), brief(settled) + JSON.stringify(settled.json));
+  write(repo, 'reports/review-paged.md', report('- R1: FIXED - ok\n- R2: PAGED - needs the owner\n'));
+  const paged = runScript(['--chain', 'review', '--report', 'reports/review-paged.md'], repo);
+  check('--chain review fails on a PAGED line', paged.json.pass === false && has(paged, 'digest', /R2.*PAGED/), JSON.stringify(paged.json.failed));
+  write(repo, 'reports/review-notfixed.md', report('- R1: NOT FIXED - still there\n'));
+  const notFixed = runScript(['--chain', 'review', '--report', 'reports/review-notfixed.md'], repo);
+  check('--chain review fails on a NOT FIXED line', notFixed.json.pass === false && has(notFixed, 'digest', /R1.*NOT FIXED/), JSON.stringify(notFixed.json.failed));
+  write(repo, 'reports/receipts/y/ledger.json', JSON.stringify(ledgerOf(2, 'NOT FIXED', t(2))));
+  const revert = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/y/ledger.json'], repo);
+  check('--chain review fails on a round-2 NOT FIXED in the ledger', revert.json.pass === false && has(revert, 'ledger', /R1.*round 2/), JSON.stringify(revert.json.failed));
+  write(repo, 'reports/receipts/z/ledger.json', JSON.stringify(ledgerOf(1, 'FIXED', t(0))));
+  const late = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/z/ledger.json'], repo);
+  check('--chain review fails on fixes after the last checkpoint', late.json.pass === false && has(late, 'checkpoint', /checkpoint/), JSON.stringify(late.json.failed));
+  const noLedger = runScript(['--chain', 'review', '--report', 'reports/review-settled.md'], repo);
+  check('--chain review with no ledger passes and says so in notes',
+    noLedger.json.pass === true && notes(noLedger).some(function (n) { return /ledger/.test(n); }), JSON.stringify(noLedger.json));
+  write(repo, 'reports/review-nodigest.md', '# Review\n\n## Findings\n\n- R1: FIXED\n');
+  const noDigest = runScript(['--chain', 'review', '--report', 'reports/review-nodigest.md'], repo);
+  check('--chain review refuses a report with no Digest section',
+    noDigest.status === 1 && noDigest.json.error === 'bad_shape' && /Digest/.test(String(noDigest.json.detail)), brief(noDigest) + JSON.stringify(noDigest.json));
+  write(repo, 'reports/review-badline.md', report('- R1 FIXED without the colon\n'));
+  const badLine = runScript(['--chain', 'review', '--report', 'reports/review-badline.md'], repo);
+  check('refuses a digest line that is not in the verdict shape',
+    badLine.status === 1 && badLine.json.error === 'bad_shape' && /R1 FIXED/.test(String(badLine.json.detail)), brief(badLine) + JSON.stringify(badLine.json));
+
+  // R7 of the #272 review: the review prompt shows a digest line as
+  // `R<n>: <VERDICT>` with no dash, so a digest written that way carries the
+  // same verdicts, and a NOT FIXED or PAGED line in it must stop the chain too.
+  write(repo, 'reports/review-bare.md', report('R1: FIXED - ok\nR2: NOT FIXED - still there\n'));
+  const bare = runScript(['--chain', 'review', '--report', 'reports/review-bare.md'], repo);
+  check('a digest line with no leading dash is read, so a bare NOT FIXED line fails the chain',
+    bare.status === 0 && bare.json.pass === false && has(bare, 'digest', /R2.*NOT FIXED/), brief(bare) + JSON.stringify(bare.json));
+
+  // explore: the closing summary file
+  const summary = function (mode, dial, directions, open) {
+    return '# Exploration summary\n\n**Mode:** ' + mode + '\n**Scope dial:** ' + dial + '\n**Models:** best\n\n## Direction\n\n' +
+      directions.map(function (d) { return '- ' + d + '\n'; }).join('') + '\n## Decisions\n\n- one\n\n## Design direction\n\n- none\n\n## Open questions\n\n' +
+      open.map(function (q) { return '- ' + q + '\n'; }).join('');
+  };
+  write(repo, 'reports/explore/s1.md', summary('scoping', 'not offered', ['Trim the rule'], ['none']));
+  const s1 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s1.md'], repo);
+  check('--chain explore passes an empty open-questions section',
+    s1.status === 0 && s1.json.stage === 'explore' && s1.json.pass === true && dig(s1.json, 'handoff.models') === 'best' && dig(s1.json, 'handoff.mode') === 'scoping' &&
+    dig(s1.json, 'handoff.summary') === 'reports/explore/s1.md', brief(s1) + JSON.stringify(s1.json));
+  write(repo, 'reports/explore/s2.md', summary('scoping', 'not offered', ['Trim the rule'], ['Which folder holds the file?']));
+  const s2 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s2.md'], repo);
+  check('fails on an open question', s2.json.pass === false && has(s2, 'open-questions', /folder/), JSON.stringify(s2.json.failed));
+  // R14 of the #272 review: M14 says "one bullet per question", not a dash
+  // bullet, so a starred or numbered question is a question too.
+  write(repo, 'reports/explore/s7.md', summary('scoping', 'not offered', ['Trim the rule'], []) + '* Which folder holds the file?\n1. Which slug names it?\n');
+  const s7 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s7.md'], repo);
+  check('a starred or numbered open question fails the explore chain too',
+    s7.json.pass === false && has(s7, 'open-questions', /2 open questions: Which folder/), JSON.stringify(s7.json));
+  write(repo, 'reports/explore/s3.md', summary('vision', 'Expand', ['Big'], []));
+  const s3 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s3.md'], repo);
+  check('fails a vision summary whose dial reads Expand', s3.json.pass === false && has(s3, 'scope-dial', /Expand/), JSON.stringify(s3.json.failed));
+  write(repo, 'reports/explore/s4.md', summary('vision', 'not offered', ['One way'], []));
+  const s4 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s4.md'], repo);
+  check('passes a vision summary with no dial and one direction',
+    s4.json.pass === true && notes(s4).some(function (n) { return /Hold/.test(n); }), JSON.stringify(s4.json));
+  write(repo, 'reports/explore/s5.md', summary('vision', 'not offered', ['One way', 'Another way'], []));
+  const s5 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s5.md'], repo);
+  check('fails one with no dial and two directions, saying offer the dial', s5.json.pass === false && has(s5, 'scope-dial', /offer the dial/), JSON.stringify(s5.json.failed));
+  write(repo, 'reports/explore/s6.md', '# Exploration summary\n\n**Mode:** scoping\n\n## Direction\n\n- x\n');
+  const s6 = runScript(['--chain', 'explore', '--summary', 'reports/explore/s6.md'], repo);
+  check('--chain explore refuses a summary with no Open questions section',
+    s6.status === 1 && s6.json.error === 'bad_shape' && /Open questions/.test(String(s6.json.detail)), brief(s6) + JSON.stringify(s6.json));
+  const missing = runScript(['--chain', 'review', '--report', 'reports/nope.md'], repo);
+  const noStage = runScript(['--chain'], repo);
+  check('--chain with a missing input exits 1 with error',
+    missing.status === 1 && typeof missing.json.error === 'string' && /nope\.md/.test(String(missing.json.detail)) && noStage.status === 1 && typeof noStage.json.error === 'string',
+    brief(missing) + JSON.stringify(missing.json) + ' | ' + brief(noStage));
 });
 
 console.log('');

@@ -2,7 +2,7 @@
 'use strict';
 // Tests that the sentences several prompt files must carry word for word still
 // agree (review fix R5, 2026-10-05): the disclosure line a dispatched finder may
-// return (`NOT CHECKED: <one sentence>`), the eight project seam files under
+// return (`NOT CHECKED: <one sentence>`), the nine project seam files under
 // `.claude/toolkit/`, the reload-then-fallback sentence the commands share, and
 // the PR parts, the kept-on-purpose key and the decisions file /merge relies on,
 // and the check-at-source sentence the rules seed and the manual share (#241).
@@ -53,9 +53,9 @@ const bareDisclosures = prompts.filter(([, t]) => /NOT CHECKED[^:]/.test(t.repla
 check('every prompt file that names the line spells it with its colon', bareDisclosures.length === 0, bareDisclosures.join(', '));
 
 console.log('\n2. the project seam files');
-const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md', 'checks.json', 'generated.json'];
+const SEAMS = ['review-kinds.md', 'plan-gate.md', 'execute-gate.md', 'fix-rules.md', 'severity-anchors.md', 'do-not-report.md', 'checks.json', 'generated.json', 'issue-labels.md'];
 const seamReadme = read('seed/toolkit-README.md');
-check('the seed README lists the eight files under a heading that counts them', /## The eight files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
+check('the seed README lists the nine files under a heading that counts them', /## The nine files/.test(seamReadme) && SEAMS.every(s => seamReadme.includes('| `' + s + '` |')), SEAMS.filter(s => !seamReadme.includes('| `' + s + '` |')).join(', '));
 const named = new Map();
 for (const [file, text] of prompts) {
   for (const m of text.matchAll(/\.claude\/toolkit\/([A-Za-z-]+\.(?:md|json))/g)) {
@@ -63,19 +63,27 @@ for (const [file, text] of prompts) {
     named.get(m[1]).add(file);
   }
 }
-const unknown = [...named.keys()].filter(n => n !== 'README.md' && !SEAMS.includes(n));
-check('every seam a prompt file names is one of the eight, or the README setup seeds', unknown.length === 0, unknown.join(', '));
+// Two files in the folder are no seam: the README setup seeds, and the adoption
+// record /tk:upgrade's stamp writes (issue #257).
+const NOT_SEAMS = ['README.md', 'adoption.md'];
+const unknown = [...named.keys()].filter(n => !NOT_SEAMS.includes(n) && !SEAMS.includes(n));
+check('every seam a prompt file names is one of the nine, the README setup seeds, or the adoption record the stamp writes', unknown.length === 0, unknown.join(', '));
 const unread = SEAMS.filter(s => !named.has(s));
-check('each of the eight is read by at least one prompt file', unread.length === 0, unread.join(', '));
+check('each of the nine is read by at least one prompt file', unread.length === 0, unread.join(', '));
 // Issue #221: the seventh seam is JSON, not prose, and its reader is the checks runner, called from the execute stage's test step.
 check('checks.json is read by the runner call in execute.md, at the test step', /node \.claude\/scripts\/run-checks\.js --checks \.claude\/toolkit\/checks\.json --out/.test(read('.claude/commands/execute.md')));
 const securityReaders = ['.claude/skills/review-security/SKILL.md', '.claude/skills/security-audit/SKILL.md', '.claude/skills/review-security-criteria/SKILL.md'];
 check('the three security reviewers read do-not-report.md, right after the toolkit\'s own list', securityReaders.every(f => read(f).includes('.claude/toolkit/do-not-report.md')), securityReaders.filter(f => !read(f).includes('.claude/toolkit/do-not-report.md')).join(', '));
 // The sentence moved from README.md to docs/EXTENDING.md on 2026-10-09, when the README became a front door and the manual moved into docs/.
-check('the toolkit reference and the extending guide count the same eight files', /eight files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Eight files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
+check('the toolkit reference and the extending guide count the same nine files', /nine files in `\.claude\/toolkit\/`/.test(read('.claude/skills/shared/toolkit-reference.md')) && /Nine files in `\.claude\/toolkit\/`/.test(read('docs/EXTENDING.md')));
 check('the extending guide lists checks.json', /^\| `checks\.json` \|/m.test(read('docs/EXTENDING.md')));
 // Issue #232: the eighth seam is JSON too, read by the merge-check script through the merge rules.
 check('the extending guide lists generated.json, and merge-rules.md defines it', /^\| `generated\.json` \|/m.test(read('docs/EXTENDING.md')) && read('.claude/skills/shared/merge-rules.md').includes('.claude/toolkit/generated.json'));
+// Issue #268: the ninth seam replaces /create-issue's questions and labels instead of adding to them.
+// Its read carries a label, because an absent file pastes Claude Code's "no output" note, and the
+// command says what each host does with a label the repository lacks (GitLab creates it silently).
+const createIssue = read('.claude/commands/create-issue.md');
+check('create-issue reads the issue-labels seam under its label and states each host on a missing label', createIssue.includes('!`cat .claude/toolkit/issue-labels.md 2>/dev/null || true`') && createIssue.includes('(from `.claude/toolkit/issue-labels.md`)') && createIssue.includes('GitLab creates') && !createIssue.includes('makes the create command fail') && /^\| `issue-labels\.md` \|/m.test(read('docs/EXTENDING.md')));
 // Issue #231 added rule M17, so the fix-rules sentence every loop stage carries counts to M17. It is
 // pinned word for word so the next rule's sweep is one grep and a drift in one file is caught here.
 const FIX_RULES = 'Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void.';
@@ -109,6 +117,28 @@ check('no prompt file keeps the old by-hand wording of the pass', byHand.length 
 const describers = ['.claude/skills/shared/finding-id-system.md', '.claude/skills/shared/dispatch-format.md', '.claude/skills/shared/hitl-loop.md'];
 check('the three fragments that describe the pass name the helper', describers.every(f => read(f).includes('merge-findings.js')), describers.filter(f => !read(f).includes('merge-findings.js')).join(', '));
 check('the helper exists where the sentence points', fs.existsSync(path.join(REPO, '.claude/scripts/merge-findings.js')));
+// Issues #267 and #272: the re-verify round runs through merge-findings.js
+// --verify, and the fix-verifier agent quotes the two sentences of M3 it
+// applies, the trust order and the verifier instruction, word for word and once
+// each, with none of the runner's steps (no `--mechanical` in the file), so the
+// rule and the agent cannot drift apart and the agent never reads the runner's
+// procedure as its own. The bullet must name the mode, so this case fails on
+// the pair that predates it rather than passing on any two matching copies.
+{
+  const m3 = (read('.claude/skills/shared/hitl-loop.md').split('\n').find((l) => l.startsWith('- **M3.')) || '').replace(/^- /, '');
+  const agent = read('.claude/agents/fix-verifier.md');
+  const TRUST = 'Trust order for verification signals: a runnable check first, a different model second, a fresh same-model context last.';
+  const { M3_INSTRUCTION } = require(path.join(REPO, '.claude', 'scripts', 'merge-findings.js'));
+  check('the fix-verifier agent quotes the M3 trust order and the verifier instruction once each, and none of the runner steps',
+    m3.length > 0 && m3.includes('merge-findings.js --verify') && m3.includes(TRUST) && m3.includes(M3_INSTRUCTION)
+      && count(agent, TRUST) === 1 && count(agent, M3_INSTRUCTION) === 1 && !agent.includes('--mechanical'),
+    m3.length ? 'trust order in the agent: ' + count(agent, TRUST) + ', instruction: ' + count(agent, M3_INSTRUCTION) + ', --mechanical in the agent: ' + agent.includes('--mechanical') + '; the bullet names the mode: ' + m3.includes('merge-findings.js --verify') : 'no M3 bullet found');
+  // R3 of the #272 review: the 450-word bar on M3 was measured by hand when the
+  // rule was trimmed (814 -> 432); this case holds it, so a rule that grows back
+  // past the bar fails here instead of passing every check.
+  const m3Words = m3.split(/\s+/).filter(Boolean).length;
+  check('the M3 bullet stays at or under 450 words (#272)', m3Words > 0 && m3Words <= 450, m3Words + ' words');
+}
 
 console.log('\n5. the merge parts (#232)');
 // /document writes the PR body parts, merge-rules.md defines them, and /merge
@@ -208,5 +238,152 @@ const PASTE_LIMIT = 28500;
     keysDrift(DOC, renamedShell) !== '' && keysDrift(renamedDoc, SHELL) !== '', keysDrift(DOC, renamedShell) + ' | ' + keysDrift(renamedDoc, SHELL));
 }
 
+// --- /cloud: typed only, never a launch Claude can start (issue #263) ----------
+// The skill hands a self-contained brief to a Claude Code cloud session. Claude
+// Code refuses to start one from Claude's own shell ("interactive only"), so the
+// skill writes a start.sh beside the brief and the user runs it from a terminal.
+// These cases pin what keeps that safe: the skill never loads on its own, no
+// copy of it pre-approves a command that could start a session (the plugin build
+// adds a grant for every toolkit script a skill runs, and allowed-tools grants
+// whatever it lists), the start line puts the task text right after --cloud
+// (which takes it as its own value), both briefs carry the rules that keep a
+// cloud copy from pushing anything, and the plugin carries the briefs where its
+// skill reads them. Missing files read as empty, so they fail here, not crash.
+{
+  const optional = (rel) => (fs.existsSync(path.join(REPO, rel)) ? read(rel) : '');
+  const SRC = optional('.claude/skills/cloud/SKILL.md');
+  const PLUG = optional('plugin/skills/cloud/SKILL.md');
+  const BRIEFS = ['research-brief.md', 'review-brief.md'];
+  const frontmatter = (text) => (/^---\r?\n([\s\S]*?)\r?\n---/.exec(text) || [])[1] || '';
+  const typedOnly = (text) => /^disable-model-invocation:\s*true\s*$/m.test(frontmatter(text));
+  // allowed-tools entries, in the inline form and the YAML list form.
+  const grants = (text) => {
+    const lines = frontmatter(text).split(/\r?\n/);
+    const at = lines.findIndex((l) => /^allowed-tools:/.test(l));
+    if (at < 0) return [];
+    const out = lines[at].replace(/^allowed-tools:\s*/, '').split(/,\s*/).filter(Boolean);
+    for (let i = at + 1; i < lines.length && /^\s+- /.test(lines[i]); i++) out.push(lines[i].replace(/^\s+- /, '').trim());
+    return out;
+  };
+  // The one node grant allowed is the skill's own unpack script, which only
+  // reads a saved page and writes files; it cannot start a session.
+  const unpackGrant = /^"?Bash\(node \S*skills\/cloud\/unpack\.js \*\)"?$/;
+  // A known-safe set, not a ban list, so a new grant (`Bash(env *)`, `Bash(npx *)`)
+  // fails here until someone checks it cannot start a session: the file tools,
+  // six read-only git commands, the unpack script, and the plugin's mktemp row.
+  const SAFE = [/^Read$/, /^Write$/, /^Bash\(git (ls-files|rev-parse|merge-base|check-ignore|rev-list|status) \*\)$/, unpackGrant, /^"?Bash\(mktemp -d \/tmp\/\*\)"?$/];
+  const launchers = (text) => grants(text).filter((g) => !SAFE.some((re) => re.test(g)));
+
+  check('263: the cloud skill never fires on its own (disable-model-invocation: true), in the source and the plugin', typedOnly(SRC) && typedOnly(PLUG),
+    (SRC ? '' : 'no .claude/skills/cloud/SKILL.md; ') + (PLUG ? '' : 'no plugin/skills/cloud/SKILL.md'));
+  check('263: no copy of the cloud skill pre-approves a command that could start a cloud session', SRC !== '' && PLUG !== '' && launchers(SRC).length === 0 && launchers(PLUG).length === 0,
+    [...launchers(SRC), ...launchers(PLUG)].join(', '));
+  const startLine = /CCR_FORCE_BUNDLE=1 exec claude [^\n]*--cloud "\$\(cat [^)\n]*brief\.md\)"/.exec(SRC);
+  check('263: the start script the skill writes puts the task text right after --cloud', !!startLine && !/--cloud\s+-/.test(startLine[0]), startLine ? startLine[0] : 'no CCR_FORCE_BUNDLE=1 exec claude ... --cloud "$(cat ...brief.md)" line');
+  check('263: the skill tells the user to run its one start line and never runs it itself', /`bash [^`\s]*start\.sh`/.test(SRC) && SRC.includes('Never run `start.sh` or `claude --cloud` yourself'));
+  // The plugin copy must still ask git about the project's own file: the build
+  // keeps that phrase (a SITE_OVERRIDES entry) instead of rewriting it to the
+  // plugin's folder, where git ls-files would never find it.
+  const repoCheck = '`git ls-files .claude/commands/review.md`';
+  check('263: review mode runs only where the toolkit lives in the repo, and names why elsewhere, in the source and the plugin',
+    [SRC, PLUG].every((t) => t.includes(repoCheck) && t.includes('cloud sessions never load plugins')));
+  for (const brief of BRIEFS) {
+    const text = optional('.claude/skills/cloud/' + brief);
+    const rules = ['Never commit, push, create a branch or open a pull request.', 'Never call `add_repo`', 'Make no change git would commit', '/tmp', '`git status --porcelain`', 'The summary comes first', '<script type="text/markdown" id="report-markdown">', '<script type="text/plain" class="run-file" data-name="'];
+    const missing = rules.filter((r) => !text.includes(r));
+    check('263: ' + brief + ' carries the no-push rules, the summary-first shape, the report block and the run-file blocks', text !== '' && missing.length === 0, text ? 'missing: ' + missing.join(' | ') : 'no .claude/skills/cloud/' + brief);
+  }
+  // Everything a run produced comes back (owner, 2026-10-18), and a file name
+  // read off the page is another session's data, so it must not leave files/.
+  // A review range need not be on the branch the cloud session starts on, so
+  // the review must read the files the range ends at (found in the Verify step).
+  check('263: review-brief.md checks out the range\'s last commit before the review reads any file',
+    optional('.claude/skills/cloud/review-brief.md').includes('git checkout --detach <the commit id after the two dots in {{RANGE}}>'));
+  // Found in the Verify step: the cloud session stops at a prompt before it
+  // publishes, and a page with every run file is too big to pass through the
+  // chat, so the skill warns about the prompt and unpacks the page on disk.
+  check('263: the walk-through warns that the session asks once to publish its page',
+    SRC.includes('the session asks once for permission to publish its page to claude.ai'));
+  check('263: the plugin carries unpack.js and its skill runs and grants it from the plugin',
+    fs.existsSync(path.join(REPO, 'plugin/skills/cloud/unpack.js')) && PLUG.includes('node ${CLAUDE_PLUGIN_ROOT}/skills/cloud/unpack.js --page')
+      && grants(PLUG).some((g) => unpackGrant.test(g) && g.includes('${CLAUDE_PLUGIN_ROOT}')));
+  check('263: the skill saves every run file under files/ and keeps each name inside it',
+    SRC.includes('class="run-file"') && SRC.includes('so no name can reach outside `files/`'));
+  const plugBriefs = BRIEFS.filter((b) => fs.existsSync(path.join(REPO, 'plugin/skills/cloud', b)) && PLUG.includes('${CLAUDE_PLUGIN_ROOT}/skills/cloud/' + b));
+  check('263: the plugin carries both briefs and its skill reads them from the plugin', plugBriefs.length === BRIEFS.length, 'found ' + plugBriefs.join(', '));
+  const untyped = SRC.replace(/^disable-model-invocation:.*\r?\n/m, '');
+  check('263: mutation: the skill without disable-model-invocation trips the first case', SRC !== '' && untyped !== SRC && !typedOnly(untyped));
+  // The upload carries unpushed work on purpose, so before the start line the
+  // walk-through says how much of it GitHub does not have, and what a session
+  // that broke the no-push rule would expose (review of 46bf362..2d1061a, R2).
+  check('263: the walk-through counts the commits and edits GitHub does not have and warns before the start line',
+    SRC.includes('`git rev-list --count HEAD --not --remotes`') && SRC.includes('`git status --porcelain --untracked-files=no`')
+      && SRC.includes('GitHub does not have yet') && SRC.indexOf('GitHub does not have yet') < SRC.indexOf('Paste this one line'));
+  const widened = SRC.replace(/^allowed-tools:\r?\n/m, (m) => m + '  - Bash(env *)\n');
+  check('263: mutation: a new grant outside the known-safe set trips the no-launch case', widened !== SRC && launchers(widened).join() === 'Bash(env *)', launchers(widened).join(', '));
+}
+
+console.log('\n7. the rules a review loads by name (#261)');
+// Twelve files run the loop and used to paste its rules at the top of every
+// run. They now load them through three skills at the point the rules are
+// first needed, and all twelve say so in one sentence, so a skipped load is
+// the one failure this change adds and a drifted sentence is what this
+// section catches. The page rules load only when the gate fires, and the gate
+// itself stays inline so the decision never waits on a fragment loaded after it.
+const LOOP_FILES = [
+  '.claude/commands/review.md',
+  '.claude/skills/review-browser/SKILL.md', '.claude/skills/review-code/SKILL.md',
+  '.claude/skills/review-commands/SKILL.md', '.claude/skills/review-copy/SKILL.md',
+  '.claude/skills/review-deps/SKILL.md', '.claude/skills/review-plan/SKILL.md',
+  '.claude/skills/review-security/SKILL.md', '.claude/skills/review-ux/SKILL.md',
+  '.claude/skills/review-full/SKILL.md', '.claude/skills/security-audit/SKILL.md',
+  '.claude/skills/upgrade/SKILL.md',
+];
+const PAGE_FILES = LOOP_FILES.filter(f => !f.includes('/upgrade/'));
+const LOAD_LINE = '**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context.';
+const GATE_LINE = '**The gate:** render the review page whenever this run has any surviving finding, or this branch\'s standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.';
+const PAGE_LINE = '**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.';
+const LOOP_FRAGMENTS = ['hitl-loop.md', 'hitl-stages.md', 'report-format.md', 'finding-contract.md', 'html-outputs.md'];
+const PAGE_FRAGMENTS = ['html-render-review.md', 'html-viewing.md'];
+const pasteOf = (name) => '!`cat .claude/skills/shared/' + name + '`';
+// Where the load sentence must sit: after the heading that opens the phase
+// that first needs the rules, before the next heading. A sentence that counts
+// once but drifted below its phase would load the rules too late (review #261).
+const loadSpan = (rel) => rel.endsWith('/review.md') ? ['### Phase 2: Dispatch', '### Phase 3']
+  : rel.includes('/upgrade/') ? ['## Procedure', '<procedure>'] : ['## Audit Before the Report', '## Output Format'];
+// The paste-era wordings the twelve files used for a fragment they no longer
+// hold: a position ("inlined under", "inlined below", "inlined at the end",
+// "inlined in Phase 2"), "the inlined template" or "are inlined for". Pastes that remain (the
+// criteria, the dispatch format) may still be described as inlined.
+const STALE_PASTE = /\binlined (below|under|here|at the end|in Phase \d)\b|\bthe inlined\b|\b(is|are) inlined (for|below|under|at the end)\b/i;
+{
+  const misses = [];
+  for (const rel of LOOP_FILES) {
+    const text = read(rel);
+    if (count(text, LOAD_LINE) !== 1) misses.push(rel + ': load sentence x' + count(text, LOAD_LINE));
+    const [opens, closes] = loadSpan(rel);
+    const at = text.indexOf(LOAD_LINE), from = text.indexOf(opens), to = text.indexOf(closes, from + 1);
+    if (at >= 0 && !(from >= 0 && to > from && at > from && at < to)) misses.push(rel + ': load sentence outside ' + opens + ' .. ' + closes);
+    for (const n of LOOP_FRAGMENTS) if (text.includes(pasteOf(n))) misses.push(rel + ' still pastes ' + n);
+    const stale = text.split(/\r?\n/).filter(l => STALE_PASTE.test(l)).length;
+    if (stale) misses.push(rel + ': ' + stale + ' line(s) still say a fragment is inlined');
+  }
+  check('the 12 loop files load loop-rules and report-rules before Phase 3 with one wording and paste none of their five fragments', misses.length === 0, misses.join('; '));
+}
+{
+  const misses = [];
+  for (const rel of PAGE_FILES) {
+    const text = read(rel);
+    if (count(text, GATE_LINE) !== 1) misses.push(rel + ': gate sentence x' + count(text, GATE_LINE));
+    if (count(text, PAGE_LINE) !== 1) misses.push(rel + ': page load sentence x' + count(text, PAGE_LINE));
+    for (const n of PAGE_FRAGMENTS) if (text.includes(pasteOf(n))) misses.push(rel + ' still pastes ' + n);
+  }
+  const upgrade = read('.claude/skills/upgrade/SKILL.md');
+  if (upgrade.includes('Skill(review-page)')) misses.push('upgrade loads review-page, which renders no review page');
+  for (const n of PAGE_FRAGMENTS) if (upgrade.includes(pasteOf(n))) misses.push('upgrade pastes ' + n);
+  check('the 11 page files load review-page at the gate with one wording and paste neither of its fragments', misses.length === 0, misses.join('; '));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
+
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

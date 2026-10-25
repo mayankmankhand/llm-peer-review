@@ -37,24 +37,43 @@
 //                                 (from the branch log, else merge-base) and print it
 //   --cut <branch> [--pr <N> | --pr-body <file>]
 //                                 the branch's cut point and where it came from
-//   --pr <N>                      read PR <N> through gh or glab; print its parts
+//   --pr <N>                      read PR <N> through gh or glab; print its parts,
+//                                 and `ref`, GitLab's full reference (null on gh)
 //   --pr-body <file|->            print the parts of a PR body (raw text, or the
 //                                 JSON gh or glab prints)
 //   --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>]
 //                                 rules 1, 2 and cut for one landing: main before
 //                                 it, the result (main after it, or the updated
 //                                 branch about to land), the cut point, and the
-//                                 branch's own tip before any update from main
+//                                 branch's own tip before any update from main;
+//                                 also lists `deleted` (files the landing removes
+//                                 from main) and `untracked` (those the result's
+//                                 own .gitignore files ignore), never as flags
 //   --since <ref>                 the same checks for every landing on main's
 //                                 first-parent line after <ref>
 //   --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>]
 //                                 write the file the decision-checker agent reads:
-//                                 this PR's decisions, then each landing's after the cut
+//                                 this PR's decisions, then each landing's after the cut,
+//                                 any diff in it word by word
+//   --wait --pr <N> --head <sha> [--timeout <seconds>]
+//                                 read PR <N> through gh or glab every 3 seconds,
+//                                 for up to 90 by default, until the host reports
+//                                 it mergeable at exactly that head; exit 1 names
+//                                 the status the host still reports
 //   --style [local-merge|host-merge|host-squash]
 //                                 the repo's landing habit; with a value, record it
 //   --changelog-place <changelog> <block>
 //                                 the line number a changelog block goes before
 //   --marker | --mark <sha>       read or write the last checked landing
+//   --bring-home <branch>         copy the records of the worktree that holds
+//                                 <branch> into the main copy (issue #266): the
+//                                 files git does not track under plans/ and
+//                                 reports/, and the dated pages in artifacts/html/.
+//                                 Replaces only a file it brought home itself and
+//                                 nobody changed since (issue #270), recorded in
+//                                 reports/landing/<branch>.brought-home.json;
+//                                 lists what differs, what is left over (anything
+//                                 else uncommitted) and the other ignored files
 // Common: --main <ref> names the default branch (otherwise the remote's default
 // branch, else `main`, else `master`).
 //
@@ -62,13 +81,18 @@
 // summary line. Exit 0 when nothing is flagged, 1 when anything is, 2 on a
 // usage or git error (one line on stderr). Only --record-cut, --mark and
 // --style with a value write to git config, and only --decisions writes a file,
-// the one --out names. Every git call
+// the one --out names (--landing's ignore check works in a throwaway folder
+// under the OS temp folder and removes it), apart from --bring-home, which
+// writes files the main copy did not have, refreshes the ones it brought home
+// itself, and keeps its record of them. Every git call
 // takes an argument list, never a shell string, and runs at the repository's
 // top level. Dependency-free.
 //
 //   node merge-check.js --landing --before <sha> --after <sha> --cut <sha> --tip <sha>
 
+const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -78,7 +102,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha>  [--main <ref>]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>]';
 
 class UsageError extends Error {}
 
@@ -163,6 +187,51 @@ function changedFiles(a, b, excl) {
     if (modes[0] !== '160000' && modes[1] !== '160000') files.push(raw[i + 1]);
   }
   return files;
+}
+
+// The files a landing removes from main (issue #258 item 1), generated paths
+// left out. No rename detection, so a moved file is a deletion plus an
+// addition, the way every other checkout sees it.
+function deletedFiles(a, b, excl) {
+  return git(['diff', '--name-only', '-z', '--no-renames', '--diff-filter=D', a, b, '--', '.'].concat(excl)).split('\0').filter(Boolean);
+}
+// Of the given files, the ones a commit's own .gitignore files ignore: a branch
+// that stopped tracking a file it means to keep (`git rm --cached` and an
+// ignore line), whose copy in every other checkout the landing deletes.
+// git's own matcher decides, in a throwaway repository that holds only that
+// commit's .gitignore files, with every other source of ignore rules switched
+// off: no global or system config, no default ~/.config/git/ignore (HOME and
+// XDG_CONFIG_HOME point into the throwaway folder), an empty core.excludesFile,
+// an empty template (so no info/exclude), and no inherited GIT_* variable. The
+// user's own ignores say nothing about what the branch meant, and the main
+// folder's rules predate the landing. The folder is removed afterwards.
+function ignoredAt(commit, files) {
+  if (!files.length) return [];
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'merge-check-ignore-'));
+  try {
+    const repo = path.join(tmp, 'repo');
+    const empty = path.join(tmp, 'empty');
+    fs.mkdirSync(repo);
+    fs.writeFileSync(empty, '');
+    const env = {};
+    for (const [k, v] of Object.entries(process.env)) if (!/^GIT_/.test(k)) env[k] = v;
+    Object.assign(env, { HOME: tmp, XDG_CONFIG_HOME: tmp, GIT_CONFIG_GLOBAL: empty, GIT_CONFIG_NOSYSTEM: '1' });
+    const isolated = (args, input) => spawnSync('git', ['-c', 'core.excludesFile=' + empty].concat(args), { cwd: repo, encoding: 'utf8', env, input, maxBuffer: MAX_BUFFER });
+    const init = isolated(['init', '-q', '--template=']);
+    if (init.error || init.status !== 0) throw new Error('git init failed for the ignore check: ' + String(init.stderr || init.error || '').trim().split('\n')[0]);
+    for (const rel of git(['ls-tree', '-r', '-z', '--name-only', commit]).split('\0')) {
+      if (rel !== '.gitignore' && !rel.endsWith('/.gitignore')) continue;
+      const abs = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, git(['show', commit + ':' + rel]));
+    }
+    // Exit 0 when some path is ignored, 1 when none is; anything else failed.
+    const r = isolated(['check-ignore', '--no-index', '-z', '--stdin'], files.join('\0') + '\0');
+    if (r.error || (r.status !== 0 && r.status !== 1)) throw new Error('git check-ignore failed: ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
+    return String(r.stdout || '').split('\0').filter(Boolean);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 }
 
 // The hunk headers of a zero-context diff of one file. Only `@@ -` lines are
@@ -471,6 +540,29 @@ function recordCut(b, mainRef) {
 }
 
 // ---- PR bodies -------------------------------------------------------------------
+// The decisions are the part's list lines only (issue #258 item 8): from its
+// first list line to the first line that is neither a list line, an indented
+// continuation of one, nor a blank line between items. An intro line above the
+// list is skipped, and text below it (the attribution line a PR body ends with)
+// is never read as a decision. Each item comes back on one line, its
+// continuation lines joined to it, because a landing message's `Decisions:`
+// list is read one line per decision (messageDecisions below). A list line
+// indented past the item above it is a sub-point of that item, a reason rather
+// than a decision, and joins it the same way. null when the part holds no list
+// line.
+const LIST_LINE_RE = /^\s*[-*]\s+\S/;
+function decisionItems(lines) {
+  const items = [];
+  let base = -1;
+  for (const l of lines) {
+    const indent = /^\s*/.exec(l)[0].length;
+    if (LIST_LINE_RE.test(l) && !(items.length && indent > base)) { base = indent; items.push(l.replace(/\s+$/, '')); continue; }
+    if (!items.length || !l.trim()) continue;
+    if (/^\s+\S/.test(l)) { items[items.length - 1] += ' ' + l.trim(); continue; }
+    break;
+  }
+  return items.length ? items.join('\n') : null;
+}
 // The parts /document writes (merge-rules.md): a `## Decisions` section, a
 // `## Changelog` section holding the block in a fence, and a `Cut from:` line.
 function parseBody(text) {
@@ -482,7 +574,7 @@ function parseBody(text) {
     // The part ends at the next heading, or at the Cut from: line when no
     // Changelog part sits between them.
     for (let i = di + 1; i < lines.length && !/^##\s/.test(lines[i]) && !/^Cut from:/.test(lines[i]); i++) out.push(lines[i]);
-    decisions = out.join('\n').trim() || null;
+    decisions = decisionItems(out);
   }
   const ci = lines.findIndex((l) => /^##\s+Changelog\s*$/.test(l));
   if (ci >= 0) {
@@ -542,10 +634,60 @@ function readPr(n) {
   const r = run(cli, args);
   if (r.error || r.status !== 0) throw new Error(cli + ' could not read #' + n + ': ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
   const j = JSON.parse(r.stdout);
+  // `ref` is GitLab's full reference (`<project path>!<number>`), which a
+  // GitLab host-merge landing message names in its `See merge request` line
+  // (#258 item 6); GitHub marks a host merge by its committer, so gh has none.
   const pr = cli === 'gh'
-    ? { number: j.number, title: j.title, state: j.state, branch: j.headRefName, head: j.headRefOid, body: j.body || '' }
-    : { number: j.iid, title: j.title, state: j.state, branch: j.source_branch, head: j.sha, body: j.description || '' };
+    ? { number: j.number, title: j.title, state: j.state, branch: j.headRefName, head: j.headRefOid, body: j.body || '', ref: null }
+    : { number: j.iid, title: j.title, state: j.state, branch: j.source_branch, head: j.sha, body: j.description || '', ref: j.references && typeof j.references.full === 'string' ? j.references.full : null };
   return Object.assign(pr, parseBody(pr.body), { host: cli });
+}
+
+// ---- waiting for the host ---------------------------------------------------------
+// After a push, and after the previous landing, the host needs some seconds to
+// work out whether a PR can merge, and a merge run sooner fails (GitLab says
+// "Merge conflicts exist" while it is still checking; issue #258 item 3).
+// --wait reads the PR through the host's read row until the host reports it
+// mergeable at exactly the pushed head, every WAIT_STEP_MS for up to --timeout
+// seconds. Read-only. A transient status (`checking`, `conflict`, `UNKNOWN`)
+// is waited through; a PR that is no longer open stops it at once.
+// TK_MERGE_WAIT_STEP_MS shortens the step for the tests.
+const WAIT_TIMEOUT_S = 90;
+const WAIT_STEP_MS = 3000;
+function sleepMs(ms) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+function readMergeable(n) {
+  const cli = hostCli();
+  const args = cli === 'gh'
+    ? ['pr', 'view', String(n), '--json', 'mergeable,headRefOid,state']
+    : ['mr', 'view', String(n), '--output', 'json'];
+  const r = run(cli, args);
+  if (r.error || r.status !== 0) throw new Error(cli + ' could not read #' + n + ': ' + String(r.stderr || r.error || '').trim().split('\n')[0]);
+  const j = JSON.parse(r.stdout);
+  return cli === 'gh'
+    ? { host: cli, status: String(j.mergeable || 'none'), ready: j.mergeable === 'MERGEABLE', head: j.headRefOid ? String(j.headRefOid).toLowerCase() : null, state: String(j.state || ''), open: j.state === 'OPEN' }
+    : { host: cli, status: String(j.detailed_merge_status || 'none'), ready: j.detailed_merge_status === 'mergeable', head: j.sha ? String(j.sha).toLowerCase() : null, state: String(j.state || ''), open: j.state === 'opened' };
+}
+function waitMergeable(o) {
+  for (const k of ['pr', 'head']) if (o['--' + k] === undefined) throw new UsageError('--wait needs --' + k);
+  if (!/^\d+$/.test(String(o['--pr']))) throw new UsageError('--pr takes a PR number');
+  const head = resolveCommit(o['--head']);
+  if (!head) throw new UsageError('--head ' + o['--head'] + ' does not name a commit');
+  const timeoutS = o['--timeout'] === undefined ? WAIT_TIMEOUT_S : Number(o['--timeout']);
+  if (!Number.isFinite(timeoutS) || timeoutS < 0) throw new UsageError('--timeout takes a number of seconds');
+  const step = Math.max(1, Number(process.env.TK_MERGE_WAIT_STEP_MS) || WAIT_STEP_MS);
+  const start = Date.now();
+  const seen = [];   // each status the host reported, in order, a repeat folded
+  let last, polls = 0;
+  for (;;) {
+    last = readMergeable(o['--pr']);
+    polls++;
+    const label = last.status + (last.head !== head ? ' at ' + (last.head ? last.head.slice(0, 7) : 'no head') : '');
+    if (seen[seen.length - 1] !== label) seen.push(label);
+    if (!last.open || (last.ready && last.head === head)) break;
+    if (Date.now() - start + step > timeoutS * 1000) break;
+    sleepMs(step);
+  }
+  return { pr: Number(o['--pr']), head, host: last.host, ready: last.open && last.ready && last.head === head, status: last.status, hostHead: last.head, state: last.state, open: last.open, polls, seen, waitedMs: Date.now() - start };
 }
 
 // ---- style, changelog, marker -----------------------------------------------------
@@ -604,6 +746,200 @@ function changelogPlace(clFile, blockFile) {
   return { line: at + 1, rule: 'after the title' };
 }
 
+// ---- bringing a worktree's records home (issue #266) -------------------------------
+// `git worktree remove` deletes every ignored file without a word and refuses
+// only untracked ones (measured on git 2.43.0), so a worktree's plans, reports and
+// receipts went with it. The records are a fixed list: the files git does not
+// track under plans/ and reports/, and the dated pages under artifacts/html/.
+// Nothing else comes home: the map, the cycle marker, packages and .env.local are
+// rebuilt or copied in fresh, and the standing pages and the artifact index
+// already live in the main copy. A fixed list, because a project's other ignored
+// folders can hold its whole build output; those are named instead (`ignored`).
+//
+// Since issue #270 /document runs this at the end of every worktree run, not
+// only before a removal: Claude Code deletes a clean worktree session's folder
+// when the session ends, without a word and without a hook that could step in,
+// so /document is the last moment the folder is sure to exist. /merge runs it
+// again before it offers a removal. A second run must refresh what the first
+// brought home (the plan moved on), so the main copy keeps a record of what
+// came home, and a file is replaced only while it still holds exactly the
+// bytes this mode copied there. A file anyone else wrote or changed is never
+// touched; it is listed under `differs` as before.
+const RECORD_PATHS = ['plans', 'reports', 'artifacts/html'];
+// Folders a removal may take without a word, because an install or a run
+// rebuilds them: a path through one of these, or through any folder whose name
+// ends in "cache", is never named in `ignored`.
+const REBUILT_DIRS = new Set(['node_modules', '.venv', 'venv', '__pycache__']);
+function isRebuilt(rel) {
+  const parts = rel.replace(/\/$/, '').split('/');
+  const folders = rel.endsWith('/') ? parts : parts.slice(0, -1);
+  return folders.some((p) => REBUILT_DIRS.has(p) || /cache$/i.test(p));
+}
+function sha256(file) { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+// The record of what came home for a branch: reports/landing/<name>.brought-home.json
+// in the main copy, beside the landing file /document writes there. The branch
+// is named the way render-html.js names a branch's standing page (standingPage
+// there): sanitized, plus a short hash of the real name when sanitizing changed
+// it, so `feature/x` is one file rather than a folder, and never meets
+// `feature-x`'s record.
+function homeRecordPath(main, b) {
+  const safe = b.replace(/[^A-Za-z0-9._-]/g, '-').replace(/^[-_.]+/, '_');
+  const tag = safe !== b ? '-' + crypto.createHash('sha1').update(b).digest('hex').slice(0, 6) : '';
+  return path.join(main, 'reports', 'landing', safe + tag + '.brought-home.json');
+}
+function readHomeRecord(file) {
+  try {
+    const j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (j && j.files && typeof j.files === 'object' && !Array.isArray(j.files)) return Object.assign({}, j.files);
+  } catch (e) { /* no record yet, or one that cannot be read: nothing came home before */ }
+  return {};
+}
+const DATED_PAGE_RE = /^artifacts\/html\/[^/]+-\d{4}-\d{2}-\d{2}-\d{6}(?:-\d+)?\.html$/;
+function isRecord(rel) {
+  if (rel.startsWith('artifacts/html/')) return DATED_PAGE_RE.test(rel);
+  return rel.startsWith('plans/') || rel.startsWith('reports/');
+}
+function gitAt(dir, args) {
+  const r = spawnSync('git', args, { cwd: dir, encoding: 'utf8', maxBuffer: MAX_BUFFER });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error('git ' + args[0] + ' failed in ' + dir + ': ' + String(r.stderr || '').trim().split('\n')[0]);
+  return r.stdout;
+}
+// The main copy: the folder that holds the shared git folder, or the folder its
+// core.worktree names (a submodule), the way render-html.js finds it.
+function mainCopyRoot() {
+  const common = path.resolve(TOP, git(['rev-parse', '--git-common-dir']).trim());
+  const wt = gitTry(['--git-dir=' + common, 'config', '--get', 'core.worktree']);
+  return wt && wt.trim() ? path.resolve(common, wt.trim()) : path.dirname(common);
+}
+// The worktree whose branch line is refs/heads/<b>, from git's own list.
+function worktreeOf(b) {
+  for (const block of git(['worktree', 'list', '--porcelain']).split(/\n\n+/)) {
+    const wt = /^worktree (.+)$/m.exec(block);
+    const br = /^branch (.+)$/m.exec(block);
+    if (wt && br && br[1] === 'refs/heads/' + b) return wt[1];
+  }
+  return null;
+}
+function sameBytes(a, b) { return fs.readFileSync(a).equals(fs.readFileSync(b)); }
+function bringHome(b) {
+  checkBranch(b);
+  const main = mainCopyRoot();
+  const wt = worktreeOf(b);
+  if (!wt) throw new UsageError('no worktree holds ' + b + ', so there is nothing to bring home');
+  const realMain = fs.realpathSync(main);
+  if (fs.realpathSync(wt) === realMain) throw new UsageError(b + ' is checked out in the main copy itself, so there is nothing to bring home');
+  // Untracked files under the record folders, ignored or not. -z keeps names unquoted.
+  const listOthers = (extra) => gitAt(wt, ['ls-files', '-z', '--others', '--exclude-standard'].concat(extra, ['--'], RECORD_PATHS)).split('\0').filter(Boolean);
+  const records = Array.from(new Set(listOthers([]).concat(listOthers(['--ignored'])))).filter(isRecord).sort();
+  // Everything git would refuse a plain `git worktree remove` over: untracked
+  // files and changes to tracked ones. An untracked record is copied below, so
+  // only what is not a record is left over.
+  const status = gitAt(wt, ['status', '--porcelain=v1', '-z', '--untracked-files=all']).split('\0');
+  const leftover = [];
+  let needsForce = false;
+  for (let i = 0; i < status.length; i++) {
+    const e = status[i];
+    if (!e) continue;
+    needsForce = true;
+    const xy = e.slice(0, 2);
+    const rel = e.slice(3);
+    // A rename or copy, staged or seen only in the working tree (intent-to-add,
+    // then moved), carries the old name as the next entry.
+    if (/[RC]/.test(xy)) i++;
+    if (xy === '??' && isRecord(rel)) continue;
+    leftover.push(rel);
+  }
+  let copied = 0;
+  let refreshed = 0;
+  let same = 0;
+  const differs = [];
+  const recordFile = homeRecordPath(main, b);
+  const home = readHomeRecord(recordFile);
+  // Written after the copies, and before an error is passed on, so a run that
+  // stops part way still records what it copied. A record that cannot be
+  // written costs only the refresh: the next run lists those files as differing.
+  let manifest = null;
+  const saveRecord = () => {
+    try {
+      fs.mkdirSync(path.dirname(recordFile), { recursive: true });
+      const files = {};
+      for (const k of Object.keys(home).sort()) files[k] = home[k];
+      fs.writeFileSync(recordFile, JSON.stringify({ branch: b, files }, null, 2) + '\n');
+      manifest = recordFile;
+    } catch (e) {
+      process.stderr.write('merge-check: could not write the record of what came home, ' + recordFile + ': ' + (e && e.message ? e.message : String(e)) + '\n');
+    }
+  };
+  for (const rel of records) {
+    const src = path.join(wt, rel);
+    const dst = path.join(main, rel);
+    const st = fs.lstatSync(src);
+    if (!st.isFile()) { leftover.push(rel); continue; }   // a symlink or a nested repository is not copied
+    let have = null;
+    try { have = fs.lstatSync(dst); } catch (e) { have = null; }
+    let replace = false;
+    if (have) {
+      // Already home byte for byte: recorded too, so a copy an earlier version
+      // brought home without a record can still be refreshed once the worktree's
+      // copy moves on (review of #270, R13). Its bytes are the branch's own.
+      if (have.isFile() && sameBytes(src, dst)) { home[rel] = sha256(dst); same++; continue; }
+      // Replaced only when this mode put it there and it still holds those bytes.
+      if (have.isFile() && typeof home[rel] === 'string' && home[rel] === sha256(dst)) replace = true;
+      else { differs.push(rel); continue; }
+    }
+    try {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      // A folder on the way that is a link out of the main copy is refused, so a
+      // record never lands outside it.
+      const realDir = fs.realpathSync(path.dirname(dst));
+      if (realDir !== realMain && !realDir.startsWith(realMain + path.sep)) throw new Error('its folder leads outside the main copy');
+      fs.copyFileSync(src, dst, replace ? 0 : fs.constants.COPYFILE_EXCL);
+      // Kept, because session-init.js picks the newest plan by modified time.
+      fs.utimesSync(dst, st.atime, st.mtime);
+      if (!sameBytes(src, dst)) throw new Error('the copy does not match');
+      home[rel] = sha256(dst);
+    } catch (e) {
+      saveRecord();
+      throw new Error('could not bring home ' + rel + ': ' + (e && e.message ? e.message : String(e)) + ' (' + (copied + refreshed) + ' copied before it stay)');
+    }
+    if (replace) refreshed++;
+    else copied++;
+  }
+  saveRecord();
+  return { branch: b, worktree: wt, mainCopy: main, copied, refreshed, same, differs, leftover: leftover.sort(),
+           ignored: otherIgnored(wt, main), needsForce, manifest };
+}
+
+// The ignored files outside the records, which `git worktree remove` deletes
+// without a word (issue #270): named, never copied, so the removal question can
+// say what goes. Left out: the records themselves, the folders an install or a
+// run rebuilds (isRebuilt), the cycle marker, and any file the main copy holds
+// byte for byte (.env.local copied in by /worktree, say). A folder git ignores
+// whole is one entry, with its trailing slash; artifacts/html, which projects
+// ignore whole, is listed file by file so its undated pages can be named.
+function otherIgnored(wt, main) {
+  const list = (extra, paths) => gitAt(wt, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard'].concat(extra, ['--'], paths)).split('\0').filter(Boolean);
+  const sameIn = (rel) => {
+    try { return fs.lstatSync(path.join(main, rel)).isFile() && fs.lstatSync(path.join(wt, rel)).isFile() && sameBytes(path.join(wt, rel), path.join(main, rel)); }
+    catch (e) { return false; }
+  };
+  const underRecords = (rel) => {
+    const top = rel.replace(/\/$/, '');
+    return RECORD_PATHS.some((p) => top === p || top.startsWith(p + '/') || p.startsWith(top + '/'));
+  };
+  const out = new Set();
+  for (const rel of list(['--directory'], ['.'])) {
+    if (isRebuilt(rel) || underRecords(rel) || (!rel.endsWith('/') && sameIn(rel))) continue;
+    out.add(rel);
+  }
+  for (const rel of list([], ['artifacts/html'])) {
+    if (isRecord(rel) || rel === 'artifacts/html/.last-cycle' || isRebuilt(rel) || sameIn(rel)) continue;
+    out.add(rel);
+  }
+  return Array.from(out).sort();
+}
+
 // ---- the decisions file (rule 3) ---------------------------------------------------
 // The one file the decision-checker agent reads (merge-rules.md, "The decisions
 // file"): a `## This PR` part, then a `## Landing <short sha>: <subject>` part for
@@ -611,9 +947,23 @@ function changelogPlace(clFile, blockFile) {
 // list; one with none (a PR from before the lists existed, a list that says
 // `None recorded`, a landing whose message has no `Decisions:` lines) holds its
 // text and its changes instead, generated paths left out, cut at DIFF_LINES lines.
+// Each diff is word by word (issue #258 item 10): a line a landing reworded
+// shows only the words it changed, so text it carried over is not read as its
+// decision. WORD_NOTE, the file's first line, says what the markers mean.
 const DIFF_LINES = 150;
+const WORD_NOTE = 'Each diff below is word by word: `[-...-]` is text that part removed and `{+...+}` is text it added. Unmarked text was already there, so it is not that part\'s decision.';
+// The list lines, one decision each; a list line indented past the one above
+// it is a sub-point of that decision and joins its line, as in decisionItems.
 function listed(lines) {
-  const out = lines.filter((l) => /^\s*[-*]\s+\S/.test(l)).map((l) => l.trim());
+  const out = [];
+  let base = -1;
+  for (const l of lines) {
+    const m = /^(\s*)[-*]\s+\S/.exec(l);
+    if (!m) continue;
+    if (out.length && m[1].length > base) { out[out.length - 1] += ' ' + l.trim(); continue; }
+    base = m[1].length;
+    out.push(l.trim());
+  }
   if (!out.length || (out.length === 1 && /^[-*]\s+None recorded\.?$/i.test(out[0]))) return null;
   return out;
 }
@@ -625,9 +975,9 @@ function messageDecisions(message) {
   while (j < lines.length && /^\s*[-*]\s+\S/.test(lines[j])) j++;
   return listed(lines.slice(i + 1, j));
 }
-// A diff in a fence longer than any backtick run inside it.
+// A word-by-word diff in a fence longer than any backtick run inside it.
 function changesOf(a, b, excl) {
-  const out = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U1', a, b, '--', '.'].concat(excl)).replace(/\n$/, '');
+  const out = git(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--word-diff=plain', '-U1', a, b, '--', '.'].concat(excl)).replace(/\n$/, '');
   if (!out) return '(no changes outside generated paths)';
   const lines = out.split('\n');
   const shown = lines.length > DIFF_LINES ? lines.slice(0, DIFF_LINES).concat('... (' + (lines.length - DIFF_LINES) + ' more lines left out)') : lines;
@@ -654,7 +1004,7 @@ function decisionsFile(o, mainRef, excl) {
   const pr = o['--pr'] ? readPr(o['--pr']) : o['--pr-body'] ? readPrArg(o['--pr-body']) : { title: null, body: '' };
   const own = listed(String(parseBody(pr.body).decisions || '').split('\n'));
   const name = o['--pr'] ? 'PR #' + pr.number + ': ' + pr.title : (pr.title || 'The branch at ' + c.tip.slice(0, 7));
-  const out = ['## This PR', '', name, ''];
+  const out = [WORD_NOTE, '', '## This PR', '', name, ''];
   if (own) out.push(...own);
   else {
     out.push('No decision list: read what it decides from its text and its changes.', '');
@@ -701,9 +1051,9 @@ function finish(result, flags, suppressed, notes) {
 }
 
 // ---- arguments ---------------------------------------------------------------------
-const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out']);
+const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout', '--bring-home']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
-const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions']);
+const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait']);
 function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -733,6 +1083,19 @@ function main(argv) {
     const [cl, block] = o['--changelog-place'];
     return finish(Object.assign({ mode: 'changelog-place' }, changelogPlace(path.resolve(cl), path.resolve(block))), [], 0, notes);
   }
+  if (o['--wait']) {
+    const r = waitMergeable(o);
+    process.stdout.write(JSON.stringify(Object.assign({ mode: 'wait' }, r)) + '\n');
+    if (r.ready) {
+      process.stderr.write('merge-check: #' + r.pr + ' is mergeable at ' + r.head.slice(0, 7) + ' (' + r.polls + ' read' + (r.polls === 1 ? '' : 's') + ': ' + r.seen.join(', ') + ')\n');
+      return 0;
+    }
+    const why = !r.open ? 'it is no longer open (' + (r.state || 'no state reported') + ')'
+      : r.hostHead !== r.head ? 'the host still has ' + (r.hostHead ? r.hostHead.slice(0, 7) : 'no head') + ', not the pushed ' + r.head.slice(0, 7) + ' (' + r.status + ')'
+      : 'the host still says ' + r.status;
+    process.stderr.write('merge-check: #' + r.pr + ' is not mergeable at ' + r.head.slice(0, 7) + ' after ' + Math.round(r.waitedMs / 1000) + ' s and ' + r.polls + ' read' + (r.polls === 1 ? '' : 's') + ': ' + why + '\n');
+    return 1;
+  }
   if (o['--pr-body'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr-body' }, missingParts(parseBody(readBodyArg(o['--pr-body'])), notes)), [], 0, notes);
   if (o['--pr'] && !o['--cut'] && !o['--decisions']) return finish(Object.assign({ mode: 'pr' }, missingParts(readPr(o['--pr']), notes)), [], 0, notes);
   if (o['--marker']) {
@@ -744,6 +1107,18 @@ function main(argv) {
     if (!sha) throw new UsageError('--mark ' + o['--mark'] + ' does not name a commit');
     git(['config', 'tk.landingChecked', sha]);
     return finish({ mode: 'mark', marker: sha, written: true }, [], 0, notes);
+  }
+  if (o['--bring-home']) {
+    const r = bringHome(o['--bring-home']);
+    process.stdout.write(JSON.stringify(Object.assign({ mode: 'bring-home' }, r)) + '\n');
+    for (const f of r.differs) process.stderr.write(f + ': the main copy already has a different file there, which was kept; this copy is not home\n');
+    for (const f of r.leftover) process.stderr.write(f + ': left over (not a record, or not committed); removing the worktree deletes it\n');
+    for (const f of r.ignored) process.stderr.write(f + ': ignored and not a record, so it stays in the worktree; removing the worktree deletes it\n');
+    const listed = r.differs.length + r.leftover.length;
+    process.stderr.write('merge-check: ' + r.copied + ' copied, ' + (r.refreshed ? r.refreshed + ' refreshed, ' : '') + r.same + ' already home' +
+      (listed ? ', ' + r.differs.length + ' differ, ' + r.leftover.length + ' left over' : '') +
+      (r.ignored.length ? ', ' + r.ignored.length + ' other ignored' : '') + (r.manifest ? '; record: ' + r.manifest : '') + '\n');
+    return listed ? 1 : 0;
   }
   const mainRef = defaultMain(o['--main']);
   if (o['--record-cut']) {
@@ -762,7 +1137,12 @@ function main(argv) {
     }
     const r = checkLanding(c, mainRef, excl, kept, notes);
     if (!changedFiles(c.before, c.after, excl).length) notes.push('the landing changes nothing on ' + mainRef + ' outside generated paths and submodule pointers');
-    return finish({ mode: 'landing', main: mainRef, before: c.before, after: c.after, cut: c.cut, tip: c.tip, flags: r.flags }, r.flags, r.suppressed, notes);
+    // Listed, never flagged (#258 item 1): /merge names the deleted files and
+    // saves the main folder's copy of each untracked one around the landing.
+    const deleted = deletedFiles(c.before, c.after, excl);
+    const untracked = ignoredAt(c.after, deleted);
+    for (const f of untracked) notes.push(f + ' is deleted by this landing and ignored on the branch: the branch stopped tracking it, and every other checkout\'s copy goes when the landing reaches it');
+    return finish({ mode: 'landing', main: mainRef, before: c.before, after: c.after, cut: c.cut, tip: c.tip, deleted, untracked, flags: r.flags }, r.flags, r.suppressed, notes);
   }
   if (o['--since']) {
     const r = since(o['--since'], mainRef, excl, kept, notes);

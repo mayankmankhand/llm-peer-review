@@ -26,32 +26,47 @@ allowed-tools:
 ### Step 1: Scan the codebase
 First resolve the model mode: run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --models`, adding `--mode <m>` when the arguments carry a `mode:<m>` word, and say "Models: <models.mode>" as your first line. `models.perRole["index-mapper"]` is the mapper's model for Steps 2 and 3; call it `{mapperModel}`, reading `session` as your own model.
 
-Then run the deterministic scanner and capture its JSON output:
+Then run the deterministic scanner and capture its JSON output. When the arguments carry the word `full`, run the full scan:
 
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-index.js
 ```
 
-Parse the JSON. The manifest contains:
-- `totalFiles`, `totalTokens`, `skippedFiles`, `skipCounts` (binary/lockfile/secret/minified/oversized/missing breakdown)
+Otherwise run the refresh scan, which reads the existing `CODEBASE_MAP.md` and lists only what was committed since the commit in its header (an edit not yet committed is picked up after it is):
+
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-index.js --delta
+```
+
+Parse the JSON. `mode` says which scan you got. A `--delta` call falls back to the full scan on its own and names the reason in `fullReason`: no map, a malformed map, a Module Guide block with no `**Files:**` line (every map written before 8.0.5, so the first refresh after the upgrade is a full one), the map's commit missing from this branch's history, or a refresh that would need 4 or more subagents (`deltaChunks`). Say the reason in one line and follow the full path. The steps below name each `delta` difference.
+
+Both manifests contain:
+- `mode` (`full` or `delta`)
+- `totalFiles`, `totalTokens`, `skippedFiles`, `skipCounts` (binary/lockfile/secret/minified/oversized/missing breakdown), for the whole project
+- `readTokens` (what the subagents will read: `totalTokens` on a full scan; on a delta, the changed files plus the blocks they update)
 - `commit` (current HEAD hash, for staleness tracking)
 - `isDirty` and `dirtyFileCount` (uncommitted changes present?)
 - `timestamp` (UTC, for the map header)
-- `chunks` (array of `{ id, files: [{path, tokens}], totalTokens }`)
+- `chunks` (on a full scan, an array of `{ id, files: [{path, tokens}], totalTokens }`; on a delta, see below)
 - `largestChunkTokens` (size of the largest chunk - helps explain overflow)
 - `chunkTargetTokens` (the per-chunk token target; `overflowChunkIds` names the chunks over it)
-- `directoryTree` (array of indented strings)
-- `needsConfirm` (true if project total > 500k tokens OR any chunk overflows the per-chunk target)
+- `directoryTree` (array of indented strings, for the whole project)
+- `needsConfirm` (true if `readTokens` > 500k OR any chunk overflows the per-chunk target)
 - `anyChunkOverflows` (true if at least one chunk exceeds the per-chunk target despite chunking)
 - `overflowChunkIds` (the ids of the chunks over `chunkTargetTokens`; empty when none)
+
+A delta manifest also has:
+- `since` (the map's commit) and `changedFiles` (kept files added, changed or deleted since then)
+- in each chunk, `blocks`: `[{ heading, text, files: [{path, tokens}], deleted: [paths] }]`, one per Module Guide block to update, with its current text, its changed files (a new file in the same folder as the block's files is sent with that block) and the files it lost; and `newFiles`: `[{path, tokens}]`, changed files that no block covers or sits beside
+- `keptBlocks` (blocks left as they are), `droppedBlocks` (headings of blocks whose files were all deleted since), `deadBlocks` (headings of blocks whose Files line matches no file at all; they are kept as they are), `uncoveredFiles` (kept files no block covers)
 
 If the JSON has an `error` field, show the message to the user and stop.
 
 ### Step 2: Cost confirmation (only if needed)
 If `manifest.needsConfirm === true`, prompt before spending API tokens. The exact message depends on why confirmation is needed:
 
-**If `totalTokens > 500_000` (project is large):**
-> "Your project has ~{totalTokens} tokens across {totalFiles} files. Generating the codebase map will spawn {chunks.length} parallel subagents ({mapperModel} via the index-mapper agent). Estimated one-time cost: a few dollars. Proceed?"
+**If `readTokens > 500_000` (a large read):**
+> "This {mode} map run reads ~{readTokens} tokens of your {totalFiles}-file project. It will spawn {chunks.length} parallel subagents ({mapperModel} via the index-mapper agent). Estimated one-time cost: a few dollars. Proceed?"
 
 **If `anyChunkOverflows === true` (a chunk is oversized despite chunking):**
 > "Your largest chunk is ~{largestChunkTokens} tokens, which exceeds the per-chunk target of {chunkTargetTokens}. This usually means one or more files slipped past the size filter. The oversized subagent may truncate or fail. You can proceed (risky), or stop and add the offending files to the skip list. Proceed?"
@@ -71,7 +86,8 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 **For each file (or coherent module of related files), output a markdown block in this exact format:**
 
 ```
-## {file path or module name}
+### {file path or module name}
+**Files:** {The files this block covers, comma-separated. A pattern may stand for a group: `*` matches any name inside one folder, `**` any depth, and a path ending in `/` everything under that folder, as in `scripts/test-*.js`. Every file in your chunk is covered by at least one block.}
 **Purpose:** {See "Purpose handling" below.}
 **Entry points:** {Functions, exports, slash commands, or CLI commands a caller would invoke. Omit if there are no clear entry points.}
 **Key dependencies:** {What this file imports or depends on - other modules, packages, external services. Omit if none.}
@@ -88,6 +104,23 @@ You are analyzing part of a codebase. Read each file in this list and produce a 
 - Group tightly related small files (e.g., a 5-file utility folder) into one module block. Single large files get their own block.
 - Keep each block under ~200 tokens and the whole response under ~2000: every chunk's blocks are merged into one map that must stay under ~10k tokens.
 - Do not output anything besides the module blocks - no preamble, no summary, no commentary.
+
+</template>
+
+**On a delta manifest,** use this template for each chunk instead, dispatched the same way:
+
+<template>
+
+You are updating part of an existing codebase map. Read-only - do not modify anything.
+
+**Blocks to update.** Each block below is the map's current text, followed by the files that changed under it. Read the changed files, then return the block updated so it is true of the code now. Keep the `###` heading exactly as it is. Keep every `**Files:**` pattern except one that names only a deleted file, which you remove; add a pattern for a changed or new file the block should now cover. Keep every sentence that is still true word for word. Remove what only a deleted file supported.
+
+{for each block: its `text` verbatim, then `Changed: {its files' paths, comma-separated}` and `Deleted: {its deleted paths, comma-separated}`, each line left out when empty}
+
+**New files.** No block covers these yet. Read each and write new blocks for them. When a new file belongs with a block you were sent above, add it to that block's Files line instead of writing a new block. Give each new block a heading no block in the map already uses; the map's headings are: {every `### ` heading in the existing map's Module Guide, comma-separated}.
+{for each new file: `- {path}`; leave this part out when there are none}
+
+{the block format, the Purpose handling and the Rules of the template above, word for word}
 
 </template>
 
@@ -118,7 +151,7 @@ Combine the subagent responses into a single map content string (do not write th
 {manifest.directoryTree rendered as a markdown list}
 
 ## Module Guide
-{All subagent module blocks, sorted alphabetically by path. Keep Purpose, Entry points, and Key dependencies. Drop conventions/gotchas from this section - they get their own.}
+{All subagent module blocks under their ### headings, sorted alphabetically by heading. Keep Files, Purpose, Entry points, and Key dependencies. Drop conventions/gotchas from this section - they get their own.}
 
 ## Conventions
 {Collected "Observed conventions" from subagent responses. Group similar ones. Drop this section entirely if no conventions were reported.}
@@ -135,6 +168,8 @@ Skip this section if the project has no obvious extension points.}
 
 </template>
 
+**On a delta manifest,** write the same structure with three differences. The header and the Directory Tree still come from the manifest. The Module Guide holds only the blocks the subagents returned. Leave out every other section unless a returned block's conventions or gotchas add to it or contradict it: Step 5 copies each section you leave out from the existing map byte for byte. A section you do include replaces the old one whole, so write it from the existing map's section, changing only what the returned blocks add or contradict. When `chunks` is empty (nothing the map covers changed), skip Steps 2 and 3 and still write this file with an empty Module Guide: the merge carries every block over and moves the map's commit forward.
+
 ### Step 5: Write atomically and let the script apply the size cap
 
 1. Write the full synthesized content to `CODEBASE_MAP.md.tmp` in the project root with the file-writing tool. Trim nothing yourself: the script measures the map and applies the size cap below.
@@ -147,11 +182,14 @@ Skip this section if the project has no obvious extension points.}
    It validates the temp file (over 200 bytes, a `<!-- Generated:` first line, a `# Codebase Map` heading, and a `## Module Guide` section unless the header says `Files: 0`), applies the size cap, renames the result over `CODEBASE_MAP.md` (the atomic step), removes a legacy `INDEX.md`, and prints one JSON object.
 
    **The size cap.** A map over about 10k tokens is trimmed in this order, each step only while the map is still over: the Directory Tree to depth 3, then to depth 2, then the Gotchas section, then Conventions, then the Navigation Guide. The Module Guide is the semantic core and the script never cuts it. The script records what it cut in a `<!-- Trimmed: ... -->` header line and in the JSON's `trimmed` array; a step that cut nothing is left out of both.
-3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 6's size, `trimmed` for its trimmed-sections line, and `indexRemoved` for its legacy-file line. When `overCap` is true, the map is in place but still over the cap after every step: shorten each Module Guide entry to a one-line Purpose (still better than dropping the section), write the temp file again, and run `--finalize` once more; report the second result. Once is the limit.
-4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`.
+
+   **On a delta manifest,** run `node ${CLAUDE_PLUGIN_ROOT}/scripts/generate-index.js --finalize --merge` instead. Before the checks above, it merges the existing map into the temp file: a block the temp file carries replaces the block of the same heading in its place, a new block goes in at its sorted place, every other block is copied byte for byte unless its files were all deleted (then it is dropped), and each section the temp file leaves out is copied from the existing map. It refuses with `heading_clash` a block whose heading names a block that was not sent out, or a heading the temp file carries twice. Its JSON adds `merge`: `{kept, replaced, added, dropped, notReturned, uncovered}`, with `replaced` through `notReturned` as lists of headings; `notReturned` names blocks sent out that came back under no matching heading, which keep their old text, and `uncovered` counts the files no block covers after the merge.
+3. On `{"finalized":true, ...}` (exit 0): keep `tokens` for Step 6's size, `trimmed` for its trimmed-sections line, and `indexRemoved` for its legacy-file line. When `overCap` is true, the map is in place but still over the cap after every step: shorten each Module Guide entry to a one-line Purpose (still better than dropping the section), write the temp file again, and run `--finalize` once more; report the second result. Once is the limit. After a delta, build that temp file from the whole merged `CODEBASE_MAP.md` now in place, every block of it, and run plain `--finalize`, not `--merge`.
+4. On `{"finalized":false, "error": ..., "reason": ...}` (exit 1): the script has already deleted the temp file and left the existing `CODEBASE_MAP.md` and `INDEX.md` untouched. Stop and tell the user the `reason`. On `heading_clash`, also suggest `/tk:index full`.
 
 ### Step 6: Report to the user
 Tell the user:
+- On a delta, say instead of the line below: "Refreshed `CODEBASE_MAP.md` from the {changedFiles} files changed since {the first 7 characters of since}: {replaced} blocks updated, {added} added, {dropped} dropped, {kept} unchanged." Then name any `notReturned` block (its old text was kept), any `deadBlocks` (their Files lines match no file) and, when `uncovered` is above 0, how many files no block covers, and suggest `/tk:index full` for any of them.
 - "Generated `CODEBASE_MAP.md` ({totalFiles} files mapped, ~{mapTokens} tokens)."
 - If `trimmed` is not empty, list its entries as the sections trimmed or dropped, and say so when `overCap` stayed true after the second run.
 - If `isDirty` was true: "Note: map generated against a dirty worktree. Consider regenerating after your next commit for an accurate commit reference."

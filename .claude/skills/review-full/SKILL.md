@@ -49,6 +49,8 @@ Then pick one of two modes:
 
 These five rows are the toolkit's kinds. A project's own review kinds (`.claude/toolkit/review-kinds.md`) are not part of this fan-out; `/review` with no focus name runs them on its auto-detect path, with or without a range.
 
+**Docs match the code.** On every run, small or big, the runner authors the docs findings itself, because a typed worker takes its rules from its preloaded criteria and never sees this table. Run `node .claude/scripts/doc-check.js --window <base>..HEAD` (M16), with `<base>` where this run's changed files are measured from (the previous release tag on a release gate). Each entry under `links` and `oldNames` is a finding, except one that is not a mismatch (a doc that names a removed file on purpose, such as a list of retired files): dismiss it with one line in the report saying why, as `/document` Step 2 does, and do not file it. Then read the docs against the code they describe, including code that did not change in the range, because older drift is what a release gate is for. This read is the one place this run reads code that did not change, so it has its own limit in place of the reading budget below: for each claim a doc makes, open only the code file the claim names and the section it describes, at most 20 such files per run, and list in the report each doc the limit left unchecked. Each place they disagree is a finding too. Every one carries the two-sided receipt and goes into the same `findings.jsonl` as the workers' lines, so M2 audits it like any other.
+
 Each sub-agent should stay broad. If a sub-agent finds something that needs deep investigation, flag it and recommend the appropriate specialist review command.
 
 The Design & Completeness row is the one whose worker can need input: the plan criteria open by asking which plan to compare against, and a dispatched finder cannot ask, so with no plan file it would return nothing. That is why the row switches workers when no plan exists, the same guard `/review` applies with its `[plan] ⏭️ skipped (no plan file)` chip.
@@ -75,11 +77,9 @@ Each sub-agent uses the severity scale below. Write every finding line this run 
 
 ## Audit Before the Report (M2)
 
-On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
+On a direct run of this skill you are M2's **runner**: audit your findings per M2 before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
-!`cat .claude/skills/shared/hitl-loop.md`
-
-!`cat .claude/skills/shared/hitl-stages.md`
+**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context.
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -87,17 +87,17 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/report-format.md`
-
-!`cat .claude/skills/shared/finding-contract.md`
+The report template and the finding contract are in the report rules loaded before the audit (`Skill(report-rules)`); write the report per them.
 
 ## HTML Companion (when gate fires)
 
-After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+After writing the markdown report, evaluate whether to also generate an HTML view.
 
-!`cat .claude/skills/shared/html-render-review.md`
+**The gate:** render the review page whenever this run has any surviving finding, or this branch's standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the five sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Security, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip purposes.
+**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
+
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the five sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Security, Operations) so the reader sees at a glance which domains were checked. Treat `/review-full` as a multi-specialist run for chip purposes.
 
 ### Staff Architect Check
 
@@ -126,8 +126,4 @@ State one of:
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
-
-!`cat .claude/skills/shared/html-outputs.md`
-
-!`cat .claude/skills/shared/html-viewing.md`
+When to render and the temporary-folder steps are in the report rules loaded before the audit; how a page reaches the user is in the page rules loaded at the gate. Nothing is pasted here.

@@ -4,7 +4,8 @@
 // site overrides #176, quoted inline cats and the inline command guard #172,
 // seeds #173, narrowed seed rows #180; the setup skill's project paths, the
 // plugin-root install rules and the root helper hashes #180, the /document
-// create rows #181, the review scope row #182, stamps that follow --version #183).
+// create rows #181, the review scope row #182, stamps that follow --version #183;
+// the push guard's PreToolUse hook #260).
 //
 // Same shape as the other suites (test-render-html.js, test-pre-push-check.js):
 // dependency-free, prints one line per check, exits non-zero on any failure.
@@ -133,6 +134,7 @@ function makeFixture() {
   write(src, 'scripts/render-html.js', '// shells at path.join(__dirname, "..", "skills", "shared", "shells")\nconsole.log("render");\n');
   write(src, 'scripts/open-artifact.sh', '#!/usr/bin/env bash\necho open\n');
   write(src, 'scripts/session-start.js', '// the SessionStart hook\n');
+  write(src, 'scripts/push-guard.js', '// the PreToolUse hook\n');
   write(src, 'scripts/package.json', '{ "name": "fixture", "dependencies": {} }\n');
   write(src, 'scripts/package-lock.json', '{ "lockfileVersion": 3 }\n');
   write(src, 'scripts/node_modules/left-pad/index.js', 'module.exports = 1;\n');
@@ -367,6 +369,11 @@ const hooks = JSON.parse(read(out, 'hooks/hooks.json'));
 const hookCommands = (hooks.hooks.SessionStart || []).flatMap(h => h.hooks || []).map(h => h.command);
 check('SessionStart hook runs session-start.js through node with the path quoted', hookCommands.length === 1 && hookCommands[0] === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', JSON.stringify(hookCommands));
 check('the hook carries no shell-only syntax', !/mkdir|ln -s|\|\||&&/.test(JSON.stringify(hooks)));
+const guardEntries = hooks.hooks.PreToolUse || [];
+const guardHooks = guardEntries.length === 1 ? (guardEntries[0].hooks || []) : [];
+check('the PreToolUse hook runs push-guard.js and blocks when it fails', guardEntries.length === 1 && guardEntries[0].matcher === 'Bash' && guardHooks.length === 1 &&
+  guardHooks[0].type === 'command' && guardHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/push-guard.js"' && guardHooks[0].timeout === 120 && guardHooks[0].onFailure === 'block',
+  JSON.stringify(hooks.hooks.PreToolUse));
 const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths adds every historical path and skips comments and blanks', managed.paths.includes('.claude/commands/review-code.md') && managed.paths.includes('.claude/skills/shared/output-template.md') && !managed.paths.some(p => p === '' || p.startsWith('#')));
@@ -482,8 +489,52 @@ const byName = [...new Set(['commands', 'skills', 'agents'].flatMap(d => mdUnder
 const seedAllow = JSON.parse(fs.readFileSync(path.join(REPO, 'seed', 'settings.local.json'), 'utf8')).permissions.allow;
 const noRows = byName.filter(n => !seedAllow.includes('Skill(tk:' + n + ')') || !seedAllow.includes('Skill(tk:' + n + ':*)'));
 check('live: every skill a command loads by name has both permission rows in the seed', byName.length > 0 && noRows.length === 0, 'missing rows for: ' + noRows.join(', '));
+// Three rule-set skills a review loads by name mid-run (#261): each inlines
+// exactly its shared fragments by plugin path and nothing else, is not a
+// command, and has both seed rows, or default permission mode stops on the
+// first load. A missing skill is a miss here, never a crash, so the case name
+// shows in the failure list.
+const RULE_SKILLS = {
+  'loop-rules': ['hitl-loop.md', 'hitl-stages.md'],
+  'report-rules': ['report-format.md', 'finding-contract.md', 'html-outputs.md'],
+  'review-page': ['html-render-review.md', 'html-viewing.md'],
+};
+const ruleSkillMisses = [];
+for (const [name, files] of Object.entries(RULE_SKILLS)) {
+  const rel = 'skills/' + name + '/SKILL.md';
+  if (!fs.existsSync(path.join(live, rel))) { ruleSkillMisses.push(rel + ' missing'); continue; }
+  const text = read(live, rel);
+  if (!/^user-invocable: false$/m.test(text)) ruleSkillMisses.push(rel + ' is user-invocable');
+  const cats = [...text.matchAll(/!`cat "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/shared\/([^"]+)"`/g)].map(m => m[1]).sort();
+  if (cats.join(',') !== files.slice().sort().join(',')) ruleSkillMisses.push(rel + ' inlines [' + cats.join(', ') + ']');
+  if ((text.match(/!`cat /g) || []).length !== files.length) ruleSkillMisses.push(rel + ' inlines a file outside skills/shared');
+  for (const row of ['Skill(tk:' + name + ')', 'Skill(tk:' + name + ':*)']) if (!seedAllow.includes(row)) ruleSkillMisses.push('seed lacks ' + row);
+}
+check('live: loop-rules, report-rules and review-page build with plugin-scoped inlines and all six seed rows', ruleSkillMisses.length === 0, ruleSkillMisses.join('; '));
+// The twelve files that load those skills by name must carry the plugin-scoped
+// form in the built tree (#261): a load line the build left unscoped would stop
+// a downstream session on a skill that does not exist there, which a harness
+// run in bypassPermissions would never show.
+const LOOP_LOADERS = ['commands/review.md', 'skills/review-browser/SKILL.md', 'skills/review-code/SKILL.md',
+  'skills/review-commands/SKILL.md', 'skills/review-copy/SKILL.md', 'skills/review-deps/SKILL.md',
+  'skills/review-plan/SKILL.md', 'skills/review-security/SKILL.md', 'skills/review-ux/SKILL.md',
+  'skills/review-full/SKILL.md', 'skills/security-audit/SKILL.md', 'skills/upgrade/SKILL.md'];
+const scopedMisses = [];
+for (const rel of LOOP_LOADERS) {
+  if (!fs.existsSync(path.join(live, rel))) { scopedMisses.push(rel + ' missing'); continue; }
+  const text = read(live, rel);
+  for (const name of ['loop-rules', 'report-rules']) if (!text.includes('`Skill(tk:' + name + ')`')) scopedMisses.push(rel + ' lacks Skill(tk:' + name + ')');
+  const page = text.includes('`Skill(tk:review-page)`');
+  if (rel.includes('/upgrade/') ? page : !page) scopedMisses.push(rel + (page ? ' loads' : ' lacks') + ' Skill(tk:review-page)');
+  if (/Skill\((loop-rules|report-rules|review-page)\)/.test(text)) scopedMisses.push(rel + ' keeps an unscoped load');
+}
+check('live: the twelve loop files load Skill(tk:loop-rules) and Skill(tk:report-rules), and the eleven page files Skill(tk:review-page)', scopedMisses.length === 0, scopedMisses.join('; '));
+
 check('live: the deps criteria audit the plugin root, not scripts/', read(live, 'skills/shared/criteria-deps.md').includes('--prefix "${CLAUDE_PLUGIN_ROOT}"') && !read(live, 'skills/shared/criteria-deps.md').includes('${CLAUDE_PLUGIN_ROOT}/scripts`'));
-const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path.join('shared', 'conventions.md')));
+// conventions.md (data the audit parses) and the release notes (#257, the
+// repository's CHANGELOG.md blocks as written) are not prompts, so the prompt
+// checks over liveMd skip them.
+const liveMd = walkFiles(live).filter(f => f.endsWith('.md') && !f.endsWith(path.join('shared', 'conventions.md')) && f !== path.join(live, 'CHANGELOG.md'));
 const liveUnquoted = liveMd.filter(f => UNQUOTED_CAT.test(fs.readFileSync(f, 'utf8'))).map(f => path.relative(live, f));
 const liveQuoted = liveMd.reduce((n, f) => n + (fs.readFileSync(f, 'utf8').match(QUOTED_CAT) || []).length, 0);
 check('live: every emitted inline cat is quoted', liveUnquoted.length === 0 && liveQuoted > 100, 'unquoted in ' + liveUnquoted.join(', ') + '; quoted ' + liveQuoted);
@@ -752,6 +803,43 @@ if (fullHistory()) {
   console.log('  skip history checks for the helper hashes: this checkout has no full git history');
 }
 
+// --- 5b. The release notes ship with the plugin (issue #257) --------------------
+// /tk:upgrade reads what changed since a project's recorded version from the
+// plugin's own CHANGELOG.md: every released block from v6.0.0 up to the build's
+// version, newest first, never an Unreleased block or one above the version.
+console.log('\n5b. the release notes ship with the plugin');
+const notesFx = makeFixture();
+const notesOut = path.join(notesFx.root, 'plugin-notes');
+const noNotes = runBuild(['--source', notesFx.src, '--out', notesOut, '--version', '8.0.0', '--quiet']);
+check('257 notes: a source with no CHANGELOG.md builds without one', noNotes.status === 0 && !exists(notesOut, 'CHANGELOG.md'), noNotes.stderr || 'CHANGELOG.md emitted');
+write(notesFx.root, 'CHANGELOG.md', [
+  '# Changelog', '', '<!-- a maintainer note -->', '',
+  '## Unreleased - x', '', '- entry-unreleased', '',
+  '## v9.0.0 - Later (2027-01-01)', '', '- entry-v9', '',
+  '## v8.0.0 - Now (2026-10-01)', '', '### Added', '- entry-v8a', '  - entry-v8a-nested', '- entry-v8b', '', '',
+  '## v6.0.0 - Floor (2026-08-30)', '', '- entry-v6', '',
+  '## v5.9.0 - Below (2026-08-01)', '', '- entry-v59', '',
+].join('\n'));
+const withNotes = runBuild(['--source', notesFx.src, '--out', notesOut, '--version', '8.0.0', '--quiet']);
+const notes = exists(notesOut, 'CHANGELOG.md') ? read(notesOut, 'CHANGELOG.md') : null;
+const notesLines = notes === null ? [] : notes.split('\n');
+const wantBlocks = '## v8.0.0 - Now (2026-10-01)\n\n### Added\n- entry-v8a\n  - entry-v8a-nested\n- entry-v8b\n\n## v6.0.0 - Floor (2026-08-30)\n\n- entry-v6\n';
+check('257 notes: the plugin ships CHANGELOG.md with every released block from v6.0.0 up to its version',
+  withNotes.status === 0 && notes !== null && /^# \S/.test(notesLines[0]) && notesLines[1].trim() !== '' && notesLines[2] === '' && notesLines.slice(3).join('\n') === wantBlocks,
+  notes === null ? 'no CHANGELOG.md in the build' : 'headings: ' + JSON.stringify(notesLines.filter((x) => /^##? /.test(x))));
+const leaked = ['Unreleased', 'entry-unreleased', 'v9.0.0', 'entry-v9', 'v5.9.0', 'entry-v59', 'a maintainer note'].filter((s) => notes !== null && notes.includes(s));
+check('257 notes: no Unreleased block and no block above the build version ships', notes !== null && leaked.length === 0, notes === null ? 'no CHANGELOG.md in the build' : 'leaked: ' + leaked.join(', '));
+// The live build from section 5: its notes open on the newest released block of
+// the repository's CHANGELOG.md at or below VERSION.
+const liveVersion = read(REPO, 'VERSION').trim().split('.').map(Number);
+const atOrBelow = (m) => { const v = [Number(m[1]), Number(m[2]), Number(m[3])]; for (let i = 0; i < 3; i++) if (v[i] !== liveVersion[i]) return v[i] < liveVersion[i]; return true; };
+const newestReleased = read(REPO, 'CHANGELOG.md').split('\n').find((x) => { const m = /^## v(\d+)\.(\d+)\.(\d+)\b/.exec(x); return m && atOrBelow(m); });
+const liveNotes = exists(live, 'CHANGELOG.md') ? read(live, 'CHANGELOG.md') : null;
+const liveFirst = liveNotes === null ? null : liveNotes.split('\n').find((x) => x.startsWith('## '));
+check('257 notes: the live plugin\'s notes start at the newest released version and hold no Unreleased block',
+  liveNotes !== null && newestReleased !== undefined && liveFirst === newestReleased && !/^## Unreleased/m.test(liveNotes),
+  liveNotes === null ? 'no CHANGELOG.md in the build' : 'first block ' + JSON.stringify(liveFirst) + ', newest released ' + JSON.stringify(newestReleased) + ', Unreleased ' + /^## Unreleased/m.test(liveNotes));
+
 // --- 6. The key lookup from a plugin cache layout (issue #177) ------------------
 console.log('\n6. key lookup from the plugin cache');
 const home = tmpDir('build-plugin-home-');
@@ -912,6 +1000,12 @@ fs.rmSync(hookAbs);
 let uHook;
 try { uHook = unresolvedOf(); } finally { fs.writeFileSync(hookAbs, hookText); }
 check('a source without scripts/session-start.js is reported unresolved for the hook', uHook.includes('hooks/hooks.json: missing source scripts/session-start.js'), uHook.join('; '));
+const guardAbs = path.join(cp.src, 'scripts', 'push-guard.js');
+const guardText = fs.readFileSync(guardAbs);
+fs.rmSync(guardAbs);
+let uGuard;
+try { uGuard = unresolvedOf(); } finally { fs.writeFileSync(guardAbs, guardText); }
+check('a source without scripts/push-guard.js is reported unresolved for the hook', uGuard.includes('hooks/hooks.json: missing source scripts/push-guard.js'), uGuard.join('; '));
 check('the retired rows seed is exempt from the old-layout check', !unresolvedOf().some(x => x.startsWith('seed/retired-permission-rows.txt')) && read(REPO, 'seed/retired-permission-rows.txt').includes('.claude/scripts/'));
 const cpInv = lib.inventory(cp.src);
 const seedHits = (text, rel) => lib.seedProblems(rel || 'seed/CLAUDE.md', text, cpInv);

@@ -8,17 +8,11 @@ allowed-tools:
   - Bash
   - Agent
   - WebSearch
-  - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh *)"
-  - "Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/open-artifact.sh)"
   - "Bash(mktemp -d /tmp/*)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-findings.js)"
-  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js *)"
-  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-push-check.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
-  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js *)"
-  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/run-checks.js)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
@@ -63,11 +57,9 @@ allowed-tools:
 
 ## Audit Before the Report (M2)
 
-On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
+On a direct run of this skill you are M2's **runner**: audit your findings per M2 before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md"`
-
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md"`
+**Load the loop rules and the report rules now**, through the Skill tool: `Skill(tk:loop-rules)`, then `Skill(tk:report-rules)`. Everything from here on cites them, so do not go on without both in context.
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -75,17 +67,17 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/report-format.md"`
-
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/finding-contract.md"`
+The report template and the finding contract are in the report rules loaded before the audit (`Skill(tk:report-rules)`); write the report per them.
 
 ## HTML Companion (when gate fires)
 
-After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+After writing the markdown report, evaluate whether to also generate an HTML view.
 
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-render-review.md"`
+**The gate:** render the review page whenever this run has any surviving finding, or this branch's standing page already exists (`node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["copy"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
+**When the gate fires, load the page rules now**, through the Skill tool: `Skill(tk:review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
+
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules), set `lenses` to `["copy"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context).
 
 ### Staff Editor Check
 
@@ -107,8 +99,4 @@ After the standard review, step back and evaluate as a staff editor:
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
-
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-outputs.md"`
-
-!`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/html-viewing.md"`
+When to render and the temporary-folder steps are in the report rules loaded before the audit; how a page reaches the user is in the page rules loaded at the gate. Nothing is pasted here.

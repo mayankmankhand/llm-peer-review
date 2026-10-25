@@ -4,7 +4,11 @@
 // The /index command consumes this manifest to orchestrate parallel subagent
 // analysis and synthesize CODEBASE_MAP.md. No LLM tokens spent here.
 //
-//   node generate-index.js              the scan: one JSON manifest
+//   node generate-index.js              the full scan: one JSON manifest
+//   node generate-index.js --delta      the refresh scan: one JSON manifest of
+//                                       only the map blocks whose files were
+//                                       committed since the map's commit, or the
+//                                       full one with the reason (issue #254)
 //   node generate-index.js --finalize   check CODEBASE_MAP.md.tmp, trim it to the
 //                                       size cap, and move it into place: one
 //                                       JSON result (issues #181, #210)
@@ -19,6 +23,9 @@ const cwd = process.cwd();
 const CHUNK_TARGET_TOKENS = 250_000;
 const MAX_CHUNKS = 5;
 const CONFIRM_THRESHOLD_TOKENS = 500_000;
+// A refresh that needs this many chunks or more is a full rebuild instead: at
+// that size the delta saves little, and the whole map is re-read fresh.
+const FULL_AT_DELTA_CHUNKS = 4;
 
 // Hard cap on per-file token estimate. Files over this are skipped from the
 // subagent inputs to prevent a single huge file from blowing a chunk past
@@ -137,6 +144,18 @@ function emitError(code, message) {
 // may make before running --finalize once more. A map under the cap is never
 // rewritten, so it lands byte for byte.
 //
+// --finalize --merge (issue #254) is the same call after a --delta run, whose
+// temp file holds only what changed: a fresh header and Directory Tree, the
+// Module Guide blocks the subagents returned, and any section the session
+// chose to rewrite. Before the size cap, the script merges the existing map
+// into it (mergeIntoTemp, below) and writes the result back to the temp file,
+// so the rename stays the one atomic step. The JSON then adds
+//
+//   "merge":{"kept":<n>,"replaced":[..],"added":[..],"dropped":[..],"notReturned":[..],"uncovered":<n>}
+//
+// with headings in the lists, and `uncovered` the count of files no merged
+// block covers. Plain --finalize does exactly what it did before.
+//
 // Any failure deletes the temp file and leaves CODEBASE_MAP.md and INDEX.md as
 // they were.
 const MAP_FILE = "CODEBASE_MAP.md";
@@ -230,7 +249,7 @@ function withTrimmedHeader(lines, labels) {
   return out;
 }
 
-function finalizeMap() {
+function finalizeMap(merge) {
   const tmpPath = path.join(cwd, MAP_TMP_FILE);
   const mapPath = path.join(cwd, MAP_FILE);
 
@@ -260,8 +279,8 @@ function finalizeMap() {
   if (buf.length <= MAP_MIN_BYTES) {
     fail("too_small", `${MAP_TMP_FILE} is ${buf.length} bytes; a map must be over ${MAP_MIN_BYTES}.`);
   }
-  const text = buf.toString("utf8");
-  const lines = text.split(/\r?\n/);
+  let text = buf.toString("utf8");
+  let lines = text.split(/\r?\n/);
   if (!lines[0].startsWith("<!-- Generated:")) {
     fail("no_generated_header", `The first line of ${MAP_TMP_FILE} is not the <!-- Generated: ... --> header.`);
   }
@@ -274,6 +293,22 @@ function finalizeMap() {
   const minimal = lines.slice(0, titleAt).some((l) => l.startsWith("<!-- Files: 0,"));
   if (!minimal && !lines.some((l) => l.startsWith("## Module Guide"))) {
     fail("no_module_guide", `${MAP_TMP_FILE} has no "## Module Guide" section.`);
+  }
+
+  // The merge (--merge only): the merged map replaces the temp file's text
+  // here and on disk, and everything below runs on it.
+  let mergeRecord = null;
+  if (merge) {
+    const merged = mergeIntoTemp(text, fail);
+    try {
+      fs.writeFileSync(tmpPath, merged.text);
+    } catch (e) {
+      fail("merge_write_failed", `The merged map could not be written to ${MAP_TMP_FILE}: ${e.message}`);
+    }
+    text = merged.text;
+    lines = text.split(/\r?\n/);
+    buf = Buffer.from(text, "utf8");
+    mergeRecord = merged.record;
   }
 
   // The size cap: trim in order while over it, then write the trimmed map
@@ -340,200 +375,679 @@ function finalizeMap() {
     minimal,
     replaced,
     indexRemoved,
+    ...(mergeRecord ? { merge: mergeRecord } : {}),
   }) + "\n");
   process.exit(0);
 }
 
-// Arguments: none for the scan, or --finalize alone. Anything else is refused
-// rather than ignored, so a mistyped flag never prints a manifest in place of
-// the result the caller is waiting for.
-const args = process.argv.slice(2);
-if (args.length === 1 && args[0] === "--finalize") finalizeMap();
-if (args.length > 0) {
-  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan, or with --finalize alone.`);
+// --- The scan: shared pieces --------------------------------------------------------
+// The full scan, the refresh scan (--delta, issue #254) and the merge read the
+// same inventory: every tracked file, less the skip rules above.
+
+// git in the project folder, its stdout as text. Throws when git exits
+// non-zero; its stderr stays off the terminal, since each caller turns a
+// failure into its own reason.
+function git(args) {
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 256 * 1024 * 1024,
+  });
 }
 
-// Get all tracked files via git (respects .gitignore automatically). -z prints
-// each name verbatim and ends it with NUL (issue #183): without it git C-quotes
-// any name holding a non-ASCII byte ("docs/caf\303\251.md"), no file by that
-// name exists, and the file was counted as missing and left out of the map.
-let raw;
-try {
-  raw = execFileSync("git", ["ls-files", "-z"], { cwd, encoding: "utf8" });
-} catch {
-  emitError("git_failed", "git ls-files failed - not a git repository?");
-}
-
-const allFiles = raw.split("\0").filter(Boolean);
-
-// Capture HEAD commit for staleness tracking in the map header
-let commit = "(no commits yet)";
-try {
-  commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
-} catch {
-  // Empty repos have no HEAD - keep the placeholder
-}
-
-// Capture dirty-worktree state. Map consumers warn (but do not block) when
-// the map was generated against a tree that had uncommitted changes - the
-// commit hash alone would lie about freshness.
-let dirtyFileCount = 0;
-let isDirty = false;
-try {
-  const status = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
-  dirtyFileCount = status.split("\n").filter((l) => l.trim().length > 0).length;
-  isDirty = dirtyFileCount > 0;
-} catch {
-  // Not a git repo (already errored above) or git missing - leave at defaults
-}
-
-// Build the file inventory with token estimates. Track skip counts by reason
-// so users have a transparent picture of what was excluded.
-const fileInventory = [];
-const skipCounts = {
-  binary: 0, lockfile: 0, secret: 0, minified: 0, oversized: 0, missing: 0,
-};
-
-for (const f of allFiles) {
-  const reason = classifySkip(f);
-  if (reason) {
-    skipCounts[reason]++;
-    continue;
-  }
-  const tokens = estimateTokens(path.join(cwd, f));
-  // File listed by git but missing on disk (e.g., staged-then-deleted). Drop
-  // it from the inventory so subagents are not asked to read a vanished file.
-  if (tokens === 0 && !fs.existsSync(path.join(cwd, f))) {
-    skipCounts.missing++;
-    continue;
-  }
-  // Per-file size cap. A single oversized file (huge generated client,
-  // vendored library, large i18n bundle) would otherwise dominate a chunk
-  // and bust Sonnet's context window. Skip with reason so the user can see
-  // why a particular file is not in the map.
-  if (tokens > MAX_FILE_TOKENS) {
-    skipCounts.oversized++;
-    continue;
-  }
-  fileInventory.push({ path: f, tokens });
-}
-
-let totalTokens = 0;
-for (const f of fileInventory) totalTokens += f.tokens;
-
-// Build the directory tree from the kept inventory (skipped files are
-// excluded from the tree too - it should reflect what subagents actually saw).
-function createNode() {
-  return { dirs: {}, files: [] };
-}
-
-const root = createNode();
-for (const { path: fp } of fileInventory) {
-  const parts = fp.split("/");
-  let node = root;
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!node.dirs[parts[i]]) node.dirs[parts[i]] = createNode();
-    node = node.dirs[parts[i]];
-  }
-  node.files.push(parts[parts.length - 1]);
-}
-
-const treeLines = [];
-function render(node, indent) {
-  const prefix = " ".repeat(indent);
-  const dirNames = Object.keys(node.dirs).sort((a, b) =>
-    a.localeCompare(b, "en", { sensitivity: "base" })
-  );
-  for (const dir of dirNames) {
-    treeLines.push(`${prefix}- ${dir}/`);
-    render(node.dirs[dir], indent + 2);
-  }
-  const sortedFiles = node.files.slice().sort((a, b) =>
-    a.localeCompare(b, "en", { sensitivity: "base" })
-  );
-  for (const file of sortedFiles) {
-    treeLines.push(`${prefix}- ${file}`);
-  }
-}
-render(root, 0);
-
-// Greedy bin-packing into chunks <= CHUNK_TARGET_TOKENS, at most MAX_CHUNKS.
-// Sort largest-first, assign each file to the chunk with the lowest current
-// total that still has room. If all chunks are full and we are at MAX_CHUNKS,
-// overflow into the smallest - the per-chunk-overflow flag below warns
-// callers when this happens.
-const sorted = [...fileInventory].sort((a, b) => b.tokens - a.tokens);
-const chunks = [];
-
-for (const f of sorted) {
-  let target = null;
-  for (const c of chunks) {
-    if (c.totalTokens + f.tokens <= CHUNK_TARGET_TOKENS) {
-      if (!target || c.totalTokens < target.totalTokens) target = c;
+// Every tracked file with its token estimate, and the skip counts by reason so
+// users have a transparent picture of what was excluded. git ls-files already
+// respects .gitignore. -z prints each name verbatim and ends it with NUL (issue
+// #183): without it git C-quotes any name holding a non-ASCII byte
+// ("docs/caf\303\251.md"), no file by that name exists, and the file was
+// counted as missing and left out of the map. Throws when git fails.
+function inventory() {
+  const allFiles = git(["ls-files", "-z"]).split("\0").filter(Boolean);
+  const files = [];
+  const skipCounts = { binary: 0, lockfile: 0, secret: 0, minified: 0, oversized: 0, missing: 0 };
+  for (const f of allFiles) {
+    const reason = classifySkip(f);
+    if (reason) {
+      skipCounts[reason]++;
+      continue;
     }
+    const tokens = estimateTokens(path.join(cwd, f));
+    // File listed by git but missing on disk (e.g., staged-then-deleted). Drop
+    // it from the inventory so subagents are not asked to read a vanished file.
+    if (tokens === 0 && !fs.existsSync(path.join(cwd, f))) {
+      skipCounts.missing++;
+      continue;
+    }
+    // Per-file size cap. A single oversized file (huge generated client,
+    // vendored library, large i18n bundle) would otherwise dominate a chunk
+    // and bust Sonnet's context window. Skip with reason so the user can see
+    // why a particular file is not in the map.
+    if (tokens > MAX_FILE_TOKENS) {
+      skipCounts.oversized++;
+      continue;
+    }
+    files.push({ path: f, tokens });
   }
-  if (!target) {
-    if (chunks.length < MAX_CHUNKS) {
-      target = { id: chunks.length, files: [], totalTokens: 0 };
-      chunks.push(target);
+  return { files, skipCounts };
+}
+
+// The kept files of one commit, read from git rather than the working tree,
+// with the scan's skip rules and size cap: the merge's view of the files the
+// refresh scan saw, so an edit or a deletion made while the subagents run
+// cannot change which blocks count as sent. Sizes come from the commit's
+// blobs; a submodule entry has none and is left out. Throws when git fails.
+function inventoryAt(commit) {
+  const files = [];
+  for (const entry of git(["ls-tree", "-r", "-l", "-z", commit]).split("\0")) {
+    const m = /^\S+ blob \S+ +(\d+)\t([\s\S]+)$/.exec(entry);
+    if (!m || classifySkip(m[2])) continue;
+    const tokens = Math.ceil(Number(m[1]) / 4);
+    if (tokens > MAX_FILE_TOKENS) continue;
+    files.push({ path: m[2], tokens });
+  }
+  return files;
+}
+
+// HEAD, for staleness tracking in the map header. Empty repos have no HEAD,
+// so they keep the placeholder.
+function headCommit() {
+  try {
+    return git(["rev-parse", "HEAD"]).trim();
+  } catch {
+    return "(no commits yet)";
+  }
+}
+
+// Dirty-worktree state. Map consumers warn (but do not block) when the map was
+// generated against a tree that had uncommitted changes - the commit hash
+// alone would lie about freshness.
+function dirtyState() {
+  try {
+    const status = git(["status", "--porcelain"]);
+    const dirtyFileCount = status.split("\n").filter((l) => l.trim().length > 0).length;
+    return { isDirty: dirtyFileCount > 0, dirtyFileCount };
+  } catch {
+    return { isDirty: false, dirtyFileCount: 0 };
+  }
+}
+
+// The directory tree of the kept inventory, as indented list lines. Skipped
+// files are left out of it too: it should reflect what subagents actually saw.
+function directoryTree(files) {
+  const createNode = () => ({ dirs: {}, files: [] });
+  const root = createNode();
+  for (const { path: fp } of files) {
+    const parts = fp.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node.dirs[parts[i]]) node.dirs[parts[i]] = createNode();
+      node = node.dirs[parts[i]];
+    }
+    node.files.push(parts[parts.length - 1]);
+  }
+  const lines = [];
+  (function render(node, indent) {
+    const prefix = " ".repeat(indent);
+    for (const dir of Object.keys(node.dirs).sort(byName)) {
+      lines.push(`${prefix}- ${dir}/`);
+      render(node.dirs[dir], indent + 2);
+    }
+    for (const file of node.files.slice().sort(byName)) lines.push(`${prefix}- ${file}`);
+  })(root, 0);
+  return lines;
+}
+
+// The one name order the scan uses: the directory tree's, and the place a new
+// map block takes among the old ones.
+function byName(a, b) {
+  return a.localeCompare(b, "en", { sensitivity: "base" });
+}
+
+// Greedy bin-packing into chunks of at most CHUNK_TARGET_TOKENS, at most
+// maxChunks of them. Units go largest first, each to the chunk with the lowest
+// total that still has room. When every chunk is full and the cap is reached, a
+// unit overflows into the smallest - the per-chunk overflow flags in the
+// manifest warn callers when this happens. units are { tokens, item };
+// returns [{ items, totalTokens }].
+function packUnits(units, maxChunks) {
+  const chunks = [];
+  for (const u of [...units].sort((a, b) => b.tokens - a.tokens)) {
+    let target = null;
+    for (const c of chunks) {
+      if (c.totalTokens + u.tokens <= CHUNK_TARGET_TOKENS) {
+        if (!target || c.totalTokens < target.totalTokens) target = c;
+      }
+    }
+    if (!target) {
+      if (chunks.length < maxChunks) {
+        target = { items: [], totalTokens: 0 };
+        chunks.push(target);
+      } else {
+        target = chunks.reduce((a, b) => (a.totalTokens <= b.totalTokens ? a : b));
+      }
+    }
+    target.items.push(u.item);
+    target.totalTokens += u.tokens;
+  }
+  return chunks;
+}
+
+// The UTC timestamp for the map header.
+function utcTimestamp() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return [
+    now.getUTCFullYear(),
+    "-", pad(now.getUTCMonth() + 1),
+    "-", pad(now.getUTCDate()),
+    " ", pad(now.getUTCHours()),
+    ":", pad(now.getUTCMinutes()),
+    " UTC",
+  ].join("");
+}
+
+// What every scan starts from: the inventory and the header facts.
+function scanBase() {
+  let inv;
+  try {
+    inv = inventory();
+  } catch {
+    emitError("git_failed", "git ls-files failed - not a git repository?");
+  }
+  return {
+    files: inv.files,
+    skipCounts: inv.skipCounts,
+    totalTokens: inv.files.reduce((s, f) => s + f.tokens, 0),
+    commit: headCommit(),
+    ...dirtyState(),
+    timestamp: utcTimestamp(),
+  };
+}
+
+// The manifest both scans print. The project totals describe the whole
+// project on either scan (the map header records them); `fields` carries the
+// scan's own: mode, readTokens (what the subagents will read) and the delta
+// or fallback fields. chunks stay last.
+function manifest(base, fields, chunks) {
+  // Per-chunk overflow detection. The project-total check does not catch the
+  // case where most chunks are small but one is oversized (because MAX_CHUNKS
+  // was hit). The ids of the oversized chunks go out too (overflowChunkIds),
+  // so /index reads which chunks not to auto-retry instead of comparing each
+  // chunk's total with the target itself (#226, M16).
+  const overflowChunks = chunks.filter((c) => c.totalTokens > CHUNK_TARGET_TOKENS);
+  const anyChunkOverflows = overflowChunks.length > 0;
+  return {
+    timestamp: base.timestamp,
+    commit: base.commit,
+    isDirty: base.isDirty,
+    dirtyFileCount: base.dirtyFileCount,
+    totalFiles: base.files.length,
+    skippedFiles: Object.values(base.skipCounts).reduce((a, b) => a + b, 0),
+    skipCounts: base.skipCounts,
+    totalTokens: base.totalTokens,
+    ...fields,
+    largestChunkTokens: chunks.reduce((m, c) => Math.max(m, c.totalTokens), 0),
+    chunkTargetTokens: CHUNK_TARGET_TOKENS,
+    maxFileTokens: MAX_FILE_TOKENS,
+    maxChunks: MAX_CHUNKS,
+    confirmThresholdTokens: CONFIRM_THRESHOLD_TOKENS,
+    // needsConfirm is true if EITHER what the subagents will read exceeds the
+    // threshold, OR any single chunk exceeds the per-chunk target. Both cases
+    // mean the generation might run into context-window limits or cost more
+    // than the user expects, so the /index command prompts before proceeding.
+    needsConfirm: fields.readTokens > CONFIRM_THRESHOLD_TOKENS || anyChunkOverflows,
+    anyChunkOverflows,
+    // Empty when no chunk is over the target.
+    overflowChunkIds: overflowChunks.map((c) => c.id),
+    directoryTree: directoryTree(base.files),
+    chunks,
+  };
+}
+
+function print(obj) {
+  process.stdout.write(JSON.stringify(obj, null, 2) + "\n");
+}
+
+// The full scan: every kept file, packed into at most MAX_CHUNKS chunks of
+// { id, files: [{path, tokens}], totalTokens }. `extra` carries a --delta
+// fallback's fullReason (and deltaChunks, when the delta was counted).
+function printFull(base, extra) {
+  const chunks = packUnits(base.files.map((f) => ({ tokens: f.tokens, item: f })), MAX_CHUNKS)
+    .map((c, id) => ({ id, files: c.items, totalTokens: c.totalTokens }));
+  print(manifest(base, { mode: "full", readTokens: base.totalTokens, ...extra }, chunks));
+}
+
+// --- The map's parts (issue #254) -----------------------------------------------------
+// The refresh reads a map as: the lines above its first "## " section (the
+// header comments, the title and the lines under it), its "## " sections, and
+// inside the Module Guide its "### " blocks, each with a **Files:** line.
+// Fenced code is skipped, so a heading-shaped line in a code block is never a
+// boundary. Either line ending is read; the text's own is kept for writing.
+
+// The indices in [from, to) of the lines that start with `prefix`, outside
+// fenced code.
+function headingsAt(lines, prefix, from, to) {
+  const at = [];
+  let inFence = false;
+  for (let i = from; i < to; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && lines[i].startsWith(prefix)) at.push(i);
+  }
+  return at;
+}
+
+// { eol, top, titleAt, sections: [{ name, lines }] }. The empty string a
+// closing newline leaves at the end is not a line.
+function parseMap(text) {
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  if (lines[lines.length - 1] === "") lines.pop();
+  const titleAt = lines.findIndex((l) => l.trimEnd() === MAP_TITLE);
+  const heads = headingsAt(lines, "## ", titleAt + 1, lines.length);
+  return {
+    eol,
+    titleAt,
+    top: lines.slice(0, heads.length > 0 ? heads[0] : lines.length),
+    sections: heads.map((h, i) => ({
+      name: lines[h].slice(3).trim(),
+      lines: lines.slice(h, i + 1 < heads.length ? heads[i + 1] : lines.length),
+    })),
+  };
+}
+
+// The Module Guide's lead (its heading and any lines before the first block)
+// and its blocks, { heading, lines, patterns }; null when the map has no
+// Module Guide. patterns is null for a block without a **Files:** line.
+function moduleGuide(sections) {
+  const s = sections.find((x) => x.name === "Module Guide");
+  if (!s) return null;
+  const at = headingsAt(s.lines, "### ", 1, s.lines.length);
+  return {
+    lead: s.lines.slice(0, at.length > 0 ? at[0] : s.lines.length),
+    blocks: at.map((h, i) => {
+      const lines = s.lines.slice(h, i + 1 < at.length ? at[i + 1] : s.lines.length);
+      return { heading: lines[0].slice(4).trim(), lines, patterns: filesPatterns(lines) };
+    }),
+  };
+}
+
+// A block's **Files:** patterns, comma-separated: a path, a pattern with `*`
+// (any name inside one folder) or `**` (any depth), or a folder ending in `/`
+// (everything under it). Backticks around a pattern and a leading ./ are
+// dropped. null when the block has no Files line.
+function filesPatterns(lines) {
+  const line = lines.find((l) => l.startsWith("**Files:**"));
+  if (line === undefined) return null;
+  return line
+    .slice("**Files:**".length)
+    .split(",")
+    .map((p) => p.trim().replace(/^`+|`+$/g, "").trim().replace(/^\.\//, ""))
+    .filter(Boolean);
+}
+
+function patternRegex(pattern) {
+  const p = pattern.endsWith("/") ? pattern + "**" : pattern;
+  let re = "";
+  for (let i = 0; i < p.length; i++) {
+    if (p[i] === "*" && p[i + 1] === "*") {
+      // "**/" may stand for no folder at all, so src/**/a.js matches src/a.js.
+      if (p[i + 2] === "/") {
+        re += "(?:.*/)?";
+        i += 2;
+      } else {
+        re += ".*";
+        i += 1;
+      }
+    } else if (p[i] === "*") {
+      re += "[^/]*";
     } else {
-      target = chunks.reduce((a, b) => (a.totalTokens <= b.totalTokens ? a : b));
+      re += p[i].replace(/[.+?^${}()|[\]\\]/g, "\\$&");
     }
   }
-  target.files.push(f);
-  target.totalTokens += f.tokens;
+  return new RegExp("^" + re + "$");
 }
 
-// Per-chunk overflow detection. The project-total `needsConfirm` flag does
-// not catch the case where most chunks are small but one is oversized
-// (because MAX_CHUNKS was hit). Set the overflow flag - the /index command
-// uses it to widen the cost-confirm prompt to any overflow case, not just
-// projects over the project-total threshold. The ids of the oversized chunks
-// go out too (overflowChunkIds), so /index reads which chunks not to
-// auto-retry instead of comparing each chunk's total with the target itself
-// (#226, M16).
-const overflowChunks = chunks.filter((c) => c.totalTokens > CHUNK_TARGET_TOKENS);
-const anyChunkOverflows = overflowChunks.length > 0;
-const largestChunkTokens = chunks.reduce((m, c) => Math.max(m, c.totalTokens), 0);
+// A test of whether a path belongs to a block with these patterns.
+function covers(patterns) {
+  const res = patterns.map(patternRegex);
+  return (p) => res.some((r) => r.test(p));
+}
 
-// Build the UTC timestamp
-const now = new Date();
-const pad = (n) => String(n).padStart(2, "0");
-const timestamp = [
-  now.getUTCFullYear(),
-  "-", pad(now.getUTCMonth() + 1),
-  "-", pad(now.getUTCDate()),
-  " ", pad(now.getUTCHours()),
-  ":", pad(now.getUTCMinutes()),
-  " UTC",
-].join("");
+// A block's text as a subagent receives it: its lines without the blank ones
+// that separate it from the next block.
+function blockText(lines) {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === "") end--;
+  return lines.slice(0, end).join("\n");
+}
 
-const totalSkipped = Object.values(skipCounts).reduce((a, b) => a + b, 0);
+function readMapText(file) {
+  try {
+    if (!fs.lstatSync(file).isFile()) return null;
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+}
 
-const manifest = {
-  timestamp,
-  commit,
-  isDirty,
-  dirtyFileCount,
-  totalFiles: fileInventory.length,
-  skippedFiles: totalSkipped,
-  skipCounts,
-  totalTokens,
-  largestChunkTokens,
-  chunkTargetTokens: CHUNK_TARGET_TOKENS,
-  maxFileTokens: MAX_FILE_TOKENS,
-  maxChunks: MAX_CHUNKS,
-  confirmThresholdTokens: CONFIRM_THRESHOLD_TOKENS,
-  // needsConfirm is true if EITHER the project total exceeds the threshold,
-  // OR any single chunk exceeds the per-chunk target. Both cases mean the
-  // generation might run into context-window limits or cost more than the
-  // user expects, so the /index command prompts before proceeding.
-  needsConfirm: totalTokens > CONFIRM_THRESHOLD_TOKENS || anyChunkOverflows,
-  anyChunkOverflows,
-  // Empty when no chunk is over the target.
-  overflowChunkIds: overflowChunks.map((c) => c.id),
-  directoryTree: treeLines,
-  chunks,
-};
+// The commit in a map's header lines, resolved to its full hash: the same
+// pattern session-init.js reads. null when there is none or git does not know
+// it.
+function headerCommit(headerLines) {
+  for (const l of headerLines) {
+    const m = /<!--\s*Commit:\s*([0-9a-f]+)/i.exec(l);
+    if (!m) continue;
+    try {
+      return git(["rev-parse", "--verify", "--quiet", m[1] + "^{commit}"]).trim();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
-process.stdout.write(JSON.stringify(manifest, null, 2) + "\n");
+function isAncestor(a, b) {
+  try {
+    git(["merge-base", "--is-ancestor", a, b]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// An existing map, ready for a refresh: { map, guide, since }, or { reason }
+// naming why it is not. The checks run in the order /index Step 1 lists the
+// reasons. The malformed test is the three byte tests session-init.js and
+// --finalize run, in the same form, so all three agree on a map.
+function deltaReady(text) {
+  if (text === null) return { reason: "no_map" };
+  const raw = text.split(/\r?\n/);
+  if (
+    Buffer.byteLength(text) <= MAP_MIN_BYTES ||
+    !raw[0].startsWith("<!-- Generated:") ||
+    !raw.some((l) => l.trimEnd() === MAP_TITLE)
+  ) {
+    return { reason: "malformed_map" };
+  }
+  const map = parseMap(text);
+  const guide = moduleGuide(map.sections);
+  if (!guide || guide.blocks.length === 0) return { reason: "no_blocks" };
+  if (guide.blocks.some((b) => !b.patterns || b.patterns.length === 0)) return { reason: "no_files_lines" };
+  const since = headerCommit(map.top.slice(0, map.titleAt));
+  if (!since) return { reason: "unknown_commit" };
+  return { map, guide, since };
+}
+
+// What was committed between the map's commit and `end`, sorted into the map's
+// blocks. Committed changes only: a map built on a dirty tree already describes
+// those edits, so diffing the working tree would re-send them on every refresh,
+// and an edit not yet committed is picked up once it is. A rename counts as a
+// delete plus an add. Changed files pass the scan's skip rules (they must be in
+// `files`, the kept inventory); a deleted file passes the name rules.
+//
+// A block is touched when a changed file or a deleted one matches it, and is
+// sent out with its text. It is dropped when none of its patterns match a kept
+// file and at least one matched a file this diff deleted: its files went away.
+// One that matches nothing and lost nothing was already dead when the map was
+// written (a typo in its Files line): it is kept as it is and named, so a
+// pattern typo never silently deletes a block. A changed file no block covers
+// is a new file.
+function computeDelta(guide, since, end, files) {
+  const kept = new Map(files.map((f) => [f.path, f]));
+  const out = git(["diff", "--name-status", "--no-renames", "-z", since, end]).split("\0");
+  const changed = [];
+  const deleted = [];
+  for (let i = 0; i + 1 < out.length; i += 2) {
+    const status = out[i];
+    const p = out[i + 1];
+    if (status === "D") {
+      if (!classifySkip(p)) deleted.push(p);
+    } else if (kept.has(p)) {
+      changed.push(kept.get(p));
+    }
+  }
+  const tests = guide.blocks.map((b) => covers(b.patterns));
+  const touched = [];
+  const dropped = [];
+  const dead = [];
+  guide.blocks.forEach((b, i) => {
+    const has = tests[i];
+    const lost = deleted.filter(has);
+    if (!files.some((f) => has(f.path))) {
+      (lost.length > 0 ? dropped : dead).push(b.heading);
+      return;
+    }
+    const mine = changed.filter((f) => has(f.path));
+    if (mine.length > 0 || lost.length > 0) {
+      touched.push({ heading: b.heading, text: blockText(b.lines), files: mine, deleted: lost });
+    }
+  });
+  const anyBlock = (p) => tests.some((has) => has(p));
+  // A new file no block covers goes out with the block that covers the most
+  // other files in its folder (the first such block on a tie), listed with
+  // that block's changed files: one subagent then sees both and can extend
+  // the block, where a separate new-file unit could land with another
+  // subagent and become a near-duplicate block. With no such block it stays
+  // a new file.
+  const newFiles = [];
+  for (const f of changed.filter((c) => !anyBlock(c.path))) {
+    const dir = path.posix.dirname(f.path);
+    const siblings = files.filter((s) => s.path !== f.path && path.posix.dirname(s.path) === dir);
+    let best = -1;
+    let most = 0;
+    tests.forEach((has, i) => {
+      const n = siblings.filter((s) => has(s.path)).length;
+      if (n > most) [best, most] = [i, n];
+    });
+    if (best === -1) {
+      newFiles.push(f);
+      continue;
+    }
+    const heading = guide.blocks[best].heading;
+    let unit = touched.find((t) => t.heading === heading);
+    if (!unit) {
+      unit = { heading, text: blockText(guide.blocks[best].lines), files: [], deleted: [] };
+      touched.push(unit);
+    }
+    unit.files.push(f);
+  }
+  return {
+    touched,
+    dropped,
+    dead,
+    newFiles,
+    changedFiles: changed.length + deleted.length,
+    keptBlocks: guide.blocks.length - touched.length - dropped.length,
+    uncoveredFiles: files.filter((f) => !anyBlock(f.path)).length,
+  };
+}
+
+// --delta (issue #254): the refresh scan. It reads CODEBASE_MAP.md and sends
+// only what was committed since the commit in its header: each touched block
+// (its text plus its changed files) and each new file is one unit, packed the
+// way the full scan packs files but with no cap on the count. A map it cannot
+// refresh, or a refresh that would need FULL_AT_DELTA_CHUNKS chunks or more,
+// falls back to the full scan and says why in fullReason. The base commit
+// comes from the map's own header rather than an argument, so the blocks and
+// the commit always come from one file and a wrong commit can never skip
+// changed files.
+function printDelta() {
+  const base = scanBase();
+  const ready = deltaReady(readMapText(path.join(cwd, MAP_FILE)));
+  if (ready.reason) return printFull(base, { fullReason: ready.reason });
+  if (!isAncestor(ready.since, "HEAD")) return printFull(base, { fullReason: "unknown_commit" });
+
+  const d = computeDelta(ready.guide, ready.since, "HEAD", base.files);
+  const sum = (fs_) => fs_.reduce((s, f) => s + f.tokens, 0);
+  const units = [
+    ...d.touched.map((b) => ({ tokens: sum(b.files) + tokensOf(Buffer.byteLength(b.text)), item: { block: b } })),
+    ...d.newFiles.map((f) => ({ tokens: f.tokens, item: { file: f } })),
+  ];
+  const packed = packUnits(units, Infinity);
+  if (packed.length >= FULL_AT_DELTA_CHUNKS) {
+    return printFull(base, { fullReason: "delta_chunks", deltaChunks: packed.length });
+  }
+  const chunks = packed.map((c, id) => ({
+    id,
+    blocks: c.items.filter((x) => x.block).map((x) => x.block),
+    newFiles: c.items.filter((x) => x.file).map((x) => x.file),
+    totalTokens: c.totalTokens,
+  }));
+  print(manifest(base, {
+    mode: "delta",
+    readTokens: units.reduce((s, u) => s + u.tokens, 0),
+    since: ready.since,
+    changedFiles: d.changedFiles,
+    deltaChunks: packed.length,
+    keptBlocks: d.keptBlocks,
+    droppedBlocks: d.dropped,
+    deadBlocks: d.dead,
+    uncoveredFiles: d.uncoveredFiles,
+  }, chunks));
+}
+
+// The merge behind --finalize --merge: the existing map merged into the temp
+// map a --delta run wrote. It recomputes the delta the scan made, from the old
+// map's commit to the temp map's own Commit line (the HEAD the scan saw), over
+// that commit's files rather than the working tree's, so neither a commit nor
+// an edit made while the subagents run changes anything here, and then:
+//
+//   - old blocks keep their order and their bytes;
+//   - a returned block replaces the old block of the same heading, in place;
+//   - a new block goes before the first block whose heading sorts after it
+//     (byName, the directory tree's order), or at the end;
+//   - a block whose files went away in this diff is dropped;
+//   - a returned heading that names a block nobody sent out is refused
+//     (heading_clash): it would overwrite that block unread;
+//   - a block sent out but not returned keeps its old text and is named in
+//     notReturned, so a renamed heading never lands as an unreported twin;
+//   - sections come out in the template's order, each the temp file's when it
+//     has one, else the old map's byte for byte; a section under any other
+//     name follows them, the temp file's first. The header and title lines are
+//     the temp file's, and the Module Guide keeps the old map's lead lines.
+//
+// The result uses the old map's line endings. Returns { text, record }, or
+// calls fail (which removes the temp file and exits) with the reason.
+const TEMPLATE_SECTIONS = ["System Overview", "Directory Tree", "Module Guide", "Conventions", "Gotchas", "Navigation Guide"];
+
+function mergeIntoTemp(tmpText, fail) {
+  const oldText = readMapText(path.join(cwd, MAP_FILE));
+  if (oldText === null) {
+    fail("no_old_map", `${MAP_FILE} was not found; --merge needs the map the refresh scan read. Run /index full instead.`);
+  }
+  const ready = deltaReady(oldText);
+  if (ready.reason) {
+    fail("not_mergeable", `${MAP_FILE} cannot take a refresh (${ready.reason}). Run /index full instead.`);
+  }
+  const tmp = parseMap(tmpText);
+  const end = headerCommit(tmp.top.slice(0, tmp.titleAt)) || "HEAD";
+  if (!isAncestor(ready.since, end)) {
+    fail("not_mergeable", `The commit in ${MAP_FILE} is not an ancestor of ${end}. Run /index full instead.`);
+  }
+  let files;
+  try {
+    files = inventoryAt(end);
+  } catch {
+    fail("git_failed", `git ls-tree ${end} failed - not a git repository?`);
+  }
+  const d = computeDelta(ready.guide, ready.since, end, files);
+  const sent = new Set(d.touched.map((b) => b.heading));
+  const dropped = new Set(d.dropped);
+  const returned = (moduleGuide(tmp.sections) || { blocks: [] }).blocks;
+
+  const seen = new Set();
+  for (const b of returned) {
+    if (!sent.has(b.heading) && !dropped.has(b.heading) && ready.guide.blocks.some((o) => o.heading === b.heading)) {
+      fail("heading_clash", `${MAP_TMP_FILE} returns the block "${b.heading}", which was not sent out for refresh; merging it would overwrite that block unread.`);
+    }
+    // Two subagents can make up the same new heading; merging would keep only
+    // the second block and drop the first one's files unseen.
+    if (seen.has(b.heading)) {
+      fail("heading_clash", `${MAP_TMP_FILE} returns the block "${b.heading}" twice; merging would keep only the second.`);
+    }
+    seen.add(b.heading);
+  }
+
+  const list = ready.guide.blocks
+    .filter((b) => !dropped.has(b.heading))
+    .map((b) => ({ heading: b.heading, lines: b.lines, old: true }));
+  const replaced = [];
+  const added = [];
+  for (const b of returned) {
+    const entry = { heading: b.heading, lines: endWithBlank(b.lines), old: false };
+    const at = list.findIndex((x) => x.heading === b.heading);
+    if (at !== -1) {
+      list[at] = entry;
+      replaced.push(b.heading);
+      continue;
+    }
+    const after = list.findIndex((x) => byName(x.heading, b.heading) > 0);
+    list.splice(after === -1 ? list.length : after, 0, entry);
+    added.push(b.heading);
+  }
+  const returnedHeadings = new Set(returned.map((b) => b.heading));
+  // Files no merged block covers: a new file a subagent skipped, or one no
+  // pattern ever reached. The map's commit moves forward anyway, so a later
+  // refresh never sends such a file again; the count lets /index say so.
+  const mergedTests = list.map((x) => covers(filesPatterns(x.lines) || []));
+  const uncovered = files.filter((f) => !mergedTests.some((has) => has(f.path))).length;
+
+  const old = ready.map;
+  const fromTmp = (name) => tmp.sections.find((s) => s.name === name);
+  const fromOld = (name) => old.sections.find((s) => s.name === name);
+  const parts = [tmp.top];
+  for (const name of TEMPLATE_SECTIONS) {
+    if (name === "Module Guide") {
+      parts.push(ready.guide.lead.concat(...list.map((x, i) => (i < list.length - 1 ? endWithBlank(x.lines) : x.lines))));
+      continue;
+    }
+    const s = fromTmp(name) || fromOld(name);
+    if (s) parts.push(s.lines);
+  }
+  for (const s of tmp.sections) if (!TEMPLATE_SECTIONS.includes(s.name)) parts.push(s.lines);
+  for (const s of old.sections) {
+    if (!TEMPLATE_SECTIONS.includes(s.name) && !fromTmp(s.name)) parts.push(s.lines);
+  }
+
+  // Each part but the last ends with a blank line, so a section never runs
+  // into the next; the map ends with one newline.
+  const out = [];
+  parts.forEach((p, i) => out.push(...(i < parts.length - 1 ? endWithBlank(p) : p)));
+  while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+  return {
+    text: out.join(old.eol) + old.eol,
+    record: {
+      kept: list.filter((x) => x.old).length,
+      replaced,
+      added,
+      dropped: d.dropped,
+      notReturned: [...sent].filter((h) => !returnedHeadings.has(h)),
+      uncovered,
+    },
+  };
+}
+
+// The lines as they are when they already end with a blank line; otherwise
+// with one added. A block or section that already ends that way is never
+// rewritten, which keeps an untouched block's bytes.
+function endWithBlank(lines) {
+  return lines.length > 0 && lines[lines.length - 1].trim() === "" ? lines : lines.concat("");
+}
+
+// Arguments: none for the full scan, --delta for the refresh scan, or
+// --finalize alone or followed by --merge. Anything else is refused rather
+// than ignored, so a mistyped flag never prints a manifest in place of the
+// result the caller is waiting for.
+const args = process.argv.slice(2);
+const argsAre = (...want) => args.length === want.length && want.every((w, i) => args[i] === w);
+if (argsAre()) printFull(scanBase(), {});
+else if (argsAre("--delta")) printDelta();
+else if (argsAre("--finalize")) finalizeMap(false);
+else if (argsAre("--finalize", "--merge")) finalizeMap(true);
+else {
+  emitError("bad_arguments", `Unknown arguments: ${args.join(" ")}. Run with no arguments to scan everything, with --delta to scan what was committed since the map's commit, or with --finalize (alone, or followed by --merge after a --delta run).`);
+}

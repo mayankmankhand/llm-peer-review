@@ -1219,8 +1219,23 @@ console.log('\n4e. state stamping: a lost state file, an unreadable version (rev
   // version (a null previousVersion counts, since it would not hold the stamp).
   const atLeast710 = (v) => typeof v === 'string' && /^\d+\.\d+\.\d+$/.test(v)
     && v.split('.').map(Number).reduce((c, n, i) => c !== 0 ? c : Math.sign(n - [7, 1, 0][i]), 0) >= 0;
+  // The stamp with the rows of its own range (issue #257): the stamp refuses
+  // while a release-note entry in the range has no adoption row, so the same
+  // audit is asked for the range first, and one `no action` row per entry goes
+  // into a rows file in `dir` that the stamp reads. This plugin root ships no
+  // notes, so the file stays empty; the route keeps the call right if it ships some.
+  const stampWithRows = (argv, dir) => {
+    const notes = spawnSync(process.execPath, argv.filter(a => a !== '--stamp').concat('--release-notes'), { encoding: 'utf8', timeout: 30000 });
+    let entries = [];
+    try { entries = JSON.parse(notes.stdout).entries || []; } catch (e) { entries = []; }
+    const file = path.join(dir, 'adoption.txt');
+    fs.writeFileSync(file, entries.map(e => e.id + ' no action: a test fixture').join('\n') + '\n');
+    return argv.concat('--adoption', file);
+  };
   const stampThenGuards = (project) => {
-    const s = spawnSync(process.execPath, [AUDIT, '--project', project, '--plugin-root', pluginRoot, '--stamp'], { encoding: 'utf8', timeout: 30000 });
+    const rowsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-stamp-rows-'));
+    const s = spawnSync(process.execPath, stampWithRows([AUDIT, '--project', project, '--plugin-root', pluginRoot, '--stamp'], rowsDir), { encoding: 'utf8', timeout: 30000 });
+    fs.rmSync(rowsDir, { recursive: true, force: true });
     const st = stateOf(project) || {};
     const h = sessionNotice(project, hooks70);
     const p = spawnSync(process.execPath, [path.join(hooks70, 'scripts', 'pre-push-check.js')], { cwd: project, encoding: 'utf8', timeout: 30000 });

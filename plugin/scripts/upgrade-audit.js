@@ -41,6 +41,18 @@
 // record (see recordLostRowOffers), so none is offered again in this working
 // copy; the audit run itself writes nothing.
 //
+// `--release-notes` (issue #257) prints, as one JSON object, the release-note
+// entries in the audit's own range (after the recorded version, or --from, up
+// to the plugin's), read from the plugin's CHANGELOG.md, which the build writes
+// from the repository's released blocks. /tk:upgrade reads each entry against
+// the project (its step 1b) and writes one row per entry; `--stamp --adoption
+// <file>` reads those rows and refuses (exit 1, each problem named, nothing
+// written) while an entry in the range has no row, a row names an entry outside
+// it or repeats one, or a raised row has no decision. Otherwise it appends the
+// rows to .claude/toolkit/adoption.md as one section, then stamps. A range with
+// no entries, one whose section that file already holds, or a plugin that
+// ships no notes needs no rows. See releaseEntries, notesRange, adoptionCheck.
+//
 // `--rollback-to <x.y.z>` (issue #183) is the one path that lowers the record:
 // run from the project root while this release is still the running plugin,
 // before an older release is reinstalled, it sets each of auditedVersion,
@@ -165,8 +177,9 @@
 // marketplaceNamesToolkit), every mode stops with one stderr line before it
 // reads or writes anything else.
 //
-// Exit codes: 0 (findings are data, zero is a valid count; a refused stamp is
-// also 0), 1 on error, on a refused rollback, or in the toolkit's own repository.
+// Exit codes: 0 (findings are data, zero is a valid count; a stamp refused for
+// a newer record is also 0), 1 on error, on a refused rollback, on a stamp
+// refused for its adoption rows, or in the toolkit's own repository.
 // Dependency-free, like every script under .claude/scripts/.
 
 const fs = require('fs');
@@ -531,16 +544,137 @@ function referenceVersion(state) {
   return null;
 }
 
-// --stamp [--refuted <file>]: the file names the keys of the findings this
-// run's audit killed, one per line, and the stamp records them in the refuted
-// record (see recordRefutedKeys). It is read before anything is written, so a
-// path that cannot be read stops the run with the state file untouched.
-const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--refuted <file>]]\n'
+// ---- release notes and the adoption record (issue #257) -----------------------------
+// The conventions follow what changed in the toolkit's own files; the release
+// notes say everything a release changed. The notes are the plugin's
+// CHANGELOG.md: the repository's released blocks from v6.0.0 up to the plugin's
+// version, newest first, as the build writes them. An entry is a top-level
+// bullet of a version block, in any section, with every line nested under it,
+// numbered in order within its version as `<version>#<n>`; a block with no
+// bullets is one entry, its text.
+const NOTES_FILE = 'CHANGELOG.md';
+const NOTES_HEADING = /^## v(\d+\.\d+\.\d+)\b/;
+const ADOPTION_REL = '.claude/toolkit/adoption.md';
+const ADOPTION_HEADER = '# Adoption record\n\nWhat each `/tk:upgrade` read in the toolkit\'s release notes and decided for this project: one section per upgrade, one row per release-note entry in its range. The upgrade\'s stamp writes this file; no stage reads it as instructions.\n';
+// A row of the --adoption file: `<id> no action: <why>` or `<id> raised: <what> Decision: <choice>`.
+const ADOPTION_ROW = /^(\S+) (no action|raised): (.+)$/;
+// How many missing entries a refused stamp names one by one before it counts the rest.
+const MISSING_SHOWN = 20;
+// Every entry the plugin ships, oldest first, or null when it ships no notes file.
+function releaseEntries(pluginRoot) {
+  const text = readText(path.join(pluginRoot, NOTES_FILE));
+  if (text === null) return null;
+  const lines = text.split(/\r?\n/);
+  const blocks = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = NOTES_HEADING.exec(lines[i]);
+    if (!m) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^## /.test(lines[end])) end++;
+    blocks.push({ version: m[1], entries: blockEntries(m[1], lines.slice(i + 1, end)) });
+    i = end - 1;
+  }
+  return blocks.sort((a, b) => compareVersions(a.version, b.version)).flatMap(b => b.entries);
+}
+// One version block's entries, from the lines under its heading.
+function blockEntries(version, body) {
+  const out = [];
+  let section = null;
+  let cur = null;
+  const close = () => {
+    if (!cur) return;
+    while (cur.lines.length && !cur.lines[cur.lines.length - 1].trim()) cur.lines.pop();
+    out.push({ id: version + '#' + (out.length + 1), version, section: cur.section, text: cur.lines.join('\n') });
+    cur = null;
+  };
+  for (const line of body) {
+    const h = /^###\s+(.+?)\s*$/.exec(line);
+    if (h) { close(); section = h[1]; continue; }
+    if (/^[-*]\s+\S/.test(line)) { close(); cur = { section, lines: [line] }; continue; }
+    // A blank line, or one indented under the bullet, stays with it; any other line ends it.
+    if (cur && (!line.trim() || /^\s+\S/.test(line))) { cur.lines.push(line); continue; }
+    close();
+  }
+  close();
+  const text = body.join('\n').trim();
+  return out.length || !text ? out : [{ id: version + '#1', version, section: null, text }];
+}
+// The read's range, the audit's own: the entries after the start (the recorded
+// version, or --from) up to the plugin's. A start that is missing or unusable,
+// or older than the oldest block the plugin ships, cannot say which entries the
+// project has read, so every shipped entry applies and `note` says why. `from`
+// is the start as the record's heading names it: the version, or `unrecorded`,
+// never an unusable value.
+function notesRange(pluginRoot, fromVersion, toVersion) {
+  const all = releaseEntries(pluginRoot);
+  const from = fromVersion === null ? 'unrecorded' : fromVersion;
+  if (all === null) return { shipped: false, from, to: toVersion, entries: [], note: 'this plugin ships no release notes (' + NOTES_FILE + ')' };
+  const upTo = all.filter(e => compareVersions(e.version, toVersion) <= 0);
+  const oldest = all.length ? all[0].version : null;
+  if (fromVersion === null) return { shipped: true, from, to: toVersion, entries: upTo, note: 'no usable recorded version, so every entry the plugin ships applies' + (oldest ? ' (its notes start at v' + oldest + ')' : '') };
+  if (oldest !== null && compareVersions(fromVersion, oldest) < 0) return { shipped: true, from, to: toVersion, entries: upTo, note: 'the start ' + fromVersion + ' is older than the oldest release notes the plugin ships (v' + oldest + '), so every entry the plugin ships applies' };
+  return { shipped: true, from, to: toVersion, entries: upTo.filter(e => compareVersions(e.version, fromVersion) > 0) };
+}
+// --release-notes: the range and its entries as one JSON object on stdout, a
+// one-line count on stderr. Nothing is written.
+function printReleaseNotes(range) {
+  const out = { from: range.from, to: range.to, entries: range.entries.map(e => ({ id: e.id, section: e.section, text: e.text })) };
+  if (range.note) out.note = range.note;
+  process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+  console.error('upgrade-audit: ' + range.entries.length + ' release-note ' + (range.entries.length === 1 ? 'entry' : 'entries') + ' from ' + range.from + ' to ' + range.to + (range.note ? '; ' + range.note : ''));
+}
+// The stamp's check of the session's rows against the range, made before
+// anything is written: `problems`, each one line naming its row or entry, and
+// the record section to append (rows in entry order), or a note saying why no
+// rows are needed (no notes shipped, no entries in the range, or the record
+// already holds this range's section, a rerun).
+function adoptionCheck(P, range, rowsText) {
+  if (!range.shipped) return { problems: [], section: null, note: range.note + ', so the stamp records no adoption rows' };
+  if (!range.entries.length) return { problems: [], section: null, note: 'no release-note entries from ' + range.from + ' to ' + range.to + ', so no adoption rows are needed' };
+  const heading = '## ' + range.from + ' -> ' + range.to + ' (';
+  const record = readText(P(ADOPTION_REL));
+  if (record !== null && record.split(/\r?\n/).some(l => l.startsWith(heading))) return { problems: [], section: null, note: ADOPTION_REL + ' already holds the section for ' + range.from + ' -> ' + range.to + ', so no adoption rows are needed' };
+  const ids = new Set(range.entries.map(e => e.id));
+  const rowOf = new Map();
+  const problems = [];
+  rowsText.replace(/^﻿/, '').split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const n = i + 1;
+    const m = ADOPTION_ROW.exec(line);
+    if (!m) { problems.push('adoption row ' + n + ' is not "<id> no action: <why>" or "<id> raised: <what> Decision: <choice>": ' + line.slice(0, 120)); return; }
+    if (!ids.has(m[1])) { problems.push('adoption row ' + n + ' names ' + m[1].slice(0, 40) + ', which is not an entry in this range (' + range.from + ' -> ' + range.to + ')'); return; }
+    if (rowOf.has(m[1])) { problems.push('adoption row ' + n + ' repeats ' + m[1]); return; }
+    if (m[2] === 'raised' && !/ Decision: \S/.test(m[3])) problems.push('adoption row ' + n + ' raises ' + m[1] + ' with no " Decision: <choice>"');
+    rowOf.set(m[1], line);
+  });
+  const missing = range.entries.filter(e => !rowOf.has(e.id)).map(e => e.id);
+  for (const id of missing.slice(0, MISSING_SHOWN)) problems.push('no adoption row for ' + id);
+  if (missing.length > MISSING_SHOWN) problems.push('and ' + (missing.length - MISSING_SHOWN) + ' more entries with no adoption row');
+  const section = heading + new Date().toISOString().slice(0, 10) + ')\n\n' + range.entries.map(e => '- ' + rowOf.get(e.id)).join('\n') + '\n';
+  return { problems, section, rows: range.entries.length, note: null };
+}
+// Appends one section to the adoption record, creating it with its header when absent.
+function writeAdoption(P, section) {
+  const file = P(ADOPTION_REL);
+  const old = readText(file);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, (old === null ? ADOPTION_HEADER : old.replace(/\s*$/, '\n')) + '\n' + section);
+}
+
+// --stamp [--adoption <file>] [--refuted <file>]: the adoption file holds the
+// session's rows for the release read (see adoptionCheck); the refuted file
+// names the keys of the findings this run's audit killed, one per line, and the
+// stamp records them in the refuted record (see recordRefutedKeys). Both are
+// read before anything is written, so a path that cannot be read stops the run
+// with the state file untouched.
+const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--adoption <file>] [--refuted <file>]]\n'
+  + '       node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--from <version>] --release-notes\n'
   + '       node upgrade-audit.js [--project <dir>] [--from <version>] --receipt <id> [--release <version>]\n'
   + '       node upgrade-audit.js [--project <dir>] --rollback-to <x.y.z>';
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null, releaseNotes: false, adoption: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
@@ -552,6 +686,8 @@ function parseArgs(argv) {
     else if (a === '--rollback-to') o.rollbackTo = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--receipt') o.receipt = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--release') o.release = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--release-notes') o.releaseNotes = true;
+    else if (a === '--adoption') o.adoption = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else { console.error('upgrade-audit: unknown argument ' + a + '\n' + USAGE); process.exit(1); }
   }
@@ -562,6 +698,9 @@ function parseArgs(argv) {
   if (o.receipt !== null && !RECEIPT_ID.test(o.receipt)) { console.error('upgrade-audit: --receipt takes the 16-character ID a call-back receipt names\n' + USAGE); process.exit(1); }
   if (o.release !== null && o.receipt === null) { console.error('upgrade-audit: --release names the release that wrote a call-back receipt; run it with --receipt\n' + USAGE); process.exit(1); }
   if (o.release !== null && validVersion(o.release) === null) { console.error('upgrade-audit: --release takes a version such as 7.6.5\n' + USAGE); process.exit(1); }
+  if (o.adoption !== null && !o.stamp) { console.error('upgrade-audit: --adoption names the rows file of the release read for --stamp to record; run it with --stamp\n' + USAGE); process.exit(1); }
+  if (o.adoption === '') { console.error('upgrade-audit: --adoption takes the path of the rows file, one row per release-note entry\n' + USAGE); process.exit(1); }
+  if (o.releaseNotes && (o.stamp || o.receipt !== null || o.rollbackTo !== null)) { console.error('upgrade-audit: --release-notes prints the entries to read and writes nothing, so it does not run with ' + (o.stamp ? '--stamp' : o.receipt !== null ? '--receipt' : '--rollback-to') + '\n' + USAGE); process.exit(1); }
   return o;
 }
 function git(args, cwd) {
@@ -1577,11 +1716,18 @@ function main() {
     process.exit(3);
   }
   const state = readJson(P(STATE_REL), null);
+  // --from moves the start of every range: the audit's, the release read's and
+  // the stamp's rows check. Its value is never echoed.
+  if (opts.from && validVersion(opts.from) === null) { console.error('upgrade-audit: --from takes a version such as 7.0.0'); process.exit(1); }
+  const startVersion = opts.from ? validVersion(opts.from) : referenceVersion(state);
+  if (opts.releaseNotes) { printReleaseNotes(notesRange(pluginRoot, startVersion, toVersion)); return; }
   if (opts.stamp) {
-    // The --refuted file is read before anything is written, so a bad path
-    // stops the run with the state file untouched.
+    // The --refuted and --adoption files are read before anything is written,
+    // so a bad path stops the run with the state file untouched.
     const refutedKeys = opts.refuted === null ? [] : readRefutedFile(path.resolve(opts.refuted));
     if (refutedKeys === null) { console.error('upgrade-audit: the --refuted file could not be read: ' + opts.refuted); process.exit(1); }
+    const rowsText = opts.adoption === null ? '' : readText(path.resolve(opts.adoption));
+    if (rowsText === null) { console.error('upgrade-audit: the --adoption file could not be read: ' + opts.adoption); process.exit(1); }
     // A stamp never lowers the record: a project audited (or set up) on a
     // newer plugin than this one keeps what it has. Only validated versions are
     // compared or printed.
@@ -1589,6 +1735,21 @@ function main() {
     if (recorded.length) {
       console.error('upgrade-audit: not stamping: ' + STATE_REL + ' already records ' + recorded[0] + ', newer than this plugin (' + toVersion + ')');
       return;
+    }
+    // The release read (issue #257): every entry in the range needs its row
+    // before the version is recorded, and the rows become the project's
+    // adoption record. Nothing is written while a row is missing or wrong.
+    const adoption = adoptionCheck(P, notesRange(pluginRoot, startVersion, toVersion), rowsText);
+    if (adoption.problems.length) {
+      for (const p of adoption.problems) console.error('upgrade-audit: ' + p);
+      console.error('upgrade-audit: not stamping: the adoption rows ' + (opts.adoption === null ? '(no --adoption file was given)' : 'in ' + opts.adoption) + ' do not cover this range, and nothing was written; write one row per entry --release-notes prints, then stamp again');
+      process.exit(1);
+    }
+    if (adoption.section !== null) {
+      writeAdoption(P, adoption.section);
+      console.error('upgrade-audit: recorded ' + adoption.rows + ' adoption row' + (adoption.rows === 1 ? '' : 's') + ' in ' + ADOPTION_REL);
+    } else {
+      console.error('upgrade-audit: ' + adoption.note);
     }
     // The end of a clean /tk:upgrade: this project is now audited up to the
     // plugin version, so the next run's range starts here.
@@ -1624,13 +1785,12 @@ function main() {
     }
   }
   if (!fs.existsSync(conventionsPath)) { console.error('upgrade-audit: conventions file not found: ' + conventionsPath); process.exit(1); }
-  if (opts.from && validVersion(opts.from) === null) { console.error('upgrade-audit: --from takes a version such as 7.0.0'); process.exit(1); }
   // A recorded value of the wrong shape is no usable start: every convention up
   // to the plugin version applies, as with no state file, and the value is
   // never printed.
   const recordedFrom = referenceVersion(state);
   const unusableRecord = !opts.from && recordedFrom === null && state !== null && ['auditedVersion', 'previousVersion', 'version'].some(k => typeof state[k] === 'string' && state[k].trim() !== '');
-  const fromVersion = opts.from ? validVersion(opts.from) : recordedFrom;
+  const fromVersion = startVersion;
 
   const all = parseConventions(fs.readFileSync(conventionsPath, 'utf8'));
   for (const c of all) if (validVersion(c.since) === null) { console.error('upgrade-audit: bad Since in ' + c.id); process.exit(1); }

@@ -129,7 +129,7 @@ A blocker still unresolved within the retry bound is a hard stop that pages the 
 <procedure>
 Find the plan file in `plans/`: use `newestPlan` from the session-init JSON (the most recently modified `PLAN-*.md`). If the script was unavailable, find the most recently modified `PLAN-*.md` yourself. Also check the project root for `PLAN-*.md` files.
 
-**Record where the run starts.** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that already has a finished step but no start line gets none: the handoff below covers that case.
+**Record where the run starts.** Before the first step's work, run `git rev-parse HEAD` and write its output into the plan header as the line `**Start commit:** <sha>`, directly under `**Overall Progress:**`. Write it once: when the line is already there, a resumed run leaves it as it is. Every green step is committed (M4), so the chained review needs this range; uncommitted work alone would show it nothing. A plan that already has a finished step but no start line gets none: the chain check below fails on that condition and names the next step.
 
 After completing each step, update the plan file:
 - Change 🟥 to 🟨 when starting a task
@@ -155,14 +155,14 @@ A stable URL whose content has gone stale is worse than no page.
 
 ## Chain Into /tk:review (M14)
 
-On a clean finish - M14 is authoritative for the conditions; it reads "every step green and its checkpoint commit made" - announce the handoff in one line ("Execution complete - chaining into `/tk:review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/tk:review` through the Skill tool with the argument `<start>..HEAD`, where `<start>` is the sha on the plan's `**Start commit:**` line. The range is what the review covers: this run committed every step, so uncommitted work alone would show the review nothing. When the plan has no start line, invoke `/tk:review` with no argument, and it covers the newest unpushed commits instead.
+Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --chain execute` (M16); M14 is authoritative for the conditions, and the script decides the countable ones: the plan at 100%, every step proved or noTarget in its tally, a commit after the start, no file the plan committed modified again. On `pass`, announce the handoff in one line ("Execution complete - chaining into `/tk:review <start>..HEAD` per M14. Say \"no chaining\" to stop here.") and invoke `/tk:review` through the Skill tool with the `handoff.range` it printed, the range from the plan's `**Start commit:**` line to HEAD: this run committed every step, so uncommitted work alone would show the review nothing. On a fail, stop and say the condition the script printed and the next step (M14); a plan with no start line fails its `start-commit` condition, and the next step is for you to type `/tk:review` with no argument, which covers the newest unpushed commits.
 
-**Do not chain** when either brake is engaged:
+**Do not chain** when either brake is engaged, which the script shows as a step left unproved:
 
 - The critical-blocker path above fired. A blocker is a hard stop that pages the human (M1); chaining past it would review work that was never finished.
 - A step exhausted its 3-attempt retry bound. Same reasoning: the bound exists to stop the run, not to hand a broken state to the next stage.
 
-In both cases, stop and page as described above. The chain resumes only after the human decides what to do.
+In both cases, stop and page as described above, quoting the condition the script printed. The chain resumes only after the human decides what to do.
 
 Saying "no chaining" on this run stops here (M14). That is a different opt-out from "report only" (M10), which governs whether findings get auto-fixed rather than whether the next stage fires.
 

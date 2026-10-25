@@ -72,7 +72,7 @@ More on all three: [How key commands work](COMMANDS.md#how-key-commands-work).
 - **Finders look, one per lens:** code, security, UX, copy, plan compliance and more, picked by what changed.
 - **Every finding brings a check anyone can run.** A finding whose check does not show what it claims is dropped before anyone argues about it.
 - **Skeptics try to knock the rest down:** one skeptic per seven findings, and three independent votes on anything marked Block. What they refute goes to the audited-out log, not into your code.
-- **Survivors get fixed, and the fixer never grades its own fix.** A separate verifier, or the original check run again, decides.
+- **Survivors get fixed, and the fixer never grades its own fix.** A separate verifier, or the original check run again, decides. A script writes what each verifier sees (the finding as found, the diff of the fixes) and keeps the count of rounds, so a third try is refused rather than forgotten.
 - **Two tries, then stop.** A fix still failing after two tries is undone and you are asked.
 
 More: [How key commands work](COMMANDS.md#how-key-commands-work).
@@ -81,13 +81,14 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/document-dark.svg">
-  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR; writes the cycle page of what changed and why; and ends the line." width="719">
+  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR, or saves its text for merge; writes the cycle page of what changed and why; and ends the line." width="719">
 </picture>
 
 - **The docs catch up with the code:** README, CLAUDE.md, the changelog, the lessons file and the design profile.
 - **It notices what you had to correct** and keeps it in a correction ledger that never leaves your machine. Nothing is saved until you accept it.
-- **A cycle page says what changed and why,** refreshed every run.
-- **From a worktree it pushes the branch and opens a pull request** (a `/tk:document` you type yourself asks first), which you land with `/tk:merge`. The line ends here.
+- **A cycle page says what changed and why,** refreshed every run, one page per branch so worktrees never overwrite each other's.
+- **From a worktree it first copies the plans and reports into your main folder,** because removing a worktree, by hand or when Claude Code closes its session, deletes them.
+- **From a worktree it pushes the branch and opens a pull request** (a `/tk:document` you type yourself asks first), which you land with `/tk:merge`. Where your branches land on your machine instead, it opens no pull request and saves its text for `/tk:merge`. The line ends here.
 
 ### `/tk:merge`: land parallel work without losing any
 
@@ -100,6 +101,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 - **Four checks before anything lands:** the project's tests, plus three rules keyed on where the branch was cut. Would this landing remove work another one added? Do all of this branch's own lines arrive? Does one of its decisions contradict a decision that landed after it was cut? A fresh decision checker judges the last one.
 - **Any flag stops that pull request** and asks you: fix it, keep it on purpose, land it as it is, or stop.
 - **Landing on GitHub or GitLab asks you once** per run.
+- **Then it brings each worktree's records home:** the plans, reports and receipts git does not track, which removing the worktree would delete. It also folds each branch's cycle page into the main one. One question at the end offers to remove each worktree and its branch.
 
 
 ## Gate in and gate out
@@ -109,9 +111,10 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
   <img src="images/diagrams/hooks-light.svg" alt="Two gates. Gate in, the session-start hook: when Claude Code opens it links the stable path to the installed plugin and tells you what to update when the plugin and project versions differ. Gate out, the pre-push check: before Claude pushes it runs four checks on what the push adds; any hit blocks the push and asks you, otherwise the push goes out." width="980">
 </picture>
 
-- **Gate in is the plugin's one Claude Code hook.** It runs every time a session starts, keeps a stable path pointing at the installed plugin, and when the plugin and your project are on different versions, or an old copy-install is still around, tells you what to run: update the plugin, `/tk:upgrade` or `/tk:setup`.
+- **Gate in is the plugin's session-start hook.** It runs every time a session starts, keeps a stable path pointing at the installed plugin, and when the plugin and your project are on different versions, or an old copy-install is still around, tells you what to run: update the plugin, `/tk:upgrade` or `/tk:setup`.
 - **Gate out is the pre-push check,** a script Claude runs before every push it makes. It reads what the push adds: secrets in any new line; files that must never leave your machine (`.env` files, `.claude/settings.local.json`, the correction ledger); a permission change in `.claude/settings.json`; and a plugin older than the project.
-- **Any hit blocks the push and asks you.** A push you type yourself in a terminal is not checked unless your repo wires the same script in as a git hook.
+- **A push guard makes the check hard to skip.** The plugin's second Claude Code hook sees every command Claude runs and, before a push, runs the pre-push check itself, so the check no longer depends on Claude remembering it. A push in any shape other than the standard one is blocked, with the standard form named. So is a push the check flags, and only you can send that one anyway, by typing the push yourself with `!` at the prompt; a force push, `--no-verify`, or a push the check cannot scan asks for your approval instead. It is hard to skip, not impossible: it cannot see a push inside a script Claude writes and then runs (one named like the pre-push check included), a write through GitHub's web API, a shell or git alias that stands for push, a spelling built to hide a push, or a cloud session, which loads no plugin hooks.
+- **Any hit blocks the push, and Claude shows you the report.** A push you type yourself in a terminal is not checked unless your repo wires the same script in as a git hook.
 
 ## Side trips
 

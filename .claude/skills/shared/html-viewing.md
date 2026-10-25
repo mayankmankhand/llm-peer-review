@@ -91,7 +91,7 @@ For a stable type, look up its recorded page first:
 node .claude/scripts/render-html.js --index-url --name <name>
 ```
 
-It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page. The index is keyed to the repository rather than the working directory, so this lookup finds the same record from a worktree as from the main copy. The bare name `review` is the one exception: the lookup and the record below both resolve it to this branch's page, as the render does.
+It prints a URL when one has been recorded, nothing when it has not. When a URL comes back, update that page instead of publishing a new one: a plan link that changes on every re-plan is worse than no link. When nothing comes back, publish a new page. The index is keyed to the repository rather than the working directory, so this lookup finds the same record from a worktree as from the main copy. The bare names `review` and `cycle` are the two exceptions: the lookup and the record below both resolve each to this branch's page, as the render does.
 
 **Record every publish.** Immediately after a successful publish:
 

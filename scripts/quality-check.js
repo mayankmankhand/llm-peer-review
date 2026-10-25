@@ -129,7 +129,9 @@
 // A run is INVALID, and is rerun once, when: the session did not end cleanly
 // (non-zero exit, an error result, a turn or budget stop), it hit a usage limit,
 // any session or helper answered on a model other than the one it should have,
-// any call was denied, a review lens was not dispatched, a finder or the mapper
+// any call was denied (except a read-only judge's scratch experiment, which is the
+// warning denied-experiment:<n>; scratchExperiment says exactly which), a review
+// lens was not dispatched, a finder or the mapper
 // returned nothing, the review wrote no report, the mapper dispatch did not carry
 // the expected prompt, a skeptic replay made no skeptic dispatch, or a tool read
 // outside the scratch project, the scratch
@@ -662,9 +664,57 @@ function isUnder(p, root) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
+// A read-only judge's denied scratch experiment (#253). Audit skeptics and fix
+// verifiers have no edit tools, yet they still try shell experiments, and Claude
+// Code denies them; that denial comes from the runtime, not the build under test,
+// so it is a warning rather than a reason to throw the run away. The call never
+// ran, so this decides scoring, not safety, and it stays narrow: a Bash call by an
+// audit-skeptic or fix-verifier counts only when it names at least one absolute
+// path, every absolute path it names is /dev/null or lies inside the run (its temp
+// folder, which holds the scratch project and home, or its scratchpad,
+// /tmp/claude-<uid>/<project slug>/), and it has none of the shapes that can reach
+// outside without naming a path: a `..` path step wherever it sits, `$d../x`
+// included (an ellipsis is not one: the fix-d3 verifier's call has "sorts..."),
+// `~`, a backtick, a backslash, eval, a bare `cd`, `cd -`, pushd or popd, an
+// indirect `${!x}`, a variable the command does not itself set to a value, or a
+// command that turns the working folder into a path (pwd, dirname, realpath,
+// readlink). `$(...)` is allowed: its own text is checked like the rest. This is
+// a best-effort filter over shell text, not a parser: it is built to keep the
+// shapes the real judges used and refuse the escapes found so far, and a new
+// escape gets a new shape and a test. toolPaths is not reused, because its Bash
+// branch sees only /home, /mnt, /root and /Users, so /etc/passwd would read as
+// inside.
+const JUDGE_TYPE_RE = /^(tk:)?(audit-skeptic|fix-verifier)$/;
+const ESCAPE_SHAPES = [/(^|[^.])\.\.($|[^.\w-])/, /~/, /`/, /\\/, /\beval\b/, /\$\{!/, /\b(pushd|popd)\b/, /\bcd(\s+-)?\s*($|[;&|)\n])/, /\b(pwd|dirname|realpath|readlink)\b/];
+function scratchExperiment(type, call, paths) {
+  if (!JUDGE_TYPE_RE.test(type || '') || !call || call.name !== 'Bash') return false;
+  const raw = call.input && call.input.command;
+  if (typeof raw !== 'string' || !paths || !paths.tmp || !paths.project) return false;
+  if (ESCAPE_SHAPES.some(re => re.test(raw))) return false;
+  // Quotes only group words, so drop them: /e''tc/passwd is /etc/passwd.
+  const cmd = raw.replace(/['"]/g, '');
+  // A variable counts as set when the command assigns it a value at the start of a
+  // command (after a separator, `do`, `then` or `else`), or names it in `for x in`.
+  const set = new Set();
+  for (const m of cmd.matchAll(/(?:^|[\n;&|({]|\bdo|\bthen|\belse)\s*([A-Za-z_]\w*)\+?=(?=[^\s;&|)])/g)) set.add(m[1]);
+  for (const m of cmd.matchAll(/\bfor\s+([A-Za-z_]\w*)\s+in\b/g)) set.add(m[1]);
+  // $?, $#, $@, $0 to $9 and the like have no name, so they never match here.
+  for (const m of cmd.matchAll(/\$\{?#?([A-Za-z_]\w*)/g)) if (!set.has(m[1])) return false;
+  // An absolute path starts at a `/` that does not continue a word, a variable or a
+  // relative path (`$d/x` and `backups/x` stay relative).
+  const abs = [...cmd.matchAll(/(?:^|[^\w.}\-])(\/[^\s|;&)<>:,]*)/g)].map(m => path.resolve(m[1]));
+  if (abs.length === 0) return false;
+  const slug = paths.project.replace(/[^A-Za-z0-9]/g, '-');
+  return abs.every(p => {
+    if (p === '/dev/null' || isUnder(p, paths.tmp)) return true;
+    const pad = /^\/tmp\/claude-(\d+)\//.exec(p);
+    return !!pad && isUnder(p, '/tmp/claude-' + pad[1] + '/' + slug);
+  });
+}
+
 // The transcript records' tool calls, models, texts and denials, flattened.
 function digestRecords(records) {
-  const d = { models: [], toolUses: [], texts: [], errors: [], handback: null, lastText: '' };
+  const d = { models: [], toolUses: [], texts: [], errors: [], denials: [], handback: null, lastText: '' };
   for (const r of records) {
     const msg = r && r.message;
     if (r && r.type === 'assistant' && msg) {
@@ -683,7 +733,10 @@ function digestRecords(records) {
       for (const c of msg.content) {
         if (c.type !== 'tool_result' || c.is_error !== true) continue;
         const t = typeof c.content === 'string' ? c.content : (Array.isArray(c.content) ? c.content.map(x => x.text || '').join('\n') : '');
-        if (DENIED_RE.test(t)) d.errors.push('denied: ' + t.slice(0, 200));
+        if (DENIED_RE.test(t)) {
+          d.errors.push('denied: ' + t.slice(0, 200));
+          d.denials.push({ id: c.tool_use_id, text: t.slice(0, 200) }); // matched back to its call in analyzeRun
+        }
       }
     }
   }
@@ -715,7 +768,20 @@ function analyzeRun(run, answers) {
   const resultFailed = !!result && (result.is_error === true || (result.subtype && result.subtype !== 'success'));
   const errorText = [resultFailed ? result.result : '', ...main.errors, ...subs.flatMap(s => s.d.errors)].filter(Boolean).join('\n');
   if (LIMIT_RE.test(errorText)) reasons.push('usage-limit');
-  if ([main, ...subs.map(x => x.d)].some(s => s.errors.some(e => /^denied: /.test(e)))) reasons.push('denied-in-transcript');
+  // A denial in a transcript makes the run invalid, except a read-only judge's denied
+  // scratch experiment (scratchExperiment, #253), which is counted as a warning. One
+  // other denial still invalidates the whole run.
+  let experiments = 0;
+  let otherDenials = 0;
+  for (const s of [{ type: 'main', d: main }, ...subs.map(x => ({ type: (x.meta && x.meta.agentType) || '', d: x.d }))]) {
+    for (const den of s.d.denials) {
+      const call = s.d.toolUses.find(t => t.id === den.id);
+      if (scratchExperiment(s.type, call, meta.paths)) experiments++;
+      else otherDenials++;
+    }
+  }
+  if (otherDenials > 0) reasons.push('denied-in-transcript');
+  if (experiments > 0) warnings.push('denied-experiment:' + experiments);
 
   // Models: the session, the measured role, and everything else on the session family.
   const mainFams = [...new Set(main.models.filter(m => m !== '<synthetic>').map(familyOf))];

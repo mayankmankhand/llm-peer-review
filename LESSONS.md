@@ -203,7 +203,7 @@
 - **A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.**
 - **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
 - **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
-- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.**
+- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.** (recurred in #260 and #263, see detail)
 - **A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.**
 
 ### The standing cycle page (issue #163)
@@ -273,7 +273,7 @@
 
 - **An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.**
 - **Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.**
-- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.**
+- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.** (another occurrence in detail: #268)
 - **A check that defers to another check must ask whether that other check runs in this range.**
 - **In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.**
 
@@ -440,7 +440,7 @@
 ## Issues 244 and 245 (dropped files and the paste limit)
 
 - **A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.**
-- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.**
+- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.** (second and third occurrences in detail: #265/#266, #268)
 - **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
 - **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
 
@@ -458,14 +458,14 @@
 
 ## Docs visual tour (diagrams, /package-review removed)
 
-- **When a fix corrects a fact, search every doc for its other copies before calling it done.**
+- **When a fix corrects a fact, search every doc for its other copies before calling it done.** (second occurrence in detail: #265/#266)
 - **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**
 
 ## Issue 248 (cycle time and test cost)
 
 - **A runner mode several callers share changes only behind a flag the new caller passes.**
 - **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
-- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.**
+- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.** (third occurrence in detail: #268)
 
 ## Issue 249 (the test gate speed)
 
@@ -491,3 +491,81 @@
 - **Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.**
 - **When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.**
 - **`session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.**
+## Issue 247 (21 agent papers against the toolkit's problems)
+
+- **Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.**
+- **A workflow resume caches completed calls as a call-order prefix: patch a pipeline by appending work, never by inserting it.**
+- **Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.**
+
+## Issue 254 (refresh only what changed)
+
+- **A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.**
+- **Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.**
+- **Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.**
+- **On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.**
+
+## Issue 252 (fix verification harder to fool)
+
+- **Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.**
+- **Read every fixture case before writing an "all N" bar: "all 7 deletion fixes read removed" counted a fix that hollows a feature out with a new stub.**
+- **Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.**
+
+## Issue 253 (judge denials and the lessons read)
+
+- **Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.**
+
+## Issues 257, 258 and 259 (nothing lost, nothing unread)
+
+- **Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.**
+- **Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.**
+- **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
+- **A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.**
+
+## Release 8.0.6 (the practice run)
+
+- **A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.**
+
+## Issue 260 (the push guard)
+
+- **An approval prompt is not a gate for a rare, costly action: both planted-key test pushes that asked were approved at the prompt, so a flagged push now blocks.**
+- **To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.**
+- **A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.**
+- **Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.**
+
+## Issue 263 (the /cloud skill)
+
+- **A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.**
+- **A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.**
+
+## Issue 264 (the research kit)
+
+- **Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.**
+- **A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.**
+- **A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.**
+- **Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.**
+- **When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.**
+
+## Issue 262 (docs and code disagree)
+
+- **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**
+
+## Issues 265 and 266 (worktree records come home)
+
+- **`npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.**
+- **Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.**
+- **In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.**
+
+## Issue 261 (load the review rules by phase)
+
+- **Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.**
+- **Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.**
+
+## Issues 269 and 270 (a cycle page per branch, records kept)
+
+- **Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.**
+- **List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.**
+- **A check-first target that only asserts a bad thing did not happen can pass before the work: also assert the work ran.**
+
+## Issue 267 (the verify mode)
+
+- **Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.**

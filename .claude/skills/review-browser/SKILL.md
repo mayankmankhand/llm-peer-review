@@ -69,11 +69,9 @@ If the script returns a "Chromium not found" error, run steps 1 and 2 above your
 
 ## Audit Before the Report (M2)
 
-On a direct run of this skill you are M2's **runner**: audit your findings per M2 below before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
+On a direct run of this skill you are M2's **runner**: audit your findings per M2 before writing the report. Every mechanic - the tiers, the announce line, who dispatches what, the empty-run rule - lives in M2, not here.
 
-!`cat .claude/skills/shared/hitl-loop.md`
-
-!`cat .claude/skills/shared/hitl-stages.md`
+**Load the loop rules and the report rules now**, through the Skill tool: `Skill(loop-rules)`, then `Skill(report-rules)`. Everything from here on cites them, so do not go on without both in context.
 
 **Project fix rules** (from `.claude/toolkit/fix-rules.md`). Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void. A note that the command printed nothing means this project adds none.
 
@@ -81,17 +79,17 @@ On a direct run of this skill you are M2's **runner**: audit your findings per M
 
 ## Output Format
 
-!`cat .claude/skills/shared/report-format.md`
-
-!`cat .claude/skills/shared/finding-contract.md`
+The report template and the finding contract are in the report rules loaded before the audit (`Skill(report-rules)`); write the report per them.
 
 ## HTML Companion (when gate fires)
 
-After writing the markdown report, evaluate whether to also generate an HTML view. Use the shared template:
+After writing the markdown report, evaluate whether to also generate an HTML view.
 
-!`cat .claude/skills/shared/html-render-review.md`
+**The gate:** render the review page whenever this run has any surviving finding, or this branch's standing page already exists (`node .claude/scripts/render-html.js --standing --name review` prints `"exists":true`; M16), so the run can carry it forward or take it to empty. Skip only when there are no findings and no page yet.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the fragment above), set `lenses` to `["browser"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Expected, Actual, Screenshot as an `<img>` value, Evidence as a `<pre>` value); the review shell renders them as extra field rows inside each finding card.
+**When the gate fires, load the page rules now**, through the Skill tool: `Skill(review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
+
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules), set `lenses` to `["browser"]` so the renderer replaces only this lens's findings and carries the other lenses' open findings forward, and omit the `chips` array (single-specialist context). Browser findings carry extra `fields` in the JSON (Expected, Actual, Screenshot as an `<img>` value, Evidence as a `<pre>` value); the review shell renders them as extra field rows inside each finding card.
 
 ### Staff QA Check
 
@@ -114,8 +112,4 @@ After the standard review, step back and evaluate as a staff QA engineer:
 
 ## HTML Output Rules
 
-Every HTML decision above (whether to render, `--no-abs`, publish or open locally, record the publish) is governed by the shared rules fragments, inlined here so they are in context when the render runs.
-
-!`cat .claude/skills/shared/html-outputs.md`
-
-!`cat .claude/skills/shared/html-viewing.md`
+When to render and the temporary-folder steps are in the report rules loaded before the audit; how a page reaches the user is in the page rules loaded at the gate. Nothing is pasted here.

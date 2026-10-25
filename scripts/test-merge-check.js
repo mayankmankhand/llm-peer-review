@@ -424,6 +424,141 @@ section('--pr reads the PR through the host CLI the remote names', () => {
   check('a PR number that is not a number is a usage error', mc(dir, ['--pr', '7;rm'], env).status === 2);
 });
 
+// Issue #258 items 8 and 6: the Decisions part is its list lines only, so an
+// attribution line under the list is never read as a decision, and on GitLab
+// --pr prints the full reference a landing message names.
+section('258: the Decisions part is its list lines, and glab\'s full reference', () => {
+  const dir = newRepo('pr258');
+  write(dir, 'a.txt', 'a\n');
+  commitAll(dir, 'M0');
+  const f = path.join(sandbox, 'body-258.md');
+  // The attribution line sits under the list, with no Changelog part or Cut from: line after it.
+  fs.writeFileSync(f, 'Summary.\n\n## Decisions\n- Keep it - why\n- Name it - so\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n');
+  const a = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: the Decisions part keeps only its list lines', a && a.decisions === '- Keep it - why\n- Name it - so', 'decisions held: ' + JSON.stringify(a && a.decisions));
+  fs.writeFileSync(f, '## Decisions\nThese are the decisions:\n- A - why\n- B\n\nCut from: ' + 'a'.repeat(40) + '\n');
+  const b = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: an intro line above the list is skipped', b && b.decisions === '- A - why\n- B', 'decisions held: ' + JSON.stringify(b && b.decisions));
+  // A continuation line joins its item, so a landing message's Decisions: list
+  // stays one line per decision (messageDecisions stops at the first other line).
+  fs.writeFileSync(f, '## Decisions\n- A - because\n  the reason runs on\n\n- B\n\nMore text after.\n');
+  const c = mc(dir, ['--pr-body', f]).json;
+  check('258 pr: continuation lines of a list item stay with it', c && c.decisions === '- A - because the reason runs on\n- B', 'decisions held: ' + JSON.stringify(c && c.decisions));
+  const bin = path.join(sandbox, 'bin-258');
+  fs.mkdirSync(bin);
+  const body = 'S.\n\n## Decisions\n- D1\n';
+  const glJson = JSON.stringify({ iid: 8, title: 'G', description: body, source_branch: 'gfeat', sha: 'e'.repeat(40), state: 'opened', references: { short: '!8', relative: '!8', full: 'grp/sub/proj!8' } });
+  const ghJson = JSON.stringify({ number: 7, title: 'T', body, headRefName: 'feat', headRefOid: 'd'.repeat(40), state: 'OPEN' });
+  for (const [name, json] of [['gh', ghJson], ['glab', glJson]]) {
+    write(bin, name, '#!/bin/sh\ncat <<\'EOF\'\n' + json + '\nEOF\n');
+    fs.chmodSync(path.join(bin, name), 0o755);
+  }
+  const env = Object.assign({}, ENV, { PATH: bin + path.delimiter + ENV.PATH });
+  g(dir, ['remote', 'add', 'origin', 'git@gitlab.com:grp/sub/proj.git']);
+  const gl = mc(dir, ['--pr', '8'], env);
+  g(dir, ['remote', 'set-url', 'origin', 'git@github.com:x/y.git']);
+  const gh = mc(dir, ['--pr', '7'], env);
+  check('258 pr: glab\'s full reference is printed as ref', gl.json && gl.json.ref === 'grp/sub/proj!8' && gh.json && gh.json.ref === null, 'glab ref ' + JSON.stringify(gl.json && gl.json.ref) + ', gh ref ' + JSON.stringify(gh.json && gh.json.ref));
+});
+
+// Issue #258 item 1: --landing names the files a landing deletes, and among
+// them the ones the branch stopped tracking but keeps (its own .gitignore
+// files ignore them at the landing), whose copy in every other checkout the
+// landing deletes. Neither list is a flag. Only the landing commit's committed
+// .gitignore files count: never the user's global excludes.
+section('258: what a landing deletes, and what it stops tracking', () => {
+  const dir = newRepo('deleted258');
+  write(dir, 'keep.txt', 'keep\n');
+  write(dir, 'old.txt', 'old\n');
+  write(dir, 'local.cfg', 'rows: 297\n');
+  write(dir, 'sub/x.cfg', 'x\n');
+  write(dir, 'glob.cfg', 'g\n');
+  write(dir, 'gen/bundle.txt', 'built\n');
+  write(dir, '.claude/toolkit/generated.json', JSON.stringify([{ paths: ['gen/'], rebuild: 'true' }]) + '\n');
+  const m0 = commitAll(dir, 'M0');
+  const cutSha = cut(dir, 'feat');
+  g(dir, ['checkout', '-q', 'feat']);
+  g(dir, ['rm', '-q', 'old.txt']);
+  g(dir, ['rm', '-q', '--cached', 'local.cfg']);
+  write(dir, '.gitignore', 'local.cfg\n');
+  g(dir, ['rm', '-q', '--cached', 'sub/x.cfg']);
+  write(dir, 'sub/.gitignore', 'x.cfg\n');
+  g(dir, ['rm', '-q', '--cached', 'glob.cfg']);   // stopped tracking with no ignore line of its own
+  g(dir, ['rm', '-q', 'gen/bundle.txt']);
+  g(dir, ['add', '.gitignore', 'sub/.gitignore']);
+  g(dir, ['commit', '-q', '-m', 'Stop tracking the local files']);
+  const tip = rev(dir, 'feat');
+  // The files feat stopped tracking stay behind as untracked copies, and main
+  // tracks them, so remove them before switching back (main restores them).
+  for (const rel of ['local.cfg', 'sub/x.cfg', 'glob.cfg']) fs.rmSync(path.join(dir, rel), { force: true });
+  g(dir, ['checkout', '-q', 'main']);
+  // The user's own global excludes list glob.cfg: they say nothing about what the branch meant.
+  const excludes = path.join(sandbox, 'global-excludes-258');
+  fs.writeFileSync(excludes, 'glob.cfg\n');
+  const globalCfg = path.join(sandbox, 'global-config-258');
+  fs.writeFileSync(globalCfg, '[core]\n\texcludesFile = ' + excludes + '\n');
+  const env = Object.assign({}, ENV, { GIT_CONFIG_GLOBAL: globalCfg });
+  const r = mc(dir, ['--landing', '--before', m0, '--after', tip, '--cut', cutSha, '--tip', tip], env);
+  const j = r.json || {};
+  const del = Array.isArray(j.deleted) ? j.deleted.slice().sort() : null;
+  const unt = Array.isArray(j.untracked) ? j.untracked.slice().sort() : null;
+  check('258 deleted: --landing lists a file the branch deletes', del !== null && del.includes('old.txt'), 'deleted: ' + JSON.stringify(j.deleted));
+  check('258 deleted: a file the branch stops tracking and ignores is listed as untracked', unt !== null && unt.includes('local.cfg') && del !== null && del.includes('local.cfg'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: an ignore line in a nested .gitignore counts', unt !== null && unt.includes('sub/x.cfg'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: a file deleted but not ignored is not untracked', unt !== null && !unt.includes('old.txt'), 'untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: a file only the user\'s global excludes ignore is not untracked', unt !== null && del !== null && del.includes('glob.cfg') && !unt.includes('glob.cfg'), 'deleted: ' + JSON.stringify(j.deleted) + ', untracked: ' + JSON.stringify(j.untracked));
+  check('258 deleted: generated paths are left out', del !== null && !del.some((p) => p.startsWith('gen/')), 'deleted: ' + JSON.stringify(j.deleted));
+  check('258 deleted: a clean landing that deletes a file still exits 0', r.status === 0 && j.flagged === 0 && /^note: [^\n]*local\.cfg/m.test(r.stderr), 'exit ' + r.status + ', flagged ' + j.flagged + ', stderr ' + JSON.stringify(r.stderr.split('\n').slice(0, 3)));
+});
+
+// Issue #258 item 3: --wait reads the PR through the host's read row until the
+// host reports it mergeable at exactly the pushed head. The stubs answer one
+// reply per call and repeat the last one after that; TK_MERGE_WAIT_STEP_MS
+// shortens the 3-second step so each case takes at most about a second.
+section('258: --wait reads the host until the PR is mergeable at the pushed head', () => {
+  const dir = newRepo('wait258');
+  write(dir, 'a.txt', 'a\n');
+  const head = commitAll(dir, 'M0');
+  const other = 'f'.repeat(40);
+  const stubDir = path.join(sandbox, 'wait-stub-258');
+  const bin = path.join(stubDir, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  for (const name of ['gh', 'glab']) {
+    write(bin, name, '#!/bin/sh\nd="' + stubDir + '"\necho "' + name + ' $*" >> "$d/calls.txt"\nn=$(cat "$d/count" 2>/dev/null || echo 0)\nn=$((n + 1))\necho "$n" > "$d/count"\nif [ -f "$d/reply-$n.json" ]; then cat "$d/reply-$n.json"; else cat "$d/reply-last.json"; fi\n');
+    fs.chmodSync(path.join(bin, name), 0o755);
+  }
+  // One case's replies, in order; the stub's call count and log start again.
+  function replies(list) {
+    for (const f of fs.readdirSync(stubDir)) if (f !== 'bin') fs.rmSync(path.join(stubDir, f), { force: true });
+    list.forEach((reply, i) => fs.writeFileSync(path.join(stubDir, 'reply-' + (i + 1) + '.json'), JSON.stringify(reply)));
+    fs.writeFileSync(path.join(stubDir, 'reply-last.json'), JSON.stringify(list[list.length - 1]));
+  }
+  const calls = () => (fs.existsSync(path.join(stubDir, 'calls.txt')) ? read(stubDir, 'calls.txt') : '');
+  const env = Object.assign({}, ENV, { PATH: bin + path.delimiter + ENV.PATH, TK_MERGE_WAIT_STEP_MS: '20' });
+  const wait = (args) => mc(dir, ['--wait'].concat(args), env);
+  const said = (r) => 'exit ' + r.status + ' ' + (r.stderr.split('\n').find((l) => l.trim()) || '');
+  g(dir, ['remote', 'add', 'origin', 'git@gitlab.com:grp/proj.git']);
+  replies([{ detailed_merge_status: 'checking', sha: head, state: 'opened' }, { detailed_merge_status: 'mergeable', sha: head, state: 'opened' }]);
+  const a = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: GitLab checking then mergeable at the pushed head is ready', a.status === 0 && a.json && a.json.ready === true && a.json.polls === 2 && /^glab mr view 8 --output json$/m.test(calls()), said(a));
+  replies([{ detailed_merge_status: 'mergeable', sha: other, state: 'opened' }]);
+  const c = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a host head that never matches times out with exit 1 and names it', c.status === 1 && c.json && c.json.ready === false && c.json.hostHead === other && /fffffff/.test(c.stderr), said(c));
+  replies([{ detailed_merge_status: 'conflict', sha: head, state: 'opened' }]);
+  const d = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a status that stays conflict times out with exit 1 and names it', d.status === 1 && d.json && d.json.ready === false && /conflict/.test(d.stderr), said(d));
+  replies([{ detailed_merge_status: 'not_open', sha: head, state: 'merged' }]);
+  const e = wait(['--pr', '8', '--head', head, '--timeout', '1']);
+  check('258 wait: a merged or closed PR stops at once', e.status === 1 && e.json && e.json.polls === 1 && /no longer open/.test(e.stderr), said(e));
+  g(dir, ['remote', 'set-url', 'origin', 'git@github.com:x/y.git']);
+  replies([{ mergeable: 'UNKNOWN', headRefOid: head, state: 'OPEN' }, { mergeable: 'MERGEABLE', headRefOid: head, state: 'OPEN' }]);
+  const b = wait(['--pr', '7', '--head', head, '--timeout', '1']);
+  check('258 wait: GitHub UNKNOWN then MERGEABLE at the pushed head is ready', b.status === 0 && b.json && b.json.ready === true && b.json.polls === 2 && /^gh pr view 7 --json mergeable,headRefOid,state$/m.test(calls()), said(b));
+  const u1 = wait(['--pr', '7', '--timeout', '1']);
+  const u2 = wait(['--head', head]);
+  check('258 wait: --wait needs --pr and --head', u1.status === 2 && /--wait needs --head/.test(u1.stderr) && u2.status === 2 && /--wait needs --pr/.test(u2.stderr), said(u1) + ' | ' + said(u2));
+});
+
 // --- landings on main, the style, the marker ------------------------------------------------
 section('--since: what counts as a landing, and what cannot be checked', () => {
   const dir = newRepo('since');
@@ -508,6 +643,9 @@ section('--style, --marker and --mark', () => {
 });
 
 // --- the decisions file -----------------------------------------------------------------------
+// The line the decisions file opens with (#258 item 10), exactly as the replay measured it.
+const NOTE = 'Each diff below is word by word: `[-...-]` is text that part removed and `{+...+}` is text it added. Unmarked text was already there, so it is not that part\'s decision.';
+
 // The right/left case in different files (rule 3's case): PR1 lands with its
 // decisions in the landing message; PR2, cut before it, decides the opposite in
 // another file. The file /merge hands the decision-checker holds both, and the
@@ -543,7 +681,7 @@ section('--decisions: the file the decision-checker reads', () => {
   const out = path.join(sandbox, 'decisions-1.md');
   let r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', body, '--out', out]);
   let text = fs.existsSync(out) ? read(sandbox, 'decisions-1.md') : '';
-  check('with lists: exit 0, the file opens with the This PR part and holds its decision', r.status === 0 && /^## This PR\n\nThe branch at [0-9a-f]{7}\n\n- Readers always go left - the left road is shorter\n/.test(text), text.slice(0, 300) + r.stderr);
+  check('with lists: exit 0, the This PR part comes first, under the note, and holds its decision', r.status === 0 && text.startsWith(NOTE + '\n\n') && /^## This PR\n\nThe branch at [0-9a-f]{7}\n\n- Readers always go left - the left road is shorter\n/.test(text.slice(NOTE.length + 2)), text.slice(0, 300) + r.stderr);
   check('with lists: one Landing part, PR1, with its decision; the direct commit is not a part', (text.match(/^## /gm) || []).length === 2 && text.includes('## Landing ' + l1.slice(0, 7) + ': Merge PR #1: Go right\n\n- The direction is right - the map says so') && !text.includes('Add a note'), text);
   check('with lists: the JSON names the file, this PR\'s source and the one landing', r.json && r.json.file === out && r.json.thisPr === 'decisions' && r.json.landings.length === 1 && r.json.landings[0].commit === l1 && r.json.landings[0].decisions === 1, r.stdout);
   // The legacy form: no list in the body, none in the landing message.
@@ -558,8 +696,8 @@ section('--decisions: the file the decision-checker reads', () => {
   const out2 = path.join(sandbox, 'decisions-2.md');
   r = mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2, '--pr-body', legacyBody, '--out', out2]);
   text = fs.existsSync(out2) ? read(sandbox, 'decisions-2.md') : '';
-  check('legacy: "None recorded" is no list, so This PR holds its title, its text and its own changes', r.status === 0 && r.json.thisPr === 'text and changes' && /^## This PR\n\nGo left\n\nNo decision list/.test(text) && text.includes('This tells readers to go left.') && text.includes('+Always go left, whatever rules.md says.'), text);
-  check('legacy: the landing with no Decisions lines holds its changes, generated paths left out', text.includes('## Landing ' + l1b.slice(0, 7) + ': Merge PR #1: Go right') && text.includes('+Direction: right') && !text.includes('GENERATED-ONLY') && r.json.landings[0].decisions === 0, text);
+  check('legacy: "None recorded" is no list, so This PR holds its title, its text and its own changes', r.status === 0 && r.json.thisPr === 'text and changes' && /^## This PR\n\nGo left\n\nNo decision list/.test(text.slice(NOTE.length + 2)) && text.includes('This tells readers to go left.') && text.includes('{+Always go left, whatever rules.md says.+}'), text);
+  check('legacy: the landing with no Decisions lines holds its changes, generated paths left out', text.includes('## Landing ' + l1b.slice(0, 7) + ': Merge PR #1: Go right') && text.includes('Direction: [-straight-]{+right+}') && !text.includes('GENERATED-ONLY') && r.json.landings[0].decisions === 0, text);
   // A long change is cut, and the cut is said.
   g(dir, ['checkout', '-q', '-b', 'big']);
   write(dir, 'big.txt', Array.from({ length: 400 }, (x, i) => 'line ' + i).join('\n') + '\n');
@@ -573,6 +711,66 @@ section('--decisions: the file the decision-checker reads', () => {
   check('no landing after the cut: an empty list and a note', mc(dir, ['--decisions', '--cut', 'HEAD', '--tip', tip2, '--pr-body', body, '--out', path.join(sandbox, 'decisions-4.md')]).json.landings.length === 0);
   check('--decisions without --out is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', tip2]).status === 2);
   check('--decisions with a --tip that names nothing is a usage error, exit 2', mc(dir, ['--decisions', '--cut', cut2, '--tip', 'nope', '--out', out3]).status === 2);
+});
+
+// A sub-bullet under a decision is a reason for it, not a decision of its own
+// (the #258 review): both readers join it to the item above, a PR body's
+// Decisions part and a landing message's Decisions: list alike.
+section('258: a nested sub-bullet stays with its decision', () => {
+  const dir = newRepo('nested258');
+  write(dir, 'a.txt', 'a\n');
+  const m0 = commitAll(dir, 'M0');
+  const cutN = cut(dir, 'prn');
+  g(dir, ['checkout', '-q', '-b', 'pl']);
+  write(dir, 'a.txt', 'b\n');
+  commitAll(dir, 'Change a');
+  g(dir, ['checkout', '-q', 'main']);
+  const msg = path.join(sandbox, 'msg-nested.txt');
+  fs.writeFileSync(msg, 'Merge PR #5: Change a\n\nChange a\n\nDecisions:\n- A - why\n  - because of X\n- B\n\nCut from: ' + m0 + '\n');
+  g(dir, ['merge', '--no-ff', '-q', '-F', msg, 'pl']);
+  g(dir, ['checkout', '-q', 'prn']);
+  write(dir, 'c.txt', 'c\n');
+  const tipN = commitAll(dir, 'Add c');
+  g(dir, ['checkout', '-q', 'main']);
+  const body = path.join(sandbox, 'body-nested.md');
+  fs.writeFileSync(body, '## Decisions\n- C - why\n  - because of Y\n- D\n');
+  const p = mc(dir, ['--pr-body', body]).json;
+  check('258 pr: a nested sub-bullet stays with its decision', p && p.decisions === '- C - why - because of Y\n- D', 'decisions held: ' + JSON.stringify(p && p.decisions));
+  const out = path.join(sandbox, 'decisions-nested.md');
+  const r = mc(dir, ['--decisions', '--cut', cutN, '--tip', tipN, '--pr-body', body, '--out', out]);
+  const text = fs.existsSync(out) ? read(sandbox, 'decisions-nested.md') : '';
+  check('258 decisions: a landing\'s nested sub-bullet stays with its decision', r.status === 0 && r.json.landings.length === 1 && r.json.landings[0].decisions === 2 && text.includes('- A - why - because of X\n- B'), 'landings: ' + JSON.stringify(r.json && r.json.landings) + ' ' + JSON.stringify(text.slice(0, 500)));
+});
+
+// The reported fault's shape (#258 item 10): a landing after the cut rewords the
+// guide's line and keeps its cite as it was, while the PR re-points that cite.
+// In a line diff the whole line, cite and all, reads as the landing's; word by
+// word, only the words it changed are marked, so the cite it carried over is
+// not read as its decision.
+section('258: the decisions file shows each diff word by word', () => {
+  const dir = newRepo('words');
+  const guide = (line) => '# Landing guide\n\nLand one PR at a time.\n' + line + '\nAsk before anything leaves the machine.\n';
+  write(dir, 'docs/guide.md', guide('Run the checks before you land. The steps are in docs/merge.md section 3.'));
+  commitAll(dir, 'Add the landing guide');
+  const c = cut(dir, 'pr');
+  g(dir, ['checkout', '-q', 'pr']);
+  write(dir, 'docs/guide.md', guide('Run the checks before you land. The steps are in docs/landing.md section 2.'));
+  const tip = commitAll(dir, 'Point the guide at the landing doc');
+  g(dir, ['checkout', '-q', '-b', 'reword', c]);
+  write(dir, 'docs/guide.md', guide('Run every check before you land. The steps are in docs/merge.md section 3.'));
+  commitAll(dir, 'Reword the guide');
+  g(dir, ['checkout', '-q', 'main']);
+  g(dir, ['merge', '--no-ff', '-q', '-m', 'Merge PR #20: Tighten the guide wording', 'reword']);
+  const body = path.join(sandbox, 'words-body.md');
+  fs.writeFileSync(body, 'Point the guide at the new landing doc.\n\n## Decisions\n- Point the guide at docs/landing.md section 2 - the steps moved\n');
+  const out = path.join(sandbox, 'words.md');
+  const r = mc(dir, ['--decisions', '--cut', c, '--tip', tip, '--pr-body', body, '--out', out]);
+  const text = fs.existsSync(out) ? read(sandbox, 'words.md') : '';
+  const at = text.indexOf('## Landing ');
+  const part = at >= 0 ? text.slice(at) : '';
+  check('258 decisions: carried-over words of a landing are unmarked', r.status === 0 && part.includes('Run [-the checks-]{+every check+} before you land. The steps are in docs/merge.md section 3.'), 'word markers: ' + /\[-|\{\+/.test(part) + '; the guide line: ' + JSON.stringify(part.split('\n').find((l) => l.includes('section 3')) || null));
+  const first = text.split('\n')[0];
+  check('258 decisions: the file explains the markers once at its top', first === NOTE && text.split(NOTE).length === 2 && text.startsWith(NOTE + '\n\n## This PR\n'), 'first line: ' + JSON.stringify(first) + ', times: ' + (text.split(NOTE).length - 1));
 });
 
 // --- changelog placement, generated paths, usage ----------------------------------------------
@@ -601,6 +799,206 @@ section('generated paths: a broken generated.json is a note, and then nothing is
   const b = landing(dir, landings.find((l) => l.pr === 'B'));
   check('the broken file is named in a note', b.json && b.json.notes.some((n) => /not valid JSON/.test(n)), b.stderr);
   check('without the declaration, B\'s rebuilt bundle line is flagged', b.json && b.json.flags.some((f) => f.file === 'gen/bundle.txt'), b.stderr);
+});
+
+// --- 266: bringing a worktree's records home ----------------------------------------
+// A main copy with its worktree nested under .claude/worktrees/, as /worktree makes
+// it. The worktree holds every kind of file the mode has to sort: records (ignored
+// plans and reports, an untracked note under plans/, a dated page), files that stay
+// behind (the cycle marker, the artifact index, a standing page, the map, packages),
+// a record the main copy already has, and one the main copy holds differently.
+function homeFixture(label, extra) {
+  const dir = newRepo(label);
+  write(dir, '.gitignore', 'plans/PLAN-*.md\nreports/\nartifacts/html/\nnode_modules/\nCODEBASE_MAP.md\n.claude/worktrees/\n');
+  write(dir, 'a.txt', 'a\n');
+  commitAll(dir, 'M0');
+  const wt = path.join(dir, '.claude', 'worktrees', 'w1');
+  g(dir, ['worktree', 'add', '-q', '-b', 'feat', wt]);
+  if (extra) extra(dir, wt);
+  return { dir, wt };
+}
+const OLD_TIME = new Date('2020-01-02T03:04:05Z');
+// One line of a run's output for a failure detail: the suite's failure list is
+// read from its last lines, so a detail must never break across lines.
+function one(r) { return (r.stdout + ' ' + r.stderr).replace(/\s+/g, ' ').trim().slice(0, 300); }
+function fullWorktree(dir, wt) {
+  write(wt, 'plans/PLAN-x.md', '# plan x\n');
+  fs.utimesSync(path.join(wt, 'plans/PLAN-x.md'), OLD_TIME, OLD_TIME);
+  write(wt, 'plans/notes.md', 'an untracked note\n');
+  write(wt, 'reports/r1.md', 'report one\n');
+  write(wt, 'reports/sub/r2.md', 'report two\n');
+  write(wt, 'reports/same.md', 'already home\n');
+  write(dir, 'reports/same.md', 'already home\n');
+  write(wt, 'reports/clash.md', 'the worktree\'s version\n');
+  write(dir, 'reports/clash.md', 'the main copy\'s version\n');
+  write(wt, 'artifacts/html/explore-topic-2026-10-18-101010.html', '<p>dated</p>\n');
+  write(wt, 'artifacts/html/.last-cycle', 'abc\n');
+  write(wt, 'artifacts/html/index.jsonl', '{}\n');
+  write(wt, 'artifacts/html/cycle.html', '<p>standing</p>\n');
+  write(wt, 'CODEBASE_MAP.md', '# map\n');
+  write(wt, 'node_modules/x.js', 'x\n');
+  write(wt, 'stray.txt', 'never committed\n');
+  write(wt, 'a.txt', 'a changed\n');
+}
+
+section('266: --bring-home copies a worktree\'s records into the main copy', () => {
+  const { dir, wt } = homeFixture('home', fullWorktree);
+  const r = mc(dir, ['--bring-home', 'feat']);
+  const j = r.json || {};
+  const copiedOk = ['plans/PLAN-x.md', 'plans/notes.md', 'reports/r1.md', 'reports/sub/r2.md', 'artifacts/html/explore-topic-2026-10-18-101010.html']
+    .every((f) => fs.existsSync(path.join(dir, f)) && fs.readFileSync(path.join(dir, f)).equals(fs.readFileSync(path.join(wt, f))));
+  check('bring-home: a record the main copy lacks is copied and matches byte for byte', copiedOk && j.copied === 5 && j.same === 1, one(r));
+  check('bring-home: a record whose main copy differs is listed and not overwritten',
+    r.status === 1 && JSON.stringify(j.differs) === '["reports/clash.md"]' && read(dir, 'reports/clash.md') === 'the main copy\'s version\n' && /reports\/clash\.md/.test(r.stderr), one(r));
+  const mt = (d) => fs.existsSync(path.join(d, 'plans/PLAN-x.md')) ? Math.floor(fs.statSync(path.join(d, 'plans/PLAN-x.md')).mtimeMs / 1000) : null;
+  check('bring-home: a copied record keeps its modified time', mt(dir) === mt(wt) && mt(dir) === Math.floor(OLD_TIME.getTime() / 1000), mt(dir) + ' vs ' + mt(wt));
+  check('bring-home: an untracked file outside the records is listed as left over', Array.isArray(j.leftover) && j.leftover.includes('stray.txt') && /stray\.txt/.test(r.stderr), one(r));
+  check('bring-home: an uncommitted change to a tracked file is listed as left over', Array.isArray(j.leftover) && j.leftover.includes('a.txt'), one(r));
+  const stayed = ['artifacts/html/.last-cycle', 'artifacts/html/index.jsonl', 'artifacts/html/cycle.html', 'CODEBASE_MAP.md', 'node_modules/x.js'].every((f) => !fs.existsSync(path.join(dir, f)));
+  check('bring-home: the cycle marker, the artifact index and an undated page stay behind', stayed && !(j.leftover || []).some((f) => /last-cycle|index\.jsonl|cycle\.html|CODEBASE_MAP|node_modules/.test(f)), one(r));
+  check('bring-home: the main copy, its worktree and the counts are named', j.mode === 'bring-home' && j.branch === 'feat' && fs.realpathSync(j.worktree) === fs.realpathSync(wt) && fs.realpathSync(j.mainCopy) === fs.realpathSync(dir) && j.needsForce === true, one(r));
+  // Run again from inside the worktree: the main copy is found from there too.
+  const again = mc(wt, ['--bring-home', 'feat']);
+  check('bring-home: a second run copies nothing and counts every record as the same', again.json && again.json.copied === 0 && again.json.same === 6 && fs.realpathSync(again.json.mainCopy) === fs.realpathSync(dir), one(again));
+});
+
+section('266: --bring-home on a worktree with only records, a symlink, and errors', () => {
+  const only = homeFixture('home-records', (dir, wt) => {
+    write(wt, 'reports/r.md', 'r\n');
+    write(wt, 'plans/notes.md', 'untracked under plans/\n');
+  });
+  const a = mc(only.dir, ['--bring-home', 'feat']);
+  check('bring-home: an untracked record inside plans/ is copied and needsForce is true',
+    a.status === 0 && a.json && a.json.copied === 2 && a.json.leftover.length === 0 && a.json.needsForce === true && fs.existsSync(path.join(only.dir, 'plans/notes.md')), one(a));
+  const ignoredOnly = homeFixture('home-ignored', (dir, wt) => write(wt, 'reports/r.md', 'r\n'));
+  const b = mc(ignoredOnly.dir, ['--bring-home', 'feat']);
+  check('bring-home: ignored records alone need no --force', b.status === 0 && b.json && b.json.needsForce === false && b.json.copied === 1, one(b));
+  const link = homeFixture('home-link', (dir, wt) => {
+    write(wt, 'reports/r.md', 'r\n');
+    fs.symlinkSync('r.md', path.join(wt, 'reports/link.md'));
+  });
+  const c = mc(link.dir, ['--bring-home', 'feat']);
+  check('bring-home: a symlink among the records is listed as left over, not copied',
+    c.status === 1 && c.json && c.json.leftover.includes('reports/link.md') && !fs.existsSync(path.join(link.dir, 'reports/link.md')), one(c));
+  // The main copy has a file named reports, so no record can go under it.
+  const blocked = homeFixture('home-blocked', (dir, wt) => {
+    write(dir, 'reports', 'a file, not a folder\n');
+    write(wt, 'reports/r.md', 'r\n');
+  });
+  const d = mc(blocked.dir, ['--bring-home', 'feat']);
+  check('bring-home: a record the main copy cannot take exits 2', d.status === 2 && /reports\/r\.md/.test(d.stderr), one(d));
+  // A rename git sees only in the working tree (intent-to-add, then moved) prints
+  // " R new\0old\0": the old name is the rename's second entry, not a status line.
+  const renamed = homeFixture('home-rename', (dir, wt) => {
+    fs.renameSync(path.join(wt, 'a.txt'), path.join(wt, 'b.txt'));
+    g(wt, ['add', '-N', 'b.txt']);
+  });
+  const e = mc(renamed.dir, ['--bring-home', 'feat']);
+  check('bring-home: a rename in the working tree is listed once, by its new name',
+    e.json && JSON.stringify(e.json.leftover) === '["b.txt"]', one(e));
+  const none = homeFixture('home-none');
+  g(none.dir, ['branch', 'loose']);
+  check('bring-home: a branch with no worktree, or main\'s own copy, is refused',
+    mc(none.dir, ['--bring-home', 'loose']).status === 2 && mc(none.dir, ['--bring-home', 'main']).status === 2 && mc(none.dir, ['--bring-home', 'no-such-branch']).status === 2);
+});
+
+// --- 270: bringing records home on every /document run -------------------------------
+// Claude Code deletes a clean worktree session's folder when the session ends, so
+// /document now copies the records home at the end of every worktree run, and
+// /merge copies again before it offers a removal. A second copy must be able to
+// refresh what the first one brought home, through a record of what it copied,
+// without ever touching a file anyone else wrote. And the ignored files outside
+// the records, which a removal deletes without a word, are named.
+section('270: --bring-home refreshes its own copies and records what it copied', () => {
+  const { dir, wt } = homeFixture('home-refresh', (d, w) => {
+    write(w, 'plans/PLAN-x.md', '# plan x, step 1 done\n');
+    write(w, 'reports/r1.md', 'report one\n');
+  });
+  const first = mc(dir, ['--bring-home', 'feat']);
+  const recordFile = path.join(dir, 'reports', 'landing', 'feat.brought-home.json');
+  let record = null;
+  try { record = JSON.parse(fs.readFileSync(recordFile, 'utf8')); } catch (e) { record = null; }
+  const files = record && record.files ? record.files : {};
+  check('bring-home: every copied file is listed in the branch\'s brought-home record',
+    first.status === 0 && first.json && first.json.manifest && fs.realpathSync(first.json.manifest) === fs.realpathSync(recordFile) &&
+    JSON.stringify(Object.keys(files).sort()) === '["plans/PLAN-x.md","reports/r1.md"]' &&
+    Object.keys(files).every((f) => /^[0-9a-f]{64}$/.test(files[f])), one(first) + ' ' + JSON.stringify(record));
+
+  // The plan moves on in the worktree after the first copy: the newer one comes home.
+  write(wt, 'plans/PLAN-x.md', '# plan x, all steps done\n');
+  const second = mc(dir, ['--bring-home', 'feat']);
+  check('bring-home: a record it brought home before and nobody changed since is refreshed',
+    second.status === 0 && second.json && second.json.refreshed === 1 && second.json.differs.length === 0 &&
+    read(dir, 'plans/PLAN-x.md') === '# plan x, all steps done\n', one(second));
+
+  // Someone edits the main copy's report, and the worktree's moves on too: the
+  // main copy's edit is kept, and the worktree's version is listed as differing.
+  write(dir, 'reports/r1.md', 'edited in the main copy\n');
+  write(wt, 'reports/r1.md', 'report one, revised\n');
+  const third = mc(dir, ['--bring-home', 'feat']);
+  check('bring-home: a record changed in the main copy after it was brought home is listed as differing',
+    third.status === 1 && third.json && third.json.refreshed === 0 && JSON.stringify(third.json.differs) === '["reports/r1.md"]' &&
+    read(dir, 'reports/r1.md') === 'edited in the main copy\n' && fs.existsSync(recordFile), one(third));
+
+  // A record already home, byte for byte, before any record existed (an earlier
+  // version copied it and kept none): the run that finds it the same records it,
+  // so a later run refreshes it once the worktree's copy moves on (review of #270, R13).
+  const pre = homeFixture('home-pre-record', (d, w) => {
+    write(w, 'plans/PLAN-y.md', '# plan y, step 1\n');
+    write(d, 'plans/PLAN-y.md', '# plan y, step 1\n');
+  });
+  const p1 = mc(pre.dir, ['--bring-home', 'feat']);
+  write(pre.wt, 'plans/PLAN-y.md', '# plan y, all steps done\n');
+  const p2 = mc(pre.dir, ['--bring-home', 'feat']);
+  check('bring-home: a record already home before any record existed is refreshed once the worktree moves on',
+    p1.status === 0 && p1.json && p1.json.same === 1 && p2.status === 0 && p2.json && p2.json.refreshed === 1 &&
+    read(pre.dir, 'plans/PLAN-y.md') === '# plan y, all steps done\n', one(p2));
+});
+
+section('270: --bring-home names other ignored files, and keys its record by a safe branch name', () => {
+  const { dir, wt } = homeFixture('home-ignored-named', (d, w) => {
+    write(d, '.gitignore', 'plans/PLAN-*.md\nreports/\nartifacts/html/\nnode_modules/\nCODEBASE_MAP.md\n.claude/worktrees/\n.env.local\ndist/\n.venv/\n.pytest_cache/\n');
+    write(d, '.env.local', 'KEY=same\n');
+    commitAll(d, 'ignore more');
+    g(w, ['merge', '-q', 'main']);
+    write(w, '.env.local', 'KEY=same\n');
+    write(w, 'CODEBASE_MAP.md', '# map built in the worktree\n');
+    write(w, 'dist/app.js', 'built\n');
+    write(w, 'node_modules/x.js', 'x\n');
+    write(w, '.venv/lib.py', 'x\n');
+    write(w, '.pytest_cache/v', 'x\n');
+    write(w, 'artifacts/html/.last-cycle', 'abc\n');
+    write(w, 'artifacts/html/notes.html', '<p>an undated page</p>\n');
+    write(w, 'reports/r.md', 'a record\n');
+  });
+  const r = mc(dir, ['--bring-home', 'feat']);
+  const ig = (r.json && r.json.ignored) || [];
+  check('bring-home: other ignored files are named, without dependency folders or files the main copy holds unchanged',
+    r.status === 0 && r.json.copied === 1 && JSON.stringify(ig) === '["CODEBASE_MAP.md","artifacts/html/notes.html","dist/"]' &&
+    r.json.needsForce === false && /CODEBASE_MAP\.md/.test(r.stderr), one(r) + ' ' + JSON.stringify(ig));
+
+  const slash = homeFixture('home-slash', (d) => {
+    const w2 = path.join(d, '.claude', 'worktrees', 'w2');
+    g(d, ['worktree', 'add', '-q', '-b', 'feature/x', w2]);
+    write(w2, 'reports/r.md', 'r\n');
+  });
+  const s = mc(slash.dir, ['--bring-home', 'feature/x']);
+  const landing = path.join(slash.dir, 'reports', 'landing');
+  check('bring-home: a branch whose name has a slash keeps its record in one file',
+    s.status === 0 && s.json && s.json.manifest && path.dirname(fs.realpathSync(s.json.manifest)) === fs.realpathSync(landing) &&
+    /^feature-x-[0-9a-f]{6}\.brought-home\.json$/.test(path.basename(s.json.manifest)) && !fs.existsSync(path.join(landing, 'feature')),
+    one(s));
+});
+
+section('266: the landing file /document writes for /merge', () => {
+  const { dir } = homeFixture('home-landing');
+  const c0 = rev(dir, 'main');
+  const f = path.join(sandbox, 'landing-feat.md');
+  fs.writeFileSync(f, 'Bring records home\n\nWhat the branch does.\n\n## Decisions\n- Records come home - removal deletes them\n- Ask once - deletion\n\n## Changelog\n````\n### Added\n- records come home\n````\n\nCut from: ' + c0 + '\n');
+  const p = mc(dir, ['--pr-body', f]).json || {};
+  const cutRun = mc(dir, ['--cut', 'feat', '--pr-body', f]).json || {};
+  check('pr-body: a landing file in the shape /document writes gives its decisions, changelog and cut',
+    /Records come home - removal deletes them/.test(p.decisions || '') && p.changelog === '### Added\n- records come home' && p.cutFrom === c0 && cutRun.source === 'pr-body' && cutRun.cut === c0, JSON.stringify(p) + ' ' + JSON.stringify(cutRun));
 });
 
 section('usage: a bad call exits 2 and runs nothing', () => {
