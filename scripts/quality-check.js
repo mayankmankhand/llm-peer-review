@@ -2646,6 +2646,7 @@ const PLAN_SUMMARY = 'Exploration summary, approved by the owner; write the plan
   + 'Direction: show a word count under each note on the page. '
   + 'Scope: public/app.js only, counted in the browser when a note renders; no server change. '
   + 'Decisions: a word is a run of characters between spaces; an empty note shows "0 words" and a one-word note "1 word". '
+  + 'Reaches: other installs none - one scratch copy; other sessions and unreleased work none - one scratch copy; what the user gets back: the count under each note. '
   + 'Models: cheap. Open questions: none.';
 
 // The main checkout of this clone (the folder holding the shared .git), where the

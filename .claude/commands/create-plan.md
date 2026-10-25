@@ -148,6 +148,12 @@ Key architectural/implementation choices made during exploration:
 - Decision 1: [choice] - [brief rationale]
 - Decision 2: [choice] - [brief rationale]
 
+## Reaches
+<!-- Copied from the exploration summary's Reaches section (M14 in .claude/skills/shared/hitl-stages.md); each item names the step that handles it, or `no step - <why>`. When the summary has no Reaches section (written before the shape had one, or let through by "plan it anyway"), fill the three items from the conversation. The plan critic checks every item. -->
+- **Other installs:** [the summary's answer] - [Step N | no step - why]
+- **Other sessions and unreleased work:** [the summary's answer] - [Step N | no step - why]
+- **What the user gets back:** [the summary's answer] - [Step N | no step - why]
+
 ## Tasks
 <!-- For 3+ steps: tag each step [parallel] or [sequential]. See "Execution Order Tags" above. -->
 
@@ -203,7 +209,7 @@ The critic returns gaps, not a grade; the gaps are what the loop acts on.
 
 1. Before dispatching, test the paths the plan names (M16): `grep -oE '[A-Za-z0-9_@.-]+(/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+' plans/<plan>.md | sort -u | while read -r p; do test -e "$p" || echo "not found: $p"; done` prints one `not found:` line per path (a token with at least one `/`) that is not a file under the project root, and nothing when every path exists; skip a path the step creates, check a root-level file such as `package.json` by eye since it carries no slash, and fix every other line in the plan first. Then lint the plan's check lines (M16): `node .claude/scripts/run-checks.js --plan plans/<plan>.md --lint` prints one JSON object whose `problems` list names, by line, every check line that would not run (a step with neither a target nor a no-target line, a near miss of the shape, a command the runner would refuse, a target whose before and after expects are the same); fix each one until its `summary.problems` is 0. Then dispatch `subagent_type=plan-critic` with the Agent tool. The prompt carries exactly two things: the plan file's path and the path of the exploration's closing summary, the `reports/explore/` file `/explore` wrote and named in its handoff. With no handoff (`/create-plan` typed on its own), the path is the newest summary for this topic: `ls -t reports/explore/*-<topic-slug>.md 2>/dev/null | head -1` prints it, or nothing (M16). When it prints nothing, write one first from the conversation, in the shape M14 gives (`.claude/skills/shared/hitl-stages.md`), so the critic's intake never changes. Never the round number and never earlier critiques.
 2. Parse the return: either the single line `No material gaps`, or up to six numbered gap lines of the form `N. <Category>: <gap>`. A return that is neither is redispatched once (routing guardrail 2); still malformed, the round counts with no critique and the loop stops with a note in the closing message.
-3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
+3. `No material gaps` ends the loop. Otherwise, fix the gaps in the plan markdown - a decision the summary made that the plan dropped, an item the summary's Reaches section names that the plan does not cover, a step with no checkable result, a dependency that is not honest, verification that does not cover the changed logic - and dispatch again. Max 2 rounds. A gap the plan is right to leave open (the conversation decided it, or it is out of scope) is not fixed; say so in the closing message instead.
 4. Round 2's gaps are not fixed, because no third critic would check the fix. Each one except a gap the plan is right to leave open (step 3: the conversation decided it, or it is out of scope) becomes a line in the plan's `## Must-check for review` section, verbatim, in the shape `- [plan] <Category>: <gap>` (the section is defined in M14 in `.claude/skills/shared/hitl-stages.md`), so `/review` checks it against the delivered work.
 
 </procedure>
