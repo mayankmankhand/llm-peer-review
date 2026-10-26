@@ -581,3 +581,8 @@
 - **Map the problem before offering the mechanism: when the owner asks how a check would work, answer its cost in two lines and return to where the miss happens, or the exploration turns into a solution debate.**
 - **A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.**
 - **A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.**
+
+## Issue 277 (the toolkit against the harness sources)
+
+- **Seal a guess before a source read and score it after: the issue 277 guess named only gaps the toolkit already covered and missed both real ones, so the score shows what the read added and the guess can never stand in for it.**
+- **A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.**
