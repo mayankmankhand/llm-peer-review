@@ -27,13 +27,10 @@
 - **Diagnostic output to stderr when stdout is captured by another LLM.**
 - **Reasoning models share their token budget between reasoning and output.**
 - **Silent empty bodies need active detection, not just happy-path returns.**
-- **Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.**
 - **Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.**
 - **Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.**
 - **Define a judgement gate once, in countable terms, consistent with its governing rule.**
 - **A gate must be countable against the output the model actually produces.**
-- **`gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.**
-- **HTML output is useless if the user only gets a file link - it opens as source in the editor.**
 - **A diff review of already-closed work still earns its keep.**
 - **Don't trust merged review severities without verifying the source lines.**
 - **Review proposed prompt edits before applying them, and triage the volume hard.**
@@ -43,7 +40,6 @@
 - **Pin subagents freely; never switch the main-loop model mid-session.**
 - **A release needs one review of the whole range, not the sum of its per-issue reviews.**
 - **A version block describes what that version shipped; point at what changed since, never rewrite it.**
-- **Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.**
 
 ## Mistakes to Avoid
 
