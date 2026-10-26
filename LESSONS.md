@@ -575,3 +575,9 @@
 - **Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.**
 - **A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.**
 - **The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.**
+
+## Issue 271 (codes carry their meaning in plain words)
+
+- **Map the problem before offering the mechanism: when the owner asks how a check would work, answer its cost in two lines and return to where the miss happens, or the exploration turns into a solution debate.**
+- **A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.**
+- **A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.**
