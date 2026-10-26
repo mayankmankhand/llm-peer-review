@@ -72,9 +72,17 @@
 // subagent-model variables removed from the environment, bypassPermissions (the
 // check measures what the review catches, not which calls would prompt; the
 // owner approves those interactively in real use, and a run whose receipts were
-// refused would score the refusal), no MCP servers, the page-publishing tools
-// removed, and a PATH shim that turns the Windows browser launchers into no-ops,
-// so a run neither publishes a page nor opens a window. Each run has a dollar cap
+// refused would score the refusal), no MCP servers, the page-publishing and web
+// tools removed (DISALLOWED_TOOLS: the fixture's answer key is tracked in a
+// public repository, so a session may not fetch it, #277), key-like variables
+// stripped from the environment (stripSecrets: names ending _API_KEY, _SECRET,
+// _PASSWORD or _TOKEN, except the session's own CLAUDE_CODE_* and the GitHub
+// CLI's GH_TOKEN and GITHUB_TOKEN, which the dependency lens may need), and a
+// PATH shim that turns the Windows browser launchers into no-ops, so a run
+// neither publishes a page nor opens a window. What a run ran under is recorded
+// in run.json as meta.restrictions (the tools, the stripped names, the entries
+// of /tmp at session start) and printed in its summary, so a result can say what
+// it was measured under. Each run has a dollar cap
 // (--max-usd), and the whole measurement has one approved budget (see Budget).
 //
 // Usage:
@@ -752,6 +760,8 @@ function analyzeRun(run, answers) {
   const warnings = [];
   const expect = meta.expect || {};
   const a = { dir: run.dir, role: meta.role, arm: meta.arm, label: meta.label || '', valid: true, reasons, warnings };
+  // What the session ran under (#277); a run saved before the record has none.
+  a.restrictions = meta.restrictions || null;
 
   // The session ended cleanly.
   if (!result) reasons.push('no-result');
@@ -2330,15 +2340,76 @@ function makeShims(tmp) {
   return dir;
 }
 
+// What a measured session may not reach (#277). The planted-bug fixture's answer
+// key is tracked in a public repository, and harness2's own validation run saw a
+// rollout download its task's rubric unprompted, so the session's web tools are
+// off beside the page-publishing ones. The network itself stays on: the
+// dependency lens runs `npm audit` and `gh api`, and one planted bug needs them.
+const DISALLOWED_TOOLS = ['Artifact', 'ArtifactComments', 'ArtifactData', 'WebFetch', 'WebSearch'];
+
+// Key-like variable names the session never sees; names, never values, are
+// recorded. The session's own CLAUDE_CODE_* variables stay, and so do the GitHub
+// CLI's two token names, for the dependency lens (owner's decision, #277).
+const SECRET_NAME_RE = /(_API_KEY|_SECRET|_PASSWORD|_TOKEN)$/;
+const SECRET_KEEP_RE = /^(CLAUDE_CODE_|GH_TOKEN$|GITHUB_TOKEN$)/;
+
+// Deletes the key-like names from env in place and returns them, sorted.
+function stripSecrets(env) {
+  const stripped = [];
+  for (const k of Object.keys(env)) {
+    if (SECRET_NAME_RE.test(k) && !SECRET_KEEP_RE.test(k)) { delete env[k]; stripped.push(k); }
+  }
+  return stripped.sort();
+}
+
+// The entries of the temp root at session start, at most TMP_SNAPSHOT_MAX names,
+// so the analyzer can flag a read of a folder another run left there (the
+// stale-tmp warning). The scratchpad root (claude-<uid>, where Claude Code keeps
+// each session's scratchpad as <project slug>/<session id>/) is recorded as its
+// session folders and loose entries, never as the root itself: the measured
+// session's own scratchpad is a new session id, absent from the list, while an
+// older session's is in it.
+const TMP_SNAPSHOT_MAX = 200;
+function tmpSnapshot(tmpRoot) {
+  let names;
+  try { names = fs.readdirSync(tmpRoot).sort(); } catch (e) { return []; }
+  const scratchRoot = typeof process.getuid === 'function' ? 'claude-' + process.getuid() : null;
+  const out = [];
+  for (const name of names) {
+    if (name !== scratchRoot) { out.push(name); continue; }
+    let slugs;
+    try { slugs = fs.readdirSync(path.join(tmpRoot, name)).sort(); } catch (e) { continue; }
+    for (const slug of slugs) {
+      let sessions = null;
+      try { if (fs.statSync(path.join(tmpRoot, name, slug)).isDirectory()) sessions = fs.readdirSync(path.join(tmpRoot, name, slug)).sort(); } catch (e) { sessions = null; }
+      if (sessions === null) out.push(name + '/' + slug);
+      else for (const s of sessions) out.push(name + '/' + slug + '/' + s);
+    }
+  }
+  return out.slice(0, TMP_SNAPSHOT_MAX);
+}
+
+// The record of what the session ran under, written into run.json beside
+// startedAt and printed in the run summary. It is not part of the compared
+// setting (settingLines), so a run saved before #277 still compares.
+function restrictionsRecord(tmpRoot, strippedNames) {
+  return { disallowedTools: DISALLOWED_TOOLS.slice(), strippedEnv: (strippedNames || []).slice(), tmpBefore: tmpSnapshot(tmpRoot) };
+}
+
 function sessionEnv(tmp, extra) {
   const env = { ...process.env };
   for (const k of Object.keys(env)) {
     if (/^CLAUDE_CODE_SUBAGENT_MODEL/.test(k) || /^ANTHROPIC_(MODEL|DEFAULT_|SMALL_FAST_MODEL)/.test(k) || k === 'CLAUDE_CODE_EFFORT_LEVEL') delete env[k];
   }
+  const strippedNames = stripSecrets(env);
   env.PATH = makeShims(tmp) + path.delimiter + env.PATH;
   const browsers = path.join(REAL_HOME, '.cache', 'ms-playwright');
   if (!env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(browsers)) env.PLAYWRIGHT_BROWSERS_PATH = browsers;
-  return { ...env, ...(extra || {}) };
+  const out = { ...env, ...(extra || {}) };
+  // The stripped names ride along for the run's record, non-enumerable so the
+  // spawned session never sees a variable by that name.
+  Object.defineProperty(out, 'strippedNames', { value: strippedNames, enumerable: false });
+  return out;
 }
 
 // The owner's real config, hashed the way headless-session.sh --baseline lists it,
@@ -2471,12 +2542,19 @@ function runGroup(cmd, args, opts, timeoutMs, graceMs = KILL_GRACE_MS) {
   });
 }
 
+// The argument list one headless session is started with, through
+// scripts/setup/headless-session.sh. Exported so the suite can check what the
+// session may not reach (#277) without starting one.
+function sessionArgs(o) {
+  return [HARNESS, '--build', o.build, '--project', o.project, '--home', o.home, '--mode', 'bypassPermissions', '--',
+    '--model', o.sessionModel || SESSION_MODEL, '--effort', SESSION_EFFORT, '--output-format', 'json', '--max-budget-usd', String(o.maxUsd),
+    '--strict-mcp-config', '--disallowedTools', DISALLOWED_TOOLS.join(','),
+    '--append-system-prompt', SYSTEM_NOTE, o.prompt];
+}
+
 // One headless session through scripts/setup/headless-session.sh.
 async function runSession(o) {
-  const args = [HARNESS, '--build', o.build, '--project', o.project, '--home', o.home, '--mode', 'bypassPermissions', '--',
-    '--model', o.sessionModel || SESSION_MODEL, '--effort', SESSION_EFFORT, '--output-format', 'json', '--max-budget-usd', String(o.maxUsd),
-    '--strict-mcp-config', '--disallowedTools', 'Artifact,ArtifactComments,ArtifactData',
-    '--append-system-prompt', SYSTEM_NOTE, o.prompt];
+  const args = sessionArgs(o);
   const run = runGroup('bash', args, { cwd: REPO, env: o.env }, SESSION_TIMEOUT_MS);
   sessionGroup = run;
   try { return await run; } finally { sessionGroup = null; }
@@ -2975,10 +3053,12 @@ async function commandRun(o) {
     } else {
       usage('unknown probe ' + o.probe);
     }
+    const env = sessionEnv(tmp, envExtra);
+    // What the session may not reach, recorded beside the run (#277).
+    Object.assign(meta, { restrictions: restrictionsRecord('/tmp', env.strippedNames) });
     fs.writeFileSync(path.join(out, 'run.json'), JSON.stringify(meta, null, 2) + '\n');
     console.log('quality-check: ' + kind + ' on ' + o.build + ' (' + build.version + ') -> ' + path.relative(REPO, out));
     console.log('quality-check: ' + budget.note);
-    const env = sessionEnv(tmp, envExtra);
     const configBefore = realConfigSnapshot();
     ran = true;
     const r = await runSession({ build: build.dir, project, home, prompt: meta.prompt, maxUsd: o.maxUsd, env, sessionModel });
@@ -3108,6 +3188,7 @@ function printRunSummary(a, verbose) {
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
   for (const c of a.checks || []) console.log('  check ' + c.name + ': ' + (c.ok ? 'ok' : 'FAILED') + ' - ' + c.detail);
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
+  if (a.restrictions) console.log('  restrictions: tools off ' + a.restrictions.disallowedTools.join(',') + '; env stripped ' + (a.restrictions.strippedEnv.length ? a.restrictions.strippedEnv.join(',') : 'none') + '; /tmp entries at start ' + a.restrictions.tmpBefore.length);
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
     for (const id of Object.keys(a.survived)) {
@@ -3458,6 +3539,7 @@ module.exports = {
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
   ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
+  DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs,
 };
 
 if (require.main === module) {

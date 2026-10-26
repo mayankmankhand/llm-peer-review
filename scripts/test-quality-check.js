@@ -1460,6 +1460,57 @@ async function asyncSection(name, fn) {
     check('an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
   });
 
+  // #277: what a measured session may not reach. Each piece is exported and
+  // tested on its output: stripSecrets on an env, sessionEnv on the real
+  // process.env with one planted name, sessionArgs on the list runSession
+  // spawns, restrictionsRecord on a made-up /tmp. The plan's grep target covers
+  // the one call the tests cannot see, the record written into run.json.
+  section('session restrictions (#277)', () => {
+    const env = { FOO_API_KEY: 'a', X_SECRET: 'b', DB_PASSWORD: 'c', NPM_TOKEN: 'd', GH_TOKEN: 'e', GITHUB_TOKEN: 'f', CLAUDE_CODE_MESSAGING_TOKEN: 'g', PATH: '/bin' };
+    const stripped = typeof QC.stripSecrets === 'function' ? QC.stripSecrets(env) : null;
+    check("stripSecrets drops key-like names and keeps Claude Code's own and the GitHub CLI's",
+      Array.isArray(stripped) && stripped.join() === 'DB_PASSWORD,FOO_API_KEY,NPM_TOKEN,X_SECRET'
+        && !('FOO_API_KEY' in env) && !('X_SECRET' in env) && !('DB_PASSWORD' in env) && !('NPM_TOKEN' in env)
+        && env.GH_TOKEN === 'e' && env.GITHUB_TOKEN === 'f' && env.CLAUDE_CODE_MESSAGING_TOKEN === 'g' && env.PATH === '/bin',
+      JSON.stringify({ stripped, left: Object.keys(env) }));
+
+    // The planted name is set on the real environment for this one call only.
+    process.env.FOO_API_KEY = 'planted';
+    let real = null;
+    try { real = typeof QC.sessionEnv === 'function' ? QC.sessionEnv(tmp('qc-test-env-')) : null; } finally { delete process.env.FOO_API_KEY; }
+    check('sessionEnv drops a planted FOO_API_KEY from process.env',
+      real !== null && !('FOO_API_KEY' in real) && typeof real.PATH === 'string'
+        && Array.isArray(real.strippedNames) && real.strippedNames.includes('FOO_API_KEY')
+        && !Object.keys(real).includes('strippedNames'),
+      real === null ? 'sessionEnv is not exported' : JSON.stringify({ planted: 'FOO_API_KEY' in real, names: real.strippedNames, enumerable: Object.keys(real).includes('strippedNames') }));
+
+    const args = typeof QC.sessionArgs === 'function' ? QC.sessionArgs({ build: '/b', project: '/p', home: '/h', prompt: 'hi', maxUsd: 1 }) : null;
+    const at = Array.isArray(args) ? args.indexOf('--disallowedTools') : -1;
+    check('sessionArgs passes --disallowedTools with WebFetch and WebSearch',
+      at !== -1 && Array.isArray(QC.DISALLOWED_TOOLS) && args[at + 1] === QC.DISALLOWED_TOOLS.join(',')
+        && QC.DISALLOWED_TOOLS.includes('WebFetch') && QC.DISALLOWED_TOOLS.includes('WebSearch') && QC.DISALLOWED_TOOLS.includes('Artifact'),
+      args === null ? 'sessionArgs is not exported' : JSON.stringify({ at, next: args[at + 1], tools: QC.DISALLOWED_TOOLS }));
+
+    // A made-up /tmp: two plain entries, and a scratchpad root holding one
+    // session folder and one loose file. The root itself is never recorded.
+    const root = tmp('qc-test-tmp-');
+    const scratch = 'claude-' + (typeof process.getuid === 'function' ? process.getuid() : 0);
+    fs.mkdirSync(path.join(root, 'a'));
+    fs.writeFileSync(path.join(root, 'b'), '');
+    fs.mkdirSync(path.join(root, scratch, 'slugA', 'sess1'), { recursive: true });
+    fs.writeFileSync(path.join(root, scratch, 'lock'), '');
+    const rec = typeof QC.restrictionsRecord === 'function' ? QC.restrictionsRecord(root, ['FOO_API_KEY']) : null;
+    check('restrictionsRecord names the tools, the stripped names and the /tmp snapshot',
+      rec !== null && rec.disallowedTools.join() === QC.DISALLOWED_TOOLS.join() && rec.strippedEnv.join() === 'FOO_API_KEY'
+        && rec.tmpBefore.join() === ['a', 'b', scratch + '/lock', scratch + '/slugA/sess1'].join(),
+      rec === null ? 'restrictionsRecord is not exported' : JSON.stringify(rec));
+
+    const big = tmp('qc-test-tmpbig-');
+    for (let i = 0; i < 205; i++) fs.writeFileSync(path.join(big, 'e' + String(i).padStart(3, '0')), '');
+    const capped = rec === null ? null : QC.restrictionsRecord(big, []);
+    check('the /tmp snapshot is capped at 200 names', capped !== null && capped.tmpBefore.length === 200, capped === null ? 'no record' : String(capped.tmpBefore.length));
+  });
+
   console.log('');
   console.log(passed + ' passed, ' + failures.length + ' failed');
   if (failures.length) {
