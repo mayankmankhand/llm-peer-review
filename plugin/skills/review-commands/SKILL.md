@@ -27,7 +27,7 @@ allowed-tools:
 
 1. **Report first, then fix** - Reviewing never edits files; findings are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
 2. **Audit, then auto-fix, with pages** - Command-prompt findings are audited before the report per M2 in `${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They then enter the auto loop like any other (survivors auto-fixed, re-verified, then page/digest/log), with one built-in brake: fixing them means editing prompt files, which is an always-ask action (M9), so those fixes page for approval instead of auto-applying. Saying "report only" keeps a run report-first (M10)
-3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; file names, hashes and code terms stay in the receipt
+3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; that sentence carries no file name, hash or code term, which belong in the receipt row or the step's file list
 
 </rules>
 

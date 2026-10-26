@@ -1584,6 +1584,27 @@ section('272. --chain <stage>: the countable part of M14', function () {
   const prose = runScript(['--chain', 'review', '--report', 'reports/review-prose.md'], repo);
   check('--chain review lets ordinary prose through the code-term check',
     prose.status === 0 && prose.json.pass === true, brief(prose) + JSON.stringify(prose.json));
+  // The three branches the backtick and hash fixtures never reach: a bare file
+  // name or path, a long flag, and a function name (review of #271, R4 and R9).
+  write(repo, 'reports/review-barefile.md', report('- R1: FIXED - the parser in scripts/x.js drops the qualifier - the suite is green\n'));
+  const bareFile = runScript(['--chain', 'review', '--report', 'reports/review-barefile.md'], repo);
+  write(repo, 'reports/review-flag.md', report('- R1: FIXED - the --rerun-failures flag is read again - the suite is green\n'));
+  const flag = runScript(['--chain', 'review', '--report', 'reports/review-flag.md'], repo);
+  write(repo, 'reports/review-funcname.md', report('- R1: FIXED - parseDigest() reads the first verdict word - the suite is green\n'));
+  const funcName = runScript(['--chain', 'review', '--report', 'reports/review-funcname.md'], repo);
+  check('--chain review refuses a bare file name, a flag and a function name in the clause',
+    bareFile.status === 1 && bareFile.json.error === 'bad_shape' && /scripts\/x\.js/.test(String(bareFile.json.detail)) &&
+    flag.status === 1 && flag.json.error === 'bad_shape' && /--rerun-failures/.test(String(flag.json.detail)) &&
+    funcName.status === 1 && funcName.json.error === 'bad_shape' && /parseDigest\(\)/.test(String(funcName.json.detail)),
+    brief(bareFile) + JSON.stringify(bareFile.json) + ' / ' + brief(flag) + JSON.stringify(flag.json) + ' / ' + brief(funcName) + JSON.stringify(funcName.json));
+  // An inner ` - ` ends the plain-words clause: the gate judges "the page" and
+  // reads everything after the aside as the receipt, so a term there is not
+  // caught. The review prompt tells the writer the clause carries no ` - ` of
+  // its own; this case pins what the gate does when one slips through.
+  write(repo, 'reports/review-aside.md', report('- R1: FIXED - the page - the one the owner reads - was blank, see `x.js` - grep reads 1\n'));
+  const aside = runScript(['--chain', 'review', '--report', 'reports/review-aside.md'], repo);
+  check('an inner dash ends the plain-words clause, so a term after the aside is not judged',
+    aside.status === 0 && aside.json.pass === true, brief(aside) + JSON.stringify(aside.json));
 
   // explore: the closing summary file
   // #275: a Reaches section sits between Design direction and Open questions.

@@ -23,7 +23,7 @@ allowed-tools:
 
 1. **Report first, then fix** - Reviewing never edits files; findings are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
 2. **Audit, then auto-fix, with pages** - Copy findings are audited before the report per M2 in `.claude/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They do not then wait for a human "fix it": after the report, survivors are auto-fixed and re-verified, and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1 - who the real reader is may be a question only the user can answer; saying "report only" keeps a run report-first, M10)
-3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; file names, hashes and code terms stay in the receipt
+3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; that sentence carries no file name, hash or code term, which belong in the receipt row or the step's file list
 4. **Structural fix directions** - A finding's fix line gives its direction in structural terms ("explain the artifact before the first CTA", "define the audience earlier", "add a clearer next step after the overview"), not replacement wording: the wording is written when the auto loop applies the fix.
 
 </rules>

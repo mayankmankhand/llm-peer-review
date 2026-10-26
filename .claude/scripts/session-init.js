@@ -1757,7 +1757,8 @@ function chainExecute(opts) {
 // parenthetical qualifier such as `(round 2)` may follow it, and ` - ` then
 // introduces the clause, which runs to the next ` - ` (the receipt) or the end
 // of the line. The clause is the part written for the owner, so it must be
-// there and read as words: no backtick, no path or file name, no commit hash.
+// there and read as words: no backtick, no path or file name, no commit hash,
+// no `--flag`, no `name()` (the two shapes the finding contract bans in prose).
 // Those belong in the receipt. Any other text after the verdict (`FIXED in
 // round 2 (prose)`) is a missing clause, so a bare qualifier never passes for
 // plain words. Returns { clause } or { error } with the reason in words.
@@ -1773,13 +1774,13 @@ function plainWordsClause(text) {
   const clause = sep[1].split(/\s-\s/)[0].trim();
   if (!clause) return { error: "no plain words after the verdict; the clause before the next ' - ' is empty" };
   if (clause.indexOf("`") >= 0) {
-    return { error: "the plain-words clause holds a file name, hash or code term (" + clause.match(/`[^`]*`?/)[0] + "); it belongs in the receipt after the next ' - '" };
+    return { error: "the plain-words clause holds a file name, hash, flag, function name or backticked term (" + clause.match(/`[^`]*`?/)[0] + "); it belongs in the receipt after the next ' - '" };
   }
-  const tokens = clause.split(/\s+/).map(function (t) { return t.replace(/^[("'[]+|[)"'\],.;:!?]+$/g, ""); });
+  const tokens = clause.split(/\s+/).map(function (raw) { var t = raw.replace(/^[("'[]+|[)"'\],.;:!?]+$/g, ""); return /\(\)/.test(raw) && /\($/.test(t) ? t + ")" : t; });
   const term = tokens.find(function (t) {
-    return (t.indexOf("/") >= 0 && t.indexOf(".") >= 0) || CODE_EXTENSION.test(t) || COMMIT_HASH.test(t);
+    return (t.indexOf("/") >= 0 && t.indexOf(".") >= 0) || CODE_EXTENSION.test(t) || COMMIT_HASH.test(t) || /^--[a-z]/.test(t) || /\(\)$/.test(t);
   });
-  if (term) return { error: "the plain-words clause holds a file name, hash or code term (" + term + "); it belongs in the receipt after the next ' - '" };
+  if (term) return { error: "the plain-words clause holds a file name, hash, flag, function name or backticked term (" + term + "); it belongs in the receipt after the next ' - '" };
   return { clause: clause };
 }
 
