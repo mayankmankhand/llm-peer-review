@@ -1511,6 +1511,66 @@ async function asyncSection(name, fn) {
     check('the /tmp snapshot is capped at 200 names', capped !== null && capped.tmpBefore.length === 200, capped === null ? 'no record' : String(capped.tmpBefore.length));
   });
 
+  // #277: the three leak paths the analyzer flags as warnings, each on a canned
+  // run built with the builder's existing options (mainTools, agents, meta).
+  // The run's own tmp root is in tmpBefore on purpose: it exists before the
+  // session starts, so the exclusion of the run's own tmp and home is what keeps
+  // a run's reads of its own project from counting as stale.
+  section('leak flags (#277)', () => {
+    const BUILD = '/tmp/qc-run.TEST/home/.claude/plugins/cache/llm-peer-review/tk/7.4.3';
+    const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+    const scratch = '/tmp/claude-' + uid + '/-tmp-qc-run-TEST-project/';
+    const read = (id, file) => ({ type: 'tool_use', id, name: 'Read', input: { file_path: file } });
+    const bash = (id, command) => ({ type: 'tool_use', id, name: 'Bash', input: { command } });
+    // An extra finder answers NO FINDINGS: the analyzer scores a lens by its
+    // finder's last attempt, and an attempt with no answer voids the run.
+    const done = () => ({ type: 'tool_use', id: 'hb_extra', name: 'SubagentHandback', input: { message: 'NO FINDINGS' } });
+    const restrictions = { disallowedTools: ['WebFetch'], strippedEnv: [], tmpBefore: ['qc-run.TEST', 'plan-render.old', 'foo', 'claude-' + uid + '/-tmp-qc-run-TEST-project/old-session'] };
+
+    const net = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [bash('t_net', 'curl -s https://raw.githubusercontent.com/x/y/main/answers.json')], agents: [{ type: 'tk:review-deps-finder', tools: [bash('t_net2', 'git clone https://github.com/x/y'), done()] }] }));
+    check('a Bash call naming github.com is flagged network-name',
+      net.valid && net.warnings.includes('network-name:2') && Array.isArray(net.network) && net.network.length === 2 && /githubusercontent/.test(net.network[0]) && /github\.com/.test(net.network[1]),
+      JSON.stringify({ warnings: net.warnings, network: net.network, reasons: net.reasons }));
+
+    const plug = analyze(makeReviewRun({ caught: ['code-search-prefix'], agents: [{ type: 'tk:review-code-finder', tools: [read('t_p1', BUILD + '/skills/shared/model-routing.md'), done()] }] }));
+    check('a finder read of the routing file inside the plugin build folder is flagged plugin-read',
+      plug.valid && plug.warnings.includes('plugin-read:1') && Array.isArray(plug.pluginReads) && plug.pluginReads.join() === BUILD + '/skills/shared/model-routing.md',
+      JSON.stringify({ warnings: plug.warnings, reads: plug.pluginReads, reasons: plug.reasons }));
+
+    const judge = analyze(makeReviewRun({ caught: ['code-search-prefix'], agents: [{ type: 'tk:audit-skeptic', tools: [read('t_p2', BUILD + '/skills/shared/hitl-loop.md')] }] }));
+    check('a judge read of the loop rules file inside the plugin build folder is not flagged',
+      judge.valid && !judge.warnings.some(w => /^plugin-read/.test(w)), JSON.stringify({ warnings: judge.warnings, reasons: judge.reasons }));
+
+    const stale = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { restrictions }, mainTools: [read('t_s1', '/tmp/plan-render.old/data.json')] }));
+    check('a read of a /tmp folder that existed before the run is flagged stale-tmp',
+      stale.valid && stale.warnings.includes('stale-tmp:1') && Array.isArray(stale.staleTmp) && stale.staleTmp.join() === '/tmp/plan-render.old/data.json',
+      JSON.stringify({ warnings: stale.warnings, stale: stale.staleTmp, reasons: stale.reasons }));
+
+    const sib = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { restrictions }, mainTools: [read('t_s2', '/tmp/foo-2/x'), read('t_s3', '/tmp/foo')] }));
+    check('an entry never flags a sibling that only shares its prefix',
+      sib.valid && sib.warnings.includes('stale-tmp:1') && sib.staleTmp.join() === '/tmp/foo', JSON.stringify({ warnings: sib.warnings, stale: sib.staleTmp }));
+
+    const pads = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { restrictions }, mainTools: [read('t_s4', scratch + 'old-session/scratchpad/notes.md'), read('t_s5', scratch + 'new-session/scratchpad/notes.md')] }));
+    check("an older session's scratchpad is flagged and the run's own scratchpad is not",
+      pads.valid && pads.warnings.includes('stale-tmp:1') && pads.staleTmp.join() === scratch + 'old-session/scratchpad/notes.md',
+      JSON.stringify({ warnings: pads.warnings, stale: pads.staleTmp }));
+
+    const own = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { restrictions }, mainTools: [read('t_o1', BUILD + '/skills/shared/model-routing.md'), read('t_o2', '/tmp/qc-run.TEST/project/server.js'), read('t_o3', '/tmp/qc-run.TEST/home/.claude/settings.json')] }));
+    check("the main session's plugin read and the run's own tmp are not flagged",
+      own.valid && !own.warnings.some(w => /^(plugin-read|stale-tmp)/.test(w)), JSON.stringify({ warnings: own.warnings, reasons: own.reasons }));
+
+    const none = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { paths: { tmp: '/tmp/qc-run.TEST', home: '/tmp/qc-run.TEST/home', project: '/tmp/qc-run.TEST/project' } }, mainTools: [read('t_n1', '/tmp/plan-render.old/data.json')], agents: [{ type: 'tk:review-code-finder', tools: [read('t_n2', BUILD + '/skills/shared/model-routing.md'), done()] }] }));
+    check('a run with no tmpBefore or no buildDir gets neither flag',
+      none.valid && !none.warnings.some(w => /^(plugin-read|stale-tmp)/.test(w)), JSON.stringify({ warnings: none.warnings, reasons: none.reasons }));
+
+    const lines = typeof QC.leakLines === 'function' ? QC.leakLines({ network: ['curl x'], pluginReads: ['p'], staleTmp: ['s'] }) : null;
+    check('leakLines names the three lists',
+      Array.isArray(lines) && lines.length === 3 && /^network: /.test(lines[0]) && /^plugin reads: /.test(lines[1]) && /^stale tmp reads: /.test(lines[2]) && QC.leakLines({}).length === 0,
+      lines === null ? 'leakLines is not exported' : JSON.stringify(lines));
+    // Printed so a suite run shows the lines a real run would print.
+    if (lines) for (const l of lines) console.log('        ' + l);
+  });
+
   console.log('');
   console.log(passed + ' passed, ' + failures.length + ' failed');
   if (failures.length) {

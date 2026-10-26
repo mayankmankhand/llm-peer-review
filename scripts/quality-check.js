@@ -144,7 +144,14 @@
 // the expected prompt, a skeptic replay made no skeptic dispatch, or a tool read
 // outside the scratch project, the scratch
 // home (which holds the plugin build and the stable plugin path) and /tmp. A
-// second invalid run, or a usage limit, pages the owner (M1).
+// second invalid run, or a usage limit, pages the owner (M1). Three leak paths
+// are warnings, not reasons (#277): network-name (a Bash call naming github.com
+// or githubusercontent.com, where the fixture's answer key is public),
+// plugin-read (a finder's or judge's read of the build's
+// skills/shared/model-routing.md, the shipped file that describes the
+// known-answer bug) and stale-tmp (a read under a /tmp entry that existed at
+// session start, other than the run's own tmp and home); the first real runs
+// show how often each fires before any is promoted to a reason.
 //
 // Scoring (--score). A planted bug is CAUGHT in a review run when it survives the
 // audit into the report; RAISED counts any finder's raw JSONL line that matched,
@@ -753,6 +760,19 @@ function digestRecords(records) {
 
 // The analysis of one run, from its loaded pieces: validity, models, finder
 // outputs and contract breaks, raw and surviving catches, or mapper coverage.
+// The typed agents a run may dispatch: the finders, the judges, the mapper and
+// the extractor. Any other type is an other-agent warning.
+const ROSTER_TYPE_RE = /^(tk:)?(audit-skeptic|fix-verifier|plan-critic|design-critic|design-comparer|decision-checker|correction-extractor|review-[a-z]+-finder|index-mapper)$/;
+
+// The run summary's lines for the three leak lists (#277); none when none fired.
+function leakLines(a) {
+  const out = [];
+  if (a.network && a.network.length) out.push('network: ' + a.network.join(' | '));
+  if (a.pluginReads && a.pluginReads.length) out.push('plugin reads: ' + a.pluginReads.join(' | '));
+  if (a.staleTmp && a.staleTmp.length) out.push('stale tmp reads: ' + a.staleTmp.join(' | '));
+  return out;
+}
+
 function analyzeRun(run, answers) {
   const meta = run.meta || {};
   const result = run.result || null;
@@ -807,7 +827,7 @@ function analyzeRun(run, answers) {
     if (expect.byType && expect.byType[type]) want = expect.byType[type];
     else if (kind) want = (expect.finderModels && expect.finderModels[kind[1]]) || expect.finders || expect.main;
     else if (/index-mapper$/.test(type)) want = expect.mapper || expect.main;
-    else if (!/^(tk:)?(audit-skeptic|fix-verifier|plan-critic|design-critic|design-comparer|decision-checker|correction-extractor|review-[a-z]+-finder|index-mapper)$/.test(type)) warnings.push('other-agent:' + type);
+    else if (!ROSTER_TYPE_RE.test(type)) warnings.push('other-agent:' + type);
     if (fams.length > 0 && fams.some(f => f !== want)) reasons.push('model:' + type + '=' + fams.join('+') + ' (want ' + want + ')');
   }
 
@@ -823,6 +843,46 @@ function analyzeRun(run, answers) {
     }
   }
   if (outside.length) { reasons.push('outside-read:' + outside.length); a.outside = [...new Set(outside)].slice(0, 20); }
+
+  // The three leak paths (#277), warnings rather than reasons: the first real
+  // runs show how often each fires before any of them voids a run.
+  //   network-name: a Bash call that names GitHub, where the fixture's answer key
+  //                 is public (harness2's own validation run saw a rollout fetch
+  //                 its rubric unprompted).
+  //   plugin-read:  a finder's or judge's read of the one shipped file that
+  //                 describes the known-answer bug. Only subagents count: the main
+  //                 session's own includes resolve to the plugin folder, and the
+  //                 judges quote the loop rules file from there by design.
+  //   stale-tmp:    a read under a /tmp entry that existed at session start
+  //                 (meta.restrictions.tmpBefore), other than the run's own tmp
+  //                 and home, which exist before the session too. An entry
+  //                 matches at a path-segment boundary only, so `foo` never
+  //                 flags `foo-2`. A run recorded before the snapshot has no
+  //                 list and gets no flag.
+  const NETWORK_RE = /\b(?:[a-z0-9-]+\.)*github\.com\b|githubusercontent\.com/i;
+  const buildDir = meta.paths && meta.paths.buildDir;
+  const routingFile = buildDir ? path.join(buildDir, 'skills', 'shared', 'model-routing.md') : null;
+  const before = meta.restrictions && Array.isArray(meta.restrictions.tmpBefore) ? meta.restrictions.tmpBefore : null;
+  const own = [meta.paths && meta.paths.tmp, meta.paths && meta.paths.home].filter(Boolean);
+  const network = [];
+  const pluginReads = [];
+  const staleTmp = [];
+  for (const s of [{ sub: false, type: 'main', d: main }, ...subs.map(x => ({ sub: true, type: (x.meta && x.meta.agentType) || '', d: x.d }))]) {
+    const typed = s.sub && ROSTER_TYPE_RE.test(s.type);
+    for (const t of s.d.toolUses) {
+      if (t.name === 'Bash' && t.input && typeof t.input.command === 'string' && NETWORK_RE.test(t.input.command)) network.push(t.input.command.trim().slice(0, 160));
+      for (const p of toolPaths(t.name, t.input, cwd)) {
+        if (typed && routingFile && p === routingFile) pluginReads.push(p);
+        if (before && isUnder(p, '/tmp') && !own.some(r => isUnder(p, r))) {
+          const rel = path.relative('/tmp', p);
+          if (before.some(e => rel === e || rel.startsWith(e + path.sep))) staleTmp.push(p);
+        }
+      }
+    }
+  }
+  if (network.length) { warnings.push('network-name:' + network.length); a.network = network.slice(0, 20); }
+  if (pluginReads.length) { warnings.push('plugin-read:' + pluginReads.length); a.pluginReads = [...new Set(pluginReads)].slice(0, 20); }
+  if (staleTmp.length) { warnings.push('stale-tmp:' + staleTmp.length); a.staleTmp = [...new Set(staleTmp)].slice(0, 20); }
 
   // Cost, tokens, time.
   a.costUsd = result && typeof result.total_cost_usd === 'number' ? result.total_cost_usd : null;
@@ -3189,6 +3249,7 @@ function printRunSummary(a, verbose) {
   for (const c of a.checks || []) console.log('  check ' + c.name + ': ' + (c.ok ? 'ok' : 'FAILED') + ' - ' + c.detail);
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
   if (a.restrictions) console.log('  restrictions: tools off ' + a.restrictions.disallowedTools.join(',') + '; env stripped ' + (a.restrictions.strippedEnv.length ? a.restrictions.strippedEnv.join(',') : 'none') + '; /tmp entries at start ' + a.restrictions.tmpBefore.length);
+  for (const l of leakLines(a)) console.log('  ' + l);
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
     for (const id of Object.keys(a.survived)) {
@@ -3539,7 +3600,7 @@ module.exports = {
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
   ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
-  DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs,
+  DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs, leakLines,
 };
 
 if (require.main === module) {
