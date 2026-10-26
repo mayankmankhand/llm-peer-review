@@ -35,7 +35,7 @@
 //                                                 the same, saved by the script (#250, below)
 //   node session-init.js --models                 only the model mode (#205, below)
 //   node session-init.js --cycle-start            where /document's cycle window starts (#265, below)
-//   node session-init.js --lessons                duplicated lesson leads and leads with no write-up (#265, below)
+//   node session-init.js --lessons                duplicated lesson leads and leads with no write-up (#265, below), plus the index's bytes, cap and overCap (#277)
 // Each takes an optional --mode <best|fit|cheap>, the mode a command's "mode:" word
 // asked for, and each output carries the resolved "models" object.
 //
@@ -1566,7 +1566,11 @@ function lessonsCheck() {
     try { return fs.readFileSync(path.join(root, name), "utf8"); } catch { return null; }
   };
   const index = read("LESSONS.md");
-  if (index === null) return { duplicates: [], noWriteUp: [], detailFile: false, error: "no LESSONS.md in " + root };
+  if (index === null) return { duplicates: [], noWriteUp: [], detailFile: false, bytes: null, cap: LESSONS_CAP_BYTES, overCap: false, error: "no LESSONS.md in " + root };
+  // The cap travels with this mode too: /document runs it after writing the
+  // cycle's lessons, and a crossing those lessons cause has to show here, not
+  // at the next session start (#277, review R7).
+  const bytes = Buffer.byteLength(index, "utf8");
   const strip = (bold) => bold.slice(2, -2);
   const leads = (index.match(/^- \*\*[^*\r\n]+\*\*/gm) || []).map((l) => strip(l.slice(2)));
   const detail = read("LESSONS-detail.md");
@@ -1581,6 +1585,9 @@ function lessonsCheck() {
     duplicates: Array.from(twice).sort(),
     noWriteUp: Array.from(seen).filter((l) => !written.has(l)).sort(),
     detailFile: detail !== null,
+    bytes,
+    cap: LESSONS_CAP_BYTES,
+    overCap: bytes > LESSONS_CAP_BYTES,
   };
 }
 
@@ -1892,7 +1899,7 @@ if (outGiven && cliArgs[0] !== "--scope") {
 } else if (cliArgs[0] === "--cycle-start" && cliArgs.length === 1) {
   emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, cycleStart(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "start", "source", "plan"]));
 } else if (cliArgs[0] === "--lessons" && cliArgs.length === 1) {
-  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp"]));
+  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp", "bytes", "cap", "overCap"]));
 } else if (cliArgs[0] === "--chain") {
   const result = chainCheck(cliArgs.slice(1));
   // A refused input exits 1 (#272): the one mode where the exit code matters,

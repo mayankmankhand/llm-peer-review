@@ -1466,11 +1466,14 @@ async function asyncSection(name, fn) {
   // spawns, restrictionsRecord on a made-up /tmp. The plan's grep target covers
   // the one call the tests cannot see, the record written into run.json.
   section('session restrictions (#277)', () => {
-    const env = { FOO_API_KEY: 'a', X_SECRET: 'b', DB_PASSWORD: 'c', NPM_TOKEN: 'd', GH_TOKEN: 'e', GITHUB_TOKEN: 'f', CLAUDE_CODE_MESSAGING_TOKEN: 'g', PATH: '/bin' };
+    // FAL_KEY (the toolkit's own video key) and the cloud access pair end in
+    // neither _API_KEY nor _TOKEN (review of #277, R14): the strip matches by
+    // suffix family, so any name ending _KEY goes.
+    const env = { FOO_API_KEY: 'a', X_SECRET: 'b', DB_PASSWORD: 'c', NPM_TOKEN: 'd', FAL_KEY: 'k', AWS_ACCESS_KEY_ID: 'i', AWS_SECRET_ACCESS_KEY: 's', GH_TOKEN: 'e', GITHUB_TOKEN: 'f', CLAUDE_CODE_MESSAGING_TOKEN: 'g', PATH: '/bin' };
     const stripped = typeof QC.stripSecrets === 'function' ? QC.stripSecrets(env) : null;
     check("stripSecrets drops key-like names and keeps Claude Code's own and the GitHub CLI's",
-      Array.isArray(stripped) && stripped.join() === 'DB_PASSWORD,FOO_API_KEY,NPM_TOKEN,X_SECRET'
-        && !('FOO_API_KEY' in env) && !('X_SECRET' in env) && !('DB_PASSWORD' in env) && !('NPM_TOKEN' in env)
+      Array.isArray(stripped) && stripped.join() === 'AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY,DB_PASSWORD,FAL_KEY,FOO_API_KEY,NPM_TOKEN,X_SECRET'
+        && !('FOO_API_KEY' in env) && !('X_SECRET' in env) && !('DB_PASSWORD' in env) && !('NPM_TOKEN' in env) && !('FAL_KEY' in env) && !('AWS_ACCESS_KEY_ID' in env)
         && env.GH_TOKEN === 'e' && env.GITHUB_TOKEN === 'f' && env.CLAUDE_CODE_MESSAGING_TOKEN === 'g' && env.PATH === '/bin',
       JSON.stringify({ stripped, left: Object.keys(env) }));
 
@@ -1502,13 +1505,15 @@ async function asyncSection(name, fn) {
     const rec = typeof QC.restrictionsRecord === 'function' ? QC.restrictionsRecord(root, ['FOO_API_KEY']) : null;
     check('restrictionsRecord names the tools, the stripped names and the /tmp snapshot',
       rec !== null && rec.disallowedTools.join() === QC.DISALLOWED_TOOLS.join() && rec.strippedEnv.join() === 'FOO_API_KEY'
-        && rec.tmpBefore.join() === ['a', 'b', scratch + '/lock', scratch + '/slugA/sess1'].join(),
+        && rec.tmpBefore.join() === ['a', 'b', scratch + '/lock', scratch + '/slugA/sess1'].join() && rec.tmpBeforeTruncated === false,
       rec === null ? 'restrictionsRecord is not exported' : JSON.stringify(rec));
 
+    // A 200-name cap dropped the harness's own run folders on this machine (355
+    // entries; review of #277, R19): the cap is 1,000 and the record says when it cut.
     const big = tmp('qc-test-tmpbig-');
-    for (let i = 0; i < 205; i++) fs.writeFileSync(path.join(big, 'e' + String(i).padStart(3, '0')), '');
+    for (let i = 0; i < 1005; i++) fs.writeFileSync(path.join(big, 'e' + String(i).padStart(4, '0')), '');
     const capped = rec === null ? null : QC.restrictionsRecord(big, []);
-    check('the /tmp snapshot is capped at 200 names', capped !== null && capped.tmpBefore.length === 200, capped === null ? 'no record' : String(capped.tmpBefore.length));
+    check('the /tmp snapshot is capped at 1000 names and the record says it was cut', capped !== null && capped.tmpBefore.length === 1000 && capped.tmpBeforeTruncated === true, capped === null ? 'no record' : JSON.stringify({ n: capped.tmpBefore.length, truncated: capped.tmpBeforeTruncated }));
   });
 
   // #277: the three leak paths the analyzer flags as warnings, each on a canned
@@ -1562,6 +1567,25 @@ async function asyncSection(name, fn) {
     const none = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { paths: { tmp: '/tmp/qc-run.TEST', home: '/tmp/qc-run.TEST/home', project: '/tmp/qc-run.TEST/project' } }, mainTools: [read('t_n1', '/tmp/plan-render.old/data.json')], agents: [{ type: 'tk:review-code-finder', tools: [read('t_n2', BUILD + '/skills/shared/model-routing.md'), done()] }] }));
     check('a run with no tmpBefore or no buildDir gets neither flag',
       none.valid && !none.warnings.some(w => /^(plugin-read|stale-tmp)/.test(w)), JSON.stringify({ warnings: none.warnings, reasons: none.reasons }));
+
+    // Review of #277, R11 and R13: a read through the shell, a search scoped to
+    // the folder that holds the routing file, and a GitHub CLI call that names
+    // this repository all dodge the flags when only tool paths and domain
+    // names are looked at.
+    const shell = analyze(makeReviewRun({ caught: ['code-search-prefix'], meta: { restrictions }, mainTools: [bash('t_sh1', 'cat /tmp/plan-render.old/data.json')] }));
+    check('a shell read under a pre-run /tmp folder is flagged stale-tmp',
+      shell.valid && shell.warnings.includes('stale-tmp:1') && Array.isArray(shell.staleTmp) && shell.staleTmp.join() === '/tmp/plan-render.old/data.json',
+      JSON.stringify({ warnings: shell.warnings, stale: shell.staleTmp, reasons: shell.reasons }));
+
+    const grepped = analyze(makeReviewRun({ caught: ['code-search-prefix'], agents: [{ type: 'tk:review-code-finder', tools: [{ type: 'tool_use', id: 't_g1', name: 'Grep', input: { pattern: 'failglob', path: BUILD + '/skills/shared' } }, done()] }] }));
+    check("a finder search scoped to the routing file's folder is flagged plugin-read",
+      grepped.valid && grepped.warnings.includes('plugin-read:1') && Array.isArray(grepped.pluginReads) && grepped.pluginReads.join() === BUILD + '/skills/shared',
+      JSON.stringify({ warnings: grepped.warnings, reads: grepped.pluginReads, reasons: grepped.reasons }));
+
+    const cli = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [bash('t_cli1', 'gh api repos/x/llm-peer-review/contents/scripts/fixtures/quality-check/answers.json'), bash('t_cli2', 'gh api repos/lodash/lodash/releases/latest')] }));
+    check('a GitHub CLI call naming this repository is flagged network-name and a call about another repository is not',
+      cli.valid && cli.warnings.includes('network-name:1') && Array.isArray(cli.network) && cli.network.length === 1 && /llm-peer-review/.test(cli.network[0]),
+      JSON.stringify({ warnings: cli.warnings, network: cli.network, reasons: cli.reasons }));
 
     const lines = typeof QC.leakLines === 'function' ? QC.leakLines({ network: ['curl x'], pluginReads: ['p'], staleTmp: ['s'] }) : null;
     check('leakLines names the three lists',

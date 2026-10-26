@@ -1716,6 +1716,13 @@ section('The lessons object reports its cap (#277)', function () {
     under.parsed && over.parsed && U.cap === 44000 && U.overCap === false && U.bytes === Buffer.byteLength(short)
       && O.cap === 44000 && O.overCap === true && O.bytes === Buffer.byteLength(lessons),
     JSON.stringify({ under: { cap: U.cap, overCap: U.overCap, bytes: U.bytes }, over: { cap: O.cap, overCap: O.overCap, bytes: O.bytes } }));
+  // /document checks the index after it writes, through --lessons, so the cap
+  // has to be in that output too or a crossing this cycle caused goes unseen
+  // until the next startup (review of #277, R7).
+  const afterWrite = runScript(['--lessons'], big).json || {};
+  check('the --lessons check carries bytes, cap and overCap for the index as it is now',
+    afterWrite.cap === 44000 && afterWrite.overCap === true && afterWrite.bytes === Buffer.byteLength(lessons),
+    JSON.stringify({ cap: afterWrite.cap, overCap: afterWrite.overCap, bytes: afterWrite.bytes }));
 });
 
 if (failures.length === 0) {

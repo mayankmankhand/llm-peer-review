@@ -75,9 +75,11 @@
 // refused would score the refusal), no MCP servers, the page-publishing and web
 // tools removed (DISALLOWED_TOOLS: the fixture's answer key is tracked in a
 // public repository, so a session may not fetch it, #277), key-like variables
-// stripped from the environment (stripSecrets: names ending _API_KEY, _SECRET,
-// _PASSWORD or _TOKEN, except the session's own CLAUDE_CODE_* and the GitHub
-// CLI's GH_TOKEN and GITHUB_TOKEN, which the dependency lens may need), and a
+// stripped from the environment (stripSecrets: names ending _KEY, _SECRET,
+// _PASSWORD, _TOKEN or _ACCESS_KEY_ID, except the session's own CLAUDE_CODE_*
+// and the GitHub CLI's GH_TOKEN and GITHUB_TOKEN, which the dependency lens may
+// need; the network itself stays on for that lens, so a shell fetch is warned
+// on by the analyzer, never blocked), and a
 // PATH shim that turns the Windows browser launchers into no-ops, so a run
 // neither publishes a page nor opens a window. What a run ran under is recorded
 // in run.json as meta.restrictions (the tools, the stripped names, the entries
@@ -146,12 +148,15 @@
 // home (which holds the plugin build and the stable plugin path) and /tmp. A
 // second invalid run, or a usage limit, pages the owner (M1). Three leak paths
 // are warnings, not reasons (#277): network-name (a Bash call naming github.com
-// or githubusercontent.com, where the fixture's answer key is public),
-// plugin-read (a finder's or judge's read of the build's
+// or githubusercontent.com, where the fixture's answer key is public, or a
+// GitHub CLI call naming this repository, an answer-key file or a contents
+// endpoint), plugin-read (a finder's or judge's read of the build's
 // skills/shared/model-routing.md, the shipped file that describes the
-// known-answer bug) and stale-tmp (a read under a /tmp entry that existed at
-// session start, other than the run's own tmp and home); the first real runs
-// show how often each fires before any is promoted to a reason.
+// known-answer bug, or a search of a folder under the scratch home that holds
+// it) and stale-tmp (a read under a /tmp entry that existed at session start,
+// other than the run's own tmp and home); each sees a path reached through a
+// shell command as well as through a tool. The first real runs show how often
+// each fires before any is promoted to a reason.
 //
 // Scoring (--score). A planted bug is CAUGHT in a review run when it survives the
 // audit into the report; RAISED counts any finder's raw JSONL line that matched,
@@ -658,8 +663,9 @@ function mapperCoverage(files, opened, blocks) {
 }
 
 // Absolute paths a tool call reaches. Read/Grep/Glob paths are resolved against
-// the session's working folder; a shell command only contributes paths under a
-// user home or a Windows mount, the places a scratch run has no business in.
+// the session's working folder; a shell command contributes paths under a user
+// home or a Windows mount, the places a scratch run has no business in, and
+// under /tmp, so the leak flags (#277) see a read made through the shell too.
 function toolPaths(name, input, cwd) {
   const out = [];
   if (!input || typeof input !== 'object') return out;
@@ -667,7 +673,7 @@ function toolPaths(name, input, cwd) {
   if (name === 'Read' || name === 'NotebookRead') add(input.file_path || input.notebook_path);
   else if (name === 'Grep' || name === 'Glob' || name === 'LS') { add(input.path); if (name === 'Glob' && typeof input.pattern === 'string' && input.pattern.startsWith('/')) add(input.pattern.replace(/[*?[{].*$/, '')); }
   else if (name === 'Bash' && typeof input.command === 'string') {
-    const re = /(?:^|[\s'"=:(<>|])((?:\/home|\/mnt|\/root|\/Users)\/[^\s'"|;&)<>]*)/g;
+    const re = /(?:^|[\s'"=:(<>|])((?:\/home|\/mnt|\/root|\/Users|\/tmp)\/[^\s'"|;&)<>]*)/g;
     let m;
     while ((m = re.exec(input.command)) !== null) out.push(m[1]);
   }
@@ -848,31 +854,45 @@ function analyzeRun(run, answers) {
   // runs show how often each fires before any of them voids a run.
   //   network-name: a Bash call that names GitHub, where the fixture's answer key
   //                 is public (harness2's own validation run saw a rollout fetch
-  //                 its rubric unprompted).
+  //                 its rubric unprompted), or a GitHub CLI call that names this
+  //                 repository, an answer-key file or a contents endpoint: the
+  //                 same fetch by a road that names no domain (review, R13). A
+  //                 CLI call about some other repository, the dependency lens's
+  //                 own, is not flagged.
   //   plugin-read:  a finder's or judge's read of the one shipped file that
-  //                 describes the known-answer bug. Only subagents count: the main
-  //                 session's own includes resolve to the plugin folder, and the
-  //                 judges quote the loop rules file from there by design.
+  //                 describes the known-answer bug, or a search scoped to a
+  //                 folder under the scratch home that holds it (review, R11).
+  //                 Only subagents count: the main session's own includes
+  //                 resolve to the plugin folder, and the judges quote the loop
+  //                 rules file from there by design.
   //   stale-tmp:    a read under a /tmp entry that existed at session start
   //                 (meta.restrictions.tmpBefore), other than the run's own tmp
   //                 and home, which exist before the session too. An entry
   //                 matches at a path-segment boundary only, so `foo` never
   //                 flags `foo-2`. A run recorded before the snapshot has no
   //                 list and gets no flag.
+  // All three see a path reached through a shell command as well as through a
+  // tool, since toolPaths yields /tmp paths from Bash (review, R11).
   const NETWORK_RE = /\b(?:[a-z0-9-]+\.)*github\.com\b|githubusercontent\.com/i;
+  const GH_CLI_RE = /\bgh\s+(?:api|repo|gist)\b/;
+  const repoName = path.basename(REPO);
+  const namesThisRepo = cmd => cmd.includes(repoName) || /answers\.json|\/contents\//.test(cmd);
   const buildDir = meta.paths && meta.paths.buildDir;
+  const home = meta.paths && meta.paths.home;
   const routingFile = buildDir ? path.join(buildDir, 'skills', 'shared', 'model-routing.md') : null;
+  const coversRoutingFile = p => p === routingFile || (!!home && isUnder(p, home) && isUnder(routingFile, p));
   const before = meta.restrictions && Array.isArray(meta.restrictions.tmpBefore) ? meta.restrictions.tmpBefore : null;
-  const own = [meta.paths && meta.paths.tmp, meta.paths && meta.paths.home].filter(Boolean);
+  const own = [meta.paths && meta.paths.tmp, home].filter(Boolean);
   const network = [];
   const pluginReads = [];
   const staleTmp = [];
   for (const s of [{ sub: false, type: 'main', d: main }, ...subs.map(x => ({ sub: true, type: (x.meta && x.meta.agentType) || '', d: x.d }))]) {
     const typed = s.sub && ROSTER_TYPE_RE.test(s.type);
     for (const t of s.d.toolUses) {
-      if (t.name === 'Bash' && t.input && typeof t.input.command === 'string' && NETWORK_RE.test(t.input.command)) network.push(t.input.command.trim().slice(0, 160));
+      const cmd = t.name === 'Bash' && t.input && typeof t.input.command === 'string' ? t.input.command : null;
+      if (cmd !== null && (NETWORK_RE.test(cmd) || (GH_CLI_RE.test(cmd) && namesThisRepo(cmd)))) network.push(cmd.trim().slice(0, 160));
       for (const p of toolPaths(t.name, t.input, cwd)) {
-        if (typed && routingFile && p === routingFile) pluginReads.push(p);
+        if (typed && routingFile && coversRoutingFile(p)) pluginReads.push(p);
         if (before && isUnder(p, '/tmp') && !own.some(r => isUnder(p, r))) {
           const rel = path.relative('/tmp', p);
           if (before.some(e => rel === e || rel.startsWith(e + path.sep))) staleTmp.push(p);
@@ -2408,9 +2428,11 @@ function makeShims(tmp) {
 const DISALLOWED_TOOLS = ['Artifact', 'ArtifactComments', 'ArtifactData', 'WebFetch', 'WebSearch'];
 
 // Key-like variable names the session never sees; names, never values, are
-// recorded. The session's own CLAUDE_CODE_* variables stay, and so do the GitHub
-// CLI's two token names, for the dependency lens (owner's decision, #277).
-const SECRET_NAME_RE = /(_API_KEY|_SECRET|_PASSWORD|_TOKEN)$/;
+// recorded. The match is by suffix family (any name ending _KEY, not only
+// _API_KEY, so the toolkit's own FAL_KEY and a cloud access pair go too; review
+// of #277, R14). The session's own CLAUDE_CODE_* variables stay, and so do the
+// GitHub CLI's two token names, for the dependency lens (owner's decision, #277).
+const SECRET_NAME_RE = /(_KEY|_SECRET|_PASSWORD|_TOKEN|_ACCESS_KEY_ID)$/;
 const SECRET_KEEP_RE = /^(CLAUDE_CODE_|GH_TOKEN$|GITHUB_TOKEN$)/;
 
 // Deletes the key-like names from env in place and returns them, sorted.
@@ -2422,14 +2444,16 @@ function stripSecrets(env) {
   return stripped.sort();
 }
 
-// The entries of the temp root at session start, at most TMP_SNAPSHOT_MAX names,
-// so the analyzer can flag a read of a folder another run left there (the
-// stale-tmp warning). The scratchpad root (claude-<uid>, where Claude Code keeps
-// each session's scratchpad as <project slug>/<session id>/) is recorded as its
-// session folders and loose entries, never as the root itself: the measured
-// session's own scratchpad is a new session id, absent from the list, while an
-// older session's is in it.
-const TMP_SNAPSHOT_MAX = 200;
+// The entries of the temp root at session start, so the analyzer can flag a
+// read of a folder another run left there (the stale-tmp warning). The
+// scratchpad root (claude-<uid>, where Claude Code keeps each session's
+// scratchpad as <project slug>/<session id>/) is recorded as its session folders
+// and loose entries, never as the root itself: the measured session's own
+// scratchpad is a new session id, absent from the list, while an older
+// session's is in it. The record keeps at most TMP_SNAPSHOT_MAX names and says
+// when it cut the list: a 200-name cap dropped the harness's own run folders on
+// a machine with 355 entries (review of #277, R19).
+const TMP_SNAPSHOT_MAX = 1000;
 function tmpSnapshot(tmpRoot) {
   let names;
   try { names = fs.readdirSync(tmpRoot).sort(); } catch (e) { return []; }
@@ -2446,14 +2470,15 @@ function tmpSnapshot(tmpRoot) {
       else for (const s of sessions) out.push(name + '/' + slug + '/' + s);
     }
   }
-  return out.slice(0, TMP_SNAPSHOT_MAX);
+  return out;
 }
 
 // The record of what the session ran under, written into run.json beside
 // startedAt and printed in the run summary. It is not part of the compared
 // setting (settingLines), so a run saved before #277 still compares.
 function restrictionsRecord(tmpRoot, strippedNames) {
-  return { disallowedTools: DISALLOWED_TOOLS.slice(), strippedEnv: (strippedNames || []).slice(), tmpBefore: tmpSnapshot(tmpRoot) };
+  const all = tmpSnapshot(tmpRoot);
+  return { disallowedTools: DISALLOWED_TOOLS.slice(), strippedEnv: (strippedNames || []).slice(), tmpBefore: all.slice(0, TMP_SNAPSHOT_MAX), tmpBeforeTruncated: all.length > TMP_SNAPSHOT_MAX };
 }
 
 function sessionEnv(tmp, extra) {
@@ -3248,7 +3273,7 @@ function printRunSummary(a, verbose) {
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
   for (const c of a.checks || []) console.log('  check ' + c.name + ': ' + (c.ok ? 'ok' : 'FAILED') + ' - ' + c.detail);
   if (a.outside) console.log('  outside reads: ' + a.outside.join(' | '));
-  if (a.restrictions) console.log('  restrictions: tools off ' + a.restrictions.disallowedTools.join(',') + '; env stripped ' + (a.restrictions.strippedEnv.length ? a.restrictions.strippedEnv.join(',') : 'none') + '; /tmp entries at start ' + a.restrictions.tmpBefore.length);
+  if (a.restrictions) console.log('  restrictions: tools off ' + a.restrictions.disallowedTools.join(',') + '; env stripped ' + (a.restrictions.strippedEnv.length ? a.restrictions.strippedEnv.join(',') : 'none') + '; /tmp entries at start ' + a.restrictions.tmpBefore.length + (a.restrictions.tmpBeforeTruncated ? ' (list cut at the cap)' : ''));
   for (const l of leakLines(a)) console.log('  ' + l);
   if (a.survived) {
     console.log('  findings in report: ' + a.survivorCount + ' surviving, ' + a.killedCount + ' audited out; contract breaks: ' + a.contractBreaks + '; prose wrapped around JSONL: ' + (a.wrapped || 0));
