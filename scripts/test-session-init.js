@@ -1515,7 +1515,7 @@ section('272. --chain <stage>: the countable part of M14', function () {
     };
   };
   const report = function (digest) { return '# Review\n\n## Findings\n\n- R1 something\n\n## Digest\n\n' + digest; };
-  write(repo, 'reports/review-settled.md', report('- R1: FIXED - the grep is empty now\n- R2, R3: FIXED in round 2 (prose)\n- R4: OPEN, needs the owner - a decision\n'));
+  write(repo, 'reports/review-settled.md', report('- R1: FIXED - the grep is empty now\n- R2, R3: FIXED (round 2) - the two prose findings read right now\n- R4: OPEN - needs the owner, a decision\n'));
   write(repo, 'reports/receipts/x/ledger.json', JSON.stringify(ledgerOf(1, 'FIXED', t(2))));
   const settled = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/x/ledger.json'], repo);
   check('--chain review passes a settled digest and ledger',
@@ -1552,6 +1552,38 @@ section('272. --chain <stage>: the countable part of M14', function () {
   const bare = runScript(['--chain', 'review', '--report', 'reports/review-bare.md'], repo);
   check('a digest line with no leading dash is read, so a bare NOT FIXED line fails the chain',
     bare.status === 0 && bare.json.pass === false && has(bare, 'digest', /R2.*NOT FIXED/), brief(bare) + JSON.stringify(bare.json));
+
+  // #271: the plain words after the verdict. A digest line reads
+  // `R<n>: <VERDICT>[ (<qualifier>)] - <plain words>[ - <receipt>]`. The first
+  // clause is what the owner reads, so it must be there, and it must hold no
+  // backtick, path or commit hash: those belong in the receipt after the next
+  // ` - `. Text after the verdict that is not a parenthetical qualifier
+  // followed by ` - ` is a missing clause, so a bare qualifier never passes
+  // for plain words.
+  write(repo, 'reports/review-noclause.md', report('- R1: FIXED\n'));
+  const noClause = runScript(['--chain', 'review', '--report', 'reports/review-noclause.md'], repo);
+  write(repo, 'reports/review-qualifier.md', report('- R1: FIXED in round 2 (prose)\n'));
+  const qualifier = runScript(['--chain', 'review', '--report', 'reports/review-qualifier.md'], repo);
+  check('--chain review refuses a digest line with no plain words after the verdict',
+    noClause.status === 1 && noClause.json.error === 'bad_shape' && /R1.*plain words/.test(String(noClause.json.detail)) &&
+    qualifier.status === 1 && qualifier.json.error === 'bad_shape' && /R1.*plain words/.test(String(qualifier.json.detail)),
+    brief(noClause) + JSON.stringify(noClause.json) + ' / ' + brief(qualifier) + JSON.stringify(qualifier.json));
+  write(repo, 'reports/review-backtick.md', report('- R1: FIXED - the null check in `merge-check.js` is back - grep -c reads 1\n'));
+  const backtick = runScript(['--chain', 'review', '--report', 'reports/review-backtick.md'], repo);
+  write(repo, 'reports/review-hash.md', report('- R1: NOT FIXED - two attempts, reverted to 4cbc9fc\n'));
+  const hash = runScript(['--chain', 'review', '--report', 'reports/review-hash.md'], repo);
+  check('--chain review refuses a plain-words clause that holds a code term',
+    backtick.status === 1 && backtick.json.error === 'bad_shape' && /merge-check\.js/.test(String(backtick.json.detail)) &&
+    hash.status === 1 && hash.json.error === 'bad_shape' && /4cbc9fc/.test(String(hash.json.detail)),
+    brief(backtick) + JSON.stringify(backtick.json) + ' / ' + brief(hash) + JSON.stringify(hash.json));
+  write(repo, 'reports/review-newshape.md', report('- R1: FIXED (round 2) - the plan start was read even when the plan has none - grep -c start .claude/scripts/session-init.js reads 1, commit 4cbc9fc\n'));
+  const newShape = runScript(['--chain', 'review', '--report', 'reports/review-newshape.md', '--ledger', 'reports/receipts/x/ledger.json'], repo);
+  check('--chain review passes the new digest shape with the receipt after the second separator',
+    newShape.status === 0 && newShape.json.pass === true, brief(newShape) + JSON.stringify(newShape.json));
+  write(repo, 'reports/review-prose.md', report('- R1: FIXED - the and/or and pass/fail wording reads right across 10000000 rows - the suite is green\n'));
+  const prose = runScript(['--chain', 'review', '--report', 'reports/review-prose.md'], repo);
+  check('--chain review lets ordinary prose through the code-term check',
+    prose.status === 0 && prose.json.pass === true, brief(prose) + JSON.stringify(prose.json));
 
   // explore: the closing summary file
   // #275: a Reaches section sits between Design direction and Open questions.

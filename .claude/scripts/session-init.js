@@ -1750,10 +1750,45 @@ function chainExecute(opts) {
   return chainVerdict("execute", failed, { plan: path.basename(planRel), start, head, range: start ? start + "..HEAD" : null }, notes);
 }
 
-// review -> document: no PAGED or NOT FIXED line in the report's Digest; with a
-// ledger, every finding's latest verdict is FIXED for its round, and the last
-// checkpoint came after the last verdict. The checkpoint's dirty count is a
-// note, as M4 flags it.
+// #271: the plain-words clause of a digest line, read from the text after the
+// R-number and its colon. A digest line reads
+// `R<n>: <VERDICT>[ (<qualifier>)] - <plain words>[ - <receipt>]`: the verdict
+// is the leading run of upper-case words (FIXED, NOT FIXED, PAGED, OPEN), one
+// parenthetical qualifier such as `(round 2)` may follow it, and ` - ` then
+// introduces the clause, which runs to the next ` - ` (the receipt) or the end
+// of the line. The clause is the part written for the owner, so it must be
+// there and read as words: no backtick, no path or file name, no commit hash.
+// Those belong in the receipt. Any other text after the verdict (`FIXED in
+// round 2 (prose)`) is a missing clause, so a bare qualifier never passes for
+// plain words. Returns { clause } or { error } with the reason in words.
+const CODE_EXTENSION = /\.(?:m?js|cjs|ts|md|json|sh|html|css|py|ya?ml|txt)$/i;
+const COMMIT_HASH = /^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}$/;
+function plainWordsClause(text) {
+  const head = text.match(/^(?:[A-Z][A-Z ]*[A-Z]|[A-Z])(?:\s*\([^)]*\))?\s*([\s\S]*)$/);
+  const rest = head ? head[1] : text;
+  const sep = rest.match(/^-\s+([\s\S]*)$/);
+  if (!sep) {
+    return { error: "no plain words after the verdict" + (rest ? " (found `" + rest.slice(0, 60) + "`)" : "") + "; write `R<n>: <VERDICT> - <what it is, in plain words> - <receipt>`" };
+  }
+  const clause = sep[1].split(/\s-\s/)[0].trim();
+  if (!clause) return { error: "no plain words after the verdict; the clause before the next ' - ' is empty" };
+  if (clause.indexOf("`") >= 0) {
+    return { error: "the plain-words clause holds a file name, hash or code term (" + clause.match(/`[^`]*`?/)[0] + "); it belongs in the receipt after the next ' - '" };
+  }
+  const tokens = clause.split(/\s+/).map(function (t) { return t.replace(/^[("'[]+|[)"'\],.;:!?]+$/g, ""); });
+  const term = tokens.find(function (t) {
+    return (t.indexOf("/") >= 0 && t.indexOf(".") >= 0) || CODE_EXTENSION.test(t) || COMMIT_HASH.test(t);
+  });
+  if (term) return { error: "the plain-words clause holds a file name, hash or code term (" + term + "); it belongs in the receipt after the next ' - '" };
+  return { clause: clause };
+}
+
+// review -> document: no PAGED or NOT FIXED line in the report's Digest, and
+// every digest line carries its plain-words clause after the verdict (#271,
+// `plainWordsClause` above: missing, or holding a file name, hash or code
+// term, is a bad_shape refusal); with a ledger, every finding's latest verdict
+// is FIXED for its round, and the last checkpoint came after the last verdict.
+// The checkpoint's dirty count is a note, as M4 flags it.
 function chainReview(opts) {
   if (!opts.report) return refuse("review", "usage", "--chain review needs --report <file>. " + CHAIN_USAGE);
   const text = readText(path.resolve(cwd, opts.report));
@@ -1771,6 +1806,11 @@ function chainReview(opts) {
     const m = line.match(/^(?:- )?(R\d+(?:,\s*R\d+)*):\s*(.+)$/);
     if (!m) return refuse("review", "bad_shape", "a Digest line is not in the shape `- R<n>: <VERDICT>`: " + line.trim().slice(0, 120));
     const verdict = m[2].trim();
+    // #271: the words after the verdict are for the owner; a line without
+    // them, or with a code term in them, is refused before any condition is
+    // judged, as the shape refusal above is.
+    const words = plainWordsClause(verdict);
+    if (words.error) return refuse("review", "bad_shape", m[1] + ": " + words.error);
     if (/^PAGED\b/.test(verdict)) failed.push({ condition: "digest", detail: m[1] + ": PAGED, a page is waiting on the human" });
     else if (/^NOT FIXED\b/.test(verdict)) failed.push({ condition: "digest", detail: m[1] + ": NOT FIXED in the digest" });
     else if (/^FIXED\b/.test(verdict)) fixedLines++;

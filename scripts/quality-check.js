@@ -1445,9 +1445,12 @@ function oracleSet(answers, dir) {
 }
 
 // The report's Digest section (review.md, After the Report, step 6: "R3: FIXED -
-// <check>", "R5: NOT FIXED - <what was tried>", "R7: PAGED - <what needs the
-// human>"), as { R3: 'FIXED', ... }: the first upper-case verdict word after the
-// R-number that starts a line. A line naming no verdict is skipped.
+// <what it was, in plain words> - <check>", "R5: NOT FIXED - <what it is, what
+// happens if it ships as is, what you are asked> - <what was tried>", "R7:
+// PAGED - <the same three parts> - <what needs the human>"; the plain-words
+// part arrived with #271), as { R3: 'FIXED', ... }: the first upper-case
+// verdict word after the R-number that starts a line. A line naming no
+// verdict is skipped.
 const DIGEST_VERDICT = /\b(NOT FIXED|FIXED|PAGED|DEFERRED|SKIPPED|UNAUDITED|REVERTED|LOGGED)\b/;
 function parseDigest(md) {
   const out = {};
