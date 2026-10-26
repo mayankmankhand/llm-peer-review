@@ -81,6 +81,7 @@ Ask **3-4 focused questions per round**, over 2-3 rounds; in vision mode, each E
 - **Group related questions** - don't scatter topics
 - **Number them** - easy to reference in answers
 - **Keep each question short** - one sentence, not a paragraph
+- **Decode every code** - a rule or finding code in a question, or in the closing summary and its file, says in plain words what it does and what the question turns on, the first time, with the code in brackets; look the title up in its file (M<n> in `.claude/skills/shared/hitl-loop.md` or `.claude/skills/shared/hitl-stages.md`, C-<n> in `.claude/skills/shared/conventions.md`), never recall it; file names and hashes stay out of the sentence. The reader was never meant to open the rulebook
 - **Front-load the most important one** - in case they only answer a few
 
 <examples>

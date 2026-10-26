@@ -67,6 +67,7 @@ The text below is this project's own gate, read from `.claude/toolkit/plan-gate.
 - Write the exploration's Models answer (best, fit or cheap; fit when it gave none) as the `**Models:**` line under the progress line: while the plan is unfinished, `session-init.js` reads it to pick each helper's model
 - Add no scope or complexity beyond the details the conversation settled
 - Steps should be modular, elegant, minimal, and integrate seamlessly within the existing codebase
+- A rule or finding code in the plan carries what it means in plain words on its first mention, with the code in brackets, looked up in its own file rather than recalled: the plan is what the owner approves, and a bare code is one they cannot read
 
 </rules>
 
