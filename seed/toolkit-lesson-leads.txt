@@ -73,6 +73,7 @@ A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `script
 A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".
 A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.
 A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
+A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.
 A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.
@@ -262,6 +263,7 @@ Run a reviewer's suggested fix in a scratch case before applying it: the submodu
 Run debates on plans, not just finished work.
 Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.
 Run your own receipt before you report it as confirmation.
+Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.
 Scope parity gaps explicitly when fixing one of several.
 Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.
 Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
@@ -281,6 +283,7 @@ The bundled prompt audit is not deterministic: a rerun on unchanged text finds n
 The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.
 The design critic finds rendering bugs the test suite cannot see.
 The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.
+The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.
 The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
@@ -328,6 +331,3 @@ XML tags in prompts are a real thing, not just hype.
 `session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.
 `settings.json` can get modified by research subagents.
 `user-invocable: false` works as documented.
-Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.
-A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.
-The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.

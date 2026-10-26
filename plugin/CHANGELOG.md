@@ -1,5 +1,30 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.10, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.11, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.11 - Who Else This Reaches (2026-10-25)
+
+**A patch on top of v8.0.10 (#275, with the #222 and #246 records).** The explore summary names who and what else a change reaches, and the handoff refuses a summary that does not; the Jev shadow test is recorded and changes nothing in the loop.
+
+**The Jev shadow test, recorded (#222, with the #246 lab).** A log-only hook watched every Bash command in this repository for seven days and asked the Jev decision model the five M9 always-ask questions beside a regex baseline. The verdict is recorded and nothing in the loop changes.
+
+### Added
+
+- **A "Decision models, tested" section in `model-routing.md`.** Two entries. The first records the shadow run (2026-10-12 to 2026-10-19), what left the machine, the numbers against a judge's labels, the bounds, and why it was not adopted: a live gate would be the toolkit's first automated send of project bytes to a non-Anthropic provider, a data-stance decision rather than a routing one. `docs/HITL-MAP.md` points at it from M9. The second records the #246 lab: per-task model routing closed by research, Jev good at approving a command as safe on its bar, and not good at telling a kept review finding from a killed one; nothing adopted.
+- **A "What leaves your machine" section in `docs/HOW-IT-WORKS.md`:** the three rings of what the toolkit could send and which one is automated, the sends a human types, and one note on this repository's own tests.
+- **Maintainer lab scripts under `scripts/`** (never shipped): the shadow hook, its sampler, scorer and labelling plumbing, the shared Jev client with no-retention flags and daily caps, the finding-replay and safe-command tests, and their five suites. The review that closed the 222 cycle tightened the hook's stripping (hyphenated heredoc delimiters), its request flags and its key scrubbing; the review that closed the 246 cycle made the safe-command hook check for secrets before the long-quote cut and the findings replay screen receipt output for private folders, each with a suite case that failed first.
+- **A lesson on measurement windows:** a key with an expiry needs a mid-run status check, not only a day-one check; the run died silently five days early.
+
+**Who and what else a change reaches (#275).** The explore summary names it in three fixed items, the chain gate refuses a summary that leaves them out, and the plan critic checks the plan against them.
+
+### Changed
+
+- **`/tk:explore`'s closing summary carries a `## Reaches` section** (#275): three fixed items, `Other installs` (copies of the code that must pick the change up, and what they are told), `Other sessions and unreleased work` (in the same repo while the cycle runs) and `What the user gets back` (when a step ends, and after a finding), each answered or written `none - <reason>`. The scoping question list asks it in round 1, and both modes write the same section. `session-init.js --chain explore` refuses a summary without the section (`bad_shape`, like a missing Open questions section) and fails on a missing or bare-`none` item, naming it, so the stage asks for it the way it asks an open question; "plan it anyway" still overrides. The labels match with the case ignored and the bold markers optional, so a hand-written summary passes too.
+- **The plan carries the same items and the plan critic checks them** (#275): `/tk:create-plan`'s template gains a `## Reaches` block, each item pointing at the step that handles it or `no step - <why>` (a summary with no section, written before this shape or let through by "plan it anyway", is filled from the conversation), and the critic asks whether every item is covered (a miss is a `Risk` gap), plus three questions read from the plan alone: what stops each new loop when there is no work, which definition each new check depends on, and why each scope was cut. The gap categories and the return shape are unchanged.
+- **Release-time step for the maintainer:** once the release that ships this is out, record it in the correction ledger as a toolkit fix for its category (`node .claude/scripts/correction-ledger.js --record-fix --home toolkit --version <release>`, with the category the 2026-10-25 ranking named). The after rate counts only cycles run on that version, so recording it earlier or later loses cycles to the wrong side.
+
+### Why
+
+Issue #222 asked whether a decision model could make the toolkit's fixed-answer judgments faster, cheaper or more measurable. The one spot with a track record elsewhere is gating a command before it runs, so that was measured, in shadow, against a bar written before the run. The model helped on four of the five questions and saves no cost, time or tokens anywhere in the loop; recording that, with the receipt, is what keeps the question from being re-proposed from memory. Follow-ups: #273 (is an advisory hook worth building), #274 (the pattern gaps, closed without a model).
 
 ## v8.0.10 - Run What It Prints (2026-10-24)
 
