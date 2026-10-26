@@ -13,7 +13,7 @@ Run the right reviews automatically, combine findings into one report.
 
 1. **Reviewers never edit** - Specialists and the report phase never modify files; findings are their product
 2. **Audit, then continue into the auto loop** - Findings are deduped and audited (M2: receipts, skeptical pass, three-vote for Blocks) BEFORE the report, so the report shows survivors only. After the report, do not wait for a human "fix it": auto-fix survivors (guards: M7, M9), re-verify (M3, M5, M6), and exit each finding as page (M1), digest, or log. Operating rules live in `.claude/skills/shared/hitl-loop.md`, loaded by name at Phase 2 (the `loop-rules` skill). Saying "report only" keeps this run report-first (M10)
-3. **Explain simply** - Use plain English, avoid jargon
+3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; file names, hashes and code terms stay in the receipt
 4. **Respect the concurrency cap** - Max 4 parallel subagents per run
 
 </rules>

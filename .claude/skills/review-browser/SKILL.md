@@ -38,7 +38,7 @@ If the script returns a "Chromium not found" error, run steps 1 and 2 above your
 
 1. **Report first, then fix** - Reviewing never edits files; findings with browser evidence (screenshots, console, network) are its product. After the report, the same run continues into the auto loop (rule 2), which is what applies fixes
 2. **Audit, then auto-fix, with pages** - Browser QA findings are audited before the report per M2 in `.claude/skills/shared/hitl-loop.md`, so the report shows survivors only plus an Audited out log for the kills. They do not then wait for a human "fix it": after the report, survivors are auto-fixed and re-verified (a browser finding re-verifies by re-running the failing action, per M3's runnable-check preference), and each finding exits as page, digest, or log per `.claude/skills/shared/hitl-loop.md` (pages only per M1; saying "report only" keeps a run report-first, M10)
-3. **Explain simply** - Use plain English, avoid jargon
+3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; file names, hashes and code terms stay in the receipt
 4. **Keep sessions short** - Run multiple focused browser sessions (3-6 actions each) rather than one giant exploratory session. Shorter sessions are more reliable and easier to debug.
 
 </rules>
