@@ -1695,6 +1695,29 @@ section('272. --chain <stage>: the countable part of M14', function () {
 });
 
 console.log('');
+// #277: the lessons index has a cap, frozen at 44,000 bytes (its size on
+// 2026-10-26), and the startup JSON says whether the file is over it, so
+// /document can offer cuts to the owner instead of letting the index grow.
+section('The lessons object reports its cap (#277)', function () {
+  const small = newRepo('lessons-cap-small');
+  const short = '# Lessons Learned (Index)\n\n- **One short lesson.**\n';
+  write(small, 'LESSONS.md', short);
+  commitAll(small, 'init');
+  const under = runScript([], small);
+  const U = (under.json && under.json.lessons) || {};
+  const big = newRepo('lessons-cap-big');
+  let lessons = '# Lessons Learned (Index)\n\n## What I Learned\n\n';
+  while (Buffer.byteLength(lessons) < 44001) lessons += '- **A one-line lesson written the way the real index writes them, long enough to count.**\n';
+  write(big, 'LESSONS.md', lessons);
+  commitAll(big, 'init');
+  const over = runScript([], big);
+  const O = (over.json && over.json.lessons) || {};
+  check('the lessons object reports its cap and overCap',
+    under.parsed && over.parsed && U.cap === 44000 && U.overCap === false && U.bytes === Buffer.byteLength(short)
+      && O.cap === 44000 && O.overCap === true && O.bytes === Buffer.byteLength(lessons),
+    JSON.stringify({ under: { cap: U.cap, overCap: U.overCap, bytes: U.bytes }, over: { cap: O.cap, overCap: O.overCap, bytes: O.bytes } }));
+});
+
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
   process.exit(0);

@@ -92,9 +92,11 @@
 // worktree-<number>-<label>, and false otherwise (another name, a detached HEAD,
 // no git), so /explore, /create-plan and /document read the answer instead of
 // piping the branch into grep, which stops a default-mode session for approval.
-// lessons is { exists, path, hasDetail, content } while LESSONS.md is 8 KB or less.
-// Over that, content is left out and the object carries a handle instead:
-// { exists, path, hasDetail, bytes, lines, ranges, head, note }, where ranges lists
+// lessons is { exists, path, hasDetail, bytes, cap, overCap, content } while LESSONS.md
+// is 8 KB or less; cap is the index's size cap (44,000 bytes, #277) and overCap says
+// whether bytes is past it, so /document can offer cuts. Over 8 KB, content is left
+// out and the object carries a handle instead:
+// { exists, path, hasDetail, bytes, cap, overCap, lines, ranges, head, note }, where ranges lists
 // the line spans ({ from, to }, numbered from 1) that read the whole file, each
 // 28,500 bytes or fewer (#253), head is the file's opening (at most 1,500
 // characters, cut at a line end) and note says to read every range with the Read
@@ -413,11 +415,13 @@ function sessionStart() {
       hasDetail: fs.existsSync(path.join(cwd, "LESSONS-detail.md")),
     };
     const bytes = Buffer.byteLength(lessonsRaw, "utf8");
+    // The size and the cap come with both shapes (#277), so /document can offer
+    // cuts without reading the file for its size.
+    Object.assign(lessons, { bytes, cap: LESSONS_CAP_BYTES, overCap: bytes > LESSONS_CAP_BYTES });
     if (bytes <= LESSONS_INLINE_BYTES) {
       lessons.content = lessonsRaw;
     } else {
       Object.assign(lessons, {
-        bytes,
         lines: countLines(lessonsRaw),
         ranges: lessonRanges(lessonsRaw),
         head: headAtLineEnd(lessonsRaw, LESSONS_HEAD_CHARS),
@@ -451,6 +455,10 @@ function sessionStart() {
 // LESSONS.md is bundled whole up to this size; over it, a handle (above). The map's
 // System Overview is cut at the same size.
 const LESSONS_INLINE_BYTES = 8 * 1024;
+// The index's size cap (#277): frozen at the size it had on 2026-10-26 (43,567
+// bytes), so each new lesson pays with a cut. /document reads overCap and offers
+// the owner candidate cuts; nothing is cut on its own, since the file is the owner's.
+const LESSONS_CAP_BYTES = 44000;
 const LESSONS_HEAD_CHARS = 1500;
 
 // The line ranges that read all of a handled LESSONS.md (#253). In 8 of 9 sessions
