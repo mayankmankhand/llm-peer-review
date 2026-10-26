@@ -2,6 +2,23 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**A patch on top of v8.0.11 (#271).** Anything the toolkit writes for a human used to name rules and findings by code alone: M3, C-21, R5. The owner could not answer a question or act on a digest line without looking each one up, and this repository's correction ledger recorded that five times between 2026-10-09 and 2026-10-24. From this release the first mention of such a code says in plain words what it is and what it means for the reader, with the code kept in brackets for lookup and file names, hashes and code terms left to the receipt rows.
+
+### Changed
+
+- **Rule 3 of the always-on rules file ("Explain simply") names the trigger:** a rule or finding code in anything written for the owner says in plain words what it is and what it means on its first mention, looked up in its own file rather than recalled. The same sentence sits in the thirteen files that restate the rule (the manual, `/review`, `/pair-debug` and ten review skills), so the copies do not drift.
+- **The two page sentences carry the words too.** A page (M1, the rule for when the loop interrupts the owner) decodes every code it names; the revert page (M5, a fix given up after two rounds) now says what the finding is in plain words and what happens if it ships as is, before what failed and what was tried.
+- **The review digest line gains a plain-words part, and the hand-off gate checks it.** Each line reads `R<n>: <VERDICT>[ (round 2)] - <plain words> - <receipt>`; the words start from the finding's own `what`, and a NOT FIXED or PAGED line says what it is, what happens if it ships as is, and what the reader is asked. `session-init.js --chain review` refuses, as `bad_shape`, a line without the clause (any text after the verdict that is not a parenthetical qualifier followed by ` - `) or with a backtick, a file name or a commit hash in it, naming the finding and the term; "and/or", "pass/fail" and plain counts pass. The chat close-out names each finding in plain words before its verdict.
+- **The explore question guidance, the plan requirements and the plan critic say the same** where questions and plans are composed: a code in a question, a closing summary or a plan carries its meaning on first mention, and the critic raises a bare code as a `Risk` gap.
+
+### Upgrading
+
+- The rules seed changed, so the next `/tk:upgrade` reports a project's `.claude/rules/toolkit.md` as behind the seed (C-7, the check that compares the rules file with the shipped seed) and offers the merge; take it, or keep the older wording, as you prefer.
+- A review whose digest line reads `- R5: NOT FIXED - two attempts, reverted to 4cbc9fc` now stops at the hand-off with `R5: the plain-words clause holds a file name, hash or code term (4cbc9fc)`. Rewrite the line as `- R5: NOT FIXED - <what it is, in plain words> - two attempts, reverted to 4cbc9fc` and run the chain check again.
+- The wider miss, owner-facing explanations written in the toolkit's vocabulary with no code involved, is #276 and follows separately.
+
 ## v8.0.11 - Who Else This Reaches (2026-10-25)
 
 **A patch on top of v8.0.10 (#275, with the #222 and #246 records).** The explore summary names who and what else a change reaches, and the handoff refuses a summary that does not; the Jev shadow test is recorded and changes nothing in the loop.
