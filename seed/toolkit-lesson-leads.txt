@@ -14,6 +14,7 @@ A JSON escape for an apostrophe does not survive a model typing the command: the
 A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.
 A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
+A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.
 A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
 A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.
@@ -125,6 +126,7 @@ A test for a false-positive fix must use a fixture the old pattern actually matc
 A test must plant the state a failure actually leaves, not a convenient stand-in.
 A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.
 A test whose fixture is rejected by two code paths cannot detect either one breaking.
+A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.
 A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.
 A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.
 A user interrupt also stops running workflow agents, and nothing announces it.
@@ -220,6 +222,7 @@ Lazy locators don't throw - validate at parse, not at construction.
 Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.
 List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.
 Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.
+Map the problem before offering the mechanism: when the owner asks how a check would work, answer its cost in two lines and return to where the miss happens, or the exploration turns into a solution debate.
 Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.
 Masking the match that triggered the report is not masking the line.
 Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.
