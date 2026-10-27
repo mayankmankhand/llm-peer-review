@@ -3411,9 +3411,9 @@ function printRunSummary(a, verbose) {
     const f = a.fix;
     console.log('  fix loop: ' + f.digestLines + ' Digest line' + (f.digestLines === 1 ? '' : 's') + ', ' + f.verifierDispatches + ' fix-verifier dispatch' + (f.verifierDispatches === 1 ? '' : 'es')
       + '; oracles: ' + (f.oraclePort ? 'judged with servers on port ' + f.oraclePort : 'NOT JUDGED' + (f.judgeError ? ' (' + f.judgeError + ')' : '')));
-    console.log('    ' + 'bug'.padEnd(26) + 'raised  report        run said     gone      works     outcome');
+    console.log('    ' + 'bug'.padEnd(27) + 'raised  report        run said     gone      works     outcome');
     for (const [id, b] of Object.entries(f.bugs)) {
-      console.log('    ' + id.padEnd(26) + (b.raised ? 'yes' : 'no').padEnd(8) + (b.inReport.join(',') || '-').padEnd(14) + (b.said || '-').padEnd(13)
+      console.log('    ' + id.padEnd(27) + (b.raised ? 'yes' : 'no').padEnd(8) + (b.inReport.join(',') || '-').padEnd(14) + (b.said || '-').padEnd(13)
         + (b.gone || '-').padEnd(10) + (b.works || '-').padEnd(10) + b.outcome + (b.falseFixed ? '  FALSE FIXED' : ''));
       for (const l of [b.goneLine, b.worksLine]) if (l) console.log('        ' + l);
     }
@@ -3504,14 +3504,14 @@ function commandScore(o) {
     if (s.noisy.length) console.log('  noisy, not scored (' + s.noisy.length + '): ' + s.noisy.join(', '));
     if (s.never.length) console.log('  never caught by the baseline (' + s.never.length + '): ' + s.never.join(', '));
     if (role !== 'mapper') {
-      console.log('  ' + 'bug'.padEnd(26) + 'baseline  candidate  raised(candidate)  harness-lost(candidate)');
-      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(26) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate.padEnd(19) + p.harnessLost);
+      console.log('  ' + 'bug'.padEnd(27) + 'baseline  candidate  raised(candidate)  harness-lost(candidate)');
+      for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(27) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate.padEnd(19) + p.harnessLost);
       // Which run lost which bug to the harness, and through which Audited out entry.
       for (const l of s.harnessLostRuns) console.log('  harness-lost: ' + l.id + ' in ' + short(l.dir) + ' (' + l.kills.join(', ') + ')');
     }
     if (Object.keys(s.noise).length) {
       console.log('  noise: each stable catch across the ' + s.poolRuns + ' saved valid run' + (s.poolRuns === 1 ? '' : 's') + ' on the baseline\'s setting (' + path.relative(REPO, poolRoot) + '):');
-      for (const [id, n] of Object.entries(s.noise)) console.log('    ' + id.padEnd(26) + n.caught + '/' + n.runs + (n.caught < n.runs ? '  (the baseline setting drops it)' : ''));
+      for (const [id, n] of Object.entries(s.noise)) console.log('    ' + id.padEnd(27) + n.caught + '/' + n.runs + (n.caught < n.runs ? '  (the baseline setting drops it)' : ''));
     }
     console.log('  cost per run: baseline ' + money(s.baselineCostUsd) + ', candidate ' + money(s.costUsd) + '; time: baseline ' + mins(s.baselineWallMs) + ', candidate ' + mins(s.wallMs));
     console.log('  VERDICT: ' + s.verdict + (s.why.length ? ' - ' + s.why.join('; ') : '') + (s.drift ? ' (drift allowed: ' + s.drift.reason + ')' : ''));

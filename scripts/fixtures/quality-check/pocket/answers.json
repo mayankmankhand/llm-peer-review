@@ -44,10 +44,10 @@
       "lineMatch": false,
       "match": [
         [
-          "(drop|lose|loses|lost|losing|remov|strip|discard|omit|forget|forgot|without|missing|lacks?|no longer (has|have|keep|carr))\\w*.{0,60}\\bid\\b"
+          "(drop|lose|loses|lost|losing|remov|strip|discard|omit|forget|forgot|without|missing|lacks?|no longer (has|have|keep|carr))\\w*.{0,60}(\\bid\\b|identifier)"
         ],
         [
-          "\\bid\\b.{0,60}(drop|lost|missing|gone|removed|discard|undefined|overwrit|replac)"
+          "(\\bid\\b|identifier).{0,60}(drop|lost|missing|gone|removed|discard|undefined|overwrit|replac)"
         ],
         [
           "undefined",
@@ -92,7 +92,7 @@
           "cross[- ]site script"
         ],
         [
-          "(unescap|not escap|without escap|no escap|isn't escap|escaping|un-escap)",
+          "(unescap\\w*|not escap\\w*|without escap\\w*|no escap\\w*|stopped escaping|no longer escap\\w*|isn.t escap\\w*|un-escap\\w*)",
           "note|category|cell|html|markup|page|row|report|list"
         ],
         [
@@ -131,13 +131,12 @@
       "lineMatch": false,
       "match": [
         [
-          "(lose|loses|lost|losing|clear|clears|cleared|wipe|wiped|discard|empt|blank|reset|throws? away|retyp|re-typ|start over)",
-          "form|field|input|typed|values|entr",
-          "error|invalid|fail|bad|wrong|reject|mistake|validat"
+          "(lose|loses|lost|losing|clear\\w*|wipe\\w*|delet\\w*|eras\\w*|discard\\w*|empt\\w*|blank\\w*|reset\\w*|throws? away)( \\w+){0,3} (the user |they |you )?(typed|entered|input|values|fields?|form)\\b",
+          "reject|invalid|fail|error|mistake|validat|bad"
         ],
         [
           "invalid input",
-          "vague|generic|which field|doesn't say|does not say|unhelpful|no detail|not specific|unclear|uninformative"
+          "vague|generic|which field|doesn.t say|does not say|unhelpful|no detail|not specific|unclear|uninformative|never nam|not nam|without naming|doesn.t name|does not name|bare"
         ],
         [
           "(which|what) field",
@@ -172,19 +171,19 @@
       "fileless": true,
       "match": [
         [
+          "^(?![\\s\\S]*\\b(without|no|disabled|off)\\W+(java)?scripts?\\b)",
           "month|dropdown|select|picker",
-          "does nothing|nothing happens|no effect|doesn't (do|change|navigate|reload|update|work)|does not (do|change|navigate|reload|update|work)|never (fires|runs|navigat|reload|attach|wired|bound)|inert|dead|not (wired|hooked|attached|bound|working)|ignored"
+          "does nothing|nothing happens|no effect|doesn.t (do|change|navigate|reload|update|work)|does not (do|change|navigate|reload|update|work)|never (fires|runs|navigat|reload|attach|wired|bound)|inert|dead|not (wired|hooked|attached|bound|working)|ignored"
         ],
         [
-          "script|listener|handler|code",
-          "before (the )?(select|dropdown|element|page|body|dom|month|markup)"
+          "(script|listener|handler|code)\\w*( \\w+){0,8} before (the )?(select|dropdown|element|page|body|dom|month|markup|menu)"
         ],
         [
           "getelementbyid",
           "null"
         ],
         [
-          "defer|domcontentloaded"
+          "\\bdefer\\b.{0,40}(script|attribute)|(script|attribute).{0,40}\\bdefer\\b|domcontentloaded"
         ]
       ]
     },
@@ -212,7 +211,7 @@
         ],
         [
           "export|csv",
-          "two decimal|2 decimal|decimals|raw amount|unformatted|format"
+          "two decimal|2 decimal|decimals|raw amount|unformatted|unpadded|(decided|agreed|planned|number|amount) format"
         ],
         [
           "date,category,amount,note"
@@ -290,11 +289,11 @@
       "match": [
         [
           "moment",
-          "cve|vulnerab|advisor|path traversal|redos|regular expression|inefficient|audit|insecure|security|unpatched|2\\.29\\.(1|2|4)|ghsa"
+          "cve|vulnerab|path traversal|redos|regular expression|inefficient|npm audit|audit (report|flag|refus|show|find|list)\\w*|2\\.29\\.(2|4)|insecure|unpatched|ghsa|(known|two|high|published|open|existing|current|security)[- ](\\w+[- ])?(severity )?advisor"
         ],
         [
           "\\b(pin|pins|pinned|old|older|outdated)\\b[^.]{0,40}\\b(library|release|version|dependency|package)",
-          "advisor|vulnerab|cve|security|high[- ]severity"
+          "vulnerab|cve|high[- ]severity|(known|two|high|published|open|existing)[- ](\\w+[- ])?(severity )?advisor"
         ]
       ]
     },
@@ -321,22 +320,18 @@
       "noOracle": "README order: whether a newcomer learns how to run the app before meeting a command that moves data is a reader's judgment, not a behaviour a script can run",
       "match": [
         [
-          "getting started",
-          "end|bottom|last|buried|moved|after|below|down"
+          "getting started|setup|set-up|install",
+          "(moved?|pushe[sd]?|push|buried|sits?|comes?|now|ends? up) (\\w+ ){0,4}(to |at )?(the )?(very )?(end|bottom|last)\\b"
         ],
         [
-          "closing a month|close command|archive command|npm run close",
-          "first|top|before|above|ahead|opens?|leads?|early|order|sequenc"
+          "(closing a month|close command|archive command|npm run close|close and import)\\b.{0,80}\\b(first|top|before|above|ahead|early)|\\b(first|top|before|above|ahead|opens? with|leads? with)\\b.{0,80}(closing a month|close command|archive command|npm run close|close and import)"
         ],
         [
-          "order|sequenc|flow|structure",
-          "section|readme|heading",
-          "setup|install|getting started|run the app|how to (start|run)"
+          "(order|sequenc|flow)\\w*.{0,60}(setup|install|getting started|how to (start|run)|run the app)|(setup|install|getting started)\\w*.{0,60}(order|sequenc)"
         ],
         [
-          "newcomer|new user|reader|first[- ]time",
-          "before|first",
-          "destructive|data[- ]moving|moves? (data|expenses)|archiv|clos"
+          "(newcomer|new user|new reader|first[- ]time (user|reader|visitor))\\w*.{0,100}(before|first)",
+          "destructive|data[- ]moving|moves? (data|expenses)|archiv|clos(e|ing) (a |the )?month|close command|close and import"
         ]
       ]
     },
@@ -363,19 +358,19 @@
       "knownAnswer": true,
       "match": [
         [
-          "\\b(20|twenty)\\b",
-          "cap|limit|truncat|cut|only|first|max|at most|slice|page|hid|drop|omit|left out"
+          "\\b(20|twenty|twentieth)[- ](rows?|expenses?|entries|items|records)\\b"
         ],
         [
-          "capped|truncated|cut off",
-          "list|month|rows|expenses|view"
+          "(after|past|beyond) the (20th|twentieth)\\b"
+        ],
+        [
+          "(capped|cap|limit\\w*|truncat\\w*|cut off|stops?|stopping) (it )?(at|to) (the first )?(20|twenty)\\b"
+        ],
+        [
+          "(silently|quietly)\\W+(\\w+\\W+){0,3}(drop|hid|omit|cut|truncat|leav|left|miss|skip)"
         ],
         [
           "pagination"
-        ],
-        [
-          "silently|quietly",
-          "drop|hid|omit|cut|truncat|left out|missing|cap"
         ],
         [
           "(count|total|sum)\\w*.{0,40}(only|just) (the )?(shown|visible|displayed|first)"
