@@ -197,7 +197,7 @@ Full prompt: [`.claude/commands/create-issue.md`](../.claude/commands/create-iss
 
 ### `/writing` - the writing guide
 
-Claude opens the writing guide before it drafts something a person will read: a question, plan or summary for you, a PRD or spec, a README or docs, an issue, pull request or release note, an email or chat message, or web copy. It reads a short top part, then only the section for that kind of writing. Your project's own writing rules win over it; [Your own writing rules](EXTENDING.md#your-own-writing-rules) shows how to point Claude at a guide of your own or switch a section off.
+Claude opens the writing guide before it drafts something a person will read: a question, plan or summary for you, a PRD or spec, a README or docs, an issue, pull request or release note, an email or chat message, or web copy. It reads a short top part, then only the section for that kind of writing. Your project's own writing rules win over it; [Your own writing rules](EXTENDING.md#your-own-writing-rules) shows how to point Claude at a guide of your own or switch a section off. You rarely need to type it: `/writing` on its own only loads the guide into the conversation, and Claude follows it for what you ask next.
 
 Full guide: [`.claude/skills/writing/SKILL.md`](../.claude/skills/writing/SKILL.md)
 

@@ -141,8 +141,9 @@
 //        execute-mismatch   /tk:execute on a Sonnet session of a one-step plan whose
 //                           Models line is fit: it prints the build-model note
 //        create-plan-cheap  /tk:create-plan from a fixed summary naming cheap: the
-//                           plan carries **Models:** cheap and the close gives the
-//                           fresh-session steps (/model opus), not "go"
+//                           plan carries **Models:** cheap, opens with the In plain
+//                           words block, and the close gives the fresh-session
+//                           steps (/model opus), not "go"
 //   node scripts/quality-check.js --budget                 the ledger against the approval
 //   node scripts/quality-check.js --approve <usd>          record the owner's approved total
 //
@@ -374,6 +375,8 @@ function modeLineCheck(texts, want) {
 
 // session-init.js's Models line, which /create-plan writes under the progress line.
 const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
+// The five bold labels of the In plain words block /create-plan opens a plan with (#276).
+const PLAIN_LABELS = ['The problem', 'The goal and how we will know', 'The cost', 'What is left out', 'What changes for you'];
 
 // The checks a run's expect asks for beyond validity, each { name, ok, detail }:
 // the mode line (modeLine), text the session must write somewhere (texts) or in
@@ -414,6 +417,19 @@ function expectChecks(expect, main, run) {
     const hit = named.find(p => p.mode === want.mode);
     checks.push({ name: 'plan Models line', ok: !!hit,
       detail: hit ? hit.name + ': **Models:** ' + hit.mode : fresh.length === 0 ? 'no new plan was written' : named.map(p => p.name + (p.mode ? ' names ' + p.mode : ' has no Models line in its header')).join('; ') });
+  }
+  if (expect.planPlain) {
+    // A new plan opens with the In plain words heading, then its five labels.
+    const fresh = Object.entries(run.plans || {}).filter(([name]) => !(expect.planPlain.skip || []).includes(name));
+    const named = fresh.map(([name, text]) => {
+      const at = text.search(/^## In plain words[ \t]*\r?$/m);
+      if (at === -1) return { name, missing: ['the In plain words heading'] };
+      const block = text.slice(at).split(/\n## /)[0];
+      return { name, missing: PLAIN_LABELS.filter(l => !block.includes('**' + l + ':**')) };
+    });
+    const hit = named.find(p => p.missing.length === 0);
+    checks.push({ name: 'plan In plain words block', ok: !!hit,
+      detail: hit ? hit.name + ': the heading and its five labels' : fresh.length === 0 ? 'no new plan was written' : named.map(p => p.name + ' lacks ' + p.missing.join(', ')).join('; ') });
   }
   return checks;
 }
@@ -3312,13 +3328,15 @@ async function commandRun(o) {
       meta.expect.texts = ['builds on\\W{0,4}Opus', '/model opus'];
       meta.prompt = '/tk:execute no chaining';
     } else if (o.probe === 'create-plan-cheap') {
-      // /tk:create-plan from a summary naming cheap: the plan's Models line, the
-      // critic on the session model, and the fresh-session close. With no map yet,
+      // /tk:create-plan from a summary naming cheap: the plan's Models line and
+      // In plain words block, the critic on the session model, and the
+      // fresh-session close. With no map yet,
       // it runs /index mode:cheap first, so a mapper may answer too, on Sonnet.
       meta.commits = buildReviewProject(project, null, fx);
       meta.expect.byType = { 'tk:plan-critic': sessionFamily };
       meta.expect.mapper = mapperModel('cheap', build.dir, sessionFamily);
       meta.expect.planLine = { mode: 'cheap', skip: ['PLAN-fixture.md'] };
+      meta.expect.planPlain = { skip: ['PLAN-fixture.md'] };
       meta.expect.lastText = ['/model opus'];
       meta.prompt = '/tk:create-plan ' + PLAN_SUMMARY;
     } else {

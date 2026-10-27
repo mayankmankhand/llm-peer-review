@@ -1796,6 +1796,8 @@ function cycleStandingPageTests() {
   const fd = island(first.html);
   check('the first cycle summary in a repository says so',
     /First cycle summary recorded/.test(fd.sinceLast || ''), fd.sinceLast);
+  check('the cycle note counts saved checkpoints, the word the subtitle uses',
+    /9 saved checkpoints across 2 files/.test(fd.sinceLast || ''), fd.sinceLast);
   check('the first run carries no log, because there is no earlier cycle',
     fd.cycleLog === undefined);
 

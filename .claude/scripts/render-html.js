@@ -1646,7 +1646,7 @@ function trackBranchMismatches(data, prior, closedNow, branch) {
 function markCycleChanged(data, prior, branch) {
   const c = cycleCounts(data);
   const scope = c.commits || c.files
-    ? plural(c.commits, 'commit') + ' across ' + plural(c.files, 'file')
+    ? plural(c.commits, 'saved checkpoint') + ' across ' + plural(c.files, 'file')
     : '';
 
   if (prior.state === 'none') {

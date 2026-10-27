@@ -750,6 +750,16 @@ section('model modes', () => {
   check('planLine: a Models line outside the header does not count; lastText: a "go" close fails', late.checks.every(c => !c.ok), JSON.stringify(late.checks));
   const none = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-fixture.md': header }, meta: { expect: { main: 'opus', planLine: { mode: 'cheap', skip: ['PLAN-fixture.md'] } } } }));
   check('planLine: the plans that were already there are skipped', !none.checks[0].ok && /no new plan/.test(none.checks[0].detail), none.checks[0].detail);
+  // The In plain words block that opens a plan from the current template (#276).
+  const plainPlan = header.replace('## TLDR\nCount words.\n', '## In plain words\n- **The problem:** a.\n- **The goal and how we will know:** b.\n'
+    + '- **The cost:** c.\n- **What is left out:** d.\n- **What changes for you:** e.\n\n## Tasks\n');
+  const pp = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-fixture.md': '# Old\n', 'PLAN-word-count.md': plainPlan },
+    meta: { expect: { main: 'opus', planPlain: { skip: ['PLAN-fixture.md'] } } } }));
+  check('planPlain: a new plan opening with In plain words and its five labels passes', pp.checks.length === 1 && pp.checks[0].ok, JSON.stringify(pp.checks));
+  const pt = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-word-count.md': header }, meta: { expect: { main: 'opus', planPlain: { skip: [] } } } }));
+  check('planPlain: a plan with the old TLDR heading fails', pt.checks.length === 1 && !pt.checks[0].ok && /In plain words heading/.test(pt.checks[0].detail), JSON.stringify(pt.checks));
+  const pm = analyze(makeReviewRun({ caught: IDS, plans: { 'PLAN-word-count.md': plainPlan.replace('- **The cost:** c.\n', '') }, meta: { expect: { main: 'opus', planPlain: { skip: [] } } } }));
+  check('planPlain: a block missing a label fails and names it', pm.checks.length === 1 && !pm.checks[0].ok && /The cost/.test(pm.checks[0].detail), JSON.stringify(pm.checks));
 
   // A probe's verdict: dispatches first, then the checks.
   const pv = QC.probeVerdict({ valid: true, models: { byType: { 'tk:index-mapper': ['claude-sonnet-5-5'] } }, checks: [{ name: 'mode line', ok: true, detail: 'Models: cheap' }] }, { probe: 'index-mode', expect: { byType: { 'tk:index-mapper': 'sonnet' } } });

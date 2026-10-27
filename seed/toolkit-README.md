@@ -20,7 +20,7 @@ Each file has a fixed name. Create only the ones you need.
 | `generated.json` | `/tk:merge`, when it checks and lands a PR | The files your project rebuilds rather than merges, and the command that rebuilds them (format below) |
 | `issue-labels.md` | `/tk:create-issue`, before it asks its questions | Your questions, and every label their answers can map to (format below) |
 
-Write each one the way you would brief a colleague: short, direct, in your project's words. The plan check and the step check are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's. `issue-labels.md` is the one prose file that replaces the toolkit's lists rather than adding to them: when it lists questions or labels, `/tk:create-issue` uses those instead of its own.
+Write each one the way you would brief a colleague: short, direct, in your project's words. The plan check (`plan-gate.md`) and the step check (`execute-gate.md`) are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's. `issue-labels.md` is the one prose file that replaces the toolkit's lists rather than adding to them: when it lists questions or labels, `/tk:create-issue` uses those instead of its own.
 
 `adoption.md` is the one file here you never write. `/tk:upgrade` adds a section to it at every upgrade: one row for each release-note entry in the range, saying whether the entry touched this project's own files and, when it did, what you decided. The upgrade's stamp reads it and does not finish until every entry has a row; no stage reads it as instructions. Keep it in git.
 
@@ -90,9 +90,9 @@ Labels:
 
 The command applies only labels listed here, so list every label you use: a label you retire and leave off the list is never applied again. Each list replaces the toolkit's own only when it has entries. A file with questions but no labels keeps the toolkit's label set, and a file with neither (only a comment, or nothing) changes nothing. This matters most on GitLab, which creates any label an issue names: a label outside your list would come back as a new one without a word.
 
-## fix-rules.md and the plan and step checks only add rules
+## fix-rules.md, plan-gate.md and execute-gate.md only add rules
 
-Your rules and checks can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored. `severity-anchors.md` is additive the same way: it sets how severe your own review types' findings are and cannot lower the toolkit's own floors, because every reviewer that reads it applies the toolkit's Universal Anchors first ("The Universal Anchors above still win").
+These three files can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored. `severity-anchors.md` is additive the same way: it sets how severe your own review types' findings are and cannot lower the toolkit's own floors, because every reviewer that reads it applies the toolkit's Universal Anchors first ("The Universal Anchors above still win").
 
 ## Your own lines in the rules file
 

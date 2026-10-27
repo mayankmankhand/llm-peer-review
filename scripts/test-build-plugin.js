@@ -515,7 +515,7 @@ else {
     if (!exists(live, 'skills/writing/' + f + '.md')) { writingShortMisses.push(f + '.md missing'); continue; }
     const t = read(live, 'skills/writing/' + f + '.md');
     if (f !== 'SKILL' && wordCount(t) > 400) writingShortMisses.push(f + '.md has ' + wordCount(t) + ' words (limit 400)');
-    if (/[–—]/.test(t)) writingShortMisses.push(f + '.md holds an em or en dash');
+    if (/[\u2013\u2014]/.test(t)) writingShortMisses.push(f + '.md holds an em or en dash');
   }
 }
 check('live: the writing guide stays short and dash-free', writingShortMisses.length === 0, writingShortMisses.join('; '));
