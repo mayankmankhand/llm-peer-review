@@ -223,15 +223,17 @@
 //     INVALID run is left out of the whole score, and a bug harness-lost in two
 //     runs gives HARNESS (fix the runner, then rerun) instead of failing the arm.
 //
-// Release gate (#279). scripts/release-check.js reads three exports rather than
-// copying the record format: reviewPathHash(sha), the review-path hash of a
-// commit; measuredRelease({ newHash, prevHash, ledgerDir, fixtureName }), the
-// ledger's valid ship-arm review runs of the judge fixture (Pocket by default)
-// on each hash, newest first; and scoreRunDirs(candidateDirs, baselineDirs,
-// opts), what --score prints as JSON. A release whose review path changed since
-// the previous tag needs two candidates to count as measured, and when the
-// previous tag has two or more, the gate scores new against old and blocks on
-// anything but PASS.
+// Release gate (#279). scripts/release-check.js reads four exports rather than
+// copying the record format: ledgerRuns(ledgerDir), every valid ship-arm review
+// run with its record, hash and fixture, newest first (the gate's info line
+// reads the ledger through it too); reviewPathHash(sha), the review-path hash
+// of a commit; measuredRelease({ newHash, prevHash, ledgerDir, fixtureName }),
+// those runs of the judge fixture (Pocket by default) on each hash; and
+// scoreRunDirs(candidateDirs, baselineDirs, opts), what --score prints as JSON.
+// A release needs two candidates on its review-path hash to count as measured,
+// whether the path changed since the previous tag or not, and the gate scores
+// new against the previous tag's runs, or the last earlier release's that has
+// two on a different path, and blocks on anything but PASS.
 //
 // Budget. reports/quality-check/budget.json holds the owner's approved total.
 // With no approval on record, only the first measured run may start (its cost
@@ -2252,39 +2254,46 @@ function reviewPathHash(sha) {
   return files ? pathHash('review', files) : null;
 }
 
-// What measures a release (#279): the valid ship-arm review runs of the judge
-// fixture (Pocket, #278) in the ledger whose review-path hash is the new build's
-// (candidates) or the previous release's (baseline), newest first. A run's hash
-// is the one its record carries, else the one its commit gives when that commit
-// is in history; a run with neither never matches. A folder without run.json
-// and analysis.json is not a run (one still going, or a stray file), as the
-// release gate's info line already reads the ledger. The gate calls this with
-// the pushed commit's hash and the previous tag's, and needs two candidates
-// before the build counts as measured.
-function measuredRelease(o) {
-  const ledgerDir = o.ledgerDir || OUT_ROOT;
-  const fixtureName = o.fixtureName || 'pocket';
-  const out = { newHash: o.newHash || null, prevHash: o.prevHash || null, unchanged: !!o.newHash && o.newHash === o.prevHash, candidates: [], baseline: [] };
+// Every valid ship-arm review run in the ledger, any fixture, newest first (#279):
+// the one reader the release gate's info line and measuredRelease share, so the
+// two cannot drift on what counts as a run. Each row carries the folder, its
+// name, the run's record, when it started, its review-path hash (the one its
+// record carries, else the one its commit gives when that commit is in history,
+// else null) and its fixture's name. A folder without run.json and
+// analysis.json is not a run (one still going, or a stray file).
+function ledgerRuns(ledgerDir) {
+  const root = ledgerDir || OUT_ROOT;
+  const out = [];
   let names;
-  try { names = fs.readdirSync(ledgerDir); } catch (e) { return out; }
+  try { names = fs.readdirSync(root); } catch (e) { return out; }
   for (const name of names) {
-    const dir = path.join(ledgerDir, name);
+    const dir = path.join(root, name);
     const meta = readJson(path.join(dir, 'run.json'));
     const analysis = readJson(path.join(dir, 'analysis.json'));
     if (!meta || !analysis) continue;
     if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;
-    if (runFixtureName(meta) !== fixtureName) continue;
     const build = meta.build || {};
     let hash = (build.pathHashes && build.pathHashes.review) || null;
     if (!hash && build.sha) hash = reviewPathHash(build.sha);
-    if (!hash) continue;
-    const row = { dir, name, startedAt: String(meta.startedAt || name), hash };
-    if (hash === out.newHash) out.candidates.push(row);
-    if (hash === out.prevHash) out.baseline.push(row);
+    out.push({ dir, name, meta, startedAt: String(meta.startedAt || name), hash, fixtureName: runFixtureName(meta) });
   }
-  const newestFirst = (a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0);
-  out.candidates.sort(newestFirst);
-  out.baseline.sort(newestFirst);
+  return out.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));
+}
+
+// What measures a release (#279): the valid ship-arm review runs of the judge
+// fixture (Pocket, #278) whose review-path hash is the new build's (candidates)
+// or the previous release's (baseline), newest first, read through ledgerRuns;
+// a run with no hash never matches. The gate calls this with the pushed
+// commit's hash and the previous tag's, and needs two candidates before the
+// build counts as measured, whether or not the path changed.
+function measuredRelease(o) {
+  const fixtureName = o.fixtureName || 'pocket';
+  const out = { newHash: o.newHash || null, prevHash: o.prevHash || null, unchanged: !!o.newHash && o.newHash === o.prevHash, candidates: [], baseline: [] };
+  for (const run of ledgerRuns(o.ledgerDir)) {
+    if (run.fixtureName !== fixtureName || !run.hash) continue;
+    if (run.hash === out.newHash) out.candidates.push(run);
+    if (run.hash === out.prevHash) out.baseline.push(run);
+  }
   return out;
 }
 
@@ -3839,7 +3848,7 @@ module.exports = {
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
   auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
-  settingLines, mapperPromptHash, PATH_FILES, reviewPathHash, measuredRelease, scoreRunDirs,
+  settingLines, mapperPromptHash, PATH_FILES, ledgerRuns, reviewPathHash, measuredRelease, scoreRunDirs,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
   notRunnable, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,

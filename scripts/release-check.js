@@ -110,21 +110,27 @@
 //                    cut) is counted in the reason, never a failure. Skipped
 //                    with a note when the repo has no merge-check.js or no
 //                    earlier release tag.
-//   7. Catch rate  - a release whose review path (the plugin files the review
-//                    reads, the harness's own list) changed since the previous
-//                    release tag must be measured (issue #279): two valid
-//                    Pocket ship-arm review runs in reports/quality-check/
-//                    whose review-path hash is the checked commit's, and, when
-//                    the previous tag's hash has two or more runs of its own,
-//                    a PASS score of the new runs against them, all through
-//                    scripts/quality-check.js's exports (read, never copied).
-//                    Fewer than two runs fails naming the two-run command;
-//                    any verdict but PASS fails with the verdict and the lost
-//                    catches. TK_RELEASE_CATCH_OVERRIDE='<reason>' turns that
-//                    FAIL into ok with the reason printed first. Skipped in a
-//                    repo without the harness, and under --tests-only (the
-//                    ledger is gitignored, so CI and fresh clones never see
-//                    it; the info line below still prints there).
+//   7. Catch rate  - a release's review path (the plugin files the review
+//                    reads, the harness's own list) must be measured (issue
+//                    #279): two valid Pocket ship-arm review runs in
+//                    reports/quality-check/ whose review-path hash is the
+//                    checked commit's, whether the path changed since the
+//                    previous release tag or not (so a tag pushed under the
+//                    override never passes the releases after it), and, when
+//                    the path changed, a PASS score of those runs against the
+//                    previous tag's runs, or, when that tag has fewer than
+//                    two, against the last earlier release that has two on a
+//                    different path; all through scripts/quality-check.js's
+//                    exports (read, never copied). Fewer than two runs fails
+//                    naming the two-run command; any verdict but PASS fails
+//                    with the verdict and the lost catches.
+//                    TK_RELEASE_CATCH_OVERRIDE='<reason>' turns that FAIL
+//                    into ok with the reason printed first; the hook runs the
+//                    gate on the tag push and again on the push of main, so
+//                    the variable is set on both. Skipped in a repo without
+//                    the harness, and under --tests-only (the ledger is
+//                    gitignored, so CI and fresh clones never see it; the
+//                    info line below still prints there).
 //
 // After check 2 it also prints one `info prompt load` line: how many words each
 // prompt file loads against scripts/prompt-load-baseline.json (issue #206). It is
@@ -618,37 +624,28 @@ function infoCatchRate() {
   const harness = path.join(REPO, 'scripts', 'quality-check.js');
   if (!fs.existsSync(ledger) || !fs.existsSync(harness)) return;
   let reviewPath;
+  let runs;
   try {
-    reviewPath = require(harness).PATH_FILES.review;
+    const qc = require(harness);
+    reviewPath = qc.PATH_FILES.review;
     if (!(reviewPath instanceof RegExp)) throw new Error('PATH_FILES.review is not a pattern');
+    // The harness reads the ledger for this line and for check 7 alike (#279), so
+    // what counts as a run is decided once, there.
+    if (typeof qc.ledgerRuns !== 'function') throw new Error('ledgerRuns is not exported');
+    runs = qc.ledgerRuns(ledger).filter(r => r.meta.build && typeof r.meta.build.sha === 'string' && /^[0-9a-f]{7,64}$/.test(r.meta.build.sha));
   } catch (e) {
     console.log('  info catch rate - unavailable: ' + e.message);
     return;
-  }
-  const runs = [];
-  for (const name of fs.readdirSync(ledger)) {
-    let meta;
-    let analysis;
-    try {
-      meta = JSON.parse(fs.readFileSync(path.join(ledger, name, 'run.json'), 'utf8'));
-      analysis = JSON.parse(fs.readFileSync(path.join(ledger, name, 'analysis.json'), 'utf8'));
-    } catch (e) {
-      continue; // not a run folder, or a run still going
-    }
-    if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;
-    if (!meta.build || typeof meta.build.sha !== 'string' || !/^[0-9a-f]{7,64}$/.test(meta.build.sha)) continue;
-    runs.push({ name, meta, at: String(meta.startedAt || name) });
   }
   if (!runs.length) {
     console.log('  info catch rate - no valid ship-arm review run in reports/quality-check yet');
     return;
   }
-  runs.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const newest = runs[0];
   const sha = newest.meta.build.sha;
   const head = 'newest valid ship-arm run ' + newest.name + ': build ' + sha.slice(0, 7);
   // The fixture the run measured (#278): a run saved before fixtures had names ran on notebook.
-  const fixtureNote = '; fixture ' + (newest.meta.fixtureName || 'notebook');
+  const fixtureNote = '; fixture ' + newest.fixtureName;
   if (git(['cat-file', '-e', sha + '^{commit}']).status !== 0) {
     console.log('  info catch rate - ' + head + " is not in this repository's history" + fixtureNote);
     return;
@@ -935,31 +932,71 @@ function checkCatchRate(target) {
   const newHash = qc.reviewPathHash(target.sha);
   const prevHash = prevSha ? qc.reviewPathHash(prevSha) : null;
   if (!newHash) { report(name, false, at + 'the review path at ' + target.sha.slice(0, 12) + ' could not be hashed'); return; }
-  if (newHash === prevHash) { report(name, true, at + 'review path unchanged since ' + prev.tag + '; no run needed'); return; }
   const fail = (what) => (CATCH_OVERRIDE ? report(name, true, at + 'overridden - ' + CATCH_OVERRIDE + ' (' + what + ')') : report(name, false, at + what));
   const names = list => list.map(r => r.name).join(', ');
-  const changed = 'review path changed since ' + prev.tag;
   const m = qc.measuredRelease({ newHash, prevHash });
-  if (m.candidates.length < 2) {
-    fail(changed + ' (' + newHash + ' vs ' + (prevHash || 'none') + ') and ' + m.candidates.length + ' of 2 valid Pocket ship-arm runs measure it'
-      + (m.candidates.length ? ' (' + names(m.candidates) + ')' : '')
-      + '; run node scripts/quality-check.js --role review --arm ship --build ' + target.sha + ' --fixture pocket ' + (m.candidates.length === 1 ? 'once more' : 'twice'));
+  const n = m.candidates.length;
+  const twoRun = '; run node scripts/quality-check.js --role review --arm ship --build ' + target.sha + ' --fixture pocket ' + (n === 1 ? 'once more' : 'twice');
+  const measuredBy = 'measured by ' + n + ' valid Pocket ship-arm runs (' + names(m.candidates) + ')';
+  // An unchanged path passes only when its hash was measured: a tag pushed under
+  // the override and never measured must not pass the releases after it (R10).
+  if (newHash === prevHash) {
+    if (n >= 2) { report(name, true, at + 'review path unchanged since ' + prev.tag + ', ' + measuredBy + '; no run needed'); return; }
+    fail('review path unchanged since ' + prev.tag + ', but ' + n + ' of 2 valid Pocket ship-arm runs measure it' + (n ? ' (' + names(m.candidates) + ')' : '') + ': that release shipped unmeasured' + twoRun);
     return;
   }
-  const measuredBy = 'measured by ' + m.candidates.length + ' valid Pocket ship-arm runs (' + names(m.candidates) + ')';
-  if (m.baseline.length < 2) {
-    report(name, true, at + changed + '; ' + measuredBy + '; ' + m.baseline.length + ' run' + (m.baseline.length === 1 ? '' : 's') + ' on ' + prev.tag + "'s review path, nothing to compare");
+  const changed = 'review path changed since ' + prev.tag;
+  if (n < 2) {
+    fail(changed + ' (' + newHash + ' vs ' + (prevHash || 'none') + ') and ' + n + ' of 2 valid Pocket ship-arm runs measure it' + (n ? ' (' + names(m.candidates) + ')' : '') + twoRun);
     return;
+  }
+  // The baseline: the previous tag's runs, or, when it has fewer than two, the
+  // last earlier release that has two on a different review path (R10).
+  let baseline = m.baseline;
+  let against = 'against ' + prev.tag;
+  if (baseline.length < 2) {
+    const prevRuns = m.baseline.length + ' run' + (m.baseline.length === 1 ? '' : 's');
+    const found = earlierBaseline(target.sha, prev.tag, newHash, qc);
+    if (!found) {
+      report(name, true, at + changed + '; ' + measuredBy + '; ' + prevRuns + ' on ' + prev.tag + "'s review path and no earlier release measured, nothing to compare");
+      return;
+    }
+    baseline = found.baseline;
+    against = 'against ' + found.tag + ', the last measured release since ' + prev.tag + ' has ' + prevRuns;
   }
   let s;
-  try { s = qc.scoreRunDirs(m.candidates.map(r => r.dir), m.baseline.map(r => r.dir), {}); } catch (e) { fail(changed + '; ' + measuredBy + '; the score against ' + prev.tag + ' failed: ' + e.message); return; }
+  try { s = qc.scoreRunDirs(m.candidates.map(r => r.dir), baseline.map(r => r.dir), {}); } catch (e) { fail(changed + '; ' + measuredBy + '; the score ' + against + ' failed: ' + e.message); return; }
   if (s.verdict === 'PASS') {
-    report(name, true, at + changed + '; ' + measuredBy + '; PASS against ' + prev.tag + ' (' + (s.stable || []).length + ' stable catches kept; baseline ' + names(m.baseline) + ')');
+    report(name, true, at + changed + '; ' + measuredBy + '; PASS ' + against + ' (' + (s.stable || []).length + ' stable catches kept; baseline ' + names(baseline) + ')');
     return;
   }
   const why = s.why && s.why.length ? ' - ' + s.why.join('; ') : '';
   const rows = s.verdict === 'FAIL' ? (s.failed || []).map(id => { const p = (s.perId || {})[id] || {}; return id + ': baseline ' + p.baseline + ', candidate ' + p.candidate; }) : [];
-  fail(s.verdict + ' against ' + prev.tag + why + (rows.length ? '; ' + rows.join('; ') : '') + ' (candidates ' + names(m.candidates) + '; baseline ' + names(m.baseline) + ')');
+  fail(s.verdict + ' ' + against + why + (rows.length ? '; ' + rows.join('; ') : '') + ' (candidates ' + names(m.candidates) + '; baseline ' + names(baseline) + ')');
+}
+
+// The last release before the previous tag whose review path differs from the
+// checked commit's and has two or more measuring runs: the baseline when the
+// previous tag itself has fewer than two (issue #279, review R10), so one thin
+// or overridden tag never erases the comparison. The tags reachable from the
+// commit, newest version first, the ones on the commit itself and the previous
+// tag left out; null when none qualifies. A release on the same review path is
+// never a baseline: its runs are the candidates.
+function earlierBaseline(sha, prevTag, newHash, qc) {
+  const reachable = git(['tag', '--merged', sha, '--list', 'v[0-9]*']);
+  if (reachable.status !== 0) return null;
+  const onCommit = git(['tag', '--points-at', sha, '--list', 'v[0-9]*']);
+  const skip = new Set([prevTag, ...(onCommit.status === 0 ? onCommit.out.split('\n') : [])]);
+  const tags = reachable.out.split('\n').filter(t => t && !skip.has(t))
+    .sort((a, b) => compareVersions(b.replace(/^v/, ''), a.replace(/^v/, '')) || 0);
+  for (const tag of tags) {
+    const tagSha = resolveCommit(tag);
+    const hash = tagSha ? qc.reviewPathHash(tagSha) : null;
+    if (!hash || hash === newHash) continue;
+    const mm = qc.measuredRelease({ newHash, prevHash: hash });
+    if (mm.baseline.length >= 2) return { tag, hash, baseline: mm.baseline };
+  }
+  return null;
 }
 
 // Checks T, 3, 4, 5, 6 and 7. Every commit named by --commit or --pushing-tag is

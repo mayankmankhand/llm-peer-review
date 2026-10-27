@@ -853,6 +853,12 @@ section('measured release (#279)', () => {
   check('the judge fixture is the default: a Notebook run on the hash is not a candidate unless asked for',
     !!m && !names(m.candidates).some(n => /notebook/.test(n)) && measured({ newHash: NEW, prevHash: OLD, ledgerDir: ledger, fixtureName: 'notebook' }).candidates.length === 1,
     m ? JSON.stringify(names(m.candidates)) : 'measuredRelease is not exported');
+  // The one ledger reader both the gate's info line and measuredRelease use (review R14).
+  const lr = typeof QC.ledgerRuns === 'function' ? QC.ledgerRuns(ledger) : null;
+  check('ledgerRuns lists every valid ship-arm review run of any fixture with its record, hash and fixture, newest first',
+    !!lr && JSON.stringify(names(lr)) === JSON.stringify([fromShaName, '2026-10-26-235000-review-ship-fit-0000000-pocket-nohash', '2026-10-26-230000-review-ship-fit-fffffff-notebook', '2026-10-26-210000-review-ship-fit-fffffff-pocket-2', '2026-10-26-200000-review-ship-fit-fffffff-pocket-1', '2026-10-20-000000-review-ship-fit-fffffff-pocket-old'])
+      && lr[0].hash === expected && lr[1].hash === null && lr[2].fixtureName === 'notebook' && lr[3].fixtureName === 'pocket' && lr[3].hash === NEW && lr.every(r => r.meta && r.meta.role === 'review' && r.dir === path.join(ledger, r.name)),
+    lr ? JSON.stringify(lr.map(r => [r.name, r.fixtureName, r.hash])) : 'ledgerRuns is not exported');
 
   const a = makeReviewRun({ caught: IDS });
   const b = makeReviewRun({ caught: IDS });

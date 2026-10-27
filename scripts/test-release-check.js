@@ -783,6 +783,30 @@ function releaseRepo(version, tag, opt) {
   };
   runDir('2026-10-01-000000-review-a-x', { role: 'review', arm: 'a', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-03T00:00:00Z' }, true);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
+  check('the info line reads the ledger through the harness lookup and says so when the harness lacks it (#279 review)',
+    r.status === 0 && /^ {2}info catch rate - unavailable: ledgerRuns is not exported$/m.test(r.out), summaryLine(r.out));
+  // The harness's ledger reader, stubbed to its contract: every valid ship-arm
+  // review run with its record, hash and fixture, newest first.
+  write(repo, 'scripts/quality-check.js', [
+    "const fs = require('fs'), path = require('path');",
+    'module.exports = {',
+    '  PATH_FILES: { review: /^(commands\\/review\\.md|agents\\/audit-skeptic\\.md)$/ },',
+    '  ledgerRuns: (dir) => {',
+    '    const out = [];',
+    '    let names = [];',
+    '    try { names = fs.readdirSync(dir); } catch (e) { return out; }',
+    '    for (const name of names) {',
+    '      let meta, analysis;',
+    "      try { meta = JSON.parse(fs.readFileSync(path.join(dir, name, 'run.json'), 'utf8')); analysis = JSON.parse(fs.readFileSync(path.join(dir, name, 'analysis.json'), 'utf8')); } catch (e) { continue; }",
+    "      if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;",
+    "      out.push({ dir: path.join(dir, name), name, meta, startedAt: String(meta.startedAt || name), hash: (meta.build && meta.build.pathHashes && meta.build.pathHashes.review) || null, fixtureName: meta.fixtureName || 'notebook' });",
+    '    }',
+    '    return out.sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0));',
+    '  },',
+    '};',
+    '',
+  ].join('\n'));
+  r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('a ledger with no valid ship-arm run says so in one info line',
     r.status === 0 && /^ {2}info catch rate - no valid ship-arm review run in reports\/quality-check yet/m.test(r.out), r.out);
 
@@ -821,8 +845,9 @@ function releaseRepo(version, tag, opt) {
     "const canned = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'qc-canned.json'), 'utf8'));",
     'module.exports = {',
     '  PATH_FILES: { review: /^(commands\\/review\\.md|agents\\/audit-skeptic\\.md)$/ },',
+    '  ledgerRuns: () => [],',
     '  reviewPathHash: (sha) => (canned().hashes || {})[sha] || null,',
-    '  measuredRelease: (o) => Object.assign({ newHash: o.newHash, prevHash: o.prevHash, unchanged: o.newHash === o.prevHash, candidates: [], baseline: [] }, canned().measured || {}),',
+    "  measuredRelease: (o) => { const runs = canned().runs || {}; return { newHash: o.newHash, prevHash: o.prevHash, unchanged: o.newHash === o.prevHash, candidates: runs[o.newHash] || [], baseline: runs[o.prevHash] || [] }; },",
     '  scoreRunDirs: () => canned().score,',
     '};',
     '',
@@ -838,11 +863,21 @@ function releaseRepo(version, tag, opt) {
   const canned = (c) => write(repo, 'scripts/qc-canned.json', JSON.stringify(c));
   const cr = (out) => line(out, 'catch rate');
   const detail = (out) => cr(out) || summaryLine(out);
+  const one = runOf('2026-10-26-review-ship-fit-new1-pocket-a');
+  const two = [runOf('2026-10-26-review-ship-fit-new1-pocket-b'), one];
+  const old = [runOf('2026-10-01-review-ship-fit-old1-pocket-b'), runOf('2026-10-01-review-ship-fit-old1-pocket-a')];
+  const perId = { 'code-x': { baseline: '2/2', candidate: '2/2' }, 'ux-y': { baseline: '2/2', candidate: '2/2' } };
 
-  canned({ hashes: { [head]: 'same', [base]: 'same' } });
+  // An unchanged review path passes only when its hash was measured: a tag pushed
+  // under the override and never measured must not pass its successors (review R10).
+  canned({ hashes: { [head]: 'same', [base]: 'same' }, runs: { same: two } });
   r = run(repo, ['--skip-suites']);
-  check('a release whose review path is unchanged since the previous tag passes with no run',
-    r.status === 0 && isOk(r.out, 'catch rate') && /review path unchanged since v1\.0\.0; no run needed$/.test(cr(r.out)), detail(r.out));
+  check('a release whose review path is unchanged since the previous tag and measured passes with no new run',
+    r.status === 0 && isOk(r.out, 'catch rate') && /review path unchanged since v1\.0\.0, measured by 2 valid Pocket ship-arm runs \(2026-10-26-review-ship-fit-new1-pocket-b, 2026-10-26-review-ship-fit-new1-pocket-a\); no run needed$/.test(cr(r.out)), detail(r.out));
+  canned({ hashes: { [head]: 'same', [base]: 'same' }, runs: { same: [one] } });
+  r = run(repo, ['--skip-suites']);
+  check('an unchanged review path whose hash has fewer than two runs fails: the previous release shipped unmeasured',
+    r.status === 1 && isFail(r.out, 'catch rate') && /review path unchanged since v1\.0\.0, but 1 of 2 valid Pocket ship-arm runs measure it \(2026-10-26-review-ship-fit-new1-pocket-a\): that release shipped unmeasured; run node .* --fixture pocket once more$/.test(cr(r.out)), detail(r.out));
 
   const hashes = { [head]: 'new1', [base]: 'old1' };
   canned({ hashes });
@@ -850,31 +885,54 @@ function releaseRepo(version, tag, opt) {
   check('a changed review path with no ledger fails naming the two-run command',
     r.status === 1 && isFail(r.out, 'catch rate') && /review path changed since v1\.0\.0 \(new1 vs old1\) and 0 of 2 valid Pocket ship-arm runs measure it; run node scripts\/quality-check\.js --role review --arm ship --build [0-9a-f]{40} --fixture pocket twice$/.test(cr(r.out)) && cr(r.out).includes('--build ' + head + ' '), detail(r.out));
 
-  const one = runOf('2026-10-26-review-ship-fit-new1-pocket-a');
-  canned({ hashes, measured: { candidates: [one] } });
+  canned({ hashes, runs: { new1: [one] } });
   r = run(repo, ['--skip-suites']);
   check('one valid run on the new hash fails asking for one more',
     r.status === 1 && isFail(r.out, 'catch rate') && /1 of 2 valid Pocket ship-arm runs measure it \(2026-10-26-review-ship-fit-new1-pocket-a\); run node .* --fixture pocket once more$/.test(cr(r.out)), detail(r.out));
 
-  const two = [runOf('2026-10-26-review-ship-fit-new1-pocket-b'), one];
-  canned({ hashes, measured: { candidates: two, baseline: [runOf('2026-10-01-review-ship-fit-old1-pocket')] } });
+  canned({ hashes, runs: { new1: two, old1: [runOf('2026-10-01-review-ship-fit-old1-pocket')] } });
   r = run(repo, ['--skip-suites']);
   check('two valid runs on the new hash and fewer than two on the previous tag\'s pass with nothing to compare',
-    r.status === 0 && isOk(r.out, 'catch rate') && /review path changed since v1\.0\.0; measured by 2 valid Pocket ship-arm runs \(2026-10-26-review-ship-fit-new1-pocket-b, 2026-10-26-review-ship-fit-new1-pocket-a\); 1 run on v1\.0\.0's review path, nothing to compare$/.test(cr(r.out)), detail(r.out));
+    r.status === 0 && isOk(r.out, 'catch rate') && /review path changed since v1\.0\.0; measured by 2 valid Pocket ship-arm runs \(2026-10-26-review-ship-fit-new1-pocket-b, 2026-10-26-review-ship-fit-new1-pocket-a\); 1 run on v1\.0\.0's review path and no earlier release measured, nothing to compare$/.test(cr(r.out)), detail(r.out));
 
-  const old = [runOf('2026-10-01-review-ship-fit-old1-pocket-b'), runOf('2026-10-01-review-ship-fit-old1-pocket-a')];
-  const perId = { 'code-x': { baseline: '2/2', candidate: '2/2' }, 'ux-y': { baseline: '2/2', candidate: '2/2' } };
-  canned({ hashes, measured: { candidates: two, baseline: old }, score: { verdict: 'PASS', why: [], stable: ['code-x', 'ux-y'], failed: [], perId } });
+  canned({ hashes, runs: { new1: two, old1: old }, score: { verdict: 'PASS', why: [], stable: ['code-x', 'ux-y'], failed: [], perId } });
   r = run(repo, ['--skip-suites']);
   check('two runs each side with a PASS score pass naming the tag',
     r.status === 0 && isOk(r.out, 'catch rate') && /measured by 2 valid Pocket ship-arm runs \(.*\); PASS against v1\.0\.0 \(2 stable catches kept; baseline 2026-10-01-review-ship-fit-old1-pocket-b, 2026-10-01-review-ship-fit-old1-pocket-a\)$/.test(cr(r.out)), detail(r.out));
 
-  canned({ hashes, measured: { candidates: two, baseline: old }, score: { verdict: 'FAIL', why: [], stable: ['code-x', 'ux-y'], failed: ['code-x'], perId: { 'code-x': { baseline: '2/2', candidate: '0/2' }, 'ux-y': { baseline: '2/2', candidate: '2/2' } } } });
+  canned({ hashes, runs: { new1: two, old1: old }, score: { verdict: 'FAIL', why: [], stable: ['code-x', 'ux-y'], failed: ['code-x'], perId: { 'code-x': { baseline: '2/2', candidate: '0/2' }, 'ux-y': { baseline: '2/2', candidate: '2/2' } } } });
   r = run(repo, ['--skip-suites']);
   check('a lost stable catch fails with the verdict and the bug rows',
     r.status === 1 && isFail(r.out, 'catch rate') && /FAIL against v1\.0\.0; code-x: baseline 2\/2, candidate 0\/2 \(candidates 2026-10-26-review-ship-fit-new1-pocket-b, 2026-10-26-review-ship-fit-new1-pocket-a; baseline 2026-10-01-review-ship-fit-old1-pocket-b, 2026-10-01-review-ship-fit-old1-pocket-a\)$/.test(cr(r.out)) && !/ux-y: baseline/.test(cr(r.out)), detail(r.out));
 
-  canned({ hashes, measured: { candidates: two, baseline: old }, score: { verdict: 'CONFOUNDED', why: ['the arm moved with the build: finders opus/medium vs sonnet/medium'], stable: [], failed: [], perId } });
+  // A previous tag with fewer than two runs is passed over for the last earlier
+  // release that has two, so one thin tag never erases the baseline (review R10).
+  const repo2 = makeRepo('0.9.0', gitSubdir('v0.9.0'));
+  git(repo2, ['tag', 'v0.9.0']);
+  write(repo2, 'plugin/commands/review.md', '# Review\n');
+  setPlugin(repo2, '1.0.0', gitSubdir('v1.0.0'));
+  commitAll(repo2, 'release 1.0.0');
+  git(repo2, ['tag', 'v1.0.0']);
+  write(repo2, 'plugin/commands/explore.md', '# Explore\n\nChanged.\n');
+  setPlugin(repo2, '1.1.0', gitSubdir('v1.1.0'));
+  commitAll(repo2, 'release 1.1.0');
+  git(repo2, ['tag', 'v1.1.0']);
+  write(repo2, 'scripts/quality-check.js', STUB);
+  const head2 = git(repo2, ['rev-parse', 'HEAD']);
+  const mid2 = git(repo2, ['rev-parse', 'v1.0.0^{commit}']);
+  const old2 = git(repo2, ['rev-parse', 'v0.9.0^{commit}']);
+  const canned2 = (c) => write(repo2, 'scripts/qc-canned.json', JSON.stringify(c));
+  const older = [runOf('2026-09-01-review-ship-fit-old0-pocket-b'), runOf('2026-09-01-review-ship-fit-old0-pocket-a')];
+  canned2({ hashes: { [head2]: 'new1', [mid2]: 'old1', [old2]: 'old0' }, runs: { new1: two, old0: older }, score: { verdict: 'PASS', why: [], stable: ['code-x', 'ux-y'], failed: [], perId } });
+  r = run(repo2, ['--skip-suites']);
+  check('a previous release with fewer than two runs is passed over for the last earlier release that has two',
+    r.status === 0 && isOk(r.out, 'catch rate') && /PASS against v0\.9\.0, the last measured release since v1\.0\.0 has 0 runs \(2 stable catches kept; baseline 2026-09-01-review-ship-fit-old0-pocket-b, 2026-09-01-review-ship-fit-old0-pocket-a\)$/.test(cr(r.out)), detail(r.out));
+  canned2({ hashes: { [head2]: 'new1', [mid2]: 'old1', [old2]: 'new1' }, runs: { new1: two } });
+  r = run(repo2, ['--skip-suites']);
+  check('an earlier release on the same review path is never a baseline',
+    r.status === 0 && isOk(r.out, 'catch rate') && /0 runs on v1\.0\.0's review path and no earlier release measured, nothing to compare$/.test(cr(r.out)), detail(r.out));
+
+  canned({ hashes, runs: { new1: two, old1: old }, score: { verdict: 'CONFOUNDED', why: ['the arm moved with the build: finders opus/medium vs sonnet/medium'], stable: [], failed: [], perId } });
   r = run(repo, ['--skip-suites']);
   check('a confounded comparison fails too', r.status === 1 && isFail(r.out, 'catch rate') && /CONFOUNDED against v1\.0\.0 - the arm moved with the build: finders opus\/medium vs sonnet\/medium \(candidates /.test(cr(r.out)), detail(r.out));
 
