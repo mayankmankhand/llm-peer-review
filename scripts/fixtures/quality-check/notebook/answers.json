@@ -11,8 +11,20 @@
     "evidence. The first full run showed both shapes (a receipt quoting the planted title, an attachment naming Export).",
     "`lines` documents where each bug sits (the tests check it still does). With `lineMatch` true a finding inside a window",
     "(widened by 1 line) also counts; every bug here leaves it false, because the first live run showed different findings",
-    "on the same lines (a crash on a malformed URL, stale search results) being credited by line alone."
+    "on the same lines (a crash on a malformed URL, stale search results) being credited by line alone.",
+    "`app` names the app and the two commits the runner makes from base/ and change/ (the author is \"<name> Dev\").",
+    "`selfTestPair` names the oracle self-test's required pair: a correct fix for one runnable bug, an empty fix for another.",
+    "A bug that no script can run carries `noOracle`, the reason; every other bug has a gone and a works oracle in oracles/."
   ],
+  "app": {
+    "name": "Notebook",
+    "baseMessage": "Notes app",
+    "changeMessage": "Add search, export, clear all, backups, import and a reset command"
+  },
+  "selfTestPair": {
+    "correct": "code-search-prefix",
+    "deletion": "known-shell-glob"
+  },
   "bugs": [
     {
       "id": "code-search-prefix",
@@ -254,7 +266,8 @@
         [
           "(delet|overwrit).{0,80}(never|forbid|rule)"
         ]
-      ]
+      ],
+      "noOracle": "a prompt file: whether its rule and its step 2 still contradict is a reading of the text, and what an agent does with it is not deterministic, so no script can run it"
     },
     {
       "id": "deps-lodash-cve",
@@ -329,7 +342,8 @@
         [
           "renam(es|ed|ing) the (app|project)"
         ]
-      ]
+      ],
+      "noOracle": "README wording: whether a newcomer learns what the app is is a reader's judgment, not a behaviour a script can run"
     },
     {
       "id": "known-shell-glob",

@@ -580,6 +580,60 @@ section('fixtures by name (#278)', () => {
     given === null ? 'parseArgs is not exported' : JSON.stringify({ given: given.fixture, plain: plain.fixture }));
 });
 
+// #278 Step 2: what the harness held as constants comes from each fixture's
+// answer key, and every record says which fixture it ran on.
+section('fixture facts and records (#278)', () => {
+  const app = ANSWERS.app || {};
+  const pair = ANSWERS.selfTestPair || {};
+  const reasons = ANSWERS.bugs.filter(b => b.noOracle !== undefined);
+  check('answers.json carries the app name, the two commit messages, the self-test pair and each no-oracle reason',
+    app.name === 'Notebook' && app.baseMessage === 'Notes app' && app.changeMessage === 'Add search, export, clear all, backups, import and a reset command'
+      && pair.correct === 'code-search-prefix' && pair.deletion === 'known-shell-glob'
+      && reasons.map(b => b.id).sort().join() === 'commands-contradiction,copy-unclear-headline'
+      && reasons.every(b => typeof b.noOracle === 'string' && b.noOracle.length > 20),
+    JSON.stringify({ app, pair, noOracle: reasons.map(b => b.id) }));
+
+  // The folder name puts the fixture after the build and before any label, and
+  // only when it is not the default, so a Notebook run's name does not change.
+  const named = typeof QC.runDirName === 'function';
+  const withLabel = named ? QC.runDirName({ stamp: '2026-10-27-101500', kind: 'review-ship-fit', build: 'abc1234', fixture: 'pocket', label: '278 a1' }) : null;
+  const noLabel = named ? QC.runDirName({ stamp: '2026-10-27-101500', kind: 'fix', build: 'abc1234', fixture: 'pocket' }) : null;
+  const notebook = named ? QC.runDirName({ stamp: '2026-10-27-101500', kind: 'review-ship-fit', build: 'abc1234', fixture: 'notebook', label: 'x' }) : null;
+  const rec = typeof QC.fixtureRecord === 'function' ? QC.fixtureRecord('notebook') : null;
+  const row = typeof QC.ledgerRow === 'function'
+    ? QC.ledgerRow({ role: 'review', arm: 'ship', probe: null, build: { spec: 'HEAD', sha: 'abc' }, fixtureName: 'pocket', endedAt: 'T' }, { costUsd: 1 }, true, 'reports/quality-check/x')
+    : null;
+  check("a run's record, folder name and ledger row name the fixture",
+    withLabel === '2026-10-27-101500-review-ship-fit-abc1234-pocket-278-a1' && noLabel === '2026-10-27-101500-fix-abc1234-pocket'
+      && notebook === '2026-10-27-101500-review-ship-fit-abc1234-x'
+      && !!rec && rec.fixture === '3b661928401a8724' && rec.fixtureName === 'notebook'
+      && !!row && row.fixtureName === 'pocket' && row.build === 'HEAD' && row.sha === 'abc' && row.costUsd === 1 && row.valid === true && row.dir === 'reports/quality-check/x',
+    JSON.stringify({ withLabel, noLabel, notebook, rec, row }));
+
+  // A temporary fixtures root holding "alpha", a copy of Notebook's key under
+  // another app name, stands in for a second fixture the suite cannot rely on.
+  const root = tmp('qc-test-fixtures-alpha-');
+  write(path.join(root, 'alpha', 'answers.json'), JSON.stringify({ ...ANSWERS, app: { ...app, name: 'Alpha' } }));
+  const alphaDir = makeReviewRun({ caught: ['code-search-prefix'], meta: { fixtureName: 'alpha' } });
+  const plainDir = makeReviewRun({ caught: ['code-search-prefix'] });
+  let alpha = null;
+  let plainRun = null;
+  if (typeof QC.checkRun === 'function') {
+    try { alpha = QC.checkRun(alphaDir, root); } catch (e) { alpha = { error: e.message }; }
+    try { plainRun = QC.checkRun(plainDir); } catch (e) { plainRun = { error: e.message }; }
+  }
+  check('--check and --judge take the fixture from the saved record',
+    !!alpha && alpha.fixtureName === 'alpha' && !!alpha.answers && alpha.answers.app.name === 'Alpha' && alpha.analysis.valid && alpha.analysis.fixtureName === 'alpha'
+      && !!plainRun && plainRun.fixtureName === 'notebook' && !!plainRun.answers && plainRun.answers.app.name === 'Notebook',
+    alpha === null ? 'checkRun is not exported' : JSON.stringify({ alpha: alpha.error || [alpha.fixtureName, alpha.answers && alpha.answers.app], plain: plainRun.error || [plainRun.fixtureName, plainRun.answers && plainRun.answers.app] }));
+  // Failure details stay on one line: the release gate shows only a failing suite's tail.
+  const oneLine = s => String(s).replace(/\s+/g, ' ').trim().slice(0, 300);
+  const flag = spawnSync('node', [SCRIPT, '--check', plainDir, '--fixture', 'notebook'], { encoding: 'utf8' });
+  check('--check given --fixture is a usage error: the record names the fixture', flag.status === 2 && /reads the fixture from the run's record/.test(flag.stderr), oneLine(flag.stdout + flag.stderr));
+  const mixed = spawnSync('node', [SCRIPT, '--score', alphaDir, '--against', plainDir], { encoding: 'utf8' });
+  check('--score refuses runs of two different fixtures, naming both', mixed.status === 2 && /alpha/.test(mixed.stderr) && /notebook/.test(mixed.stderr), oneLine(mixed.stdout + mixed.stderr));
+});
+
 section('model modes', () => {
   const file = model => '---\nname: x\ntools: Read\n' + (model ? 'model: ' + model + '\n' : '') + 'effort: high\n---\nbody\n';
   check('modeFamily: best is the session family whatever the file says', QC.modeFamily('best', file('sonnet'), 'opus') === 'opus' && QC.modeFamily('best', file('sonnet'), 'opus', 'review-code-finder') === 'opus');
@@ -806,6 +860,14 @@ section('setting comparison (P1-C1)', () => {
     && /baseline set is not uniform in arm effort: 8 agents/.test(depsH.summary) && /baseline set is not uniform in build: aaaaaaa .* \| ddddddd/.test(depsH.summary), depsH.summary);
   check('sameSetting: unknown fields match, recorded ones must agree',
     QC.sameSetting(setting(), setting({ harness: { build: null } })) && !QC.sameSetting(setting(), setting({ harness: { claude: '2.1.289' } })) && !QC.sameSetting(setting(), setting({ arm: { effort: 'low' } })));
+});
+
+// #278: two runs on two fixtures are never one setting, and the score says which.
+section('setting comparison names the fixtures (#278)', () => {
+  const cmp = QC.compareSettings(
+    [{ ...setting({ name: 'p1', harness: { fixture: 'h1h1h1h1h1h1h1h1' } }), labels: { build: 'aaaaaaa', fixture: 'pocket' } }],
+    [{ ...setting({ name: 'n1', harness: { fixture: 'h2h2h2h2h2h2h2h2' } }), labels: { build: 'aaaaaaa', fixture: 'notebook' } }]);
+  check('the score message names both fixtures when their hashes differ', cmp.confounded && /pocket/.test(cmp.summary) && /notebook/.test(cmp.summary), cmp.summary);
 });
 
 section('scoring with settings: CONFOUNDED, --allow-drift, noise (P1-C1)', () => {
@@ -1230,12 +1292,14 @@ const FIXES = require(path.join(FIXTURE, 'oracles', 'self-test-fixes.js'));
 section('fix role: every planted bug has an oracle pair or a reason', () => {
   const set = QC.oracleSet(ANSWERS, path.join(FIXTURE, 'oracles'));
   const runnable = Object.keys(set);
-  const not = Object.keys(QC.NOT_RUNNABLE);
+  // The not-runnable bugs and the self-test pair come from the answer key (#278).
+  const not = ANSWERS.bugs.filter(b => b.noOracle).map(b => b.id);
+  const selfPair = ANSWERS.selfTestPair || {};
   check('oracles: each planted bug is runnable or listed as not runnable, never both', IDS.every(id => runnable.includes(id) !== not.includes(id)), JSON.stringify({ runnable, not }));
-  check('oracles: the not-runnable list names only planted bugs, each with a reason', not.every(id => IDS.includes(id) && QC.NOT_RUNNABLE[id].length > 20));
+  check('oracles: the not-runnable list names only planted bugs, each with a reason', not.every(id => IDS.includes(id) && BUG[id].noOracle.length > 20));
   check('oracles: seven runnable bugs, the prompt file and the README wording are not', runnable.length === 7 && not.sort().join() === 'commands-contradiction,copy-unclear-headline', runnable.join());
   check('oracles: every runnable bug has a correct and an empty self-test fix', runnable.every(id => FIXES[id] && FIXES[id].correct.length && FIXES[id].deletion.length));
-  check('oracles: the self-test pair is two different runnable bugs', QC.SELF_TEST_PAIR.correct !== QC.SELF_TEST_PAIR.deletion && runnable.includes(QC.SELF_TEST_PAIR.correct) && runnable.includes(QC.SELF_TEST_PAIR.deletion));
+  check('oracles: the self-test pair is two different runnable bugs', !!selfPair.correct && selfPair.correct !== selfPair.deletion && runnable.includes(selfPair.correct) && runnable.includes(selfPair.deletion));
   const half = tmp('qc-test-oracles-half-');
   write(path.join(half, 'code-search-prefix.gone.js'), '');
   let threw = '';
@@ -1246,6 +1310,17 @@ section('fix role: every planted bug has an oracle pair or a reason', () => {
   threw = '';
   try { QC.oracleSet(ANSWERS, stray); } catch (e) { threw = e.message; }
   check('oracleSet: an oracle that names no planted bug is refused', /no-such-bug\.gone\.js/.test(threw), threw);
+  // A bug with neither an oracle pair nor a noOracle reason, or with both, is
+  // a key error, never a quiet skip (#278).
+  const oracles = path.join(FIXTURE, 'oracles');
+  const neither = { ...ANSWERS, bugs: ANSWERS.bugs.map(b => (b.id === 'commands-contradiction' ? { ...b, noOracle: undefined } : b)) };
+  threw = '';
+  try { QC.oracleSet(neither, oracles); } catch (e) { threw = e.message; }
+  check('oracleSet: a bug with no oracle pair and no noOracle reason is refused', /commands-contradiction has no oracle pair and no noOracle reason/.test(threw), threw);
+  const both = { ...ANSWERS, bugs: ANSWERS.bugs.map(b => (b.id === 'code-search-prefix' ? { ...b, noOracle: 'a reason that should not be here at all' } : b)) };
+  threw = '';
+  try { QC.oracleSet(both, oracles); } catch (e) { threw = e.message; }
+  check('oracleSet: a bug with an oracle pair and a noOracle reason is refused', /code-search-prefix has an oracle pair and a noOracle reason/.test(threw), threw);
 });
 
 section('fix role: the oracles stay out of the scratch project', () => {
@@ -1457,7 +1532,10 @@ async function asyncSection(name, fn) {
     const tree = tmp('qc-test-fake-tree-');
     write(path.join(tree, 'server.js'), '');
     const port = await QC.freePort();
-    const j = await QC.judgeTree(tree, port, { answers: ANSWERS, dir });
+    // A key of just the two bugs the fake folder holds oracles for: every other
+    // bug would have neither a pair nor a noOracle reason, which oracleSet refuses.
+    const twoBugs = { ...ANSWERS, bugs: ANSWERS.bugs.filter(b => b.id === 'code-search-prefix' || b.id === 'known-shell-glob') };
+    const j = await QC.judgeTree(tree, port, { answers: twoBugs, dir });
     const by = Object.fromEntries(j.oracles.map(r => [r.id, r]));
     check('judgeTree: a PASS line with exit 1 is UNJUDGED, not a pass or a fail', by['code-search-prefix'].gone.verdict === 'UNJUDGED', JSON.stringify(by['code-search-prefix'].gone));
     check('judgeTree: an oracle that crashes is UNJUDGED, not a FAIL', by['code-search-prefix'].works.verdict === 'UNJUDGED' && /no verdict line \(exit 1\)/.test(by['code-search-prefix'].works.line), JSON.stringify(by['code-search-prefix'].works));
@@ -1484,18 +1562,21 @@ async function asyncSection(name, fn) {
     const unfixed = tmp('qc-test-oracle-unfixed-');
     QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
     QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
-    const only = [QC.SELF_TEST_PAIR.correct, QC.SELF_TEST_PAIR.deletion];
+    const selfPair = ANSWERS.selfTestPair;
+    // One line, not a stack: the release gate shows only a failing suite's tail.
+    if (!selfPair) { check('the answer key names the self-test pair', false, 'answers.json has no selfTestPair'); return; }
+    const only = [selfPair.correct, selfPair.deletion];
     const port = await QC.freePort();
     const before = await QC.judgeTree(unfixed, port, { answers: ANSWERS, only });
     for (const r of before.oracles) check('unfixed: the ' + r.id + ' gone oracle FAILs', r.gone.verdict === 'FAIL', r.gone.line);
     const pair = tmp('qc-test-oracle-pair-');
     QC.copyTree(unfixed, pair);
-    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.correct].correct);
-    QC.applyEdits(pair, FIXES[QC.SELF_TEST_PAIR.deletion].deletion);
+    QC.applyEdits(pair, FIXES[selfPair.correct].correct);
+    QC.applyEdits(pair, FIXES[selfPair.deletion].deletion);
     const after = await QC.judgeTree(pair, port, { answers: ANSWERS, only });
     const by = Object.fromEntries(after.oracles.map(r => [r.id, r]));
-    const c = by[QC.SELF_TEST_PAIR.correct];
-    const d = by[QC.SELF_TEST_PAIR.deletion];
+    const c = by[selfPair.correct];
+    const d = by[selfPair.deletion];
     check('a correct fix (' + c.id + ') passes gone and works', c.gone.verdict === 'PASS' && c.works.verdict === 'PASS', c.gone.line + ' | ' + c.works.line);
     check('an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
   });

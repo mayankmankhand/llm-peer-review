@@ -790,7 +790,7 @@ function releaseRepo(version, tag, opt) {
   runDir('2026-10-04-000000-review-ship-y', { role: 'review', arm: 'ship', build: { sha: built, version: '1.0.0' }, startedAt: '2026-10-04T00:00:00Z' }, false);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
   check('the newest valid ship-arm run is named with its build and Claude Code version, and nothing has changed since',
-    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-02-000000-review-ship-x: build [0-9a-f]{7} \(1\.0\.0\), Claude Code 2\.1\.296 \(Claude Code\); 0 review-path files changed in plugin\/ since that build/.test(r.out), r.out);
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-02-000000-review-ship-x: build [0-9a-f]{7} \(1\.0\.0\), Claude Code 2\.1\.296 \(Claude Code\); 0 review-path files changed in plugin\/ since that build; fixture notebook$/m.test(r.out), r.out);
 
   write(repo, 'plugin/commands/review.md', '# Review, edited\n');
   write(repo, 'plugin/README.md', '# Plugin, edited\n');
@@ -800,10 +800,10 @@ function releaseRepo(version, tag, opt) {
     r.status === 0 && /; 1 review-path file changed in plugin\/ since that build/.test(r.out) && /^ {7}commands\/review\.md$/m.test(r.out) && !/^ {7}README\.md$/m.test(r.out), r.out);
   check('the catch-rate line is not counted as a check', /release-check: 5 passed, 0 failed/.test(r.out), summaryLine(r.out));
 
-  runDir('2026-10-05-000000-review-ship-z', { role: 'review', arm: 'ship', build: { sha: '0123456789abcdef0123456789abcdef01234567', version: '1.0.0' }, startedAt: '2026-10-05T00:00:00Z' }, true);
+  runDir('2026-10-05-000000-review-ship-z', { role: 'review', arm: 'ship', build: { sha: '0123456789abcdef0123456789abcdef01234567', version: '1.0.0' }, fixtureName: 'pocket', startedAt: '2026-10-05T00:00:00Z' }, true);
   r = run(repo, ['--tests-only', '--suites', 'stubs/pass.js']);
-  check('a build this repository does not have is said plainly, and the run still exits 0',
-    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-05-000000-review-ship-z: build 0123456 is not in this repository's history/.test(r.out), r.out);
+  check('a build this repository does not have is said plainly, naming the run\'s fixture, and the run still exits 0',
+    r.status === 0 && /info catch rate - newest valid ship-arm run 2026-10-05-000000-review-ship-z: build 0123456 is not in this repository's history; fixture pocket$/m.test(r.out), r.out);
 }
 
 // --- hook routing ------------------------------------------------------------------

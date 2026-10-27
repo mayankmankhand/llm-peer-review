@@ -52,7 +52,18 @@
 // notebook, and the mode probes, the mapper and the skeptic replay always run on
 // notebook. An unknown name is refused with the list of folders that hold an
 // answers.json. A fixture's hash is taken over its base/ and change/ files by
-// their paths inside its own folder, so moving the folder does not move it.
+// their paths inside its own folder, so moving the folder does not move it. The
+// answer key also holds what used to be constants here: `app` (the app's name and
+// the two commit messages), `selfTestPair`, and `noOracle` on each bug no script
+// can run.
+//
+// Notebook chooses, Pocket judges (#278, the held-out rule). Prompt wording, model
+// pins and every other setting are tuned on notebook. pocket is held out as the
+// judge: a pocket run may correct pocket's own answer key (every saved pocket run
+// rescored with --check and the moved catches reported), but nothing is ever
+// tuned on a pocket result, never a prompt, a model pin or notebook's key. A
+// pocket miss on the current build is filed as an issue and worked on notebook,
+// and pocket is run again only to re-judge.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -135,11 +146,16 @@
 //   node scripts/quality-check.js --budget                 the ledger against the approval
 //   node scripts/quality-check.js --approve <usd>          record the owner's approved total
 //
-// Each run lands in reports/quality-check/<stamp>-<role>-<arm>-<build>/: run.json
-// (what ran), result.json (the session's own JSON result), transcripts/ (every
-// session and helper transcript), project-reports/ (the review's markdown
-// report and receipts), analysis.json (validity and catches), and a line in
-// reports/quality-check/ledger.jsonl. reports/ is gitignored and kept on disk.
+// Each run lands in reports/quality-check/<stamp>-<role>-<arm>-<build>[-<fixture>][-<label>]/,
+// the fixture named only when it is not notebook: run.json (what ran, the fixture's
+// hash and name as meta.fixture and meta.fixtureName), result.json (the session's
+// own JSON result), transcripts/ (every session and helper transcript),
+// project-reports/ (the review's markdown report and receipts), analysis.json
+// (validity and catches), and a line in reports/quality-check/ledger.jsonl that
+// names the fixture too. reports/ is gitignored and kept on disk. --check, --judge
+// and --score read the fixture from each run's record (a run saved before #278 has
+// none and ran on notebook), so they take no --fixture; --score refuses runs of
+// two fixtures, and its noise pool holds only runs of the fixture it scores.
 // A skeptic run adds replay-merge/ (the Phase 3 merge folder it was handed) and
 // scratchpad/ (the session's scratchpad, where a runner may write shards with
 // Bash, so no transcript holds their bytes). A fix run adds project-final/ (the
@@ -798,7 +814,7 @@ function analyzeRun(run, answers) {
   const reasons = [];
   const warnings = [];
   const expect = meta.expect || {};
-  const a = { dir: run.dir, role: meta.role, arm: meta.arm, label: meta.label || '', valid: true, reasons, warnings };
+  const a = { dir: run.dir, role: meta.role, arm: meta.arm, label: meta.label || '', fixtureName: runFixtureName(meta), valid: true, reasons, warnings };
   // What the session ran under (#277); a run saved before the record has none.
   a.restrictions = meta.restrictions || null;
 
@@ -1519,20 +1535,21 @@ function analyzeSkeptic(a, run, main, subs, reasons, warnings) {
 // fix verifiers' returns), and the two verdicts. A bug the run said was FIXED that
 // does not pass both oracles is a false FIXED: the miss B1 found, measured.
 
-// The planted bugs with no oracle pair, and why: no script can run them.
-const NOT_RUNNABLE = {
-  'commands-contradiction': 'a prompt file: whether its rule and its step 2 still contradict is a reading of the text, and what an agent does with it is not deterministic, so no script can run it',
-  'copy-unclear-headline': 'README wording: whether a newcomer learns what the app is is a reader\'s judgment, not a behaviour a script can run',
-};
-// The self-test's required pair: a correct fix for one bug and an empty fix (B1's
-// bad-R3 shape: the cited lines deleted, nothing in their place) for another.
-const SELF_TEST_PAIR = { correct: 'code-search-prefix', deletion: 'known-shell-glob' };
+// The fixture's answer key says which planted bugs no script can run (each such
+// bug carries noOracle, the reason) and names the self-test's required pair
+// (selfTestPair: a correct fix for one bug and an empty fix, B1's bad-R3 shape of
+// the cited lines deleted with nothing in their place, for another), so the
+// harness holds neither (#278).
+function notRunnable(answers) {
+  return Object.fromEntries(answers.bugs.filter(b => b.noOracle).map(b => [b.id, b.noOracle]));
+}
 const ORACLE_KINDS = ['gone', 'works'];
 const ORACLE_EXIT = { PASS: 0, FAIL: 1, UNJUDGED: 2 };
 const ORACLE_TIMEOUT_MS = 90 * 1000;
 
-// The oracle files for each planted bug, { id: { gone, works } }, in the answer
-// key's order. Throws on half a pair or an oracle that names no planted bug.
+// The oracle files for each runnable planted bug, { id: { gone, works } }, in the
+// answer key's order. Throws on half a pair, an oracle that names no planted bug,
+// and a bug that has neither a pair nor a noOracle reason, or has both.
 function oracleSet(answers, dir) {
   const files = fs.readdirSync(dir).filter(f => /\.(gone|works)\.js$/.test(f));
   const known = new Set(answers.bugs.map(b => b.id));
@@ -1541,7 +1558,11 @@ function oracleSet(answers, dir) {
   const out = {};
   for (const b of answers.bugs) {
     const pair = Object.fromEntries(ORACLE_KINDS.map(k => [k, files.includes(b.id + '.' + k + '.js') ? b.id + '.' + k + '.js' : null]));
-    if (!pair.gone && !pair.works) continue;
+    if (b.noOracle) {
+      if (pair.gone || pair.works) throw new Error(b.id + ' has an oracle pair and a noOracle reason');
+      continue;
+    }
+    if (!pair.gone && !pair.works) throw new Error(b.id + ' has no oracle pair and no noOracle reason');
     if (!pair.gone || !pair.works) throw new Error(b.id + ' has a ' + (pair.gone ? 'gone' : 'works') + ' oracle and no ' + (pair.gone ? 'works' : 'gone') + ' oracle');
     out[b.id] = pair;
   }
@@ -1620,7 +1641,7 @@ function analyzeFix(a, run, subs, answers, warnings) {
     const o = judged ? judged.oracles.find(x => x.id === b.id) : null;
     const gone = o && o.gone ? o.gone.verdict : null;
     const works = o && o.works ? o.works.verdict : null;
-    const outcome = NOT_RUNNABLE[b.id] ? 'not-runnable' : !o ? 'not-judged' : fixOutcome(gone, works);
+    const outcome = b.noOracle ? 'not-runnable' : !o ? 'not-judged' : fixOutcome(gone, works);
     const row = {
       raised: ((a.raised || {})[b.id] || []).length > 0, inReport: rids, reported, said: said.join('/') || null,
       gone, works, goneLine: o && o.gone ? o.gone.line : null, worksLine: o && o.works ? o.works.line : null, outcome,
@@ -1704,7 +1725,8 @@ function playwrightCore() {
 async function judgeTree(tree, port, opts) {
   const o = opts || {};
   const src = o.dir || path.join(fixtureDir(o.fixture || DEFAULT_FIXTURE), 'oracles');
-  const set = oracleSet(o.answers || loadAnswers(o.fixture), src);
+  const answers = o.answers || loadAnswers(o.fixture);
+  const set = oracleSet(answers, src);
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-judge.'));
   const pw = playwrightCore();
   const env = { ...process.env, QC_PLAYWRIGHT_CORE: pw || '' };
@@ -1735,7 +1757,7 @@ async function judgeTree(tree, port, opts) {
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
-  return { port, at: new Date().toISOString(), playwright: pw, oracles: results, notRunnable: NOT_RUNNABLE };
+  return { port, at: new Date().toISOString(), playwright: pw, oracles: results, notRunnable: notRunnable(answers) };
 }
 
 // Applies self-test-fixes.js edits to a tree: { file, find, replace }, where the
@@ -1843,8 +1865,15 @@ function agentShort(name) {
 }
 
 // How a field's value reads, with the runs that carry it: a build hash is shown
-// with the commits (or tree builds) it was hashed from.
+// with the commits (or tree builds) it was hashed from, a fixture hash with the
+// fixture's name.
 function settingValue(field, value, runs) {
+  // A fixture hash reads with the fixture's name, so a score across two fixtures
+  // says which two (#278).
+  if (field === 'fixture') {
+    const names = knownValues(runs.filter(r => r.harness.fixture === value).map(r => (r.labels || {}).fixture));
+    return names.length ? names.join('+') + ' (' + String(value).slice(0, 8) + ')' : String(value);
+  }
   if (field !== 'build') return String(value);
   const labels = knownValues(runs.filter(r => r.harness.build === value).map(r => (r.labels || {}).build));
   return (labels.join('+') || 'build') + ' (path ' + String(value).slice(0, 8) + ')';
@@ -2138,6 +2167,26 @@ function loadAnswers(name, root) {
   return JSON.parse(fs.readFileSync(path.join(fixtureDir(name || DEFAULT_FIXTURE, root), 'answers.json'), 'utf8'));
 }
 
+// What run.json records of the fixture a run used: its hash and its name.
+function fixtureRecord(name, root) {
+  return { fixture: fixtureHash(fixtureDir(name, root)), fixtureName: name };
+}
+
+// The fixture a saved run used, from its record; a run saved before #278 has no
+// name and ran on the only fixture there was, Notebook.
+function runFixtureName(meta) {
+  return (meta && meta.fixtureName) || DEFAULT_FIXTURE;
+}
+
+// A saved run analyzed against its own fixture's answer key, the way --check and
+// --judge read it: { fixtureName, answers, analysis }. `root` is for the tests.
+function checkRun(dir, root) {
+  const run = loadRun(dir);
+  const fixtureName = runFixtureName(run.meta);
+  const answers = loadAnswers(fixtureName, root);
+  return { fixtureName, answers, analysis: analyzeRun(run, answers) };
+}
+
 // A role's path files in a build folder, as { relPath: Buffer }. Read at run time,
 // so a tree build, which leaves no commit behind, still records its build hash.
 function dirPathFiles(dir, role) {
@@ -2267,7 +2316,7 @@ function runSetting(run) {
       chunk,
     },
     arm: armOf(meta, role),
-    labels: { build: build.sha ? build.sha.slice(0, 7) : build.spec ? build.spec + (build.version ? ' ' + build.version : '') : null },
+    labels: { build: build.sha ? build.sha.slice(0, 7) : build.spec ? build.spec + (build.version ? ' ' + build.version : '') : null, fixture: runFixtureName(meta) },
   };
 }
 
@@ -2277,7 +2326,7 @@ function settingLines(setting) {
   const h = setting.harness;
   const u = v => (v === null || v === undefined ? 'unknown' : v);
   const parts = ['build ' + (h.build ? settingValue('build', h.build, [setting]) : 'unknown' + (setting.labels.build ? ' (' + setting.labels.build + ', no recorded hash)' : '')),
-    'session ' + u(h.session), 'Claude Code ' + u(h.claude), 'fixture ' + u(h.fixture)];
+    'session ' + u(h.session), 'Claude Code ' + u(h.claude), 'fixture ' + (h.fixture ? settingValue('fixture', h.fixture, [setting]) : 'unknown')];
   if (setting.role === 'mapper') parts.push('prompt ' + u(h.prompt), 'chunk ' + u(h.chunk));
   const groups = new Map();
   for (const [ag, v] of Object.entries(setting.arm || {})) {
@@ -2296,6 +2345,22 @@ function stamp() {
   const d = new Date();
   const p = n => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
+// A run's folder name: <stamp>-<kind>-<build>[-<fixture>][-<label>], the fixture
+// named only when it is not the default, so a Notebook run's name is what it was
+// before there were two fixtures (#278).
+function runDirName(p) {
+  return p.stamp + '-' + p.kind + '-' + p.build
+    + (p.fixture && p.fixture !== DEFAULT_FIXTURE ? '-' + p.fixture : '')
+    + (p.label ? '-' + p.label.replace(/[^a-z0-9-]+/gi, '-') : '');
+}
+
+// A run's ledger line, from its run.json record: written however the run ends
+// (review R14), and naming the fixture it ran on.
+function ledgerRow(meta, cost, valid, dir) {
+  return { at: meta.endedAt || new Date().toISOString(), role: meta.role, arm: meta.arm, probe: meta.probe,
+    build: meta.build.spec, sha: meta.build.sha, fixtureName: runFixtureName(meta), ...cost, valid, dir };
 }
 
 function sh(cmd, args, opts) {
@@ -2338,9 +2403,10 @@ function fixtureHash(dir) {
   return h.digest('hex').slice(0, 16);
 }
 
-// A review fixture (its folder, `dir`) as a two-commit repo; returns the two
-// commit ids.
+// A review fixture (its folder, `dir`) as a two-commit repo, the commit messages
+// and author named by its answer key's `app`; returns the two commit ids.
 function buildReviewProject(project, planModels, dir) {
+  const app = JSON.parse(fs.readFileSync(path.join(dir, 'answers.json'), 'utf8')).app;
   fs.mkdirSync(project, { recursive: true });
   copyFixture(path.join(dir, 'base'), project);
   if (planModels) {
@@ -2348,14 +2414,14 @@ function buildReviewProject(project, planModels, dir) {
     const text = fs.readFileSync(planFile, 'utf8').replace(/(\*\*Overall Progress:\*\*[^\n]*\n)/, '$1**Models:** ' + planModels + '\n');
     fs.writeFileSync(planFile, text);
   }
-  const who = ['-c', 'user.name=Notebook Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false'];
+  const who = ['-c', 'user.name=' + app.name + ' Dev', '-c', 'user.email=dev@example.com', '-c', 'commit.gpgsign=false'];
   git(['init', '-q', '-b', 'main'], project);
   git(['add', '-A'], project);
-  git([...who, 'commit', '-q', '-m', 'Notes app'], project, { GIT_AUTHOR_DATE: '2026-09-30T12:00:00Z', GIT_COMMITTER_DATE: '2026-09-30T12:00:00Z' });
+  git([...who, 'commit', '-q', '-m', app.baseMessage], project, { GIT_AUTHOR_DATE: '2026-09-30T12:00:00Z', GIT_COMMITTER_DATE: '2026-09-30T12:00:00Z' });
   const base = git(['rev-parse', 'HEAD'], project);
   copyFixture(path.join(dir, 'change'), project);
   git(['add', '-A'], project);
-  git([...who, 'commit', '-q', '-m', 'Add search, export, clear all, backups, import and a reset command'], project, { GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z' });
+  git([...who, 'commit', '-q', '-m', app.changeMessage], project, { GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z' });
   const change = git(['rev-parse', 'HEAD'], project);
   return { base, change };
 }
@@ -3044,7 +3110,7 @@ async function commandRun(o) {
   const modeTag = o.modeWord ? '-' + o.modeWord : o.planModels ? '-plan-' + o.planModels : o.arm === 'ship' ? '-fit' : '';
   const onlyTag = o.only ? '-only-' + o.only.map(n => n.replace(/^review-|-finder$/g, '')).join('+') : '';
   const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' || role === 'fix' ? role : role + '-' + o.arm + onlyTag + modeTag;
-  const out = path.join(OUT_ROOT, stamp() + '-' + kind + '-' + buildLabel + (o.label ? '-' + o.label.replace(/[^a-z0-9-]+/gi, '-') : ''));
+  const out = path.join(OUT_ROOT, runDirName({ stamp: stamp(), kind, build: buildLabel, fixture: o.fixture, label: o.label }));
   fs.mkdirSync(out, { recursive: true });
   // Opus, except the probe that checks /execute's note on a session running on
   // another model than the plan's build model.
@@ -3056,7 +3122,7 @@ async function commandRun(o) {
     session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
     expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
-    fixture: fixtureHash(fx), startedAt: new Date().toISOString(),
+    ...fixtureRecord(o.fixture), startedAt: new Date().toISOString(),
   };
   // Where the oracles start the judged tree's server, after the session's own
   // fixture server has stopped.
@@ -3070,8 +3136,7 @@ async function commandRun(o) {
   let reportedCost = null;
   let sessionDone = false;
   let cleanupFailed = [];
-  const enterLedger = valid => appendLedger({ at: meta.endedAt || new Date().toISOString(), role, arm: meta.arm, probe: meta.probe,
-    build: o.build, sha: build.sha, ...ledgerCost(reportedCost, o.maxUsd), valid, dir: path.relative(REPO, out) });
+  const enterLedger = valid => appendLedger(ledgerRow(meta, ledgerCost(reportedCost, o.maxUsd), valid, path.relative(REPO, out)));
   try {
     if (role === 'review' || role === 'fix' || (role === 'probe' && o.probe === 'review')) {
       // The fix role runs the finders as the build ships them (the ship arm's settings).
@@ -3098,7 +3163,7 @@ async function commandRun(o) {
       meta.prompt = role === 'fix' ? fixPrompt(meta.lenses, commits.base) : '/tk:review ' + lensArg + ' ' + commits.base + '..HEAD' + modeWord + ' report only, no chaining';
       // The loop commits each green fix (M4); the scratch home has no git
       // identity, so the project carries one, as a real project would.
-      if (role === 'fix') for (const [k, v] of [['user.name', 'Notebook Dev'], ['user.email', 'dev@example.com'], ['commit.gpgsign', 'false']]) git(['config', k, v], project);
+      if (role === 'fix') for (const [k, v] of [['user.name', loadAnswers(o.fixture).app.name + ' Dev'], ['user.email', 'dev@example.com'], ['commit.gpgsign', 'false']]) git(['config', k, v], project);
       serverPid = await startServer(project);
     } else if (role === 'mapper') {
       const chunk = JSON.parse(fs.readFileSync(path.resolve(o.chunk), 'utf8'));
@@ -3314,7 +3379,7 @@ function mins(ms) { return typeof ms === 'number' ? (ms / 60000).toFixed(1) + ' 
 
 function printRunSummary(a, verbose) {
   console.log('');
-  console.log('Run: ' + path.relative(REPO, a.dir));
+  console.log('Run: ' + path.relative(REPO, a.dir) + ' (fixture ' + (a.fixtureName || DEFAULT_FIXTURE) + ')');
   console.log('  valid: ' + (a.valid ? 'yes' : 'NO (' + a.reasons.join(', ') + ')') + (a.warnings.length ? '; warnings: ' + a.warnings.join(', ') : ''));
   console.log('  cost: ' + money(a.costUsd) + ', time: ' + mins(a.wallMs) + ', turns: ' + (a.turns || 'n/a'));
   if (a.models) console.log('  models: main ' + a.models.main.join('+') + '; ' + Object.entries(a.models.byType).map(([t, m]) => t.replace(/^tk:/, '') + ' ' + m.join('+')).join('; '));
@@ -3375,15 +3440,16 @@ function printRunSummary(a, verbose) {
   }
 }
 
-// Every saved run under `root` whose role is `role`, analyzed with its setting:
-// the pool the noise lines draw from. A folder that does not load is skipped.
-function loadPool(root, role, answers) {
+// Every saved run under `root` whose role is `role` and whose fixture is
+// `fixtureName`, analyzed with its setting: the pool the noise lines draw from. A
+// folder that does not load is skipped.
+function loadPool(root, role, answers, fixtureName) {
   const out = [];
   if (!root || !fs.existsSync(root)) return out;
   for (const name of fs.readdirSync(root).sort()) {
     const dir = path.join(root, name);
     const meta = readJson(path.join(dir, 'run.json'));
-    if (!meta || meta.role !== role) continue;
+    if (!meta || meta.role !== role || runFixtureName(meta) !== fixtureName) continue;
     try {
       const run = loadRun(dir);
       out.push(Object.assign(analyzeRun(run, answers), { setting: runSetting(run) }));
@@ -3393,7 +3459,12 @@ function loadPool(root, role, answers) {
 }
 
 function commandScore(o) {
-  const answers = loadAnswers();
+  // One answer key scores every run, so the runs must share a fixture (#278).
+  const dirs = [...o.score, o.against].flatMap(list => list.split(',').map(s => s.trim()).filter(Boolean)).map(d => path.resolve(d));
+  const names = knownValues(dirs.map(d => runFixtureName(readJson(path.join(d, 'run.json'))))).sort();
+  if (names.length > 1) usage('the runs are on different fixtures (' + names.join(', ') + '): a score compares runs of one fixture');
+  const fixtureName = names[0] || DEFAULT_FIXTURE;
+  const answers = loadAnswers(fixtureName);
   const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => {
     const run = loadRun(path.resolve(d));
     return Object.assign(analyzeRun(run, answers), { setting: runSetting(run) });
@@ -3405,7 +3476,7 @@ function commandScore(o) {
     : answers.bugs.map(b => b.id);
   const knownId = (answers.bugs.find(b => b.knownAnswer) || {}).id;
   const poolRoot = path.resolve(o.pool || OUT_ROOT);
-  const pool = loadPool(poolRoot, role, answers);
+  const pool = loadPool(poolRoot, role, answers, fixtureName);
   const results = o.score.map(set => {
     const candidate = load(set);
     const s = scoreSets(candidate, baseline, ids, { knownId, requireKnown: o.requireKnown, allowDrift: o.allowDrift, pool });
@@ -3451,8 +3522,8 @@ function commandScore(o) {
 }
 
 // --oracle-self-test: the oracles on the change tree with no fix (every gone oracle
-// must FAIL), then on one tree holding a correct fix for SELF_TEST_PAIR.correct and
-// an empty fix for SELF_TEST_PAIR.deletion (correct: gone and works PASS; empty:
+// must FAIL), then on one tree holding a correct fix for the key's selfTestPair.correct
+// and an empty fix for its selfTestPair.deletion (correct: gone and works PASS; empty:
 // gone PASS, works FAIL), then each runnable bug's correct and empty fix alone.
 // No session, no ledger line; servers on a free port other than PORT. --fixture
 // chooses the fixture (notebook unless given).
@@ -3461,6 +3532,8 @@ async function commandOracleSelfTest(o) {
   const answers = loadAnswers(o.fixture);
   const set = oracleSet(answers, path.join(fx, 'oracles'));
   const fixes = require(path.join(fx, 'oracles', 'self-test-fixes.js'));
+  const pairIds = answers.selfTestPair || {};
+  if (!set[pairIds.correct] || !set[pairIds.deletion] || pairIds.correct === pairIds.deletion) usage('the answer key\'s selfTestPair must name two different runnable bugs: ' + JSON.stringify(answers.selfTestPair || null));
   const port = o.oraclePort || await freePort();
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-oracle-self-test.'));
   let checks = 0;
@@ -3486,10 +3559,10 @@ async function commandOracleSelfTest(o) {
 
     const pair = path.join(work, 'pair');
     copyTree(unfixed, pair);
-    applyEdits(pair, fixes[SELF_TEST_PAIR.correct].correct);
-    applyEdits(pair, fixes[SELF_TEST_PAIR.deletion].deletion);
-    console.log('\n2. One tree: a correct fix for ' + SELF_TEST_PAIR.correct + ', an empty fix (the cited lines deleted) for ' + SELF_TEST_PAIR.deletion);
-    await judge('pair', pair, { [SELF_TEST_PAIR.correct]: { gone: 'PASS', works: 'PASS' }, [SELF_TEST_PAIR.deletion]: { gone: 'PASS', works: 'FAIL' } });
+    applyEdits(pair, fixes[pairIds.correct].correct);
+    applyEdits(pair, fixes[pairIds.deletion].deletion);
+    console.log('\n2. One tree: a correct fix for ' + pairIds.correct + ', an empty fix (the cited lines deleted) for ' + pairIds.deletion);
+    await judge('pair', pair, { [pairIds.correct]: { gone: 'PASS', works: 'PASS' }, [pairIds.deletion]: { gone: 'PASS', works: 'FAIL' } });
 
     console.log('\n3. Each runnable bug alone: its correct fix passes both; its empty fix passes gone and fails works');
     for (const id of Object.keys(set)) {
@@ -3503,7 +3576,7 @@ async function commandOracleSelfTest(o) {
       }
     }
     console.log('\nNot runnable (no oracle pair):');
-    for (const [id, why] of Object.entries(NOT_RUNNABLE)) console.log('  ' + id.padEnd(24) + ' ' + why);
+    for (const [id, why] of Object.entries(notRunnable(answers))) console.log('  ' + id.padEnd(24) + ' ' + why);
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
@@ -3519,9 +3592,9 @@ async function commandJudge(o) {
   if (!meta || meta.role !== 'fix') usage('--judge needs a fix run folder (its run.json says role fix): ' + dir);
   const tree = path.join(dir, 'project-final');
   if (!fs.existsSync(tree)) usage('--judge needs the run\'s project-final/ folder, not found in ' + dir);
-  const judged = await judgeTree(tree, o.oraclePort || PORT);
+  const judged = await judgeTree(tree, o.oraclePort || PORT, { fixture: runFixtureName(meta) });
   fs.writeFileSync(path.join(dir, 'oracles.json'), JSON.stringify(judged, null, 2) + '\n');
-  const a = analyzeRun(loadRun(dir), loadAnswers());
+  const a = checkRun(dir).analysis;
   fs.writeFileSync(path.join(dir, 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
   printRunSummary(a, false);
 }
@@ -3530,7 +3603,7 @@ function commandBudget() {
   const rows = ledger();
   const spent = rows.reduce((s, r) => s + (typeof r.costUsd === 'number' ? r.costUsd : 0), 0);
   const approval = readJson(BUDGET);
-  for (const r of rows) console.log((r.at || '').slice(0, 19) + '  ' + String(r.role + (r.arm ? '-' + r.arm : '') + (r.probe ? '-' + r.probe : '')).padEnd(22) + String(r.build).padEnd(10) + (money(r.costUsd) + (r.costCapped ? '*' : '')).padEnd(9) + (r.valid ? 'valid' : 'INVALID') + '  ' + r.dir);
+  for (const r of rows) console.log((r.at || '').slice(0, 19) + '  ' + String(r.role + (r.arm ? '-' + r.arm : '') + (r.probe ? '-' + r.probe : '') + (r.fixtureName && r.fixtureName !== DEFAULT_FIXTURE ? ' ' + r.fixtureName : '')).padEnd(22) + String(r.build).padEnd(10) + (money(r.costUsd) + (r.costCapped ? '*' : '')).padEnd(9) + (r.valid ? 'valid' : 'INVALID') + '  ' + r.dir);
   if (rows.some(r => r.costCapped)) console.log('* no cost reported (a timeout, a crash, an interrupt): entered at the run\'s cap');
   console.log('spent: ' + money(spent) + '; approved: ' + (approval ? money(approval.approvedUsd) + ' (' + approval.at + ')' : 'none yet'));
 }
@@ -3599,9 +3672,13 @@ async function main() {
     return;
   }
   if (o.oracleSelfTest) return commandOracleSelfTest(o);
+  // A saved run's record names its fixture (#278), so these take no flag.
+  for (const [given, name] of [[o.judge, '--judge'], [o.check, '--check'], [o.score.length, '--score']]) {
+    if (given && o.fixtureGiven) usage(name + ' reads the fixture from the run\'s record; it takes no --fixture');
+  }
   if (o.judge) return commandJudge(o);
   if (o.check) {
-    const a = analyzeRun(loadRun(path.resolve(o.check)), loadAnswers());
+    const a = checkRun(path.resolve(o.check)).analysis;
     fs.writeFileSync(path.join(path.resolve(o.check), 'analysis.json'), JSON.stringify(a, null, 2) + '\n');
     printRunSummary(a, true);
     process.exit(a.valid ? 0 : 3);
@@ -3678,9 +3755,10 @@ module.exports = {
   settingLines, mapperPromptHash, PATH_FILES,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
-  NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
+  notRunnable, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
   FIXTURES_ROOT, DEFAULT_FIXTURE, ORACLE_LIB, fixtureNames, fixtureDir, fixtureHash, loadAnswers, parseArgs,
+  fixtureRecord, runDirName, ledgerRow, runFixtureName, checkRun,
   DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs, leakLines,
 };
 

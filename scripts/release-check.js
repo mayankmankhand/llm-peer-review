@@ -620,8 +620,10 @@ function infoCatchRate() {
   const newest = runs[0];
   const sha = newest.meta.build.sha;
   const head = 'newest valid ship-arm run ' + newest.name + ': build ' + sha.slice(0, 7);
+  // The fixture the run measured (#278): a run saved before fixtures had names ran on notebook.
+  const fixtureNote = '; fixture ' + (newest.meta.fixtureName || 'notebook');
   if (git(['cat-file', '-e', sha + '^{commit}']).status !== 0) {
-    console.log('  info catch rate - ' + head + " is not in this repository's history");
+    console.log('  info catch rate - ' + head + " is not in this repository's history" + fixtureNote);
     return;
   }
   const diff = git(['diff', '--name-only', sha, 'HEAD', '--', 'plugin/']);
@@ -631,7 +633,7 @@ function infoCatchRate() {
   const version = newest.meta.build.version ? ' (' + newest.meta.build.version + ')' : '';
   const claude = newest.meta.session && newest.meta.session.claude ? newest.meta.session.claude : 'unknown';
   console.log('  info catch rate - ' + head + version + ', Claude Code ' + claude + '; ' + changed.length
-    + ' review-path file' + (changed.length === 1 ? '' : 's') + ' changed in plugin/ since that build');
+    + ' review-path file' + (changed.length === 1 ? '' : 's') + ' changed in plugin/ since that build' + fixtureNote);
   for (const f of changed.slice(0, 20)) console.log('       ' + f);
   if (changed.length > 20) console.log('       ... and ' + (changed.length - 20) + ' more');
 }
