@@ -1360,6 +1360,24 @@ section('fix role: every planted bug has an oracle pair or a reason', () => {
   check('oracleSet: a bug with an oracle pair and a noOracle reason is refused', /code-search-prefix has an oracle pair and a noOracle reason/.test(threw), threw);
 });
 
+// Pocket's oracles (#278): the same shape, against Pocket's own key. A missing
+// oracles folder is one failing line, not a thrown stack.
+section('fix role: every pocket bug has an oracle pair or a reason (#278)', () => {
+  const dir = path.resolve(__dirname, 'fixtures', 'quality-check', 'pocket');
+  const key = JSON.parse(fs.readFileSync(path.join(dir, 'answers.json'), 'utf8'));
+  const oracles = path.join(dir, 'oracles');
+  if (!fs.existsSync(path.join(oracles, 'self-test-fixes.js'))) { check('pocket oracles: the fixture has oracles and self-test fixes', false, 'no pocket/oracles/self-test-fixes.js'); return; }
+  const fixes = require(path.join(oracles, 'self-test-fixes.js'));
+  let set = null;
+  try { set = QC.oracleSet(key, oracles); } catch (e) { check('pocket oracles: oracleSet accepts the folder', false, e.message); return; }
+  const runnable = Object.keys(set);
+  const not = key.bugs.filter(b => b.noOracle).map(b => b.id).sort();
+  const selfPair = key.selfTestPair || {};
+  check('pocket oracles: seven runnable bugs, the commands and copy bugs carry reasons', runnable.length === 7 && not.join() === 'commands-preview-archives,copy-readme-sequence' && key.bugs.filter(b => b.noOracle).every(b => b.noOracle.length > 20), JSON.stringify({ runnable, not }));
+  check('pocket oracles: every runnable bug has a correct and an empty self-test fix', runnable.every(id => fixes[id] && fixes[id].correct.length && fixes[id].deletion.length), runnable.filter(id => !(fixes[id] && fixes[id].correct.length && fixes[id].deletion.length)).join());
+  check('pocket oracles: the self-test pair is two different runnable bugs', !!selfPair.correct && selfPair.correct !== selfPair.deletion && runnable.includes(selfPair.correct) && runnable.includes(selfPair.deletion), JSON.stringify(selfPair));
+});
+
 section('fix role: the oracles stay out of the scratch project', () => {
   // The fixture folder holds base/, change/ and oracles/ side by side; the shared
   // oracle library sits one level up, outside every fixture (#278).
@@ -1593,30 +1611,40 @@ async function asyncSection(name, fn) {
     } finally { child.kill('SIGKILL'); }
   });
 
-  await asyncSection('fix role: the oracles separate a correct fix from an empty one (no browser)', async () => {
-    // The self-test's required case for the two bugs a test can run without a
-    // browser: the full one, browser oracles included, is --oracle-self-test.
-    const unfixed = tmp('qc-test-oracle-unfixed-');
-    QC.copyFixture(path.join(FIXTURE, 'base'), unfixed);
-    QC.copyFixture(path.join(FIXTURE, 'change'), unfixed);
-    const selfPair = ANSWERS.selfTestPair;
+  // The self-test's required case for the two bugs a test can run without a
+  // browser, on one fixture: the full one, browser oracles included, is
+  // --oracle-self-test. `prefix` starts every check name, so a failure names
+  // its fixture; a missing oracles folder is one failing line, not a stack.
+  async function separatesPair(name, prefix) {
+    const dir = path.resolve(__dirname, 'fixtures', 'quality-check', name);
+    const key = JSON.parse(fs.readFileSync(path.join(dir, 'answers.json'), 'utf8'));
+    const selfPair = key.selfTestPair;
     // One line, not a stack: the release gate shows only a failing suite's tail.
-    if (!selfPair) { check('the answer key names the self-test pair', false, 'answers.json has no selfTestPair'); return; }
+    if (!selfPair) { check(prefix + 'the answer key names the self-test pair', false, 'answers.json has no selfTestPair'); return; }
+    const fixesFile = path.join(dir, 'oracles', 'self-test-fixes.js');
+    if (!fs.existsSync(fixesFile)) { check(prefix + 'the fixture has oracles and self-test fixes', false, 'no ' + name + '/oracles/self-test-fixes.js'); return; }
+    const fixes = require(fixesFile);
+    const unfixed = tmp('qc-test-oracle-unfixed-');
+    QC.copyFixture(path.join(dir, 'base'), unfixed);
+    QC.copyFixture(path.join(dir, 'change'), unfixed);
     const only = [selfPair.correct, selfPair.deletion];
     const port = await QC.freePort();
-    const before = await QC.judgeTree(unfixed, port, { answers: ANSWERS, only });
-    for (const r of before.oracles) check('unfixed: the ' + r.id + ' gone oracle FAILs', r.gone.verdict === 'FAIL', r.gone.line);
+    const before = await QC.judgeTree(unfixed, port, { fixture: name, answers: key, only });
+    for (const r of before.oracles) check(prefix + 'unfixed: the ' + r.id + ' gone oracle FAILs', r.gone.verdict === 'FAIL', r.gone.line);
     const pair = tmp('qc-test-oracle-pair-');
     QC.copyTree(unfixed, pair);
-    QC.applyEdits(pair, FIXES[selfPair.correct].correct);
-    QC.applyEdits(pair, FIXES[selfPair.deletion].deletion);
-    const after = await QC.judgeTree(pair, port, { answers: ANSWERS, only });
+    QC.applyEdits(pair, fixes[selfPair.correct].correct);
+    QC.applyEdits(pair, fixes[selfPair.deletion].deletion);
+    const after = await QC.judgeTree(pair, port, { fixture: name, answers: key, only });
     const by = Object.fromEntries(after.oracles.map(r => [r.id, r]));
     const c = by[selfPair.correct];
     const d = by[selfPair.deletion];
-    check('a correct fix (' + c.id + ') passes gone and works', c.gone.verdict === 'PASS' && c.works.verdict === 'PASS', c.gone.line + ' | ' + c.works.line);
-    check('an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
-  });
+    check(prefix + 'a correct fix (' + c.id + ') passes gone and works', c.gone.verdict === 'PASS' && c.works.verdict === 'PASS', c.gone.line + ' | ' + c.works.line);
+    check(prefix + 'an empty fix (' + d.id + ', the cited lines deleted) passes gone and fails works', d.gone.verdict === 'PASS' && d.works.verdict === 'FAIL', d.gone.line + ' | ' + d.works.line);
+  }
+
+  await asyncSection('fix role: the oracles separate a correct fix from an empty one (no browser)', () => separatesPair('notebook', ''));
+  await asyncSection('fix role: the oracles separate a correct fix from an empty one on pocket (no browser)', () => separatesPair('pocket', 'on pocket (no browser): '));
 
   // #277: what a measured session may not reach. Each piece is exported and
   // tested on its output: stripSecrets on an env, sessionEnv on the real
