@@ -521,26 +521,63 @@ section('mapper coverage', () => {
   check('the template\'s file-list line becomes the chunk list', t === 'intro\n**Files in your chunk:**\n- a.js\n- b.js\nrest', t);
 });
 
+// Every fixture, Notebook and Pocket alike (#278): the key's line ranges exist in
+// the built tree, nothing stored is live in this repo, no file a finder reads
+// says what was planted, and the renames happen.
+const FIXTURE_NAMES = ['notebook', 'pocket'];
 section('fixture', () => {
-  const dest = tmp('qc-test-fixture-');
-  QC.copyFixture(path.join(FIXTURE, 'base'), dest);
-  QC.copyFixture(path.join(FIXTURE, 'change'), dest);
-  check('renames: dot-claude and dot-gitignore become dot folders, .fixture is dropped', fs.existsSync(path.join(dest, '.claude', 'commands', 'reset-notes.md')) && fs.existsSync(path.join(dest, '.gitignore')) && fs.existsSync(path.join(dest, 'package.json')) && fs.existsSync(path.join(dest, 'package-lock.json')));
-  for (const b of ANSWERS.bugs) {
-    for (const [file, start, end] of b.lines) {
-      const abs = path.join(dest, file);
-      const n = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8').split('\n').length : 0;
-      check('answer key ' + b.id + ': ' + file + ' exists and holds lines ' + start + '-' + end, n >= end && start >= 1, 'lines in file: ' + n);
+  for (const name of FIXTURE_NAMES) {
+    const dir = path.resolve(__dirname, 'fixtures', 'quality-check', name);
+    let key = null;
+    try { key = JSON.parse(fs.readFileSync(path.join(dir, 'answers.json'), 'utf8')); } catch (e) { key = null; }
+    if (!key) { check(name + ': the fixture has an answer key', false, 'no readable answers.json in scripts/fixtures/quality-check/' + name); continue; }
+    const dest = tmp('qc-test-fixture-' + name + '-');
+    QC.copyFixture(path.join(dir, 'base'), dest);
+    QC.copyFixture(path.join(dir, 'change'), dest);
+    const commands = path.join(dest, '.claude', 'commands');
+    check(name + ': renames: dot-claude and dot-gitignore become dot folders, .fixture is dropped',
+      fs.existsSync(commands) && fs.readdirSync(commands).some(c => c.endsWith('.md')) && fs.existsSync(path.join(dest, '.gitignore')) && fs.existsSync(path.join(dest, 'package.json')) && fs.existsSync(path.join(dest, 'package-lock.json')));
+    for (const b of key.bugs) {
+      for (const [file, start, end] of b.lines) {
+        const abs = path.join(dest, file);
+        const n = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8').split('\n').length : 0;
+        check(name + ': answer key ' + b.id + ': ' + file + ' exists and holds lines ' + start + '-' + end, n >= end && start >= 1, 'lines in file: ' + n);
+      }
     }
+    // Inert in this repo: nothing the repo's own tooling would pick up by name.
+    const stored = [];
+    (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else stored.push(path.relative(dir, p)); } })(dir);
+    const live = stored.filter(p => /(^|\/)(package\.json|package-lock\.json|CLAUDE\.md|\.gitignore)$/.test(p) || /(^|\/)\.claude\//.test(p));
+    check(name + ': the stored fixture carries no live package, lockfile, CLAUDE.md, .gitignore or .claude folder', live.length === 0, live.join(', '));
+    // Neutral: no file the finders read says what was planted (LESSONS, #204).
+    const telling = stored.filter(p => /^(base|change)\//.test(p)).filter(p => /\b(planted|answer key|deliberate(ly)? (bug|broken)|known[- ]answer|quality[- ]check|test fixture)\b/i.test(fs.readFileSync(path.join(dir, p), 'utf8')));
+    check(name + ': no fixture file names what was planted', telling.length === 0, telling.join(', '));
   }
-  // Inert in this repo: nothing the repo's own tooling would pick up by name.
-  const stored = [];
-  (function walk(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else stored.push(path.relative(FIXTURE, p)); } })(FIXTURE);
-  const live = stored.filter(p => /(^|\/)(package\.json|package-lock\.json|CLAUDE\.md|\.gitignore)$/.test(p) || /(^|\/)\.claude\//.test(p));
-  check('the stored fixture carries no live package, lockfile, CLAUDE.md, .gitignore or .claude folder', live.length === 0, live.join(', '));
-  // Neutral: no file the finders read says what was planted (LESSONS, #204).
-  const telling = stored.filter(p => /^(base|change)\//.test(p)).filter(p => /\b(planted|answer key|deliberate(ly)? (bug|broken)|known[- ]answer|quality[- ]check|test fixture)\b/i.test(fs.readFileSync(path.join(FIXTURE, p), 'utf8')));
-  check('no fixture file names what was planted', telling.length === 0, telling.join(', '));
+});
+
+// Pocket's shape (#278): one planted bug per lens plus one known-answer case,
+// seven of them runnable, and the change's lockfile pinning moment where the
+// dependency lens can find it. A missing file is reported by name, not thrown.
+section('the pocket fixture (#278)', () => {
+  const dir = path.resolve(__dirname, 'fixtures', 'quality-check', 'pocket');
+  const read = file => { try { return JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')); } catch (e) { return null; } };
+  const key = read('answers.json');
+  const lock = read(path.join('change', 'package-lock.json.fixture'));
+  if (!key || !lock) {
+    check('pocket: one planted bug per lens, one known-answer case, seven runnable', false, [!key && 'no pocket/answers.json', !lock && 'no pocket/change/package-lock.json.fixture'].filter(Boolean).join('; '));
+    return;
+  }
+  const bugs = key.bugs || [];
+  const lenses = bugs.filter(b => !b.knownAnswer).map(b => b.lens).sort();
+  const known = bugs.filter(b => b.knownAnswer).map(b => b.id);
+  const noOracle = bugs.filter(b => b.noOracle).map(b => b.id).sort();
+  const moment = (lock.packages || {})['node_modules/moment'] || {};
+  check('pocket: one planted bug per lens, one known-answer case, seven runnable',
+    bugs.length === 9 && lenses.join() === QC.FINDER_KINDS.slice().sort().join() && known.length === 1
+      && noOracle.join() === 'commands-preview-archives,copy-readme-sequence' && bugs.length - noOracle.length === 7
+      && !!key.app && key.app.name === 'Pocket' && !!key.selfTestPair
+      && moment.version === '2.29.1' && moment.resolved === 'https://registry.npmjs.org/moment/-/moment-2.29.1.tgz' && /^sha512-[A-Za-z0-9+/]+=*$/.test(moment.integrity || ''),
+    JSON.stringify({ n: bugs.length, lenses, known, noOracle, app: key.app, moment }));
 });
 
 // #278: fixtures are folders under scripts/fixtures/quality-check/, chosen by

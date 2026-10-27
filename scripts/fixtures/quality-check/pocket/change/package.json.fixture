@@ -1,0 +1,16 @@
+{
+  "name": "pocket",
+  "version": "1.1.0",
+  "private": true,
+  "description": "A small web app for keeping track of what you spend",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "import": "node scripts/import-expenses.js",
+    "close": "node scripts/close-month.js"
+  },
+  "dependencies": {
+    "moment": "2.29.1"
+  },
+  "license": "MIT"
+}

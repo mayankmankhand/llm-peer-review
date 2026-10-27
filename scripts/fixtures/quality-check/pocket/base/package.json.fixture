@@ -1,0 +1,11 @@
+{
+  "name": "pocket",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A small web app for keeping track of what you spend",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "license": "MIT"
+}

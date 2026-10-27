@@ -1,0 +1,386 @@
+{
+  "_about": [
+    "Answer key for the quality check (scripts/quality-check.js). Never copied into the scratch project.",
+    "Paths are as they appear in the scratch project, after the runner's renames (dot-claude -> .claude, *.fixture -> *).",
+    "A finding catches a bug when its file is one of `files` (or it names no file, or a URL, and `fileless` is true) and its",
+    "sentences satisfy `match`: a list of alternatives, each a list of case-insensitive regexes that must ALL match.",
+    "Sentences are the finding's what, context, fix and key (raw JSONL), or its report entry line, plain sub-bullets and",
+    "Top Issues summary. They carry no code names (finding-contract.md), so `match` names the consequence in plain words.",
+    "Evidence (the receipt and the attachments: Expected, Actual, Screenshot, Evidence) is never matched: a receipt that",
+    "prints a block of code quotes whatever sits nearby, so even a precise pattern turns up in a neighbouring finding's",
+    "evidence.",
+    "`lines` documents where each bug sits (the tests check it still does). Every bug here leaves `lineMatch` false, as",
+    "on the first fixture: a line window credits a different finding that happens to sit on the same lines.",
+    "`app` names the app and the two commits the runner makes from base/ and change/ (the author is \"<name> Dev\").",
+    "`selfTestPair` names the oracle self-test's required pair: a correct fix for one runnable bug, an empty fix for another.",
+    "A bug that no script can run carries `noOracle`, the reason; every other bug has a gone and a works oracle in oracles/.",
+    "This fixture is held out as the judge (scripts/quality-check.js header, \"Notebook chooses, Pocket judges\"): a run",
+    "on it may correct this key, with every saved run of it rescored, but nothing else is ever tuned on its results."
+  ],
+  "app": {
+    "name": "Pocket",
+    "baseMessage": "Expense list",
+    "changeMessage": "Add the month view, edit, export, report, import, close-month and a contributor command"
+  },
+  "selfTestPair": {
+    "correct": "code-edit-drops-id",
+    "deletion": "security-stored-xss"
+  },
+  "bugs": [
+    {
+      "id": "code-edit-drops-id",
+      "lens": "code",
+      "description": "Saving an edit replaces the row with the validated fields alone, so the expense loses its id and can no longer be edited or deleted (its links point at /edit/undefined).",
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          226,
+          232
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "(drop|lose|loses|lost|losing|remov|strip|discard|omit|forget|forgot|without|missing|lacks?|no longer (has|have|keep|carr))\\w*.{0,60}\\bid\\b"
+        ],
+        [
+          "\\bid\\b.{0,60}(drop|lost|missing|gone|removed|discard|undefined|overwrit|replac)"
+        ],
+        [
+          "undefined",
+          "edit|delet|link|url|row|expense"
+        ],
+        [
+          "(can(no|')t|never|no longer|unable to)( be)? (edit|delet|remov)",
+          "edit|sav|updat"
+        ]
+      ]
+    },
+    {
+      "id": "security-stored-xss",
+      "lens": "security",
+      "description": "The new cell() helper puts its content into the page without esc(), and the list rows and the report pass the note and category through it, so a note holding markup runs in the page.",
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          91,
+          94
+        ],
+        [
+          "server.js",
+          159,
+          159
+        ],
+        [
+          "server.js",
+          192,
+          192
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "xss"
+        ],
+        [
+          "cross[- ]site script"
+        ],
+        [
+          "(unescap|not escap|without escap|no escap|isn't escap|escaping|un-escap)",
+          "note|category|cell|html|markup|page|row|report|list"
+        ],
+        [
+          "(script|html|markup) (inject|execut)"
+        ],
+        [
+          "(malicious|attacker|untrusted|hostile|arbitrary)\\w*.{0,60}(script|html|markup|javascript)"
+        ],
+        [
+          "inject\\w*.{0,40}(html|script|markup|page)"
+        ],
+        [
+          "(raw|unsanitiz|unsanitis|not sanitiz)\\w*.{0,40}(html|note|category|input)"
+        ]
+      ]
+    },
+    {
+      "id": "ux-form-loses-input",
+      "lens": "ux",
+      "description": "A failed add (a bad amount) redirects to /add?error=1, which shows \"Invalid input\" over empty fields; the base re-rendered the form with what was typed and a message naming the field.",
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          152,
+          154
+        ],
+        [
+          "server.js",
+          213,
+          216
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "(lose|loses|lost|losing|clear|clears|cleared|wipe|wiped|discard|empt|blank|reset|throws? away|retyp|re-typ|start over)",
+          "form|field|input|typed|values|entr",
+          "error|invalid|fail|bad|wrong|reject|mistake|validat"
+        ],
+        [
+          "invalid input",
+          "vague|generic|which field|doesn't say|does not say|unhelpful|no detail|not specific|unclear|uninformative"
+        ],
+        [
+          "(which|what) field",
+          "error|wrong|invalid|message"
+        ],
+        [
+          "(typed|entered) (values?|data|input|text)",
+          "lost|gone|not kept|dropped|discarded|cleared|wiped"
+        ]
+      ]
+    },
+    {
+      "id": "browser-month-select-inert",
+      "lens": "browser",
+      "description": "The month dropdown's script sits inline in the page head, runs before the select exists, and is guarded with if (select), so choosing a month does nothing and no error shows.",
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          27,
+          33
+        ],
+        [
+          "server.js",
+          175,
+          175
+        ]
+      ],
+      "lineMatch": false,
+      "fileless": true,
+      "match": [
+        [
+          "month|dropdown|select|picker",
+          "does nothing|nothing happens|no effect|doesn't (do|change|navigate|reload|update|work)|does not (do|change|navigate|reload|update|work)|never (fires|runs|navigat|reload|attach|wired|bound)|inert|dead|not (wired|hooked|attached|bound|working)|ignored"
+        ],
+        [
+          "script|listener|handler|code",
+          "before (the )?(select|dropdown|element|page|body|dom|month|markup)"
+        ],
+        [
+          "getelementbyid",
+          "null"
+        ],
+        [
+          "defer|domcontentloaded"
+        ]
+      ]
+    },
+    {
+      "id": "plan-export-columns",
+      "lens": "plan",
+      "description": "The plan decides export columns date,category,amount,note with two-decimal amounts; /export.csv writes id,date,amount,category,note with the amounts as stored.",
+      "files": [
+        "server.js",
+        "plans/PLAN-fixture.md"
+      ],
+      "lines": [
+        [
+          "server.js",
+          201,
+          206
+        ]
+      ],
+      "lineMatch": false,
+      "match": [
+        [
+          "export|csv",
+          "column|header",
+          "plan|order|extra|\\bid\\b|differ|mismatch|wrong|swap|decided|spec"
+        ],
+        [
+          "export|csv",
+          "two decimal|2 decimal|decimals|raw amount|unformatted|format"
+        ],
+        [
+          "date,category,amount,note"
+        ],
+        [
+          "id,date,amount,category,note"
+        ]
+      ]
+    },
+    {
+      "id": "commands-preview-archives",
+      "lens": "commands",
+      "description": "month-report.md says it previews the month's report without changing any data, then its step 3 runs the close-month script, which moves the month's expenses into archive/.",
+      "files": [
+        ".claude/commands/month-report.md"
+      ],
+      "lines": [
+        [
+          ".claude/commands/month-report.md",
+          2,
+          2
+        ],
+        [
+          ".claude/commands/month-report.md",
+          13,
+          13
+        ]
+      ],
+      "lineMatch": false,
+      "noOracle": "a prompt file: whether its description and its step 3 still disagree is a reading of the text, and what an agent does with it is not deterministic, so no script can run it",
+      "match": [
+        [
+          "contradict"
+        ],
+        [
+          "conflict"
+        ],
+        [
+          "(without|no|not|never) chang\\w*( any)? data",
+          "archiv|mov|close|delet|remov|modif|writ"
+        ],
+        [
+          "read[- ]only|preview|non[- ]destructive",
+          "archiv|mov|close|modif|chang|delet|remov|mutat|writ|destructive"
+        ],
+        [
+          "description|frontmatter|promis|claims?|says",
+          "archiv|close-month|close month|mov\\w* (the )?(month|rows|expenses|data)|modif|destructive|mutat"
+        ]
+      ]
+    },
+    {
+      "id": "deps-moment-cve",
+      "lens": "deps",
+      "description": "The import command adds moment 2.29.1, below the fixes for CVE-2022-24785 (locale path traversal, fixed in 2.29.2) and CVE-2022-31129 (ReDoS, fixed in 2.29.4).",
+      "files": [
+        "package.json",
+        "package-lock.json",
+        "scripts/import-expenses.js"
+      ],
+      "lines": [
+        [
+          "package.json",
+          12,
+          14
+        ],
+        [
+          "package-lock.json",
+          15,
+          23
+        ]
+      ],
+      "lineMatch": false,
+      "fileless": true,
+      "match": [
+        [
+          "moment",
+          "cve|vulnerab|advisor|path traversal|redos|regular expression|inefficient|audit|insecure|security|unpatched|2\\.29\\.(1|2|4)|ghsa"
+        ],
+        [
+          "\\b(pin|pins|pinned|old|older|outdated)\\b[^.]{0,40}\\b(library|release|version|dependency|package)",
+          "advisor|vulnerab|cve|security|high[- ]severity"
+        ]
+      ]
+    },
+    {
+      "id": "copy-readme-sequence",
+      "lens": "copy",
+      "description": "The README puts a new \"Closing a month\" section with the archive command right after the opening, and moves Getting started to the end, so a newcomer meets a data-moving command before learning how to run the app.",
+      "files": [
+        "README.md"
+      ],
+      "lines": [
+        [
+          "README.md",
+          5,
+          7
+        ],
+        [
+          "README.md",
+          29,
+          33
+        ]
+      ],
+      "lineMatch": false,
+      "noOracle": "README order: whether a newcomer learns how to run the app before meeting a command that moves data is a reader's judgment, not a behaviour a script can run",
+      "match": [
+        [
+          "getting started",
+          "end|bottom|last|buried|moved|after|below|down"
+        ],
+        [
+          "closing a month|close command|archive command|npm run close",
+          "first|top|before|above|ahead|opens?|leads?|early|order|sequenc"
+        ],
+        [
+          "order|sequenc|flow|structure",
+          "section|readme|heading",
+          "setup|install|getting started|run the app|how to (start|run)"
+        ],
+        [
+          "newcomer|new user|reader|first[- ]time",
+          "before|first",
+          "destructive|data[- ]moving|moves? (data|expenses)|archiv|clos"
+        ]
+      ]
+    },
+    {
+      "id": "known-capped-total",
+      "lens": "code",
+      "description": "Known-answer case (the 7.2.0 capped-list miss): the month view shows at most 20 rows and computes its count and total from the shown rows, so a month with more than 20 expenses reports a wrong count and total and says nothing was left out.",
+      "files": [
+        "server.js"
+      ],
+      "lines": [
+        [
+          "server.js",
+          13,
+          13
+        ],
+        [
+          "server.js",
+          167,
+          168
+        ]
+      ],
+      "lineMatch": false,
+      "knownAnswer": true,
+      "match": [
+        [
+          "\\b(20|twenty)\\b",
+          "cap|limit|truncat|cut|only|first|max|at most|slice|page|hid|drop|omit|left out"
+        ],
+        [
+          "capped|truncated|cut off",
+          "list|month|rows|expenses|view"
+        ],
+        [
+          "pagination"
+        ],
+        [
+          "silently|quietly",
+          "drop|hid|omit|cut|truncat|left out|missing|cap"
+        ],
+        [
+          "(count|total|sum)\\w*.{0,40}(only|just) (the )?(shown|visible|displayed|first)"
+        ]
+      ]
+    }
+  ]
+}

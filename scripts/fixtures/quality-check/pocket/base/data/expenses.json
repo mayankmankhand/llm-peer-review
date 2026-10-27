@@ -1,0 +1,37 @@
+[
+  {
+    "id": "p1a2b3",
+    "date": "2026-09-27",
+    "category": "Food",
+    "amount": 12.5,
+    "note": "Lunch with Sam"
+  },
+  {
+    "id": "p1a2b4",
+    "date": "2026-09-30",
+    "category": "Transport",
+    "amount": 2.75,
+    "note": "Bus fare"
+  },
+  {
+    "id": "p1a2b5",
+    "date": "2026-10-02",
+    "category": "Home",
+    "amount": 38.2,
+    "note": "Light bulbs, batteries"
+  },
+  {
+    "id": "p1a2b6",
+    "date": "2026-10-03",
+    "category": "Fun",
+    "amount": 15,
+    "note": "Cinema"
+  },
+  {
+    "id": "p1a2b7",
+    "date": "2026-10-05",
+    "category": "Food",
+    "amount": 4,
+    "note": "Coffee"
+  }
+]
