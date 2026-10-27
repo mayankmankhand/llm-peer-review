@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-**A patch on top of v8.0.12 (#277, #278).** The issue 277 research compared the toolkit with two Google harness sources (the harness2 repository and the Object-Oriented Harness paper) and the write-ups around them, 398 verified parts. It found two things the toolkit did that every source says not to do, and three cheap practices it lacked. This block builds the four free items and both budget items: a second planted-bug fixture (#278) and the measurement rule per review-path release (#279).
+**A patch on top of v8.0.12 (#277, #278, #279).** The issue 277 research compared the toolkit with two Google harness sources (the harness2 repository and the Object-Oriented Harness paper) and the write-ups around them, 398 verified parts. It found two things the toolkit did that every source says not to do, and three cheap practices it lacked. This block builds the four free items and both budget items: a second planted-bug fixture (#278) and the measurement rule per review-path release (#279).
 
 ### Changed
 
