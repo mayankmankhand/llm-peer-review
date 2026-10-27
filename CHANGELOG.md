@@ -18,6 +18,10 @@
 - **`/tk:document` and `/tk:create-issue` open the guide** before they write docs, release notes, a pull request body or an issue body; their own style rules and issue format still hold.
 - **The fixed lines Claude says to the owner use the everyday names:** the announcement when one stage moves on to the next by itself, the question about removing a side copy at the end of a cycle, the map and side-copy notices, the review page's "Proof" and "Double-check verdict" labels and its "Dropped by the double-check" group, the cycle page's checkpoint counts, and the starter text of four files. The review's markdown report keeps "Receipt" and "Audited out" until a release that changes the review itself, so for now the review page and the report differ in those labels.
 
+### Fixed
+
+- **The plan probe (maintainer, not shipped) works again.** Since v7.5.0 it ran on Opus and expected the closing steps to switch to Opus, which an Opus session rightly skips, so every run failed. It now runs on Sonnet, and it also checks that a new plan opens with the In plain words block.
+
 ### Upgrading
 
 - The rules file changed, so the next `/tk:upgrade` reports your `.claude/rules/toolkit.md` as behind the shipped copy (C-7, the check that compares the rules file with the shipped starter copy) and offers the merge; take it, or keep your wording. The new Rule 6 and Rule 8 reach your sessions only once you take it.

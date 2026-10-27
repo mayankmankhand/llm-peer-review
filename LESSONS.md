@@ -13,7 +13,6 @@
 - **Hybrid approach beats all-or-nothing.**
 - **AI peer review recommendations often over-engineer.**
 - **A worktree is just a folder, a branch is just a pointer.**
-- **Worktree detection: `--git-dir` vs `--git-common-dir`.**
 - **Use deterministic scripts for structural data, not LLMs.** (see the v4.4.0 / issue #97 refinement in detail)
 - **Version bumps touch more files than you think.**
 - **Never interpolate shell variables into inline `node -e` strings.**
@@ -60,10 +59,7 @@
 
 ### Skills migration decisions (issue #71)
 
-- **Subagents do NOT auto-discover project skills.**
 - **Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.**
-- **`@axe-core/playwright` is compatible with `playwright-core`.**
-- **`user-invocable: false` works as documented.**
 - **Shared files reduce duplication across review skills.**
 - **GPT and Gemini peer review caught things standard reviews missed.**
 
@@ -89,7 +85,6 @@
 
 ### Rename-aware setup cleanup (issue #80)
 
-- **`for i in "${!array[@]}"` is the idiomatic Bash way to iterate parallel indexed arrays.**
 - **Scope parity gaps explicitly when fixing one of several.**
 - **A 🟩 on "ask the user about X" can mislead.**
 
@@ -586,3 +581,8 @@
 ## Issue 278 (a second planted-bug fixture)
 
 - **Try a judge fixture's checks on wrong answers too: a fix that hid the symptom and a finding about the neighbouring bug both scored right until the review tried them.**
+
+## Issues 276 and 280 (the writing guide and everyday words)
+
+- **Run the probe that checks a behavior in the same change that alters it: a change made an Opus session say go, the plan probe still expected the steps to switch to Opus, and nobody ran it for 24 days.**
+- **Never cd into a subfolder in a Bash call: the shell keeps that folder for the next call, so the project's relative paths miss; start each call from the project root instead.**
