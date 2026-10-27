@@ -802,6 +802,73 @@ section('score command end to end', () => {
   check('a run without --arm is a usage error (exit 2) and starts nothing', u.status === 2, u.stdout + u.stderr);
 });
 
+section('measured release (#279)', () => {
+  // The release gate reads three exports: the review-path hash of a commit, the
+  // ledger's runs on a hash (what measures a build), and the score of run folders
+  // against run folders. Each case tests the export first, so a missing one fails
+  // by the case name rather than throwing out of the section.
+  const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' }).stdout.trim();
+  const expected = QC.pathHash('review', QC.gitPathFiles(head, 'review'));
+  const hashOf = typeof QC.reviewPathHash === 'function' ? QC.reviewPathHash : null;
+  check('reviewPathHash gives the review-path hash of a commit and null for an unknown ref',
+    !!hashOf && /^[0-9a-f]{16}$/.test(expected) && hashOf(head) === expected && hashOf('nope') === null && hashOf('0'.repeat(40)) === null,
+    hashOf ? JSON.stringify({ head: hashOf(head), expected, nope: hashOf('nope') }) : 'reviewPathHash is not exported');
+
+  // A ledger of hand-made run folders: only run.json and analysis.json matter here.
+  const ledger = tmp('qc-ledger-');
+  const run = (name, meta, valid) => {
+    write(path.join(ledger, name, 'run.json'), JSON.stringify(meta));
+    write(path.join(ledger, name, 'analysis.json'), JSON.stringify({ valid }));
+  };
+  const NEW = 'aaaaaaaaaaaaaaaa';
+  const OLD = 'bbbbbbbbbbbbbbbb';
+  const ship = (hash, at, extra) => ({ role: 'review', arm: 'ship', fixtureName: 'pocket', startedAt: at, build: { sha: 'f'.repeat(40), pathHashes: { review: hash } }, ...(extra || {}) });
+  run('2026-10-26-200000-review-ship-fit-fffffff-pocket-1', ship(NEW, '2026-10-26T20:00:00Z'), true);
+  run('2026-10-26-210000-review-ship-fit-fffffff-pocket-2', ship(NEW, '2026-10-26T21:00:00Z'), true);
+  run('2026-10-20-000000-review-ship-fit-fffffff-pocket-old', ship(OLD, '2026-10-20T00:00:00Z'), true);
+  run('2026-10-26-220000-review-ship-fit-fffffff-pocket-invalid', ship(NEW, '2026-10-26T22:00:00Z'), false);
+  run('2026-10-26-230000-review-ship-fit-fffffff-notebook', { role: 'review', arm: 'ship', startedAt: '2026-10-26T23:00:00Z', build: { sha: 'f'.repeat(40), pathHashes: { review: NEW } } }, true);
+  run('2026-10-26-233000-review-a-only-code-fffffff-pocket', ship(NEW, '2026-10-26T23:30:00Z', { arm: 'a' }), true);
+  run('2026-10-26-234000-fix-fffffff-pocket', ship(NEW, '2026-10-26T23:40:00Z', { role: 'fix', arm: null }), true);
+  run('2026-10-26-235000-review-ship-fit-0000000-pocket-nohash', { role: 'review', arm: 'ship', fixtureName: 'pocket', startedAt: '2026-10-26T23:50:00Z', build: { sha: '0'.repeat(40) } }, true);
+  const fromShaName = '2026-10-27-000000-review-ship-fit-' + head.slice(0, 7) + '-pocket-fromsha';
+  run(fromShaName, { role: 'review', arm: 'ship', fixtureName: 'pocket', startedAt: '2026-10-27T00:00:00Z', build: { sha: head } }, true);
+  write(path.join(ledger, 'ledger.jsonl'), '{}\n');
+  write(path.join(ledger, '2026-10-27-010000-review-ship-fit-fffffff-pocket-going', 'run.json'), JSON.stringify(ship(NEW, '2026-10-27T01:00:00Z')));
+  const measured = typeof QC.measuredRelease === 'function' ? QC.measuredRelease : null;
+  const names = list => list.map(r => r.name);
+  const m = measured ? measured({ newHash: NEW, prevHash: OLD, ledgerDir: ledger }) : null;
+  check('measuredRelease picks valid ship-arm runs of the judge fixture by review-path hash',
+    !!m && JSON.stringify(names(m.candidates)) === JSON.stringify(['2026-10-26-210000-review-ship-fit-fffffff-pocket-2', '2026-10-26-200000-review-ship-fit-fffffff-pocket-1'])
+      && JSON.stringify(names(m.baseline)) === JSON.stringify(['2026-10-20-000000-review-ship-fit-fffffff-pocket-old'])
+      && m.unchanged === false && m.candidates.every(r => r.dir === path.join(ledger, r.name) && typeof r.startedAt === 'string'),
+    m ? JSON.stringify({ candidates: names(m.candidates), baseline: names(m.baseline), unchanged: m.unchanged }) : 'measuredRelease is not exported');
+  const fromSha = measured ? measured({ newHash: expected, prevHash: OLD, ledgerDir: ledger }) : null;
+  check('a run saved without the hash is hashed from its commit when that commit is in history; one whose commit is not never matches',
+    !!fromSha && JSON.stringify(names(fromSha.candidates)) === JSON.stringify([fromShaName]),
+    fromSha ? JSON.stringify(names(fromSha.candidates)) : 'measuredRelease is not exported');
+  check('equal hashes read as unchanged', !!measured && measured({ newHash: NEW, prevHash: NEW, ledgerDir: ledger }).unchanged === true);
+  const none = measured ? measured({ newHash: NEW, prevHash: OLD, ledgerDir: path.join(ledger, 'missing') }) : null;
+  check('a missing ledger folder gives empty lists', !!none && none.candidates.length === 0 && none.baseline.length === 0 && none.unchanged === false, none ? JSON.stringify(none) : 'measuredRelease is not exported');
+  check('the judge fixture is the default: a Notebook run on the hash is not a candidate unless asked for',
+    !!m && !names(m.candidates).some(n => /notebook/.test(n)) && measured({ newHash: NEW, prevHash: OLD, ledgerDir: ledger, fixtureName: 'notebook' }).candidates.length === 1,
+    m ? JSON.stringify(names(m.candidates)) : 'measuredRelease is not exported');
+
+  const a = makeReviewRun({ caught: IDS });
+  const b = makeReviewRun({ caught: IDS });
+  const c = makeReviewRun({ caught: IDS, cost: 2 });
+  const d = makeReviewRun({ caught: IDS, cost: 2 });
+  const score = typeof QC.scoreRunDirs === 'function' ? QC.scoreRunDirs : null;
+  const s = score ? score([c, d], [a, b], {}) : null;
+  check('scoreRunDirs returns what --score --json prints for the same runs',
+    !!s && s.verdict === 'PASS' && !!s.settings && s.settings.candidate.length === 2 && s.settings.baseline.length === 2 && IDS.every(id => s.perId[id]) && s.fixtureName === 'notebook',
+    s ? JSON.stringify({ verdict: s.verdict, why: s.why, ids: Object.keys(s.perId || {}) }) : 'scoreRunDirs is not exported');
+  const alpha = makeReviewRun({ caught: IDS, meta: { fixtureName: 'alpha' } });
+  let refused = null;
+  try { if (score) score([alpha], [a], {}); } catch (e) { refused = e.message; }
+  check('scoreRunDirs refuses runs of two fixtures by throwing, naming both', !!score && /alpha/.test(refused) && /notebook/.test(refused), score ? String(refused) : 'scoreRunDirs is not exported');
+});
+
 section('ledger cost (review R14)', () => {
   check('ledgerCost: a reported cost is entered as it is', JSON.stringify(QC.ledgerCost(4.19, 25)) === JSON.stringify({ costUsd: 4.19 }));
   const none = QC.ledgerCost(null, 25);

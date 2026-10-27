@@ -223,6 +223,16 @@
 //     INVALID run is left out of the whole score, and a bug harness-lost in two
 //     runs gives HARNESS (fix the runner, then rerun) instead of failing the arm.
 //
+// Release gate (#279). scripts/release-check.js reads three exports rather than
+// copying the record format: reviewPathHash(sha), the review-path hash of a
+// commit; measuredRelease({ newHash, prevHash, ledgerDir, fixtureName }), the
+// ledger's valid ship-arm review runs of the judge fixture (Pocket by default)
+// on each hash, newest first; and scoreRunDirs(candidateDirs, baselineDirs,
+// opts), what --score prints as JSON. A release whose review path changed since
+// the previous tag needs two candidates to count as measured, and when the
+// previous tag has two or more, the gate scores new against old and blocks on
+// anything but PASS.
+//
 // Budget. reports/quality-check/budget.json holds the owner's approved total.
 // With no approval on record, only the first measured run may start (its cost
 // sizes the request). With one, a run refuses to start when the money already
@@ -2234,6 +2244,50 @@ function gitPathFiles(sha, role) {
   return out;
 }
 
+// The review-path hash of a commit (#279): what run.json records as
+// build.pathHashes.review, computed from the commit's plugin/ tree. Null when
+// the ref is not a commit sha in this repository.
+function reviewPathHash(sha) {
+  const files = gitPathFiles(sha, 'review');
+  return files ? pathHash('review', files) : null;
+}
+
+// What measures a release (#279): the valid ship-arm review runs of the judge
+// fixture (Pocket, #278) in the ledger whose review-path hash is the new build's
+// (candidates) or the previous release's (baseline), newest first. A run's hash
+// is the one its record carries, else the one its commit gives when that commit
+// is in history; a run with neither never matches. A folder without run.json
+// and analysis.json is not a run (one still going, or a stray file), as the
+// release gate's info line already reads the ledger. The gate calls this with
+// the pushed commit's hash and the previous tag's, and needs two candidates
+// before the build counts as measured.
+function measuredRelease(o) {
+  const ledgerDir = o.ledgerDir || OUT_ROOT;
+  const fixtureName = o.fixtureName || 'pocket';
+  const out = { newHash: o.newHash || null, prevHash: o.prevHash || null, unchanged: !!o.newHash && o.newHash === o.prevHash, candidates: [], baseline: [] };
+  let names;
+  try { names = fs.readdirSync(ledgerDir); } catch (e) { return out; }
+  for (const name of names) {
+    const dir = path.join(ledgerDir, name);
+    const meta = readJson(path.join(dir, 'run.json'));
+    const analysis = readJson(path.join(dir, 'analysis.json'));
+    if (!meta || !analysis) continue;
+    if (meta.role !== 'review' || meta.arm !== 'ship' || analysis.valid !== true) continue;
+    if (runFixtureName(meta) !== fixtureName) continue;
+    const build = meta.build || {};
+    let hash = (build.pathHashes && build.pathHashes.review) || null;
+    if (!hash && build.sha) hash = reviewPathHash(build.sha);
+    if (!hash) continue;
+    const row = { dir, name, startedAt: String(meta.startedAt || name), hash };
+    if (hash === out.newHash) out.candidates.push(row);
+    if (hash === out.prevHash) out.baseline.push(row);
+  }
+  const newestFirst = (a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0);
+  out.candidates.sort(newestFirst);
+  out.baseline.sort(newestFirst);
+  return out;
+}
+
 // One agent file's text at a commit, or null.
 const gitAgentCache = new Map();
 function gitAgentText(sha, name) {
@@ -3469,31 +3523,53 @@ function loadPool(root, role, answers, fixtureName) {
   return out;
 }
 
-function commandScore(o) {
-  // One answer key scores every run, so the runs must share a fixture (#278).
-  const dirs = [...o.score, o.against].flatMap(list => list.split(',').map(s => s.trim()).filter(Boolean)).map(d => path.resolve(d));
+// The score of candidate run folders against baseline run folders: what --score
+// prints as JSON, as one object, for commandScore and for the release gate
+// (#279). One answer key scores every run, so the runs must share a fixture
+// (#278): two fixtures throw an Error marked `usage`, which commandScore turns
+// into a usage error. The result is scoreSets' object with each side's settings
+// attached, plus the role, the fixture name and the noise pool's root.
+function scoreRunDirs(candidateDirs, baselineDirs, opts) {
+  const o = opts || {};
+  const dirs = [...candidateDirs, ...baselineDirs].map(d => path.resolve(d));
   const names = knownValues(dirs.map(d => runFixtureName(readJson(path.join(d, 'run.json'))))).sort();
-  if (names.length > 1) usage('the runs are on different fixtures (' + names.join(', ') + '): a score compares runs of one fixture');
+  if (names.length > 1) {
+    const e = new Error('the runs are on different fixtures (' + names.join(', ') + '): a score compares runs of one fixture');
+    e.usage = true;
+    throw e;
+  }
   const fixtureName = names[0] || DEFAULT_FIXTURE;
   const answers = loadAnswers(fixtureName);
-  const load = list => list.split(',').map(s => s.trim()).filter(Boolean).map(d => {
+  const load = list => list.map(d => {
     const run = loadRun(path.resolve(d));
     return Object.assign(analyzeRun(run, answers), { setting: runSetting(run) });
   });
-  const baseline = load(o.against);
+  const baseline = load(baselineDirs);
+  const candidate = load(candidateDirs);
   const role = baseline[0] && baseline[0].role;
   const ids = role === 'mapper'
-    ? ((loadRun(path.resolve(o.against.split(',')[0])).meta.chunk || {}).files || [])
+    ? ((loadRun(path.resolve(baselineDirs[0])).meta.chunk || {}).files || [])
     : answers.bugs.map(b => b.id);
   const knownId = (answers.bugs.find(b => b.knownAnswer) || {}).id;
   const poolRoot = path.resolve(o.pool || OUT_ROOT);
   const pool = loadPool(poolRoot, role, answers, fixtureName);
-  const results = o.score.map(set => {
-    const candidate = load(set);
-    const s = scoreSets(candidate, baseline, ids, { knownId, requireKnown: o.requireKnown, allowDrift: o.allowDrift, pool });
-    s.settings = { candidate: candidate.map(x => x.setting), baseline: baseline.map(x => x.setting) };
-    return { set, s };
-  });
+  const s = scoreSets(candidate, baseline, ids, { knownId, requireKnown: o.requireKnown, allowDrift: o.allowDrift, pool });
+  s.settings = { candidate: candidate.map(x => x.setting), baseline: baseline.map(x => x.setting) };
+  s.role = role;
+  s.fixtureName = fixtureName;
+  s.poolRoot = poolRoot;
+  return s;
+}
+
+function commandScore(o) {
+  const split = list => list.split(',').map(s => s.trim()).filter(Boolean);
+  let results;
+  try {
+    results = o.score.map(set => ({ set, s: scoreRunDirs(split(set), split(o.against), o) }));
+  } catch (e) {
+    if (e && e.usage) return usage(e.message);
+    throw e;
+  }
   if (o.json) { console.log(JSON.stringify(results, null, 2)); return; }
   const short = d => path.basename(d);
   for (const { set, s } of results) {
@@ -3514,14 +3590,14 @@ function commandScore(o) {
     console.log('  stable (' + s.stable.length + '): ' + (s.stable.join(', ') || 'none'));
     if (s.noisy.length) console.log('  noisy, not scored (' + s.noisy.length + '): ' + s.noisy.join(', '));
     if (s.never.length) console.log('  never caught by the baseline (' + s.never.length + '): ' + s.never.join(', '));
-    if (role !== 'mapper') {
+    if (s.role !== 'mapper') {
       console.log('  ' + 'bug'.padEnd(27) + 'baseline  candidate  raised(candidate)  harness-lost(candidate)');
       for (const [id, p] of Object.entries(s.perId)) console.log('  ' + id.padEnd(27) + p.baseline.padEnd(10) + p.candidate.padEnd(11) + p.raisedCandidate.padEnd(19) + p.harnessLost);
       // Which run lost which bug to the harness, and through which Audited out entry.
       for (const l of s.harnessLostRuns) console.log('  harness-lost: ' + l.id + ' in ' + short(l.dir) + ' (' + l.kills.join(', ') + ')');
     }
     if (Object.keys(s.noise).length) {
-      console.log('  noise: each stable catch across the ' + s.poolRuns + ' saved valid run' + (s.poolRuns === 1 ? '' : 's') + ' on the baseline\'s setting (' + path.relative(REPO, poolRoot) + '):');
+      console.log('  noise: each stable catch across the ' + s.poolRuns + ' saved valid run' + (s.poolRuns === 1 ? '' : 's') + ' on the baseline\'s setting (' + path.relative(REPO, s.poolRoot) + '):');
       for (const [id, n] of Object.entries(s.noise)) console.log('    ' + id.padEnd(27) + n.caught + '/' + n.runs + (n.caught < n.runs ? '  (the baseline setting drops it)' : ''));
     }
     console.log('  cost per run: baseline ' + money(s.baselineCostUsd) + ', candidate ' + money(s.costUsd) + '; time: baseline ' + mins(s.baselineWallMs) + ', candidate ' + mins(s.wallMs));
@@ -3763,7 +3839,7 @@ module.exports = {
   modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
   auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
-  settingLines, mapperPromptHash, PATH_FILES,
+  settingLines, mapperPromptHash, PATH_FILES, reviewPathHash, measuredRelease, scoreRunDirs,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
   notRunnable, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
