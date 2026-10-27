@@ -1646,6 +1646,62 @@ async function asyncSection(name, fn) {
   await asyncSection('fix role: the oracles separate a correct fix from an empty one (no browser)', () => separatesPair('notebook', ''));
   await asyncSection('fix role: the oracles separate a correct fix from an empty one on pocket (no browser)', () => separatesPair('pocket', 'on pocket (no browser): '));
 
+  // #278 review: a fix that only hides a planted symptom must not read as fixed.
+  // Each edit below is such a fix on Pocket's change tree, and its gone oracle
+  // must FAIL. Not a self-test shape: those are a real fix and an empty one.
+  await asyncSection('fix role: on pocket, a fix that hides the symptom fails its gone oracle (#278 review)', async () => {
+    const dir = path.resolve(__dirname, 'fixtures', 'quality-check', 'pocket');
+    const key = JSON.parse(fs.readFileSync(path.join(dir, 'answers.json'), 'utf8'));
+    const unfixed = tmp('qc-test-mask-unfixed-');
+    QC.copyFixture(path.join(dir, 'base'), unfixed);
+    QC.copyFixture(path.join(dir, 'change'), unfixed);
+    const masks = {
+      // The count line goes; the list still shows the newest 20 of 25 and says nothing of the rest.
+      'known-capped-total': [{
+        file: 'server.js',
+        find: "    + '<p class=\"summary\">' + rows.length + (rows.length === 1 ? ' expense, ' : ' expenses, ') + money(total) + ' in total</p>\\n'\n",
+        replace: '',
+      }],
+      // The edit is still stored without its id, and answered with a page instead of a redirect.
+      'code-edit-drops-id': [{
+        file: 'server.js',
+        find: "      expenses[index] = checked.value;\n      saveExpenses(expenses);\n      return redirect(res, '/?month=' + monthOf(checked.value.date));\n",
+        replace: "      expenses[index] = checked.value;\n      saveExpenses(expenses);\n      return send(res, 200, page('Saved', '<p>Saved. <a href=\"/\">Back to the list</a></p>'));\n",
+      }],
+    };
+    const port = await QC.freePort();
+    for (const [id, edits] of Object.entries(masks)) {
+      const tree = tmp('qc-test-mask-');
+      QC.copyTree(unfixed, tree);
+      QC.applyEdits(tree, edits);
+      const j = await QC.judgeTree(tree, port, { fixture: 'pocket', answers: key, only: [id] });
+      const r = j.oracles.find(x => x.id === id);
+      check('on pocket: hiding the ' + id + ' symptom fails its gone oracle', !!r && r.gone.verdict === 'FAIL', r ? r.gone.line : 'no verdict for ' + id);
+    }
+  });
+
+  // #278 review: the judge runs code the session wrote (the tree's server and its
+  // npm scripts, started by the oracles), so it gets the session's stripped
+  // environment, never the owner's keys.
+  await asyncSection('fix role: the judge and the servers it starts see no key-like variable (#278 review)', async () => {
+    const dir = tmp('qc-test-env-oracles-');
+    const probe = "const k = process.env.QC_TEST_FAKE_API_KEY; console.log(k ? 'FAIL ID KIND: the oracle sees a key' : 'PASS ID KIND: no key'); process.exit(k ? 1 : 0);\n";
+    for (const id of ['code-search-prefix', 'known-shell-glob']) for (const kind of ['gone', 'works']) write(path.join(dir, id + '.' + kind + '.js'), probe.split('ID KIND').join(id + ' ' + kind));
+    const tree = tmp('qc-test-env-tree-');
+    write(path.join(tree, 'server.js'), '');
+    const twoBugs = { ...ANSWERS, bugs: ANSWERS.bugs.filter(b => b.id === 'code-search-prefix' || b.id === 'known-shell-glob') };
+    // Built from pieces: a quoted literal after a key-like name trips the push tripwire,
+    // which has no allow-list by design (see the lesson on real-shaped fixture secrets).
+    process.env.QC_TEST_FAKE_API_KEY = ['not', 'a', 'real', 'key'].join('-');
+    try {
+      const j = await QC.judgeTree(tree, await QC.freePort(), { answers: twoBugs, dir });
+      const seen = j.oracles.filter(r => r.gone.verdict !== 'PASS' || r.works.verdict !== 'PASS').map(r => r.id + ': ' + r.gone.line + ' | ' + r.works.line);
+      check('judgeTree: an oracle never sees the owner\'s key-like variables', j.oracles.length === 2 && seen.length === 0, seen.join('; ') || j.oracles.length + ' oracles judged');
+      const env = typeof QC.childEnv === 'function' ? QC.childEnv({ PORT: '1' }) : null;
+      check('childEnv: a process the harness starts beside the session gets no key-like variable', !!env && !('QC_TEST_FAKE_API_KEY' in env) && env.PORT === '1' && env.PATH === process.env.PATH, env ? 'key kept or PATH lost' : 'childEnv is not exported');
+    } finally { delete process.env.QC_TEST_FAKE_API_KEY; }
+  });
+
   // #277: what a measured session may not reach. Each piece is exported and
   // tested on its output: stripSecrets on an env, sessionEnv on the real
   // process.env with one planted name, sessionArgs on the list runSession

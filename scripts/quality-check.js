@@ -1729,7 +1729,7 @@ async function judgeTree(tree, port, opts) {
   const set = oracleSet(answers, src);
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-judge.'));
   const pw = playwrightCore();
-  const env = { ...process.env, QC_PLAYWRIGHT_CORE: pw || '' };
+  const env = childEnv({ QC_PLAYWRIGHT_CORE: pw || '' });
   const browsers = path.join(REAL_HOME, '.cache', 'ms-playwright');
   if (!env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync(browsers)) env.PLAYWRIGHT_BROWSERS_PATH = browsers;
   const results = [];
@@ -2553,6 +2553,17 @@ function stripSecrets(env) {
   return stripped.sort();
 }
 
+// The environment for a process the harness starts beside the session: the
+// review's dev server, the dependency preflight's npm audit, and the judge's
+// oracles, which start the tree's server and npm scripts, code the session
+// wrote. The same names are stripped as from the session, so that code never
+// reads a key the session itself was denied (review of #278, R3).
+function childEnv(extra) {
+  const env = { ...process.env };
+  stripSecrets(env);
+  return { ...env, ...(extra || {}) };
+}
+
 // The entries of the temp root at session start, so the analyzer can flag a
 // read of a folder another run left there (the stale-tmp warning). The
 // scratchpad root (claude-<uid>, where Claude Code keeps each session's
@@ -2764,7 +2775,7 @@ function httpOk(port) {
 
 async function startServer(project) {
   if (await httpOk(PORT)) throw new Error('port ' + PORT + ' already answers; stop whatever runs there (another quality-check run?) and retry');
-  const child = spawn(process.execPath, ['--require', LOOPBACK_PRELOAD, 'server.js'], { cwd: project, env: { ...process.env, PORT: String(PORT) }, detached: true, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['--require', LOOPBACK_PRELOAD, 'server.js'], { cwd: project, env: childEnv({ PORT: String(PORT) }), detached: true, stdio: 'ignore' });
   child.unref();
   liveGroups.add(child.pid);
   for (let i = 0; i < 50; i++) {
@@ -3730,7 +3741,7 @@ async function probeLocal(o) {
       ok = !!j && j.title === 'Notebook' && /addEventListener/.test(err);
       why = j ? 'title ' + JSON.stringify(j.title) + ', page errors: ' + (err || 'none') : 'browse.js output was not JSON: ' + (r.stdout + r.stderr).slice(0, 300);
     } else {
-      const r = sh('npm', ['audit', '--json'], { cwd: project, env: { ...process.env, HOME: home } });
+      const r = sh('npm', ['audit', '--json'], { cwd: project, env: childEnv({ HOME: home }) });
       let j = null;
       try { j = JSON.parse(r.stdout); } catch (e) { j = null; }
       const v = j && j.vulnerabilities && j.vulnerabilities.lodash;
@@ -3759,7 +3770,7 @@ module.exports = {
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
   FIXTURES_ROOT, DEFAULT_FIXTURE, ORACLE_LIB, fixtureNames, fixtureDir, fixtureHash, loadAnswers, parseArgs,
   fixtureRecord, runDirName, ledgerRow, runFixtureName, checkRun,
-  DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs, leakLines,
+  DISALLOWED_TOOLS, stripSecrets, childEnv, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs, leakLines,
 };
 
 if (require.main === module) {

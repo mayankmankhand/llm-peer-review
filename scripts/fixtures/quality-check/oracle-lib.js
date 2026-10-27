@@ -99,7 +99,9 @@ function portAnswers(port) {
 
 // Starts the tree's server.js on `port`, loopback only. Resolves { up: true } once
 // it answers, or { up: false, why } when the tree's server will not start (that is
-// the tree's doing). Throws Unjudged when something else holds the port.
+// the tree's doing). Throws Unjudged when something else holds the port. The
+// server, like the npm scripts below, gets this oracle's environment, which the
+// judge has already stripped of key-like names (quality-check.js, childEnv).
 async function startServer(tree, port) {
   for (let i = 0; i < 25 && await portAnswers(port); i++) await sleep(200);
   if (await portAnswers(port)) throw new Unjudged('port ' + port + ' is in use by another process');
