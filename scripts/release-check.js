@@ -9,6 +9,8 @@
 //                                 [--commit <sha>]
 //                                 [--pushing-tag <tag>[:<sha>]]...
 //                                 [--remote <name|url>]
+//   TK_RELEASE_CATCH_OVERRIDE='<reason>'  passes a failing catch-rate check (7)
+//                                         with the reason printed first
 //
 // Why it exists: the toolkit ships as the `tk` plugin, and Claude Code caches a
 // plugin by its version. Commits that changed plugin/ without bumping
@@ -108,6 +110,21 @@
 //                    cut) is counted in the reason, never a failure. Skipped
 //                    with a note when the repo has no merge-check.js or no
 //                    earlier release tag.
+//   7. Catch rate  - a release whose review path (the plugin files the review
+//                    reads, the harness's own list) changed since the previous
+//                    release tag must be measured (issue #279): two valid
+//                    Pocket ship-arm review runs in reports/quality-check/
+//                    whose review-path hash is the checked commit's, and, when
+//                    the previous tag's hash has two or more runs of its own,
+//                    a PASS score of the new runs against them, all through
+//                    scripts/quality-check.js's exports (read, never copied).
+//                    Fewer than two runs fails naming the two-run command;
+//                    any verdict but PASS fails with the verdict and the lost
+//                    catches. TK_RELEASE_CATCH_OVERRIDE='<reason>' turns that
+//                    FAIL into ok with the reason printed first. Skipped in a
+//                    repo without the harness, and under --tests-only (the
+//                    ledger is gitignored, so CI and fresh clones never see
+//                    it; the info line below still prints there).
 //
 // After check 2 it also prints one `info prompt load` line: how many words each
 // prompt file loads against scripts/prompt-load-baseline.json (issue #206). It is
@@ -187,6 +204,16 @@ const SUITE_TIMEOUT_MS = (() => {
   if (!/^[1-9]\d*$/.test(v)) { console.error('release-check: TK_RELEASE_SUITE_TIMEOUT_MS must be a whole number of milliseconds, got ' + JSON.stringify(v)); process.exit(2); }
   console.error('release-check: TK_RELEASE_SUITE_TIMEOUT_MS is set; each suite stops after ' + v + ' ms instead of 10 minutes');
   return Number(v);
+})();
+// A release the maintainer ships unmeasured, or past a lost catch, on purpose
+// (issue #279): TK_RELEASE_CATCH_OVERRIDE holds the reason, and the catch-rate
+// check (7) passes with it printed first. It is a variable, not a flag, because
+// the pre-push hook passes the gate fixed arguments; empty or unset is no
+// override, and it says so on stderr whenever it is set.
+const CATCH_OVERRIDE = (() => {
+  const v = (process.env.TK_RELEASE_CATCH_OVERRIDE || '').trim();
+  if (v) console.error('release-check: TK_RELEASE_CATCH_OVERRIDE is set; a failing catch-rate check passes with this reason: ' + v);
+  return v;
 })();
 // The most of a suite's output kept, per stream: a failing suite shows only
 // its last 15 lines.
@@ -881,7 +908,61 @@ function checkLandings(target) {
   report(name, false, at + 'merge-check.js could not check the landings since ' + prev.tag + ' (exit ' + (r.status === null ? 'none, ' + (r.error ? r.error.code : 'killed') : r.status) + '): ' + (lines[0] || 'no output'));
 }
 
-// Checks T, 3, 4, 5 and 6. Every commit named by --commit or --pushing-tag is
+// --- 7. catch rate (issue #279) --------------------------------------------------------
+// A release whose review path changed since the previous release must be
+// measured: two valid Pocket ship-arm review runs in the ledger whose
+// review-path hash is the checked commit's, and, when the previous tag's hash
+// has two or more runs of its own, a PASS score of the new runs against them.
+// The hashes, the lookup and the score are the harness's exports (read, never
+// copied); the harness absent means the repository is not this toolkit, and the
+// line is skipped. Fewer than two runs, or any verdict but PASS, fails, naming
+// the two-run command or the lost catch; TK_RELEASE_CATCH_OVERRIDE turns that
+// FAIL into ok with its reason printed first and the finding kept in brackets.
+function checkCatchRate(target) {
+  const name = 'catch rate';
+  const at = target.label + ': ';
+  const harness = path.join(REPO, 'scripts', 'quality-check.js');
+  if (!fs.existsSync(harness)) return;
+  let qc;
+  try {
+    qc = require(harness);
+    for (const fn of ['reviewPathHash', 'measuredRelease', 'scoreRunDirs']) if (typeof qc[fn] !== 'function') throw new Error(fn + ' is not exported');
+  } catch (e) { report(name, false, at + 'the harness could not be read (' + e.message + ')'); return; }
+  const prev = previousTag(target.sha);
+  if (prev.error) { report(name, false, at + prev.error); return; }
+  if (!prev.tag) { report(name, true, at + 'no earlier v* release tag reachable; nothing to compare'); return; }
+  const prevSha = resolveCommit(prev.tag);
+  const newHash = qc.reviewPathHash(target.sha);
+  const prevHash = prevSha ? qc.reviewPathHash(prevSha) : null;
+  if (!newHash) { report(name, false, at + 'the review path at ' + target.sha.slice(0, 12) + ' could not be hashed'); return; }
+  if (newHash === prevHash) { report(name, true, at + 'review path unchanged since ' + prev.tag + '; no run needed'); return; }
+  const fail = (what) => (CATCH_OVERRIDE ? report(name, true, at + 'overridden - ' + CATCH_OVERRIDE + ' (' + what + ')') : report(name, false, at + what));
+  const names = list => list.map(r => r.name).join(', ');
+  const changed = 'review path changed since ' + prev.tag;
+  const m = qc.measuredRelease({ newHash, prevHash });
+  if (m.candidates.length < 2) {
+    fail(changed + ' (' + newHash + ' vs ' + (prevHash || 'none') + ') and ' + m.candidates.length + ' of 2 valid Pocket ship-arm runs measure it'
+      + (m.candidates.length ? ' (' + names(m.candidates) + ')' : '')
+      + '; run node scripts/quality-check.js --role review --arm ship --build ' + target.sha + ' --fixture pocket ' + (m.candidates.length === 1 ? 'once more' : 'twice'));
+    return;
+  }
+  const measuredBy = 'measured by ' + m.candidates.length + ' valid Pocket ship-arm runs (' + names(m.candidates) + ')';
+  if (m.baseline.length < 2) {
+    report(name, true, at + changed + '; ' + measuredBy + '; ' + m.baseline.length + ' run' + (m.baseline.length === 1 ? '' : 's') + ' on ' + prev.tag + "'s review path, nothing to compare");
+    return;
+  }
+  let s;
+  try { s = qc.scoreRunDirs(m.candidates.map(r => r.dir), m.baseline.map(r => r.dir), {}); } catch (e) { fail(changed + '; ' + measuredBy + '; the score against ' + prev.tag + ' failed: ' + e.message); return; }
+  if (s.verdict === 'PASS') {
+    report(name, true, at + changed + '; ' + measuredBy + '; PASS against ' + prev.tag + ' (' + (s.stable || []).length + ' stable catches kept; baseline ' + names(m.baseline) + ')');
+    return;
+  }
+  const why = s.why && s.why.length ? ' - ' + s.why.join('; ') : '';
+  const rows = s.verdict === 'FAIL' ? (s.failed || []).map(id => { const p = (s.perId || {})[id] || {}; return id + ': baseline ' + p.baseline + ', candidate ' + p.candidate; }) : [];
+  fail(s.verdict + ' against ' + prev.tag + why + (rows.length ? '; ' + rows.join('; ') : '') + ' (candidates ' + names(m.candidates) + '; baseline ' + names(m.baseline) + ')');
+}
+
+// Checks T, 3, 4, 5, 6 and 7. Every commit named by --commit or --pushing-tag is
 // checked once, labelled with how it was named; with neither, HEAD.
 function checkCommits() {
   const targets = [];
@@ -917,6 +998,7 @@ function checkCommits() {
     checkMarketplace(t);
     checkReleaseTag(t, pushedTags);
     checkLandings(t);
+    checkCatchRate(t);
   }
 }
 
