@@ -126,6 +126,7 @@ A test for a false-positive fix must use a fixture the old pattern actually matc
 A test must plant the state a failure actually leaves, not a convenient stand-in.
 A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.
 A test whose fixture is rejected by two code paths cannot detect either one breaking.
+A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.
 A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.
 A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.
 A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.
@@ -269,6 +270,7 @@ Run your own receipt before you report it as confirmation.
 Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.
 Scope parity gaps explicitly when fixing one of several.
 Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.
+Seal a guess before a source read and score it after: the issue 277 guess named only gaps the toolkit already covered and missed both real ones, so the score shows what the read added and the guess can never stand in for it.
 Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
 Self-enforce release-time conventions in the artifact or the checklist, not in memory.
 Set shell variables before a backgrounded `&&` chain, never inside it.
@@ -292,6 +294,7 @@ The self-modification guard also blocks adding a permission to `settings.local.j
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
 Tokenising the shared layer does not tokenise its consumers.
+Try a judge fixture's checks on wrong answers too: a fix that hid the symptom and a finding about the neighbouring bug both scored right until the review tried them.
 Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.
 Two halves of one feature, written in one session, can each be right and still not meet.
 Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.

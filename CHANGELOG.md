@@ -2,7 +2,7 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
-## Unreleased
+## v8.0.13 - Measured Before It Ships (2026-10-27)
 
 **A patch on top of v8.0.12 (#277, #278, #279).** The issue 277 research compared the toolkit with two Google harness sources (the harness2 repository and the Object-Oriented Harness paper) and the write-ups around them, 398 verified parts. It found two things the toolkit did that every source says not to do, and three cheap practices it lacked. This block builds the four free items and both budget items: a second planted-bug fixture (#278) and the measurement rule per review-path release (#279).
 
