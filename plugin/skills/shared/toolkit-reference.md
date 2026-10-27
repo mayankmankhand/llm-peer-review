@@ -74,6 +74,7 @@ The lessons captured at `/tk:document` are read back at the start of the next `/
 | `/tk:learning-opportunity` | Pause to learn a concept at 3 levels of depth (skill - runs when you ask) |
 | `/tk:codebase-to-course` | Turn any codebase into a visual learning guide |
 | `/tk:playground` | Generate throwaway interactive HTML for in-the-loop decisions: compare options, drag-to-reorder, toggle variants, tune sliders (skill - Claude can dispatch proactively, e.g. from /tk:explore vision mode) |
+| `/tk:writing` | The clear-writing guide for anything a person will read (a skill: Claude opens it before drafting, and your project's own writing rules win) |
 | `/tk:audit-html` | Scan your project's own markdown for files that would benefit from an HTML view. Report-only by default; opt-in static view generation (skill). |
 | `/tk:cloud` | Run research, or a report-only review (in a repository that carries the toolkit's own files), on cloud in a Claude Code cloud session. You start it by pasting one line into a terminal; on "done" the report and every file the run produced come back, and only the summary is shown (skill - runs only when typed) |
 | `/tk:worktree` | Create an isolated parallel session in a new worktree |

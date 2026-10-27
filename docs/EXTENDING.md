@@ -97,6 +97,17 @@ Your files listed under "Custom files detected" are safe. Anything under "Manage
 
 **Have a branch for the worker that fails.** Decide in advance what happens when one errors, times out, or returns something you cannot parse.
 
+### Your own writing rules
+
+The plugin ships a writing guide (`/tk:writing`) that Claude opens before it drafts something a person will read. Your project's own writing rules win over it, so keep them where they already are, usually `CLAUDE.md`, which Claude reads on every turn. Nothing needs to move.
+
+Two one-line patterns cover most needs. Put either in `CLAUDE.md`:
+
+- **Point Claude at your own guide for a kind of writing:** `For web copy, use our skill brand-voice.` Claude then uses your skill first, and the toolkit's guide only where yours is silent.
+- **Switch a section off:** `Skip the toolkit's web copy section; follow docs/voice.md instead.`
+
+The switch is an instruction Claude follows, not a hard off switch: Claude Code cannot turn off one skill of a plugin, so the guide stays installed and your line decides how it is used.
+
 ### A few things that will bite regardless
 
 **Give temp files a per-run unique suffix.** Two tabs open on the same project will otherwise overwrite each other's working files.
