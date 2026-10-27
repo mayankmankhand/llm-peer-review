@@ -768,6 +768,11 @@ section('model modes', () => {
   check('probeVerdict: a failed check fails the probe', !pf.ok && /mode line/.test(pf.why), pf.why);
   const pn = QC.probeVerdict({ valid: true, models: { byType: {} }, checks: [] }, { probe: 'review-code-mode', expect: { byType: { 'tk:review-code-finder': 'sonnet' } } });
   check('probeVerdict: no fan-out fails the probe', !pn.ok && /not dispatched/.test(pn.why), pn.why);
+  // The plan probe's close shows the fresh-session steps only off Opus: an Opus
+  // session says "go" (since v7.5.0), so it runs on Sonnet like the execute probe.
+  check('sessionModelFor: the plan and execute probes run on Sonnet, every other run on Opus',
+    typeof QC.sessionModelFor === 'function' && QC.sessionModelFor('create-plan-cheap') === 'sonnet'
+      && QC.sessionModelFor('execute-mismatch') === 'sonnet' && QC.sessionModelFor('index-mode') === 'opus' && QC.sessionModelFor(undefined) === 'opus');
 
   // Flags that would start a session refuse before anything runs.
   const badArm = spawnSync('node', [SCRIPT, '--role', 'review', '--arm', 'z', '--build', 'HEAD'], { encoding: 'utf8' });

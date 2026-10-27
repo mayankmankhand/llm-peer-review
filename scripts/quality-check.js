@@ -140,7 +140,7 @@
 //                           fan-out finders answer on the mode's model
 //        execute-mismatch   /tk:execute on a Sonnet session of a one-step plan whose
 //                           Models line is fit: it prints the build-model note
-//        create-plan-cheap  /tk:create-plan from a fixed summary naming cheap: the
+//        create-plan-cheap  /tk:create-plan on a Sonnet session from a fixed summary naming cheap: the
 //                           plan carries **Models:** cheap, opens with the In plain
 //                           words block, and the close gives the fresh-session
 //                           steps (/model opus), not "go"
@@ -375,6 +375,14 @@ function modeLineCheck(texts, want) {
 
 // session-init.js's Models line, which /create-plan writes under the progress line.
 const MODELS_LINE = /^\*\*Models:\*\*[ \t]+([A-Za-z]+)[ \t]*\r?$/m;
+// The model a run's session uses: Opus, except the probes whose note shows only
+// on a session running on another model than the plan's build model: /execute's
+// mismatch note, and /create-plan's close, which says "go" on an Opus session
+// (since v7.5.0) and gives the fresh-session steps on any other.
+function sessionModelFor(probe) {
+  return ['execute-mismatch', 'create-plan-cheap'].includes(probe) ? 'sonnet' : SESSION_MODEL;
+}
+
 // The five bold labels of the In plain words block /create-plan opens a plan with (#276).
 const PLAIN_LABELS = ['The problem', 'The goal and how we will know', 'The cost', 'What is left out', 'What changes for you'];
 
@@ -3202,9 +3210,7 @@ async function commandRun(o) {
   const kind = role === 'probe' ? 'probe-' + o.probe + (o.modeWord ? '-' + o.modeWord : '') : role === 'skeptic' || role === 'fix' ? role : role + '-' + o.arm + onlyTag + modeTag;
   const out = path.join(OUT_ROOT, runDirName({ stamp: stamp(), kind, build: buildLabel, fixture: o.fixture, label: o.label }));
   fs.mkdirSync(out, { recursive: true });
-  // Opus, except the probe that checks /execute's note on a session running on
-  // another model than the plan's build model.
-  const sessionModel = o.probe === 'execute-mismatch' ? 'sonnet' : SESSION_MODEL;
+  const sessionModel = sessionModelFor(o.probe);
   const sessionFamily = familyOf(sessionModel);
   const meta = {
     version: 1, role, arm: o.arm || null, only: o.only || null, label: o.label || '', probe: o.probe || null,
@@ -3863,7 +3869,7 @@ module.exports = {
   familyOf, lowerEffort, frontmatterValue, patchAgent, parseFinderOutput, findingText, bugMatches, rawToMatchable,
   parseReport, entryMatches, linkRaw, normWords, parseMapperOutput, twinOf, mapperCoverage, toolPaths, digestRecords, analyzeRun,
   scoreSets, loadRun, copyFixture, fillMapperTemplate, mapperTemplate, armSettings, FINDER_KINDS, tokenWindowProblem,
-  modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, appendSource, compareSnapshots,
+  modeFamily, modeLineCheck, expectChecks, finderModels, probeVerdict, sessionModelFor, appendSource, compareSnapshots,
   runGroup, ledgerCost, runSteps, markCleanup, LOOPBACK_PRELOAD, budgetEstimate, DEFAULT_MAX_USD,
   auditVerdict, stripArmLines, pathHash, dirPathFiles, gitPathFiles, runSetting, armOf, compareSettings, sameSetting,
   settingLines, mapperPromptHash, PATH_FILES, ledgerRuns, reviewPathHash, measuredRelease, scoreRunDirs,
