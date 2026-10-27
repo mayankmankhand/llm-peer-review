@@ -18,7 +18,7 @@ When the review has finished, write the report as markdown. The summary comes fi
 4. `## Not checked`: each review lens that did not run, and why. The plan lens has no plan file in this copy (plan files are gitignored, so they do not travel), so say what it could not compare.
 5. The line `git status --porcelain:` followed by its output, or `empty`.
 
-Plain English and short sentences. No em dashes or en dashes: use a hyphen or rewrite the sentence.
+Plain English and short sentences. No em dashes or en dashes, and no spaced hyphen standing in for one: rewrite the sentence. Hyphens stay inside words and in fixed line formats that ask for them. Quoted, dictated or locked text is never changed, even for a dash.
 
 ## Rules
 

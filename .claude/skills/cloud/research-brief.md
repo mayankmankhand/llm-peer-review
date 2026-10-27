@@ -39,7 +39,7 @@ Write the report as markdown. The summary comes first:
 5. The line `Checker: N claims checked, M fixed, K dropped`.
 6. The line `git status --porcelain:` followed by its output, or `empty`.
 
-Plain English and short sentences. Explain each technical term the first time it appears. No em dashes or en dashes: use a hyphen or rewrite the sentence.
+Plain English and short sentences. Explain each technical term the first time it appears. No em dashes or en dashes, and no spaced hyphen standing in for one: rewrite the sentence. Hyphens stay inside words and in fixed line formats that ask for them. Quoted, dictated or locked text is never changed, even for a dash.
 
 ## Rules
 

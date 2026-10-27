@@ -401,6 +401,55 @@ const STALE_PASTE = /\binlined (below|under|here|at the end|in Phase \d)\b|\bthe
   check('the 11 page files load review-page at the gate with one wording and paste neither of its fragments', misses.length === 0, misses.join('; '));
 }
 
+console.log('\n8. the writing rules (#276, #280)');
+// The dash rule (Rule 6) lives in six files, each in its own form, and Rule 8
+// ("Everyday words") in the rules seed and the manual. Nothing pinned either
+// before, so one reworded copy could drift from the rest unseen. The dash
+// anchors and Rule 8's sixteen everyday names are literals here, never read
+// from the files under test, so a rule that loses a name fails this case.
+{
+  const DASH_FILES = ['.claude/rules/toolkit.md', '.claude/skills/shared/toolkit-reference.md', '.claude/skills/setup/SKILL.md',
+    '.claude/skills/upgrade/SKILL.md', '.claude/skills/cloud/review-brief.md', '.claude/skills/cloud/research-brief.md'];
+  const DASH_KEEP = ['no spaced hyphen standing in for one', 'Quoted, dictated or locked text is never changed, even for a dash'];
+  const DASH_GONE = ['Use regular hyphens', 'use a hyphen or rewrite'];
+  const dashMisses = [];
+  for (const rel of DASH_FILES) {
+    const text = read(rel);
+    for (const s of DASH_KEEP) if (!text.includes(s)) dashMisses.push(rel + ' lacks "' + s + '"');
+    for (const s of DASH_GONE) if (text.includes(s)) dashMisses.push(rel + ' still says "' + s + '"');
+  }
+  check('276: the dash rule\'s six copies forbid a spaced hyphen as a dash and keep quoted text', dashMisses.length === 0, dashMisses.join('; '));
+
+  // A numbered rule's whole line in a rules block, found by its number and bold label.
+  const ruleLine = (text, n, label) => text.split(/\r?\n/).find(l => l.startsWith(n + '. **' + label + '**')) || '';
+  const EVERYDAY = ['a reviewer', 'a double-check', 'a separate check of the fix', 'a question for you', 'the review summary', 'the proof',
+    'the log', 'the check before', 'moving on by itself', 'the starter copy', 'the practice project', 'the test rig', 'review type',
+    'a side copy of the project', 'a saved checkpoint', 'undo'];
+  const rulesText = read('.claude/rules/toolkit.md');
+  const rule6 = ruleLine(rulesText, 6, 'No em dashes or en dashes');
+  const rule8 = ruleLine(rulesText, 8, 'Everyday words');
+  const rule8Missing = [...EVERYDAY, 'the receipt row or the step\'s file list', 'Skill(writing)'].filter(s => !rule8.includes(s));
+  check('276: Rule 8 in the rules seed names the sixteen everyday words', rule8 !== '' && rule8Missing.length === 0,
+    rule8 ? 'missing: ' + rule8Missing.join(' | ') : 'no "8. **Everyday words**" line in .claude/rules/toolkit.md');
+  const rule8Words = rule8.split(/\s+/).filter(Boolean).length;
+  check('276: Rule 8 stays at or under 220 words', rule8Words > 0 && rule8Words <= 220, rule8Words + ' words');
+
+  // The manual restates the rules block, so its two lines must match the seed's.
+  const manualText = read('.claude/skills/shared/toolkit-reference.md');
+  const sameRules = (manual) => rule6 !== '' && rule8 !== ''
+    && ruleLine(manual, 6, 'No em dashes or en dashes') === rule6 && ruleLine(manual, 8, 'Everyday words') === rule8;
+  check('276: the manual\'s Rule 6 and Rule 8 match the rules seed word for word', sameRules(manualText),
+    'Rule 6 ' + (rule6 !== '' && ruleLine(manualText, 6, 'No em dashes or en dashes') === rule6 ? 'matches' : 'differs')
+      + ', Rule 8 ' + (rule8 !== '' && ruleLine(manualText, 8, 'Everyday words') === rule8 ? 'matches' : 'differs'));
+  // A project receives the plugin's emitted seed, where the build scopes the load to the plugin.
+  const emitted8 = ruleLine(read('plugin/seed/rules-toolkit.md'), 8, 'Everyday words');
+  check('276: the emitted plugin seed carries Rule 8 with Skill(tk:writing)',
+    rule8 !== '' && emitted8 === rule8.replace('Skill(writing)', 'Skill(tk:writing)') && !emitted8.includes('Skill(writing)'),
+    emitted8 ? emitted8.slice(0, 160) : 'no Rule 8 line in plugin/seed/rules-toolkit.md');
+  const mutatedManual = rule8 === '' ? manualText : manualText.replace(rule8, rule8.replace(/\bproof\b/, 'receipt'));
+  check('276: mutation: one changed word in the manual\'s Rule 8 trips the word-for-word check', mutatedManual !== manualText && !sameRules(mutatedManual));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

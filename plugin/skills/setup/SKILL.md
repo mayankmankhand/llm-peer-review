@@ -21,7 +21,7 @@ allowed-tools:
 1. **The script decides, you relay.** Everything happens in `node ${CLAUDE_PLUGIN_ROOT}/scripts/setup-project.js`: detection, the page, the backup, the removal, the seed, the settings merge, the report. Never reproduce a step of it by hand, never edit a managed file yourself, and never "help" by deleting something the script chose to keep.
 2. **A page is a decision (M1).** Exit code 3 means the script stopped before writing anything and needs a human answer. Present it as a decision a non-engineer can make: what it found, what the recommended default is, what `--force` will do. Only a clear yes reruns it.
 3. **The toolkit's own repository is not a project.** The script checks whether `.claude-plugin/marketplace.json` at the root names the toolkit itself (a marketplace named `llm-peer-review`, or one that lists a plugin named `tk`) and exits 1 with `setup-project: this is the toolkit's own repository (its marketplace file names the toolkit); nothing to seed.` before it reads or writes anything (M16); relay that line and stop, and never read the JSON yourself: the source tree is what the plugin is built from, not something to seed. A project that publishes a plugin of its own has a marketplace file too, and is seeded like any other.
-4. **No em dashes or en dashes** in anything you write.
+4. **No em dashes or en dashes** in anything you write, and no spaced hyphen standing in for one: rewrite the sentence. Hyphens stay inside words and in fixed line formats that ask for them. Quoted, dictated or locked text is never changed, even for a dash.
 
 </rules>
 

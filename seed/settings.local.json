@@ -161,6 +161,8 @@
       "Skill(tk:report-rules:*)",
       "Skill(tk:review-page)",
       "Skill(tk:review-page:*)",
+      "Skill(tk:writing)",
+      "Skill(tk:writing:*)",
       "Skill(claude-api)",
       "Skill(claude-api:*)",
       "Skill(tk:review-commands)",
