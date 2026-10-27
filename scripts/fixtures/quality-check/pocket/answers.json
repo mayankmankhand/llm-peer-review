@@ -367,7 +367,8 @@
           "(capped|cap|limit\\w*|truncat\\w*|cut off|stops?|stopping) (it )?(at|to) (the first )?(20|twenty)\\b"
         ],
         [
-          "(silently|quietly)\\W+(\\w+\\W+){0,3}(drop|hid|omit|cut|truncat|leav|left|miss|skip)"
+          "(silently|quietly)\\W+(\\w+\\W+){0,3}(drop|hid|omit|cut|truncat|leav|left|miss|skip)",
+          "\\b(older|oldest|earlier|rest|remaining|extra|later|beyond|past|after|more than|over)\\W+(\\w+\\W+){0,3}(rows|expenses|entries|items|records)\\b"
         ],
         [
           "pagination"

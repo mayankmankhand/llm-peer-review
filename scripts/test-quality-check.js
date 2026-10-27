@@ -578,6 +578,14 @@ section('the pocket fixture (#278)', () => {
       && !!key.app && key.app.name === 'Pocket' && !!key.selfTestPair
       && moment.version === '2.29.1' && moment.resolved === 'https://registry.npmjs.org/moment/-/moment-2.29.1.tgz' && /^sha512-[A-Za-z0-9+/]+=*$/.test(moment.integrity || ''),
     JSON.stringify({ n: bugs.length, lenses, known, noOracle, app: key.app, moment }));
+  // #278 review: the lost-id bug sits in the same file as the capped list, so the
+  // known-answer key's "silently drops" wording must also name the rows it drops,
+  // or a finding about the edit is credited as the known-answer catch.
+  const kb = bugs.find(b => b.knownAnswer);
+  const lostId = { file: 'server.js', line: 230, text: 'Blocks. Saving an edit silently drops the expense id, so it can never be edited or deleted again.' };
+  const capped = { file: 'server.js', line: 167, text: 'Should fix. The month view silently drops the older expenses, and its count and total leave them out.' };
+  check('pocket: a finding that an edit silently drops the id is not the capped-list catch', !!kb && !QC.bugMatches(kb, lostId), lostId.text);
+  check('pocket: a finding that the month view silently drops older expenses is the capped-list catch', !!kb && QC.bugMatches(kb, capped), capped.text);
 });
 
 // #278: fixtures are folders under scripts/fixtures/quality-check/, chosen by
