@@ -1,5 +1,5 @@
 <!--
-  design-profile-template.md - the template for a project's DESIGN-PROFILE.md.
+  design-profile-template.md: the template for a project's DESIGN-PROFILE.md.
 
   A project gets its DESIGN-PROFILE.md ONCE and never has it overwritten: the copy
   is user-owned, like CLAUDE.md and LESSONS.md. On the plugin, setup writes it from
@@ -31,8 +31,8 @@ and never overwrites a design system you already have. Edit it freely.
 
 <!-- What exploration may change inside the design system without asking. The
      default is layout, composition, motion, and copy. Colors, type, spacing, and
-     components stay as the system defines them unless a divergence page says
-     otherwise. -->
+     components stay as the system defines them unless you approve a change when
+     you are asked. -->
 - layout, composition, motion, copy
 
 ## Taste notes

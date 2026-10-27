@@ -474,8 +474,8 @@ h2{font-size:var(--text-h2);}
       if (isAudit) {
         var det = el("details", "audited-out");
         var sum = el("summary");
-        text(sum, "Audited out: " + group.findings.length +
-                  (group.findings.length === 1 ? " finding did not survive" : " findings did not survive"));
+        text(sum, "Dropped by the double-check: " + group.findings.length +
+                  (group.findings.length === 1 ? " finding did not hold up" : " findings did not hold up"));
         det.appendChild(sum);
         host = el("div", "audited-body");
         det.appendChild(host);

@@ -38,7 +38,7 @@ Don't try to guess silently. Always ask, but pre-fill your best guess so it's a 
 4. Interpret the answer:
    - Empty input or just enter -> proceed with the bracketed guess
    - Anything that clearly maps to scoping or vision (the word itself, single letters `s`/`v`, or common synonyms like "narrow it down" / "big picture") -> use that mode
-   - Truly ambiguous input -> proceed with the bracketed guess but acknowledge it out loud: "Couldn't tell from that - going with scoping. Say 'switch to vision mode' anytime."
+   - Truly ambiguous input -> proceed with the bracketed guess but acknowledge it out loud: "Couldn't tell from that, so I'm going with scoping. Say 'switch to vision mode' anytime."
    - **Models:** empty -> fit; `best`, `fit` or `cheap` (or `b`, `f`, `c`) -> that mode; anything else -> fit, said out loud. The answer holds for the whole cycle: it goes into the closing summary, and `/create-plan` writes it into the plan.
 
 Once the mode is picked, announce it briefly and tell the user how to switch. Example:
@@ -66,7 +66,7 @@ After the user describes their idea, **think like an experienced product manager
 - Don't be gentle, but don't be rude
 
 **Vision mode:**
-- Expansive and curious: "Let's think bigger - what if..."
+- Expansive and curious: "Let's think bigger: what if..."
 - Challenge premises, not just scope: "Are we even solving the right problem?"
 - Push the user to dream before narrowing down
 - Give permission to scrap and rethink
@@ -92,9 +92,9 @@ Ask **3-4 focused questions per round**, over 2-3 rounds; in vision mode, each E
 > Recommendation: scope this to the web app and archive the finished plans.
 >
 > A few quick questions:
-> 1. What's in scope - just the web app, or the review commands too?
-> 2. The 3 completed PLAN files - delete, archive, or keep?
-> 3. What about manager_package/ and toon_flow/ - part of this project?
+> 1. What's in scope: just the web app, or the review commands too?
+> 2. The 3 completed PLAN files: delete, archive, or keep?
+> 3. Are manager_package/ and toon_flow/ part of this project?
 </examples>
 
 ### Scoping Mode Questions (pick 3-4 per round)
@@ -134,7 +134,7 @@ Once the user's answers start pointing toward a direction (usually round 2, some
 > - **Reduce** - strip to absolute essentials
 
 **After the user picks:**
-- **Expand** - continue with vision mode questions, push even bigger. If the user picks Expand twice, re-offer the Scope Dial after one more round. If they pick Expand a third time, gently suggest Hold: "We've explored a lot of territory - want to lock in what we have and move to planning?"
+- **Expand** - continue with vision mode questions, push even bigger. If the user picks Expand twice, re-offer the Scope Dial after one more round. If they pick Expand a third time, gently suggest Hold: "We've explored a lot of territory. Want to lock in what we have and move to planning?"
 - **Hold or Reduce** - shift to scoping-style questions (definition of done, trade-offs, success criteria, and the reach question, since the summary's Reaches section needs its three answers) but keep the vision mode tone. This avoids conversational whiplash. Also bring in Design exploration if the feature involves a UI.
 - Phase 2 stays optional regardless of which dial option was chosen
 
@@ -210,7 +210,7 @@ If they say skip, present a vision-mode closing summary:
     The helper computes the timestamped name, creates `artifacts/html/`, needs no read-before-write step, and prints the output path. This persisted file is the canonical record of the exploration. Then show it to the user per the **"Viewing the Artifact"** rules in `.claude/skills/shared/html-viewing.md`: publish is the primary viewport, the local open is the fallback, and that section holds the whole decision.
   - **Offer an optional playground** - ask "Want this interactive? (drag, toggle, slider)". If yes, dispatch the `playground` skill for a *separate, throwaway* interactive version in `/tmp/` (export-loop only). The playground is disposable; the `artifacts/html/` record above stays canonical.
   - **Detecting a playground reply** - if the user's message starts with `Playground result`, treat the rest as structured state (selection, drag order, slider values, toggle states) and feed it into the closing summary. Otherwise treat the reply as natural-language decision input. `/explore` never modifies the playground output - the export loop is the only path back.
-- **Chain check (M14)** - write the closing summary above to `reports/explore/<stamp>-<slug>.md` in the shape M14 gives (`.claude/skills/shared/hitl-stages.md`; **Open questions** above is its open-questions section), then run `node .claude/scripts/session-init.js --chain explore --summary <that file>` (M16). M14 holds every condition and what to say when the gate does not pass; do not restate them here. On `pass`, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool, naming the summary file.
+- **Chain check (M14)** - write the closing summary above to `reports/explore/<stamp>-<slug>.md` in the shape M14 gives (`.claude/skills/shared/hitl-stages.md`; **Open questions** above is its open-questions section), then run `node .claude/scripts/session-init.js --chain explore --summary <that file>` (M16). M14 holds every condition and what to say when the gate does not pass; do not restate them here. On `pass`, announce the handoff in one line ("Exploration is settled, so I'm moving on to `/create-plan` by myself. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool, naming the summary file.
 
 If they say yes, continue with the analysis below.
 
@@ -221,7 +221,7 @@ Before exploring manually, check if `CODEBASE_MAP.md` exists in the project root
 
 **If it exists:** Read it for the directory tree, module purposes, conventions, gotchas, and navigation guide - your starting point before any glob/grep. For staleness, use the session-init JSON instead of running git yourself: `map.commitsBehind` is the count and `map.stale` is true when it is >= 10 (single-commit drift is noisy and not actionable). If the script was unavailable, compute it manually: compare the `<!-- Commit: -->` hash with `git rev-parse HEAD` and run `git rev-list --count <map_commit>..HEAD`. When `map.stale` is true (10 or more commits behind), run `/index mode:<m>` automatically per M12 (`.claude/skills/shared/hitl-stages.md`), with `<m>` the Models answer, then read the fresh map and proceed - tell the user it ran and why. When the map is not stale, proceed without comment. If `map.generatedWhileDirty` is true (the header notes `generated_while_dirty`), mention that to the user regardless of commit count - it signals the map was built from uncommitted state.
 
-**If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now via `/index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/index mode:<m>`, with `<m>` the Models answer, to generate the map. After it completes, read the new map and proceed.
+**If it does not exist (first-time use or fresh setup):** Tell the user: "No codebase map found. Generating one now with `/index`. This is a one-time setup that may take a minute, and it runs several helpers at once." Then invoke `/index mode:<m>`, with `<m>` the Models answer, to generate the map. After it completes, read the new map and proceed.
 
 **If it exists but is malformed:** `map.malformed` in the session-init JSON is the verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Skip it, tell the user "Codebase map looked malformed, falling back to manual exploration. You may want to run `/index` to regenerate.", and continue with glob/grep.
 
@@ -250,7 +250,7 @@ Give the user a brief summary of what you found:
 - Models: the Models answer (best, fit or cheap)
 - Remaining questions (if any)
 
-**Chain check (M14).** Write the summary above to `reports/explore/<stamp>-<slug>.md` in the shape M14 gives (`.claude/skills/shared/hitl-stages.md`; **Remaining questions** above is its open-questions section, and the mode is the sticky one from Mode Detection, since a vision-mode run that accepted Phase 2 arrives here too), then run `node .claude/scripts/session-init.js --chain explore --summary <that file>` (M16). M14 holds every condition and the not-passing behavior; do not restate them here. An unanswered question is the cheapest thing to fix at this point and the most expensive to fix after a plan is built on it. On `pass`, announce the handoff in one line ("Exploration converged - chaining into `/create-plan` per M14. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool, naming the summary file.
+**Chain check (M14).** Write the summary above to `reports/explore/<stamp>-<slug>.md` in the shape M14 gives (`.claude/skills/shared/hitl-stages.md`; **Remaining questions** above is its open-questions section, and the mode is the sticky one from Mode Detection, since a vision-mode run that accepted Phase 2 arrives here too), then run `node .claude/scripts/session-init.js --chain explore --summary <that file>` (M16). M14 holds every condition and the not-passing behavior; do not restate them here. An unanswered question is the cheapest thing to fix at this point and the most expensive to fix after a plan is built on it. On `pass`, announce the handoff in one line ("Exploration is settled, so I'm moving on to `/create-plan` by myself. Say \"no chaining\" to stop here.") and invoke `/create-plan` through the Skill tool, naming the summary file.
 
 #### Optional: ASCII diagrams
 Include diagrams as part of your summary above when the feature involves flows, data paths, or multi-step processes. Each arrow is a place where things can break - that's the point. In vision mode, diagrams are especially useful for grounding abstract ideas - but keep them high-level to match the conversation.
@@ -295,7 +295,7 @@ Keep going until no question that would change the plan is left, within those ro
 
 ---
 
-**Ready.** Describe what you're thinking - a concrete feature, a rough idea, or a strategic question all work.
+**Ready.** Describe what you're thinking: a concrete feature, a rough idea, or a strategic question all work.
 
 ## HTML Output Rules
 

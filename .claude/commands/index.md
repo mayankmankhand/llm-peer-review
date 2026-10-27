@@ -184,7 +184,7 @@ Tell the user:
 - On a delta, say instead of the line below: "Refreshed `CODEBASE_MAP.md` from the {changedFiles} files changed since {the first 7 characters of since}: {replaced} blocks updated, {added} added, {dropped} dropped, {kept} unchanged." Then name any `notReturned` block (its old text was kept), any `deadBlocks` (their Files lines match no file) and, when `uncovered` is above 0, how many files no block covers, and suggest `/index full` for any of them.
 - "Generated `CODEBASE_MAP.md` ({totalFiles} files mapped, ~{mapTokens} tokens)."
 - If `trimmed` is not empty, list its entries as the sections trimmed or dropped, and say so when `overCap` stayed true after the second run.
-- If `isDirty` was true: "Note: map generated against a dirty worktree. Consider regenerating after your next commit for an accurate commit reference."
+- If `isDirty` was true: "Note: the map was built while some changes were not yet saved as a checkpoint. Rebuild it after the next saved checkpoint so it points at the right one."
 - If old `INDEX.md` was removed, mention it: "Removed legacy `INDEX.md`."
 - If any subagent failed and was skipped, mention the gap.
 

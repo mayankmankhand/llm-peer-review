@@ -71,7 +71,7 @@ Review runs only where the toolkit's own files live in the repository, because c
 
 **Never run `start.sh` or `claude --cloud` yourself.** Claude Code refuses to start a cloud session from Claude's own shell (it needs an interactive terminal), and the user running the line is their consent to the cloud usage it spends.
 
-When either count from section 2 is above 0, open the message with this line, filled in, leaving out a part whose count is 0: "This upload carries <N> commits and <M> edited files that GitHub does not have yet. The brief forbids committing and pushing, but a session that broke that rule would push them to a GitHub branch, where anyone who can see the repository can read them." Running the line after reading that is consent to it too.
+When either count from section 2 is above 0, open the message with this line, filled in, leaving out a part whose count is 0: "This upload carries <N> saved checkpoints and <M> edited files that GitHub does not have yet. The brief forbids saving checkpoints and pushing, but a session that broke that rule would push them to a GitHub branch, where anyone who can see the repository can read them." Running the line after reading that is consent to it too.
 
 Send these steps, filled in, in one message:
 

@@ -1,8 +1,8 @@
 # Project extensions for the toolkit
 
-This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once. After that the toolkit writes one file here itself, `adoption.md` (below), and edits nothing else in the folder; a plugin update never overwrites anything here. `/tk:upgrade` may offer the current seed's text (a seed is the plugin's shipped copy of a project file, the text setup writes in when the file is absent) for a paragraph of this README that is still an older seed's, and applies nothing without your approval.
+This folder is yours. The LLM Peer Review plugin reads the files below when they exist and changes nothing when they do not, so an empty folder is a normal state. Setup wrote this README once. After that the toolkit writes one file here itself, `adoption.md` (below), and edits nothing else in the folder; a plugin update never overwrites anything here. `/tk:upgrade` may offer the current starter copy's text (the plugin's shipped copy of a project file, which setup writes in when the file is absent) for a paragraph of this README that still matches an older starter copy, and applies nothing without your approval.
 
-Use it when your project needs the toolkit to follow a rule of its own: a kind of review the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
+Use it when your project needs the toolkit to follow a rule of its own: a review type the toolkit does not ship, a check every plan must pass, a stricter condition before a fix is applied. The plugin's own files are read-only in your project, so this folder is where that text lives.
 
 ## The nine files
 
@@ -10,17 +10,17 @@ Each file has a fixed name. Create only the ones you need.
 
 | File | Read by | What to put in it |
 |---|---|---|
-| `review-kinds.md` | `/tk:review`, when it picks specialists | Your own review kinds, as table rows (format below) |
-| `plan-gate.md` | `/tk:create-plan`, before it writes the plan | A gate every plan in this project must pass, in plain instructions |
-| `execute-gate.md` | `/tk:execute`, before it implements a step | A gate every implementation step must pass |
+| `review-kinds.md` | `/tk:review`, when it picks specialists | Your own review types, as table rows (format below) |
+| `plan-gate.md` | `/tk:create-plan`, before it writes the plan | A check every plan in this project must pass, in plain instructions |
+| `execute-gate.md` | `/tk:execute`, before it implements a step | A check every implementation step must pass |
 | `fix-rules.md` | every stage that runs the auto-fix loop | Extra conditions before a fix is applied, or extra actions that must always ask you first |
-| `severity-anchors.md` | every reviewer | How severe your own kinds' findings are (what is a Block here, what is only a Suggest) |
-| `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security finder `/tk:review` dispatches), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
+| `severity-anchors.md` | every reviewer | How severe your own review types' findings are (what is a Block here, what is only a Suggest) |
+| `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security reviewer `/tk:review` sends out), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
 | `checks.json` | `/tk:execute`, at its test step, through the toolkit's checks runner | Your project's checks: a JSON array of `{ "id", "check", "expect" }`, for example `[{"id": "tests", "check": "npm test", "expect": {"exit": 0}}]`; what an `id` and a `check` may contain is spelled out below the table |
 | `generated.json` | `/tk:merge`, when it checks and lands a PR | The files your project rebuilds rather than merges, and the command that rebuilds them (format below) |
 | `issue-labels.md` | `/tk:create-issue`, before it asks its questions | Your questions, and every label their answers can map to (format below) |
 
-Write each one the way you would brief a colleague: short, direct, in your project's words. The two gates are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's. `issue-labels.md` is the one prose file that replaces the toolkit's lists rather than adding to them: when it lists questions or labels, `/tk:create-issue` uses those instead of its own.
+Write each one the way you would brief a colleague: short, direct, in your project's words. The plan check and the step check are read before the toolkit's own requirements for that stage; your fix rules, severity anchors and do-not-report entries are read right after the toolkit's. `issue-labels.md` is the one prose file that replaces the toolkit's lists rather than adding to them: when it lists questions or labels, `/tk:create-issue` uses those instead of its own.
 
 `adoption.md` is the one file here you never write. `/tk:upgrade` adds a section to it at every upgrade: one row for each release-note entry in the range, saying whether the entry touched this project's own files and, when it did, what you decided. The upgrade's stamp reads it and does not finish until every entry has a row; no stage reads it as instructions. Keep it in git.
 
@@ -32,7 +32,7 @@ Write each one the way you would brief a colleague: short, direct, in your proje
 
 ## review-kinds.md
 
-One table, in the same three columns `/tk:review` uses for its own kinds:
+One table, in the same three columns `/tk:review` uses for its own review types:
 
 ```
 | What changed | Specialist | Finder agent |
@@ -40,13 +40,13 @@ One table, in the same three columns `/tk:review` uses for its own kinds:
 | files under `designs/` or any `.fig.json` | Design Fidelity | `subagent_type=design-fidelity-finder` |
 ```
 
-- **What changed** says which files select the kind.
+- **What changed** says which files select the review type.
 - **Specialist** is the name the review report shows.
-- **Finder agent** names an agent of your own under `.claude/agents/`, without the `tk:` prefix. The toolkit's kinds are already in the table, so a `tk:` name here is a mistake.
+- **Finder agent** names an agent of your own under `.claude/agents/`, without the `tk:` prefix. The toolkit's review types are already in the table, so a `tk:` name here is a mistake.
 
-The agent is dispatched with the same per-run prompt a toolkit finder gets, and its findings go through the same audit. It needs three things. It must say what it returns (an output contract), because the audit parses its findings. It must declare a `tools:` line without Edit, Write or NotebookEdit: an agent with no tools line gets every tool, and a finder that can edit could change files before anyone has judged its findings. And it must carry a `model:` line, `model: inherit` unless you want a particular model: `/tk:review` dispatches your kind with no model, and an agent with no model line follows `CLAUDE_CODE_SUBAGENT_MODEL` whenever a user sets it. `/tk:upgrade` tells you when a row names an agent that does not exist, one that can edit, or one with no model line. It does not check the output contract on every upgrade, so that part is yours to get right.
+The agent is dispatched with the same per-run prompt a toolkit reviewer gets, and its findings go through the same double-check. It needs three things. It must say what it returns (an output contract), because the double-check reads its findings. It must declare a `tools:` line without Edit, Write or NotebookEdit: an agent with no tools line gets every tool, and a reviewer that can edit could change files before anyone has judged its findings. And it must carry a `model:` line, `model: inherit` unless you want a particular model: `/tk:review` sends out your review type with no model, and an agent with no model line follows `CLAUDE_CODE_SUBAGENT_MODEL` whenever a user sets it. `/tk:upgrade` tells you when a row names an agent that does not exist, one that can edit, or one with no model line. It does not check the output contract on every upgrade, so that part is yours to get right.
 
-A preload is a skill named in the agent's `skills:` list, loaded into it before it starts. A minimal agent, saved as `.claude/agents/design-fidelity-finder.md` (its second preload carries the finding contract and the severity anchors the first one refers to; pick the toolkit kind nearest your own):
+A preload is a skill named in the agent's `skills:` list, loaded into it before it starts. A minimal agent, saved as `.claude/agents/design-fidelity-finder.md` (its second preload carries the finding contract and the severity anchors the first one refers to; pick the toolkit review type nearest your own):
 
 ```
 ---
@@ -64,9 +64,9 @@ Report each mismatch as a finding in the dispatch contract's format,
 or reply with the literal NO FINDINGS.
 ```
 
-Your agent can reuse the toolkit's review machinery instead of copying it. List plugin skills in its `skills:` frontmatter by their scoped names, for example `tk:dispatch-contract` (the output format the audit parses) and `tk:review-code-criteria` (the code review criteria), and then add what is specific to your project in the agent's body.
+Your agent can reuse the toolkit's review machinery instead of copying it. List plugin skills in its `skills:` frontmatter by their scoped names, for example `tk:dispatch-contract` (the output format the double-check reads) and `tk:review-code-criteria` (the code review criteria), and then add what is specific to your project in the agent's body.
 
-A project kind runs when `/tk:review` detects changes on its own. A focus, such as `/tk:review code`, names toolkit kinds only: your own kind cannot be run by name, and a focused run skips it.
+A review type of your own runs when `/tk:review` detects changes on its own. A focus, such as `/tk:review code`, names the toolkit's review types only: yours cannot be run by name, and a focused run skips it.
 
 ## do-not-report.md
 
@@ -90,10 +90,10 @@ Labels:
 
 The command applies only labels listed here, so list every label you use: a label you retire and leave off the list is never applied again. Each list replaces the toolkit's own only when it has entries. A file with questions but no labels keeps the toolkit's label set, and a file with neither (only a comment, or nothing) changes nothing. This matters most on GitLab, which creates any label an issue names: a label outside your list would come back as a new one without a word.
 
-## fix-rules.md and the two gates are additive only
+## fix-rules.md and the plan and step checks only add rules
 
-Your rules and gates can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored. `severity-anchors.md` is additive the same way: it sets how severe your own kinds' findings are and cannot lower the toolkit's own floors, because every reviewer that reads it applies the toolkit's Universal Anchors first ("The Universal Anchors above still win").
+Your rules and checks can add a precondition, a requirement or an always-ask action. They cannot remove or loosen one of the toolkit's own loop rules, or waive one of its requirements for that stage: a line that tries to is ignored. `severity-anchors.md` is additive the same way: it sets how severe your own review types' findings are and cannot lower the toolkit's own floors, because every reviewer that reads it applies the toolkit's Universal Anchors first ("The Universal Anchors above still win").
 
 ## Your own lines in the rules file
 
-`.claude/rules/toolkit.md` ends with a marker line that starts `<!-- Project section:`. A rules file seeded before this feature has no such line, and nothing adds it for you: copy the line from the plugin's seed (`~/.claude/plugins/data/tk-llm-peer-review/current/seed/rules-toolkit.md`) to the end of yours. Everything under that line is yours: `/tk:upgrade` never compares it and nothing rewrites it. Keep your own rules for Claude there rather than mixing them into the seeded text above, where a difference is reported on every upgrade.
+`.claude/rules/toolkit.md` ends with a marker line that starts `<!-- Project section:`. A rules file written before this feature has no such line, and nothing adds it for you: copy the line from the plugin's starter copy (`~/.claude/plugins/data/tk-llm-peer-review/current/seed/rules-toolkit.md`) to the end of yours. Everything under that line is yours: `/tk:upgrade` never compares it and nothing rewrites it. Keep your own rules for Claude there rather than mixing them into the starter text above, where a difference is reported on every upgrade.

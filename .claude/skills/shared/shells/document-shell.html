@@ -33,7 +33,7 @@
     // Subtitle line under the title. Plain cycle window + meta. HTML allowed
     // (e.g. <code>a82e755..dfe7e39</code>, &middot;). If omitted, built from
     // "window" + "commitCount" + "issues" when those are present instead.
-    "subtitle":    "2026-06-08 &middot; window <code>a82e755..dfe7e39</code> (1 commit)",
+    "subtitle":    "2026-06-08 &middot; window <code>a82e755..dfe7e39</code> (1 saved checkpoint)",
     "window":      "a82e755..dfe7e39",           // used only if subtitle is absent
     "commitCount": 1,                            // used only if subtitle is absent
     "issues":      ["#119", "#126"],             // used only if subtitle is absent
@@ -627,7 +627,7 @@ footer.note p{margin:0;font-size:.8rem;color:var(--text-muted);}
       var w = "window <code>" + escapeHtml(d.window) + "</code>";
       if (d.commitCount != null && d.commitCount !== "") {
         var n = Number(d.commitCount);
-        w += " (" + d.commitCount + " commit" + (n === 1 ? "" : "s") + ")";
+        w += " (" + d.commitCount + " saved checkpoint" + (n === 1 ? "" : "s") + ")";
       }
       parts.push(w);
     }
@@ -716,7 +716,7 @@ footer.note p{margin:0;font-size:.8rem;color:var(--text-muted);}
     chart.setAttribute("role", "img");
     var summaryParts = rows.filter(function (r) { return r && isStr(r.date); })
       .map(function (r) { return (Number(r.count) || 0) + " on " + r.date; });
-    chart.setAttribute("aria-label", "Commits per day: " + (summaryParts.length ? summaryParts.join(", ") : "none"));
+    chart.setAttribute("aria-label", "Saved checkpoints per day: " + (summaryParts.length ? summaryParts.join(", ") : "none"));
     rows.forEach(function (r) {
       if (!r) return;
       var count = Number(r.count) || 0;

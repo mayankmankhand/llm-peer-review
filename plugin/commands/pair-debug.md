@@ -35,7 +35,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it exists:** Read it. The module guide and gotchas section often point at the file most likely to contain the bug. When `map.stale` is true (10 or more commits behind), run `/tk:index` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`), then read the fresh map.
 
-**If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute." Then invoke `/tk:index`. After it completes, read the new map and proceed.
+**If it does not exist:** Tell the user "No codebase map found. Generating one now with `/tk:index`. This is a one-time setup that may take a minute." Then invoke `/tk:index`. After it completes, read the new map and proceed.
 
 **If it is malformed or `/tk:index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Proceed without the map. Logs and repro info are what really drive debugging - the map is helpful context, not a hard requirement.
 

@@ -128,7 +128,7 @@ If the scan finds an existing HTML-generation setup, the report instead leads wi
 **Existing HTML-generation setup detected.** `package.json` script `dashboard` reads `STATUS.md` and emits `public/dashboard.html`.
 
 Two options:
-1. Align the existing output with the toolkit's visual tokens (`${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md`) - typography, colors, severity badges. Want me to draft the changes?
+1. Align the existing output with the toolkit's visual tokens: typography, colors, severity badges. Want me to draft the changes?
 2. Register this as the project's view-generator in `CLAUDE.md` so future sessions know not to suggest rebuilding it.
 
 No new view will be built.

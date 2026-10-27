@@ -28,7 +28,7 @@ Check if `CODEBASE_MAP.md` exists (`map.exists` in the JSON; if the script was u
 
 **If it exists:** Read it. The module guide tells you which files are involved in the work, and the navigation guide helps you write task steps that match the project's structure. When `map.stale` in the session JSON is true (10 or more commits behind), run `/tk:index mode:<m>` automatically per M12 (`${CLAUDE_PLUGIN_ROOT}/skills/shared/hitl-stages.md`), with `<m>` the exploration's Models answer (fit when it gave none), then read the fresh map.
 
-**If it does not exist:** Tell the user "No codebase map found. Generating one now via `/tk:index` - this is a one-time setup that may take a minute and spawns parallel subagents." Then invoke `/tk:index mode:<m>`, with `<m>` the exploration's Models answer (fit when it gave none). After it completes, read the new map and proceed.
+**If it does not exist:** Tell the user "No codebase map found. Generating one now with `/tk:index`. This is a one-time setup that may take a minute, and it runs several helpers at once." Then invoke `/tk:index mode:<m>`, with `<m>` the exploration's Models answer (fit when it gave none). After it completes, read the new map and proceed.
 
 **If it is malformed or `/tk:index` fails:** `map.malformed` in the session JSON is the malformed verdict (false passes; M16), and only if the script was unavailable run the byte tests yourself: `wc -c CODEBASE_MAP.md; head -1 CODEBASE_MAP.md; grep -c '^# Codebase Map' CODEBASE_MAP.md` (a byte count above 200, a first line starting `<!-- Generated:` and a count of `1` mean the map is sound; anything else is malformed). Proceed without the map. The plan can still be written, just with less precision on file paths.
 
@@ -122,8 +122,8 @@ An id is letters, digits, `.`, `_` and `-`. A command is one read-only line the 
 **Explain why, in one line.** Directly under the Verify step (and under the optional setup step, if present), add a short plain-English note so a non-technical reader knows why it appeared and whether it is safe to drop. Format it as an italic sub-line, e.g. `_Why this step: this plan changes pricing math, so we confirm the numbers come out right._`
 
 **When the project has no way to run tests yet** (no test framework in dependencies, no `tests/` directory) AND the plan changes logic (so it ends with a Verify step):
-- Add a flagged, optional setup step before the code steps, named like "Set up <framework> (optional - recommended)".
-- Auto-detect the idiomatic framework from the project: Vitest or Jest for JavaScript/TypeScript (`package.json`), pytest for Python (`pyproject.toml` or `requirements.txt`), and so on. If the ecosystem is unclear, use generic wording: "Set up a test framework (optional - recommended)".
+- Add a flagged, optional setup step before the code steps, named like "Set up <framework> (optional, recommended)".
+- Auto-detect the idiomatic framework from the project: Vitest or Jest for JavaScript/TypeScript (`package.json`), pytest for Python (`pyproject.toml` or `requirements.txt`), and so on. If the ecosystem is unclear, use generic wording: "Set up a test framework (optional, recommended)".
 - Give it a why-note that says it is safe to delete, e.g. `_Why this step: optional. Delete it if you do not want to add a test tool now; the Verify step still works, it just runs manually._`
 - Because the Verify step depends on the code steps and not on this setup step, deleting the optional step never leaves a dangling reference. Never force a framework install onto a small change.
 
@@ -160,7 +160,7 @@ An id is letters, digits, `.`, `_` and `-`. A command is one read-only line the 
 - **Directions tried:** [name] - seed `[seed]` - dropped at pick; [name] - seed `[seed]` - dropped at pick (new work only)
 - **Divergence allowed:** stay inside / this surface only / propose a system change - [what]
 - **Media:** ask at build / none
-- **Critic budget:** per M15 for the load level
+- **Critic budget:** the design loop's round limit for the load level (M15)
 - **Look:** [Layout, style, colors, visual direction - whatever was decided]
 - **Behavior:** [Interactions, flows, states - whatever was decided]
 
@@ -194,7 +194,7 @@ Key architectural/implementation choices made during exploration:
   - Check target `[id]`: `[command]` - before `[expect]` - after `[expect]`
 
 - [ ] 🟥 **Step N: Verify** `[sequential]` → depends on: the code steps it verifies
-  <!-- The whole-system step (see "Checks (every step, M17)" above). Include it when the plan changes logic; omit it for docs-only or config-only plans. If the project has no test runner, add a flagged optional "Set up <framework> (optional - recommended)" step before the code steps. This Verify step depends on the CODE steps, not the optional setup step, so deleting the optional step never breaks it. -->
+  <!-- The whole-system step (see "Checks (every step, M17)" above). Include it when the plan changes logic; omit it for docs-only or config-only plans. If the project has no test runner, add a flagged optional "Set up <framework> (optional, recommended)" step before the code steps. This Verify step depends on the CODE steps, not the optional setup step, so deleting the optional step never breaks it. -->
   - _Why this step: [one plain-English line, e.g. "this plan changes pricing math, so we confirm the numbers come out right"]_
   - [ ] 🟥 Run the project's full test step
   - [ ] 🟥 [A user flow end to end; old against new when the plan replaces a system]

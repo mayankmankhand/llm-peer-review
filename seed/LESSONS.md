@@ -8,7 +8,7 @@
        - **The takeaway, in one bold sentence.**
      Lessons from one larger piece of work can sit together under a subheading such as
      "### Checkout redesign (issue #12)" inside the section they belong to.
-     /tk:document drafts new lessons at the end of each work cycle. Keep this file short -
+     /tk:document drafts new lessons at the end of each work cycle. Keep this file short:
      it is the always-read surface. For deep dives into why a concept works, use /tk:learning-opportunity. -->
 
 ## What I Learned

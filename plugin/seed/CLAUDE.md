@@ -1,7 +1,7 @@
 # Project Instructions for Claude
 
 <!-- This file is YOURS. Add your project-specific info below. The toolkit never overwrites it. -->
-<!-- Toolkit rules live in .claude/rules/toolkit.md (seeded by /tk:setup, auto-discovered by Claude). -->
+<!-- Toolkit rules live in .claude/rules/toolkit.md (written once by /tk:setup, found by Claude on its own). -->
 
 ## About This Project
 <!-- Describe your project: what it is, what it does, what tech stack it uses -->

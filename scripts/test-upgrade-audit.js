@@ -3143,8 +3143,11 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
   check('C-15: an extension README with one paragraph still the v7.4.0 seed\'s and another the project rewrote is one finding, for the old paragraph, with the current heading as its Seed block', f.length === 1 && /v7\.4\.0 seed wrote \(a paragraph\)/.test(f[0].what) && f[0].fields.some(x => x.label === 'Seed block' && x.value === '## The nine files') && receiptShows(f[0], out) && /## The five files/.test(out.stdout), JSON.stringify(f).slice(0, 500));
 
   // ---- (f) a whole file that is an older seed's ----
-  const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md - this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).');
-  check('the 7.5.x profile seed differs from the current one in its second line', OLD_PROFILE !== seed760('DESIGN-PROFILE.md') && OLD_PROFILE.split('\n').length === seed760('DESIGN-PROFILE.md').split('\n').length);
+  // The 7.5.x seed, rebuilt from the current one: its second line and its
+  // divergence comment are the two places the seed has changed since.
+  const OLD_PROFILE = seed760('DESIGN-PROFILE.md').replace('DESIGN-PROFILE.md: this project\'s design profile.', 'DESIGN-PROFILE.md - this project\'s design profile (issue #160).')
+    .replace('unless you approve a change when\n     you are asked.', 'unless a divergence page says\n     otherwise.');
+  check('the 7.5.x profile seed differs from the current one in its second line and its divergence comment', OLD_PROFILE !== seed760('DESIGN-PROFILE.md') && OLD_PROFILE.split('\n').length === seed760('DESIGN-PROFILE.md').split('\n').length);
   d = seededCase('old-profile-file', { 'DESIGN-PROFILE.md': OLD_PROFILE.replace(/\n/g, '\r\n') });
   r = audit760(d);
   f = c15(r);

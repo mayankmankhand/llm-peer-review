@@ -1,5 +1,5 @@
 <!--
-  DESIGN-PROFILE.md - this project's design profile.
+  DESIGN-PROFILE.md: this project's design profile.
 
   /tk:setup writes this file ONCE, when the project has none, and never overwrites
   it afterwards: it is user-owned, like CLAUDE.md and LESSONS.md. /tk:explore reads
@@ -28,8 +28,8 @@ and never overwrites a design system you already have. Edit it freely.
 
 <!-- What exploration may change inside the design system without asking. The
      default is layout, composition, motion, and copy. Colors, type, spacing, and
-     components stay as the system defines them unless a divergence page says
-     otherwise. -->
+     components stay as the system defines them unless you approve a change when
+     you are asked. -->
 - layout, composition, motion, copy
 
 ## Taste notes
