@@ -482,6 +482,43 @@ check('live: every kept override phrase survives and every replacement lands', l
 const liveSetupSkill = read(live, 'skills/setup/SKILL.md');
 check('live: the setup skill keeps "the project\'s own `.claude/scripts/`" in its settings-merge sentence, never the plugin root',
   liveSetupSkill.includes('a script in the project\'s own `.claude/scripts/`, which is dead under the plugin') && !liveSetupSkill.includes('own `${CLAUDE_PLUGIN_ROOT}/scripts/`'));
+// The writing guide (#276, #280): one skill whose top part every load reads, and
+// eight per-kind files it opens only for the kind being written, each through the
+// plugin root (a Read of the source path, which the build rewrites; a !cat line
+// would paste every kind on every load). A missing file is a miss here, never a
+// crash, so the case name shows in the failure list.
+const WRITING_KINDS = ['owner-chat', 'owner-pages', 'prd', 'spec', 'readme-docs', 'issues-prs-releases', 'messages', 'web-copy'];
+const writingSkill = exists(live, 'skills/writing/SKILL.md') ? read(live, 'skills/writing/SKILL.md') : null;
+const writingMisses = [];
+if (writingSkill === null) writingMisses.push('skills/writing/SKILL.md missing');
+else {
+  if (!/^name: writing$/m.test(writingSkill)) writingMisses.push('SKILL.md has no "name: writing" line');
+  if (/!`cat /.test(writingSkill)) writingMisses.push('SKILL.md pastes a file with !cat');
+  if (!writingSkill.includes('addyosmani/clarity')) writingMisses.push('SKILL.md lacks the clarity credit');
+  if (!writingSkill.includes('this project\'s own writing rules win')) writingMisses.push('SKILL.md lacks the who-wins sentence');
+  for (const k of WRITING_KINDS) {
+    if (!exists(live, 'skills/writing/' + k + '.md')) writingMisses.push(k + '.md missing');
+    if (!writingSkill.includes('${CLAUDE_PLUGIN_ROOT}/skills/writing/' + k + '.md')) writingMisses.push('SKILL.md does not open ' + k + '.md through the plugin root');
+  }
+  const writingExtra = fs.readdirSync(path.join(live, 'skills', 'writing')).filter(f => f.endsWith('.md') && f !== 'SKILL.md' && !WRITING_KINDS.includes(f.slice(0, -3)));
+  if (writingExtra.length) writingMisses.push('unexpected files: ' + writingExtra.join(', '));
+}
+check('live: the writing guide ships its eight kind files and opens each through the plugin root', writingMisses.length === 0, writingMisses.join('; '));
+// The guide is read on every drafting turn, so it stays short, and it is held to
+// its own dash rule (U+2014 and U+2013 typed as escapes, never as the characters).
+const wordCount = (t) => t.split(/\s+/).filter(Boolean).length;
+const writingShortMisses = [];
+if (writingSkill === null) writingShortMisses.push('skills/writing/SKILL.md missing');
+else {
+  if (wordCount(writingSkill) > 1200) writingShortMisses.push('SKILL.md has ' + wordCount(writingSkill) + ' words (limit 1,200)');
+  for (const f of ['SKILL'].concat(WRITING_KINDS)) {
+    if (!exists(live, 'skills/writing/' + f + '.md')) { writingShortMisses.push(f + '.md missing'); continue; }
+    const t = read(live, 'skills/writing/' + f + '.md');
+    if (f !== 'SKILL' && wordCount(t) > 400) writingShortMisses.push(f + '.md has ' + wordCount(t) + ' words (limit 400)');
+    if (/[–—]/.test(t)) writingShortMisses.push(f + '.md holds an em or en dash');
+  }
+}
+check('live: the writing guide stays short and dash-free', writingShortMisses.length === 0, writingShortMisses.join('; '));
 // A skill a command loads by name mid-run needs its two permission rows in the seed, or
 // default permission mode stops on the call (#206: html-viewing first shipped without them).
 const mdUnder = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? mdUnder(path.join(d, e.name)) : e.name.endsWith('.md') ? [path.join(d, e.name)] : []);
