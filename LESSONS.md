@@ -582,3 +582,7 @@
 
 - **Seal a guess before a source read and score it after: the issue 277 guess named only gaps the toolkit already covered and missed both real ones, so the score shows what the read added and the guess can never stand in for it.**
 - **A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.**
+
+## Issue 278 (a second planted-bug fixture)
+
+- **Try a judge fixture's checks on wrong answers too: a fix that hid the symptom and a finding about the neighbouring bug both scored right until the review tried them.**
