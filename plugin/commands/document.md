@@ -75,6 +75,8 @@ Existing documentation may describe old behavior, so read the actual code rather
 
 ## 4. Documentation Style Rules
 
+Before writing any doc, release-note text, the pull request body or the cycle page, load the writing guide (`Skill(tk:writing)`) and follow its section for that kind. The five rules below still hold; where the guide's section is more specific, the guide wins.
+
 ✅ **Concise** - Short, plain sentences
 ✅ **Practical** - Examples over theory
 ✅ **Accurate** - Code verified, not assumed

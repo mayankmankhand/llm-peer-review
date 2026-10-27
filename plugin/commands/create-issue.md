@@ -47,6 +47,8 @@ Detect the host first, then create the issue with the matching CLI. These two st
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/host-cli.md"`
 
+Before writing the body, load the writing guide (`Skill(tk:writing)`) and follow its section for issues, pull requests and release notes; the Issue Body Format below still sets the sections.
+
 Then run the **"Create issue" row** for the detected host, from the project directory, following the quoting rule under the invocation table: the title and labels in single quotes (each `'` written as `'\''`), the body in a `mktemp -d` file on both hosts (inline on GitLab only through the table's `Unknown flag` fallback), and never double quotes or `$(...)`. Take the command from that row rather than from memory: the flag carrying the issue text is named differently on each host, double-quoted text has its backticks run as commands, and a command substitution stops for an approval prompt.
 
 ## Issue Body Format (Keep It Short)
