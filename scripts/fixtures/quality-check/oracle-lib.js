@@ -1,7 +1,8 @@
 'use strict';
 //
-// lib.js - what the fix oracles share (scripts/quality-check.js --role fix,
-// harness research plan Step 11).
+// oracle-lib.js - what the fix oracles of every fixture share
+// (scripts/quality-check.js --role fix, harness research plan Step 11; split out
+// of the first fixture's lib.js when a second fixture arrived, #278).
 //
 // Why: a fix verifier judges whether the defect a finding named is gone, and a
 // fix that deleted the feature along with the defect passed it 3 of 3 times
@@ -10,11 +11,12 @@
 // symptom no longer reproduces) and "works" (the feature the bug sat in still
 // does its job). A real fix passes both; a deletion passes gone and fails works.
 //
-// The oracles live here, outside the scratch project, and are copied to a temp
-// folder only at judge time, after the session has ended, so the fixer never
-// sees them. Each one runs as
+// The oracles live in each fixture's oracles/ folder, outside the scratch
+// project, and are copied to a temp folder only at judge time, after the session
+// has ended, so the fixer never sees them; this file and loopback.js are copied
+// in beside them. Each one runs as
 //   node <bug-id>.<gone|works>.js <tree> <port>
-// on its own throwaway copy of the project tree (it may write there: seed notes,
+// on its own throwaway copy of the project tree (it may write there: seed rows,
 // backups, a CSV), and starts the tree's server on <port> when it needs one,
 // bound to 127.0.0.1 by loopback.js. It prints one line,
 //   <PASS|FAIL|UNJUDGED> <bug-id> <gone|works>: <why>
@@ -26,6 +28,8 @@
 // server will not start), the symptom cannot reproduce and gone PASSes, saying
 // so. That is the literal "the defect is gone" a fix verifier reads, and the
 // works oracle is the half that catches the deletion.
+//
+// A fixture's own oracles/lib.js holds its seed data and re-exports this file.
 
 const fs = require('fs');
 const net = require('net');
@@ -33,17 +37,8 @@ const http = require('http');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 
-// Next to the oracles in the judge's temp copy; one folder up in the repo.
-const LOOPBACK = [path.join(__dirname, 'loopback.js'), path.join(__dirname, '..', 'loopback.js')].find(p => fs.existsSync(p));
-
-// The notes every oracle seeds, so the run's own data never decides a verdict.
-// n1 starts with "Buy"; n2 holds a comma (the CSV quoting case) and "buy" mid-text.
-const SEED = [
-  { id: 'n1', created: '2026-10-01T09:00:00.000Z', text: 'Buy coffee filters and oat milk' },
-  { id: 'n2', created: '2026-10-02T09:00:00.000Z', text: 'Call the dentist, then buy stamps' },
-  { id: 'n3', created: '2026-10-03T09:00:00.000Z', text: 'Book club: finish chapter 7' },
-];
-const NEWEST_FIRST = ['n3', 'n2', 'n1'];
+// Beside this file, in the repository and in the judge's temp copy alike.
+const LOOPBACK = path.join(__dirname, 'loopback.js');
 
 class Unjudged extends Error {}
 const PASS = why => ({ verdict: 'PASS', why });
@@ -83,11 +78,6 @@ function oracle(id, kind, judge) {
     .then(r => say(r.verdict, r.why))
     .catch(e => say('UNJUDGED', e instanceof Unjudged ? e.message : 'oracle error: ' + (e && e.message || e)))
     .finally(() => cleanupAll().finally(() => { clearTimeout(timer); process.exit(process.exitCode); }));
-}
-
-function seedNotes(tree, notes) {
-  fs.mkdirSync(path.join(tree, 'data'), { recursive: true });
-  fs.writeFileSync(path.join(tree, 'data', 'notes.json'), JSON.stringify(notes || SEED, null, 2) + '\n');
 }
 
 function lastLine(text) {
@@ -180,12 +170,13 @@ function npmRun(tree, script, args) {
 }
 
 // ---------------------------------------------------------------------------
-// A browser, for the two bugs that only show in the page
+// A browser, for the bugs that only show in the page
 // ---------------------------------------------------------------------------
 
-// The planted search-box crash (browser-search-id) stops app.js before it wires
-// Clear all, so the Clear all oracles turn an element lookup that finds nothing
-// into a detached stand-in element: one planted bug cannot hide another.
+// For an oracle whose control sits behind another planted bug: a planted script
+// crash can stop the page before it wires the control under test, so an element
+// lookup that finds nothing returns a detached stand-in element instead, and one
+// planted bug cannot hide another (withPage's stubMissing option).
 function stubMissingElements() {
   const real = Document.prototype.getElementById;
   Document.prototype.getElementById = function getElementById(id) {
@@ -237,6 +228,6 @@ async function waitFor(test, ms) {
 }
 
 module.exports = {
-  SEED, NEWEST_FIRST, Unjudged, PASS, FAIL, oracle, seedNotes, lastLine, sleep,
+  Unjudged, PASS, FAIL, oracle, lastLine, sleep,
   startServer, request, requestJson, ids, packageJson, npmRun, withPage, bodyText, waitFor,
 };

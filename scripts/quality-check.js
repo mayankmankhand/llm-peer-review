@@ -17,11 +17,11 @@
 // runs one toolkit command on a scratch project and is copied out before the
 // scratch folders are removed:
 //
-//   --role review  The fixture in scripts/fixtures/quality-check/ becomes a
-//                  two-commit git repo (base, then a change that plants one bug
-//                  per review lens plus a known-answer case), its dev server is
-//                  started on 127.0.0.1 port 3000 (the fixture's loopback.js keeps
-//                  it off the network), and the session runs
+//   --role review  A fixture (see Fixtures below) becomes a two-commit git repo
+//                  (base, then a change that plants one bug per review lens plus
+//                  a known-answer case), its dev server is started on 127.0.0.1
+//                  port 3000 (the shared loopback.js keeps it off the network),
+//                  and the session runs
 //                  `/tk:review <all eight lenses> <base>..HEAD report only, no chaining`.
 //   --role mapper  A git archive of a frozen source commit, and one dispatch of
 //                  the index-mapper agent on a frozen chunk of it, with /index's
@@ -42,6 +42,17 @@
 //                  build's prompts as they ship. The scratch project's final tree
 //                  is then judged by oracles the session never sees. See "The fix
 //                  role and its oracles" below.
+//
+// Fixtures (#278). Each planted-bug fixture is a folder under
+// scripts/fixtures/quality-check/<name>/ holding answers.json (the answer key),
+// base/ and change/ (the two commits) and oracles/ (the fix role's oracles);
+// loopback.js and oracle-lib.js, which every fixture shares, sit one level up and
+// are copied beside the oracles at judge time. --fixture <name> chooses one for
+// --role review, --role fix and --oracle-self-test; without it the fixture is
+// notebook, and the mode probes, the mapper and the skeptic replay always run on
+// notebook. An unknown name is refused with the list of folders that hold an
+// answers.json. A fixture's hash is taken over its base/ and change/ files by
+// their paths inside its own folder, so moving the folder does not move it.
 //
 // The arm decides the measured agents' model and effort, patched into the
 // build's agent files before the session starts (never into the repo):
@@ -90,7 +101,7 @@
 // Usage:
 //   node scripts/quality-check.js --role review --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        [--effort <level>] [--max-usd <n>] [--label <text>] [--mode-word <best|fit|cheap>]
-//        [--plan-models <best|fit|cheap>] [--keep]
+//        [--plan-models <best|fit|cheap>] [--fixture <name>] [--keep]
 //   node scripts/quality-check.js --role mapper --arm <a|b|c|h|ship> [--only <agent[,agent]>] --build <git-ref|tree>
 //        --chunk <manifest.json> [--effort <level>] [--max-usd <n>] [--keep]
 //   node scripts/quality-check.js --role skeptic --build <git-ref|tree> [--evidence <dir>] [--receipts <dir>]
@@ -99,14 +110,14 @@
 //        checkout's reports/harness-papers-2026-10-12/evidence), --receipts that run's
 //        receipts folder (default: the main checkout's reports/receipts/2026-09-22-002749)
 //   node scripts/quality-check.js --role fix --build <git-ref|tree> [--max-usd <n>] [--label <text>]
-//        [--oracle-port <n>] [--keep]
+//        [--oracle-port <n>] [--fixture <name>] [--keep]
 //        --oracle-port is where the oracles start the judged tree's server after the
 //        session (default 3000, which the session's own fixture server has freed by then)
 //   node scripts/quality-check.js --judge <fix-run-dir> [--oracle-port <n>]   re-run the
 //        oracles on a saved fix run's final tree (no session, no cost)
-//   node scripts/quality-check.js --oracle-self-test [--oracle-port <n>]   the oracles on
-//        the change tree unfixed, then with hand-made correct and empty fixes (no session;
-//        a free port other than 3000 unless --oracle-port names one)
+//   node scripts/quality-check.js --oracle-self-test [--oracle-port <n>] [--fixture <name>]   the
+//        oracles on the change tree unfixed, then with hand-made correct and empty fixes (no
+//        session; a free port other than 3000 unless --oracle-port names one)
 //   node scripts/quality-check.js --score <run[,run...]> [--score <run[,run...]>]
 //        --against <run[,run...]> [--require-known] [--allow-drift <reason>] [--pool <dir>] [--json]
 //   node scripts/quality-check.js --check <run-dir>        re-analyze one saved run
@@ -224,9 +235,13 @@ const os = require('os');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
-const FIXTURE = path.join(REPO, 'scripts', 'fixtures', 'quality-check');
-const ANSWERS_FILE = path.join(FIXTURE, 'answers.json');
-const LOOPBACK_PRELOAD = path.join(FIXTURE, 'loopback.js');
+// The planted-bug fixtures, one folder each, chosen with --fixture (#278): each
+// <name>/ holds answers.json, base/, change/ and oracles/. What they share sits
+// here, one level up: loopback.js and the oracles' generic half, oracle-lib.js.
+const FIXTURES_ROOT = path.join(REPO, 'scripts', 'fixtures', 'quality-check');
+const DEFAULT_FIXTURE = 'notebook';
+const LOOPBACK_PRELOAD = path.join(FIXTURES_ROOT, 'loopback.js');
+const ORACLE_LIB = path.join(FIXTURES_ROOT, 'oracle-lib.js');
 const HARNESS = path.join(REPO, 'scripts', 'setup', 'headless-session.sh');
 const OUT_ROOT = path.join(REPO, 'reports', 'quality-check');
 const LEDGER = path.join(OUT_ROOT, 'ledger.jsonl');
@@ -236,8 +251,6 @@ const NODE_MODULES = path.join(REPO, '.claude', 'scripts', 'node_modules');
 // This checkout's merge-findings.js: the skeptic replay checks every skeptic's
 // return with its checkVerdicts, whatever build the session ran.
 const MERGE_FINDINGS = path.join(REPO, '.claude', 'scripts', 'merge-findings.js');
-// The fix role's oracles: outside the scratch project, copied out only at judge time.
-const ORACLES = path.join(FIXTURE, 'oracles');
 
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODES = ['best', 'fit', 'cheap'];
@@ -1495,8 +1508,9 @@ function analyzeSkeptic(a, run, main, subs, reasons, warnings) {
 // verifier judging only whether the defect a finding named is gone: a fix that
 // deleted the cited step passed it 3 of 3 times, and nothing asked whether the
 // step still worked. --role fix lets /review's own loop fix the fixture, then
-// judges the tree it left with two oracles per runnable planted bug, kept in
-// scripts/fixtures/quality-check/oracles/ (see its lib.js) and copied to a temp
+// judges the tree it left with two oracles per runnable planted bug, kept in the
+// fixture's oracles/ folder (scripts/fixtures/quality-check/<name>/oracles/; the
+// shared half is oracle-lib.js one level above the fixtures) and copied to a temp
 // folder only after the session has ended, so the fixer never sees them:
 //   gone   the bug's symptom no longer reproduces
 //   works  the feature the bug sat in still does its job
@@ -1520,7 +1534,7 @@ const ORACLE_TIMEOUT_MS = 90 * 1000;
 // The oracle files for each planted bug, { id: { gone, works } }, in the answer
 // key's order. Throws on half a pair or an oracle that names no planted bug.
 function oracleSet(answers, dir) {
-  const files = fs.readdirSync(dir || ORACLES).filter(f => /\.(gone|works)\.js$/.test(f));
+  const files = fs.readdirSync(dir).filter(f => /\.(gone|works)\.js$/.test(f));
   const known = new Set(answers.bugs.map(b => b.id));
   const stray = files.filter(f => !known.has(f.replace(/\.(gone|works)\.js$/, '')));
   if (stray.length) throw new Error('oracles that name no planted bug: ' + stray.join(', '));
@@ -1681,15 +1695,16 @@ function playwrightCore() {
 
 // Runs each oracle pair (only those named in opts.only, when given) one at a time,
 // each oracle on its own fresh copy of `tree`, starting servers on `port`. The
-// oracles go to a temp folder first, with loopback.js beside them. A verdict counts
-// only when the oracle's line and exit code agree; anything else is UNJUDGED.
-// Resolves { port, at, playwright, oracles: [{ id, gone, works }], notRunnable },
-// each verdict { verdict, line, exit }. opts: answers, only, onResult(id, kind,
-// verdict), and dir (another oracle folder, for the tests).
+// oracles go to a temp folder first, with loopback.js and oracle-lib.js beside
+// them. A verdict counts only when the oracle's line and exit code agree; anything
+// else is UNJUDGED. Resolves { port, at, playwright, oracles: [{ id, gone, works }],
+// notRunnable }, each verdict { verdict, line, exit }. opts: fixture (a fixture's
+// name, notebook unless given), answers, only, onResult(id, kind, verdict), and dir
+// (another oracle folder, for the tests).
 async function judgeTree(tree, port, opts) {
   const o = opts || {};
-  const src = o.dir || ORACLES;
-  const set = oracleSet(o.answers || loadAnswers(), src);
+  const src = o.dir || path.join(fixtureDir(o.fixture || DEFAULT_FIXTURE), 'oracles');
+  const set = oracleSet(o.answers || loadAnswers(o.fixture), src);
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-judge.'));
   const pw = playwrightCore();
   const env = { ...process.env, QC_PLAYWRIGHT_CORE: pw || '' };
@@ -1700,6 +1715,7 @@ async function judgeTree(tree, port, opts) {
     const dir = path.join(work, 'oracles');
     copyDir(src, dir);
     fs.copyFileSync(LOOPBACK_PRELOAD, path.join(dir, 'loopback.js'));
+    fs.copyFileSync(ORACLE_LIB, path.join(dir, 'oracle-lib.js'));
     for (const [id, files] of Object.entries(set)) {
       if (o.only && !o.only.includes(id)) continue;
       const row = { id };
@@ -2095,8 +2111,31 @@ function loadRun(dir) {
   };
 }
 
-function loadAnswers() {
-  return JSON.parse(fs.readFileSync(ANSWERS_FILE, 'utf8'));
+// The names of the fixtures under `root` (FIXTURES_ROOT unless given): the
+// folders that hold an answers.json, sorted.
+function fixtureNames(root) {
+  const r = root || FIXTURES_ROOT;
+  let entries;
+  try { entries = fs.readdirSync(r, { withFileTypes: true }); } catch (e) { return []; }
+  return entries.filter(e => e.isDirectory() && fs.existsSync(path.join(r, e.name, 'answers.json'))).map(e => e.name).sort();
+}
+
+// The folder of the fixture called `name` under `root` (FIXTURES_ROOT unless a
+// test passes another). Only a plain name whose folder holds an answers.json
+// resolves; anything else (a path, a folder with no key) throws, naming the
+// fixtures there are.
+function fixtureDir(name, root) {
+  const r = root || FIXTURES_ROOT;
+  const names = fixtureNames(r);
+  if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/i.test(name) || !names.includes(name)) {
+    throw new Error('no fixture called ' + JSON.stringify(String(name)) + ' under ' + path.relative(REPO, r) + '; the fixtures are: ' + (names.join(', ') || 'none'));
+  }
+  return path.join(r, name);
+}
+
+// A fixture's answer key, by name (notebook unless given).
+function loadAnswers(name, root) {
+  return JSON.parse(fs.readFileSync(path.join(fixtureDir(name || DEFAULT_FIXTURE, root), 'answers.json'), 'utf8'));
 }
 
 // A role's path files in a build folder, as { relPath: Buffer }. Read at run time,
@@ -2287,19 +2326,23 @@ function copyFixture(src, dest) {
   }
 }
 
-function fixtureHash() {
+// A fixture's hash, from its folder: every base/ and change/ file, named by its
+// path inside the fixture's own folder, so moving the folder leaves the hash as
+// it was (#278: the saved Notebook runs stay comparable after the move).
+function fixtureHash(dir) {
   const h = crypto.createHash('sha256');
-  for (const f of walk(path.join(FIXTURE)).filter(f => /\/(base|change)\//.test(f)).sort()) {
-    h.update(path.relative(FIXTURE, f) + '\0');
+  for (const f of walk(dir).filter(f => /^(base|change)\//.test(path.relative(dir, f).split(path.sep).join('/'))).sort()) {
+    h.update(path.relative(dir, f) + '\0');
     h.update(fs.readFileSync(f));
   }
   return h.digest('hex').slice(0, 16);
 }
 
-// The review fixture as a two-commit repo; returns the two commit ids.
-function buildReviewProject(project, planModels) {
+// A review fixture (its folder, `dir`) as a two-commit repo; returns the two
+// commit ids.
+function buildReviewProject(project, planModels, dir) {
   fs.mkdirSync(project, { recursive: true });
-  copyFixture(path.join(FIXTURE, 'base'), project);
+  copyFixture(path.join(dir, 'base'), project);
   if (planModels) {
     const planFile = path.join(project, 'plans', 'PLAN-fixture.md');
     const text = fs.readFileSync(planFile, 'utf8').replace(/(\*\*Overall Progress:\*\*[^\n]*\n)/, '$1**Models:** ' + planModels + '\n');
@@ -2310,7 +2353,7 @@ function buildReviewProject(project, planModels) {
   git(['add', '-A'], project);
   git([...who, 'commit', '-q', '-m', 'Notes app'], project, { GIT_AUTHOR_DATE: '2026-09-30T12:00:00Z', GIT_COMMITTER_DATE: '2026-09-30T12:00:00Z' });
   const base = git(['rev-parse', 'HEAD'], project);
-  copyFixture(path.join(FIXTURE, 'change'), project);
+  copyFixture(path.join(dir, 'change'), project);
   git(['add', '-A'], project);
   git([...who, 'commit', '-q', '-m', 'Add search, export, clear all, backups, import and a reset command'], project, { GIT_AUTHOR_DATE: '2026-10-01T12:00:00Z', GIT_COMMITTER_DATE: '2026-10-01T12:00:00Z' });
   const change = git(['rev-parse', 'HEAD'], project);
@@ -2973,6 +3016,10 @@ async function commandRun(o) {
     if (role === 'skeptic') skepticInputs(o);
   }
   if (o.oraclePort !== undefined && role !== 'fix') usage('--oracle-port applies to --role fix, --judge and --oracle-self-test');
+  // The probes name Notebook's files and the mapper and skeptic read no fixture,
+  // so only the review and fix roles take another one (#278).
+  if (o.fixture !== DEFAULT_FIXTURE && role !== 'review' && role !== 'fix') usage('--fixture applies to --role review, --role fix and --oracle-self-test; the probes, the mapper and the skeptic replay run on ' + DEFAULT_FIXTURE);
+  const fx = fixtureOrUsage(o.fixture);
   if (role !== 'probe' && role !== 'skeptic' && role !== 'fix' && !['a', 'b', 'c', 'h', 'ship'].includes(o.arm)) usage('--arm must be a, b, c, h or ship');
   if (o.only && (role === 'probe' || o.arm === 'ship')) usage('--only applies to a measured arm (a, b, c or h) of the review or mapper role');
   if (!o.build) usage('--build <git-ref|tree> is required');
@@ -3009,7 +3056,7 @@ async function commandRun(o) {
     session: { model: sessionModel, effort: SESSION_EFFORT, permissionMode: 'bypassPermissions', maxUsd: o.maxUsd, systemNote: SYSTEM_NOTE, claude: claudeVersion() },
     paths: { tmp, home, project, buildDir: build.dir },
     expect: { main: sessionFamily, finders: sessionFamily, mapper: sessionFamily },
-    fixture: fixtureHash(), startedAt: new Date().toISOString(),
+    fixture: fixtureHash(fx), startedAt: new Date().toISOString(),
   };
   // Where the oracles start the judged tree's server, after the session's own
   // fixture server has stopped.
@@ -3043,7 +3090,7 @@ async function commandRun(o) {
       if (o.arm === 'ship' || o.modeWord || o.planModels) {
         meta.expect.modeLine = { mode, from: o.modeWord ? 'mode:? ?word|argument' : o.planModels ? 'PLAN-fixture' : 'default' };
       }
-      const commits = buildReviewProject(project, o.planModels || null);
+      const commits = buildReviewProject(project, o.planModels || null, fx);
       meta.commits = commits;
       meta.lenses = role === 'review' || role === 'fix' ? FINDER_KINDS : ['code'];
       const lensArg = meta.lenses.join(',');
@@ -3102,7 +3149,7 @@ async function commandRun(o) {
     } else if (o.probe === 'index-mode') {
       // /tk:index on the fixture: one chunk, so one mapper, on the mode's model.
       const mode = o.modeWord || 'fit';
-      meta.commits = buildReviewProject(project, null);
+      meta.commits = buildReviewProject(project, null, fx);
       meta.expect.mapper = mapperModel(mode, build.dir, sessionFamily);
       meta.expect.byType = { 'tk:index-mapper': meta.expect.mapper };
       meta.expect.modeLine = { mode };
@@ -3111,7 +3158,7 @@ async function commandRun(o) {
       // A direct /tk:review-code on four changed files takes the bigger-change path
       // and fans out to review-code-finder calls, each on the mode's model.
       const mode = o.modeWord || 'fit';
-      const commits = buildReviewProject(project, null);
+      const commits = buildReviewProject(project, null, fx);
       meta.commits = commits;
       meta.expect.finderModels = finderModels(mode, build.dir, sessionFamily);
       meta.expect.byType = { 'tk:review-code-finder': meta.expect.finderModels.code };
@@ -3121,7 +3168,7 @@ async function commandRun(o) {
     } else if (o.probe === 'execute-mismatch') {
       // A Sonnet session builds a plan whose Models line is fit: /tk:execute notes in
       // one line that the plan builds on Opus, gives the fresh-session steps, and carries on.
-      meta.commits = buildReviewProject(project, null);
+      meta.commits = buildReviewProject(project, null, fx);
       addMismatchPlan(project);
       meta.expect.texts = ['builds on\\W{0,4}Opus', '/model opus'];
       meta.prompt = '/tk:execute no chaining';
@@ -3129,7 +3176,7 @@ async function commandRun(o) {
       // /tk:create-plan from a summary naming cheap: the plan's Models line, the
       // critic on the session model, and the fresh-session close. With no map yet,
       // it runs /index mode:cheap first, so a mapper may answer too, on Sonnet.
-      meta.commits = buildReviewProject(project, null);
+      meta.commits = buildReviewProject(project, null, fx);
       meta.expect.byType = { 'tk:plan-critic': sessionFamily };
       meta.expect.mapper = mapperModel('cheap', build.dir, sessionFamily);
       meta.expect.planLine = { mode: 'cheap', skip: ['PLAN-fixture.md'] };
@@ -3204,7 +3251,7 @@ async function commandRun(o) {
       const tree = path.join(out, 'project-final');
       if (!fs.existsSync(tree)) throw new Error('no project-final/ was saved');
       console.log('quality-check: judging the final tree with the oracles, servers on port ' + oraclePort);
-      judged = await judgeTree(tree, oraclePort);
+      judged = await judgeTree(tree, oraclePort, { fixture: o.fixture });
     } catch (e) {
       judged = { port: oraclePort, at: new Date().toISOString(), error: String(e && e.message || e) };
       console.error('quality-check: the oracles could not judge the run: ' + judged.error);
@@ -3214,7 +3261,7 @@ async function commandRun(o) {
   }
   let analysis = null;
   try {
-    analysis = markCleanup(analyzeRun(loadRun(out), loadAnswers()), cleanupFailed);
+    analysis = markCleanup(analyzeRun(loadRun(out), loadAnswers(o.fixture)), cleanupFailed);
     fs.writeFileSync(path.join(out, 'analysis.json'), JSON.stringify(analysis, null, 2) + '\n');
   } finally {
     enterLedger(!!analysis && analysis.valid);
@@ -3407,11 +3454,13 @@ function commandScore(o) {
 // must FAIL), then on one tree holding a correct fix for SELF_TEST_PAIR.correct and
 // an empty fix for SELF_TEST_PAIR.deletion (correct: gone and works PASS; empty:
 // gone PASS, works FAIL), then each runnable bug's correct and empty fix alone.
-// No session, no ledger line; servers on a free port other than PORT.
+// No session, no ledger line; servers on a free port other than PORT. --fixture
+// chooses the fixture (notebook unless given).
 async function commandOracleSelfTest(o) {
-  const answers = loadAnswers();
-  const set = oracleSet(answers);
-  const fixes = require(path.join(ORACLES, 'self-test-fixes.js'));
+  const fx = fixtureOrUsage(o.fixture);
+  const answers = loadAnswers(o.fixture);
+  const set = oracleSet(answers, path.join(fx, 'oracles'));
+  const fixes = require(path.join(fx, 'oracles', 'self-test-fixes.js'));
   const port = o.oraclePort || await freePort();
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-oracle-self-test.'));
   let checks = 0;
@@ -3423,13 +3472,13 @@ async function commandOracleSelfTest(o) {
       + (wanted === null ? '(reference)  ' : '(want ' + wanted + ')').padEnd(14) + got.line);
   };
   const judge = async (stage, tree, wants) => {
-    await judgeTree(tree, port, { answers, only: Object.keys(wants), onResult: (id, kind, r) => want(stage, id, kind, wants[id][kind], r) });
+    await judgeTree(tree, port, { fixture: o.fixture, answers, only: Object.keys(wants), onResult: (id, kind, r) => want(stage, id, kind, wants[id][kind], r) });
   };
   try {
     console.log('Oracle self-test: servers on port ' + port + '; playwright-core: ' + (playwrightCore() || 'none (the browser oracles will be UNJUDGED)'));
     const unfixed = path.join(work, 'unfixed');
-    copyFixture(path.join(FIXTURE, 'base'), unfixed);
-    copyFixture(path.join(FIXTURE, 'change'), unfixed);
+    copyFixture(path.join(fx, 'base'), unfixed);
+    copyFixture(path.join(fx, 'change'), unfixed);
     for (const id of Object.keys(set)) if (!fixes[id] || !fixes[id].correct || !fixes[id].deletion) failed.push('no self-test fixes for ' + id);
 
     console.log('\n1. The change tree with no fix: every gone oracle FAILs (works shown for reference)');
@@ -3492,8 +3541,13 @@ function usage(msg) {
   process.exit(2);
 }
 
+// The chosen fixture's folder, or a usage error (exit 2) naming the fixtures.
+function fixtureOrUsage(name) {
+  try { return fixtureDir(name || DEFAULT_FIXTURE); } catch (e) { return usage(e.message); }
+}
+
 function parseArgs(argv) {
-  const o = { score: [], maxUsd: null };
+  const o = { score: [], maxUsd: null, fixture: DEFAULT_FIXTURE };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const val = () => { if (i + 1 >= argv.length) usage(a + ' needs a value'); return argv[++i]; };
@@ -3510,6 +3564,7 @@ function parseArgs(argv) {
     else if (a === '--mode-word') o.modeWord = val();
     else if (a === '--plan-models') o.planModels = val();
     else if (a === '--keep') o.keep = true;
+    else if (a === '--fixture') { o.fixture = val(); o.fixtureGiven = true; }
     else if (a === '--score') o.score.push(val());
     else if (a === '--against') o.against = val();
     else if (a === '--require-known') o.requireKnown = true;
@@ -3584,7 +3639,7 @@ async function probeLocal(o) {
   let ok = false;
   let why = '';
   try {
-    buildReviewProject(project, null);
+    buildReviewProject(project, null, fixtureDir(DEFAULT_FIXTURE));
     if (o.probe === 'browser') {
       if (!o.build) usage('--probe browser needs --build');
       const build = prepareBuild(o.build, home, tmp);
@@ -3623,8 +3678,9 @@ module.exports = {
   settingLines, mapperPromptHash, PATH_FILES,
   SKEPTIC_REPLAY, handbackBody, agentReturns, finderLinesFromLog, shareKeys, rewriteRoot, namedFiles, idsIn,
   verdictAsks, instructionText, scoreDispatch, localCopyOf, recordedVerdicts, skepticPrompt, replayCheckout, prepareSkepticReplay,
-  ORACLES, NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
+  NOT_RUNNABLE, SELF_TEST_PAIR, oracleSet, parseDigest, verifierVerdicts, fixOutcome, fixPrompt,
   copyTree, judgeTree, applyEdits, freePort, fixDiff, processesUnder, PORT,
+  FIXTURES_ROOT, DEFAULT_FIXTURE, ORACLE_LIB, fixtureNames, fixtureDir, fixtureHash, loadAnswers, parseArgs,
   DISALLOWED_TOOLS, stripSecrets, tmpSnapshot, restrictionsRecord, sessionEnv, sessionArgs, leakLines,
 };
 

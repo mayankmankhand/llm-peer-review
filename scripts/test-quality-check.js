@@ -22,7 +22,8 @@ const { spawnSync } = require('child_process');
 
 const QC = require('./quality-check.js');
 const SCRIPT = path.resolve(__dirname, 'quality-check.js');
-const FIXTURE = path.resolve(__dirname, 'fixtures', 'quality-check');
+// The Notebook fixture, the default one (#278 moved it into its own folder).
+const FIXTURE = path.resolve(__dirname, 'fixtures', 'quality-check', 'notebook');
 const ANSWERS = JSON.parse(fs.readFileSync(path.join(FIXTURE, 'answers.json'), 'utf8'));
 const BUG = Object.fromEntries(ANSWERS.bugs.map(b => [b.id, b]));
 const IDS = ANSWERS.bugs.map(b => b.id);
@@ -358,7 +359,7 @@ section('validity', () => {
   check('a build read through the plugin cache or the stable path is allowed', plugin.valid, plugin.reasons.join(', '));
 
   const outside = analyze(makeReviewRun({ mainTools: [
-    { type: 'tool_use', id: 'o1', name: 'Read', input: { file_path: '/home/someone/Projects/llm-peer-review/scripts/fixtures/quality-check/answers.json' } },
+    { type: 'tool_use', id: 'o1', name: 'Read', input: { file_path: '/home/someone/Projects/llm-peer-review/scripts/fixtures/quality-check/notebook/answers.json' } },
     { type: 'tool_use', id: 'o2', name: 'Bash', input: { command: 'cat /home/someone/notes.txt | head' } },
     { type: 'tool_use', id: 'o3', name: 'Grep', input: { pattern: 'x', path: '../../../home/someone' } },
   ] }));
@@ -540,6 +541,43 @@ section('fixture', () => {
   // Neutral: no file the finders read says what was planted (LESSONS, #204).
   const telling = stored.filter(p => /^(base|change)\//.test(p)).filter(p => /\b(planted|answer key|deliberate(ly)? (bug|broken)|known[- ]answer|quality[- ]check|test fixture)\b/i.test(fs.readFileSync(path.join(FIXTURE, p), 'utf8')));
   check('no fixture file names what was planted', telling.length === 0, telling.join(', '));
+});
+
+// #278: fixtures are folders under scripts/fixtures/quality-check/, chosen by
+// name. Notebook moved into its own folder; its hash must not move with it, or
+// the saved runs stop being comparable with new ones.
+section('fixtures by name (#278)', () => {
+  const ROOT = path.resolve(__dirname, 'fixtures', 'quality-check');
+  let unknown = '';
+  let resolved = null;
+  if (typeof QC.fixtureDir === 'function') {
+    try { QC.fixtureDir('no-such'); } catch (e) { unknown = e.message; }
+    const root = tmp('qc-test-fixtures-root-');
+    write(path.join(root, 'alpha', 'answers.json'), '{"bugs":[]}\n');
+    try { resolved = QC.fixtureDir('alpha', root); } catch (e) { resolved = 'threw: ' + e.message; }
+    let sep = '';
+    try { QC.fixtureDir('../notebook'); } catch (e) { sep = e.message; }
+    check('fixtureDir resolves a folder under scripts/fixtures/quality-check and refuses an unknown name',
+      QC.fixtureDir('notebook') === path.join(ROOT, 'notebook') && /\bnotebook\b/.test(unknown) && /no-such/.test(unknown)
+        && resolved === path.join(root, 'alpha') && sep !== '',
+      JSON.stringify({ notebook: QC.fixtureDir('notebook'), unknown, resolved, sep }));
+  } else check('fixtureDir resolves a folder under scripts/fixtures/quality-check and refuses an unknown name', false, 'fixtureDir is not exported');
+  const hash = typeof QC.fixtureHash === 'function' && typeof QC.fixtureDir === 'function' ? QC.fixtureHash(QC.fixtureDir('notebook')) : null;
+  // The value the 105 saved runs in reports/quality-check carry: pinned here, so
+  // an edit to Notebook's base/ or change/ is a deliberate test change too.
+  check('fixtureHash of the notebook fixture is 3b661928401a8724 after the move', hash === '3b661928401a8724', hash === null ? 'fixtureHash or fixtureDir is not exported' : hash);
+  const libFile = path.join(ROOT, 'notebook', 'oracles', 'lib.js');
+  let lib = null;
+  try { lib = fs.existsSync(libFile) ? require(libFile) : null; } catch (e) { lib = null; }
+  check('the generic oracle library and loopback.js sit one level above the fixtures',
+    fs.existsSync(path.join(ROOT, 'oracle-lib.js')) && fs.existsSync(path.join(ROOT, 'loopback.js'))
+      && !!lib && Array.isArray(lib.SEED) && typeof lib.startServer === 'function',
+    JSON.stringify({ oracleLib: fs.existsSync(path.join(ROOT, 'oracle-lib.js')), loopback: fs.existsSync(path.join(ROOT, 'loopback.js')), lib: !!lib }));
+  const given = typeof QC.parseArgs === 'function' ? QC.parseArgs(['--fixture', 'pocket']) : null;
+  const plain = typeof QC.parseArgs === 'function' ? QC.parseArgs([]) : null;
+  check('parseArgs reads --fixture and defaults it to notebook',
+    !!given && given.fixture === 'pocket' && !!plain && plain.fixture === 'notebook',
+    given === null ? 'parseArgs is not exported' : JSON.stringify({ given: given.fixture, plain: plain.fixture }));
 });
 
 section('model modes', () => {
@@ -1190,7 +1228,7 @@ section('skeptic replay: the usage line', () => {
 const FIXES = require(path.join(FIXTURE, 'oracles', 'self-test-fixes.js'));
 
 section('fix role: every planted bug has an oracle pair or a reason', () => {
-  const set = QC.oracleSet(ANSWERS);
+  const set = QC.oracleSet(ANSWERS, path.join(FIXTURE, 'oracles'));
   const runnable = Object.keys(set);
   const not = Object.keys(QC.NOT_RUNNABLE);
   check('oracles: each planted bug is runnable or listed as not runnable, never both', IDS.every(id => runnable.includes(id) !== not.includes(id)), JSON.stringify({ runnable, not }));
@@ -1211,8 +1249,10 @@ section('fix role: every planted bug has an oracle pair or a reason', () => {
 });
 
 section('fix role: the oracles stay out of the scratch project', () => {
-  const rel = path.relative(FIXTURE, QC.ORACLES);
-  check('the oracles folder sits beside base/ and change/, not inside either', rel === 'oracles');
+  // The fixture folder holds base/, change/ and oracles/ side by side; the shared
+  // oracle library sits one level up, outside every fixture (#278).
+  check('the oracles folder sits beside base/ and change/, not inside either',
+    ['base', 'change', 'oracles'].every(d => fs.existsSync(path.join(FIXTURE, d))) && path.dirname(QC.ORACLE_LIB) === path.dirname(FIXTURE));
   const dest = tmp('qc-test-fix-project-');
   QC.copyFixture(path.join(FIXTURE, 'base'), dest);
   QC.copyFixture(path.join(FIXTURE, 'change'), dest);
@@ -1582,7 +1622,7 @@ async function asyncSection(name, fn) {
       grepped.valid && grepped.warnings.includes('plugin-read:1') && Array.isArray(grepped.pluginReads) && grepped.pluginReads.join() === BUILD + '/skills/shared',
       JSON.stringify({ warnings: grepped.warnings, reads: grepped.pluginReads, reasons: grepped.reasons }));
 
-    const cli = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [bash('t_cli1', 'gh api repos/x/llm-peer-review/contents/scripts/fixtures/quality-check/answers.json'), bash('t_cli2', 'gh api repos/lodash/lodash/releases/latest')] }));
+    const cli = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [bash('t_cli1', 'gh api repos/x/llm-peer-review/contents/scripts/fixtures/quality-check/notebook/answers.json'), bash('t_cli2', 'gh api repos/lodash/lodash/releases/latest')] }));
     check('a GitHub CLI call naming this repository is flagged network-name and a call about another repository is not',
       cli.valid && cli.warnings.includes('network-name:1') && Array.isArray(cli.network) && cli.network.length === 1 && /llm-peer-review/.test(cli.network[0]),
       JSON.stringify({ warnings: cli.warnings, network: cli.network, reasons: cli.reasons }));
