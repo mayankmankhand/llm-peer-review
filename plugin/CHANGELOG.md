@@ -1,5 +1,34 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.13, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.14, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.14 - Words You Already Know (2026-10-27)
+
+**A patch on top of v8.0.13 (#276, #280).** Claude used to explain things to the owner in the toolkit's own words (finder, digest, seed, gate), which the owner never learned, and a project had no shared rules for text other people read, such as a PRD, a README, an email or a web page. From this release Claude calls the toolkit's parts by everyday names in what it writes for the owner (the review's own lines follow in a later release), keeps the exact term for the proof at the end, and opens a writing guide before it drafts text a person will read.
+
+### Added
+
+- **The writing guide (`/tk:writing`).** A short top part that every load reads (who wins, eight core rules, the dash rule, one review pass), and eight sections Claude opens only for the kind it is writing: chat replies and questions to the owner; plans and summaries for the owner; a PRD; a technical spec; a README or docs; issues, pull requests and release notes; email and chat messages; web copy and social posts. A project's own writing rules win over it wherever they live, and a guide or skill the project names for a kind is used first. The PRD section puts the problem and the goal before any technical notes, and the web copy section starts from a card that describes the reader. The core rules are adapted, in the toolkit's own words, from the clarity writing guide by Addy Osmani (https://github.com/addyosmani/clarity, MIT license).
+- **An "In plain words" block opens every exploration summary and plan:** the problem, the goal and how we will know, the cost, what is left out, and what changes for the owner, written so someone who never saw the work can follow it. The plan page shows it as a card where the TLDR card was; a plan written before this release keeps its TLDR card.
+
+### Changed
+
+- **Rule 8 of the always-on rules file, "Everyday words".** In a sentence written for the owner, the toolkit's own words get sixteen everyday names (a reviewer for a finder, the proof for a receipt, a side copy of the project for a worktree, a saved checkpoint for a commit, among others), and the toolkit's term moves to the proof at the end, where file names and commands go too. The names cover the toolkit's own parts only, never a project's own thing that shares the word. The rule also has Claude open the writing guide before it drafts a plan or summary, a PRD or spec, docs, an issue, pull request or release note, a message, or web copy.
+- **Rule 6, the dash rule, now also rules out a spaced hyphen used as a dash.** Hyphens stay inside words and in fixed line formats, quoted, dictated or locked text is never changed, and every copy of the rule in the toolkit says the same.
+- **`/tk:document` and `/tk:create-issue` open the guide** before they write docs, release notes, a pull request body or an issue body; their own style rules and issue format still hold.
+- **The fixed lines Claude says to the owner use the everyday names:** the announcement when exploration, plan execution or setup moves on to the next stage by itself, the question about removing a side copy at the end of a cycle, the map and side-copy notices, the warning `/tk:cloud` gives before an upload that carries saved checkpoints GitHub does not have yet, the review page's "Proof" and "Double-check verdict" labels and its "Dropped by the double-check" group, the cycle page's checkpoint counts, and the starter text of `CLAUDE.md`, `DESIGN-PROFILE.md` and `.claude/toolkit/README.md` (the starter text of `LESSONS.md` changed only for the new dash rule). The review's own lines wait for a release that changes the review itself: its hand-off to `/tk:document`, its line before the double-check, and its markdown report's "Receipt" and "Audited out", so for now the review page and the report differ in those labels. A finding carried onto the review page from a run before the update keeps its "Receipt" row until a later review closes it or finds it again.
+
+### Fixed
+
+- **The plan probe (maintainer, not shipped) works again.** Since v7.5.0 it ran on Opus and expected the closing steps to switch to Opus, which an Opus session rightly skips, so it could not pass. It now runs on Sonnet, and it also checks that a new plan carries the In plain words block with its five labels.
+
+### Upgrading
+
+- The rules file changed, so the next `/tk:upgrade` reports your `.claude/rules/toolkit.md` as behind the shipped copy (C-7, the check that compares the rules file with the shipped starter copy) and offers the merge; take it, or keep your wording. The new Rule 6 and Rule 8 reach your sessions only once you take it.
+- Rerun `/tk:setup` to add the guide's two permission rows, `Skill(tk:writing)` and `Skill(tk:writing:*)`; `/tk:upgrade` lists them as missing until you do (C-9, the check that your permission rows match the shipped starter settings). Without them, a session in default permission mode stops to ask before it opens the guide.
+- `CLAUDE.md`, `LESSONS.md`, `DESIGN-PROFILE.md` and `.claude/toolkit/README.md` have newer starter text. Where your copy still holds an older starter text, `/tk:upgrade` offers the new one (C-15, the check that offers newer starter text), and you take it or keep yours. Once your `DESIGN-PROFILE.md` holds your own answers, the check compares only its opening comment, so the reworded note under Allowed variance stays as it is; it means the same thing.
+- Your own writing rules stay where they are, mostly in `CLAUDE.md`, and they win over the guide. [Your own writing rules](docs/EXTENDING.md#your-own-writing-rules) shows a one-line pointer to a writing skill of your own and a one-line switch for a section you do not want.
+- A copy-install for other editors gets the guide (as `/writing`), the new Rule 6 and Rule 8 and the changed commands when you re-run `setup.sh` or `setup.ps1`. The rerun replaces `.claude/rules/toolkit.md` whole after copying the old one into a `.toolkit-backup-<date>-<time>-<n>/` folder, so copy back anything you wrote under its Project section. It adds no permission row for the guide yet, so a session in default permission mode asks before it opens it, and the newer starter text reaches plugin projects only.
+- On the plugin, cloud sessions never load plugins: they read Rule 8 from your committed rules file once you take the merge, and they never get the guide.
 
 ## v8.0.13 - Measured Before It Ships (2026-10-27)
 
