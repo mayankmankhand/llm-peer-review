@@ -65,6 +65,7 @@ The text below is this project's own gate, read from `.claude/toolkit/plan-gate.
   - 🟥 To Do
 - Include dynamic tracking of overall progress percentage (at top)
 - Write the exploration's Models answer (best, fit or cheap; fit when it gave none) as the `**Models:**` line under the progress line: while the plan is unfinished, `session-init.js` reads it to pick each helper's model
+- Open the plan with an `## In plain words` block right under the header lines, in place of a TLDR: the exploration summary's block, carried over and updated to the plan, with its five labels (**The problem:**, **The goal and how we will know:**, **The cost:**, **What is left out:**, **What changes for you:**) in everyday words someone who never saw the work can follow. The cost names money and time, or says nothing is spent. The block goes below the `**Models:**` line, which stays in the header
 - Add no scope or complexity beyond the details the conversation settled
 - Steps should be modular, elegant, minimal, and integrate seamlessly within the existing codebase
 - A rule or finding code in the plan carries what it means in plain words on its first mention, with the code in brackets, looked up in its own file rather than recalled: the plan is what the owner approves, and a bare code is one they cannot read (Rule 3 of the always-on rules file, applied to the plan)
@@ -138,8 +139,12 @@ An id is letters, digits, `.`, `_` and `-`. A command is one read-only line the 
 **Overall Progress:** `0%`
 **Models:** fit
 
-## TLDR
-Short summary of what we're building and why.
+## In plain words
+- **The problem:** What goes wrong today, and for whom.
+- **The goal and how we will know:** What changes, and the check that shows it worked.
+- **The cost:** The money and time this plan spends, or that nothing is spent.
+- **What is left out:** What this plan does not do, and why.
+- **What changes for you:** What the owner will see, do or be asked.
 
 ## Goal State (optional - include for features with 3+ steps)
 **Current State:** Where things are now.
@@ -247,7 +252,7 @@ After writing the markdown plan, also render an HTML view of the same plan to `p
 
 ### Build the JSON Payload
 
-Produce a JSON payload matching the schema documented in the header comment of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `tldr`, `goalState`, `uiux`, `decisions`, `reaches`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
+Produce a JSON payload matching the schema documented in the header comment of `${CLAUDE_PLUGIN_ROOT}/skills/shared/shells/plan-shell.html` (read it for the exact fields: `title`, `subtitle`, `progress`, `plain` (the In plain words block, as label and value rows), `tldr` (only for a plan written before that block), `goalState`, `uiux`, `decisions`, `reaches`, `steps`, `outcomes`). All fields are optional; a section is skipped when its data is missing. Within each `steps` entry, the schema defines `name`, `tag` (parallel/sequential), `meta` (delivers/depends on text), `why` (italic note for Verify steps), and `subtasks` - all optional. Two payload rules:
 
 - Do not number step names ("Extend the helper", not "1. Extend the helper") - the renderer numbers steps from array order.
 - Each step takes an optional `status` of `todo` | `doing` | `done`. At creation every step is `todo`, so it may be omitted entirely; `/tk:execute` fills it in as it re-renders. Markdown stays the source of truth.

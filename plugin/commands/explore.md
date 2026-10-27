@@ -208,6 +208,7 @@ Once you're satisfied with the problem definition, shift to technical exploratio
 > "Want me to look at how this connects to the existing codebase, or should we wrap up here?"
 
 If they say skip, present a vision-mode closing summary:
+- **In plain words** - first, under the heading `## In plain words`, five bullets someone who never saw the work can follow: **The problem:**, **The goal and how we will know:**, **The cost:** (money and time, or that nothing is spent), **What is left out:** and **What changes for you:** (what the user will see, do or be asked). Exact terms stay in the parts below it
 - **Direction chosen** - what the user landed on (and which scope dial option, if offered). Frame this in terms that map to `/tk:create-plan`'s Goal State section.
 - **Key decisions made** - premises challenged, ideas scrapped or kept (these become Critical Decisions in the plan)
 - **Design direction** - when the design step fired: load level, design system (state and where), direction name, brief, seed, the two unpicked directions' names and seeds, divergence allowed. `/tk:create-plan` copies this line into its UI/UX Design section.
@@ -253,6 +254,7 @@ After the codebase map, use the lesson index from the session-init JSON (`lesson
 
 ### What to present
 Give the user a brief summary of what you found:
+- In plain words, first: a `## In plain words` section with five bullets, **The problem:**, **The goal and how we will know:**, **The cost:**, **What is left out:** and **What changes for you:**, in everyday words someone who never saw the work can follow; exact terms stay in the parts below it
 - Key files involved
 - How the feature integrates
 - Any technical concerns or trade-offs

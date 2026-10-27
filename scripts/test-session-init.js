@@ -1687,6 +1687,23 @@ section('272. --chain <stage>: the countable part of M14', function () {
   check('a vision summary passes with the Reaches section and is refused without it',
     r6.status === 0 && r6.json.pass === true && r7.status === 1 && r7.json.error === 'bad_shape' && /Reaches/.test(String(r7.json.detail)),
     JSON.stringify(r6.json) + ' | ' + JSON.stringify(r7.json));
+  // #276: the In plain words block opens the summary, after the three bold lines
+  // and before ## Direction, in both modes. The gate reads sections by name and
+  // never this one, so the block passes as written; this pins that placement.
+  const PLAIN_BLOCK = '## In plain words\n\n- **The problem:** notes go missing\n- **The goal and how we will know:** none lost in a week\n' +
+    '- **The cost:** nothing is spent\n- **What is left out:** sync\n- **What changes for you:** nothing to do\n\n';
+  const withPlain = function (text) { return text.split('\n## Direction\n').join('\n' + PLAIN_BLOCK + '## Direction\n'); };
+  const p1Text = withPlain(summary('scoping', 'not offered', ['Trim the rule'], ['none']));
+  const p2Text = withPlain(summary('vision', 'Hold', ['One way'], ['none']));
+  write(repo, 'reports/explore/p1.md', p1Text);
+  write(repo, 'reports/explore/p2.md', p2Text);
+  const p1 = runScript(['--chain', 'explore', '--summary', 'reports/explore/p1.md'], repo);
+  const p2 = runScript(['--chain', 'explore', '--summary', 'reports/explore/p2.md'], repo);
+  check('a summary that opens with an In plain words block passes the explore chain',
+    p1Text.indexOf(PLAIN_BLOCK + '## Direction') > 0 && p2Text.indexOf(PLAIN_BLOCK + '## Direction') > 0 &&
+    p1.status === 0 && p1.json.pass === true && dig(p1.json, 'handoff.mode') === 'scoping' &&
+    p2.status === 0 && p2.json.pass === true && dig(p2.json, 'handoff.mode') === 'vision',
+    JSON.stringify(p1.json) + ' | ' + JSON.stringify(p2.json));
   const missing = runScript(['--chain', 'review', '--report', 'reports/nope.md'], repo);
   const noStage = runScript(['--chain'], repo);
   check('--chain with a missing input exits 1 with error',

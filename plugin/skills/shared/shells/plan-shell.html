@@ -66,6 +66,12 @@
     // shown as "Overall progress: <percent>% (<label>)" (plain text).
     "progress": { "percent": 0, "label": "0 of 7 steps" },
 
+    // In plain words rows (#276) - label/value pairs mirroring the plan's
+    // opening block, rendered as a card in the TLDR card's place. label is
+    // plain text; value is trusted inline HTML ok. Omitted -> card skipped.
+    "plain": [ { "label": "The problem", "value": "notes go missing" } ],
+
+    // TLDR paragraph, for a plan written before the In plain words block.
     "tldr":     "TLDR paragraph (trusted inline HTML ok)",
 
     // Two-column Goal State cards. Either key may be omitted to drop its card.
@@ -124,10 +130,11 @@ header.page{margin:2rem 0 0;}
 .progress-fill{height:100%;width:0%;background:var(--accent);}
 .progress-label{font-size:.875rem;color:var(--text-muted);white-space:nowrap;}
 
-/* TLDR card with accent left border. */
+/* TLDR and In plain words cards, with an accent left border. */
 .tldr{background:var(--bg-muted);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:1rem 1.25rem;margin:1.25rem 0 0;}
 .tldr h2{margin:0 0 .5rem;font-size:1.125rem;}
 .tldr p{margin:0;}
+.tldr ul{margin:0;padding-left:1.25rem;}
 
 /* Two-column Goal State grid. */
 .goal-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.5rem;}
@@ -212,6 +219,21 @@ th.narrow{width:1%;}
   function isArr(x) { return Object.prototype.toString.call(x) === '[object Array]'; }
   function nonEmptyArr(x) { return isArr(x) && x.length > 0; }
   function isNonEmpty(s) { return typeof s === 'string' && s.trim().length > 0; }
+  // Label/value rows as a list (In plain words, UI/UX Design, Reaches): the
+  // label as bold plain text, the value as trusted inline HTML. A row with no
+  // label is skipped; null when no row is left.
+  function labelRows(rows) {
+    var list = el('ul', null);
+    rows.forEach(function (row) {
+      if (!row || !isNonEmpty(row.label)) return;
+      var li = el('li', null);
+      li.appendChild(textEl('strong', null, row.label + ':'));
+      li.appendChild(document.createTextNode(' '));
+      li.appendChild(htmlEl('span', null, row.value != null ? String(row.value) : ''));
+      list.appendChild(li);
+    });
+    return list.childNodes.length ? list : null;
+  }
 
   var body = el('main'); // all rendered output lives in one <main> landmark (a11y)
 
@@ -242,6 +264,17 @@ th.narrow{width:1%;}
   wrap.appendChild(textEl('span', 'progress-label', labelText));
   body.appendChild(wrap);
 
+  // ---- In plain words card (#276): the plan's opening block, in the TLDR
+  // card's place. A plan written before the block carries tldr instead, and
+  // its TLDR card below still renders.
+  var plainList = nonEmptyArr(data.plain) ? labelRows(data.plain) : null;
+  if (plainList) {
+    var plain = el('section', 'tldr');
+    plain.appendChild(textEl('h2', null, 'In plain words'));
+    plain.appendChild(plainList);
+    body.appendChild(plain);
+  }
+
   // ---- TLDR card ----------------------------------------------------------
   if (isNonEmpty(data.tldr)) {
     var tldr = el('section', 'tldr');
@@ -268,23 +301,12 @@ th.narrow{width:1%;}
   }
 
   // ---- UI/UX Design (label/value rows) ------------------------------------
-  if (nonEmptyArr(data.uiux)) {
+  var uxList = nonEmptyArr(data.uiux) ? labelRows(data.uiux) : null;
+  if (uxList) {
     var uxSec = el('section', null);
     uxSec.appendChild(textEl('h2', null, 'UI/UX Design'));
-    var uxList = el('ul', null);
-    data.uiux.forEach(function (row) {
-      if (!row || !isNonEmpty(row.label)) return;
-      var li = el('li', null);
-      var strong = textEl('strong', null, row.label + ':');
-      li.appendChild(strong);
-      li.appendChild(document.createTextNode(' '));
-      li.appendChild(htmlEl('span', null, row.value != null ? String(row.value) : ''));
-      uxList.appendChild(li);
-    });
-    if (uxList.childNodes.length) {
-      uxSec.appendChild(uxList);
-      body.appendChild(uxSec);
-    }
+    uxSec.appendChild(uxList);
+    body.appendChild(uxSec);
   }
 
   // ---- Critical Decisions --------------------------------------------------
@@ -304,22 +326,12 @@ th.narrow{width:1%;}
 
   // ---- Reaches (label/value rows, #275): who and what else the change
   // reaches, and the step that handles each item; mirrors the plan's section.
-  if (nonEmptyArr(data.reaches)) {
+  var reachList = nonEmptyArr(data.reaches) ? labelRows(data.reaches) : null;
+  if (reachList) {
     var reachSec = el('section', null);
     reachSec.appendChild(textEl('h2', null, 'Reaches'));
-    var reachList = el('ul', null);
-    data.reaches.forEach(function (row) {
-      if (!row || !isNonEmpty(row.label)) return;
-      var rli = el('li', null);
-      rli.appendChild(textEl('strong', null, row.label + ':'));
-      rli.appendChild(document.createTextNode(' '));
-      rli.appendChild(htmlEl('span', null, row.value != null ? String(row.value) : ''));
-      reachList.appendChild(rli);
-    });
-    if (reachList.childNodes.length) {
-      reachSec.appendChild(reachList);
-      body.appendChild(reachSec);
-    }
+    reachSec.appendChild(reachList);
+    body.appendChild(reachSec);
   }
 
   // ---- Tasks table -----------------------------------------------------------

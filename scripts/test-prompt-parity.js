@@ -448,6 +448,17 @@ console.log('\n8. the writing rules (#276, #280)');
     emitted8 ? emitted8.slice(0, 160) : 'no Rule 8 line in plugin/seed/rules-toolkit.md');
   const mutatedManual = rule8 === '' ? manualText : manualText.replace(rule8, rule8.replace(/\bproof\b/, 'receipt'));
   check('276: mutation: one changed word in the manual\'s Rule 8 trips the word-for-word check', mutatedManual !== manualText && !sameRules(mutatedManual));
+
+  // The plain block opens the exploration summary and the plan. The M14 shape
+  // and the two stages that write it spell out its heading and five labels, so
+  // a label renamed in one of the three places fails here.
+  const PLAIN = ['## In plain words', '**The problem:**', '**The goal and how we will know:**', '**The cost:**', '**What is left out:**', '**What changes for you:**'];
+  const plainMisses = [];
+  for (const rel of ['.claude/skills/shared/hitl-stages.md', '.claude/commands/explore.md', '.claude/commands/create-plan.md']) {
+    const text = read(rel);
+    for (const s of PLAIN) if (!text.includes(s)) plainMisses.push(rel + ' lacks ' + s);
+  }
+  check('276: the In plain words heading and its five labels sit in hitl-stages.md, explore.md and create-plan.md', plainMisses.length === 0, plainMisses.join('; '));
 }
 
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');

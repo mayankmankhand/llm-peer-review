@@ -1432,6 +1432,18 @@ function findingContractTests() {
     steps: [{ name: 'One' }] }, [], 'plan').html);
   check('the rendered progress bar and label carry the payload percent',
     /progress-fill[^>]*width:40%/.test(prog) && /Overall progress: 40% \(2 of 5\)/.test(prog));
+  // #276: the plan's In plain words block arrives as label and value rows and
+  // renders as a card in the TLDR card's place; a payload that still carries
+  // only tldr (a plan written before the block) keeps its TLDR card.
+  const plainDom = renderDom(run('PLAN-w', { title: 'P', plain: [
+    { label: 'The problem', value: 'notes go <strong>missing</strong>' }, { label: 'The cost', value: 'nothing is spent' }],
+    steps: [{ name: 'One' }] }, [], 'plan').html);
+  check('a plan payload\'s plain rows render as an In plain words card',
+    /<h2>In plain words<\/h2>/.test(plainDom) && /<strong>The problem:<\/strong> <span>notes go <strong>missing<\/strong><\/span>/.test(plainDom) &&
+    /<strong>The cost:<\/strong>/.test(plainDom) && !/<h2>TLDR<\/h2>/.test(plainDom), plainDom.slice(0, 400));
+  const tldrDom = renderDom(run('PLAN-l', { title: 'P', tldr: 'an older plan', steps: [{ name: 'One' }] }, [], 'plan').html);
+  check('a plan payload with only tldr still renders its TLDR card',
+    /<h2>TLDR<\/h2>/.test(tldrDom) && /an older plan/.test(tldrDom) && !/In plain words/.test(tldrDom), tldrDom.slice(0, 400));
 }
 
 // ==========================================================================
