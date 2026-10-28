@@ -213,7 +213,6 @@
 - **A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.**
 - **Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.**
 - **Test an undo instruction by executing it, not by matching its text.**
-- **When a fix moves code, re-verify a line-number receipt's claim on the new code, not the old range.**
 
 ## Issues 178-183 (v7.2.0, the review sees the work)
 
@@ -401,6 +400,7 @@
 
 ## Issue 241 (check a claim at its source)
 
+- **A plan line that says what another script does is a claim: read the script before the line goes in the plan.**
 - **The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.**
 - **Before the bump, test an upgrade finding on a next-version scratch plugin, beside a control on the new text.**
 - **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**
