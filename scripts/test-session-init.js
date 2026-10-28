@@ -1818,6 +1818,55 @@ section('Over the cap, the read keeps the newest part (#281)', function () {
     JSON.stringify({ ranges: H.ranges, skipped: H.skipped }));
 });
 
+// #281: --lessons lists the trim candidates a script can see, by line number, for
+// the trim order in the toolkit reference; the owner still picks every cut.
+section('--lessons lists trim candidates (#281)', function () {
+  const repo = newRepo('lessons-candidates');
+  const long121 = 'L'.repeat(121);
+  const long120 = 'M'.repeat(120);
+  write(repo, 'LESSONS.md', [
+    '# Lessons', '', '## Section A', '',
+    '- **Alpha lead.**',
+    '- **Beta lead.** Superseded by #9.',
+    '- **Gamma lead.**',
+    '- **' + long121 + '**',
+    '- **' + long120 + '**',
+    '', '### Lone heading', '',
+    '- **Delta lead.**', ''].join('\n'));
+  write(repo, 'LESSONS-detail.md', [
+    '# Detail', '',
+    '- **Alpha lead.** The write-up.',
+    '- **Beta lead.** Another.',
+    '- **Gamma lead.** Superseded by the Delta lead, which covers the same case.',
+    '- **' + long121 + '** x',
+    '- **' + long120 + '** y',
+    '- **Delta lead.** z', ''].join('\n'));
+  commitAll(repo, 'init');
+  const own = runScript(['--lessons'], repo).json || {};
+  const C = own.candidates || {};
+  check('281: --lessons lists trim candidates by line number',
+    JSON.stringify(C.afterLead) === '[6]' && JSON.stringify(C.loneHeadings) === '[11]'
+      && JSON.stringify(C.superseded) === '[6,7]' && JSON.stringify(C.longLeads) === '[8]',
+    JSON.stringify(C));
+
+  // The toolkit's own lessons list ships in the plugin's seed folder, beside its
+  // scripts folder. This repo's .claude/scripts has no seed folder beside it, which
+  // is what keeps the list off in the toolkit's own repository. The copy runs alone:
+  // the script needs only Node's own modules outside --chain review.
+  const plug = path.join(TMP, 'plugin-shaped');
+  fs.mkdirSync(path.join(plug, 'scripts'), { recursive: true });
+  fs.mkdirSync(path.join(plug, 'seed'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(plug, 'scripts', 'session-init.js'));
+  fs.writeFileSync(path.join(plug, 'seed', 'toolkit-lesson-leads.txt'), '# The toolkit\'s leads, one per line.\nalpha lead\nNot in this index.\n');
+  const r = spawnSync(process.execPath, [path.join(plug, 'scripts', 'session-init.js'), '--lessons'], { cwd: repo, env: ENV, encoding: 'utf-8' });
+  let P = {};
+  try { P = JSON.parse(r.stdout); } catch (e) { P = {}; }
+  check('281: the toolkit\'s lessons list is read only where seed/ sits beside the scripts',
+    JSON.stringify((P.candidates || {}).toolkitLeads) === '[5]' && P.notes === undefined
+      && C.toolkitLeads === undefined && Array.isArray(own.notes) && own.notes.length === 1 && /toolkit-lesson-leads\.txt/.test(own.notes[0]),
+    JSON.stringify({ plugin: P.candidates, pluginNotes: P.notes, ownNotes: own.notes, stderr: (r.stderr || '').slice(0, 200) }));
+});
+
 if (failures.length === 0) {
   console.log(passed + ' checks passed.\n');
   process.exit(0);

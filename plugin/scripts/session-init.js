@@ -1600,8 +1600,13 @@ function cycleStart() {
 // asterisks. A missing detail file leaves every lead without a write-up. A bold
 // span never crosses a line end, as with grep: otherwise a lone `**` (a glob
 // such as `**/x`) pairs with the next line's bold text and hides real write-ups.
+// candidates lists what a script can see of the trim order (lessonCandidates,
+// below), and notes says when a list could not be made.
 //
-//   {"duplicates": ["<lead>", ...], "noWriteUp": ["<lead>", ...], "detailFile": true | false}
+//   {"duplicates": ["<lead>", ...], "noWriteUp": ["<lead>", ...], "detailFile": true | false,
+//    "bytes": <n>, "cap": 44000, "overCap": true | false,
+//    "candidates": {"afterLead": [<line>, ...], "loneHeadings": [...], "toolkitLeads": [...],
+//                   "superseded": [...], "longLeads": [...]}, "notes": ["..."]}
 function lessonsCheck() {
   const root = modelsRoot() || cwd;
   const read = (name) => {
@@ -1623,7 +1628,7 @@ function lessonsCheck() {
     if (seen.has(l)) twice.add(l);
     seen.add(l);
   }
-  return {
+  const out = {
     duplicates: Array.from(twice).sort(),
     noWriteUp: Array.from(seen).filter((l) => !written.has(l)).sort(),
     detailFile: detail !== null,
@@ -1631,7 +1636,74 @@ function lessonsCheck() {
     cap: LESSONS_CAP_BYTES,
     overCap: bytes > LESSONS_CAP_BYTES,
   };
+  const toolkit = readToolkitLeads();
+  out.candidates = lessonCandidates(index, detail, toolkit);
+  if (toolkit === null) out.notes = ["The toolkit's own lessons list (seed/" + TOOLKIT_LEADS_FILE + ") is not beside this script, so copied toolkit lessons are not listed here; that list ships with the plugin only."];
+  return out;
 }
+
+// Trim candidates (#281): the steps of the trim order ("Trimming the index" in the
+// toolkit reference) that a script can see, as line numbers only, so the output
+// stays small on a large index. The owner still picks every cut.
+//   afterLead     a bullet with text after its bold lead (step 0)
+//   loneHeadings  a heading of level 2 or deeper over exactly one lesson (step 0)
+//   toolkitLeads  a lead on the toolkit's own lessons list, compared as the upgrade
+//                 check's C-16 compares them; present only where the list ships
+//                 (step 1)
+//   superseded    a lesson whose index line or write-up says superseded (step 4)
+//   longLeads     a lead over 120 bytes, its bold markers left out (step 7)
+// A lead and its line are read as lessonsCheck reads them (a `- **...**` line), and
+// HTML comments are skipped, as the seed's own comment shows an example line. A
+// write-up is the detail file's line that opens with the same bold lead, plus the
+// lines under it up to the next bullet or heading.
+const LESSONS_LONG_LEAD_BYTES = 120;
+function lessonCandidates(index, detail, toolkit) {
+  const leadOf = (line) => /^- \*\*([^*\r\n]+)\*\*(.*)$/.exec(line);
+  const says = (text) => /\bsuperseded\b/i.test(text);
+  const supersededLeads = new Set();
+  let current = null;
+  for (const line of (detail || "").split(/\r?\n/)) {
+    const m = leadOf(line);
+    if (m) current = m[1];
+    else if (/^\s*(?:#|- )/.test(line)) current = null;
+    if (current !== null && says(line)) supersededLeads.add(current);
+  }
+  const c = { afterLead: [], loneHeadings: [], superseded: [], longLeads: [] };
+  if (toolkit !== null) c.toolkitLeads = [];
+  let heading = null;
+  const close = () => { if (heading && heading.lessons === 1) c.loneHeadings.push(heading.line); };
+  let inComment = false;
+  index.split(/\r?\n/).forEach((line, i) => {
+    if (inComment) { if (line.includes("-->")) inComment = false; return; }
+    if (/^\s*<!--/.test(line)) { if (!line.includes("-->")) inComment = true; return; }
+    if (/^#{2,}\s/.test(line)) { close(); heading = { line: i + 1, lessons: 0 }; return; }
+    const m = leadOf(line);
+    if (!m) return;
+    const [, lead, after] = m;
+    if (heading) heading.lessons++;
+    if (after.trim() !== "") c.afterLead.push(i + 1);
+    if (toolkit !== null && toolkit.has(leadKey(lead))) c.toolkitLeads.push(i + 1);
+    if (says(after) || supersededLeads.has(lead)) c.superseded.push(i + 1);
+    if (Buffer.byteLength(lead, "utf8") > LESSONS_LONG_LEAD_BYTES) c.longLeads.push(i + 1);
+  });
+  close();
+  return c;
+}
+
+// The toolkit's own lessons list, as the upgrade check's C-16 reads it, or null
+// where it does not ship. It sits in the plugin's seed folder, beside the plugin's
+// scripts folder; this repository's .claude/scripts has no seed folder beside it,
+// which is what keeps step 1 off in the toolkit's own repository, where every
+// lesson is the toolkit's.
+const TOOLKIT_LEADS_FILE = "toolkit-lesson-leads.txt";
+function readToolkitLeads() {
+  let text;
+  try { text = fs.readFileSync(path.join(__dirname, "..", "seed", TOOLKIT_LEADS_FILE), "utf8"); } catch { return null; }
+  return new Set(text.split(/\r?\n/).filter((l) => l.trim() && !l.startsWith("#")).map(leadKey));
+}
+// A lead as compared: case, spacing and a closing period or colon set aside. The
+// same reading as leadKey in upgrade-audit.js, which C-16 uses on the same list.
+function leadKey(lead) { return String(lead).toLowerCase().replace(/\s+/g, " ").trim().replace(/[.:!]+$/, "").trim(); }
 
 // ==========================================================================
 // --chain <stage>: the countable part of M14's stage handoffs (#272)
@@ -1941,7 +2013,7 @@ if (outGiven && cliArgs[0] !== "--scope") {
 } else if (cliArgs[0] === "--cycle-start" && cliArgs.length === 1) {
   emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, cycleStart(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "start", "source", "plan"]));
 } else if (cliArgs[0] === "--lessons" && cliArgs.length === 1) {
-  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp", "bytes", "cap", "overCap"]));
+  emit(withModels(Object.assign({ generatedAt: new Date().toISOString() }, lessonsCheck(), { cwd })), (o) => ordered(o, ["generatedAt", "error", "duplicates", "noWriteUp", "bytes", "cap", "overCap", "notes", "candidates"]));
 } else if (cliArgs[0] === "--chain") {
   const result = chainCheck(cliArgs.slice(1));
   // A refused input exits 1 (#272): the one mode where the exit code matters,
