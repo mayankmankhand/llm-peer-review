@@ -52,6 +52,7 @@
     ".claude/scripts/correction-ledger.js",
     ".claude/scripts/doc-check.js",
     ".claude/scripts/env-local.js",
+    ".claude/scripts/folder-guard.js",
     ".claude/scripts/gen-media.js",
     ".claude/scripts/generate-index.js",
     ".claude/scripts/merge-check.js",
