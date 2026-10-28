@@ -1,5 +1,23 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.15, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.16, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.16 - Right Folder, Real Fixes (2026-10-28)
+
+**Claude's commands stay in the project folder, and in the usual proofs a fix that only moves the flagged line no longer passes its recheck (#282, #283).** A `cd` into a subfolder stays in force for Claude's next command, so a later check, helper or skill could run in the wrong folder and read the wrong files, or none. And when a review's fix only moved the line a finding pointed at, the automatic recheck still passed, because it looked for the flagged text at the old line number only.
+
+### Added
+
+- **The folder guard (#282).** While Claude's shell sits anywhere other than the project folder, a new plugin hook stops the next command, helper launch, skill or search before it runs, and at the end of a turn has Claude step back first, so your next message starts in the project folder. The reason it gives names the one `cd` that steps back; Claude runs it by itself and carries on, so nothing comes to you. A command that has to run in another folder still runs when it starts with `cd <full path> &&`, and the top folder of a git working copy, such as a worktree, counts as the project. If the guard itself fails, the call runs as it would have without it.
+
+### Changed
+
+- **The recheck of a fix looks for the flagged text wherever it now sits (#283).** A fix passes only when that text is gone, not when it has moved to another line. This holds whether the proof printed line numbers with a search (`grep -n`, `rg --column`), `cat -n` or `git blame`, and wherever its expected text holds the line number the finding points at. A few rarer proofs can still let a moved line pass: line numbers printed by a linter or a test runner, and a numbered line picked out of a search by a second search. A fix that keeps the flagged text on purpose, or text with a number equal to that line, may take one more round, and when the text shows up on more than one line, Claude writes what that recheck must show before running it. A proof that picks lines by their number (`sed -n 12p`, `head` or `tail` on a file or on a whole file piped in, or `git blame -L 12,15`) cannot be rechecked this way, so its finding goes to the separate check of the fix, and the review command now tells Claude how to hand it over.
+
+### Upgrading
+
+- Nothing to do: both changes arrive with the plugin update.
+- If the folder guard misbehaves, start a session with `claude --settings '{"disableAllHooks": true}'`, which turns every hook off for that session.
+- A copy-install for other editors gets the recheck change when you re-run `setup.sh` or `setup.ps1`. The folder guard is a Claude Code hook, so it comes with the plugin only, like the push guard.
 
 ## v8.0.15 - Lessons That Fit (2026-10-28)
 
