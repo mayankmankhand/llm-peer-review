@@ -1670,13 +1670,16 @@ function lessonCandidates(index, detail, toolkit) {
   }
   const c = { afterLead: [], loneHeadings: [], superseded: [], longLeads: [] };
   if (toolkit !== null) c.toolkitLeads = [];
+  // A heading over exactly one lesson. A parent heading (the next heading sits
+  // deeper) keeps its place, since its subsections still need it.
   let heading = null;
-  const close = () => { if (heading && heading.lessons === 1) c.loneHeadings.push(heading.line); };
+  const close = (nextLevel) => { if (heading && heading.lessons === 1 && !(nextLevel > heading.level)) c.loneHeadings.push(heading.line); };
   let inComment = false;
   index.split(/\r?\n/).forEach((line, i) => {
     if (inComment) { if (line.includes("-->")) inComment = false; return; }
     if (/^\s*<!--/.test(line)) { if (!line.includes("-->")) inComment = true; return; }
-    if (/^#{2,}\s/.test(line)) { close(); heading = { line: i + 1, lessons: 0 }; return; }
+    const h = /^(#{2,})\s/.exec(line);
+    if (h) { close(h[1].length); heading = { line: i + 1, level: h[1].length, lessons: 0 }; return; }
     const m = leadOf(line);
     if (!m) return;
     const [, lead, after] = m;
@@ -1686,7 +1689,7 @@ function lessonCandidates(index, detail, toolkit) {
     if (says(after) || supersededLeads.has(lead)) c.superseded.push(i + 1);
     if (Buffer.byteLength(lead, "utf8") > LESSONS_LONG_LEAD_BYTES) c.longLeads.push(i + 1);
   });
-  close();
+  close(0); // the end of the file: no heading below
   return c;
 }
 

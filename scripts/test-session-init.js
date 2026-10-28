@@ -1848,6 +1848,15 @@ section('--lessons lists trim candidates (#281)', function () {
     JSON.stringify(C.afterLead) === '[6]' && JSON.stringify(C.loneHeadings) === '[11]'
       && JSON.stringify(C.superseded) === '[6,7]' && JSON.stringify(C.longLeads) === '[8]',
     JSON.stringify(C));
+  // A parent heading keeps its place even over one lesson of its own: removing it
+  // would hand its subsections to the section above.
+  const parent = newRepo('lessons-parent-heading');
+  write(parent, 'LESSONS.md', ['# Lessons', '', '## Parent', '', '- **Only direct lesson.**', '', '### Child', '', '- **One.**', '- **Two.**', ''].join('\n'));
+  write(parent, 'LESSONS-detail.md', '- **Only direct lesson.** a\n- **One.** b\n- **Two.** c\n');
+  commitAll(parent, 'init');
+  const PC = (runScript(['--lessons'], parent).json || {}).candidates || {};
+  check('281: a parent heading over one lesson of its own is not listed, since its subsections still need it',
+    JSON.stringify(PC.loneHeadings) === '[]', JSON.stringify(PC));
 
   // The toolkit's own lessons list ships in the plugin's seed folder, beside its
   // scripts folder. This repo's .claude/scripts has no seed folder beside it, which
