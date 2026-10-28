@@ -2,6 +2,27 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**The lessons file costs less to read (#281).** Every session used to read a project's whole `LESSONS.md` at the start, and each later stage in the same session read it again, so one long-lived project with a 206 KB lessons file spent about 8 to 9% of its cost on that read. The 44,000-byte cap from v8.0.13 only came up when a new lesson was written. Now the read stops at the cap, a stage skips a read whose text it still has, `/tk:upgrade` tells a project whose file is over, and a trim guide says what to cut first.
+
+### Added
+
+- **A trim guide for the lessons file.** "Trimming the index", in the toolkit reference's Lessons section, puts the cuts in order: strip what holds no lesson, remove lessons that are not this project's, move write-ups out of the index, then retire lessons already said in an always-read file, superseded ones, ones a check now enforces, repeats (folded into the clearest line, with the count kept), long lines (shortened to their rule) and one-offs. It was built from an audit of nine real lessons files. `/tk:document` follows it when the file is over the cap, and you pick every cut.
+- **`session-init.js --lessons` lists trim candidates** by line number: notes after a bold line, headings over one lesson, lessons copied from the toolkit's own log (on a plugin install, where that list ships), superseded marks, and lines over 120 bytes.
+
+### Changed
+
+- **Over 44,000 bytes, the session-start read covers only the newest part of `LESSONS.md`**, the lines at the end of the file that fit in 44,000 bytes, and says which lines it skipped. A later stage in the same session skips the read when the text is still in its conversation, and reads again after the conversation is compacted.
+- **`/tk:document` writes each new lesson as its rule:** a bold line of about 120 bytes, with the story in `LESSONS-detail.md`. A lesson that repeats an existing one adds a dated line to that lesson's write-up instead of a new line, and at its third incident `/tk:document` offers you a check for it (an issue or a test). Over the cap it asks one question per kind of cut, with the full list in a file under `reports/`, and reruns the lessons check after cutting.
+- **The cap is set by cost:** one full read of 44,000 bytes is about 2% of a session. The number did not change.
+
+### Upgrading
+
+- Nothing to do for the shorter read: it starts with the plugin update.
+- If your `LESSONS.md` is over 44,000 bytes, the next `/tk:upgrade` reports it (C-16, the check that keeps the lessons index to one-liners) and points to the trim guide; you pick the cuts. It comes back on every upgrade until the file is under the cap.
+- A copy-install for other editors gets none of this until it moves to the plugin; once it does, the same check also flags the lessons it copied from the toolkit's own log.
+
 ## v8.0.14 - Words You Already Know (2026-10-27)
 
 **A patch on top of v8.0.13 (#276, #280).** Claude used to explain things to the owner in the toolkit's own words (finder, digest, seed, gate), which the owner never learned, and a project had no shared rules for text other people read, such as a PRD, a README, an email or a web page. From this release Claude calls the toolkit's parts by everyday names in what it writes for the owner (the review's own lines follow in a later release), keeps the exact term for the proof at the end, and opens a writing guide before it drafts text a person will read.
