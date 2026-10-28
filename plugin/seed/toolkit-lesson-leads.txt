@@ -415,6 +415,7 @@ When a reviewer gets its excerpts as a diff file, tell it to cite the files' own
 When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
 When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.
 When a rule limits what may leave, screen the bytes at the send call, not the command that made them.
+When a rule matches commands by name, list every allowed command that prints the same output, and test each.
 When a second script borrows a safety screen, keep its order of operations, not just its code.
 When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.
 When a session restart is possible, run a minutes-long suite detached, with its log and exit code in files.

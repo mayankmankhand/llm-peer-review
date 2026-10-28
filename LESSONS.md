@@ -525,3 +525,7 @@
 
 - **Name what a cut keeps by its place in the file, not by what that place usually holds.**
 - **Count a rule as already said only where every reader of the copy also reads the original.**
+
+## Issues 282 and 283 (the folder guard and the position-free recheck)
+
+- **When a rule matches commands by name, list every allowed command that prints the same output, and test each.**
