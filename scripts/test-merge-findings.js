@@ -1158,6 +1158,28 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('283: with line numbers printed, the cited line goes wherever the match holds it; counts and words stay',
     round3Wrong.length === 0,
     round3Wrong.map(([match, check, line]) => check + ' -> ' + inv3(match, check, line)).join(' | '));
+  // A third verifier found the count test reading an option's value as flags:
+  // rg's -thtml or -tcss and grep's -elogger hold an l or a c, so those checks
+  // lost the line-number handling they had before it. Short options are now
+  // read the way the tools read them: a letter that takes a value (-t, -e, -C)
+  // ends the word, so its value is no flag, and -tpy or -tjson print no line
+  // numbers either.
+  const options = [
+    ['^a\\.html:40:', 'rg -n -thtml href src', 40, '^a\\.html:[0-9]+:'],
+    ['^40:.*body', 'rg -n -tcss body src/a.css', 40, '^[0-9]+:.*body'],
+    ['^40:logger', 'grep -n -elogger src/a.js', 40, '^[0-9]+:logger'],
+    ['^40:logger', 'grep -nm1 logger src/a.js', 40, '^[0-9]+:logger'],
+    ['^40:x', 'grep -n x src/a.js | grep -c x', 40, '^40:x'],
+    ['^40$', 'grep -cn logger src/a.js', 40, '^40$'],
+    ['^40$', 'rg --count -n logger src/a.js', 40, '^40$'],
+    ['x 40 y', 'rg -tpy x src', 40, 'x 40 y'],
+    ['x 40 y', 'rg -tjson x src', 40, 'x 40 y'],
+    ['^40:x', 'grep -n -e -c src/a.js', 40, '^[0-9]+:x'],
+  ];
+  const optionsWrong = options.filter(([match, check, line, want]) => inv3(match, check, line) !== JSON.stringify({ noMatch: want }));
+  check11('283: an option\'s value (-thtml, -tcss, -elogger) is not read as a count flag, and -tpy prints no numbers',
+    optionsWrong.length === 0,
+    optionsWrong.map(([match, check, line]) => check + ' -> ' + inv3(match, check, line)).join(' | '));
   // End to end: the cited line travels from the finding through --verify into
   // the recheck row, and the checks runner fails the moved line and passes the
   // fix for a layout no shape covers.

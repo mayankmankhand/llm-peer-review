@@ -921,9 +921,30 @@ function toolOf(words) {
   return git ? { tool: 'git ' + git.sub, args: git.args } : { tool: words[0], args: words.slice(1) };
 }
 const SEARCHES = ['grep', 'egrep', 'fgrep', 'rg', 'git grep'];
+// A search's options, read the way the tool reads them: a long option by its
+// name, and a word with one dash as a run of letters, where a letter that
+// takes a value (-e, -f, -m, -A, -B, -C, and rg's -t, -g, -r) ends the run,
+// its value being the rest of the word (-thtml, -elogger, -C2) or, when the
+// run ends there, the next word.
+const TAKES_VALUE = { rg: 'efgtTmABCjMrEd', 'git grep': 'efmABC' };
+function searchFlags(tool, args) {
+  const takes = TAKES_VALUE[tool] || 'efmABCdD';
+  const flags = new Set();
+  for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+    const a = args[i];
+    if (a.startsWith('--')) flags.add(a.split('=')[0]);
+    else if (a.length > 1 && a[0] === '-') {
+      for (let j = 1; j < a.length; j++) {
+        if (takes.includes(a[j])) { if (j === a.length - 1) i++; break; }
+        flags.add(a[j]);
+      }
+    }
+  }
+  return flags;
+}
 // A search that counts, lists files or stays quiet prints no line of the file.
-const NO_LINES = ['--count', '--count-matches', '--files-with-matches', '--files-without-match', '--files', '--name-only', '--quiet', '--silent'];
-const printsNoLines = (args) => args.some((a) => /^-[A-Za-z0-9]*[clq]/.test(a) || NO_LINES.includes(a));
+const NO_LINES = ['c', 'l', 'q', '--count', '--count-matches', '--files-with-matches', '--files-without-match', '--files', '--name-only', '--quiet', '--silent'];
+const printsNoLines = (flags) => NO_LINES.some((f) => flags.has(f));
 // How a command prints line numbers, or null. A search (grep, egrep, fgrep, rg
 // or git grep) prints them with a short-option cluster holding n (-n, -rn, -nE,
 // -nC2), --line-number or rg's -p, and the column after them with --column (rg
@@ -937,12 +958,13 @@ function numberShape(words) {
   const { tool, args } = toolOf(words);
   if (tool === 'git blame') return 'blame';
   if (tool === 'cat') return args.some((a) => /^-[A-Za-z]*[nb][A-Za-z]*$/.test(a) || /^--number(?:-[a-z]*)?$/.test(a)) ? 'cat' : null;
-  if (!SEARCHES.includes(tool) || printsNoLines(args)) return null;
-  if (tool === 'rg' && args.includes('--json')) return 'json';
-  const has = (letter, long) => args.some((a) => new RegExp('^-[A-Za-z0-9]*' + letter + '[A-Za-z0-9]*$').test(a) || a === long);
-  const lineNo = has('n', '--line-number') || (tool === 'rg' && has('p', '--pretty'));
-  const offset = has('b', '--byte-offset');
-  if (args.some((a) => a === '--column' || (tool === 'rg' && a === '--vimgrep')) || (lineNo && offset)) return 'column';
+  if (!SEARCHES.includes(tool)) return null;
+  const flags = searchFlags(tool, args);
+  if (printsNoLines(flags)) return null;
+  if (tool === 'rg' && flags.has('--json')) return 'json';
+  const lineNo = flags.has('n') || flags.has('--line-number') || (tool === 'rg' && (flags.has('p') || flags.has('--pretty')));
+  const offset = flags.has('b') || flags.has('--byte-offset');
+  if (flags.has('--column') || (tool === 'rg' && flags.has('--vimgrep')) || (lineNo && offset)) return 'column';
   return lineNo || offset ? 'search' : null;
 }
 // Where each shape puts the number, and the match with it replaced by any
@@ -971,7 +993,7 @@ const NUMBER_SHAPES = {
 function withoutLineNumber(pattern, check, cited) {
   const cmds = commandsOf(check);
   if (!cmds) return pattern;
-  const counts = (words) => { const t = toolOf(words); return t.tool === 'wc' || (SEARCHES.includes(t.tool) && printsNoLines(t.args)); };
+  const counts = (words) => { const t = toolOf(words); return t.tool === 'wc' || (SEARCHES.includes(t.tool) && printsNoLines(searchFlags(t.tool, t.args))); };
   const reaches = (i) => { for (let k = i + 1; k < cmds.length && cmds[k].from === k - 1; k++) if (counts(cmds[k].words)) return false; return true; };
   const shapes = cmds.map((c, i) => (reaches(i) ? numberShape(c.words) : null));
   const last = cmds[cmds.length - 1];
