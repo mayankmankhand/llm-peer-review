@@ -65,7 +65,12 @@
 //     The PreToolUse hook on Bash runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/
 //     push-guard.js"` before every Bash command (#260), so the M11 pre-push
 //     check runs before any push Claude makes; a crash or a hang blocks the
-//     command ("onFailure": "block", Claude Code 2.1.295 or later).
+//     command ("onFailure": "block", Claude Code 2.1.295 or later). The folder
+//     guard (#282) runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js"`
+//     twice: as a PreToolUse hook on the calls that run in the shell's folder
+//     (Bash, a helper launch, a skill, a search) and as a Stop hook, so a call
+//     or the end of a turn away from the project root is stopped. It has no
+//     onFailure: a crash or a timeout lets the call run, as without the guard.
 //   * managed-paths.json. The repo-relative paths a copy-install manages, so
 //     the plugin's setup script can migrate an install that predates the
 //     manifest (issue #138 shipped the manifest in v5.5.0), and the content
@@ -134,6 +139,7 @@ const KEEP_PROJECT_PATHS = [
 // no such script, so a hook can never point at a missing file.
 const SESSION_START_SCRIPT = 'session-start.js';
 const PUSH_GUARD_SCRIPT = 'push-guard.js';
+const FOLDER_GUARD_SCRIPT = 'folder-guard.js';
 // The stamped files (#183), by emitted path: the three files
 // scripts/setup/bump-version.sh stamps in the source. Each emitted copy gets the
 // build's version in its stamp, by the replacement bump-version.sh makes (the
@@ -708,9 +714,13 @@ function build(src, version) {
     version,
     author: { name: 'Mayank Mankhand' },
   }, null, 2) + '\n');
-  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT]) {
+  for (const script of [SESSION_START_SCRIPT, PUSH_GUARD_SCRIPT, FOLDER_GUARD_SCRIPT]) {
     if (!inv.scripts.some(s => s.rel === script)) unresolved.push('hooks/hooks.json: missing source scripts/' + script);
   }
+  // The folder guard (#282), one script for both events. It always exits 0
+  // and has no onFailure, so a crash or a hang lets the call or the stop
+  // through: a call in the wrong folder can be undone, a stuck session cannot.
+  const folderGuard = { type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + FOLDER_GUARD_SCRIPT + '"', timeout: 10 };
   put('hooks/hooks.json', JSON.stringify({
     hooks: {
       SessionStart: [{ hooks: [{
@@ -727,7 +737,13 @@ function build(src, version) {
         command: 'node "${CLAUDE_PLUGIN_ROOT}/scripts/' + PUSH_GUARD_SCRIPT + '"',
         timeout: 120,
         onFailure: 'block',
-      }] }],
+      }] }, {
+        // The calls that run in the shell's folder; Task is the helper
+        // launch's older name, and Grep and Glob exist on some platforms only.
+        matcher: 'Bash|Agent|Task|Skill|Grep|Glob',
+        hooks: [Object.assign({}, folderGuard)],
+      }],
+      Stop: [{ hooks: [Object.assign({}, folderGuard)] }],
     },
   }, null, 2) + '\n');
   // Paths a copy-install manages (for migrating a manifest-less install): today's

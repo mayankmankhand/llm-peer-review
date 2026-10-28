@@ -135,6 +135,7 @@ function makeFixture() {
   write(src, 'scripts/open-artifact.sh', '#!/usr/bin/env bash\necho open\n');
   write(src, 'scripts/session-start.js', '// the SessionStart hook\n');
   write(src, 'scripts/push-guard.js', '// the PreToolUse hook\n');
+  write(src, 'scripts/folder-guard.js', '// the folder guard hook\n');
   write(src, 'scripts/package.json', '{ "name": "fixture", "dependencies": {} }\n');
   write(src, 'scripts/package-lock.json', '{ "lockfileVersion": 3 }\n');
   write(src, 'scripts/node_modules/left-pad/index.js', 'module.exports = 1;\n');
@@ -370,10 +371,26 @@ const hookCommands = (hooks.hooks.SessionStart || []).flatMap(h => h.hooks || []
 check('SessionStart hook runs session-start.js through node with the path quoted', hookCommands.length === 1 && hookCommands[0] === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/session-start.js"', JSON.stringify(hookCommands));
 check('the hook carries no shell-only syntax', !/mkdir|ln -s|\|\||&&/.test(JSON.stringify(hooks)));
 const guardEntries = hooks.hooks.PreToolUse || [];
-const guardHooks = guardEntries.length === 1 ? (guardEntries[0].hooks || []) : [];
-check('the PreToolUse hook runs push-guard.js and blocks when it fails', guardEntries.length === 1 && guardEntries[0].matcher === 'Bash' && guardHooks.length === 1 &&
+// Each PreToolUse entry is found by the script it runs (#282 added the folder guard's).
+const entryRunning = (script) => guardEntries.find(e => (e.hooks || []).some(h => String(h.command).includes('/scripts/' + script))) || {};
+const pushEntry = entryRunning('push-guard.js');
+const guardHooks = pushEntry.hooks || [];
+check('the PreToolUse hook runs push-guard.js and blocks when it fails', pushEntry.matcher === 'Bash' && guardHooks.length === 1 &&
   guardHooks[0].type === 'command' && guardHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/push-guard.js"' && guardHooks[0].timeout === 120 && guardHooks[0].onFailure === 'block',
   JSON.stringify(hooks.hooks.PreToolUse));
+// The folder guard (#282) fails open: no onFailure, so a crash or a timeout lets
+// the call run as it would have without the guard.
+const folderEntry = entryRunning('folder-guard.js');
+const folderHooks = folderEntry.hooks || [];
+check('282: the PreToolUse folder guard runs folder-guard.js on Bash, Agent, Task, Skill, Grep and Glob and never blocks on its own failure',
+  guardEntries.length === 2 && folderEntry.matcher === 'Bash|Agent|Task|Skill|Grep|Glob' && folderHooks.length === 1 && folderHooks[0].type === 'command'
+    && folderHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js"' && folderHooks[0].timeout === 10 && folderHooks[0].onFailure === undefined,
+  JSON.stringify(hooks.hooks.PreToolUse));
+const stopEntries = hooks.hooks.Stop || [];
+const stopHooks = stopEntries.flatMap(h => h.hooks || []);
+check('282: the Stop hook runs folder-guard.js', stopEntries.length === 1 && stopHooks.length === 1 && stopHooks[0].type === 'command'
+  && stopHooks[0].command === 'node "${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js"' && stopHooks[0].timeout === 10 && stopHooks[0].onFailure === undefined,
+  JSON.stringify(hooks.hooks.Stop || null));
 const managed = JSON.parse(read(out, 'managed-paths.json'));
 check('managed-paths lists copy-install paths', managed.paths.includes('.claude/commands/review.md') && managed.paths.includes('.claude/rules/toolkit.md') && managed.paths.includes('.env.local.example') && managed.paths.includes('.claude/scripts/package.json'));
 check('managed-paths adds every historical path and skips comments and blanks', managed.paths.includes('.claude/commands/review-code.md') && managed.paths.includes('.claude/skills/shared/output-template.md') && !managed.paths.some(p => p === '' || p.startsWith('#')));
@@ -1043,6 +1060,12 @@ fs.rmSync(guardAbs);
 let uGuard;
 try { uGuard = unresolvedOf(); } finally { fs.writeFileSync(guardAbs, guardText); }
 check('a source without scripts/push-guard.js is reported unresolved for the hook', uGuard.includes('hooks/hooks.json: missing source scripts/push-guard.js'), uGuard.join('; '));
+const folderAbs = path.join(cp.src, 'scripts', 'folder-guard.js');
+const folderText = fs.readFileSync(folderAbs);
+fs.rmSync(folderAbs);
+let uFolder;
+try { uFolder = unresolvedOf(); } finally { fs.writeFileSync(folderAbs, folderText); }
+check('282: a source without scripts/folder-guard.js is reported unresolved for the hook', uFolder.includes('hooks/hooks.json: missing source scripts/folder-guard.js'), uFolder.join('; '));
 check('the retired rows seed is exempt from the old-layout check', !unresolvedOf().some(x => x.startsWith('seed/retired-permission-rows.txt')) && read(REPO, 'seed/retired-permission-rows.txt').includes('.claude/scripts/'));
 const cpInv = lib.inventory(cp.src);
 const seedHits = (text, rel) => lib.seedProblems(rel || 'seed/CLAUDE.md', text, cpInv);

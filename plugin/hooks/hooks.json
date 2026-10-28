@@ -21,6 +21,27 @@
             "onFailure": "block"
           }
         ]
+      },
+      {
+        "matcher": "Bash|Agent|Task|Skill|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/folder-guard.js\"",
+            "timeout": 10
+          }
+        ]
       }
     ]
   }
