@@ -1094,6 +1094,30 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('283: a file piped into a pick by number, and git blame or log with a numbered range, read lines by number',
     piped.every(byNumber) && !unpiped.some(byNumber),
     'missed: ' + piped.filter((c) => !byNumber(c)).join(' | ') + '; wrongly caught: ' + unpiped.filter(byNumber).join(' | '));
+  // A fresh verifier of that change found forms the command-text rules still
+  // missed: sed with -E or -r before -n, --, a ; list or a second -e, a $ or a
+  // /re/,N address; a quoted -L range; a pick after && or ;; head with its count
+  // in a cluster, or with no count at all; rg --column and --vimgrep and git grep
+  // --column, which print the column after the line; and grep -n cut down to the
+  // number alone. The checks now read each command's words as the runner does.
+  const round2Numbered = ["sed -E -n '12p' src/a.js", "sed -r -n '12p' src/a.js", "sed -n -- '12p' src/a.js", "sed -n '/token/p;12p' src/a.js",
+    "sed -n -e '/token/p' -e '12p' src/a.js", "sed -n '/token/,12p' src/a.js", "sed -n '$p' src/a.js", "git log -L '12,15:src/a.js'",
+    "git blame -L '12,15' src/a.js", "test -f src/a.js && sed -n '12p' src/a.js", 'grep -q x src/a.js; head -n 12 src/a.js', 'head -qn 12 src/a.js', 'head src/a.js'];
+  const round2Unnumbered = ["sed '12p' src/a.js", "sed -n 's/token/T/p' src/a.js", "test -f src/a.js && grep -n 'token' src/a.js", 'grep -c token src/a.js | head -n 1'];
+  check11('283: sed in any flag order or script list, quoted -L ranges, picks after && or ; and head clusters read lines by number',
+    round2Numbered.every(byNumber) && !round2Unnumbered.some(byNumber),
+    'missed: ' + round2Numbered.filter((c) => !byNumber(c)).join(' | ') + '; wrongly caught: ' + round2Unnumbered.filter(byNumber).join(' | '));
+  const round2Shapes = [
+    ['^12:5:console', 'rg --column console src/a.js', '^[0-9]+:[0-9]+:console'],
+    ['^src/a.js:12:5:console', 'rg --vimgrep console src', '^src/a.js:[0-9]+:[0-9]+:console'],
+    ['^src/a\\.js:12:5:console', 'git grep --column -n console', '^src/a\\.js:[0-9]+:[0-9]+:console'],
+    ['^12$', 'grep -n console src/a.js | cut -d: -f1', '^[0-9]+$'],
+    ['^12$', 'grep -n console src/a.js | wc -l', '^12$'],
+  ];
+  const round2Wrong = round2Shapes.filter(([match, check, want]) => inv(match, check) !== JSON.stringify({ noMatch: want }));
+  check11('283: rg --column and --vimgrep, git grep --column, and grep -n cut to the number drop the number too',
+    round2Wrong.length === 0,
+    round2Wrong.map(([match, check]) => check + ' -> ' + inv(match, check)).join(' | '));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });

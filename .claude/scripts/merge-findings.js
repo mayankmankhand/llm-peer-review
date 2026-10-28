@@ -878,7 +878,7 @@ const MAX_ROUNDS = 2;
 // runner refuses a prose expect on its own row and runs the others (measured
 // 2026-10-23), so the row cannot pass until the runner writes the expect.
 //
-// A match that holds the line number a grep or rg, cat or git blame printed
+// A match that holds the line number a search, cat or git blame printed
 // inverts without the number (issue #283); NUMBER_SHAPES says where each puts
 // it. A noMatch on line 1668 passes as soon as an edit above pushes the text to
 // line 1669, so a problem that only moved read as FIXED; with the number
@@ -892,73 +892,158 @@ function invertExpect(expect, check) {
   return PLACEHOLDER_EXPECT;
 }
 
-// A search that prints line numbers: one command of the check holds a grep
-// word or rg, and a short-option cluster with n in it (-n, -rn, -Hn, -nE,
-// -nC2) or --line-number. Only then does a number at the start of the match
-// name a line, not text. Under the checks runner rg prints numbers only when
-// asked, since its output is no terminal, and its -N turns them off.
-function grepPrintsLineNumbers(check) {
-  return String(check || '').split(/\|\|?|&&|;/).some((part) =>
-    /(?:^|\s)(?:[ef]?grep|rg)\s/.test(part) && /\s(?:-[A-Za-z0-9]*n[A-Za-z0-9]*|--line-number)(?=\s|$)/.test(part));
+// A check's commands as the checks runner reads them, through its own reader
+// of shell words, loaded on first use: each command's words with the quotes
+// gone, and the command piped into it, or -1. null when the reader is missing
+// or refuses the check, which the runner would then refuse to run as well.
+let tokenizeFn = null;
+function commandsOf(check) {
+  try {
+    if (tokenizeFn === null) tokenizeFn = require(path.join(__dirname, 'run-checks.js')).tokenize;
+    const t = tokenizeFn(String(check || ''));
+    if (!t || t.error || !Array.isArray(t.segments) || t.segments.length === 0) return null;
+    return t.segments.map((words, i) => ({ words, from: i > 0 && t.operators[i - 1] === '|' ? i - 1 : -1 }));
+  } catch (e) {
+    return null;
+  }
 }
-// cat numbers lines with -n, -b (blank lines skipped), --number or
-// --number-nonblank, alone or in a cluster (-bA); git blame always does.
-function catPrintsLineNumbers(check) {
-  return String(check || '').split(/\|\|?|&&|;/).some((part) =>
-    /^\s*cat\s/.test(part) && /\s(?:-[A-Za-z]*[nb][A-Za-z]*|--number(?:-[a-z]*)?)(?=\s|$)/.test(part));
+// git's subcommand and the words after it, past a leading --no-pager.
+function gitSubcommand(words) {
+  if (words[0] !== 'git') return null;
+  const at = words[1] === '--no-pager' ? 2 : 1;
+  return { sub: words[at], args: words.slice(at + 1) };
 }
-function blamePrintsLineNumbers(check) {
-  return String(check || '').split(/\|\|?|&&|;/).some((part) => /^\s*git\s+(?:--no-pager\s+)?blame\s/.test(part));
+
+// How a command prints line numbers, or null. A search (grep, egrep, fgrep, rg
+// or git grep) prints them with a short-option cluster holding n (-n, -rn, -nE,
+// -nC2) or --line-number, and the column after them with --column (rg and git
+// grep) or rg's --vimgrep; under the checks runner rg prints none unless asked,
+// since its output is no terminal, and its -N turns them off. cat prints them
+// with -n, -b (blank lines skipped) or --number, alone or in a cluster (-bA);
+// git blame always does.
+function numberShape(words) {
+  const git = gitSubcommand(words);
+  const tool = git ? 'git ' + git.sub : words[0];
+  const args = git ? git.args : words.slice(1);
+  if (tool === 'git blame') return 'blame';
+  if (tool === 'cat') return args.some((a) => /^-[A-Za-z]*[nb][A-Za-z]*$/.test(a) || /^--number(?:-[a-z]*)?$/.test(a)) ? 'cat' : null;
+  if (!['grep', 'egrep', 'fgrep', 'rg', 'git grep'].includes(tool)) return null;
+  if (args.some((a) => a === '--column' || (tool === 'rg' && a === '--vimgrep'))) return 'column';
+  return args.some((a) => /^-[A-Za-z0-9]*n[A-Za-z0-9]*$/.test(a) || a === '--line-number') ? 'search' : null;
 }
-// Where each command puts the number, and the match with it replaced by any
-// number. A grep or rg leads the line with it ("^1668:", "^1668-", or
+// Where each shape puts the number, and the match with it replaced by any
+// number. A search leads the line with it ("^1668:", "^1668-", or
 // "^src/a.js:1668:" from a search over several files, the file name being the
-// optional group); cat right-aligns it before a tab, so the spaces in front
-// change with its width and become \s*; git blame ends each line's note with
-// it ("1668)"). The match is left as it is when the check prints no number or
-// the match holds none where the check puts it.
-const NUMBER_SHAPES = [
-  { prints: grepPrintsLineNumbers, at: /^\^((?:[^:\\]|\\.)+:)?\d+([:-])/,
-    as: (m, prefix, sep) => '^' + (prefix || '') + '[0-9]+' + sep },
-  { prints: catPrintsLineNumbers, at: /^(\^?)((?:(?: |\\s|\[ \])(?:[*+?]|\{\d+(?:,\d*)?\})?)*)\d+(?=\\t|\t|\\s)/,
+// optional group), with the column after it when asked; cat right-aligns it
+// before a tab, so the spaces in front change with its width and become \s*;
+// git blame ends each line's note with it ("1668)"); cut -f1 after any of them
+// leaves the number alone on its line. blame's --porcelain and diff's hunk
+// headers put their numbers on a line of their own, not the flagged text's.
+// The match is left as it is when it holds no number where the check puts one.
+const NUMBER_SHAPES = {
+  bare: { at: /^(\^?(?:\\s[*+?]?| )*)\d+((?:\\s[*+?]?| )*\$?)$/, as: (m, before, after) => before + '[0-9]+' + after },
+  column: { at: /^\^((?:[^:\\]|\\.)+:)?\d+:\d+:/, as: (m, prefix) => '^' + (prefix || '') + '[0-9]+:[0-9]+:' },
+  search: { at: /^\^((?:[^:\\]|\\.)+:)?\d+([:-])/, as: (m, prefix, sep) => '^' + (prefix || '') + '[0-9]+' + sep },
+  cat: { at: /^(\^?)((?:(?: |\\s|\[ \])(?:[*+?]|\{\d+(?:,\d*)?\})?)*)\d+(?=\\t|\t|\\s)/,
     as: (m, caret, spaces) => caret + (caret || spaces ? '\\s*' : '') + '[0-9]+' },
-  { prints: blamePrintsLineNumbers, at: /(^|[ \t]|\\[st](?:[*+?]|\{\d+(?:,\d*)?\})?)\d+(?=\\\))/,
-    as: (m, before) => before + '[0-9]+' },
-];
+  blame: { at: /(^|[ \t]|\\[st](?:[*+?]|\{\d+(?:,\d*)?\})?)\d+(?=\\\))/, as: (m, before) => before + '[0-9]+' },
+};
 function withoutLineNumber(pattern, check) {
-  const shape = NUMBER_SHAPES.find((s) => s.prints(check) && s.at.test(pattern));
+  const cmds = commandsOf(check);
+  if (!cmds) return pattern;
+  const shapes = cmds.map((c) => numberShape(c.words));
+  const last = cmds[cmds.length - 1];
+  const cut = last.words[0] === 'cut' && last.from >= 0 && shapes[last.from] !== null
+    && last.words.some((a, j) => a === '-f1' || a === '--fields=1' || ((a === '-f' || a === '--fields') && last.words[j + 1] === '1'));
+  const shape = (cut ? ['bare'] : []).concat(['column', 'search', 'cat', 'blame'].filter((s) => shapes.includes(s)))
+    .map((s) => NUMBER_SHAPES[s]).find((s) => s.at.test(pattern));
   return shape ? pattern.replace(shape.at, shape.as) : pattern;
 }
 
-// A command that picks lines by their number: quiet sed (-n, --quiet or
-// --silent) with a numeric address, bare or after -e or --expression ('226p',
-// '1778,1782p', '12,+3p'), awk testing NR or FNR against a number, or head or
-// tail with a line count (-n 12, -12, --lines=12). With ownFile, head and tail
-// count only with a file of their own: with none they read a pipe.
-function picksLinesByNumber(cmd, ownFile) {
-  if (/^sed\s+(?:(?:-[A-Za-z]*n[A-Za-z]*|--quiet|--silent)\s+)+(?:(?:-e|--expression)(?:\s+|=)?)?['"]?\d+(?:,(?:[+~]?\d+|\$))?p/.test(cmd)) return true;
-  if (/^awk\s/.test(cmd) && /\bF?NR\s*(?:==|<=|>=|<|>|!=)\s*\d/.test(cmd)) return true;
-  if (!/^(?:head|tail)\s/.test(cmd)) return false;
-  // With the count out of the way, a word left that is no option is the file.
-  const words = cmd.replace(/\s(?:-(?:n\s*\+?\d+|\d+)|--lines(?:=|\s+)\+?\d+)(?=\s|$)/, ' <count>').split(/\s+/).slice(1);
-  return words.includes('<count>') && (!ownFile || words.some((w) => w !== '<count>' && !w.startsWith('-')));
-}
-// The allowed commands that print a whole file: cat, git show or cat-file of
-// one revision's file (HEAD:src/a.js), and git blame.
-const WHOLE_FILE = /^(?:cat\s|git\s+(?:--no-pager\s+)?(?:(?:show|cat-file)\s(?:.*\s)?(?!-)\S*:\S|blame\s))/;
-// A check that reads a file by line number: its first command picks lines by
-// number from a file of its own, or one is fed a whole file through a pipe
-// (cat -n src/a.js | sed -n '40,45p'), or git blame or git log reads a
-// numbered -L range. No recheck built from it can follow the text when an edit
-// moves it (issue #283), so the mechanical path refuses it.
-function readsLinesByNumber(check) {
-  const parts = String(check || '').trim().split(/(\|\|?|&&|;)/).map((p) => p.trim());
-  if (picksLinesByNumber(parts[0], true)) return true;
-  if (/^git\s+(?:--no-pager\s+)?(?:blame|log)\s/.test(parts[0]) && /\s-L\s*,?\d/.test(parts[0])) return true;
-  for (let i = 2; i < parts.length; i += 2) {
-    if (parts[i - 1] === '|' && WHOLE_FILE.test(parts[i - 2]) && picksLinesByNumber(parts[i], false)) return true;
+// sed's words as sedRule in run-checks.js reads them: -e or --expression
+// scripts and the -n, -E and -r flags, alone or clustered, anywhere; the other
+// words, and every word after --, are the script when no -e gave one, then the
+// files.
+function sedWords(args) {
+  const scripts = [];
+  const rest = [];
+  let quiet = false;
+  let i = 0;
+  for (; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { i++; break; }
+    if (a === '-e' || a === '--expression') scripts.push(String(args[++i] || ''));
+    else if (a.startsWith('--expression=')) scripts.push(a.slice('--expression='.length));
+    else if (a === '--quiet' || a === '--silent') quiet = true;
+    else if (/^-[A-Za-z]+$/.test(a)) quiet = quiet || a.includes('n');
+    else rest.push(a);
   }
-  return false;
+  rest.push(...args.slice(i));
+  if (scripts.length === 0 && rest.length > 0) scripts.push(rest.shift());
+  return { quiet, scripts, files: rest };
+}
+// head's or tail's files: the words that are no option, no count and no
+// option's value (-n 12, -qn 12, -c 100, --lines 12, -12, -n12, --lines=12).
+function headTailFiles(args) {
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--') { files.push(...args.slice(i + 1)); break; }
+    if (a === '--lines' || a === '--bytes' || /^-[A-Za-z]*[nc]$/.test(a)) i++;
+    else if (!a.startsWith('-')) files.push(a);
+  }
+  return files;
+}
+// Whether a command picks lines by their number, and if so whether it names a
+// file of its own; null when it does not pick. Quiet sed (-n anywhere, --quiet
+// or --silent) picks when a print's address, on either side of the comma, is a
+// number or $ ('226p', '1778,1782p', '/re/,12p', '$p'), in any script of a ;
+// list or any -e; without -n it prints every line. head and tail pick by
+// position even with no count. awk testing NR or FNR against a number picks
+// too, whatever it reads (the checks runner refuses awk itself).
+function picksByNumber(words) {
+  const [cmd, ...args] = words;
+  if (cmd === 'head' || cmd === 'tail') return { ownFile: headTailFiles(args).length > 0 };
+  if (cmd === 'awk') return /\bF?NR\s*(?:==|<=|>=|<|>|!=)\s*\d/.test(args.join(' ')) ? { ownFile: true } : null;
+  if (cmd !== 'sed') return null;
+  const sed = sedWords(args);
+  const numbered = sed.scripts.some((s) => !/^s[\/|#,]/.test(s)
+    && s.split(';').some((p) => /^(?:\d+|\$)(?:,|p$)|,(?:\d+|\$)p$/.test(p.trim())));
+  return sed.quiet && numbered ? { ownFile: sed.files.length > 0 } : null;
+}
+// git blame or git log with an -L range that starts at a line number (-L 12,15
+// or -L12,+4, quoted or not), as against one that starts at a pattern or a
+// function name (-L '/login/,+3', -L :login:src/a.js).
+function rangeByNumber(words) {
+  const git = gitSubcommand(words);
+  if (!git || (git.sub !== 'blame' && git.sub !== 'log')) return false;
+  return git.args.some((a, j) => /^,?\d/.test(a === '-L' ? String(git.args[j + 1] || '') : a.startsWith('-L') ? a.slice(2) : ''));
+}
+// A check that reads a file by line number: any of its commands, after |, &&,
+// ; or ||, picks lines by number from a file of its own or from a whole file
+// piped into it (cat -n src/a.js | sed -n '40,45p'), or reads a numbered -L
+// range. A whole file comes from cat with a file of its own or fed one whole,
+// git show or cat-file of one revision's file (HEAD:src/a.js), or git blame
+// with no -L. No recheck built from such a check can follow the text when an
+// edit moves it (issue #283), so the mechanical path refuses it, as it does a
+// check the runner's reader refuses.
+function readsLinesByNumber(check) {
+  if (!String(check || '').trim()) return false;
+  const cmds = commandsOf(check);
+  if (!cmds) return true;
+  const wholeFile = (i) => {
+    const w = cmds[i].words;
+    if (w[0] === 'cat') return w.slice(1).some((a) => !a.startsWith('-')) || (cmds[i].from >= 0 && wholeFile(cmds[i].from));
+    const git = gitSubcommand(w);
+    if (!git) return false;
+    if (git.sub === 'show' || git.sub === 'cat-file') return git.args.some((a) => !a.startsWith('-') && a.includes(':'));
+    return git.sub === 'blame' && !git.args.some((a) => a.startsWith('-L'));
+  };
+  return cmds.some((c) => {
+    if (rangeByNumber(c.words)) return true;
+    const pick = picksByNumber(c.words);
+    return pick !== null && (pick.ownFile || (c.from >= 0 && wholeFile(c.from)));
+  });
 }
 
 // How many lines of a saved output a pattern finds, one line at a time.
