@@ -13,7 +13,7 @@
 - **Hybrid approach beats all-or-nothing.**
 - **AI peer review recommendations often over-engineer.**
 - **A worktree is just a folder, a branch is just a pointer.**
-- **Use deterministic scripts for structural data, not LLMs.** (see the v4.4.0 / issue #97 refinement in detail)
+- **Use deterministic scripts for structural data, not LLMs.**
 - **Version bumps touch more files than you think.**
 - **Never interpolate shell variables into inline `node -e` strings.**
 - **`settings.json` can get modified by research subagents.**
@@ -26,15 +26,13 @@
 - **Diagnostic output to stderr when stdout is captured by another LLM.**
 - **Reasoning models share their token budget between reasoning and output.**
 - **Silent empty bodies need active detection, not just happy-path returns.**
-- **Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.**
+- **Run /ask-gpt and /ask-gemini in parallel on a change worth real scrutiny; treat a gap both raise as real.**
 - **Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.**
 - **Define a judgement gate once, in countable terms, consistent with its governing rule.**
 - **A gate must be countable against the output the model actually produces.**
-- **A diff review of already-closed work still earns its keep.**
-- **Don't trust merged review severities without verifying the source lines.**
 - **Review proposed prompt edits before applying them, and triage the volume hard.**
 - **Editing the currently-running command file trips the harness self-modification guard.**
-- **The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.**
+- **The self-modification guard blocks adding a permission to `settings.local.json`; ask the user to add it.**
 - **A prompt's user-facing message is not enforcement.**
 - **Pin subagents freely; never switch the main-loop model mid-session.**
 - **A release needs one review of the whole range, not the sum of its per-issue reviews.**
@@ -61,7 +59,6 @@
 
 - **Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.**
 - **Shared files reduce duplication across review skills.**
-- **GPT and Gemini peer review caught things standard reviews missed.**
 
 ### Doc audit + v5.0.0 release (issue #118)
 
@@ -82,10 +79,6 @@
 
 - **Tag vocabulary for prompts.**
 - **Audit before converting.**
-
-### Rename-aware setup cleanup (issue #80)
-
-- **Scope parity gaps explicitly when fixing one of several.**
 - **A 🟩 on "ask the user about X" can mislead.**
 
 ### browse.js hardening (issues #82 / #84 / #87)
@@ -97,16 +90,13 @@
 ### HTML render pipeline (issues #120, #122, #127)
 
 - **Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.**
-- **Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.**
+- **Lift the gold artifact verbatim into a shared tokens file, and make each file point at the other.**
 - **Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.**
 
 ### Plan HTML migration (issue #129)
 
 - **Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.**
 - **A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.**
-
-### v5.2.0 release + doc audit (issue #128)
-
 - **Self-enforce release-time conventions in the artifact or the checklist, not in memory.**
 
 ### Host-agnostic gh/glab (issue #143)
@@ -116,23 +106,16 @@
 - **Inlining a shared fragment AND repeating its content defeats the point of the fragment.**
 - **A permission you cannot self-provision may have an already-permitted equivalent.**
 
-### Human-in-the-loop map (issue #146)
-
-- **A self-run consistency check passes while the scoped thing is missing entirely.**
-
 ### Auto-by-default rewrite (issue #147)
 
 - **A checked subtask means its wording shipped, not that the nearby diff did.**
 - **Call sites paraphrase a shared rule into different behaviors on day one.**
-
-### M2 audit tiers (issue #148)
-
 - **Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.**
 
 ### M11 tripwire hardening (issue #149)
 
-- **A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.**
-- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.** (see the harness-research refinement in detail)
+- **Probe a security control with hostile inputs before trusting its exit code, and confirm it fails closed.**
+- **Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.**
 - **Masking the match that triggered the report is not masking the line.**
 
 ### Stage chaining (M14)
@@ -143,7 +126,7 @@
 ### Severity rubric + audit-aware direct runs (issues #150, #151)
 
 - **A "nothing defines X" finding must first refute the generic rule that already covers X.**
-- **Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.**
+- **When centralizing a rule, make each call site quote it verbatim or say nothing beyond what is local.**
 - **A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.**
 
 ### Subagent model pinning (issue #152)
@@ -151,7 +134,7 @@
 - **Write the validation bar before the result, then honor it when the result is inconvenient.**
 - **A missing finding is invisible to the audit; a wrong one is not.**
 - **`failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.**
-- **Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.**
+- **Narrowing an agent's tools changes behavior: first check what every caller dispatching through it runs.**
 
 ### Second-viewport publishing (issue #154)
 
@@ -163,9 +146,8 @@
 
 - **Mutation-testing a group of assertions is not mutation-testing each assertion.**
 - **Tokenising the shared layer does not tokenise its consumers.**
-- **A prose sweep needs the wordings that actually occur, not the one you remember writing.** (see the #206 and #208 refinements in detail)
-- **A measurable claim in a commit message is a claim until you measure it.**
-- **A pipeline's exit status is the last command's, so `grep | head` always succeeds.** (second occurrence in detail: a landing gate)
+- **A prose sweep needs the wordings that actually occur, not the one you remember writing.**
+- **A pipeline's exit status is the last command's, so `grep | head` always succeeds.**
 - **"Falls back" is not "degrades to nothing" - read what the fallback actually produces.**
 - **An audit with only pass and kill discards correct findings that carry the wrong label.**
 
@@ -181,7 +163,6 @@
 
 ### Design workflow (issue #160)
 
-- **A test fixture must never carry a real-shaped secret; assemble it at runtime, because the tripwire has no allow-list by design.**
 - **A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.**
 - **A prompt cannot declare a user-owned prerequisite done.**
 - **Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.**
@@ -194,7 +175,6 @@
 - **A count gate and a standing page cannot coexist: the run with nothing to show is the one that must render.**
 - **A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.**
 - **Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.**
-- **A `cd` inside one Bash call persists into the next; start every chained command from the repo root.** (recurred in #260 and #263, see detail)
 - **A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.**
 
 ### The standing cycle page (issue #163)
@@ -203,14 +183,11 @@
 - **The design critic finds rendering bugs the test suite cannot see.**
 - **An inherited CSS property belongs on the shared root, not copied into each file.**
 - **Ask what a change means for repos that already installed the last version, before writing the plan.**
-- **Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.**
 
 ### Tripwire credential patterns (issue #164)
 
-- **A detection pattern must be tested against ordinary prose, not only against what it hunts.**
 - **A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.**
 - **The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.**
-- **Release counts go stale a second time when the fix loop itself changes them; re-sweep after the loop, never before.**
 
 ### Permission seeding and the netrc exemption (issues #165, #166)
 
@@ -220,35 +197,34 @@
 ## Issue 167 (v7.0.0, the plugin)
 
 - **An agent file written mid-session is not dispatchable until the session reloads it.**
-- **Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.**
+- **Preload a skill into a subagent with a `skills:` line, not a paste, and never nest inline-cats.**
 - **Review a plan this size with three fresh lenses before executing it.**
 - **A suite is green when its exit code is 0, not when its tail looks quiet.**
 
 ## Issue 168 (v7.0.1, mangled mail links)
 
-- **A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.**
-- **A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.**
+- **Test a false-positive fix on a fixture the old pattern matched, and assert what only the fix changes.**
+- **A plugin fix made after a tag reaches installs only with the next version: bump now or say so in the notes.**
 
 ## Issues 172-177 (v7.1.0, safe distribution)
 
-- **An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.**
 - **A user interrupt also stops running workflow agents, and nothing announces it.**
 - **A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.**
 - **Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.**
 - **Test an undo instruction by executing it, not by matching its text.**
-- **A receipt that cites line numbers stops proving anything once a fix moves the code; re-verify the claim, not the old range.**
+- **When a fix moves code, re-verify a line-number receipt's claim on the new code, not the old range.**
 
 ## Issues 178-183 (v7.2.0, the review sees the work)
 
 - **Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.**
 - **Isolate a headless test session's whole home, not only its plugin: a scratch `HOME` is the complete fix.**
-- **Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.**
+- **Headless runs edit `.claude/` only in bypassPermissions; decide how a prompt-file flow is proven beforehand.**
 - **A plugin CLI command run inside a project also edits that project's settings file.**
 - **A rewrite keyed on names must be tested on file names that contain those names.**
 
 ## Issue 184 (7.3.0, the regression audit)
 
-- **A build that scopes names and permissions for one distribution leaves the other behind unless the same sweep runs over its files.**
+- **When a build rewrites names or permissions for one distribution, run the same sweep over the other's files.**
 - **Prove a harness with the thing it will be used for, not with a trivial prompt.**
 - **Generate a long report from parts with one script; never append into a file that is also its own source.**
 - **A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.**
@@ -256,21 +232,21 @@
 
 ## Issues 185-194 (7.3.1, the follow-ups)
 
-- **A leading wildcard in a permission row widens what the row trusts, not just where the file lives; measure the hostile form before shipping the row.**
-- **A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.**
-- **Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.**
+- **Before shipping a permission row with a leading wildcard, test which hostile commands it also allows.**
+- **Before pointing call sites at a link moved only at session start, test an update taken mid-session.**
+- **When changing a detection pattern, add the new rule beside the old one and rerun every hostile fixture.**
 
 ## Issue 199 (project extension seams)
 
-- **An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.**
-- **Measure a new inline command form in a real default-mode session before building on it; a shell exit code says nothing about the harness.**
-- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.** (another occurrence in detail: #268)
+- **Label every optional inline read, so a missing file's "no output" note cannot pass for content.**
+- **Before building on a new inline command form, measure it in a real default-mode session, not a shell.**
+- **Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.**
 - **A check that defers to another check must ask whether that other check runs in this range.**
 - **In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.**
 
 ## Issues 196, 200, 202 (the outside audit)
 
-- **A new rule written for the orchestrator stops one step short of its neighbors: second occurrence of "find a rule's consumers by who applies it".** (third occurrence in detail: the re-key sentence, #211)
+- **A rule written for the orchestrator must reach every runner that applies it: list them and check each one.**
 - **Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.**
 - **A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.**
 - **"Binary files differ" is git's reading of the attributes, not of the content; check the bytes before staying silent.**
@@ -280,103 +256,89 @@
 ## Issues 195, 197, 201 (wave 2: things that fail in a confusing way)
 
 - **Prove a test stub takes before trusting the checks built on it; a read-only property swallows a plain assignment.**
-- **When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.**
-- **A live check on the friendliest fixture proves the friendly case; write the check against the row the rules actually allow.**
+- **When a prompt spells out a placeholder's value, grep each later use of it and spell those out too.**
+- **Write a live check against the least helpful row the rules allow, not the friendliest fixture.**
 
 ## Issue 203 (the silent middle)
 
 - **`plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.**
 - **A gate that lists the signals it cares about is another silent middle; read the record the code already computes.**
-- **An assertion for ABSENCE cannot go red before the fix, so it guards against later widening, never against the bug it was written for.**
-- **A fixture that already satisfies one term of a compound gate cannot tell that term from the others; build the fixture from the gate, not from what is nearby.**
+- **Build a compound gate's fixture from the gate, so that only the term under test decides the result.**
 
 ## Issue 204 (judges return gaps, not grades)
 
-- **A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.**
-- **A fixture that fails on both pages tells them apart no better than one that passes on both; every-frame redraws made the good page's Delete unclickable too.**
-- **Give a finder a neutral copy of what it judges: a fixture's name and comments state the answer, and a finder with Grep will read the plan.**
+- **Before trusting a check meant to tell a defect from its fix, run it on both and confirm the answers differ.**
+- **Give a finder a neutral copy of what it judges, with no telling names or comments and the plan out of reach.**
 - **Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.**
 - **When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.**
-- **A line telling one stage to read a field from another stage's output is a claim: check the producer's template has that field.**
+- **When a prompt has one stage read a field from another stage's output, check the producer's template has it.**
 - **A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.**
 
 ## Issue 206 (prompt-audit cleanup)
 
-- **The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.**
+- **The bundled prompt audit is not deterministic, so no rerun of it proves a list is complete.**
 - **Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.**
-- **Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.**
-- **In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.**
+- **Build a smoke test's plugin into a cache-shaped folder, or allowed script calls look denied.**
+- **Tell an unattended test session to judge each call on its own, even after an earlier call was denied.**
 
 ## Issues 205 and 207 (model modes, the quality check)
 
 - **A plan that promises a one-commit revert must say what happens once later work moves the text.**
-- **A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.**
-- **An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.**
+- **Cap a model named in a helper's file at the model of the session that dispatches it.**
+- **Give an agent role that must stay on the session model an explicit `model: inherit` line.**
 - **A cheaper helper that finishes faster may simply have read less: score what it covered, not only its cost and time.**
 - **Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.**
 - **Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.**
-- **Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.**
-- **A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.**
-- **A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.**
-- **In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.**
+- **When cleanup is made to tolerate a failure, carry the failure into the run's verdict.**
+- **A test that a timeout kills a child must also assert an upper bound on the elapsed time.**
+- **In this shell, grep for literal text that contains a `$` with `-F`.**
 
 ## Issue 208 (three small gaps)
 
 - **The plugin build rewrites command names in prompts, never in scripts: wording moved into a script must name no command.**
 - **Before engineering a smarter limit, lift the old one once and see whether it binds.**
-
-## Issue 209 (your own helpers' models)
-
-- **A detector's "this one is fine" rule must be as narrow as the text it recognizes: the audit after it can drop a reported finding, never add a missed one.**
-- **A detector that copies two lists from another file needs a drift check on each; pinning the first does not cover the second.** (see the #211 refinement in detail: the installer lists)
+- **When a detector copies lists from another file, give each copied list its own drift check.**
 
 ## Prompt audit fixes (v7.6.0)
 
-- **A detector, its receipt and the generator of the digests it compares against must read a file the same way; prove it with a fixture saved with a byte order mark and trailing blanks.**
-- **A sentence-break rule needs its abbreviation exception before it ships: when a critic names the false positive, that input goes into the test first.**
-- **A sentence that must read the same in several prompt files gets a parity test; a reviewer found the one site of nine that kept the old wording.**
-- **When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.**
-- **A JSON escape for an apostrophe does not survive a model typing the command: the one-argument form works only with no apostrophe in the JSON.**
-- **Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.**
-
-## Issues 210-213 (the follow-ups folded into 7.6.0)
-
-- **A record that suppresses findings must be keyed on the text a finding is about; a key that names only the file silences that check for good.**
-- **A standing page published in an earlier session is read in full before it is updated; the publish is refused until then.**
+- **Make a detector, its receipt and its digest generator read files alike; test with a byte order mark and trailing blanks.**
+- **Give a sentence-break rule an abbreviation exception; any false positive a critic names is tested first.**
+- **A sentence that must read the same in several prompt files gets a parity test.**
+- **When a worker gains a capability, sweep the dispatcher for conditions that capability made obsolete.**
+- **When a model types JSON in the one-argument form, it must hold no apostrophe, not even as an escape.**
+- **When merging findings, match same-file findings on their claim, not only on their dedup key.**
+- **Key a record that suppresses findings on the text a finding is about, never on the file name alone.**
 
 ## Issues 215-217 (the 7.6.1 patch)
 
 - **A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.**
-- **A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.**
+- **When one plan step reads a file another step writes, put the writing step first and name the file.**
 - **When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.**
 
 ## Repo front door (the README rewrite)
 
 - **A "nothing reads this file" claim must check every grep hit, test suites included.**
-- **Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.**
+- **After moving text between files, sweep for "above", "below" and quoted heading names before calling it done.**
 - **When the owner changes a decision at a page, sweep what was already written under the old decision.**
-- **A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.**
+- **To republish a standing page from a new session, read the live page once, then publish the rendered file.**
 
 ## Issues 219 and 220 (the standing page and the interrupt)
 
 - **A branch built on local main inherits the commits the push guard is holding; compare with the remote's main before a PR.**
 - **A nested worktree has two roots: every list of path prefixes strips the longer one first.**
 - **A warning that serves as a live proof must fire on the condition itself, not on a side effect of it.**
-- **A standing page rendered in a worktree has no predecessor on disk: copy in the page the index last recorded, which may be another worktree's, or the shared page loses its open findings.** Superseded by #237: no copy is needed.
-- **A standing page rendered in a worktree has no predecessor on disk: copy the live hosted page in first, or the shared page loses its open findings.** Superseded by #237: no copy is needed.
 - **When the plan's wording drifts from the exploration summary the owner approved, the summary wins.**
-- **Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.**
 
 ## Issue 221 (run before you reason)
 
 - **Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.**
 - **A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.**
-- **A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.**
+- **Before a prompt's new command ships, run it from the project root and check its shape against the allow rows.**
 
 ## Review of 7.6.3 (the runner executes what it judged)
 
 - **A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.**
-- **After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.**
+- **After a security fix, spend one adversarial round on it with a canary outside the sandbox.**
 
 ## Issue 231 (check first)
 
@@ -388,27 +350,26 @@
 
 ## Harness research (after v7.6.5)
 
-- **A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.**
+- **A replay sandbox must hold everything the replayed agent will reach for: the range's history and cited files.**
 - **A cap on each part is not a cap on the whole: measure the total against the budget.**
-- **An exclusion applied to one arm of a comparison must apply to the other arm too.**
 - **A judge with no edit tools still tries scratch experiments, and Claude Code's denial invalidates the whole harness run.**
 
 ## Issue 229 (the ledger loop)
 
-- **Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.**
-- **An audit agent with Bash can open the real ledger: when the work under review is the ledger, say in the dispatch that its files are off limits.**
+- **Pick a trace repo the owner is already working in, never an idle one.**
+- **When reviewing ledger work, say in each agent's dispatch that the ledger's files are off limits.**
 - **A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.**
 - **A second mode that needs the same context as an existing walk should call that walk, not copy it.**
 
 ## Issues 228 and 230 (receipts that call back)
 
-- **A check made once when a run starts does not cover a call made later through the same shared link: put the caller's version in the call.**
-- **When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.**
+- **A start-of-run check does not cover a later call through a shared link: put the caller's version in the call.**
+- **When older releases can receive a new call, name the answer they give and test the fix against one of them.**
 
 ## Issue 232 (land without losing work)
 
-- **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.**
-- **A lone `cd` call, then plain commands, matches the permission rows; a subshell, a `cd` joined with `&&`, `git -C` and `env -C` ask every time.**
+- **A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`.**
+- **Enter a folder with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.**
 - **Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.**
 - **When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.**
 
@@ -419,170 +380,142 @@
 
 ## Issues 238 and 243 (no false alarm from main)
 
-- **Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.**
 - **Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.**
 - **To ignore what the default branch already has, compare content from the merge base, not commit ancestry.**
-- **Diff a standing page's open items before and after a render: a seeded item from another plan resolves whenever the plan lens runs.**
-
-## Issue 235 (messages typed while Claude works)
-
-- **A count taken by a different walk than the code's own can call a live case "never seen": when the real run finds it, test it in the same step.**
+- **Diff a standing page's open items before and after a render to catch any that resolved without a recheck.**
+- **Judge "never seen" by the code's own walk, and when the real run finds such a case, test it in that step.**
 
 ## Issues 244 and 245 (dropped files and the paste limit)
 
-- **A suite that runs for minutes dies with the session: when a restart is possible, run it detached with its log and exit code in files.**
-- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.** (second and third occurrences in detail: #265/#266, #268)
+- **When a session restart is possible, run a minutes-long suite detached, with its log and exit code in files.**
+- **Write a check's stated failure in that suite's own failure format; the suites do not print it alike.**
 - **Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.**
 - **A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.**
 
 ## Issue 237 (one review page per branch)
 
-- **A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.**
-- **Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.**
-- **A new lesson lead also goes into `seed/toolkit-lesson-leads.txt` through `scripts/seed-history.js`, or every later full test run fails.**
+- **Never share a standing page that closes findings by file between branches.**
+- **Run a reviewer's suggested fix in a scratch case before applying it.**
+- **After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.**
 
 ## Issue 241 (check a claim at its source)
 
-- **A plan line that says what another script does is a claim: read the script before the line goes in the plan.**
 - **The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.**
-- **Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.**
-
-## Docs visual tour (diagrams, /package-review removed)
-
-- **When a fix corrects a fact, search every doc for its other copies before calling it done.** (second occurrence in detail: #265/#266)
+- **Before the bump, test an upgrade finding on a next-version scratch plugin, beside a control on the new text.**
 - **A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.**
 
 ## Issue 248 (cycle time and test cost)
 
 - **A runner mode several callers share changes only behind a flag the new caller passes.**
 - **Verification runs of a recording feature land in the real record: remove their rows, or the next report shows the demo.**
-- **On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.** (third occurrence in detail: #268)
+- **On the standing review page, name fixed findings by what changed, not by number.**
 
 ## Issue 249 (the test gate speed)
 
 - **A rule widened to catch one missed case can mis-sort another: before keeping it, test the case on its other side.**
-- **When a hand-kept list decides what runs, check the list against what exists: a missing entry otherwise passes as all green.**
+- **When a hand-kept list decides what runs, check the list against what exists.**
 
 ## Issue 250 (no stops on the way)
 
-- **Probe why a command prompts before choosing the fix: the stop on `test -e <file>; echo $?` was the `$?`, not the `;` the issue blamed.**
-- **Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.**
-- **Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.**
-- **Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.**
+- **Probe why a command prompts before choosing the fix.**
+- **Give every check Claude reads a printed answer, never a bare exit code.**
+- **Reproduce a CI-only flake before fixing it, in a throwaway branch's matrix, then again with the fix.**
+- **Keep each failure detail on one line, so the case names a check looks for stay in the release gate's tail.**
 
 ## Issue 222 (the shadow M9 gate)
 
-- **A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.**
-- **Hand a non-technical owner the decision, not the rows: a 276-row tick list and a hedged evaluation got no answer, two yes-or-no questions and one recommendation did.**
-- **Point a finding's receipt at the line the fix will change, never at its premise: the fix loop inverts the receipt into the recheck, and a premise check inverts into nonsense.**
-- **A plan's Start commit written on main is not a branch's review range: when the work moves to a worktree forked later, re-pin the review and the cycle window at the fork.**
+- **A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check.**
+- **Hand a non-technical owner the decision as yes-or-no questions and one recommendation, not the rows.**
+- **Point a finding's receipt at the line the fix will change, never at its premise.**
+- **When a branch forks after its plan's Start commit, re-pin the review range and the cycle window at the fork.**
 
 ## Issue 246 (the Jev lab)
 
-- **Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.**
-- **When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.**
-- **`session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.**
+- **When a rule limits what may leave, screen the bytes at the send call, not the command that made them.**
+- **When a second script borrows a safety screen, keep its order of operations, not just its code.**
+- **Dispatch each role on the roster's model, never a familiar default; `session` is your own model's alias.**
 ## Issue 247 (21 agent papers against the toolkit's problems)
 
 - **Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.**
-- **A workflow resume caches completed calls as a call-order prefix: patch a pipeline by appending work, never by inserting it.**
-- **Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.**
+- **Patch a workflow you will resume by appending work after its existing calls, never by inserting it.**
+- **Write a hypothesis down before the research, keep it out of every prompt, and score it after.**
 
 ## Issue 254 (refresh only what changed)
 
-- **A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.**
-- **Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.**
-- **Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.**
-- **On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.**
+- **A step that redoes an earlier scan must read that scan's snapshot, not the working tree.**
+- **Fix a routing gap in the code that does the routing, not in the prompt's wording.**
+- **Before merging parallel helpers' outputs by a key, refuse any key that appears twice.**
+- **Confirm a passing test case by grepping the test file for its name, not by the release gate's output.**
 
 ## Issue 252 (fix verification harder to fool)
 
-- **Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.**
-- **Read every fixture case before writing an "all N" bar: "all 7 deletion fixes read removed" counted a fix that hollows a feature out with a new stub.**
-- **Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.**
-
-## Issue 253 (judge denials and the lessons read)
-
-- **Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.**
+- **When testing how an agent behaves, probe the typed agent that ships, not a stand-in given its text.**
+- **Before writing an "all N" bar, open every case it counts and confirm each is the kind the bar assumes.**
+- **When you keep records instead of replacing them, also keep everything those records point at.**
+- **Before choosing how a file gets read, measure where each reader cuts the real file and whether it asks for permission.**
 
 ## Issues 257, 258 and 259 (nothing lost, nothing unread)
 
-- **Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.**
-- **Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.**
+- **Before dispatching typed agents, confirm with `pwd` that the session sits in the repo root.**
+- **Make the before run each step's first command, before opening its files, even in a research step.**
 - **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
-- **A new temporary worktree in a prompt needs the same copy-and-install line as every other: a fresh checkout has no packages and no local settings.**
-
-## Release 8.0.6 (the practice run)
-
-- **A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.**
+- **When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.**
+- **A prompt's example is read as the rule: use one any project produces, or say what in it is repo-specific.**
 
 ## Issue 260 (the push guard)
 
-- **An approval prompt is not a gate for a rare, costly action: both planted-key test pushes that asked were approved at the prompt, so a flagged push now blocks.**
-- **To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.**
-- **A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.**
-- **Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.**
+- **To stop a rare, costly action, block it instead of asking, with a way round that takes deliberate typing.**
+- **To find who approved a tool call, read the `source` of its `permissionDecision` in the session log.**
+- **A guard reading shell text needs a hostile case for every place a command can start, not just wrappers.**
+- **Ask a consequential choice in plain text the owner answers in words, never as clickable options.**
 
 ## Issue 263 (the /cloud skill)
 
-- **A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.**
-- **A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.**
+- **A command that uploads local work to another service says what the upload carries before the user starts it.**
+- **A file-name collision guard compares names the way the disk does, case-blind on Mac and Windows.**
 
 ## Issue 264 (the research kit)
 
-- **Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.**
-- **A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.**
-- **A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.**
-- **Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.**
+- **When two reads of a page disagree, check each against the page itself, not against the other read.**
+- **Start a headless session with `--setting-sources project,local` and probe its fence with a forbidden write.**
+- **Run every headless lead with `--disallowedTools ScheduleWakeup`.**
+- **Run each new check line once against the before state before relying on it.**
 - **When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.**
-
-## Issue 262 (docs and code disagree)
-
-- **A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.**
+- **A guard keyed on commit ancestry must survive squash and rebase landings.**
 
 ## Issues 265 and 266 (worktree records come home)
 
-- **`npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.**
-- **Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.**
-- **In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.**
-
-## Issue 261 (load the review rules by phase)
-
-- **Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.**
-- **Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.**
+- **A step that edits a file under `.claude/` rebuilds `plugin/` before its after run.**
+- **Before a script replaces a manual check, run both on the real file and compare.**
+- **In `git status --porcelain -z`, a rename's old name follows when either column says R, so check both.**
+- **Check the login token's remaining life before promising a harness run.**
 
 ## Issues 269 and 270 (a cycle page per branch, records kept)
 
-- **Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.**
-- **List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.**
+- **Type U+2028 and U+2029 as escape text in a regex, never as the raw characters.**
+- **List in a review page's `reviewedFiles` only what a specialist read.**
 - **A check-first target that only asserts a bad thing did not happen can pass before the work: also assert the work ran.**
-
-## Issue 267 (the verify mode)
-
-- **Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.**
+- **Before running a step that reads the tree, count the edits that applied.**
 
 ## Issue 275 (who and what else a change reaches)
 
-- **Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.**
-- **A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.**
-- **The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.**
+- **Say which user a label means: the person running the loop or the person the product serves.**
+- **Pin a parity test's expected values as literals in the test, never read them from the code it checks.**
+- **Write the review digest as one line per finding, never one line for a range of IDs.**
 
 ## Issue 271 (codes carry their meaning in plain words)
 
-- **Map the problem before offering the mechanism: when the owner asks how a check would work, answer its cost in two lines and return to where the miss happens, or the exploration turns into a solution debate.**
-- **A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.**
-- **A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.**
+- **Map the problem first: when asked how a check would work, give its cost in two lines and return to the map.**
+- **When a check normalizes tokens first, test each new pattern on what the normalizer hands it.**
+- **A ban written as "X stays in the receipt" needs its scope in the same sentence.**
 
 ## Issue 277 (the toolkit against the harness sources)
 
-- **Seal a guess before a source read and score it after: the issue 277 guess named only gaps the toolkit already covered and missed both real ones, so the score shows what the read added and the guess can never stand in for it.**
-- **A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.**
-
-## Issue 278 (a second planted-bug fixture)
-
-- **Try a judge fixture's checks on wrong answers too: a fix that hid the symptom and a finding about the neighbouring bug both scored right until the review tried them.**
+- **Seal a guess before a source read and score it after, and never let the guess stand in for the read.**
+- **A threshold checked after a stage writes must re-measure, not reuse a reading from before the write.**
+- **Try a judge fixture's checks on wrong answers too, not only on the planted bug and the real fix.**
 
 ## Issues 276 and 280 (the writing guide and everyday words)
 
-- **Run the probe that checks a behavior in the same change that alters it: a change made an Opus session say go, the plan probe still expected the steps to switch to Opus, and nobody ran it for 24 days.**
-- **Never cd into a subfolder in a Bash call: the shell keeps that folder for the next call, so the project's relative paths miss; start each call from the project root instead.**
+- **Run the probe that checks a behavior in the same change that alters it.**
+- **Never cd into a subfolder in a Bash call; start each call from the project root instead.**

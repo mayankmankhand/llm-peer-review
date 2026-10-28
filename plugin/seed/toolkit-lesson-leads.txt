@@ -14,6 +14,7 @@ A JSON escape for an apostrophe does not survive a model typing the command: the
 A Mermaid SVG stretches to the page column on GitHub: give each docs `<img>` the picture's natural width.
 A `--stable` render reads the page it replaces, so a trial render is not free: give it every input the first time.
 A `cd` inside one Bash call persists into the next; start every chained command from the repo root.
+A ban written as "X stays in the receipt" needs its scope in the same sentence.
 A ban written as "X stays in the receipt" needs its scope in the same sentence: unscoped, the rule's 14 copies read as forbidding file names in a plan, which the plan critic requires.
 A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.
 A batch approval covers the edits it listed; a later correction to the same prompt text asks again.
@@ -30,6 +31,7 @@ A checked subtask means its wording shipped, not that the nearby diff did.
 A clause chosen by a family test must be true for every member of the family, not just the member the old test asserted.
 A co-location rule is only as strong as its weakest call site.
 A command inserted into a prompt needs two checks before it ships: run it once from the project root, and read its shape against the permission rows.
+A command that uploads local work to another service says what the upload carries before the user starts it.
 A command that uploads local work to another service says what the upload carries before the user starts it: a session that broke its no-push rule would publish whatever it took.
 A containment check that compares path strings is not containment.
 A contract line that names a recovery path is a claim: ship the flag in the same commit as the sentence.
@@ -43,6 +45,7 @@ A diff review of already-closed work still earns its keep.
 A dispatched finder cannot ask, so a criterion that opens with a question returns nothing.
 A fallback the writer drops is not a fallback: stamp derived values on the way in, or every later reader loses them.
 A file that is both the maintainer's live config and the downstream seed leaks in both directions.
+A file-name collision guard compares names the way the disk does, case-blind on Mac and Windows.
 A file-name collision guard compares names the way the disk does: Mac and Windows disks are case-blind, so `Notes.md` and `notes.md` are one file there.
 A filter whose misses are undetectable must reject only the certain non-matches, never guess the matches.
 A fixture has to dodge every pattern in the scanner, not just the one it is a fixture for.
@@ -51,7 +54,9 @@ A fixture that fails on both pages tells them apart no better than one that pass
 A gate must be countable against the output the model actually produces.
 A gate that lists the signals it cares about is another silent middle; read the record the code already computes.
 A guard built only from hostile fixtures refuses real input; run the first live receipts through it before it ships.
+A guard keyed on commit ancestry must survive squash and rebase landings.
 A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.
+A guard reading shell text needs a hostile case for every place a command can start, not just wrappers.
 A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
 A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.
 A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.
@@ -64,6 +69,7 @@ A lone `cd` call, then plain commands, matches the permission rows; a subshell, 
 A loop step that needs to know the last iteration in advance cannot be honored; attach it to every iteration.
 A major version bump on additive-only work needs explicit framing.
 A measurable claim in a commit message is a claim until you measure it.
+A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check.
 A measurement window on a key with an expiry needs a mid-run status check, not only a day-one check: the shadow run died silently five days early when the key expired.
 A missing finding is invisible to the audit; a wrong one is not.
 A model named in a helper's file is relative to the session that dispatches it: on a cheaper session it lands above the judges, so cap it at the session model.
@@ -76,6 +82,7 @@ A new temporary worktree in a prompt needs the same copy-and-install line as eve
 A new upgrade convention touches the upgrade skill too: its rerun detector list and its every-upgrade sentence.
 A parity test that reads its expected values from the code it checks only proves the two sides agree: pin the expected literals in the test, or one bad edit moves the code and the test together.
 A passing happy-path test is not enough - test edge cases, or let adversarial review hunt.
+A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`.
 A permission row added to the plugin seed also goes into this repo's `.claude/settings.local.json`: it is the copy-install seed.
 A permission rule ending in `:*` is read as the older prefix spelling and never matches a literal colon.
 A permission you cannot self-provision may have an already-permitted equivalent.
@@ -85,9 +92,11 @@ A plan that promises a one-commit revert must say what happens once later work m
 A plan's Start commit written on main is not a branch's review range: when the work moves to a worktree forked later, re-pin the review and the cycle window at the fork.
 A plan's bullet list reads as an order: when one step reads a file another step writes, put them in that order and name the file.
 A plugin CLI command run inside a project also edits that project's settings file.
+A plugin fix made after a tag reaches installs only with the next version: bump now or say so in the notes.
 A plugin install updates only on a version change, so fixes committed after a tag reach no existing install until the next bump.
 A prompt cannot declare a user-owned prerequisite done.
 A prompt's example is read as the rule: `/create-plan`'s stated-failure example matches a line this repo's own suites print, so a practice plan whose tests print no such line matched the runner's `exit N` line, which a match never sees.
+A prompt's example is read as the rule: use one any project produces, or say what in it is repo-specific.
 A prompt's user-facing message is not enforcement.
 A prose sweep needs the wordings that actually occur, not the one you remember writing.
 A reader that takes an unknown first word as plain text lets every shell keyword through: write a guard's hostile cases from where the shell can start a command, not only from the wrapper programs.
@@ -97,16 +106,19 @@ A record that suppresses findings must be keyed on the text a finding is about; 
 A release needs one review of the whole range, not the sum of its per-issue reviews.
 A removal that makes a consumer refuse a form breaks every producer of that form: sweep the producers before it lands.
 A replay sandbox must hold everything the replayed agent will reach for: the range's git history and every file its inputs cite.
+A replay sandbox must hold everything the replayed agent will reach for: the range's history and cited files.
 A rewrite keyed on names must be tested on file names that contain those names.
 A rewrite to a link that moves only at session start breaks an update taken mid-session; measure the same-session update path.
 A rule that keeps something out of a comparison applies to both sides: test the before side as hard as the after side.
 A rule widened to catch one missed case can mis-sort another: before keeping it, test the case on its other side.
+A rule written for the orchestrator must reach every runner that applies it: list them and check each one.
 A runner mode several callers share changes only behind a flag the new caller passes.
 A safety baseline must check what the test can change, not the bytes of files the owner's own sessions also write.
 A score that wobbles a point on unchanged input cannot drive a loop; the gaps it returns can.
 A second mode that needs the same context as an existing walk should call that walk, not copy it.
 A security control passes its own happy-path tests and still fails open - probe it with hostile inputs before trusting its exit code.
 A self-run consistency check passes while the scoped thing is missing entirely.
+A sentence that must read the same in several prompt files gets a parity test.
 A sentence that must read the same in several prompt files gets a parity test; a reviewer found the one site of nine that kept the old wording.
 A sentence-break rule needs its abbreviation exception before it ships: when a critic names the false positive, that input goes into the test first.
 A stable page that is never refreshed is worse than no page: one durable URL, and everything at it false.
@@ -116,6 +128,9 @@ A standing page rendered in a worktree has no predecessor on disk: copy the live
 A standing page rendered in a worktree has no predecessor on disk: copy the main checkout's page in first, or the shared page loses its open findings.
 A standing page republished from a new session is refused until that session has read the live page; the renderer's carry-forward is the merge, so read once and publish the rendered file.
 A standing page that closes findings by file cannot be shared between branches: a sibling branch's copy of the file never had the change.
+A start-of-run check does not cover a later call through a shared link: put the caller's version in the call.
+A step that edits a file under `.claude/` rebuilds `plugin/` before its after run.
+A step that redoes an earlier scan must read that scan's snapshot, not the working tree.
 A step that redoes an earlier scan must read the scan's snapshot, not the working tree: the merge re-listed today's files and refused a valid refresh.
 A subagent lost to an account limit resumes as a narrowed retry scoped to what earlier passes did not cover.
 A suite is green when its exit code is 0, not when its tail looks quiet.
@@ -124,8 +139,10 @@ A sweep's receipt is its grep patterns and their output, not the word "clean".
 A test fixture must never carry a real-shaped secret; assemble it at runtime, because the tripwire has no allow-list by design.
 A test for a false-positive fix must use a fixture the old pattern actually matched, and assert the thing only the fix changes.
 A test must plant the state a failure actually leaves, not a convenient stand-in.
+A test that a timeout kills a child must also assert an upper bound on the elapsed time.
 A test that a timeout kills a child must bound the time too: while the orphan holds the output pipe, the wait ends only when the child finishes on its own.
 A test whose fixture is rejected by two code paths cannot detect either one breaking.
+A threshold checked after a stage writes must re-measure, not reuse a reading from before the write.
 A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.
 A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.
 A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.
@@ -139,7 +156,10 @@ A 🟩 on "ask the user about X" can mislead.
 AI debates surface things standard reviews miss.
 AI peer review recommendations often over-engineer.
 Adding a pipeline stage demands three sweeps: flow prose, data-lifecycle rules, and sibling-stage parity.
+After a security fix, spend one adversarial round on it with a canary outside the sandbox.
 After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.
+After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.
+After moving text between files, sweep for "above", "below" and quoted heading names before calling it done.
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
 An approval prompt is not a gate for a rare, costly action: both planted-key test pushes that asked were approved at the prompt, so a flagged push now blocks.
@@ -151,33 +171,53 @@ An everyday test command cannot be the release gate, because the gate's version 
 An exclusion applied to one arm of a comparison must apply to the other arm too.
 An inherited CSS property belongs on the shared root, not copied into each file.
 An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
+Ask a consequential choice in plain text the owner answers in words, never as clickable options.
 Ask a consequential choice in plain text, not as clickable options: an answer can arrive as the first option without the owner choosing it.
 Ask what a change means for repos that already installed the last version, before writing the plan.
 Audit before converting.
 Auto-start lifecycle code is hard to verify without a real dev server.
+Before a prompt's new command ships, run it from the project root and check its shape against the allow rows.
+Before a script replaces a manual check, run both on the real file and compare.
 Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.
+Before building on a new inline command form, measure it in a real default-mode session, not a shell.
+Before choosing how a file gets read, measure where each reader cuts the real file and whether it asks for permission.
+Before dispatching typed agents, confirm with `pwd` that the session sits in the repo root.
 Before engineering a smarter limit, lift the old one once and see whether it binds.
 Before merging parallel helpers' outputs by a key, refuse a key that appears twice: a merge keyed by heading silently kept the second of two same-named blocks.
+Before merging parallel helpers' outputs by a key, refuse any key that appears twice.
+Before pointing call sites at a link moved only at session start, test an update taken mid-session.
+Before running a step that reads the tree, count the edits that applied.
 Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.
+Before shipping a permission row with a leading wildcard, test which hostile commands it also allows.
+Before the bump, test an upgrade finding on a next-version scratch plugin, beside a control on the new text.
+Before trusting a check meant to tell a defect from its fix, run it on both and confirm the answers differ.
+Before writing an "all N" bar, open every case it counts and confirm each is the kind the bar assumes.
 Boundary annotations in few-shot examples teach thresholds, not just format.
+Build a compound gate's fixture from the gate, so that only the term under test decides the result.
+Build a smoke test's plugin into a cache-shaped folder, or allowed script calls look denied.
 Build a smoke test's plugin into a cache-shaped folder, or setup drops the plugin's script rows and an allowed call looks denied.
 CLI default-acceptance prompts don't fully translate to chat.
 Call sites paraphrase a shared rule into different behaviors on day one.
+Cap a model named in a helper's file at the model of the session that dispatches it.
 Centralizing a rule and hand-writing its call-site preamble in the same commit still drifts - quote the rule or say nothing.
 Change a scorer's answer key only with a rescore of every saved run, and report exactly which catches moved.
 Check `pwd` before dispatching typed agents: they resolve their preloaded skills' relative includes against the session's working folder, and one stray `cd` failed all four review finders.
 Check that a mutation changed the file before reading its result: a string replace whose anchor missed left the file as it was, and the unchanged file "still passing" read as a test that could not catch the move.
+Check the login token's remaining life before promising a harness run.
 Check the login token's remaining life before promising a harness run: the harness refuses to start with under 105 minutes left, and the direct-run probe this cycle owed was refused twice.
 Check the permission allow-list before designing a mechanism out of shell commands.
 Check which read of a page is right against the page itself, not against the other read: the `.md` copy taken as truth left out a section the real page has.
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
+Confirm a passing test case by grepping the test file for its name, not by the release gate's output.
 Copying a script and permitting it are two edits, and only the missing copy is loud.
 Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.
 Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.
 DRY refactors create duplication-of-the-other-kind bugs.
 Define a judgement gate once, in countable terms, consistent with its governing rule.
 Diagnostic output to stderr when stdout is captured by another LLM.
+Diff a standing page's open items before and after a render to catch any that resolved without a recheck.
 Diff a standing page's open items before and after a render: a seeded item from another plan resolves whenever the plan lens runs.
+Dispatch each role on the roster's model, never a familiar default; `session` is your own model's alias.
 Don't micro-tag individual bullets.
 Don't state a cited past lesson as if it happened this session.
 Don't trust merged review severities without verifying the source lines.
@@ -185,45 +225,64 @@ Dry-running an upgrade on scratch copies of real projects finds defects that syn
 Editing the currently-running command file trips the harness self-modification guard.
 Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.
 Enforce invariants in code, not just comments - convention-only constraints erode as the codebase grows.
+Enter a folder with a lone `cd` call, then plain commands; a subshell, `cd &&`, `git -C`, `env -C` all ask.
 Every fix lands with a check that failed first; a fresh context re-verifies the judgment ones.
 Extending a running rollup beats adding a competing one.
 FS-probes for "is X installed" should fall through, not be authoritative.
 Feed a finder's receipt to the checks runner from its JSON bytes, never retyped.
 Fill a plan's Outcomes by replacing the template placeholder, not inserting above it.
 Find a rule's consumers by who applies it, not by who inlines it, and never count them through a `head`.
+Fix a routing gap in the code that does the routing, not in the prompt's wording.
 Fix a routing gap in the code that routes, not in the prompt: "add it to a block you were sent" only helped when the packer put both in one chunk.
 Fixing a drift finding means moving mechanics INTO the shared rule, not adding them at the call site.
 GPT and Gemini peer review caught things standard reviews missed.
 Generate a long report from parts with one script; never append into a file that is also its own source.
 Git accepts any unambiguous prefix of a long option, so a permission row on the full word misses the short spellings.
+Give a finder a neutral copy of what it judges, with no telling names or comments and the plan out of reach.
 Give a finder a neutral copy of what it judges: a fixture's name and comments state the answer, and a finder with Grep will read the plan.
+Give a sentence-break rule an abbreviation exception; any false positive a critic names is tested first.
+Give an agent role that must stay on the session model an explicit `model: inherit` line.
+Give every check Claude reads a printed answer, never a bare exit code.
 Give every check Claude reads a printed answer, never a bare exit code: a model reported a missing file's `test -e` as exit 0.
 Guard the symptom, not the one syntax that shipped; and mutation-test the test's own anchors, not just the bug.
 HTML output is useless if the user only gets a file link - it opens as source in the editor.
+Hand a non-technical owner the decision as yes-or-no questions and one recommendation, not the rows.
 Hand a non-technical owner the decision, not the rows: a 276-row tick list and a hedged evaluation got no answer, two yes-or-no questions and one recommendation did.
 Harden every field on a whitelist, or the whitelist is not a boundary.
+Headless runs edit `.claude/` only in bypassPermissions; decide how a prompt-file flow is proven beforehand.
 Headless sessions cannot edit files under `.claude/` outside bypassPermissions; decide how a prompt-file flow is proven before running it.
 Hold a cheaper model to a known-answer case taken from a real miss; an easy fixture passes everything.
 Hybrid approach beats all-or-nothing.
+In `git status --porcelain -z`, a rename's old name follows when either column says R, so check both.
 In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.
 In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.
 In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.
 In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.
+In this shell, grep for literal text that contains a `$` with `-F`.
 Inlining a shared fragment AND repeating its content defeats the point of the fragment.
 Isolate a headless test session's whole home, not only its plugin: a scratch `HOME` is the complete fix.
 Issue framing != actual problem.
 Issue framing != actual problem: second occurrence, this time a factual claim rather than a hypothesis.
 Issue framing != actual problem: third occurrence, in the diagnosis and in the suggested fix.
+Judge "never seen" by the code's own walk, and when the real run finds such a case, test it in that step.
 Keep a test's failure detail on one line: the release gate shows only a failing suite's last 15 lines.
 Keep a test's failure detail on one line: the release gate shows only the tail of a failing suite, and long details push the case names a check looks for out of view.
+Keep each failure detail on one line, so the case names a check looks for stay in the release gate's tail.
 Keep verification evidence in the repo as it lands; this machine clears `/tmp` and the scratchpad between days.
 Keeping a record means keeping what it points at: results.json kept every run's rows while a same-id rerun overwrote the output file the older row named.
 Keeping both sides of a conflict is not a merge when both sides set one value: keep one and name the other.
+Key a record that suppresses findings on the text a finding is about, never on the file name alone.
+Label every optional inline read, so a missing file's "no output" note cannot pass for content.
 Lazy locators don't throw - validate at parse, not at construction.
 Lift the gold artifact verbatim into a shared tokens file for zero visual regression - but make the mirror bidirectional.
+Lift the gold artifact verbatim into a shared tokens file, and make each file point at the other.
+List in a review page's `reviewedFiles` only what a specialist read.
 List in a review page's `reviewedFiles` only what a specialist read: naming the owner's own file there closed a carried finding nobody had rechecked.
+Make a detector, its receipt and its digest generator read files alike; test with a byte order mark and trailing blanks.
+Make the before run each step's first command, before opening its files, even in a research step.
 Making cleanup tolerate a failure moves it from "the run stopped" to "the run is judged on partial evidence": carry the failure into the verdict.
 Map the problem before offering the mechanism: when the owner asks how a check would work, answer its cost in two lines and return to where the miss happens, or the exploration turns into a solution debate.
+Map the problem first: when asked how a check would work, give its cost in two lines and return to the map.
 Markdown table escaping leaks into shell commands when the file is inlined with `` !`cat` ``.
 Masking the match that triggered the report is not masking the line.
 Measure a hand-off before delegating a single command to a cheaper model: the round trip, not accuracy, decides.
@@ -231,22 +290,33 @@ Measure a new inline command form in a real default-mode session before building
 Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.
 Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.
 Mutation-testing a group of assertions is not mutation-testing each assertion.
+Narrowing an agent's tools changes behavior: first check what every caller dispatching through it runs.
 Never cd into a subfolder in a Bash call: the shell keeps that folder for the next call, so the project's relative paths miss; start each call from the project root instead.
+Never cd into a subfolder in a Bash call; start each call from the project root instead.
 Never interpolate shell variables into inline `node -e` strings.
+Never share a standing page that closes findings by file between branches.
 Never write a literal HTML comment as an example inside an HTML comment.
 Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.
 Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
 On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.
+On the standing review page, name fixed findings by what changed, not by number.
 On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
+Patch a workflow you will resume by appending work after its existing calls, never by inserting it.
 Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.
 Permission approvals can land in the wrong settings file.
+Pick a trace repo the owner is already working in, never an idle one.
 Pick a trace repo the owner is already working in: an idle repo turns the trace into a chore and never shows an after rate.
+Pin a parity test's expected values as literals in the test, never read them from the code it checks.
 Pin subagents freely; never switch the main-loop model mid-session.
+Point a finding's receipt at the line the fix will change, never at its premise.
 Point a finding's receipt at the line the fix will change, never at its premise: the fix loop inverts the receipt into the recheck, and a premise check inverts into nonsense.
 Prebuilt shell + data injection: the real #127 win is that a script has no "read-before-overwrite" constraint.
+Preload a skill into a subagent with a `skills:` line, not a paste, and never nest inline-cats.
 Preload beats paste: a `skills:` line loads a skill into the subagent byte for byte, and nested inline-cats do not expand.
+Probe a security control with hostile inputs before trusting its exit code, and confirm it fails closed.
 Probe the agent that ships, not a stand-in: a general-purpose agent carrying the skeptic's text refuted 0 of 9 masked verdicts where the typed audit-skeptic refuted 4 of 9.
+Probe why a command prompts before choosing the fix.
 Probe why a command prompts before choosing the fix: the stop on `test -e <file>; echo $?` was the `$?`, not the `;` the issue blamed.
 Profile a slow suite by section before speeding it up: one fixture check can be the whole cost.
 Prove a harness with the thing it will be used for, not with a trivial prompt.
@@ -258,20 +328,28 @@ Release counts go stale a second time when the fix loop itself changes them; re-
 Render a standing page when its content is final, not when it first becomes available.
 Replacing LLM-run prose with a script removes non-determinism and shrinks the permission surface.
 Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.
+Reproduce a CI-only flake before fixing it, in a throwaway branch's matrix, then again with the fix.
 Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.
 Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.
 Review a plan this size with three fresh lenses before executing it.
 Review proposed prompt edits before applying them, and triage the volume hard.
 Review your own AI-generated code before shipping.
+Run /ask-gpt and /ask-gemini in parallel on a change worth real scrutiny; treat a gap both raise as real.
 Run /ask-gpt and /ask-gemini in parallel when the change is worth real scrutiny; convergence between independent reviewers is signal.
+Run a reviewer's suggested fix in a scratch case before applying it.
 Run a reviewer's suggested fix in a scratch case before applying it: the submodule fix it proposed named the same wrong folder as the bug.
 Run debates on plans, not just finished work.
+Run each new check line once against the before state before relying on it.
 Run each new check line once against the before state before relying on it: one used `jq`, which is not installed here, and two `noMatch` guards failed on a file the step had not created yet.
+Run every headless lead with `--disallowedTools ScheduleWakeup`.
+Run the probe that checks a behavior in the same change that alters it.
 Run the probe that checks a behavior in the same change that alters it: a change made an Opus session say go, the plan probe still expected the steps to switch to Opus, and nobody ran it for 24 days.
 Run your own receipt before you report it as confirmation.
 Say which user a label means: in a toolkit "the user" is both the person running the loop and the person the product serves, and the first gloss of "what the user gets back" picked the wrong one.
+Say which user a label means: the person running the loop or the person the product serves.
 Scope parity gaps explicitly when fixing one of several.
 Screen the bytes that leave, not the command that made them: the findings replay checked each receipt's command for private folders and sent its saved output unscreened.
+Seal a guess before a source read and score it after, and never let the guess stand in for the read.
 Seal a guess before a source read and score it after: the issue 277 guess named only gaps the toolkit already covered and missed both real ones, so the score shows what the read added and the guess can never stand in for it.
 Seal the hypothesis before the research and score it after: a mechanism-based pre-triage scored 8 of 21 against readers judging by which measured problem moves.
 Self-enforce release-time conventions in the artifact or the checklist, not in memory.
@@ -280,12 +358,16 @@ Shared files reduce duplication across review skills.
 Silent empty bodies need active detection, not just happy-path returns.
 Skill tool expansions can serve stale command versions.
 Smoke-test a new on-demand skill in default permission mode: only that mode shows a missing permission row.
+Start a headless session with `--setting-sources project,local` and probe its fence with a forbidden write.
 Sub-agent output can arrive HTML-escaped; unescape a check before executing anything in it.
 Subagents do NOT auto-discover project skills.
 Tag vocabulary for prompts:
 Take a step's before run before opening any of its files: two steps this cycle started their work first, and one before record could not be recovered.
+Tell an unattended test session to judge each call on its own, even after an earlier call was denied.
+Test a false-positive fix on a fixture the old pattern matched, and assert what only the fix changes.
 Test an undo instruction by executing it, not by matching its text.
 Test an upgrade finding before the bump by building the scratch plugin at the next version, beside a control already on the new text.
+The bundled prompt audit is not deterministic, so no rerun of it proves a list is complete.
 The bundled prompt audit is not deterministic: a rerun on unchanged text finds new items, so no rerun proves a list is complete.
 The comment justifying an exclusion is load-bearing: if it is wrong, the exclusion is unguarded.
 The design critic finds rendering bugs the test suite cannot see.
@@ -293,12 +375,18 @@ The plugin build rewrites command names in prompts, never in scripts: wording mo
 The review digest is one line per finding: a line that bundles a range of IDs fails the chain gate's shape check and refuses the handoff to the document stage.
 The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
+The self-modification guard blocks adding a permission to `settings.local.json`; ask the user to add it.
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
+To find who approved a tool call, read the `source` of its `permissionDecision` in the session log.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
+To republish a standing page from a new session, read the live page once, then publish the rendered file.
+To stop a rare, costly action, block it instead of asking, with a way round that takes deliberate typing.
 Tokenising the shared layer does not tokenise its consumers.
+Try a judge fixture's checks on wrong answers too, not only on the planted bug and the real fix.
 Try a judge fixture's checks on wrong answers too: a fix that hid the symptom and a finding about the neighbouring bug both scored right until the review tried them.
 Two finders describing one defect write two dedup keys: the key catches exact repeats, not corroboration, so the merge pass needs a rule beyond it.
 Two halves of one feature, written in one session, can each be right and still not meet.
+Type U+2028 and U+2029 as escape text in a regex, never as the raw characters.
 Type U+2028 and U+2029 as escape text in a regex, never as the raw characters: a raw one is a line end to JavaScript, and the whole script stops parsing.
 Update (v4.4.0, issue #97):
 Use deterministic scripts for structural data, not LLMs.
@@ -307,26 +395,53 @@ Verify audit findings against file content before acting - subagent claims about
 Verify impact, not just existence, before scoping a fix.
 Version bumps touch more files than you think.
 Watch for tool output artifacts in reviews.
+When a branch forks after its plan's Start commit, re-pin the review range and the cycle window at the fork.
+When a build rewrites names or permissions for one distribution, run the same sweep over the other's files.
+When a check normalizes tokens first, test each new pattern on what the normalizer hands it.
+When a detector copies lists from another file, give each copied list its own drift check.
 When a fix corrects a fact, search every doc for its other copies before calling it done.
+When a fix moves code, re-verify a line-number receipt's claim on the new code, not the old range.
+When a hand-kept list decides what runs, check the list against what exists.
 When a hand-kept list decides what runs, check the list against what exists: a missing entry otherwise passes as all green.
+When a model types JSON in the one-argument form, it must hold no apostrophe, not even as an escape.
+When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.
+When a prompt has one stage read a field from another stage's output, check the producer's template has it.
+When a prompt spells out a placeholder's value, grep each later use of it and spell those out too.
 When a prompt spells out a placeholder's value, grep every later use of that placeholder or the model improvises the rest.
 When a race decides whether a test can run at all, change the setup so the order is reliable instead of retrying it.
 When a reviewer gets its excerpts as a diff file, tell it to cite the files' own line numbers.
 When a rule gains a condition or a trigger, follow it to every restatement and every gate on its path.
 When a rule gains an outcome, sweep every paragraph that enumerates outcomes, including the failure-mode one.
+When a rule limits what may leave, screen the bytes at the send call, not the command that made them.
+When a second script borrows a safety screen, keep its order of operations, not just its code.
 When a second script borrows a safety screen, keep its order: the safe-command hook cut long quotes before the secret check, so a key the cut split would have left as a fragment the check no longer matched.
+When a session restart is possible, run a minutes-long suite detached, with its log and exit code in files.
+When a worker gains a capability, sweep the dispatcher for conditions that capability made obsolete.
 When a worker gains a capability, sweep the dispatcher's conditions too: the browser finder could start a server for two releases while the orchestrator still skipped it without one.
+When centralizing a rule, make each call site quote it verbatim or say nothing beyond what is local.
+When changing a detection pattern, add the new rule beside the old one and rerun every hostile fixture.
 When changing user-facing copy, grep for the same description elsewhere.
+When cleanup is made to tolerate a failure, carry the failure into the run's verdict.
 When every always-ask edit of a run is known before it starts, raise the approval pages together, one part per step.
 When inserting a numbered step, grep for every "step N" reference before and after the insertion.
+When merging findings, match same-file findings on their claim, not only on their dedup key.
+When older releases can receive a new call, name the answer they give and test the fix against one of them.
+When one plan step reads a file another step writes, put the writing step first and name the file.
 When releases that predate a new call can receive it, name the answer they give: a fix tested only against builds that know the call misses them.
+When reviewing ledger work, say in each agent's dispatch that the ledger's files are off limits.
 When storage is append-only, validate the whole batch before writing any of it.
+When testing how an agent behaves, probe the typed agent that ships, not a stand-in given its text.
 When the owner changes a decision at a page, sweep what was already written under the old decision.
 When the plan's wording drifts from the exploration summary the owner approved, the summary wins.
+When two reads of a page disagree, check each against the page itself, not against the other read.
+When you keep records instead of replacing them, also keep everything those records point at.
 Windows PowerShell answers from WSL: run the `.ps1` suite through `powershell.exe` before calling it untestable here.
 Worktree detection: `--git-dir` vs `--git-common-dir`.
 Write a check's stated failure in that suite's own failure format; the suites do not print it alike.
+Write a hypothesis down before the research, keep it out of every prompt, and score it after.
+Write a live check against the least helpful row the rules allow, not the friendliest fixture.
 Write the return shape first and make the reasoning steps silent, or the contract contradicts itself.
+Write the review digest as one line per finding, never one line for a range of IDs.
 Write the validation bar before the result, then honor it when the result is inconvenient.
 XML tags in prompts are a real thing, not just hype.
 `<title>` is RCDATA, so escaping markup inside it changes nothing visible except entities.
