@@ -879,13 +879,14 @@ const MAX_ROUNDS = 2;
 // 2026-10-23), so the row cannot pass until the runner writes the expect.
 //
 // A match that holds the line number a search, cat or git blame printed
-// inverts without the number (issue #283); NUMBER_SHAPES says where each puts
-// it. A noMatch on line 1668 passes as soon as an edit above pushes the text to
-// line 1669, so a problem that only moved read as FIXED; with the number
-// dropped, the recheck fails while the text sits on any line.
-function invertExpect(expect, check) {
+// inverts without the number (issue #283): NUMBER_SHAPES says where each puts
+// it, and the line the finding cites goes wherever else the match holds it. A
+// noMatch on line 1668 passes as soon as an edit above pushes the text to line
+// 1669, so a problem that only moved read as FIXED; with the number dropped,
+// the recheck fails while the text sits on any line.
+function invertExpect(expect, check, line) {
   if (expect && typeof expect === 'object') {
-    if (typeof expect.match === 'string') return { noMatch: withoutLineNumber(expect.match, check) };
+    if (typeof expect.match === 'string') return { noMatch: withoutLineNumber(expect.match, check, citedNumbers(line)) };
     if (typeof expect.noMatch === 'string') return { match: expect.noMatch };
     if (Number.isInteger(expect.exit) && expect.exit !== 0) return { exit: 0 };
   }
@@ -914,50 +915,95 @@ function gitSubcommand(words) {
   return { sub: words[at], args: words.slice(at + 1) };
 }
 
+// A command's tool, "git <subcommand>" for git, and the words after it.
+function toolOf(words) {
+  const git = gitSubcommand(words);
+  return git ? { tool: 'git ' + git.sub, args: git.args } : { tool: words[0], args: words.slice(1) };
+}
+const SEARCHES = ['grep', 'egrep', 'fgrep', 'rg', 'git grep'];
+// A search that counts, lists files or stays quiet prints no line of the file.
+const NO_LINES = ['--count', '--count-matches', '--files-with-matches', '--files-without-match', '--files', '--name-only', '--quiet', '--silent'];
+const printsNoLines = (args) => args.some((a) => /^-[A-Za-z0-9]*[clq]/.test(a) || NO_LINES.includes(a));
 // How a command prints line numbers, or null. A search (grep, egrep, fgrep, rg
 // or git grep) prints them with a short-option cluster holding n (-n, -rn, -nE,
-// -nC2) or --line-number, and the column after them with --column (rg and git
-// grep) or rg's --vimgrep; under the checks runner rg prints none unless asked,
-// since its output is no terminal, and its -N turns them off. cat prints them
-// with -n, -b (blank lines skipped) or --number, alone or in a cluster (-bA);
-// git blame always does.
+// -nC2), --line-number or rg's -p, and the column after them with --column (rg
+// and git grep) or rg's --vimgrep; under the checks runner rg prints none
+// unless asked, since its output is no terminal, and its -N turns them off. A
+// byte offset (-b) moves with the line the same way, and rg's --json writes
+// "line_number". A search with -c, -l or -q prints none. cat prints them with
+// -n, -b (blank lines skipped) or --number, alone or in a cluster (-bA); git
+// blame always does.
 function numberShape(words) {
-  const git = gitSubcommand(words);
-  const tool = git ? 'git ' + git.sub : words[0];
-  const args = git ? git.args : words.slice(1);
+  const { tool, args } = toolOf(words);
   if (tool === 'git blame') return 'blame';
   if (tool === 'cat') return args.some((a) => /^-[A-Za-z]*[nb][A-Za-z]*$/.test(a) || /^--number(?:-[a-z]*)?$/.test(a)) ? 'cat' : null;
-  if (!['grep', 'egrep', 'fgrep', 'rg', 'git grep'].includes(tool)) return null;
-  if (args.some((a) => a === '--column' || (tool === 'rg' && a === '--vimgrep'))) return 'column';
-  return args.some((a) => /^-[A-Za-z0-9]*n[A-Za-z0-9]*$/.test(a) || a === '--line-number') ? 'search' : null;
+  if (!SEARCHES.includes(tool) || printsNoLines(args)) return null;
+  if (tool === 'rg' && args.includes('--json')) return 'json';
+  const has = (letter, long) => args.some((a) => new RegExp('^-[A-Za-z0-9]*' + letter + '[A-Za-z0-9]*$').test(a) || a === long);
+  const lineNo = has('n', '--line-number') || (tool === 'rg' && has('p', '--pretty'));
+  const offset = has('b', '--byte-offset');
+  if (args.some((a) => a === '--column' || (tool === 'rg' && a === '--vimgrep')) || (lineNo && offset)) return 'column';
+  return lineNo || offset ? 'search' : null;
 }
 // Where each shape puts the number, and the match with it replaced by any
-// number. A search leads the line with it ("^1668:", "^1668-", or
-// "^src/a.js:1668:" from a search over several files, the file name being the
-// optional group), with the column after it when asked; cat right-aligns it
-// before a tab, so the spaces in front change with its width and become \s*;
-// git blame ends each line's note with it ("1668)"); cut -f1 after any of them
-// leaves the number alone on its line. blame's --porcelain and diff's hunk
-// headers put their numbers on a line of their own, not the flagged text's.
-// The match is left as it is when it holds no number where the check puts one.
+// number. A search leads the line with it ("1668:", "1668-", or
+// "src/a.js:1668:" from a search over several files, the file name being the
+// optional group, with or without the ^), with the column or byte offset after
+// it when asked; cat right-aligns it before a tab, so the spaces in front
+// change with its width and become \s*, and after a ^ it is the number whatever
+// follows; git blame ends each line's note with it ("1668)"); rg
+// --json writes "line_number":1668; cut -f1 after any of them leaves the
+// number alone on its line. blame's --porcelain and diff's hunk headers put
+// their numbers on a line of their own, not the flagged text's. The match is
+// left as it is when it holds no number where the check puts one.
 const NUMBER_SHAPES = {
   bare: { at: /^(\^?(?:\\s[*+?]?| )*)\d+((?:\\s[*+?]?| )*\$?)$/, as: (m, before, after) => before + '[0-9]+' + after },
-  column: { at: /^\^((?:[^:\\]|\\.)+:)?\d+:\d+:/, as: (m, prefix) => '^' + (prefix || '') + '[0-9]+:[0-9]+:' },
-  search: { at: /^\^((?:[^:\\]|\\.)+:)?\d+([:-])/, as: (m, prefix, sep) => '^' + (prefix || '') + '[0-9]+' + sep },
-  cat: { at: /^(\^?)((?:(?: |\\s|\[ \])(?:[*+?]|\{\d+(?:,\d*)?\})?)*)\d+(?=\\t|\t|\\s)/,
-    as: (m, caret, spaces) => caret + (caret || spaces ? '\\s*' : '') + '[0-9]+' },
+  column: { at: /^(\^?)((?:[^:\\]|\\.)+:)?\d+:\d+:/, as: (m, caret, prefix) => caret + (prefix || '') + '[0-9]+:[0-9]+:' },
+  search: { at: /^(\^?)((?:[^:\\]|\\.)+:)?\d+([:-])/, as: (m, caret, prefix, sep) => caret + (prefix || '') + '[0-9]+' + sep },
+  cat: { at: /^(?:(\^)|(?=(?:(?: |\\s|\[ \])(?:[*+?]|\{\d+(?:,\d*)?\})?)*\d+(?:\\t|\t|\\s)))((?:(?: |\\s|\[ \])(?:[*+?]|\{\d+(?:,\d*)?\})?)*)\d+/,
+    as: (m, caret, spaces) => (caret || '') + (caret || spaces ? '\\s*' : '') + '[0-9]+' },
   blame: { at: /(^|[ \t]|\\[st](?:[*+?]|\{\d+(?:,\d*)?\})?)\d+(?=\\\))/, as: (m, before) => before + '[0-9]+' },
+  json: { at: /("line_number":)\d+/, as: (m, key) => key + '[0-9]+' },
 };
-function withoutLineNumber(pattern, check) {
+// A command's numbers count only when they reach the check's output, with no
+// wc and no counting search after it in its pipe. The shapes go first, then
+// the lines the finding cites wherever else the match holds them.
+function withoutLineNumber(pattern, check, cited) {
   const cmds = commandsOf(check);
   if (!cmds) return pattern;
-  const shapes = cmds.map((c) => numberShape(c.words));
+  const counts = (words) => { const t = toolOf(words); return t.tool === 'wc' || (SEARCHES.includes(t.tool) && printsNoLines(t.args)); };
+  const reaches = (i) => { for (let k = i + 1; k < cmds.length && cmds[k].from === k - 1; k++) if (counts(cmds[k].words)) return false; return true; };
+  const shapes = cmds.map((c, i) => (reaches(i) ? numberShape(c.words) : null));
   const last = cmds[cmds.length - 1];
   const cut = last.words[0] === 'cut' && last.from >= 0 && shapes[last.from] !== null
     && last.words.some((a, j) => a === '-f1' || a === '--fields=1' || ((a === '-f' || a === '--fields') && last.words[j + 1] === '1'));
-  const shape = (cut ? ['bare'] : []).concat(['column', 'search', 'cat', 'blame'].filter((s) => shapes.includes(s)))
+  const shape = (cut ? ['bare'] : []).concat(['column', 'search', 'cat', 'blame', 'json'].filter((s) => shapes.includes(s)))
     .map((s) => NUMBER_SHAPES[s]).find((s) => s.at.test(pattern));
-  return shape ? pattern.replace(shape.at, shape.as) : pattern;
+  const shaped = shape ? pattern.replace(shape.at, shape.as) : pattern;
+  return cited.length && shapes.some((s) => s !== null) ? withoutCitedLine(shaped, cited) : shaped;
+}
+// The lines a finding cites: its line, or each line of a range (12-15) up to
+// 50 lines long, else the range's two ends.
+function citedNumbers(line) {
+  const m = /^(\d+)(?:\s*[-–]\s*(\d+))?$/.exec(typeof line === 'number' || typeof line === 'string' ? String(line).trim() : '');
+  if (!m || Number(m[1]) < 1) return [];
+  const from = Number(m[1]);
+  const to = m[2] === undefined ? from : Number(m[2]);
+  if (to < from || to - from > 50) return [String(from), String(to)];
+  return Array.from({ length: to - from + 1 }, (_, k) => String(from + k));
+}
+// A match with each cited line, where it stands as a number of its own, turned
+// into any number: not inside a longer number or a word (v12, 12px), a
+// character class, a {12} count or an escape (\x12). Run only when the check
+// prints line numbers, where a number equal to the cited line is that line's
+// in whatever layout the receipt wrote it (git grep's HEAD:src/a.js:12:, a
+// number cut out alone); one in the text by coincidence only widens the
+// noMatch, which can make a fix read NOT FIXED, never FIXED.
+const REGEX_PARTS = /\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|c[A-Za-z]|\d+|[\s\S])|\[\^?(?:\\[\s\S]|[^\]\\])*\]|\{\d+(?:,\d*)?\}|\d+|[\s\S]/g;
+function withoutCitedLine(pattern, cited) {
+  const parts = pattern.match(REGEX_PARTS) || [];
+  const word = (p) => p !== undefined && /^[A-Za-z_]$/.test(p);
+  return parts.map((p, i) => (cited.includes(p) && !word(parts[i - 1]) && !word(parts[i + 1]) ? '[0-9]+' : p)).join('');
 }
 
 // sed's words as sedRule in run-checks.js reads them: -e or --expression
@@ -1205,7 +1251,7 @@ function buildVerify(parsed, scope, opts) {
       const saved = path.join(opts.receipts, stem + '.txt');
       if (firstFile === null) firstFile = saved;
       if (fs.existsSync(saved)) anySaved = true;
-      let expect = invertExpect(src.receipt.expect, src.receipt.check);
+      let expect = invertExpect(src.receipt.expect, src.receipt.check, src.file && typeof src.file === 'object' ? src.file.line : undefined);
       // A line number dropped from a pattern the first run printed on more than
       // one line: the noMatch passes only once every one of those lines is gone,
       // so a fix of the flagged one would still read NOT FIXED, and the runner

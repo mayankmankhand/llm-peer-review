@@ -12,7 +12,7 @@
 
 ### Changed
 
-- **The recheck of a fix looks for the flagged text wherever it now sits (#283).** A fix passes only when that text is gone, not when it has moved to another line, whether the proof printed line numbers with a search (`grep -n`, `rg --column`), `cat -n` or `git blame`. A fix that keeps the flagged text on purpose may take one more round, and when the text shows up on more than one line, Claude writes what that recheck must show before running it. A proof that picks lines by their number (`sed -n 12p`, `head` or `tail` on a file or on a whole file piped in, or `git blame -L 12,15`) cannot be rechecked this way, so its finding goes to the separate check of the fix, and the review command now tells Claude how to hand it over.
+- **The recheck of a fix looks for the flagged text wherever it now sits (#283).** A fix passes only when that text is gone, not when it has moved to another line. This holds whether the proof printed line numbers with a search (`grep -n`, `rg --column`), `cat -n` or `git blame`, and wherever its expected text holds the line number the finding points at. A fix that keeps the flagged text on purpose, or text with a number equal to that line, may take one more round, and when the text shows up on more than one line, Claude writes what that recheck must show before running it. A proof that picks lines by their number (`sed -n 12p`, `head` or `tail` on a file or on a whole file piped in, or `git blame -L 12,15`) cannot be rechecked this way, so its finding goes to the separate check of the fix, and the review command now tells Claude how to hand it over.
 
 ### Upgrading
 

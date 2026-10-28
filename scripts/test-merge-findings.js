@@ -1118,6 +1118,69 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('283: rg --column and --vimgrep, git grep --column, and grep -n cut to the number drop the number too',
     round2Wrong.length === 0,
     round2Wrong.map(([match, check]) => check + ' -> ' + inv(match, check)).join(' | '));
+  // A second verifier found layouts the shapes still missed, each passing a fix
+  // that only moved the line: the number with no ^ before it or its file name,
+  // cut out after a head, by sed or as the second field, after git grep's
+  // revision, after .* in a blame match, both of blame -n's numbers, and cat
+  // -n's number before something other than a tab. When the check prints line
+  // numbers, the line the finding cites (each line of a range) now goes
+  // wherever it stands, a coincidence in the text included; rg --json and a
+  // byte offset (-b) drop theirs too. A count, a number inside a word or a
+  // longer number, a class, a {n} or an escape, and a check that prints no
+  // line numbers are left alone.
+  const inv3 = (match, check, line) => JSON.stringify(mod.invertExpect({ match: match }, check, line));
+  const round3 = [
+    ['src/a\\.js:12:console', 'grep -rn console src', 12, 'src/a\\.js:[0-9]+:console'],
+    ['12:.*console', 'grep -n console src/a.js', 12, '[0-9]+:.*console'],
+    ['^12$', 'grep -n console src/a.js | head -n 1 | cut -d: -f1', 12, '^[0-9]+$'],
+    ['^\\s+42.*logger', 'cat -n src/a.js', 42, '^\\s*[0-9]+.*logger'],
+    ['^\\s*12$', 'cat -n src/a.js | grep console | cut -f1', 12, '^\\s*[0-9]+$'],
+    ['^12$', "grep -n console src/a.js | sed 's/:.*//'", 12, '^[0-9]+$'],
+    ['^12$', 'grep -rn console src | cut -d: -f2', 12, '^[0-9]+$'],
+    ['^src/a\\.js:12$', 'grep -rn console src | cut -d: -f1,2', 12, '^src/a\\.js:[0-9]+$'],
+    ['^HEAD:src/a\\.js:12:', 'git grep -n console HEAD', 12, '^HEAD:src/a\\.js:[0-9]+:'],
+    ['.*12\\)', 'git blame src/a.js', 12, '.*[0-9]+\\)'],
+    ['^\\^?[0-9a-f]+ 12 \\(.* 12\\) console', 'git blame -n src/a.js', 12, '^\\^?[0-9a-f]+ [0-9]+ \\(.* [0-9]+\\) console'],
+    ['.*13\\)', 'git blame src/a.js', '12-15', '.*[0-9]+\\)'],
+    ['^12:.*retries = 12', 'grep -n retries src/a.js', 12, '^[0-9]+:.*retries = [0-9]+'],
+    ['"line_number":7,', 'rg --json console src/a.js', 12, '"line_number":[0-9]+,'],
+    ['^345:console', 'grep -b console src/a.js', 12, '^[0-9]+:console'],
+    ['^12:345:console', 'grep -nb console src/a.js', 12, '^[0-9]+:[0-9]+:console'],
+    ['^2:.*utf8 v12 x120 12px', 'grep -n x src/a.js', 12, '^[0-9]+:.*utf8 v12 x120 12px'],
+    ['^2:a{12}[12]\\x12\\12', 'grep -n a src/a.js', 12, '^[0-9]+:a{12}[12]\\x12\\12'],
+    ['^12$', 'grep -n console src/a.js | wc -l', 12, '^12$'],
+    ['12', 'cat -n src/a.js | wc', 12, '12'],
+    ['^12$', 'grep -nc console src/a.js', 12, '^12$'],
+    ['timeout: 12', 'cat src/a.js', 12, 'timeout: 12'],
+    ['timeout: 12', "grep 'timeout' src/a.js", 12, 'timeout: 12'],
+  ];
+  const round3Wrong = round3.filter(([match, check, line, want]) => inv3(match, check, line) !== JSON.stringify({ noMatch: want }));
+  check11('283: with line numbers printed, the cited line goes wherever the match holds it; counts and words stay',
+    round3Wrong.length === 0,
+    round3Wrong.map(([match, check, line]) => check + ' -> ' + inv3(match, check, line)).join(' | '));
+  // End to end: the cited line travels from the finding through --verify into
+  // the recheck row, and the checks runner fails the moved line and passes the
+  // fix for a layout no shape covers.
+  const rcptCut = path.join(sandbox, 'receipts-283-cut');
+  fs.mkdirSync(rcptCut);
+  fs.writeFileSync(path.join(rcptCut, 'code-1.txt'), '2\nexit 0\n');
+  const outCut = path.join(sandbox, 'verify-out-283-cut');
+  fs.mkdirSync(outCut);
+  const cutForm = [f('code', 'src/a.js', 2, 'src/a.js:log-cut', 'Should fix. The token is logged.', { check: "grep -n 'console.log(token)' src/a.js | head -n 1 | cut -d: -f1", expect: { match: '^2$' } })];
+  const rCut = run(['--verify', jsonl(cutForm), '--receipts', rcptCut, '--scope', scope3, '--out', outCut, '--root', repo3, '--mechanical', 'R1']);
+  const cutVerdict = (text, name) => {
+    w3('src/a.js', text);
+    const rc = spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(outCut, 'recheck-1.json'), '--out', path.join(sandbox, 'rc-out-cut-' + name)], { cwd: repo3, encoding: 'utf8' });
+    let j = null;
+    try { j = JSON.parse(rc.stdout); } catch (e) { j = null; }
+    return (((j && j.checks) || [])[0] || {}).verdict;
+  };
+  const cutMoved = cutVerdict('// one line added above\nconst token = login();\n' + LOG + '\nexport default token;\n', 'moved');
+  const cutFixed = cutVerdict('const token = login();\nexport default token;\n', 'fixed');
+  w3('src/a.js', 'const token = login();\n' + LOG + '\nexport default token;\n');
+  check11('283: end to end, the cited line reaches the recheck and a cut-out number fails the moved line',
+    rCut.status === 0 && cutMoved === 'fail' && cutFixed === 'pass',
+    rCut.stderr.slice(0, 200) + ' moved: ' + cutMoved + ', fixed: ' + cutFixed + ', row: ' + JSON.stringify((readJson(path.join(outCut, 'recheck-1.json')) || [])[0] || {}).slice(0, 200));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
