@@ -877,13 +877,58 @@ const MAX_ROUNDS = 2;
 // inverse the mode can know, so the row carries a prose placeholder: the checks
 // runner refuses a prose expect on its own row and runs the others (measured
 // 2026-10-23), so the row cannot pass until the runner writes the expect.
-function invertExpect(expect) {
+//
+// A match that opens with the line number a grep printed ("^1668:", "^1668-",
+// or "^src/a.js:1668:" from a grep over several files) inverts without the
+// number (issue #283). A noMatch on line 1668 passes as soon as an edit above
+// pushes the text to line 1669, so a problem that only moved read as FIXED; with
+// the number dropped, the recheck fails while the text sits on any line.
+function invertExpect(expect, check) {
   if (expect && typeof expect === 'object') {
-    if (typeof expect.match === 'string') return { noMatch: expect.match };
+    if (typeof expect.match === 'string') return { noMatch: withoutLineNumber(expect.match, check) };
     if (typeof expect.noMatch === 'string') return { match: expect.noMatch };
     if (Number.isInteger(expect.exit) && expect.exit !== 0) return { exit: 0 };
   }
   return PLACEHOLDER_EXPECT;
+}
+
+// A grep that prints line numbers: one command of the check holds a grep word
+// and a short-option cluster with n in it (-n, -rn, -Hn, -nE) or --line-number.
+// Only then does a number at the start of the match name a line, not text.
+function grepPrintsLineNumbers(check) {
+  return String(check || '').split(/\|\|?|&&|;/).some((part) =>
+    /(?:^|\s)[ef]?grep\s/.test(part) && /\s(?:-[A-Za-z]*n[A-Za-z]*|--line-number)(?=\s|$)/.test(part));
+}
+// The match with its leading grep line number replaced by any number, or the
+// match unchanged when the check prints no line numbers or none leads it. The
+// optional group is the file name a grep over several files prints first.
+const LINE_ANCHOR = /^\^((?:[^:\\]|\\.)+:)?\d+([:-])/;
+function withoutLineNumber(pattern, check) {
+  if (!grepPrintsLineNumbers(check) || !LINE_ANCHOR.test(pattern)) return pattern;
+  return pattern.replace(LINE_ANCHOR, (m, prefix, sep) => '^' + (prefix || '') + '[0-9]+' + sep);
+}
+
+// A check whose first command reads the file by line number: sed -n with a
+// numeric address ('226p', '1778,1782p'), awk testing NR against a number, or
+// head or tail with a line count and a file of their own. No recheck built from
+// it can follow the text when an edit moves it (issue #283), so the mechanical
+// path refuses it.
+function readsLinesByNumber(check) {
+  const first = String(check || '').trim().split(/\|\|?|&&|;/)[0].trim();
+  if (/^sed\s+(?:-[A-Za-z]*n[A-Za-z]*\s+)+['"]?\d+(?:,(?:\d+|\$))?p/.test(first)) return true;
+  if (/^awk\s/.test(first) && /\bNR\s*(?:==|<=|>=|<|>|!=)\s*\d/.test(first)) return true;
+  if (!/^(?:head|tail)\s/.test(first)) return false;
+  // With the count out of the way, a word left that is no option is the file;
+  // head or tail with a count and no file reads a pipe, which is not the file.
+  const words = first.replace(/\s-(?:n\s*\+?\d+|\d+)(?=\s|$)/, ' <count>').split(/\s+/).slice(1);
+  return words.includes('<count>') && words.some((w) => w !== '<count>' && !w.startsWith('-'));
+}
+
+// How many lines of a saved output a pattern finds, one line at a time.
+function linesFound(text, pattern) {
+  let re;
+  try { re = new RegExp(pattern); } catch (e) { return 0; }
+  return String(text).split(/\r?\n/).filter((l) => re.test(l)).length;
 }
 
 function emptyLedger() { return { calls: 0, findings: {}, checkpoints: [], lastGreen: null }; }
@@ -973,6 +1018,18 @@ function buildVerify(parsed, scope, opts) {
   }
   const named = Object.keys(pathOf).sort(byNumber);
   if (!named.length) throw badInput('usage', null, 'name at least one ID under --mechanical, --judgment or --browser');
+  // A receipt that reads lines by number gives no recheck that follows its
+  // text (issue #283): the mechanical path refuses the finding before anything
+  // is written, and the error carries its IDs, which verifyMain turns into the
+  // same call with them under --judgment, where a verifier reads the diff.
+  const addressedBy = (id) => byId.get(id).sources.find((src) => src.receipt && readsLinesByNumber(src.receipt.check));
+  const addressed = lists.mechanical.filter((id) => addressedBy(id)).sort(byNumber);
+  if (addressed.length) {
+    const one = addressed.length === 1;
+    const e = badInput('line_addressed', null, addressed.join(', ') + (one ? ' has a receipt that reads' : ' have receipts that read') + ' lines by their number (' + addressedBy(addressed[0]).receipt.check + '), so a recheck built from ' + (one ? 'it' : 'them') + ' cannot follow the text when an edit above moves it: name ' + (one ? 'it' : 'them') + ' under --judgment instead, as retry does; nothing was written');
+    e.ids = addressed;
+    throw e;
+  }
 
   const ledgerFile = path.join(opts.out, 'ledger.json');
   const ledger = readLedger(ledgerFile);
@@ -1026,7 +1083,14 @@ function buildVerify(parsed, scope, opts) {
       const saved = path.join(opts.receipts, stem + '.txt');
       if (firstFile === null) firstFile = saved;
       if (fs.existsSync(saved)) anySaved = true;
-      rows.push({ id: stem + '-recheck-r' + roundOf(id), check: src.receipt.check, expect: invertExpect(src.receipt.expect) });
+      let expect = invertExpect(src.receipt.expect, src.receipt.check);
+      // A line number dropped from a pattern the first run printed on more than
+      // one line: the noMatch passes only once every one of those lines is gone,
+      // so a fix of the flagged one would still read NOT FIXED, and the runner
+      // writes this row's expect instead (issue #283).
+      if (expect !== PLACEHOLDER_EXPECT && typeof expect.noMatch === 'string' && expect.noMatch !== src.receipt.expect.match
+        && fs.existsSync(saved) && linesFound(fs.readFileSync(saved, 'utf8'), expect.noMatch) > 1) expect = PLACEHOLDER_EXPECT;
+      rows.push({ id: stem + '-recheck-r' + roundOf(id), check: src.receipt.check, expect });
     }
     if (!rows.length) throw badInput('usage', null, id + ' is named under --mechanical but carries no receipt check to run again');
     if (!anySaved) throw badInput('missing_receipt', null, 'no saved tier 1 output for ' + id + ' at ' + firstFile + '; a finding whose check never ran cannot be rechecked');
@@ -1172,6 +1236,21 @@ function verifyNext(built, opts) {
   return next;
 }
 
+// The same --verify call with the given IDs moved from --mechanical to
+// --judgment, printed as `retry` with a line_addressed refusal so the runner
+// runs it the way it runs the mode's next list (issue #283).
+function retryCommand(file, opts, ids) {
+  const moved = new Set(ids);
+  const mechanical = opts.mechanical.filter((id) => !moved.has(id));
+  const words = ['node', shellWord(selfPath()), '--verify', shellWord(file), '--receipts', shellWord(opts.receipts), '--scope', shellWord(opts.scope), '--out', shellWord(opts.out)];
+  if (mechanical.length) words.push('--mechanical', mechanical.join(','));
+  words.push('--judgment', opts.judgment.concat(ids).sort(byNumber).join(','));
+  if (opts.browser.length) words.push('--browser', opts.browser.join(','));
+  if (opts.end !== undefined) words.push('--end', opts.end);
+  if (opts.rootGiven) words.push('--root', shellWord(opts.root));
+  return words.join(' ');
+}
+
 // --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--end <sha>] [--root <dir>]
 function verifyMain(argv, fail) {
   const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--end <sha>] [--root <dir>]; at least one ID flag';
@@ -1209,6 +1288,7 @@ function verifyMain(argv, fail) {
     if (e.lastGreen !== undefined) out.lastGreen = e.lastGreen;
     if (e.from) out.from = e.from;
     out.reason = e.error === 'usage' ? e.message + '. ' + usage : e.message;
+    if (e.error === 'line_addressed') out.retry = retryCommand(positional[0], opts, e.ids);
     process.stderr.write(JSON.stringify(out) + '\n');
     process.exit(1);
   }

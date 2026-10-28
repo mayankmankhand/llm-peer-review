@@ -912,6 +912,117 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('M3_INSTRUCTION is the verifier sentence hitl-loop.md and fix-verifier.md carry',
     typeof mod.M3_INSTRUCTION === 'string' && HITL.includes(mod.M3_INSTRUCTION) && VERIFIER.includes(mod.M3_INSTRUCTION),
     'in hitl-loop.md: ' + HITL.includes(mod.M3_INSTRUCTION) + '; in the agent: ' + VERIFIER.includes(mod.M3_INSTRUCTION));
+
+  // Issue #283: a receipt tied to a line number ("line 1668 holds this text")
+  // inverted into a noMatch on that same number, which any edit above the line
+  // satisfies, so a problem that only moved read as FIXED. A grep that prints
+  // line numbers now gets a recheck with the number dropped: it fails while the
+  // text sits on any line. A receipt that reads lines by number cannot be made
+  // position-free, so the mechanical path refuses it and prints the same call
+  // with the finding named under --judgment, where a verifier reads the diff.
+  const repo3 = path.join(sandbox, 'verify-283');
+  fs.mkdirSync(repo3);
+  const g3 = (args) => spawnSync('git', ['-C', repo3, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+  g3(['init', '-q']);
+  const w3 = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo3, rel)), { recursive: true }); fs.writeFileSync(path.join(repo3, rel), text); };
+  // The #281 review's real receipt: its check, its match on line 1668 and the
+  // output its first run saved (reports/receipts/2026-10-28-075544/code-1.txt).
+  const REAL_CHECK = "grep -n 'current = null' .claude/scripts/session-init.js";
+  const REAL_MATCH = '^1668:.*\\^\\\\s\\*\\(\\?:#\\|- \\)';
+  const OLD_LINE = '    else if (/^\\s*(?:#|- )/.test(line)) current = null;';
+  const NEW_LINE = '    else if (/^(?:#|[-*+]\\s)/.test(line)) current = null;';
+  const lines283 = Array.from({ length: 1663 }, (_, i) => '// filler ' + (i + 1))
+    .concat(['  let current = null;', '  for (const line of lines) {', '    if (skip(line)) continue;', '    if (lead(line)) current = line;', OLD_LINE, '  }']);
+  const writeInit = (lines) => w3('.claude/scripts/session-init.js', lines.join('\n') + '\n');
+  writeInit(lines283);
+  w3('src/a.js', 'const token = login();\nconsole.log(token);\nexport default token;\n');
+  w3('docs/x.md', ['# Guide', 'one', 'two', 'three', 'four', 'five'].join('\n') + '\n');
+  g3(['add', '-A']); g3(['commit', '-q', '-m', 'reviewed tree']);
+  const end3 = g3(['rev-parse', 'HEAD']).stdout.trim();
+  const rcpt3 = path.join(sandbox, 'receipts-283');
+  fs.mkdirSync(rcpt3);
+  const saved3 = (stem, text) => fs.writeFileSync(path.join(rcpt3, stem + '.txt'), text + '\nexit 0\n');
+  const scope3 = scopeFile('scope-283.json', { range: { base: end3, end: end3 }, uncommitted: { baseline: null, untracked: { files: [], added: 0, deleted: 0 } } });
+  const LOG = 'console.log(token);';
+  const forms = [
+    f('code', '.claude/scripts/session-init.js', 1668, 'init:superseded-indented', 'Should fix. A superseded note on an indented line is missed.', { check: REAL_CHECK, expect: { match: REAL_MATCH } }),
+    f('code', 'src/a.js', 2, 'src/a.js:log-n', 'Should fix. The token is logged.', { check: "grep -n 'console.log(token)' src/a.js", expect: { match: '^2:console' } }),
+    f('code', 'src/a.js', 2, 'src/a.js:log-nE', 'Should fix. The token is logged, found by a regex.', { check: "grep -nE 'console[.]log[(]token[)]' src/a.js", expect: { match: '^2:console' } }),
+    f('code', 'src/a.js', 2, 'src/a.js:log-long', 'Should fix. The token is logged, found with the long flag.', { check: "grep --line-number -F 'console.log(token)' src/a.js", expect: { match: '^2:console' } }),
+    f('code', 'src/a.js', 2, 'src/a.js:log-rn', 'Should fix. The token is logged, found by a recursive search.', { check: "grep -rn 'console.log(token)' src", expect: { match: '^src/a\\.js:2:console' } }),
+  ];
+  saved3('code-1', '1664:  let current = null;\n1668:' + OLD_LINE);
+  for (const s of ['code-2', 'code-3', 'code-4']) saved3(s, '2:' + LOG);
+  saved3('code-5', 'src/a.js:2:' + LOG);
+  const out3a = path.join(sandbox, 'verify-out-283');
+  fs.mkdirSync(out3a);
+  const r283 = run(['--verify', jsonl(forms), '--receipts', rcpt3, '--scope', scope3, '--out', out3a, '--root', repo3, '--mechanical', 'R1,R2,R3,R4,R5']);
+  const rows283 = readJson(path.join(out3a, 'recheck-1.json')) || [];
+  const rowOf = (stem) => rows283.find((x) => x.id === stem + '-recheck-r1') || {};
+  // A recheck row fails when its noMatch finds the text: moved down a line it
+  // must, gone or fixed it must not.
+  const fails = (row, output) => typeof (row.expect || {}).noMatch === 'string' && new RegExp(row.expect.noMatch, 'm').test(output);
+  const moved = { 'code-1': '1665:  let current = null;\n1669:' + OLD_LINE, 'code-2': '3:' + LOG, 'code-3': '3:' + LOG, 'code-4': '3:' + LOG, 'code-5': 'src/a.js:3:' + LOG };
+  const fixedOut = { 'code-1': '1664:  let current = null;\n1668:' + NEW_LINE, 'code-2': '', 'code-3': '', 'code-4': '', 'code-5': '' };
+  check11('283: a line-anchored grep receipt\'s recheck still fails when the flagged text moves down a line',
+    r283.status === 0 && Object.keys(moved).every((s) => fails(rowOf(s), moved[s] + '\nexit 0\n') && !fails(rowOf(s), fixedOut[s] + '\nexit ' + (fixedOut[s] ? 0 : 1) + '\n')),
+    r283.stderr + JSON.stringify(rows283.map((x) => [x.id, x.expect])).slice(0, 400));
+  // End to end through the checks runner, on the real receipt: the text pushed
+  // down a line by an edit above it is still there, so the recheck fails; the
+  // fixed text passes.
+  const verdict283 = (lines, name) => {
+    writeInit(lines);
+    const rc = spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(out3a, 'recheck-1.json'), '--out', path.join(sandbox, 'rc-out-283-' + name)], { cwd: repo3, encoding: 'utf8' });
+    let j = null;
+    try { j = JSON.parse(rc.stdout); } catch (e) { j = null; }
+    return ((j && j.checks) || []).find((c) => c.id === 'code-1-recheck-r1') || {};
+  };
+  const vMoved = verdict283(['// one line added above'].concat(lines283), 'moved');
+  const vFixed = verdict283(lines283.map((l) => (l === OLD_LINE ? NEW_LINE : l)), 'fixed');
+  writeInit(lines283);
+  check11('283: end to end, the checks runner fails the recheck of a moved line and passes the fix',
+    vMoved.verdict === 'fail' && vFixed.verdict === 'pass', 'moved: ' + JSON.stringify(vMoved).slice(0, 200) + ' fixed: ' + JSON.stringify(vFixed).slice(0, 200));
+  // A pattern the first run printed on several lines: a whole-file noMatch could
+  // only pass once every one of them is gone, so the runner writes this expect.
+  const rcptMany = path.join(sandbox, 'receipts-283-many');
+  fs.mkdirSync(rcptMany);
+  fs.writeFileSync(path.join(rcptMany, 'code-1.txt'), '1:const token = login();\n2:' + LOG + '\n3:export default token;\nexit 0\n');
+  const outMany = path.join(sandbox, 'verify-out-283-many');
+  fs.mkdirSync(outMany);
+  const many = [f('code', 'src/a.js', 2, 'src/a.js:token-everywhere', 'Should fix. The token reaches the log.', { check: "grep -n 'token' src/a.js", expect: { match: '^2:.*token' } })];
+  const rMany = run(['--verify', jsonl(many), '--receipts', rcptMany, '--scope', scope3, '--out', outMany, '--root', repo3, '--mechanical', 'R1']);
+  const mMany = parse(rMany) || {};
+  const rowMany = (readJson(path.join(outMany, 'recheck-1.json')) || [])[0] || {};
+  check11('283: a pattern on more than one line of the saved output goes to needsExpect',
+    rMany.status === 0 && rowMany.expect === 'write the expect the fix must now satisfy' && (mMany.needsExpect || []).join() === 'R1',
+    rMany.stderr + JSON.stringify(rowMany).slice(0, 200));
+  // A receipt that reads lines by number: refused for the mechanical path with
+  // nothing written, and the printed retry builds the finding's verifier shard.
+  w3('docs/x.md', ['# Guide', 'one', 'two', 'three, now explained', 'four', 'five'].join('\n') + '\n');
+  const rcptRanged = path.join(sandbox, 'receipts-283-ranged');
+  fs.mkdirSync(rcptRanged);
+  fs.writeFileSync(path.join(rcptRanged, 'ux-1.txt'), 'two\nthree\nfour\nexit 0\n');
+  const outRanged = path.join(sandbox, 'verify-out-283-ranged');
+  fs.mkdirSync(outRanged);
+  const ranged = [f('ux', 'docs/x.md', 4, 'docs/x.md:three', 'Should fix. Line three says nothing.', { check: "sed -n '3,5p' docs/x.md", expect: { match: 'three' } })];
+  const rRanged = run(['--verify', jsonl(ranged), '--receipts', rcptRanged, '--scope', scope3, '--out', outRanged, '--root', repo3, '--mechanical', 'R1']);
+  let refusal = {};
+  try { refusal = JSON.parse(rRanged.stderr.trim().split('\n').pop()); } catch (e) { refusal = {}; }
+  const writtenByRanged = fs.readdirSync(outRanged).length;
+  const retried = typeof refusal.retry === 'string' ? spawnSync(refusal.retry, { shell: true, cwd: sandbox, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' };
+  const retryShard = fs.existsSync(path.join(outRanged, 'verify-1-1.txt')) ? fs.readFileSync(path.join(outRanged, 'verify-1-1.txt'), 'utf8') : '';
+  check11('283: a mechanical receipt that reads lines by number is refused with nothing written and the retry printed',
+    rRanged.status === 1 && refusal.error === 'line_addressed' && (refusal.ids || []).join() === 'R1' && writtenByRanged === 0
+      && / --judgment R1( |$)/.test(refusal.retry || '') && !/--mechanical/.test(refusal.retry || '') && !/(^|\s)\/(tk:)?(review|execute|document|explore|merge)\b/.test(refusal.reason || '')
+      && retried.status === 0 && retryShard.split('\n')[0] === 'M3 verify shard: call 1, shard 1 of 1, ids R1',
+    rRanged.status + ' ' + rRanged.stderr.slice(0, 200) + ' | retry: ' + String(refusal.retry).slice(0, 160) + ' -> ' + String(retried.stderr).slice(0, 160));
+  check11('283: a receipt without grep line numbers inverts as before',
+    JSON.stringify(mod.invertExpect({ match: '^2$' }, "grep -c 'token' src/a.js")) === JSON.stringify({ noMatch: '^2$' })
+      && JSON.stringify(mod.invertExpect({ match: '^12:30 at' }, "grep 'at' notes.txt")) === JSON.stringify({ noMatch: '^12:30 at' })
+      && JSON.stringify(mod.invertExpect({ match: 'token' }, "grep -n 'token' src/a.js")) === JSON.stringify({ noMatch: 'token' })
+      && JSON.stringify(mod.invertExpect({ noMatch: '^4:x' }, "grep -n 'x' src/a.js")) === JSON.stringify({ match: '^4:x' })
+      && JSON.stringify(mod.invertExpect({ exit: 1 }, 'test -e src/a.test.js')) === JSON.stringify({ exit: 0 }),
+    JSON.stringify([mod.invertExpect({ match: '^2$' }, "grep -c 'token' src/a.js"), mod.invertExpect({ match: '^12:30 at' }, "grep 'at' notes.txt")]));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
