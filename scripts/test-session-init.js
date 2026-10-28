@@ -1712,9 +1712,11 @@ section('272. --chain <stage>: the countable part of M14', function () {
 });
 
 console.log('');
-// #277: the lessons index has a cap, frozen at 44,000 bytes (its size on
-// 2026-10-26), and the startup JSON says whether the file is over it, so
-// /document can offer cuts to the owner instead of letting the index grow.
+// #277: the lessons index has a cap of 44,000 bytes, set by what a read costs
+// (about 2% of a session, #281), and the startup JSON says whether the file is over
+// it, so /document can offer cuts to the owner instead of letting the index grow.
+// The literal is pinned here, not read from the script, so one bad edit cannot move
+// the code and the test together.
 section('The lessons object reports its cap (#277)', function () {
   const small = newRepo('lessons-cap-small');
   const short = '# Lessons Learned (Index)\n\n- **One short lesson.**\n';
@@ -1740,6 +1742,80 @@ section('The lessons object reports its cap (#277)', function () {
   check('the --lessons check carries bytes, cap and overCap for the index as it is now',
     afterWrite.cap === 44000 && afterWrite.overCap === true && afterWrite.bytes === Buffer.byteLength(lessons),
     JSON.stringify({ cap: afterWrite.cap, overCap: afterWrite.overCap, bytes: afterWrite.bytes }));
+});
+
+// #281: how an over-cap handle's ranges cover the file. They must run in order with
+// no gap or overlap, end on the last line, hold 28,500 bytes or fewer each (a single
+// longer line excepted), hold the cap's worth or less in all, and be the longest such
+// tail: the line just before the first range would not fit.
+function tailCoverage(text, ranges, cap) {
+  const all = text.split(/(?<=\n)/).filter(p => p !== '');
+  if (!Array.isArray(ranges) || ranges.length === 0) return { ok: false, why: 'ranges ' + JSON.stringify(ranges) };
+  const first = ranges[0].from;
+  let next = first;
+  for (const r of ranges) {
+    if (r.from !== next || !(r.to >= r.from)) return { ok: false, why: 'range ' + JSON.stringify(r) + ' should start at line ' + next };
+    const bytes = Buffer.byteLength(all.slice(r.from - 1, r.to).join(''));
+    if (bytes > 28500 && r.to !== r.from) return { ok: false, why: 'range ' + JSON.stringify(r) + ' holds ' + bytes + ' bytes' };
+    next = r.to + 1;
+  }
+  if (next !== all.length + 1) return { ok: false, why: 'ranges end on line ' + (next - 1) + ' of ' + all.length };
+  const kept = Buffer.byteLength(all.slice(first - 1).join(''));
+  if (kept > cap) return { ok: false, why: 'the ranges hold ' + kept + ' bytes, over ' + cap + ': ' + JSON.stringify(ranges) };
+  if (first > 1 && kept + Buffer.byteLength(all[first - 2]) <= cap) return { ok: false, why: 'line ' + (first - 1) + ' also fits, so the tail is not the longest' };
+  return { ok: true, why: JSON.stringify(ranges) + ', ' + kept + ' bytes from line ' + first };
+}
+
+// #281: over the cap the startup read keeps the newest part, since most indexes add
+// at the bottom, and says what it left out; the cap's worth is about 2% of a session.
+section('Over the cap, the read keeps the newest part (#281)', function () {
+  const repo = newRepo('lessons-tail');
+  let lessons = '# Lessons Learned (Index)\n\n## What I Learned\n\n';
+  let n = 0;
+  while (Buffer.byteLength(lessons) < 60000) lessons += '- **Lesson ' + (++n) + ': a one-line lesson written the way the real index writes them.**\n';
+  write(repo, 'LESSONS.md', lessons);
+  commitAll(repo, 'init');
+  const L = (runScript([], repo).json || {}).lessons || {};
+  const cover = tailCoverage(lessons, L.ranges, 44000);
+  check('281: an index over the cap lists ranges for its newest 44,000 bytes only, ending at its last line',
+    L.overCap === true && cover.ok && L.ranges[0].from > 1, cover.why);
+  const first = Array.isArray(L.ranges) && L.ranges.length ? L.ranges[0].from : 0;
+  const skippedBytes = Buffer.byteLength(lessons.split(/(?<=\n)/).slice(0, Math.max(first - 1, 0)).join(''));
+  const S = L.skipped || {};
+  const note = String(L.note || '');
+  check('281: the skipped field and the note name the first and last skipped line and their bytes',
+    first > 1 && S.from === 1 && S.to === first - 1 && S.bytes === skippedBytes
+      && note.includes('lines 1 to ' + (first - 1)) && note.includes(String(skippedBytes)),
+    JSON.stringify({ skipped: L.skipped, first: first, skippedBytes: skippedBytes, note: note }));
+  // The note goes to every stage that reads the index; the plugin build rewrites
+  // command names in prompts only, so a script's note names none (#208).
+  check('281: the note says to skip a read whose text is still in view and to read again after compaction, and names no command',
+    /still visible earlier in this conversation/.test(note) && /compacted/.test(note) && !/(^|[\s(])\/[a-z]/.test(note), note);
+
+  // The boundary is the one overCap already uses (bytes > cap), so the startup read
+  // and the upgrade check's over-cap finding agree on a file of exactly the cap.
+  const exact = newRepo('lessons-exact-cap');
+  let text = '# Lessons Learned (Index)\n\n';
+  const row = '- **A one-line lesson written the way the real index writes them, long enough to count.**\n';
+  while (Buffer.byteLength(text) + Buffer.byteLength(row) <= 44000 - 100) text += row;
+  text += '- **' + 'p'.repeat(44000 - Buffer.byteLength(text) - 7) + '**\n';
+  write(exact, 'LESSONS.md', text);
+  commitAll(exact, 'init');
+  const E = (runScript([], exact).json || {}).lessons || {};
+  const whole = rangeCoverage(text, E.ranges);
+  check('281: an index under the cap is still read whole, and one of exactly 44,000 bytes counts as under',
+    Buffer.byteLength(text) === 44000 && E.overCap === false && E.skipped === undefined && whole.ok,
+    JSON.stringify({ bytes: E.bytes, overCap: E.overCap, skipped: E.skipped, why: whole.why }));
+
+  // A range holds a single line over its size alone (#253); the tail does the same
+  // with a last line over the cap, so the newest lesson is never the one skipped.
+  const huge = newRepo('lessons-huge-last-line');
+  write(huge, 'LESSONS.md', '# Lessons\n\n- **short**\n' + '- **' + 'y'.repeat(45000) + '**\n');
+  commitAll(huge, 'init');
+  const H = (runScript([], huge).json || {}).lessons || {};
+  check('281: a last line over the cap on its own is still read, alone',
+    JSON.stringify(H.ranges) === '[{"from":4,"to":4}]' && !!H.skipped && H.skipped.from === 1 && H.skipped.to === 3,
+    JSON.stringify({ ranges: H.ranges, skipped: H.skipped }));
 });
 
 if (failures.length === 0) {

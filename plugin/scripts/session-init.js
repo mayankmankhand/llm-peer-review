@@ -420,6 +420,22 @@ function sessionStart() {
     Object.assign(lessons, { bytes, cap: LESSONS_CAP_BYTES, overCap: bytes > LESSONS_CAP_BYTES });
     if (bytes <= LESSONS_INLINE_BYTES) {
       lessons.content = lessonsRaw;
+    } else if (bytes > LESSONS_CAP_BYTES) {
+      // Over the cap (#281): the ranges read only the newest part, the longest run
+      // of whole lines at the end that fits in the cap (most indexes add lessons at
+      // the bottom), and skipped names the lines left out, so a session pays for at
+      // most the cap's worth and says what it did not read.
+      const tail = lessonTail(lessonsRaw, LESSONS_CAP_BYTES);
+      const total = countLines(lessonsRaw);
+      const skipped = { from: 1, to: tail.from - 1, bytes: bytes - tail.bytes };
+      Object.assign(lessons, {
+        lines: total,
+        ranges: lessonRanges(tail.text, tail.from),
+        skipped,
+        head: headAtLineEnd(lessonsRaw, LESSONS_HEAD_CHARS),
+        note: "LESSONS.md is " + bytes + " bytes, over its cap of " + LESSONS_CAP_BYTES + ", so the ranges read only its newest part, lines " + tail.from + " to " + total
+          + "; lines 1 to " + skipped.to + " (" + skipped.bytes + " bytes) are skipped. Retiring lessons in the documentation step brings the whole file back into the read. " + LESSONS_READ_NOTE,
+      });
     } else {
       Object.assign(lessons, {
         lines: countLines(lessonsRaw),
@@ -455,26 +471,34 @@ function sessionStart() {
 // LESSONS.md is bundled whole up to this size; over it, a handle (above). The map's
 // System Overview is cut at the same size.
 const LESSONS_INLINE_BYTES = 8 * 1024;
-// The index's size cap (#277): frozen at the size it had on 2026-10-26 (43,567
-// bytes), so each new lesson pays with a cut. /document reads overCap and offers
-// the owner candidate cuts; nothing is cut on its own, since the file is the owner's.
+// The index's size cap (#277), set by what a read costs (#281): one full read of
+// 44,000 bytes is about 2% of a session, the 8 to 9% one project measured for its
+// 206 KB index scaled down at 2.7 to 2.8 bytes per token. Over it, the startup read
+// keeps the newest part (lessonTail, below). /document reads overCap and offers the
+// owner candidate cuts; nothing is cut on its own, since the file is the owner's.
+// upgrade-audit.js carries the same number for its over-cap finding (C-16), and both
+// test suites pin the literal.
 const LESSONS_CAP_BYTES = 44000;
 const LESSONS_HEAD_CHARS = 1500;
 
-// The line ranges that read all of a handled LESSONS.md (#253). In 8 of 9 sessions
-// that got a bare "read the file itself", no stage read the index in full, and a
-// cat through Bash over about 30,000 bytes is cut to a 2 KB preview. So the handle
-// names the reads: each range ends at a line end and holds 28,500 bytes or fewer,
-// the margin the toolkit keeps under that cut; a single line over the limit is a
-// range of its own. Lines count from 1, as the Read tool's offset does. The note
-// names no command: the plugin build rewrites command names in prompts, not here.
+// The line ranges that read a handled LESSONS.md (#253): all of it, or over the cap
+// its newest part (#281). In 8 of 9 sessions that got a bare "read the file
+// itself", no stage read the index in full, and a cat through Bash over about
+// 30,000 bytes is cut to a 2 KB preview. So the handle names the reads: each range
+// ends at a line end and holds 28,500 bytes or fewer, the margin the toolkit keeps
+// under that cut; a single line over the limit is a range of its own. Lines count
+// from 1, as the Read tool's offset does; a tail's ranges start at its first line
+// (first), so they keep the file's own numbers. A repeat read is not free: the Read
+// tool returns the full text again, and every chained stage would pay for it
+// (#281), so the note says when to skip one. The note names no command: the plugin
+// build rewrites command names in prompts, not here.
 const LESSONS_RANGE_BYTES = 28500;
-const LESSONS_READ_NOTE = "Read the whole file with the Read tool, one call per entry in ranges (offset is from, limit is to - from + 1); a cat through Bash is cut to a 2 KB preview.";
-function lessonRanges(text) {
+const LESSONS_READ_NOTE = "Read it with the Read tool, one call per entry in ranges (offset is from, limit is to - from + 1); a cat through Bash is cut to a 2 KB preview. Skip these reads when the text they return is still visible earlier in this conversation; after the conversation was compacted, read them again.";
+function lessonRanges(text, first = 1) {
   const ranges = [];
-  let from = 1;
+  let from = first;
   let bytes = 0;
-  let line = 0;
+  let line = first - 1;
   for (const piece of text.split(/(?<=\n)/)) {
     if (piece === "") continue;
     line++;
@@ -489,6 +513,24 @@ function lessonRanges(text) {
   if (line >= from) ranges.push({ from, to: line });
   return ranges;
 }
+
+// The newest part of an index over its cap (#281): the longest run of whole lines,
+// counted back from the end, that fits in the cap. A last line over the cap on its
+// own is still kept, alone, the way a range holds a single long line, so the newest
+// lesson is never the one skipped. from is the run's first line, counted from 1.
+function lessonTail(text, cap) {
+  const pieces = text.split(/(?<=\n)/).filter((p) => p !== "");
+  let start = pieces.length;
+  let bytes = 0;
+  for (let i = pieces.length - 1; i >= 0; i--) {
+    const size = Buffer.byteLength(pieces[i], "utf8");
+    if (i < pieces.length - 1 && bytes + size > cap) break;
+    bytes += size;
+    start = i;
+  }
+  return { from: start + 1, text: pieces.slice(start).join(""), bytes };
+}
+
 // Plans listed in full, then by name only; any older ones are counted.
 const PLANS_IN_FULL = 10;
 const PLANS_BY_NAME = 40;
