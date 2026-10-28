@@ -2,6 +2,24 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**Claude's commands stay in the project folder, and a fix that only moves the flagged line no longer passes its recheck (#282, #283).** A `cd` into a subfolder stays in force for Claude's next command, so a later check, helper or skill could run in the wrong folder and read the wrong files, or none. And when a review's fix only moved the line a finding pointed at, the automatic recheck still passed, because it looked for the flagged text at the old line number only.
+
+### Added
+
+- **The folder guard (#282).** While Claude's shell sits anywhere other than the project folder, a new plugin hook stops the next command, helper launch, skill or search before it runs, and at the end of a turn has Claude step back first, so your next message starts in the project folder. The reason it gives names the one `cd` that steps back; Claude runs it by itself and carries on, so nothing comes to you. A command that has to run in another folder still runs when it starts with `cd <full path> &&`, and the top folder of a git working copy, such as a worktree, counts as the project. If the guard itself fails, the call runs as it would have without it.
+
+### Changed
+
+- **The recheck of a fix looks for the flagged text wherever it now sits (#283).** A fix passes only when that text is gone, not when it has moved to another line. A fix that keeps the flagged text on purpose may take one more round, and when the text shows up on more than one line, Claude writes what that recheck must show before running it. A proof that reads lines by number (`sed -n 12p`, `awk 'NR==12'`, `head` or `tail` with a count) cannot be rechecked this way, so its finding goes to the separate check of the fix.
+
+### Upgrading
+
+- Nothing to do: both changes arrive with the plugin update.
+- If the folder guard misbehaves, start a session with `claude --settings '{"disableAllHooks": true}'`, which turns every hook off for that session.
+- A copy-install for other editors gets the recheck change when you re-run `setup.sh` or `setup.ps1`. The folder guard is a Claude Code hook, so it comes with the plugin only, like the push guard.
+
 ## v8.0.15 - Lessons That Fit (2026-10-28)
 
 **The lessons file costs less to read (#281).** Every session used to read a project's whole `LESSONS.md` at the start, and each later stage in the same session read it again, so one long-lived project with a 206 KB lessons file spent about 8 to 9% of its cost on that read. The 44,000-byte cap from v8.0.13 only came up when a new lesson was written. Now the read stops at the cap, a stage skips a read whose text it still has, `/tk:upgrade` tells a project whose file is over, and a trim guide says what to cut first.
