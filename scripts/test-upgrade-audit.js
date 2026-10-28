@@ -3230,7 +3230,7 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
   d = seededCase('no-lessons', { 'LESSONS.md': null, 'LESSONS-detail.md': null });
   check('C-16: a project with no LESSONS.md has no finding', c16(audit760(d)).length === 0);
   // ---- (g) an index over the cap (#281) ----
-  // Every session start reads only the newest 44,000 bytes of an index over the
+  // Every session start reads only the last 44,000 bytes of an index over the
   // cap, so the upgrade says so. The literal is pinned here, not read from the
   // script, so one bad edit cannot move the code and the test together.
   const SIZED = (bytes) => {

@@ -113,7 +113,7 @@
 // LESSONS-detail.md is absent, and a bullet whose bold lead is in the plugin's
 // seed/toolkit-lesson-leads.txt, the toolkit's own lessons that the
 // copy-installers wrote into projects, and an index over its 44,000-byte cap,
-// which the startup read cuts to its newest part. lessons-merge (C-18) asks git for the
+// which the startup read cuts to its last part. lessons-merge (C-18) asks git for the
 // merge attribute of LESSONS.md and LESSONS-detail.md and flags a lessons file
 // the project has that git does not merge with union. paste-size (C-19) finds the
 // project files a stage pastes whole from the plugin's own commands and skills
@@ -1627,7 +1627,7 @@ const SENTENCE_BREAK = /(?:[!?]|(?<!(?:^|[^A-Za-z])[A-Za-z])\.)[\]"')*`]*[ \t]+[
 const LONG_BULLET_CHARS = 300;
 // The lessons index's size cap (#281), the same number as LESSONS_CAP_BYTES in
 // session-init.js, where the reason lives: one full read of it is about 2% of a
-// session, and over it every session start reads only the newest part. Both test
+// session, and over it every session start reads only the last part. Both test
 // suites pin the literal 44000.
 const LESSONS_CAP_BYTES = 44000;
 function isLongBullet(text) { return text.length > LONG_BULLET_CHARS || (text.match(SENTENCE_BREAK) || []).length > 0; }
@@ -2424,13 +2424,13 @@ function main() {
       if (lines !== null) {
         const bullets = lessonBullets(lines);
         const waits = 'files of the project\'s own, so the edit waits for the batch page\'s approval';
-        // An index over the cap (#281): every session start reads only its newest
+        // An index over the cap (#281): every session start reads only its last
         // part, so the lessons above it are never read. Size only, as C-19 measures
         // a pasted file; the startup read uses the same boundary (bytes > cap).
         const size = fs.statSync(P('LESSONS.md')).size;
         if (size > LESSONS_CAP_BYTES) {
           emit({ id: c.id, key: claim(c.id + ':LESSONS.md:over-cap').key, severity: 'warn', convention: c.title, file: { relPath: 'LESSONS.md' },
-            what: 'Should fix. LESSONS.md is ' + withCommas(size) + ' bytes, over the ' + withCommas(LESSONS_CAP_BYTES) + '-byte cap: every session start reads only its newest ' + withCommas(LESSONS_CAP_BYTES) + ' bytes, so the lessons above them are never read, and a full read of an index this size costs a session more than the cap allows.',
+            what: 'Should fix. LESSONS.md is ' + withCommas(size) + ' bytes, over the ' + withCommas(LESSONS_CAP_BYTES) + '-byte cap: every session start reads only its last ' + withCommas(LESSONS_CAP_BYTES) + ' bytes, so the lessons above them are never read, and a full read of an index this size costs a session more than the cap allows.',
             fix: 'retire lessons in the trim order under "Trimming the index" in ' + path.join(pluginRoot, 'skills', 'shared', 'toolkit-reference.md') + ' (node ' + path.join(pluginRoot, 'scripts', 'session-init.js') + ' --lessons lists the candidates a script can see), with the owner picking each cut; a retired lesson keeps its write-up in LESSONS-detail.md; ' + waits, since: c.since,
             fields: [{ label: 'Size', value: withCommas(size) + ' of ' + withCommas(LESSONS_CAP_BYTES) + ' bytes' }],
             receipt: { check: 'find -H LESSONS.md -size +' + LESSONS_CAP_BYTES + 'c | grep .', shows: 'the file\'s path, printed only while it is over ' + withCommas(LESSONS_CAP_BYTES) + ' bytes; the check exits 0 only while it is' } });

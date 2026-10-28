@@ -79,6 +79,7 @@
 
 - **Tag vocabulary for prompts.**
 - **Audit before converting.**
+- **Scope parity gaps explicitly when fixing one of several.**
 - **A 🟩 on "ask the user about X" can mislead.**
 
 ### browse.js hardening (issues #82 / #84 / #87)

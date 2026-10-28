@@ -13,7 +13,7 @@
 
 ### Changed
 
-- **Over 44,000 bytes, the session-start read covers only the newest part of `LESSONS.md`**, the lines at the end of the file that fit in 44,000 bytes, and says which lines it skipped. A later stage in the same session skips the read when the text is still in its conversation, and reads again after the conversation is compacted.
+- **Over 44,000 bytes, the session-start read covers only the last part of `LESSONS.md`**, the whole lines at the end of the file that fit in 44,000 bytes, and says which lines it skipped. A later stage in the same session skips the read when the text is still in its conversation, and reads again after the conversation is compacted.
 - **`/tk:document` writes each new lesson as its rule:** a bold line of about 120 bytes, with the story in `LESSONS-detail.md`. A lesson that repeats an existing one adds a dated line to that lesson's write-up instead of a new line, and at its third incident `/tk:document` offers you a check for it (an issue or a test). Over the cap it asks one question per kind of cut, with the full list in a file under `reports/`, and reruns the lessons check after cutting.
 - **The cap is set by cost:** one full read of 44,000 bytes is about 2% of a session. The number did not change.
 

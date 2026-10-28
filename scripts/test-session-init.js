@@ -1766,9 +1766,9 @@ function tailCoverage(text, ranges, cap) {
   return { ok: true, why: JSON.stringify(ranges) + ', ' + kept + ' bytes from line ' + first };
 }
 
-// #281: over the cap the startup read keeps the newest part, since most indexes add
+// #281: over the cap the startup read keeps the last part, since most indexes add
 // at the bottom, and says what it left out; the cap's worth is about 2% of a session.
-section('Over the cap, the read keeps the newest part (#281)', function () {
+section('Over the cap, the read keeps the last part (#281)', function () {
   const repo = newRepo('lessons-tail');
   let lessons = '# Lessons Learned (Index)\n\n## What I Learned\n\n';
   let n = 0;
@@ -1777,7 +1777,7 @@ section('Over the cap, the read keeps the newest part (#281)', function () {
   commitAll(repo, 'init');
   const L = (runScript([], repo).json || {}).lessons || {};
   const cover = tailCoverage(lessons, L.ranges, 44000);
-  check('281: an index over the cap lists ranges for its newest 44,000 bytes only, ending at its last line',
+  check('281: an index over the cap lists ranges for its last 44,000 bytes only, ending at its last line',
     L.overCap === true && cover.ok && L.ranges[0].from > 1, cover.why);
   const first = Array.isArray(L.ranges) && L.ranges.length ? L.ranges[0].from : 0;
   const skippedBytes = Buffer.byteLength(lessons.split(/(?<=\n)/).slice(0, Math.max(first - 1, 0)).join(''));
@@ -1808,7 +1808,7 @@ section('Over the cap, the read keeps the newest part (#281)', function () {
     JSON.stringify({ bytes: E.bytes, overCap: E.overCap, skipped: E.skipped, why: whole.why }));
 
   // A range holds a single line over its size alone (#253); the tail does the same
-  // with a last line over the cap, so the newest lesson is never the one skipped.
+  // with a last line over the cap, so the file's last line is never the one skipped.
   const huge = newRepo('lessons-huge-last-line');
   write(huge, 'LESSONS.md', '# Lessons\n\n- **short**\n' + '- **' + 'y'.repeat(45000) + '**\n');
   commitAll(huge, 'init');

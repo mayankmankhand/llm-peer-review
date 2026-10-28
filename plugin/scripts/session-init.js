@@ -421,7 +421,7 @@ function sessionStart() {
     if (bytes <= LESSONS_INLINE_BYTES) {
       lessons.content = lessonsRaw;
     } else if (bytes > LESSONS_CAP_BYTES) {
-      // Over the cap (#281): the ranges read only the newest part, the longest run
+      // Over the cap (#281): the ranges read only the last part, the longest run
       // of whole lines at the end that fits in the cap (most indexes add lessons at
       // the bottom), and skipped names the lines left out, so a session pays for at
       // most the cap's worth and says what it did not read.
@@ -433,7 +433,7 @@ function sessionStart() {
         ranges: lessonRanges(tail.text, tail.from),
         skipped,
         head: headAtLineEnd(lessonsRaw, LESSONS_HEAD_CHARS),
-        note: "LESSONS.md is " + bytes + " bytes, over its cap of " + LESSONS_CAP_BYTES + ", so the ranges read only its newest part, lines " + tail.from + " to " + total
+        note: "LESSONS.md is " + bytes + " bytes, over its cap of " + LESSONS_CAP_BYTES + ", so the ranges read only its last part, lines " + tail.from + " to " + total
           + "; lines 1 to " + skipped.to + " (" + skipped.bytes + " bytes) are skipped. Retiring lessons in the documentation step brings the whole file back into the read. " + LESSONS_READ_NOTE,
       });
     } else {
@@ -474,7 +474,7 @@ const LESSONS_INLINE_BYTES = 8 * 1024;
 // The index's size cap (#277), set by what a read costs (#281): one full read of
 // 44,000 bytes is about 2% of a session, the 8 to 9% one project measured for its
 // 206 KB index scaled down at 2.7 to 2.8 bytes per token. Over it, the startup read
-// keeps the newest part (lessonTail, below). /document reads overCap and offers the
+// keeps the last part (lessonTail, below). /document reads overCap and offers the
 // owner candidate cuts; nothing is cut on its own, since the file is the owner's.
 // upgrade-audit.js carries the same number for its over-cap finding (C-16), and both
 // test suites pin the literal.
@@ -482,7 +482,7 @@ const LESSONS_CAP_BYTES = 44000;
 const LESSONS_HEAD_CHARS = 1500;
 
 // The line ranges that read a handled LESSONS.md (#253): all of it, or over the cap
-// its newest part (#281). In 8 of 9 sessions that got a bare "read the file
+// its last part (#281). In 8 of 9 sessions that got a bare "read the file
 // itself", no stage read the index in full, and a cat through Bash over about
 // 30,000 bytes is cut to a 2 KB preview. So the handle names the reads: each range
 // ends at a line end and holds 28,500 bytes or fewer, the margin the toolkit keeps
@@ -514,10 +514,10 @@ function lessonRanges(text, first = 1) {
   return ranges;
 }
 
-// The newest part of an index over its cap (#281): the longest run of whole lines,
+// The last part of an index over its cap (#281): the longest run of whole lines,
 // counted back from the end, that fits in the cap. A last line over the cap on its
-// own is still kept, alone, the way a range holds a single long line, so the newest
-// lesson is never the one skipped. from is the run's first line, counted from 1.
+// own is still kept, alone, the way a range holds a single long line, so the file's
+// last line is never the one skipped. from is the run's first line, counted from 1.
 function lessonTail(text, cap) {
   const pieces = text.split(/(?<=\n)/).filter((p) => p !== "");
   let start = pieces.length;
