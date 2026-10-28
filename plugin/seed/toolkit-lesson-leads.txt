@@ -210,6 +210,7 @@ Check which read of a page is right against the page itself, not against the oth
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
 Confirm a passing test case by grepping the test file for its name, not by the release gate's output.
 Copying a script and permitting it are two edits, and only the missing copy is loud.
+Count a rule as already said only where every reader of the copy also reads the original.
 Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.
 Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.
 DRY refactors create duplication-of-the-other-kind bugs.
@@ -290,6 +291,7 @@ Measure a new inline command form in a real default-mode session before building
 Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.
 Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.
 Mutation-testing a group of assertions is not mutation-testing each assertion.
+Name what a cut keeps by its place in the file, not by what that place usually holds.
 Narrowing an agent's tools changes behavior: first check what every caller dispatching through it runs.
 Never cd into a subfolder in a Bash call: the shell keeps that folder for the next call, so the project's relative paths miss; start each call from the project root instead.
 Never cd into a subfolder in a Bash call; start each call from the project root instead.
