@@ -878,11 +878,12 @@ const MAX_ROUNDS = 2;
 // runner refuses a prose expect on its own row and runs the others (measured
 // 2026-10-23), so the row cannot pass until the runner writes the expect.
 //
-// A match that opens with the line number a grep printed ("^1668:", "^1668-",
-// or "^src/a.js:1668:" from a grep over several files) inverts without the
-// number (issue #283). A noMatch on line 1668 passes as soon as an edit above
-// pushes the text to line 1669, so a problem that only moved read as FIXED; with
-// the number dropped, the recheck fails while the text sits on any line.
+// A match that opens with the line number a grep or rg printed ("^1668:",
+// "^1668-", or "^src/a.js:1668:" from a search over several files) inverts
+// without the number (issue #283). A noMatch on line 1668 passes as soon as an
+// edit above pushes the text to line 1669, so a problem that only moved read as
+// FIXED; with the number dropped, the recheck fails while the text sits on any
+// line.
 function invertExpect(expect, check) {
   if (expect && typeof expect === 'object') {
     if (typeof expect.match === 'string') return { noMatch: withoutLineNumber(expect.match, check) };
@@ -892,35 +893,38 @@ function invertExpect(expect, check) {
   return PLACEHOLDER_EXPECT;
 }
 
-// A grep that prints line numbers: one command of the check holds a grep word
-// and a short-option cluster with n in it (-n, -rn, -Hn, -nE) or --line-number.
-// Only then does a number at the start of the match name a line, not text.
+// A search that prints line numbers: one command of the check holds a grep
+// word or rg, and a short-option cluster with n in it (-n, -rn, -Hn, -nE,
+// -nC2) or --line-number. Only then does a number at the start of the match
+// name a line, not text. Under the checks runner rg prints numbers only when
+// asked, since its output is no terminal, and its -N turns them off.
 function grepPrintsLineNumbers(check) {
   return String(check || '').split(/\|\|?|&&|;/).some((part) =>
-    /(?:^|\s)[ef]?grep\s/.test(part) && /\s(?:-[A-Za-z]*n[A-Za-z]*|--line-number)(?=\s|$)/.test(part));
+    /(?:^|\s)(?:[ef]?grep|rg)\s/.test(part) && /\s(?:-[A-Za-z0-9]*n[A-Za-z0-9]*|--line-number)(?=\s|$)/.test(part));
 }
-// The match with its leading grep line number replaced by any number, or the
-// match unchanged when the check prints no line numbers or none leads it. The
-// optional group is the file name a grep over several files prints first.
+// The match with its leading line number replaced by any number, or the match
+// unchanged when the check prints no line numbers or none leads it. The
+// optional group is the file name a search over several files prints first.
 const LINE_ANCHOR = /^\^((?:[^:\\]|\\.)+:)?\d+([:-])/;
 function withoutLineNumber(pattern, check) {
   if (!grepPrintsLineNumbers(check) || !LINE_ANCHOR.test(pattern)) return pattern;
   return pattern.replace(LINE_ANCHOR, (m, prefix, sep) => '^' + (prefix || '') + '[0-9]+' + sep);
 }
 
-// A check whose first command reads the file by line number: sed -n with a
-// numeric address ('226p', '1778,1782p'), awk testing NR against a number, or
-// head or tail with a line count and a file of their own. No recheck built from
-// it can follow the text when an edit moves it (issue #283), so the mechanical
-// path refuses it.
+// A check whose first command reads the file by line number: quiet sed (-n,
+// --quiet or --silent) with a numeric address, bare or after -e or
+// --expression ('226p', '1778,1782p', '12,+3p'), awk testing NR or FNR against
+// a number, or head or tail with a line count (-n 12, -12, --lines=12) and a
+// file of their own. No recheck built from it can follow the text when an edit
+// moves it (issue #283), so the mechanical path refuses it.
 function readsLinesByNumber(check) {
   const first = String(check || '').trim().split(/\|\|?|&&|;/)[0].trim();
-  if (/^sed\s+(?:-[A-Za-z]*n[A-Za-z]*\s+)+['"]?\d+(?:,(?:\d+|\$))?p/.test(first)) return true;
-  if (/^awk\s/.test(first) && /\bNR\s*(?:==|<=|>=|<|>|!=)\s*\d/.test(first)) return true;
+  if (/^sed\s+(?:(?:-[A-Za-z]*n[A-Za-z]*|--quiet|--silent)\s+)+(?:(?:-e|--expression)(?:\s+|=)?)?['"]?\d+(?:,(?:[+~]?\d+|\$))?p/.test(first)) return true;
+  if (/^awk\s/.test(first) && /\bF?NR\s*(?:==|<=|>=|<|>|!=)\s*\d/.test(first)) return true;
   if (!/^(?:head|tail)\s/.test(first)) return false;
   // With the count out of the way, a word left that is no option is the file;
   // head or tail with a count and no file reads a pipe, which is not the file.
-  const words = first.replace(/\s-(?:n\s*\+?\d+|\d+)(?=\s|$)/, ' <count>').split(/\s+/).slice(1);
+  const words = first.replace(/\s(?:-(?:n\s*\+?\d+|\d+)|--lines(?:=|\s+)\+?\d+)(?=\s|$)/, ' <count>').split(/\s+/).slice(1);
   return words.includes('<count>') && words.some((w) => w !== '<count>' && !w.startsWith('-'));
 }
 
@@ -1477,5 +1481,5 @@ function verdictsMain(argv, fail) {
   if (!out.ok) process.exitCode = 1;
 }
 
-module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, locusLabel, parsePatch, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, M3_INSTRUCTION, VERIFY_HEADER, invertExpect, readScope, readLedger, buildVerify, main };
+module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, locusLabel, parsePatch, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, M3_INSTRUCTION, VERIFY_HEADER, invertExpect, readsLinesByNumber, readScope, readLedger, buildVerify, main };
 if (require.main === module) main(process.argv.slice(2));

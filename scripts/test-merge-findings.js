@@ -1023,6 +1023,27 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
       && JSON.stringify(mod.invertExpect({ noMatch: '^4:x' }, "grep -n 'x' src/a.js")) === JSON.stringify({ match: '^4:x' })
       && JSON.stringify(mod.invertExpect({ exit: 1 }, 'test -e src/a.test.js')) === JSON.stringify({ exit: 0 }),
     JSON.stringify([mod.invertExpect({ match: '^2$' }, "grep -c 'token' src/a.js"), mod.invertExpect({ match: '^12:30 at' }, "grep 'at' notes.txt")]));
+  // The review of #283 found receipt forms the first cut missed. The checks
+  // runner also allows rg, and a grep option cluster may carry a digit (-nC2);
+  // both print line numbers, so both drop the number. rg -N prints none, so its
+  // match is left alone.
+  const inv = (match, check) => JSON.stringify(mod.invertExpect({ match: match }, check));
+  check11('283: an rg receipt with line numbers and a grep option cluster with a digit drop the number too',
+    inv('^2:console', "rg -n 'console.log' src/a.js") === JSON.stringify({ noMatch: '^[0-9]+:console' })
+      && inv('^src/a\\.js:2:console', "rg --line-number 'console.log' src") === JSON.stringify({ noMatch: '^src/a\\.js:[0-9]+:console' })
+      && inv('^2:console', "grep -nC2 'console.log' src/a.js") === JSON.stringify({ noMatch: '^[0-9]+:console' })
+      && inv('^2:console', "rg -N 'console.log' src/a.js") === JSON.stringify({ noMatch: '^2:console' }),
+    [inv('^2:console', "rg -n 'console.log' src/a.js"), inv('^2:console', "grep -nC2 'console.log' src/a.js"), inv('^2:console', "rg -N 'console.log' src/a.js")].join(' '));
+  // The same sweep for a receipt that reads lines by number: sed with -e,
+  // --expression, --quiet or a +N range, awk on FNR, and head or tail with
+  // --lines all name lines by their number; a sed pattern address and a head
+  // that reads a pipe do not.
+  const numbered = ["sed -n -e '12p' a.md", "sed -n --expression='12p' a.md", "sed --quiet '12,+3p' a.md", "awk 'FNR==12' a.md", 'head --lines=12 a.md', 'tail --lines=+12 a.md'];
+  const unnumbered = ["sed -n '/token/p' a.md", 'head --lines=12', "grep -n 'x' a.md"];
+  const byNumber = (check) => typeof mod.readsLinesByNumber === 'function' && mod.readsLinesByNumber(check) === true;
+  check11('283: sed -e, --quiet and +N forms, awk on FNR and head or tail --lines read lines by number too',
+    numbered.every(byNumber) && !unnumbered.some(byNumber),
+    'missed: ' + numbered.filter((c) => !byNumber(c)).join(' | ') + '; wrongly caught: ' + unnumbered.filter(byNumber).join(' | '));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
