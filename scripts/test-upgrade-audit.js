@@ -452,8 +452,9 @@ function receiptShows(f, r) {
   // The lessons merge rule (C-18): git prints one line per lessons file the
   // finding names, and none of them says union.
   if (f.id === 'C-18') { const got = outLines(r.stdout); return got.length > 0 && got.every(l => /^LESSONS(-detail)?\.md: merge: /.test(l) && !/: merge: union$/.test(l)); }
-  // A pasted file over the limit (C-19): find prints the file's path, alone.
-  if (f.id === 'C-19') return r.stdout.trim() === f.file.relPath;
+  // A file over a size limit (C-19's paste limit, C-16's lessons cap): find prints
+  // the file's path, alone.
+  if (f.id === 'C-19' || /^the file's path, printed only while it is over /.test(f.receipt.shows)) return r.stdout.trim() === f.file.relPath;
   // A tracked migration record: git prints the record's path and nothing else.
   if (/because it tracks the file/.test(f.receipt.shows)) return r.stdout.trim() === f.file.relPath;
   const marker = /reading ([a-z]+): </.exec(f.receipt.shows);
@@ -2108,7 +2109,7 @@ console.log('\n4o. the refuted record keeps whole-file findings out (review 2026
   check('isContentKey: a line digest, a repeat suffix, a state-file, a finder-call and a seeded-block key are content keys',
     ['C-11:CLAUDE.md:239d814e728c', 'C-11:CLAUDE.md:239d814e728c#2', 'C-10:.gitignore:line:0123456789ab', 'C-14:.claude/commands/x.md:finder-call:review-code-finder:0123456789ab', 'C-15:CLAUDE.md:block:0123456789abcdef'].every(isContentKey));
   check('isContentKey: the whole-file keys are not',
-    ['C-9:.claude/settings.local.json:missing-ask-rows', 'C-7:.claude/rules/toolkit.md:rules-text', 'C-16:LESSONS.md:long-bullets', 'C-9:.claude/settings.local.json:missing-rows#2', 'C-15:CLAUDE.md:file'].every(k => !isContentKey(k)));
+    ['C-9:.claude/settings.local.json:missing-ask-rows', 'C-7:.claude/rules/toolkit.md:rules-text', 'C-16:LESSONS.md:long-bullets', 'C-16:LESSONS.md:over-cap', 'C-9:.claude/settings.local.json:missing-rows#2', 'C-15:CLAUDE.md:file'].every(k => !isContentKey(k)));
   const dir = path.join(TMP, 'refuted-whole');
   write(dir, '.claude/.toolkit-state.json', STATE_701);
   write(dir, '.claude/settings.local.json', JSON.stringify({ permissions: { allow: SEED_ALLOW, ask: SEED_ASK.filter(x => x !== 'Bash(npm install *)') } }, null, 2) + '\n');
@@ -3228,6 +3229,33 @@ console.log('\n9d. seeded blocks are the current seed\'s (C-15)');
   // ---- (f) no index at all ----
   d = seededCase('no-lessons', { 'LESSONS.md': null, 'LESSONS-detail.md': null });
   check('C-16: a project with no LESSONS.md has no finding', c16(audit760(d)).length === 0);
+  // ---- (g) an index over the cap (#281) ----
+  // Every session start reads only the newest 44,000 bytes of an index over the
+  // cap, so the upgrade says so. The literal is pinned here, not read from the
+  // script, so one bad edit cannot move the code and the test together.
+  const SIZED = (bytes) => {
+    const row = '- **A one-line lesson written the way the real index writes them, long enough to count.**';
+    const rows = ['- **Read the map first.**'];
+    while (Buffer.byteLength(INDEX(rows)) + 200 < bytes) rows.push(row);
+    const base = Buffer.byteLength(INDEX(rows.concat(['- ****'])));
+    return INDEX(rows.concat(['- **' + 'p'.repeat(bytes - base) + '**']));
+  };
+  d = seededCase('over-cap', { 'LESSONS.md': SIZED(44001) });
+  f = c16(audit760(d));
+  out = f.length === 1 ? runReceipt(d, f[0]) : { status: -1, stdout: '' };
+  check('C-16: an index over 44,000 bytes is one Should fix naming its size, whose receipt prints the file only while it is over and passes',
+    Buffer.byteLength(SIZED(44001)) === 44001 && f.length === 1 && f[0].key === 'C-16:LESSONS.md:over-cap' && f[0].severity === 'warn'
+      && /44,001 bytes, over the 44,000-byte cap/.test(f[0].what) && f[0].fields.some(x => x.label === 'Size' && x.value === '44,001 of 44,000 bytes')
+      && /toolkit-reference\.md/.test(f[0].fix) && /Trimming the index/.test(f[0].fix) && receiptShows(f[0], out),
+    JSON.stringify(f).slice(0, 600) + out.stdout);
+  d = seededCase('at-cap', { 'LESSONS.md': SIZED(44000) });
+  check('C-16: an index of exactly 44,000 bytes is no over-cap finding, as the startup read counts it under the cap too',
+    Buffer.byteLength(SIZED(44000)) === 44000 && c16(audit760(d)).length === 0, JSON.stringify(c16(audit760(d))).slice(0, 300));
+  d = seededCase('over-cap-trimmed', { 'LESSONS.md': SIZED(50000) });
+  f = c16(audit760(d));
+  write(d, 'LESSONS.md', SIZED(30000));
+  check('C-16: trimming under the cap clears the finding, and the old receipt no longer passes',
+    f.length === 1 && f[0].key === 'C-16:LESSONS.md:over-cap' && c16(audit760(d)).length === 0 && runReceipt(d, f[0]).status !== 0, JSON.stringify(f).slice(0, 300));
 }
 }
 if (OWN('9f')) {
