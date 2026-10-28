@@ -1044,6 +1044,56 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('283: sed -e, --quiet and +N forms, awk on FNR and head or tail --lines read lines by number too',
     numbered.every(byNumber) && !unnumbered.some(byNumber),
     'missed: ' + numbered.filter((c) => !byNumber(c)).join(' | ') + '; wrongly caught: ' + unnumbered.filter(byNumber).join(' | '));
+  // The checks runner also allows cat and git blame, and both print line
+  // numbers: cat's -n, -b and --number right-aligned before a tab, git blame
+  // before the parenthesis that closes each line's note. Both drop the number;
+  // cat without a numbering flag, a match with no number where they print it,
+  // and a number inside the code a blame match quotes are left alone.
+  const catBlame = [
+    ['^\\s*2\\t.*console', 'cat -n src/a.js', '^\\s*[0-9]+\\t.*console'],
+    ['^     2\\tconsole', "cat -n src/a.js | grep 'console'", '^\\s*[0-9]+\\tconsole'],
+    ['^ +2\\s+console', 'cat --number src/a.js', '^\\s*[0-9]+\\s+console'],
+    ['2\\tconsole', 'cat -bA src/a.js', '[0-9]+\\tconsole'],
+    [' 2\\) console', 'git blame src/a.js', ' [0-9]+\\) console'],
+    ['\\s2\\)\\s+console', 'git --no-pager blame -s src/a.js', '\\s[0-9]+\\)\\s+console'],
+    ['^2\\tconsole', 'cat src/a.js', '^2\\tconsole'],
+    ['^2\\tconsole', 'cat -v src/a.js', '^2\\tconsole'],
+    ['console', 'cat -n src/a.js', 'console'],
+    ['login\\(1\\)', 'git blame src/a.js', 'login\\(1\\)'],
+  ];
+  const catBlameWrong = catBlame.filter(([match, check, want]) => inv(match, check) !== JSON.stringify({ noMatch: want }));
+  check11('283: a cat -n or git blame receipt drops the line number too',
+    catBlameWrong.length === 0,
+    catBlameWrong.map(([match, check]) => check + ' -> ' + inv(match, check)).join(' | '));
+  // End to end on real cat -n output: the text pushed down a line still fails
+  // the recheck, and the fixed file passes it.
+  const catVerdict = (name) => {
+    const file = path.join(sandbox, 'cat-' + name + '.json');
+    fs.writeFileSync(file, JSON.stringify([{ id: 'cat-1', check: 'cat -n src/a.js', expect: mod.invertExpect({ match: '^\\s*2\\tconsole' }, 'cat -n src/a.js') }]));
+    const rc = spawnSync(process.execPath, [RUN_CHECKS, '--checks', file, '--out', path.join(sandbox, 'rc-out-cat-' + name)], { cwd: repo3, encoding: 'utf8' });
+    let j = null;
+    try { j = JSON.parse(rc.stdout); } catch (e) { j = null; }
+    return (((j && j.checks) || [])[0] || {}).verdict;
+  };
+  w3('src/a.js', '// one line added above\nconst token = login();\n' + LOG + '\nexport default token;\n');
+  const catMoved = catVerdict('moved');
+  w3('src/a.js', 'const token = login();\nexport default token;\n');
+  const catFixed = catVerdict('fixed');
+  w3('src/a.js', 'const token = login();\n' + LOG + '\nexport default token;\n');
+  check11('283: end to end, a cat -n recheck fails on the moved line and passes the fix',
+    catMoved === 'fail' && catFixed === 'pass', 'moved: ' + catMoved + ', fixed: ' + catFixed);
+  // The same reads by number with the file arriving through a pipe: cat, git
+  // show or cat-file of one revision's file, or git blame, into a sed, awk, head
+  // or tail that picks lines by number; and git blame or git log with a
+  // numbered -L range. A pattern range, a function range, a pipe from a search
+  // and git show of a whole commit do not.
+  const piped = ["cat -n src/a.js | sed -n '40,45p'", 'cat src/a.js | head -n 12', "git show HEAD:src/a.js | sed -n '12p'",
+    'git blame src/a.js | tail -n +12', 'git blame -L 12,15 src/a.js', 'git --no-pager blame -L12,+4 src/a.js', 'git log -L 12,15:src/a.js'];
+  const unpiped = ["cat -n src/a.js | grep 'console'", "grep -n 'x' a.md | head -n 1", "git blame -L '/login/,+3' src/a.js",
+    'git log -L :login:src/a.js', "cat src/a.js | sed -n '/token/p'", 'git show HEAD | head -n 20'];
+  check11('283: a file piped into a pick by number, and git blame or log with a numbered range, read lines by number',
+    piped.every(byNumber) && !unpiped.some(byNumber),
+    'missed: ' + piped.filter((c) => !byNumber(c)).join(' | ') + '; wrongly caught: ' + unpiped.filter(byNumber).join(' | '));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });
