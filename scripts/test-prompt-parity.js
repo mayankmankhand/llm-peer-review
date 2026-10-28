@@ -461,6 +461,28 @@ console.log('\n8. the writing rules (#276, #280)');
   check('276: the In plain words heading and its five labels sit in hitl-stages.md, explore.md and create-plan.md', plainMisses.length === 0, plainMisses.join('; '));
 }
 
+// #281: the lessons rules the owner approved stay in /document, and the trim
+// guide keeps its nine steps in order under its heading, so a rewrite that drops
+// one fails here (review of #281, R6).
+{
+  const LESSONS_RULES = [
+    'skip the read when its full text is still visible earlier in this conversation',
+    'as the rule only, a bold lead of about 120 bytes with nothing after it',
+    'add a dated incident line to that lesson\'s write-up instead of a new index line',
+    'when a write-up records its third incident, offer the owner to turn the rule into a check',
+    'A lead you shorten is renamed in both files',
+    'in the order under "Trimming the index"',
+    'after the edits, run `--lessons` again',
+  ];
+  check('281: document.md keeps the lessons rules the owner approved', LESSONS_RULES.every(s => DOC.includes(s)), LESSONS_RULES.filter(s => !DOC.includes(s)).join(' | '));
+  const REF = read('.claude/skills/shared/toolkit-reference.md');
+  const STEPS = ['0. **Strip what holds no lesson.**', '1. **Not this project\'s lesson.**', '2. **Write-ups in the index.**', '3. **Already said in an always-read file.**',
+    '4. **Superseded or contradicted.**', '5. **Enforced by a check.**', '6. **Repeats and families.**', '7. **Long leads.**', '8. **One-offs.**'];
+  const head = REF.indexOf('#### Trimming the index');
+  const at = STEPS.map(s => REF.indexOf(s));
+  check('281: the trim guide holds its nine steps, 0 to 8, in order under its heading', head > -1 && at.every((p, i) => p > head && (i === 0 || p > at[i - 1])), JSON.stringify({ head, at }));
+}
+
 console.log('\n' + passed + ' passed, ' + failures.length + ' failed');
 
 if (failures.length) { console.log('Failed: ' + failures.join(' | ')); process.exit(1); }

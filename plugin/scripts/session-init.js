@@ -1594,7 +1594,8 @@ function cycleStart() {
 //
 // /document compared the leads with grep, sort and comm through `>` redirects,
 // and default permission mode asks before every redirect. The same comparison,
-// with no redirect: a lead is a `- **...**` line in LESSONS.md, and it has a
+// with no redirect: a lead is a bullet line in LESSONS.md that opens with a bold
+// span (indexLines, below, which skips HTML comments), and it has a
 // write-up when the same bold text appears anywhere in LESSONS-detail.md (the
 // old `comm -23` against every bold span there). Leads print without their
 // asterisks. A missing detail file leaves every lead without a write-up. A bold
@@ -1619,7 +1620,7 @@ function lessonsCheck() {
   // at the next session start (#277, review R7).
   const bytes = Buffer.byteLength(index, "utf8");
   const strip = (bold) => bold.slice(2, -2);
-  const leads = (index.match(/^- \*\*[^*\r\n]+\*\*/gm) || []).map((l) => strip(l.slice(2)));
+  const leads = indexLines(index).filter((l) => l.lead !== undefined).map((l) => l.lead);
   const detail = read("LESSONS-detail.md");
   const written = new Set(((detail || "").match(/\*\*[^*\r\n]+\*\*/g) || []).map(strip));
   const seen = new Set();
@@ -1652,20 +1653,19 @@ function lessonsCheck() {
 //                 (step 1)
 //   superseded    a lesson whose index line or write-up says superseded (step 4)
 //   longLeads     a lead over 120 bytes, its bold markers left out (step 7)
-// A lead and its line are read as lessonsCheck reads them (a `- **...**` line), and
-// HTML comments are skipped, as the seed's own comment shows an example line. A
-// write-up is the detail file's line that opens with the same bold lead, plus the
-// lines under it up to the next bullet or heading.
+// Leads and headings come from indexLines (below), the one reading lessonsCheck
+// uses too. A write-up is the detail file's top-level bullet that opens with the
+// same bold lead, plus the lines under it, indented notes included, up to the next
+// top-level bullet or heading (review of #281, R9).
 const LESSONS_LONG_LEAD_BYTES = 120;
 function lessonCandidates(index, detail, toolkit) {
-  const leadOf = (line) => /^- \*\*([^*\r\n]+)\*\*(.*)$/.exec(line);
   const says = (text) => /\bsuperseded\b/i.test(text);
   const supersededLeads = new Set();
   let current = null;
   for (const line of (detail || "").split(/\r?\n/)) {
-    const m = leadOf(line);
+    const m = /^[-*+]\s+\*\*([^*\r\n]+)\*\*/.exec(line);
     if (m) current = m[1];
-    else if (/^\s*(?:#|- )/.test(line)) current = null;
+    else if (/^(?:#|[-*+]\s)/.test(line)) current = null;
     if (current !== null && says(line)) supersededLeads.add(current);
   }
   const c = { afterLead: [], loneHeadings: [], superseded: [], longLeads: [] };
@@ -1674,23 +1674,36 @@ function lessonCandidates(index, detail, toolkit) {
   // deeper) keeps its place, since its subsections still need it.
   let heading = null;
   const close = (nextLevel) => { if (heading && heading.lessons === 1 && !(nextLevel > heading.level)) c.loneHeadings.push(heading.line); };
+  for (const l of indexLines(index)) {
+    if (l.level !== undefined) { close(l.level); heading = { line: l.line, level: l.level, lessons: 0 }; continue; }
+    if (heading) heading.lessons++;
+    if (l.after.trim() !== "") c.afterLead.push(l.line);
+    if (toolkit !== null && toolkit.has(leadKey(l.lead))) c.toolkitLeads.push(l.line);
+    if (says(l.after) || supersededLeads.has(l.lead)) c.superseded.push(l.line);
+    if (Buffer.byteLength(l.lead, "utf8") > LESSONS_LONG_LEAD_BYTES) c.longLeads.push(l.line);
+  }
+  close(0); // the end of the file: no heading below
+  return c;
+}
+
+// The lines of a lessons index as every list here reads them (#281): HTML comments
+// skipped, since the seed's own comment shows an example line; a heading of level
+// 2 or deeper, with its level; and a lead, a bullet that opens with a bold span,
+// with the text after it. A bullet is dash, star or plus, indented or not, as the
+// upgrade check's C-16 reads one (review of #281, R10). Lines count from 1.
+const INDEX_LEAD = /^\s*[-*+]\s+\*\*([^*\r\n]+)\*\*(.*)$/;
+function indexLines(index) {
+  const out = [];
   let inComment = false;
   index.split(/\r?\n/).forEach((line, i) => {
     if (inComment) { if (line.includes("-->")) inComment = false; return; }
     if (/^\s*<!--/.test(line)) { if (!line.includes("-->")) inComment = true; return; }
     const h = /^(#{2,})\s/.exec(line);
-    if (h) { close(h[1].length); heading = { line: i + 1, level: h[1].length, lessons: 0 }; return; }
-    const m = leadOf(line);
-    if (!m) return;
-    const [, lead, after] = m;
-    if (heading) heading.lessons++;
-    if (after.trim() !== "") c.afterLead.push(i + 1);
-    if (toolkit !== null && toolkit.has(leadKey(lead))) c.toolkitLeads.push(i + 1);
-    if (says(after) || supersededLeads.has(lead)) c.superseded.push(i + 1);
-    if (Buffer.byteLength(lead, "utf8") > LESSONS_LONG_LEAD_BYTES) c.longLeads.push(i + 1);
+    if (h) { out.push({ line: i + 1, level: h[1].length }); return; }
+    const m = INDEX_LEAD.exec(line);
+    if (m) out.push({ line: i + 1, lead: m[1], after: m[2] });
   });
-  close(0); // the end of the file: no heading below
-  return c;
+  return out;
 }
 
 // The toolkit's own lessons list, as the upgrade check's C-16 reads it, or null

@@ -1857,6 +1857,27 @@ section('--lessons lists trim candidates (#281)', function () {
   const PC = (runScript(['--lessons'], parent).json || {}).candidates || {};
   check('281: a parent heading over one lesson of its own is not listed, since its subsections still need it',
     JSON.stringify(PC.loneHeadings) === '[]', JSON.stringify(PC));
+  // A note on an indented line under a write-up still belongs to that write-up:
+  // only a top-level bullet or a heading starts the next one (review of #281, R9).
+  const nested = newRepo('lessons-superseded-nested');
+  write(nested, 'LESSONS.md', '# Lessons\n\n## A\n\n- **First lead.**\n- **Second lead.**\n');
+  write(nested, 'LESSONS-detail.md', '- **First lead.** The write-up.\n  - Update: superseded by the second lead.\n- **Second lead.** Another.\n');
+  commitAll(nested, 'init');
+  const N = (runScript(['--lessons'], nested).json || {}).candidates || {};
+  check('281: a superseded note on an indented line under a write-up still marks its lesson',
+    JSON.stringify(N.superseded) === '[5]', JSON.stringify(N));
+  // Star, plus and indented bullets are leads too, as the upgrade check's C-16 reads
+  // them, and the seed's own comment, whose example line is indented, is still
+  // skipped (review of #281, R10).
+  const stars = newRepo('lessons-star-bullets');
+  write(stars, 'LESSONS.md', ['# Lessons', '', '<!-- An index line looks like', '       - **The takeaway, in one bold sentence.** -->', '', '## A', '',
+    '* **Star lead.** extra', '+ **Plus lead.**', '- **Dash lead.**', '  - **Indented lead.** more', ''].join('\n'));
+  write(stars, 'LESSONS-detail.md', '- **Star lead.** a\n- **Plus lead.** b\n- **Indented lead.** c\n');
+  commitAll(stars, 'init');
+  const SB = runScript(['--lessons'], stars).json || {};
+  check('281: star, plus and indented bullets are read as leads, and the seed comment\'s example is not',
+    JSON.stringify((SB.candidates || {}).afterLead) === '[8,11]' && JSON.stringify(SB.noWriteUp) === '["Dash lead."]',
+    JSON.stringify({ candidates: SB.candidates, noWriteUp: SB.noWriteUp }));
 
   // The toolkit's own lessons list ships in the plugin's seed folder, beside its
   // scripts folder. This repo's .claude/scripts has no seed folder beside it, which
