@@ -25,7 +25,7 @@
 
 - Nothing to do for the shorter read: it starts with the plugin update.
 - If your `LESSONS.md` is over 44,000 bytes, the next `/tk:upgrade` reports it (C-16, the check that keeps the lessons index to one-liners) and points to the trim guide; you pick the cuts. It comes back on every upgrade until the file is under the cap.
-- A copy-install for other editors gets none of this until it moves to the plugin; once it does, the same check also flags the lessons it copied from the toolkit's own log.
+- A copy-install for other editors gets the shorter read, the trim guide, the new lesson rules and the trim candidates when you re-run `setup.sh` or `setup.ps1`. The `/tk:upgrade` report for an index over the cap, and the list of lessons copied from the toolkit's own log, come with the plugin only.
 
 ## v8.0.14 - Words You Already Know (2026-10-27)
 
