@@ -520,3 +520,8 @@
 
 - **Run the probe that checks a behavior in the same change that alters it.**
 - **Never cd into a subfolder in a Bash call; start each call from the project root instead.**
+
+## Issue 281 (the lessons read budget)
+
+- **Name what a cut keeps by its place in the file, not by what that place usually holds.**
+- **Count a rule as already said only where every reader of the copy also reads the original.**
