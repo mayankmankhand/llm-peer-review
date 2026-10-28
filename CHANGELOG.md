@@ -8,7 +8,7 @@
 
 ### Added
 
-- **A trim guide for the lessons file.** "Trimming the index", in the toolkit reference's Lessons section, puts the cuts in order: strip what holds no lesson, remove lessons that are not this project's, move write-ups out of the index, then retire lessons already said in an always-read file, superseded ones, ones a check now enforces, repeats (folded into the clearest line, with the count kept), long lines (shortened to their rule) and one-offs. It was built from an audit of nine real lessons files. `/tk:document` follows it when the file is over the cap, and you pick every cut.
+- **A trim guide for the lessons file.** "Trimming the index", in the toolkit reference's Lessons section, puts the cuts in order: strip what holds no lesson, remove lessons that are not this project's, move write-ups out of the index, then retire lessons already said in a committed file every session reads (never one only your machine has), superseded ones, ones a check now enforces, repeats (folded into the clearest line, with the count kept), long lines (shortened to their rule) and one-offs. It was built from an audit of nine real lessons files. `/tk:document` follows it when the file is over the cap, and you pick every cut.
 - **`session-init.js --lessons` lists trim candidates** by line number: notes after a bold line, headings over one lesson, lessons copied from the toolkit's own log (on a plugin install, where that list ships), superseded marks, and lines over 120 bytes.
 
 ### Changed
@@ -16,6 +16,10 @@
 - **Over 44,000 bytes, the session-start read covers only the last part of `LESSONS.md`**, the whole lines at the end of the file that fit in 44,000 bytes, and says which lines it skipped. A later stage in the same session skips the read when the text is still in its conversation, and reads again after the conversation is compacted.
 - **`/tk:document` writes each new lesson as its rule:** a bold line of about 120 bytes, with the story in `LESSONS-detail.md`. A lesson that repeats an existing one adds a dated line to that lesson's write-up instead of a new line, and at its third incident `/tk:document` offers you a check for it (an issue or a test). Over the cap it asks one question per kind of cut, with the full list in a file under `reports/`, and reruns the lessons check after cutting.
 - **The cap is set by cost:** one full read of 44,000 bytes is about 2% of a session. The number did not change.
+
+### Fixed
+
+- **The lessons check now reads star, plus and indented bullets.** It read only lines starting with a dash, while `/tk:upgrade` reads every bullet style, so an index written with stars came back clean. `/tk:document` may now list repeats or missing write-ups it did not see before.
 
 ### Upgrading
 
