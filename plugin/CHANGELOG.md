@@ -19,6 +19,10 @@ The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin'
 - If the folder guard misbehaves, start a session with `claude --settings '{"disableAllHooks": true}'`, which turns every hook off for that session.
 - A copy-install for other editors gets the recheck change when you re-run `setup.sh` or `setup.ps1`. The folder guard is a Claude Code hook, so it comes with the plugin only, like the push guard.
 
+### Released under the catch-rate override (maintainer only)
+
+- Claude Code moved from 2.1.310 to 2.1.312 between v8.0.15's Pocket runs and this release's, so the release check called the comparison confounded. Scored with that change allowed, the verdict is PASS: every reliable catch held in 3 of 3 runs on both sides, and the browser bug, which comes and goes, was caught in 2 of 3 on both. Two of this release's three runs were first voided because the new folder guard stopped a step and Claude ran it again; the test rig now counts that stop as a warning.
+
 ## v8.0.15 - Lessons That Fit (2026-10-28)
 
 **The lessons file costs less to read (#281).** Every session used to read a project's whole `LESSONS.md` at the start, and each later stage in the same session read it again, so one long-lived project with a 206 KB lessons file spent about 8 to 9% of its cost on that read. The 44,000-byte cap from v8.0.13 only came up when a new lesson was written. Now the read stops at the cap, a stage skips a read whose text it still has, `/tk:upgrade` tells a project whose file is over, and a trim guide says what to cut first.
