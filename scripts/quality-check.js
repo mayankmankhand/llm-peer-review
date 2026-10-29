@@ -311,6 +311,11 @@ const SYSTEM_NOTE = 'This is an unattended test session: no human is present, an
 
 const LIMIT_RE = /usage limit|rate limit|limit reached|hit your (usage |weekly |session )?limit|weekly limit|5-hour limit|out of (extra )?usage|credit balance is too low/i;
 const DENIED_RE = /permission to use|was denied|has been denied|requires approval|blocked by (a |the )?(hook|permission|policy)|not allowed to/i;
+// The plugin's folder guard (#282) stopping a call while the session's shell sits
+// in a subfolder. The session steps back and runs the call again, so the stop is
+// the build doing its job, not a refused permission: two v8.0.16 Pocket runs were
+// voided by it, each with all nine bugs caught (2026-10-28).
+const GUARD_STOP_RE = /\bfolder-guard: Claude's shell is (?:still )?in /;
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for scripts/test-quality-check.js)
@@ -800,7 +805,7 @@ function scratchExperiment(type, call, paths) {
 
 // The transcript records' tool calls, models, texts and denials, flattened.
 function digestRecords(records) {
-  const d = { models: [], toolUses: [], texts: [], errors: [], denials: [], handback: null, lastText: '' };
+  const d = { models: [], toolUses: [], texts: [], errors: [], denials: [], guardStops: [], handback: null, lastText: '' };
   for (const r of records) {
     const msg = r && r.message;
     if (r && r.type === 'assistant' && msg) {
@@ -819,6 +824,7 @@ function digestRecords(records) {
       for (const c of msg.content) {
         if (c.type !== 'tool_result' || c.is_error !== true) continue;
         const t = typeof c.content === 'string' ? c.content : (Array.isArray(c.content) ? c.content.map(x => x.text || '').join('\n') : '');
+        if (GUARD_STOP_RE.test(t)) { d.guardStops.push(c.tool_use_id); continue; }
         if (DENIED_RE.test(t)) {
           d.errors.push('denied: ' + t.slice(0, 200));
           d.denials.push({ id: c.tool_use_id, text: t.slice(0, 200) }); // matched back to its call in analyzeRun
@@ -860,10 +866,17 @@ function analyzeRun(run, answers) {
     if (meta.exitCode !== undefined && meta.exitCode !== 0) reasons.push('exit:' + meta.exitCode);
     if (result.is_error === true) reasons.push('error-result');
     if (result.subtype && result.subtype !== 'success') reasons.push('ended:' + result.subtype);
-    if (Array.isArray(result.permission_denials) && result.permission_denials.length > 0) reasons.push('denied:' + result.permission_denials.length);
   }
   const main = digestRecords(run.main || []);
   const subs = (run.subagents || []).map(s => ({ ...s, d: digestRecords(s.records || []) }));
+  // A denied call makes the run invalid, except a folder-guard stop (GUARD_STOP_RE),
+  // counted as the warning folder-guard:<n>.
+  if (result && Array.isArray(result.permission_denials) && result.permission_denials.length > 0) {
+    const stops = new Set([main, ...subs.map(s => s.d)].flatMap(d => d.guardStops));
+    const guard = result.permission_denials.filter(p => p && stops.has(p.tool_use_id)).length;
+    if (result.permission_denials.length > guard) reasons.push('denied:' + (result.permission_denials.length - guard));
+    if (guard > 0) warnings.push('folder-guard:' + guard);
+  }
   // A limit shows in the harness's own messages (model <synthetic>) or in an error
   // result, never in a finding: a security finding may well say "rate limit".
   const resultFailed = !!result && (result.is_error === true || (result.subtype && result.subtype !== 'success'));

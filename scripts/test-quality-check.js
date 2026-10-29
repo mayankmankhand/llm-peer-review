@@ -376,6 +376,20 @@ section('validity', () => {
   check('a denied call makes the run invalid', !denied.valid && denied.reasons.includes('denied:1'));
   const deniedSub = analyze(makeReviewRun({ mainToolResults: [{ type: 'tool_result', tool_use_id: 'x', is_error: true, content: 'Permission to use Bash with command npm audit --json has been denied.' }] }));
   check('a denial written into a transcript makes the run invalid', !deniedSub.valid && deniedSub.reasons.includes('denied-in-transcript'));
+  // #282: the plugin's folder guard stopping a call while the shell sits in a
+  // subfolder is the build doing its job, and the session steps back and runs it
+  // again: the warning folder-guard:<n>, not a voided run. Two v8.0.16 Pocket
+  // runs were voided this way. Any other denial in the same run still voids it.
+  const GUARD = 'PreToolUse:Skill hook error: folder-guard: Claude\'s shell is in /tmp/qc-run.TEST/project/reports/receipts/2026-10-28-194411, not the project folder /tmp/qc-run.TEST/project, so this skill would run in the wrong place. Step back with `cd /tmp/qc-run.TEST/project` as a Bash command of its own, then run it again.';
+  const guardStop = { type: 'tool_result', tool_use_id: 'toolu_guard_1', is_error: true, content: GUARD };
+  const guardDenial = { tool_name: 'Skill', tool_use_id: 'toolu_guard_1', tool_input: { skill: 'tk:review-page' } };
+  const guardShow = r => (r.valid ? 'valid' : 'INVALID') + ' reasons [' + r.reasons.join(', ') + '] warnings [' + r.warnings.join(', ') + ']';
+  const guarded = analyze(makeReviewRun({ mainToolResults: [guardStop], result: { permission_denials: [guardDenial] } }));
+  check('282: a folder-guard stop is the warning folder-guard:1, and the run stays valid',
+    guarded.valid && guarded.warnings.includes('folder-guard:1') && !guarded.reasons.some(r => /^denied/.test(r)), guardShow(guarded));
+  const guardedPlus = analyze(makeReviewRun({ mainToolResults: [guardStop], result: { permission_denials: [guardDenial, { tool_name: 'Bash', tool_use_id: 'toolu_other', tool_input: { command: 'npm audit --json' } }] } }));
+  check('282: a folder-guard stop beside another denial still voids the run',
+    !guardedPlus.valid && guardedPlus.reasons.includes('denied:1') && guardedPlus.warnings.includes('folder-guard:1'), guardShow(guardedPlus));
 
   // #253: a read-only judge's denied scratch experiment is a warning, not an invalid
   // run. The three shapes below are the real denied calls from the 2026-10-13
