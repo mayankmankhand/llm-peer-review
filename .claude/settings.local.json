@@ -140,5 +140,6 @@
       "/tmp"
     ]
   },
-  "defaultMode": "acceptEdits"
+  "defaultMode": "acceptEdits",
+  "idleCompaction": false
 }
