@@ -99,6 +99,23 @@ check('285: merge reads the project fix rules under its label', mergeCmd.include
 const mergePromptBullet = (mergeCmd.split('\n').find((l) => l.includes('- **A prompt file** (a command, skill, agent or rules file; M9)')) || '');
 check("285: merge's combined-file list names CLAUDE.md, CLAUDE.local.md and the add-on instruction files",
   mergePromptBullet.includes('`CLAUDE.md` at the root or in `.claude/`') && mergePromptBullet.includes('`CLAUDE.local.md`') && mergePromptBullet.includes('`.claude/toolkit/*.md` other than `README.md` and `adoption.md`'), mergePromptBullet.slice(0, 200));
+// Review of #285 and #286: the verdict that lets a project fix rule stop a landing, and the
+// overview that says so, are pinned, and every flag and output field the upgrade skill's
+// earlier read names is one upgrade-audit.js has, so the wording cannot drift from the code.
+const mergeVerdict = mergeCmd.split('\n').find((l) => l.includes('**The verdict.**')) || '';
+check("285: merge's verdict pages on a project fix rule for a landing, and the overview says so",
+  mergeVerdict.includes('project fix rule') && mergeVerdict.includes('for a landing') && mergeVerdict.includes('land on a yes')
+    && mergeCmd.includes("meets one of the project's own fix rules"), mergeVerdict.slice(0, 200));
+const upgradeSkill = read('.claude/skills/upgrade/SKILL.md');
+const upgradeAudit = read('.claude/scripts/upgrade-audit.js');
+const EARLIER_FLAGS = ['--earlier', '--out', '--earlier-adoption', '--earlier-declined'];
+const EARLIER_FIELDS = ['offer', 'note', 'ranges', 'count'];
+// A flag counts as named only whole: `--earlier` inside `--earlier-adoption` does not count.
+const namesFlag = (text, f) => new RegExp(f.replace(/-/g, '\\-') + '(?![a-z-])').test(text);
+const missingFlags = EARLIER_FLAGS.filter((f) => !namesFlag(upgradeSkill, f) || !upgradeAudit.includes("a === '" + f + "'"));
+const missingFields = EARLIER_FIELDS.filter((k) => !upgradeSkill.includes('`' + k + '`') && !upgradeSkill.includes('<' + k + '>') || !new RegExp('\\b' + k + '[:,]').test(upgradeAudit.slice(upgradeAudit.indexOf('function printEarlier'))));
+check('286: every earlier-read flag and field the upgrade skill names is one the script has',
+  missingFlags.length === 0 && missingFields.length === 0, 'flags ' + JSON.stringify(missingFlags) + ', fields ' + JSON.stringify(missingFields));
 // Written as a class, so this file never holds the old range as a literal a sweep would find.
 const staleRule = prompts.filter(([, text]) => /M1 to M1[56]|M1-M1[56]/.test(text)).map(([file]) => file);
 check('no prompt file still counts the loop rules to M15 or M16', staleRule.length === 0, staleRule.join(', '));

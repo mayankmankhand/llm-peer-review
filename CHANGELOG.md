@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-**Landings stop less and check more, and older projects get their unread release notes once (#284, #285, #286).** A landing from a worktree no longer stops at its own push. A landing that combined a conflict in `CLAUDE.md` or one of your add-on instruction files waits for your yes, and your own fix rules now apply to landings. A project first upgraded before 8.0.6 is offered, once, the release notes it never had read against its files.
+**Landings stop less and check more, and older projects get their unread release notes once (#284, #285, #286).** A landing from a worktree no longer stops at its own push. A landing that combined a conflict in `CLAUDE.md` or one of your add-on instruction files waits for your yes, and your own fix rules now apply to landings. A project first upgraded before 8.0.6 gets a one-time offer to check its own files against the earlier release notes it never read.
 
 ### Fixed
 

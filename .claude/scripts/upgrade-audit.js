@@ -707,7 +707,10 @@ function startedAt(project, state) {
   const first = log ? log.split('\n')[0] : '';
   if (!/^[0-9a-f]{40,64}$/.test(first)) return { none: 'no record of the version this project began on: ' + STATE_REL + ' has no previousVersion and no committed history' };
   let firstState = null;
-  try { firstState = JSON.parse(git(['show', first + ':' + STATE_REL], project)); } catch (e) { firstState = null; }
+  // `<commit>:./<path>` names the file relative to the folder git runs in, as
+  // `git log -- <path>` above does; a bare `<commit>:<path>` is read from the
+  // repository's top, and misses a project kept in a subfolder of it.
+  try { firstState = JSON.parse(git(['show', first + ':./' + STATE_REL], project)); } catch (e) { firstState = null; }
   const version = referenceVersion(firstState);
   return version === null ? { none: 'the first committed ' + STATE_REL + ' records no usable version' } : { version };
 }

@@ -648,13 +648,20 @@ function runScan(top, remote, name) {
 
 // The folder git pushes from: the input's cwd, or the push's -C folder
 // resolved against it the way git resolves it (#284). { dir } or { deny }.
+// git -C changes folder the way the system does: a link is followed first,
+// and a later .. climbs from wherever it points. path.resolve tidies lnk/..
+// away as plain text and names the folder the push started in, so the guard
+// would scan one repository while git pushes another (review of #284). The
+// system resolves the folder as typed instead.
 function pushFolder(call, push) {
   if (typeof call.cwd !== 'string' || !isDirectory(call.cwd)) {
     return { deny: 'the hook input names no folder that exists, so the guard cannot tell which repository the push is from' };
   }
   if (!push || push.folder === undefined) return { dir: call.cwd };
-  const dir = path.resolve(call.cwd, push.folder);
-  if (!isDirectory(dir)) return { deny: 'the folder ' + push.folder + ' that the push names with -C does not exist' };
+  const typed = path.isAbsolute(push.folder) ? push.folder : call.cwd + path.sep + push.folder;
+  let dir = null;
+  try { dir = fs.realpathSync.native(typed); } catch (e) { dir = null; }
+  if (dir === null || !isDirectory(dir)) return { deny: 'the folder ' + push.folder + ' that the push names with -C does not exist' };
   return { dir: dir };
 }
 

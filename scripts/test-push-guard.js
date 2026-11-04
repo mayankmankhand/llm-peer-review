@@ -460,6 +460,18 @@ hook('284: a push that names its folder is denied when that folder checked-out c
 hook('284: every branch pushed from a keyed folder is blocked', runHook(function () { return bashCall('git -C ' + keyedWt.wt + ' push --all origin', keyedWt.repo); }), 'deny', '[gitlab-pat]');
 hook('284: the built plugin copy scans the folder a push names', runHook(function () { return bashCall('git -C ' + keyedWt.wt + ' push origin HEAD:feature', keyedWt.repo); },
   { script: PLUGIN_GUARD }), 'deny', '[gitlab-pat]');
+// Review of 284: git -C changes folder the way the system does, so a link
+// followed by .. climbs from wherever the link points. Read as plain text,
+// lnk/.. is the folder the push started in, and a scan there would check the
+// wrong repository. The clean repo holds a link into a keyed repo's subfolder.
+const viaLink = setUp(function () {
+  const sb = scratchRepo('link-clean');
+  const other = scratchRepo('link-keyed');
+  commitFile(other, 'inner/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n');
+  fs.symlinkSync(path.join(other.repo, 'inner'), path.join(sb.repo, 'lnk'));
+  return sb;
+});
+hook('284: a folder through a link and back up is scanned where git pushes from', runHook(function () { return bashCall('git -C lnk/.. push origin HEAD:feature', viaLink.repo); }), 'deny', '[gitlab-pat]');
 check('prescribed: .claude/commands/merge.md still names the folder on every git call when a cd does not stick', (function () {
   try { return fs.readFileSync(path.join(ROOT, '.claude', 'commands', 'merge.md'), 'utf8').includes('`git -C <worktree> <command>` for git'); } catch (e) { return false; }
 })());
