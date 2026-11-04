@@ -153,8 +153,31 @@ console.log('\n7. a dry run pushes nothing');
 reader('--dry-run pushes nothing and gets no answer', 'git push --dry-run origin HEAD:feature', { decision: 'none', code: 'dry-run' });
 reader('-n pushes nothing and gets no answer', 'git push -n origin HEAD:feature', { decision: 'none', code: 'dry-run' });
 
+console.log('\n8a. a push that names its folder with git -C is a standard push (#284)');
+// /merge's branch guard names the worktree on every git call (git -C) when a
+// cd does not stick, so its push arrives in this shape. -C alone among git's
+// options, once, with a plain-word folder; the hook scans that folder.
+reader('284: git -C <folder> push is a standard push that carries its folder', 'git -C ../other push origin HEAD:feature',
+  { decision: 'scan', code: 'standard', push: { remote: 'origin', src: 'HEAD', dst: 'feature', folder: '../other' } });
+reader('284: the M11 check then a push that names its folder is standard', 'node .claude/scripts/pre-push-check.js origin feature && git -C wt push origin HEAD:feature',
+  { decision: 'scan', code: 'standard', push: { dst: 'feature', folder: 'wt' } });
+reader('284: a push that names its folder keeps its flags read', 'git -C wt push --no-verify origin HEAD:feature', { decision: 'scan', code: 'no-verify', push: { folder: 'wt', askAlways: true } });
+reader('284: a dry run that names its folder pushes nothing', 'git -C wt push --dry-run origin HEAD:feature', { decision: 'none', code: 'dry-run' });
+reader('284: the landing command check line in its worktree is not a push', 'cd /work/repo/.claude/worktrees/merge-7 && node .claude/scripts/pre-push-check.js origin feature', { decision: 'none', code: 'not-a-push' });
+reader('284: two -C before push are denied', 'git -C a -C b push origin HEAD:feature', { decision: 'deny', code: 'options' });
+reader('284: -C with -c before push is denied', 'git -C a -c core.hooksPath=/dev/null push origin HEAD:feature', { decision: 'deny', code: 'options' });
+reader('284: --git-dir with -C before push is denied', 'git --git-dir=x/.git -C a push origin HEAD:feature', { decision: 'deny', code: 'options' });
+reader('284: -C before another option is denied', 'git -C a --no-pager push origin HEAD:feature', { decision: 'deny', code: 'options' });
+reader('284: a -C folder with ~ is denied', 'git -C ~/repo push origin HEAD:feature', { decision: 'deny', code: 'plain' });
+reader('284: a -C folder with a space is denied', "git -C 'my repo' push origin HEAD:feature", { decision: 'deny', code: 'plain' });
+reader('284: a -C folder from a variable is denied as unreadable', 'git -C $WT push origin HEAD:feature', { decision: 'deny', code: 'unreadable' });
+// Moving the shell before a -C push would make git push from a folder other
+// than the one the guard resolves, so every such shape stays denied.
+reader('284: cd before a push that names its folder is denied', 'cd y && git -C ../x push origin HEAD:feature', { decision: 'deny', code: 'not-first' });
+reader('284: pushd before a push that names its folder is denied', 'pushd y && git -C ../x push origin HEAD:feature', { decision: 'deny', code: 'not-first' });
+reader('284: a subshell that moves before a push that names its folder is denied', '(cd y; git -C ../x push origin HEAD:feature)', { decision: 'deny' });
+
 console.log('\n8. every other push shape is denied');
-reader('git -C before push is denied', 'git -C ../other push origin HEAD:feature', { decision: 'deny', code: 'options' });
 reader('git -c before push is denied', 'git -c core.hooksPath=/dev/null push origin HEAD:feature', { decision: 'deny', code: 'options' });
 reader('a git alias defined with -c is denied', 'git -c alias.p=push p origin HEAD:feature', { decision: 'deny', code: 'options' });
 reader('cd before the push is denied', 'cd .claude/worktrees/a && git push origin HEAD:feature', { decision: 'deny', code: 'not-first' });
@@ -367,7 +390,9 @@ hook('a planted key pushed to a mirror remote is blocked', runHook(function () {
 }), 'deny', '[gitlab-pat]');
 // Review R15: the command the owner types keeps the push's own flags.
 hook('the push-anyway command keeps the push\'s own flags', runHook(function () { return bashCall('git push -f origin HEAD:feature', keyed.repo); }), 'deny', 'push -f origin HEAD:feature');
-hook('a push in another shape is denied with the standard forms named', runHook(function () { return bashCall('git -C . push origin HEAD:feature', clean.repo); }), 'deny', 'HEAD:<branch>');
+const otherShape = runHook(function () { return bashCall('git -c x=y push origin HEAD:feature', clean.repo); });
+hook('a push in another shape is denied with the standard forms named', otherShape, 'deny', 'HEAD:<branch>');
+hook('284: the standard forms named include the push that names its folder', otherShape, 'deny', 'git -C <folder> push');
 hook('unreadable input that mentions push is denied', runHook(function () { return '{not json: git push origin HEAD:feature'; }), 'deny');
 hook('unreadable input without push gets no answer', runHook(function () { return '{not json'; }), 'none');
 hook('another tool gets no answer', runHook(function () {
@@ -403,6 +428,41 @@ check('hook: no answer ever says allow', answers.length > 0 && answers.every(fun
 hook('a push carrying a planted key is blocked', runHook(function () {
   return bashCall('git push -u origin HEAD:feature 2>&1 | tail -4', keyed.repo);
 }), 'deny', '[gitlab-pat]');
+
+console.log('\n11. a push that names its folder is checked in that folder (#284)');
+// A second worktree on branch feature, as /tk:merge works in: the main folder
+// stays on main, and the push names the worktree with git -C.
+function worktreeOf(sb, branch, file, contents) {
+  const wt = path.join(sb.root, 'wt-' + branch);
+  sb.g(['worktree', 'add', '-q', '-b', branch, wt]);
+  const w = function (args) { return execFileSync('git', args, { cwd: wt, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); };
+  fs.mkdirSync(path.dirname(path.join(wt, file)), { recursive: true });
+  fs.writeFileSync(path.join(wt, file), contents);
+  w(['add', file]);
+  w(['commit', '-qm', 'add ' + file]);
+  return fs.realpathSync(wt);
+}
+const cleanWt = setUp(function () { const sb = scratchRepo('clean-wt'); sb.wt = worktreeOf(sb, 'feature', 'src/app.js', 'console.log("ordinary code");\n'); sb.g(['branch', 'older']); return sb; });
+const keyedWt = setUp(function () { const sb = scratchRepo('keyed-wt'); sb.wt = worktreeOf(sb, 'feature', 'ci/token.env', 'CI_TOKEN' + '=' + FAKE_KEY + '\n'); return sb; });
+const plainDir = path.join(SCRATCH, 'not-a-repo');
+fs.mkdirSync(plainDir, { recursive: true });
+// The landing command's own fallback line, from the main folder with the worktree's absolute path.
+hook('284: a clean push that names its folder gets no answer', runHook(function () { return bashCall('git -C ' + cleanWt.wt + ' push origin HEAD:feature', cleanWt.repo); }), 'none');
+const keyedFromClean = runHook(function () { return bashCall('git -C ' + keyedWt.wt + ' push origin HEAD:feature', keyedWt.repo); });
+hook('284: a push that names a keyed folder from a clean folder is blocked', keyedFromClean, 'deny', '[gitlab-pat]');
+hook('284: the push-anyway command names that folder once', keyedFromClean, 'deny', '! git -C ' + keyedWt.wt + ' push origin HEAD:feature`');
+check('hook: 284: the push-anyway command never names two folders', keyedFromClean.reason.indexOf('-C ' + keyedWt.wt + ' -C') === -1 && (keyedFromClean.reason.match(/ -C /g) || []).length === 1, show(keyedFromClean));
+hook('284: a clean folder named from a keyed folder gets no answer', runHook(function () { return bashCall('git -C ' + keyedWt.repo + ' push origin HEAD:other', keyedWt.wt); }), 'none');
+hook('284: a relative folder resolves against the input cwd, not the hook folder', runHook(function () { return bashCall('git -C wt-feature push origin HEAD:feature', keyedWt.root); }, { from: cleanWt ? cleanWt.repo : SCRATCH }), 'deny', '[gitlab-pat]');
+hook('284: a folder that does not exist is denied', runHook(function () { return bashCall('git -C ./no-such-folder push origin HEAD:feature', cleanWt.repo); }), 'deny', 'no-such-folder');
+hook('284: a folder outside any repository is denied', runHook(function () { return bashCall('git -C ' + plainDir + ' push origin HEAD:feature', cleanWt.repo); }), 'deny', 'is not inside a git repository');
+hook('284: a push that names its folder is denied when that folder checked-out commit is not the pushed branch', runHook(function () { return bashCall('git -C ' + cleanWt.wt + ' push origin older', cleanWt.repo); }), 'deny', 'branch older');
+hook('284: every branch pushed from a keyed folder is blocked', runHook(function () { return bashCall('git -C ' + keyedWt.wt + ' push --all origin', keyedWt.repo); }), 'deny', '[gitlab-pat]');
+hook('284: the built plugin copy scans the folder a push names', runHook(function () { return bashCall('git -C ' + keyedWt.wt + ' push origin HEAD:feature', keyedWt.repo); },
+  { script: PLUGIN_GUARD }), 'deny', '[gitlab-pat]');
+check('prescribed: .claude/commands/merge.md still names the folder on every git call when a cd does not stick', (function () {
+  try { return fs.readFileSync(path.join(ROOT, '.claude', 'commands', 'merge.md'), 'utf8').includes('`git -C <worktree> <command>` for git'); } catch (e) { return false; }
+})());
 
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.'); process.exit(0); }

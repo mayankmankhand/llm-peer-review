@@ -28,7 +28,14 @@
 // block, never remove one.
 //
 // A standard push, and why each part of it is required:
-//   git push [-u|--set-upstream] [-q|-v|--porcelain|--progress] <remote> <refspec>
+//   git [-C <folder>] push [-u|--set-upstream] [-q|-v|--porcelain|--progress] <remote> <refspec>
+//   - -C <folder> is the one git option allowed before push (#284), once, its
+//     folder a plain word. /tk:merge names a worktree on every git call when
+//     a cd does not stick, so its push arrives in this shape. The hook
+//     resolves the folder against the input's cwd, as git does, and runs
+//     every check below in that folder's repository, because that is the one
+//     git pushes from. Any other option before push could change what git
+//     reads (-c, --git-dir, --work-tree), so it is denied.
 //   - <remote> is a remote's name, never a URL or a path: the check ranges
 //     against the remote's tracking refs, which only a named remote has.
 //   - <refspec> is HEAD:<branch> (or HEAD:refs/heads/<branch>), HEAD, a
@@ -82,7 +89,8 @@
 //   none  nothing printed: Claude Code's own permission flow runs unchanged.
 //   deny  Claude Code cancels the command and shows Claude the reason.
 //   ask   Claude Code shows the owner an approval prompt with the reason.
-// For a scan, the hook works in the repository the input's cwd is in. It
+// For a scan, the hook works in the repository the input's cwd is in, or the
+// one the push's -C folder is in, resolved against that cwd. It
 // denies a branch or tag that is not the checked-out commit, then runs
 // pre-push-check.js, found beside this file, for <remote> <branch-or-tag>.
 // Exit 0: no answer, except that --no-verify and force pushes, and a remote
@@ -131,7 +139,7 @@ const MAX_DEPTH = 3;
 // What a commit-form message reads as: a plain word, never a git subcommand.
 const MESSAGE_WORD = 'message-text';
 
-const STANDARD_FORMS = '`git push -u <remote> HEAD:<branch>`, or `git push <remote> <tag>` for a tag on the checked-out commit';
+const STANDARD_FORMS = '`git push -u <remote> HEAD:<branch>`, `git -C <folder> push -u <remote> HEAD:<branch>` for a push from another folder, or `git push <remote> <tag>` for a tag on the checked-out commit';
 const UNREADABLE_HINT = 'If it is not a push, put the long text in a file and pass the file instead (for a commit message, `git commit -F <file>`).';
 
 let tokenizeFn = null;
@@ -356,7 +364,8 @@ function runnerOf(words, g) {
 }
 
 // One segment: null when it does not push, { deny } when it pushes in a shape
-// the guard refuses, { standard: true } when it may be a standard push.
+// the guard refuses, { standard: true } when it may be a standard push, with
+// `folder` set when the push names its folder with -C (#284).
 function segmentPush(words, level) {
   for (let k = 0; k < words.length; k++) {
     const name = base(words[k]);
@@ -397,6 +406,10 @@ function segmentPush(words, level) {
     return { deny: deny('keyword', 'the push follows the shell word ' + words.slice(0, g).join(' ') + ', so it is not a plain push; check its result in a separate command') };
   }
   if (runner === 'path') return { deny: deny('git-path', 'it runs git from a path (' + words[g] + ')') };
+  if (options.length === 2 && options[0] === '-C') {
+    if (!PLAIN_WORD.test(options[1])) return { deny: deny('plain', 'its folder ' + JSON.stringify(options[1]) + ' holds characters the guard does not read as plain text') };
+    return { standard: true, folder: options[1] };
+  }
   if (options.length) return { deny: deny('options', 'git options come before push (' + options.join(' ') + ')') };
   return { standard: true };
 }
@@ -493,7 +506,14 @@ function classify(command, depth) {
     }
   }
   if (read.meta[p].some(function (m) { return m.input; })) return deny('plain', 'it reads its input from a file');
-  return standardPush(segs[p]);
+  const folder = found[0].folder;
+  if (folder === undefined) return standardPush(segs[p]);
+  // A push that names its folder is read without -C <folder>, so every rule
+  // below applies to it unchanged and push.words is the push alone, which
+  // the push-anyway hint puts after its own -C <repository>.
+  const verdict = standardPush([segs[p][0]].concat(segs[p].slice(3)));
+  if (verdict.push) verdict.push.folder = folder;
+  return verdict;
 }
 
 // --- the hook ----------------------------------------------------------------
@@ -626,13 +646,24 @@ function runScan(top, remote, name) {
   return { status: 'error', text: said || 'it exited ' + (r.status === null ? 'on ' + r.signal : r.status) };
 }
 
+// The folder git pushes from: the input's cwd, or the push's -C folder
+// resolved against it the way git resolves it (#284). { dir } or { deny }.
+function pushFolder(call, push) {
+  if (typeof call.cwd !== 'string' || !isDirectory(call.cwd)) {
+    return { deny: 'the hook input names no folder that exists, so the guard cannot tell which repository the push is from' };
+  }
+  if (!push || push.folder === undefined) return { dir: call.cwd };
+  const dir = path.resolve(call.cwd, push.folder);
+  if (!isDirectory(dir)) return { deny: 'the folder ' + push.folder + ' that the push names with -C does not exist' };
+  return { dir: dir };
+}
+
 // The answer for a standard push: scan it in the repository it runs in.
 function scanAnswer(call, push) {
-  if (typeof call.cwd !== 'string' || !isDirectory(call.cwd)) {
-    return answer('deny', denyReason('the hook input names no folder that exists, so the guard cannot tell which repository the push is from'));
-  }
-  const top = git(call.cwd, ['rev-parse', '--show-toplevel']);
-  if (top === null) return answer('deny', denyReason(call.cwd + ' is not inside a git repository'));
+  const where = pushFolder(call, push);
+  if (where.deny) return answer('deny', denyReason(where.deny));
+  const top = git(where.dir, ['rev-parse', '--show-toplevel']);
+  if (top === null) return answer('deny', denyReason(where.dir + ' is not inside a git repository'));
   const repo = top.trim();
   const remote = remoteProblem(repo, push.remote);
   if (remote !== null && remote.deny) return answer('deny', denyReason(remote.deny));
@@ -658,7 +689,8 @@ function scanAnswer(call, push) {
 // owner is asked as before.
 function unscannableAnswer(call, verdict) {
   const push = verdict.push;
-  const top = typeof call.cwd === 'string' && isDirectory(call.cwd) ? git(call.cwd, ['rev-parse', '--show-toplevel']) : null;
+  const where = pushFolder(call, push);
+  const top = where.dir ? git(where.dir, ['rev-parse', '--show-toplevel']) : null;
   if (top !== null) {
     const repo = top.trim();
     const branch = git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
