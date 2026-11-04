@@ -2,6 +2,32 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**Landings stop less and check more, and older projects get their unread release notes once (#284, #285, #286).** A landing from a worktree no longer stops at its own push. A landing that combined a conflict in `CLAUDE.md` or one of your add-on instruction files waits for your yes, and your own fix rules now apply to landings. A project first upgraded before 8.0.6 is offered, once, the release notes it never had read against its files.
+
+### Fixed
+
+- **A landing's own push no longer stops at the push guard (#284).** When a `cd` into a worktree does not stick, `/tk:merge` names the worktree on every git command, so its push reads `git -C <worktree> push origin HEAD:<branch>`, and the push guard blocked that form, so every such landing stopped and you had to type the push yourself. The guard now accepts `git -C <folder>` before `push`, once and as git's only option, and runs every check in that folder, the pre-push secret scan included. Every other option before `push`, and a `cd` or `pushd` in front of it, is still blocked.
+
+### Changed
+
+- **Landings read your fix rules, and more instruction files wait for your yes (#285).** `/tk:merge` now reads `.claude/toolkit/fix-rules.md`, as every other stage of the loop already did, so a rule such as "ask before a landing that deletes a file" stops that landing until you say yes. Without such a rule, deleted files are still named on the landing line and never asked about: a renamed file counts as deleted, and a deleted file comes back from history. A conflict the landing combined in `CLAUDE.md`, `CLAUDE.local.md`, or a `.claude/toolkit/*.md` file other than `README.md` and `adoption.md` now waits for your yes, as one in a command or skill already did, because every session reads those files as instructions.
+
+### Added
+
+- **The earlier release notes, offered once (#286).** `/tk:upgrade` has read the release notes since 8.0.6, but only from a project's last audited version forward, so a project already audited before then never had the entries before its first recorded read checked against its own files. Its next upgrade finds them, from the version the project began on (where it migrated from, or the version its first committed state file names) to the start of its record, asks one yes or no before reading anything, reads them range by range on a yes, and records either answer in `.claude/toolkit/adoption.md`, so the question never comes back. Behind it, `upgrade-audit.js --release-notes --earlier --out <file>` writes the entries to a file with line ranges to read it by, and `--stamp` takes `--earlier-adoption <file>` or `--earlier-declined`, refusing while the question has no answer.
+
+### Upgrading
+
+- All three arrive with the plugin update, with no setup step and no new permission rows.
+- A project that keeps its own "ask before a landing that deletes files" rule in its rules file can move it into `.claude/toolkit/fix-rules.md`, where `/tk:merge` now reads it. The starter README's row for `fix-rules.md` now names `/tk:merge`, and `/tk:upgrade` offers that row to a project whose README still has the older text.
+- A project first upgraded before 8.0.6 gets the one-time question on its next upgrade. The read is long (251 entries in the project that reported it), so a no is a fine answer, and it is recorded.
+
+### Why
+
+All three came from downstream upgrades to 8.0.15. Feeding the push guard the landing command's own push forms showed both refused before any landing hit them (#284). A GitLab project still kept two landing checks in its own rules after 8.0.6 closed most of #258 (#285). And in a project migrated from a 6.3.3 copy-install, a one-time read of the 251 entries from 7.0.0 to 7.6.5 raised 12 claims about its own files; 11 held up under three independent checks (#286).
+
 ## v8.0.16 - Right Folder, Real Fixes (2026-10-28)
 
 **Claude's commands stay in the project folder, and in the usual proofs a fix that only moves the flagged line no longer passes its recheck (#282, #283).** A `cd` into a subfolder stays in force for Claude's next command, so a later check, helper or skill could run in the wrong folder and read the wrong files, or none. And when a review's fix only moved the line a finding pointed at, the automatic recheck still passed, because it looked for the flagged text at the old line number only.
