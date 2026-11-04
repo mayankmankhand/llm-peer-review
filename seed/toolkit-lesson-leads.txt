@@ -332,6 +332,7 @@ Replacing LLM-run prose with a script removes non-determinism and shrinks the pe
 Replacing a detection pattern can drop a hit only the old one had; add the new rule beside it and rerun every hostile fixture.
 Reproduce a CI-only flake before fixing it, in a throwaway branch's matrix, then again with the fix.
 Reproduce a CI-only flake before fixing it: run the suite in a throwaway branch's 10-job matrix, then again with the fix.
+Resolve a folder as the tool using it will: tidying the text undoes link/.., but git follows the link.
 Restricting an agent's tools is a behavior change, not a safety annotation - check what its callers actually need to run.
 Review a plan this size with three fresh lenses before executing it.
 Review proposed prompt edits before applying them, and triage the volume hard.
