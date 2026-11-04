@@ -13,7 +13,7 @@ Each file has a fixed name. Create only the ones you need.
 | `review-kinds.md` | `/tk:review`, when it picks specialists | Your own review types, as table rows (format below) |
 | `plan-gate.md` | `/tk:create-plan`, before it writes the plan | A check every plan in this project must pass, in plain instructions |
 | `execute-gate.md` | `/tk:execute`, before it implements a step | A check every implementation step must pass |
-| `fix-rules.md` | every stage that runs the auto-fix loop | Extra conditions before a fix is applied, or extra actions that must always ask you first |
+| `fix-rules.md` | every stage that runs the auto-fix loop, and `/tk:merge` before it lands a PR | Extra conditions before a fix is applied, or extra actions that must always ask you first |
 | `severity-anchors.md` | every reviewer | How severe your own review types' findings are (what is a Block here, what is only a Suggest) |
 | `do-not-report.md` | the security reviewers (`/tk:review-security`, `/tk:security-audit`, and the security reviewer `/tk:review` sends out), right after the toolkit's own list | Finding categories that are noise in this project, one bullet each (format below) |
 | `checks.json` | `/tk:execute`, at its test step, through the toolkit's checks runner | Your project's checks: a JSON array of `{ "id", "check", "expect" }`, for example `[{"id": "tests", "check": "npm test", "expect": {"exit": 0}}]`; what an `id` and a `check` may contain is spelled out below the table |

@@ -88,8 +88,17 @@ check('create-issue reads the issue-labels seam under its label and states each 
 // pinned word for word so the next rule's sweep is one grep and a drift in one file is caught here.
 const FIX_RULES = 'Additive only: they may add a precondition or an always-ask action, and a line that loosens or removes any of M1 to M17 is void.';
 const FIX_RULES_SITES = prompts.filter(([, text]) => /\*\*Project fix rules\*\* \(from/.test(text)).map(([file]) => file);
-check('eighteen prompt files carry the project fix rules paragraph', FIX_RULES_SITES.length === 18, FIX_RULES_SITES.length + ' found');
+check('nineteen prompt files carry the project fix rules paragraph', FIX_RULES_SITES.length === 19, FIX_RULES_SITES.length + ' found');
 for (const file of FIX_RULES_SITES) check(file + ' carries the fix-rules sentence word for word, once', count(read(file), FIX_RULES) === 1, count(read(file), FIX_RULES) + ' found');
+// Issue #285: /merge reads the project's fix rules like every other loop stage, so a
+// project can add a yes before a landing (one that deletes files, say) in the supported
+// seam, and a conflict it combined in an instruction file every session reads waits too.
+const mergeCmd = read('.claude/commands/merge.md');
+check('285: merge reads the project fix rules under its label', mergeCmd.includes('**Project fix rules** (from `.claude/toolkit/fix-rules.md`).')
+  && count(mergeCmd, FIX_RULES) === 1 && mergeCmd.includes('!`cat .claude/toolkit/fix-rules.md 2>/dev/null || true`'));
+const mergePromptBullet = (mergeCmd.split('\n').find((l) => l.includes('- **A prompt file** (a command, skill, agent or rules file; M9)')) || '');
+check("285: merge's combined-file list names CLAUDE.md, CLAUDE.local.md and the add-on instruction files",
+  mergePromptBullet.includes('`CLAUDE.md` at the root or in `.claude/`') && mergePromptBullet.includes('`CLAUDE.local.md`') && mergePromptBullet.includes('`.claude/toolkit/*.md` other than `README.md` and `adoption.md`'), mergePromptBullet.slice(0, 200));
 // Written as a class, so this file never holds the old range as a literal a sweep would find.
 const staleRule = prompts.filter(([, text]) => /M1 to M1[56]|M1-M1[56]/.test(text)).map(([file]) => file);
 check('no prompt file still counts the loop rules to M15 or M16', staleRule.length === 0, staleRule.join(', '));
