@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-**Landings stop less and check more, and older projects get their unread release notes once (#284, #285, #286).** A landing from a worktree no longer stops at its own push. A landing that combined a conflict in `CLAUDE.md` or one of your add-on instruction files waits for your yes, and your own fix rules now apply to landings. A project first upgraded before 8.0.6 gets a one-time offer to check its own files against the earlier release notes it never read.
+**Landings stop less and check more, and older projects get their unread release notes once (#284, #285, #286).** A landing from a worktree no longer stops at its own push. A landing that combined a conflict in `CLAUDE.md` or one of your add-on instruction files waits for your yes, and your own fix rules that name a landing now apply to it. A project first upgraded before 8.0.6 gets a one-time offer to check its own files against the earlier release notes it never read.
 
 ### Fixed
 
@@ -12,7 +12,7 @@
 
 ### Changed
 
-- **Landings read your fix rules, and more instruction files wait for your yes (#285).** `/tk:merge` now reads `.claude/toolkit/fix-rules.md`, as every other stage of the loop already did, so a rule such as "ask before a landing that deletes a file" stops that landing until you say yes. Without such a rule, deleted files are still named on the landing line and never asked about: a renamed file counts as deleted, and a deleted file comes back from history. A conflict the landing combined in `CLAUDE.md`, `CLAUDE.local.md`, or a `.claude/toolkit/*.md` file other than `README.md` and `adoption.md` now waits for your yes, as one in a command or skill already did, because every session reads those files as instructions.
+- **Landings read your fix rules, and more instruction files wait for your yes (#285).** `/tk:merge` now reads `.claude/toolkit/fix-rules.md`, as every other stage of the loop already did, so a rule such as "ask before a landing that deletes a file" stops that landing until you say yes; a rule that names no landing, one written for the fix loops, does not. Without such a rule, deleted files are still named on the landing line and never asked about: a renamed file counts as deleted, and a deleted file comes back from history. A conflict the landing combined in `CLAUDE.md`, `CLAUDE.local.md`, or a `.claude/toolkit/*.md` file other than `README.md` and `adoption.md` now waits for your yes, as one in a command or skill already did, because every session reads those files as instructions.
 
 ### Added
 
