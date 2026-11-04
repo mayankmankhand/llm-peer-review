@@ -6,7 +6,8 @@
 //
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--project <dir>]
 //        [--plugin-root <dir>] [--conventions <file>] [--from <version>]
-//        [--stamp [--refuted <file>]]
+//        [--stamp [--adoption <file>] [--earlier-adoption <file> | --earlier-declined] [--refuted <file>]]
+//   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js --release-notes [--earlier --out <file>]
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js [--from <version>] --receipt <id> [--release <version>]
 //   node ${CLAUDE_PLUGIN_ROOT}/scripts/upgrade-audit.js --rollback-to <x.y.z>
 //
@@ -52,6 +53,19 @@
 // rows to .claude/toolkit/adoption.md as one section, then stamps. A range with
 // no entries, one whose section that file already holds, or a plugin that
 // ships no notes needs no rows. See releaseEntries, notesRange, adoptionCheck.
+//
+// `--release-notes --earlier --out <file>` (issue #286) finds the entries a
+// project audited before 8.0.6 never read: from the version it began on (its
+// previousVersion, or the version its first committed state file records) to
+// the start of the adoption record's oldest section, or of this upgrade's own
+// range when the record has none. It writes them to <file>, one block per
+// entry, and prints one JSON object with `offer`, the range, `count` and the
+// line `ranges` to read the file by; with nothing to offer it prints `offer`
+// false and a `note`, and writes no file. The stamp then takes the read's rows
+// (`--earlier-adoption <file>`, checked like the normal rows) or the owner's no
+// (`--earlier-declined`), and refuses while an earlier read applies and
+// neither is given. Either answer is written as a section of its own, so the
+// offer never comes back. See earlierRange, earlierFile, earlierCheck.
 //
 // `--rollback-to <x.y.z>` (issue #183) is the one path that lowers the record:
 // run from the project root while this release is still the running plugin,
@@ -635,7 +649,17 @@ function adoptionCheck(P, range, rowsText) {
   const heading = '## ' + range.from + ' -> ' + range.to + ' (';
   const record = readText(P(ADOPTION_REL));
   if (record !== null && record.split(/\r?\n/).some(l => l.startsWith(heading))) return { problems: [], section: null, note: ADOPTION_REL + ' already holds the section for ' + range.from + ' -> ' + range.to + ', so no adoption rows are needed' };
-  const ids = new Set(range.entries.map(e => e.id));
+  const { problems, rowOf } = checkRows(rowsText, range.entries, 'adoption', 'this range (' + range.from + ' -> ' + range.to + ')');
+  const section = heading + new Date().toISOString().slice(0, 10) + ')\n\n' + range.entries.map(e => '- ' + rowOf.get(e.id)).join('\n') + '\n';
+  return { problems, section, rows: range.entries.length, note: null };
+}
+// One rows file against the entries it must cover: a problem line per row that
+// is malformed, names an entry outside `entries`, repeats one, or raises one
+// with no decision, and per entry with no row. `kind` names the rows in each
+// line (`adoption` for the normal read, `earlier` for the earlier read), and
+// `rangeText` says which range an outside id missed.
+function checkRows(rowsText, entries, kind, rangeText) {
+  const ids = new Set(entries.map(e => e.id));
   const rowOf = new Map();
   const problems = [];
   rowsText.replace(/^﻿/, '').split(/\r?\n/).forEach((raw, i) => {
@@ -643,17 +667,148 @@ function adoptionCheck(P, range, rowsText) {
     if (!line) return;
     const n = i + 1;
     const m = ADOPTION_ROW.exec(line);
-    if (!m) { problems.push('adoption row ' + n + ' is not "<id> no action: <why>" or "<id> raised: <what> Decision: <choice>": ' + line.slice(0, 120)); return; }
-    if (!ids.has(m[1])) { problems.push('adoption row ' + n + ' names ' + m[1].slice(0, 40) + ', which is not an entry in this range (' + range.from + ' -> ' + range.to + ')'); return; }
-    if (rowOf.has(m[1])) { problems.push('adoption row ' + n + ' repeats ' + m[1]); return; }
-    if (m[2] === 'raised' && !/ Decision: \S/.test(m[3])) problems.push('adoption row ' + n + ' raises ' + m[1] + ' with no " Decision: <choice>"');
+    if (!m) { problems.push(kind + ' row ' + n + ' is not "<id> no action: <why>" or "<id> raised: <what> Decision: <choice>": ' + line.slice(0, 120)); return; }
+    if (!ids.has(m[1])) { problems.push(kind + ' row ' + n + ' names ' + m[1].slice(0, 40) + ', which is not an entry in ' + rangeText); return; }
+    if (rowOf.has(m[1])) { problems.push(kind + ' row ' + n + ' repeats ' + m[1]); return; }
+    if (m[2] === 'raised' && !/ Decision: \S/.test(m[3])) problems.push(kind + ' row ' + n + ' raises ' + m[1] + ' with no " Decision: <choice>"');
     rowOf.set(m[1], line);
   });
-  const missing = range.entries.filter(e => !rowOf.has(e.id)).map(e => e.id);
-  for (const id of missing.slice(0, MISSING_SHOWN)) problems.push('no adoption row for ' + id);
-  if (missing.length > MISSING_SHOWN) problems.push('and ' + (missing.length - MISSING_SHOWN) + ' more entries with no adoption row');
-  const section = heading + new Date().toISOString().slice(0, 10) + ')\n\n' + range.entries.map(e => '- ' + rowOf.get(e.id)).join('\n') + '\n';
-  return { problems, section, rows: range.entries.length, note: null };
+  const missing = entries.filter(e => !rowOf.has(e.id)).map(e => e.id);
+  for (const id of missing.slice(0, MISSING_SHOWN)) problems.push('no ' + kind + ' row for ' + id);
+  if (missing.length > MISSING_SHOWN) problems.push('and ' + (missing.length - MISSING_SHOWN) + ' more entries with no ' + kind + ' row');
+  return { problems, rowOf };
+}
+
+// ---- the earlier read (issue #286) ---------------------------------------------------
+// The release read arrived in 8.0.6, so a project audited before it holds an
+// adoption record that starts after the version the project began on, and
+// nothing read the entries in between against it. The earlier range runs from
+// that beginning to the start of the record's oldest section (or, with no
+// section yet, to the start of this upgrade's own range). It is offered once:
+// the stamp records the rows of a read, or a decline, as a section of its own
+// whose heading ends `, earlier notes)` or `, earlier notes declined)`, and
+// either one turns the offer off for good.
+const EARLIER_HEADING = /^## (\S+) -> (\S+) \([^)]*, earlier notes( declined)?\)\s*$/;
+const SECTION_HEADING = /^## (\S+) -> (\S+) \(/;
+// The most bytes one read range of the earlier file holds, the size the
+// lessons index is read in (session-init.js): a long Bash output shows only a
+// 2 KB preview, so the file is read with the Read tool, range by range.
+const EARLIER_RANGE_BYTES = 28500;
+
+// The version this project began on: { version } (null when a migration
+// recorded `unknown`), or { none: why }. A migration keeps its copy-install's
+// version as previousVersion through every stamp; a fresh setup records none,
+// so its start is the version the first committed state file names.
+function startedAt(project, state) {
+  if (state && typeof state === 'object' && typeof state.previousVersion === 'string' && state.previousVersion.trim() !== '') {
+    return { version: validVersion(state.previousVersion) };
+  }
+  const log = git(['log', '--reverse', '--format=%H', '--', STATE_REL], project);
+  const first = log ? log.split('\n')[0] : '';
+  if (!/^[0-9a-f]{40,64}$/.test(first)) return { none: 'no record of the version this project began on: ' + STATE_REL + ' has no previousVersion and no committed history' };
+  let firstState = null;
+  try { firstState = JSON.parse(git(['show', first + ':' + STATE_REL], project)); } catch (e) { firstState = null; }
+  const version = referenceVersion(firstState);
+  return version === null ? { none: 'the first committed ' + STATE_REL + ' records no usable version' } : { version };
+}
+// The adoption record's sections: the normal ones (from, to) and the earlier
+// read's, when one is recorded.
+function adoptionSections(P) {
+  const text = readText(P(ADOPTION_REL));
+  const out = { sections: [], earlier: null };
+  if (text === null) return out;
+  for (const line of text.split(/\r?\n/)) {
+    const e = EARLIER_HEADING.exec(line);
+    if (e) { if (!out.earlier) out.earlier = { from: e[1], to: e[2], declined: !!e[3] }; continue; }
+    const m = SECTION_HEADING.exec(line);
+    if (m) out.sections.push({ from: m[1], to: m[2] });
+  }
+  return out;
+}
+// The earlier range: { applies: true, from, to, entries, note? }, or
+// { applies: false, recorded?, note } saying why nothing is offered.
+// `normalStart` is this upgrade's own start (null when unrecorded).
+function earlierRange(P, project, pluginRoot, state, normalStart) {
+  const rec = adoptionSections(P);
+  if (rec.earlier) return { applies: false, recorded: true, note: ADOPTION_REL + ' already holds the earlier read (' + rec.earlier.from + ' -> ' + rec.earlier.to + (rec.earlier.declined ? ', declined' : '') + '), so it is not offered again' };
+  let end = normalStart;
+  if (rec.sections.length) {
+    if (rec.sections.some(s => s.from === 'unrecorded')) return { applies: false, note: 'the first read in ' + ADOPTION_REL + ' started unrecorded, so it already covered every shipped entry' };
+    const froms = rec.sections.map(s => validVersion(s.from)).filter(v => v !== null).sort(compareVersions);
+    end = froms.length ? froms[0] : null;
+  }
+  if (end === null) return { applies: false, note: (rec.sections.length ? ADOPTION_REL + ' names no usable start' : 'this upgrade\'s own read starts unrecorded') + ', so it covers every shipped entry already' };
+  const start = startedAt(project, state);
+  if (start.none) return { applies: false, note: start.none + ', so no earlier read is offered' };
+  const all = releaseEntries(pluginRoot);
+  if (all === null) return { applies: false, note: 'this plugin ships no release notes (' + NOTES_FILE + ')' };
+  const from = start.version === null ? 'unknown' : start.version;
+  const entries = all.filter(e => compareVersions(e.version, end) <= 0 && (start.version === null || compareVersions(e.version, start.version) > 0));
+  if (!entries.length) return { applies: false, note: 'no release-note entries from ' + from + ' to ' + end + ', so nothing earlier went unread' };
+  const oldest = all[0].version;
+  const note = start.version === null ? 'the version this project migrated from is recorded as unknown, so every entry up to ' + end + ' applies'
+    : compareVersions(start.version, oldest) < 0 ? 'the start ' + start.version + ' is older than the oldest release notes the plugin ships (v' + oldest + '), so every entry from v' + oldest + ' applies' : null;
+  return { applies: true, from, to: end, entries, note };
+}
+// The earlier file: one block per entry (`## <id>`, its section in brackets,
+// a blank line, its text), and the line ranges that read it, each at most
+// EARLIER_RANGE_BYTES and each after the first starting at a block.
+function earlierFile(range) {
+  const lines = ['# Earlier release notes: ' + range.from + ' -> ' + range.to, '',
+    range.entries.length + ' release-note entries the adoption record never read against this project, oldest first. Each starts with a `## <id>` line, its section in brackets when it has one.', ''];
+  const blocks = [];
+  for (const e of range.entries) {
+    const start = lines.length + 1;
+    lines.push('## ' + e.id + (e.section ? ' (' + e.section + ')' : ''), '');
+    for (const l of e.text.split('\n')) lines.push(l);
+    lines.push('');
+    blocks.push({ start, end: lines.length });
+  }
+  lines.pop();
+  const bytes = (a, b) => lines.slice(a - 1, b).reduce((s, l) => s + Buffer.byteLength(l) + 1, 0);
+  const ranges = [];
+  let from = 1;
+  let prevEnd = null;
+  for (const b of blocks) {
+    if (prevEnd !== null && bytes(from, Math.min(b.end, lines.length)) > EARLIER_RANGE_BYTES) { ranges.push({ from, to: prevEnd }); from = b.start; }
+    prevEnd = Math.min(b.end, lines.length);
+  }
+  ranges.push({ from, to: lines.length });
+  return { text: lines.join('\n') + '\n', ranges };
+}
+// --release-notes --earlier --out <file>: one JSON object on stdout, and the
+// file written only when the read is offered.
+function printEarlier(range, out) {
+  if (!range.applies) {
+    process.stdout.write(JSON.stringify({ offer: false, note: range.note }, null, 2) + '\n');
+    console.error('upgrade-audit: no earlier read to offer: ' + range.note);
+    return;
+  }
+  const file = path.resolve(out);
+  const built = earlierFile(range);
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, built.text); } catch (e) { console.error('upgrade-audit: the --out file could not be written: ' + out); process.exit(1); }
+  const json = { offer: true, from: range.from, to: range.to, count: range.entries.length, file, ranges: built.ranges };
+  if (range.note) json.note = range.note;
+  process.stdout.write(JSON.stringify(json, null, 2) + '\n');
+  console.error('upgrade-audit: ' + range.entries.length + ' earlier release-note ' + (range.entries.length === 1 ? 'entry' : 'entries') + ' from ' + range.from + ' to ' + range.to + ' never read; written to ' + file + ' in ' + built.ranges.length + ' read range' + (built.ranges.length === 1 ? '' : 's'));
+}
+// The stamp's check of the earlier answer, made before anything is written:
+// { problems, section, note }. Neither flag while the read applies is refused;
+// a flag where no read applies is refused, unless the read is already recorded
+// (a rerun), where it is ignored with a note.
+function earlierCheck(range, earlierRowsText, declined) {
+  const given = earlierRowsText !== null || declined;
+  const flag = declined ? '--earlier-declined' : '--earlier-adoption';
+  if (!range.applies) {
+    if (!given) return { problems: [], section: null, note: null };
+    if (range.recorded) return { problems: [], section: null, note: range.note.replace(/, so it is not offered again$/, '') + ', so ' + flag + ' is not needed' };
+    return { problems: ['no earlier read applies here (' + range.note + '), so ' + flag + ' has nothing to record'], section: null, note: null };
+  }
+  if (!given) return { problems: ['an earlier read applies: ' + range.entries.length + ' release-note entries from ' + range.from + ' to ' + range.to + ' were never read against this project; give the stamp --earlier-adoption <rows file> after reading them, or --earlier-declined after a no'], section: null, note: null };
+  const heading = '## ' + range.from + ' -> ' + range.to + ' (' + new Date().toISOString().slice(0, 10) + ', earlier notes';
+  if (declined) return { problems: [], section: heading + ' declined)\n\n- declined: not read, on the owner\'s answer\n', note: 'recorded the decline of the earlier read (' + range.from + ' -> ' + range.to + ')' };
+  const { problems, rowOf } = checkRows(earlierRowsText, range.entries, 'earlier', 'the earlier range (' + range.from + ' -> ' + range.to + ')');
+  return { problems, section: heading + ')\n\n' + range.entries.map(e => '- ' + rowOf.get(e.id)).join('\n') + '\n', note: 'recorded ' + range.entries.length + ' earlier row' + (range.entries.length === 1 ? '' : 's') };
 }
 // Appends one section to the adoption record, creating it with its header when absent.
 function writeAdoption(P, section) {
@@ -669,13 +824,13 @@ function writeAdoption(P, section) {
 // stamp records them in the refuted record (see recordRefutedKeys). Both are
 // read before anything is written, so a path that cannot be read stops the run
 // with the state file untouched.
-const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--adoption <file>] [--refuted <file>]]\n'
-  + '       node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--from <version>] --release-notes\n'
+const USAGE = 'usage: node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--conventions <file>] [--from <version>] [--stamp [--adoption <file>] [--earlier-adoption <file> | --earlier-declined] [--refuted <file>]]\n'
+  + '       node upgrade-audit.js [--project <dir>] [--plugin-root <dir>] [--from <version>] --release-notes [--earlier --out <file>]\n'
   + '       node upgrade-audit.js [--project <dir>] [--from <version>] --receipt <id> [--release <version>]\n'
   + '       node upgrade-audit.js [--project <dir>] --rollback-to <x.y.z>';
 
 function parseArgs(argv) {
-  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null, releaseNotes: false, adoption: null };
+  const o = { project: '', pluginRoot: '', conventions: '', from: '', stamp: false, refuted: null, rollbackTo: null, receipt: null, release: null, releaseNotes: false, adoption: null, earlier: false, out: null, earlierAdoption: null, earlierDeclined: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--project') o.project = argv[++i];
@@ -689,6 +844,10 @@ function parseArgs(argv) {
     else if (a === '--release') o.release = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--release-notes') o.releaseNotes = true;
     else if (a === '--adoption') o.adoption = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--earlier') o.earlier = true;
+    else if (a === '--out') o.out = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--earlier-adoption') o.earlierAdoption = argv[++i] === undefined ? '' : argv[i];
+    else if (a === '--earlier-declined') o.earlierDeclined = true;
     else if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else { console.error('upgrade-audit: unknown argument ' + a + '\n' + USAGE); process.exit(1); }
   }
@@ -702,6 +861,14 @@ function parseArgs(argv) {
   if (o.adoption !== null && !o.stamp) { console.error('upgrade-audit: --adoption names the rows file of the release read for --stamp to record; run it with --stamp\n' + USAGE); process.exit(1); }
   if (o.adoption === '') { console.error('upgrade-audit: --adoption takes the path of the rows file, one row per release-note entry\n' + USAGE); process.exit(1); }
   if (o.releaseNotes && (o.stamp || o.receipt !== null || o.rollbackTo !== null)) { console.error('upgrade-audit: --release-notes prints the entries to read and writes nothing, so it does not run with ' + (o.stamp ? '--stamp' : o.receipt !== null ? '--receipt' : '--rollback-to') + '\n' + USAGE); process.exit(1); }
+  // The earlier read (issue #286): --earlier and --out belong to --release-notes,
+  // the two answer flags to --stamp, and only one answer is given.
+  if (o.earlier && !o.releaseNotes) { console.error('upgrade-audit: --earlier reads the release notes before the adoption record starts; run it with --release-notes\n' + USAGE); process.exit(1); }
+  if (o.out !== null && !o.earlier) { console.error('upgrade-audit: --out names the file --release-notes --earlier writes the earlier entries to; run it with --earlier\n' + USAGE); process.exit(1); }
+  if (o.earlier && !o.out) { console.error('upgrade-audit: --release-notes --earlier writes the earlier entries to a file, so it takes --out <file>\n' + USAGE); process.exit(1); }
+  if ((o.earlierAdoption !== null || o.earlierDeclined) && !o.stamp) { console.error('upgrade-audit: --earlier-adoption and --earlier-declined record the answer to the earlier read for --stamp; run them with --stamp\n' + USAGE); process.exit(1); }
+  if (o.earlierAdoption !== null && o.earlierDeclined) { console.error('upgrade-audit: --earlier-adoption records a read and --earlier-declined a no; give one of them\n' + USAGE); process.exit(1); }
+  if (o.earlierAdoption === '') { console.error('upgrade-audit: --earlier-adoption takes the path of the rows file, one row per earlier release-note entry\n' + USAGE); process.exit(1); }
   return o;
 }
 function git(args, cwd) {
@@ -1726,7 +1893,11 @@ function main() {
   // the stamp's rows check. Its value is never echoed.
   if (opts.from && validVersion(opts.from) === null) { console.error('upgrade-audit: --from takes a version such as 7.0.0'); process.exit(1); }
   const startVersion = opts.from ? validVersion(opts.from) : referenceVersion(state);
-  if (opts.releaseNotes) { printReleaseNotes(notesRange(pluginRoot, startVersion, toVersion)); return; }
+  if (opts.releaseNotes) {
+    if (opts.earlier) { printEarlier(earlierRange(P, project, pluginRoot, state, startVersion), opts.out); return; }
+    printReleaseNotes(notesRange(pluginRoot, startVersion, toVersion));
+    return;
+  }
   if (opts.stamp) {
     // The --refuted and --adoption files are read before anything is written,
     // so a bad path stops the run with the state file untouched.
@@ -1734,6 +1905,8 @@ function main() {
     if (refutedKeys === null) { console.error('upgrade-audit: the --refuted file could not be read: ' + opts.refuted); process.exit(1); }
     const rowsText = opts.adoption === null ? '' : readText(path.resolve(opts.adoption));
     if (rowsText === null) { console.error('upgrade-audit: the --adoption file could not be read: ' + opts.adoption); process.exit(1); }
+    const earlierRowsText = opts.earlierAdoption === null ? null : readText(path.resolve(opts.earlierAdoption));
+    if (opts.earlierAdoption !== null && earlierRowsText === null) { console.error('upgrade-audit: the --earlier-adoption file could not be read: ' + opts.earlierAdoption); process.exit(1); }
     // A stamp never lowers the record: a project audited (or set up) on a
     // newer plugin than this one keeps what it has. Only validated versions are
     // compared or printed.
@@ -1746,11 +1919,18 @@ function main() {
     // before the version is recorded, and the rows become the project's
     // adoption record. Nothing is written while a row is missing or wrong.
     const adoption = adoptionCheck(P, notesRange(pluginRoot, startVersion, toVersion), rowsText);
-    if (adoption.problems.length) {
-      for (const p of adoption.problems) console.error('upgrade-audit: ' + p);
-      console.error('upgrade-audit: not stamping: the adoption rows ' + (opts.adoption === null ? '(no --adoption file was given)' : 'in ' + opts.adoption) + ' do not cover this range, and nothing was written; write one row per entry --release-notes prints, then stamp again');
+    // The earlier read (issue #286) is worked out from the record as it stands,
+    // before this upgrade's own section is appended, and checked in the same
+    // pass, so nothing is written while either answer is missing or wrong.
+    const earlierAnswer = earlierCheck(earlierRange(P, project, pluginRoot, state, startVersion), earlierRowsText, opts.earlierDeclined);
+    if (adoption.problems.length || earlierAnswer.problems.length) {
+      for (const p of adoption.problems.concat(earlierAnswer.problems)) console.error('upgrade-audit: ' + p);
+      if (adoption.problems.length) console.error('upgrade-audit: not stamping: the adoption rows ' + (opts.adoption === null ? '(no --adoption file was given)' : 'in ' + opts.adoption) + ' do not cover this range, and nothing was written; write one row per entry --release-notes prints, then stamp again');
+      if (earlierAnswer.problems.length) console.error('upgrade-audit: not stamping: the earlier read ' + (opts.earlierAdoption !== null ? 'rows in ' + opts.earlierAdoption + ' do not cover its range' : 'has no answer the stamp can record') + ', and nothing was written; write one row per entry --release-notes --earlier lists, or pass --earlier-declined after a no, then stamp again');
       process.exit(1);
     }
+    if (earlierAnswer.section !== null) writeAdoption(P, earlierAnswer.section);
+    if (earlierAnswer.note !== null) console.error('upgrade-audit: ' + earlierAnswer.note);
     if (adoption.section !== null) {
       writeAdoption(P, adoption.section);
       console.error('upgrade-audit: recorded ' + adoption.rows + ' adoption row' + (adoption.rows === 1 ? '' : 's') + ' in ' + ADOPTION_REL);

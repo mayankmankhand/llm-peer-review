@@ -434,7 +434,15 @@ function rowsFor(notes) {
 }
 function stampWithRows(argv) {
   const notesArgv = argv.filter((a, i) => a !== '--stamp' && a !== '--refuted' && argv[i - 1] !== '--refuted').concat('--release-notes');
-  return argv.concat('--adoption', rowsFor(spawnSync('node', notesArgv, { encoding: 'utf8' })));
+  const withRows = argv.concat('--adoption', rowsFor(spawnSync('node', notesArgv, { encoding: 'utf8' })));
+  // Issue #286: a project that began before its first recorded read is
+  // offered the earlier notes once, and the stamp needs the answer. These
+  // cases test other things, so they decline it when it is offered.
+  const earlierOut = path.join(TMP, 'stamp-earlier-' + (++stampRowFiles) + '.md');
+  const offered = spawnSync('node', notesArgv.concat('--earlier', '--out', earlierOut), { encoding: 'utf8' });
+  let offer = false;
+  try { offer = JSON.parse(offered.stdout).offer === true; } catch (e) { offer = false; }
+  return offer ? withRows.concat('--earlier-declined') : withRows;
 }
 // Does the receipt's output show what the finding stands on? It exits 0, and:
 // a finding with a line shows that line (awk and grep -n both print `<n>:`); a
@@ -2748,6 +2756,152 @@ console.log('\n7d. release notes: what --release-notes prints and the adoption r
   const newerState = stateOf(newer);
   r = run(newer, ROOT, ['--stamp']);
   check('257 stamp: the newer-record refusal still comes first', r.status === 0 && /not stamping: [^\n]*already records 9\.0\.0/.test(r.stderr) && !/adoption row/.test(r.stderr) && stateOf(newer) === newerState && outLines(r.stderr).length === 1, said(r));
+
+  // --- the earlier read (issue #286) ----------------------------------------------------------
+  // A project audited before 8.0.6 holds an adoption record that starts after
+  // the version it began on. --release-notes --earlier --out <file> finds the
+  // entries in between, writes them to <file> with line ranges to read it by,
+  // and the stamp records the rows (--earlier-adoption) or the decline
+  // (--earlier-declined) once, so the offer never returns.
+  const outFile = () => path.join(TMP, 'notes-earlier-' + (++n) + '.md');
+  const earlier = (dir, root, out) => run(dir, root, ['--release-notes', '--earlier', '--out', out]);
+  const migrated = (audited, prev) => ({ version: audited, auditedVersion: audited, path: 'copy-migrated', previousVersion: prev });
+  const sec = (from, to, tag) => '## ' + from + ' -> ' + to + ' (2026-10-01' + (tag ? ', ' + tag : '') + ')\n\n- x no action: y\n';
+  const record = (...sections) => '# Adoption record\n\nx\n\n' + sections.join('\n');
+  const coversAll = (file, ranges) => {
+    const lines = read(file).replace(/\n$/, '').split('\n');
+    if (!Array.isArray(ranges) || !ranges.length || ranges[0].from !== 1 || ranges[ranges.length - 1].to !== lines.length) return false;
+    return ranges.every((g, i) => (i === 0 || (g.from === ranges[i - 1].to + 1 && /^## /.test(lines[g.from - 1])))
+      && Buffer.byteLength(lines.slice(g.from - 1, g.to).join('\n') + '\n') <= 28500);
+  };
+
+  let f = outFile();
+  const mig = project(migrated('1.1.0', '1.0.0'));
+  r = earlier(mig, ROOT, f);
+  j = notesOf(r);
+  check('286 earlier: a migrated project is offered the entries between its old version and its first recorded read',
+    r.status === 0 && j !== null && j.offer === true && j.from === '1.0.0' && j.to === '1.1.0' && j.count === 2 && j.file === f && fs.existsSync(f)
+      && read(f).includes('\n## 1.1.0#1 (Added)\n\n- **First addition.** Its text.\n  - a nested bullet under it\n') && read(f).includes('\n## 1.1.0#2 (Added)\n') && !read(f).includes('1.2.0#1') && coversAll(f, j.ranges),
+    said(r) + ' | ' + r.stdout.slice(0, 300));
+  f = outFile();
+  r = earlier(project(migrated('1.2.0', '1.0.0'), { '.claude/toolkit/adoption.md': record(sec('1.1.0', '1.2.0')) }), ROOT, f);
+  j = notesOf(r);
+  check('286 earlier: the end is the oldest adoption section start', r.status === 0 && j && j.offer === true && j.from === '1.0.0' && j.to === '1.1.0' && j.count === 2, said(r) + ' | ' + r.stdout.slice(0, 200));
+  // A fresh setup records no previousVersion: its first committed state file says where it began.
+  const freshGit = project(null);
+  const g = (args) => spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=T', '-c', 'commit.gpgsign=false'].concat(args), { cwd: freshGit, encoding: 'utf8' });
+  g(['init', '-q']);
+  write(freshGit, '.claude/.toolkit-state.json', JSON.stringify({ version: '1.0.0', auditedVersion: '1.0.0', path: 'plugin', previousVersion: null }));
+  g(['add', '.claude/.toolkit-state.json']); g(['commit', '-qm', 'setup']);
+  write(freshGit, '.claude/.toolkit-state.json', JSON.stringify({ version: '1.1.0', auditedVersion: '1.1.0', path: 'plugin', previousVersion: null }));
+  g(['add', '.claude/.toolkit-state.json']); g(['commit', '-qm', 'upgrade']);
+  f = outFile();
+  r = earlier(freshGit, ROOT, f);
+  j = notesOf(r);
+  check('286 earlier: a fresh setup starts at the version its first committed state file records',
+    r.status === 0 && j && j.offer === true && j.from === '1.0.0' && j.to === '1.1.0' && j.count === 2, said(r) + ' | ' + r.stdout.slice(0, 200));
+  f = outFile();
+  r = earlier(project(migrated('1.1.0', 'unknown')), ROOT, f);
+  j = notesOf(r);
+  check('286 earlier: a recorded unknown start reads from the oldest shipped notes',
+    r.status === 0 && j && j.offer === true && j.from === 'unknown' && j.to === '1.1.0' && j.count === 3 && read(f).includes('\n## 1.0.0#1\n'), said(r) + ' | ' + r.stdout.slice(0, 200));
+  f = outFile();
+  r = earlier(project(migrated('1.1.0', '0.9.0')), ROOT, f);
+  j = notesOf(r);
+  check('286 earlier: a start older than the oldest shipped notes reads from the oldest',
+    r.status === 0 && j && j.offer === true && j.from === '0.9.0' && j.count === 3 && /older than the oldest/.test(j.note || ''), said(r) + ' | ' + r.stdout.slice(0, 200));
+  const none = [
+    project(migrated('1.2.0', '1.1.0'), { '.claude/toolkit/adoption.md': record(sec('1.1.0', '1.2.0')) }),
+    project(migrated('1.2.0', '1.0.0'), { '.claude/toolkit/adoption.md': record(sec('1.0.0', '1.1.0', 'earlier notes'), sec('1.1.0', '1.2.0')) }),
+    project(migrated('1.2.0', '1.0.0'), { '.claude/toolkit/adoption.md': record(sec('1.0.0', '1.1.0', 'earlier notes declined'), sec('1.1.0', '1.2.0')) }),
+    project(at('1.1.0')),
+  ].map((d) => { const o = outFile(); const x = earlier(d, ROOT, o); return { x, j: notesOf(x), o }; });
+  check('286 earlier: nothing is offered when the record reaches back, when the earlier read or its decline is recorded, or when no start can be found',
+    none.every((c) => c.x.status === 0 && c.j && c.j.offer === false && typeof c.j.note === 'string' && c.j.note.length > 0 && !fs.existsSync(c.o)),
+    JSON.stringify(none.map((c) => c.j)));
+  const unrec = [
+    project(migrated('1.2.0', '1.0.0'), { '.claude/toolkit/adoption.md': record(sec('unrecorded', '1.2.0')) }),
+    project({ path: 'copy-migrated', previousVersion: 'unknown' }),
+  ].map((d) => { const o = outFile(); const x = earlier(d, ROOT, o); return { x, j: notesOf(x), o }; });
+  check('286 earlier: nothing is offered when the first read started unrecorded, with or without a record',
+    unrec.every((c) => c.x.status === 0 && c.j && c.j.offer === false && /unrecorded/.test(c.j.note || '') && !fs.existsSync(c.o)),
+    JSON.stringify(unrec.map((c) => c.j)));
+  // A long range: sixty entries of about 1.8 KB each, about 108 KB in all.
+  const big = ['# Release notes', 'x', '', '## v1.2.0 - Top (2026-10-03)', '', '- **Top.** One.', '', '## v1.1.0 - Long (2026-10-02)', '', '### Changed', ''];
+  for (let k = 1; k <= 60; k++) big.push('- **Entry ' + k + '.** ' + 'word '.repeat(360), '  - nested line ' + k, '');
+  big.push('## v1.0.0 - Base (2026-10-01)', '', '- **Base.** Out.', '');
+  const BIG = notesRoot('notes-big', '1.2.0', big.join('\n'));
+  f = outFile();
+  r = earlier(project(migrated('1.1.0', '1.0.0')), BIG, f);
+  j = notesOf(r);
+  check('286 earlier: the ranges cover every line of the file, none over 28,500 bytes, each starting at an entry',
+    r.status === 0 && j && j.offer === true && j.count === 60 && j.ranges.length >= 4 && coversAll(f, j.ranges), said(r) + ' | ' + JSON.stringify(j && j.ranges));
+  f = outFile();
+  r = earlier(project(migrated('8.0.15', '6.3.3'), { '.claude/toolkit/adoption.md': record(sec('7.6.5', '8.0.7'), sec('8.0.7', '8.0.15')) }), path.join(REPO, 'plugin'), f);
+  j = notesOf(r);
+  check('286 earlier: on the plugin own notes a project shaped like the reported one is offered 251 entries from 6.3.3 to 7.6.5',
+    r.status === 0 && j && j.offer === true && j.from === '6.3.3' && j.to === '7.6.5' && j.count === 251 && coversAll(f, j.ranges), said(r) + ' | ' + JSON.stringify(j && { from: j.from, to: j.to, count: j.count }));
+
+  const normalRows = () => rows(['1.2.0#1 no action: nothing here']);
+  const stampEarlier = project(migrated('1.1.0', '1.0.0'));
+  r = run(stampEarlier, ROOT, ['--stamp', '--adoption', normalRows(), '--earlier-adoption', rows(['1.1.0#2 raised: docs/guide.md line 4 restates it Decision: keep our own wording', '1.1.0#1 no action: no overlap'])]);
+  const both = adoptionOf(stampEarlier) || '';
+  check('286 stamp: earlier rows are checked against the earlier range and written as their own section',
+    r.status === 0 && both.includes('\n## 1.0.0 -> 1.1.0 (' + today + ', earlier notes)\n\n- 1.1.0#1 no action: no overlap\n- 1.1.0#2 raised: docs/guide.md line 4 restates it Decision: keep our own wording\n')
+      && both.includes('\n## 1.1.0 -> 1.2.0 (' + today + ')\n\n- 1.2.0#1 no action: nothing here\n') && audited(stampEarlier) === '1.2.0',
+    said(r) + ' | ' + JSON.stringify(both));
+  const neither = project(migrated('1.1.0', '1.0.0'));
+  const neitherState = stateOf(neither);
+  r = run(neither, ROOT, ['--stamp', '--adoption', normalRows()]);
+  check('286 stamp: refuses while an earlier read applies and neither flag is given, naming both, and writes nothing',
+    r.status === 1 && r.stderr.includes('--earlier-adoption') && r.stderr.includes('--earlier-declined') && stateOf(neither) === neitherState && adoptionOf(neither) === null, said(r));
+  const badEarlier = project(migrated('1.1.0', '1.0.0'));
+  const badEarlierState = stateOf(badEarlier);
+  r = run(badEarlier, ROOT, ['--stamp', '--adoption', normalRows(), '--earlier-adoption', rows(['1.1.0#1 no action: a', '1.1.0#1 no action: again', '1.2.0#1 no action: not earlier', '1.1.0#3 raised: no such entry'])]);
+  check('286 stamp: refuses a missing earlier row, an id outside the earlier range, a repeat and a raised row with no decision, writing nothing',
+    r.status === 1 && /earlier row 2 repeats 1\.1\.0#1/.test(r.stderr) && /earlier row 3 names 1\.2\.0#1, which is not an entry in the earlier range/.test(r.stderr) && /no earlier row for 1\.1\.0#2/.test(r.stderr)
+      && stateOf(badEarlier) === badEarlierState && adoptionOf(badEarlier) === null,
+    said(r) + ' | ' + outLines(r.stderr).join(' | ').slice(0, 400));
+  const noDecision = project(migrated('1.1.0', '1.0.0'));
+  r = run(noDecision, ROOT, ['--stamp', '--adoption', normalRows(), '--earlier-adoption', rows(['1.1.0#1 no action: a', '1.1.0#2 raised: overlaps a guide'])]);
+  check('286 stamp: refuses a raised earlier row with no decision', r.status === 1 && /earlier row 2 raises 1\.1\.0#2 with no " Decision: /.test(r.stderr) && adoptionOf(noDecision) === null, said(r));
+  const after = project(migrated('1.2.0', '1.0.0'), { '.claude/toolkit/adoption.md': record(sec('1.0.0', '1.1.0', 'earlier notes declined'), sec('1.1.0', '1.2.0')) });
+  r = run(after, ROOT, ['--stamp', '--earlier-declined']);
+  check('286 stamp: a flag given after the earlier read is recorded is ignored with a note', r.status === 0 && /already holds the earlier read/.test(r.stderr) && audited(after) === '1.2.0', said(r));
+  const nowhere = project(at('1.1.0'));
+  const nowhereState = stateOf(nowhere);
+  r = run(nowhere, ROOT, ['--stamp', '--adoption', normalRows(), '--earlier-declined']);
+  check('286 stamp: a flag given when no earlier read applies is refused, writing nothing',
+    r.status === 1 && /no earlier read applies/.test(r.stderr) && stateOf(nowhere) === nowhereState && adoptionOf(nowhere) === null, said(r));
+
+  // The two paths end to end, each on its own project, through the real script.
+  const flow = (answer) => {
+    const dir = project(migrated('1.1.0', '1.0.0'));
+    const first = earlier(dir, ROOT, outFile());
+    const ans = answer === 'decline' ? ['--earlier-declined'] : ['--earlier-adoption', rows(['1.1.0#1 no action: a', '1.1.0#2 no action: b'])];
+    const st = run(dir, ROOT, ['--stamp', '--adoption', normalRows()].concat(ans));
+    const second = outFile();
+    const again = earlier(dir, ROOT, second);
+    return { first: notesOf(first), st, again: notesOf(again), secondWritten: fs.existsSync(second), record: adoptionOf(dir) || '', audited: audited(dir) };
+  };
+  const flows = [flow('decline'), flow('read')];
+  check('286 flow: offer, decline, stamp, then no offer; offer, read, stamp, then no offer',
+    flows.every((x) => x.first && x.first.offer === true && x.st.status === 0 && x.audited === '1.2.0' && x.again && x.again.offer === false && !x.secondWritten && x.record.includes('\n## 1.1.0 -> 1.2.0 (' + today + ')\n'))
+      && flows[0].record.includes('\n## 1.0.0 -> 1.1.0 (' + today + ', earlier notes declined)\n\n- declined: not read, on the owner\'s answer\n')
+      && flows[1].record.includes('\n## 1.0.0 -> 1.1.0 (' + today + ', earlier notes)\n\n- 1.1.0#1 no action: a\n'),
+    JSON.stringify(flows.map((x) => ({ first: x.first && x.first.offer, stamp: said(x.st), again: x.again && x.again.offer, audited: x.audited }))));
+
+  const usageDir = project(migrated('1.1.0', '1.0.0'));
+  const usageBefore = snapshot(usageDir);
+  const usage = [
+    run(usageDir, ROOT, ['--earlier', '--out', outFile()]),
+    run(usageDir, ROOT, ['--release-notes', '--earlier']),
+    run(usageDir, ROOT, ['--release-notes', '--out', outFile()]),
+    run(usageDir, ROOT, ['--stamp', '--adoption', normalRows(), '--earlier-declined', '--earlier-adoption', rows(['1.1.0#1 no action: a'])]),
+    run(usageDir, ROOT, ['--earlier-declined']),
+  ];
+  check('286 notes: usage errors write nothing', usage.every((x) => x.status === 1 && /^upgrade-audit: /.test(x.stderr)) && snapshot(usageDir) === usageBefore,
+    usage.map(said).join(' | '));
 }
 }
 if (OWN('9b')) {
