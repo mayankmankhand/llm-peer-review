@@ -529,3 +529,7 @@
 ## Issues 282 and 283 (the folder guard and the position-free recheck)
 
 - **When a rule matches commands by name, list every allowed command that prints the same output, and test each.**
+
+## Issues 284 to 286 (the folder push, landing conflicts, earlier notes)
+
+- **Resolve a folder as the tool using it will: tidying the text undoes link/.., but git follows the link.**
