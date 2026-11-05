@@ -103,7 +103,7 @@ After the findings (and `### More findings`, when present), list every finding t
 - **R9** `REFUTED` - [What] (skeptic: one-clause reason)
 - **R2** `REFUTED 2/3` - [What] (two of three skeptics refuted: one-clause reason)
 
-A downgraded finding is a survivor and never appears here. When a skeptic attached a `split:` line to a finding it refuted, list it directly under that finding's Audited out line as an open digest item: `  - split: <the sub-claim>`. It is a note for the human, never a finding: no ID of its own, no fields, no fix.
+A downgraded finding is a survivor and never appears here. When a skeptic attached a `split:` line to a finding it refuted, list it directly under that finding's Audited out line: `  - split: <the sub-claim> (seeded as RN)`, because the runner turns each split note into one seeded Warn. Only a split note on a seeded Warn stays a note for the human: `  - split: <the sub-claim>`, with no ID of its own, no fields and no fix.
 
 When nothing was killed, print `Audited out: none - all findings survived the audit.` **Never omit the section.** It is the run's log exit and M8 requires it stay inspectable; a report with no Audited out section is indistinguishable from a run that never audited at all.
 
