@@ -1260,9 +1260,11 @@ function buildVerify(parsed, scope, opts) {
   const rechecks = [];
   const needsExpect = [];
   const recheckRows = {};
+  const keptRows = {};
   for (const id of lists.mechanical.slice().sort(byNumber)) {
     const m = byId.get(id);
     const rows = [];
+    const kept = [];
     let anySaved = false;
     let firstFile = null;
     for (const src of m.sources) {
@@ -1280,13 +1282,16 @@ function buildVerify(parsed, scope, opts) {
       // writes this row's expect instead (issue #283).
       if (expect !== PLACEHOLDER_EXPECT && typeof expect.noMatch === 'string' && expect.noMatch !== src.receipt.expect.match
         && fs.existsSync(saved) && linesFound(fs.readFileSync(saved, 'utf8'), expect.noMatch) > 1) expect = PLACEHOLDER_EXPECT;
-      rows.push({ id: stem + '-recheck-r' + roundOf(id), check: src.receipt.check, expect });
+      const row = { id: stem + '-recheck-r' + roundOf(id), check: src.receipt.check, expect };
+      rows.push(row);
+      kept.push(Object.assign({ saved }, row));
     }
     if (!rows.length) throw badInput('usage', null, id + ' is named under --mechanical but carries no receipt check to run again');
     if (!anySaved) throw badInput('missing_receipt', null, 'no saved tier 1 output for ' + id + ' at ' + firstFile + '; a finding whose check never ran cannot be rechecked');
     if (rows.some((r) => r.expect === PLACEHOLDER_EXPECT)) needsExpect.push(id);
     for (const r of rows) rechecks.push(r);
     recheckRows[id] = rows.map((r) => r.id);
+    keptRows[id] = kept;
   }
 
   // Verifier shards: the finding bytes, then the diff of the fixes and the
@@ -1366,7 +1371,13 @@ function buildVerify(parsed, scope, opts) {
     f.path = pathOf[id];
     f.round += 1;
     if (!f.rechecks) f.rechecks = {};
-    if (recheckRows[id]) f.rechecks[String(f.round)] = recheckRows[id];
+    if (recheckRows[id]) {
+      f.rechecks[String(f.round)] = recheckRows[id];
+      // The row as written here. The recheck file is the runner's to run and can be
+      // edited; this copy is what --verdicts --recheck holds the results to.
+      if (!f.kept) f.kept = {};
+      f.kept[String(f.round)] = keptRows[id];
+    }
     rounds[id] = f.round;
   }
   return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds, renumbered };
@@ -1489,6 +1500,8 @@ function verifyMain(argv, fail) {
   }
   try { fs.mkdirSync(opts.out, { recursive: true }); } catch (e) { fail('not_found', null, opts.out + ' could not be made: ' + e.message); }
   for (const f of built.files) fs.writeFileSync(path.join(opts.out, f.name), f.text, { flag: 'wx' });
+  // The call itself, so a recheck record can print the judgment retry.
+  built.ledger.lastVerify = { file: positional[0], receipts: opts.receipts, scope: opts.scope, out: opts.out, end: opts.end, root: opts.root, rootGiven: opts.rootGiven };
   writeLedger(built.ledgerFile, built.ledger);
   const recheck = built.files.find((f) => f.kind === 'recheck');
   process.stdout.write(JSON.stringify({
@@ -1544,6 +1557,16 @@ function recordVerdicts(file, verdicts, source, from, fail) {
 // finding none of whose rows are in this results file was not rechecked by it
 // (an earlier round's finding, when a later round's file is recorded): it keeps
 // its verdicts and is listed under notInResults.
+//
+// The row that ran is held to the row --verify kept, because the runner that wrote
+// the fix can reach the file that judges it (review 2026-10-26-183019 did: a recheck
+// failed, its row was edited, and the edited row passed). A row that ran another
+// command or expect records NOT VERIFIED with a check_changed reason naming both:
+// the kept row goes back into the recheck file and is run again in the same round,
+// so a pass there is FIXED, and only a fail prints the judgment retry. A placeholder
+// row has no expect to hold it to, since writing one is the runner's job, so only
+// its command is held; an expect that the proof's saved output from before the fix
+// already meets proves nothing and records NOT VERIFIED with a vacuous_expect reason.
 function recordRechecks(opts, read, fail) {
   let ledger;
   try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
@@ -1553,6 +1576,10 @@ function recordRechecks(opts, read, fail) {
   const recorded = {};
   const unverified = [];
   const notInResults = [];
+  const rewritten = [];
+  const changedIds = [];
+  const hollowIds = [];
+  const retryIds = [];
   const at = new Date().toISOString();
   for (const id of Object.keys(ledger.findings).sort(byNumber)) {
     const f = ledger.findings[id];
@@ -1562,11 +1589,17 @@ function recordRechecks(opts, read, fail) {
     if (found.every((c) => c === null)) { notInResults.push(id); continue; }
     const missing = rowIds.filter((r, k) => found[k] === null);
     const refused = found.filter((c) => c && c.verdict === 'error');
+    const { changed, hollow } = missing.length || refused.length ? { changed: [], hollow: [] } : compareKept(f, rows);
     let verdict;
     let reason = null;
     if (missing.length) { verdict = 'NOT VERIFIED'; reason = 'no row for ' + missing.join(', ') + ' in ' + opts.recheck; }
     else if (refused.length) { verdict = 'NOT VERIFIED'; reason = 'the runner refused ' + refused.map((c) => c.id + ' (' + (c.detail || 'no detail') + ')').join('; '); }
+    else if (changed.length) { verdict = 'NOT VERIFIED'; reason = 'check_changed: ' + changed.map((c) => c.kept.id + ' ran ' + rowText(c.ran) + ' where the verify step kept ' + rowText(c.kept)).join('; '); }
+    else if (hollow.length) { verdict = 'NOT VERIFIED'; reason = 'vacuous_expect: ' + hollow.map((k) => k.id + ' passes on the saved output from before the fix (' + k.saved + ')').join('; '); }
     else verdict = found.every((c) => c.verdict === 'pass') ? 'FIXED' : 'NOT FIXED';
+    if (changed.length) { rewritten.push(...changed); changedIds.push(id); }
+    if (hollow.length) hollowIds.push(id);
+    if (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || ''))) retryIds.push(id);
     const entry = { round: f.round, verdict, source: 'recheck', from: opts.recheck, at };
     if (reason) entry.reason = reason;
     f.verdicts.push(entry);
@@ -1575,14 +1608,65 @@ function recordRechecks(opts, read, fail) {
   writeLedger(opts.ledger, ledger);
   // An unverified finding keeps its round, and what to do next is printed the
   // way --verify prints it (issue #272): fill the expect of each refused or
-  // missing row, run the recheck file again, record again.
+  // missing row, run the recheck file again, record again. A rewritten row needs
+  // no write: its kept row goes back into the file here.
   const next = [];
   const again = unverified.length ? recheckFileFor(opts.ledger, ledger, unverified) : null;
   if (again) {
-    next.push({ do: 'write', ids: unverified, file: again, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
+    if (rewritten.length) restoreKept(again, rewritten.map((c) => c.kept));
+    const toFill = unverified.filter((id) => !changedIds.includes(id) && !hollowIds.includes(id));
+    if (toFill.length) next.push({ do: 'write', ids: toFill, file: again, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
+    if (hollowIds.length) next.push({ do: 'write', ids: hollowIds, file: again, what: 'an expect the fix must satisfy and the saved output from before the fix does not already meet' });
     next.push({ do: 'run', command: 'node ' + shellWord(besideSelf('run-checks.js')) + ' --checks ' + shellWord(again) + ' --out ' + shellWord(path.dirname(opts.recheck)), record: 'node ' + shellWord(selfPath()) + ' --verdicts --ledger ' + shellWord(opts.ledger) + ' --recheck ' + shellWord(opts.recheck) });
   }
+  if (retryIds.length && ledger.lastVerify) {
+    const l = ledger.lastVerify;
+    next.push({ do: 'run', ids: retryIds, what: 'the kept check still fails after a rewrite, so a fresh verifier judges the fix', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
+  }
   process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
+}
+
+// A row as a reason quotes it: its command and its expect.
+function rowText(r) { return JSON.stringify(r.check) + ' expecting ' + require(path.join(__dirname, 'run-checks.js')).canonical(r.expect); }
+
+// Whether an expect passes on a saved receipt output (its body, then `exit N`).
+function metBeforeFix(expect, savedFile) {
+  let text;
+  try { text = fs.readFileSync(savedFile, 'utf8'); } catch (e) { return false; }
+  const tail = /(^|\n)exit (\d+)\n?$/.exec(text);
+  if (!tail) return false;
+  const body = text.slice(0, tail.index + tail[1].length);
+  return require(path.join(__dirname, 'run-checks.js')).decide(expect, Number(tail[2]), body).verdict === 'pass';
+}
+
+// The results rows of one finding held to its kept rows: { changed, hollow }. A
+// ledger written before rows were kept has none, so it is held to nothing.
+function compareKept(f, rows) {
+  const { drifted } = require(path.join(__dirname, 'run-checks.js'));
+  const changed = [];
+  const hollow = [];
+  for (const kept of (f.kept && f.kept[String(f.round)]) || []) {
+    const ran = rows.get(kept.id);
+    if (!ran) continue;
+    const filled = kept.expect === PLACEHOLDER_EXPECT;
+    if (filled ? ran.check !== undefined && ran.check !== kept.check : drifted(ran, kept.check, kept.expect, ran.role)) changed.push({ kept, ran });
+    else if (filled && ran.verdict === 'pass' && metBeforeFix(ran.expect, kept.saved)) hollow.push(kept);
+  }
+  return { changed, hollow };
+}
+
+// The kept rows back into the recheck file, so what runs next is what --verify
+// wrote. A filled-in expect stays: the placeholder it replaced cannot be run.
+function restoreKept(file, keptRows) {
+  const byId = new Map(keptRows.map((k) => [k.id, k]));
+  const rows = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const r of rows) {
+    const k = byId.get(r.id);
+    if (!k) continue;
+    r.check = k.check;
+    if (k.expect !== PLACEHOLDER_EXPECT) r.expect = k.expect;
+  }
+  fs.writeFileSync(file, JSON.stringify(rows, null, 2) + '\n');
 }
 
 // --checkpoint --ledger <ledger.json> [--root <dir>]: HEAD as the last green (M4),

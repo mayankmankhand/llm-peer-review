@@ -2376,5 +2376,5 @@ function main(argv) {
 
 // fingerprint is also the toolkit repo's release gate's (issue #249): one
 // definition of "the same files" for a skipped test run and a reused pass.
-module.exports = { tokenize, guardCheck, rebuildCommand, decide, ALLOW, main, parsePlan, fingerprint };
+module.exports = { tokenize, guardCheck, rebuildCommand, decide, canonical, drifted, ALLOW, main, parsePlan, fingerprint };
 if (require.main === module) main(process.argv.slice(2));
