@@ -448,6 +448,15 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('an all-capitals word outside the set is a problem even beside a valid verdict', keepBeside.status === 1 && /"word":"KEEP"/.test(keepBeside.stdout), keepBeside.stdout);
   const t2down = run(['--verdicts', shard, ret('R2: DOWNGRADE Warn\nR3: STANDS\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
   check('DOWNGRADE is not a tier 2 word', t2down.status === 1 && /"word":"DOWNGRADE"/.test(t2down.stdout), t2down.stdout);
+  // A judge keeps a true finding that another defect hides with one more line,
+  // `masked: <the defect>`. The reader takes it as prose: it decides nothing and
+  // stays in the saved return, so it can never turn into a verdict or a problem.
+  const masked = run(['--verdicts', shard, ret('R2: STANDS\nThe claim holds in the code.\nmasked: R6, the crash at app.js line 7 stops this handler\nR3: REFUTED\nR4: STANDS\nmasked: a null lookup stops the script\nR5: STANDS\nR6: STANDS\n')]);
+  const maskedRead = parse(masked) || {};
+  const maskedVerdicts = maskedRead.verdicts || {};
+  check('masked: a tier-2 return with a masked line keeps every verdict and reports no problem',
+    masked.status === 0 && maskedVerdicts.R2 === 'STANDS' && maskedVerdicts.R3 === 'REFUTED' && maskedVerdicts.R4 === 'STANDS' && maskedVerdicts.R5 === 'STANDS' && maskedVerdicts.R6 === 'STANDS'
+      && (maskedRead.returns || [{ problems: ['no returns'] }])[0].problems.length === 0, masked.stdout);
 
   // Tier 3: the tally in M2's order, the condition rule, and the two-ballot rule.
   const T3 = ['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3,R4'];
