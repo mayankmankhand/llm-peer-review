@@ -1758,6 +1758,68 @@ function cycle162ReviewTests() {
     lk.html.indexOf(fakeKey) === -1 && /redacted/.test(finds(island(lk.html))[0].receipt.stdout.join('\n')) && /redacted/.test(lk.stderr),
     lk.stderr.trim());
 
+  // --- harness report check: the page masker carries all 15 push-checker patterns ---
+  // The masker had fallen to 8 of the push checker's 15 patterns, though its
+  // comment said to update both together. The names are pinned here as literals,
+  // never read from the code checked, so a pattern added to either list fails
+  // this until the other list and the samples below catch up.
+  const SECRET_NAMES = ['private-key-block', 'aws-access-key', 'github-token', 'openai-key',
+    'google-api-key', 'fal-key', 'slack-token', 'gitlab-pat', 'gitlab-token', 'npm-token',
+    'pypi-token', 'jwt', 'netrc-record', 'url-with-credentials', 'secret-assignment'];
+  const listNames = function (rel, decl) {
+    const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+    const start = src.indexOf(decl);
+    const end = start === -1 ? -1 : src.indexOf('\n];', start);
+    if (end === -1) return [];
+    return (src.slice(start, end).match(/name: ["'][a-z-]+["']/g) || []).map(function (s) { return s.slice(7, -1); });
+  };
+  const maskerNames = listNames('.claude/scripts/render-html.js', 'const RECEIPT_SECRET_PATTERNS = [');
+  const checkerNames = listNames('.claude/scripts/pre-push-check.js', 'const PATTERNS = [');
+  check('masker: the page masker and the push checker name the same 15 patterns',
+    maskerNames.join() === SECRET_NAMES.join() && checkerNames.join() === SECRET_NAMES.join(),
+    'page masker: ' + (maskerNames.join(', ') || 'no names') + ' | push checker: ' + checkerNames.join(', '));
+
+  // One sample per pattern, each assembled at run time from pieces, so this file
+  // carries nothing the push checker would flag (a fixture has to dodge every
+  // pattern in the scanner, not just its own). `hide` is the part of each sample
+  // that must not reach the page.
+  const SECRET_SAMPLES = {
+    'private-key-block': { text: ['-----BEGIN RSA', 'PRIVATE KEY-----'].join(' '), hide: 'RSA PRIVATE KEY' },
+    'aws-access-key': { text: ['AK', 'IAQWERTYUIOPASDFGH'].join(''), hide: 'QWERTYUIOPASDFGH' },
+    'github-token': { text: ['gh', 'p_', 'GithubBody', 'x'.repeat(26)].join(''), hide: 'GithubBody' },
+    'openai-key': { text: ['sk', 'OpenaiBody' + 'y'.repeat(20)].join('-'), hide: 'OpenaiBody' },
+    'google-api-key': { text: ['AI', 'za', 'GoogleBody', 'z'.repeat(25)].join(''), hide: 'GoogleBody' },
+    'fal-key': { text: ['0123abcd-4567-89ab-cdef-0123456789ab', 'fa1'.repeat(10) + 'fa'].join(':'), hide: 'fa1fa1fa1fa1' },
+    'slack-token': { text: ['xo', 'xb-', 'SlackBody', '1'.repeat(10)].join(''), hide: 'SlackBody' },
+    'gitlab-pat': { text: ['gl', 'pat-', 'GitlabPatBody', '2'.repeat(10)].join(''), hide: 'GitlabPatBody' },
+    'gitlab-token': { text: ['gl', 'dt-', 'GitlabDeployBody', '3'.repeat(8)].join(''), hide: 'GitlabDeployBody' },
+    'npm-token': { text: ['np', 'm_', 'NpmBody', '4'.repeat(29)].join(''), hide: 'NpmBody' },
+    'pypi-token': { text: ['py', 'pi-', 'PypiBody', '5'.repeat(10)].join(''), hide: 'PypiBody' },
+    'jwt': { text: ['ey' + 'JhJwtHeader00', 'ey' + 'JpJwtPayload00', 'JwtSignature00'].join('.'), hide: 'JwtPayload00' },
+    'netrc-record': { text: ['machine', 'example.com', 'login', 'alice', 'pass' + 'word', 'NetrcPass9'].join(' '), hide: 'NetrcPass9' },
+    'url-with-credentials': { text: ['https', '//alice:UrlPass77@example.com/x'].join(':'), hide: 'UrlPass77' },
+    'secret-assignment': { text: ['pass', 'word="AssignValue99"'].join(''), hide: 'AssignValue99' }
+  };
+  // A page keeps only the first 6 lines of a receipt, so the 15 samples travel
+  // three to a line: 5 lines, every one of them on the page, and each line also
+  // proves a second and third secret on one line are masked beside the first.
+  const sampleLines = [];
+  for (let i = 0; i < SECRET_NAMES.length; i += 3) {
+    sampleLines.push(SECRET_NAMES.slice(i, i + 3).map(function (n) {
+      return SECRET_SAMPLES[n] ? SECRET_SAMPLES[n].text : 'no-sample-for-' + n;
+    }).join('  '));
+  }
+  const allSecrets = path.join(rdir, 'all-secrets.txt');
+  fs.writeFileSync(allSecrets, sampleLines.join('\n') + '\nexit 0\n', 'utf-8');
+  const as = run('allsecrets', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'grep -r KEY .', stdoutFile: allSecrets } })] }] });
+  const asFound = finds(island(as.html))[0];
+  const asOut = asFound && asFound.receipt ? asFound.receipt.stdout.join('\n') : '';
+  const leaked = SECRET_NAMES.filter(function (n) { return !SECRET_SAMPLES[n] || as.html.indexOf(SECRET_SAMPLES[n].hide) !== -1; });
+  check('masker: all 15 push-checker patterns are hidden on the page',
+    leaked.length === 0 && (asOut.match(/\[redacted\]/g) || []).length >= SECRET_NAMES.length,
+    'left readable, or with no sample: ' + (leaked.join(', ') || 'none') + ' | redacted runs: ' + (asOut.match(/\[redacted\]/g) || []).length);
+
   fs.rmSync(dir, { recursive: true, force: true });
 }
 

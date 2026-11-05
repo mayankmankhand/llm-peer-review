@@ -1191,21 +1191,69 @@ const RECEIPT_MAX_BYTES = 64 * 1024;
 // secrets will naturally grep for one; its receipt would then carry the key
 // onto a page that may be published. The pre-push tripwire never sees a
 // publish, so the same shapes it scans for are masked here before a line is
-// kept (review of the #162 cycle, R12). Mirrors PATTERNS in pre-push-check.js;
-// update both together. Global flags, so a second secret on one line is not
-// left readable beside the first. One deliberate difference: the URL pattern
-// below has no mailto:/tel: skip (issue #168). The tripwire skips those to stop
-// blocking pushes on mangled mail links; here over-masking one costs nothing.
+// kept (review of the #162 cycle, R12). The list mirrors PATTERNS in
+// pre-push-check.js, by the same 15 names in the same order, and
+// scripts/test-render-html.js holds the two together: a pattern added to either
+// fails that test until the other catches up. (It had drifted to 8 of 15 while
+// this comment only asked for both to be updated together.) Global flags, so a
+// second secret on one line is not left readable beside the first. Two
+// deliberate differences, both toward masking more:
+//   - url-with-credentials has no mailto:/tel: skip (issue #168). The tripwire
+//     skips those to stop blocking pushes on mangled mail links; here
+//     over-masking one costs nothing.
+//   - netrc-record masks everywhere. The tripwire steps aside in markdown
+//     files, where documentation shows such records; a receipt is a check's
+//     output, not a document, so there is no prose to spare.
+// secret-assignment carries the tripwire's hide rule, so only the value is
+// masked and the key name, the operator and both quotes stay readable.
 const RECEIPT_SECRET_PATTERNS = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
-  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
-  /\bAIza[0-9A-Za-z\-_]{35}\b/g,
-  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/gi,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/gi
+  { name: 'private-key-block', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  { name: 'aws-access-key', re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { name: 'github-token', re: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g },
+  { name: 'openai-key', re: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'google-api-key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/g },
+  { name: 'fal-key', re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/gi },
+  { name: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
+  { name: 'gitlab-pat', re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'gitlab-token', re: /\b(?:gldt|glrt|glsoat|glptt|glcbt)-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'npm-token', re: /\bnpm_[A-Za-z0-9]{36}\b/g },
+  { name: 'pypi-token', re: /\bpypi-[A-Za-z0-9_-]{16,}\b/g },
+  { name: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
+  { name: 'netrc-record', re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/gi },
+  { name: 'url-with-credentials', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/gi },
+  {
+    name: 'secret-assignment',
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["']|(?:\\[\s\S]|(?!\2)[^\\]){8,}\2)(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/gi,
+    // The value only: group 1 is the key through the opening quote and group 3
+    // the closing quote (empty when the line ends first).
+    hide: function (m) { return [m.index + m[1].length, m.index + m[0].length - m[3].length]; }
+  }
 ];
+
+// Masks one receipt line the way mask() in pre-push-check.js does: every
+// pattern reads the ORIGINAL line and marks the characters it hides (all but a
+// match's first 4 or, under a hide rule, the value alone), so one pattern's
+// rewrite never changes what the next one sees. Each hidden run prints as
+// [redacted]. Returns the masked line and how many matches it hid.
+function maskReceiptLine(line) {
+  const hidden = new Array(line.length).fill(false);
+  let count = 0;
+  RECEIPT_SECRET_PATTERNS.forEach(function (p) {
+    for (const m of line.matchAll(p.re)) {
+      const span = p.hide ? p.hide(m) : [m.index + 4, m.index + m[0].length];
+      if (span[1] <= span[0]) continue;
+      count += 1;
+      for (let i = span[0]; i < span[1]; i++) hidden[i] = true;
+    }
+  });
+  if (!count) return { line: line, count: 0 };
+  let out = '';
+  for (let i = 0; i < line.length; i++) {
+    if (!hidden[i]) out += line[i];
+    else if (i === 0 || !hidden[i - 1]) out += '[redacted]';
+  }
+  return { line: out, count: count };
+}
 
 // Returns null when the file may be read, else one short reason. The folder is
 // judged through realpath on both sides (underRoot), so a symlink inside it
@@ -1298,9 +1346,9 @@ function loadReceipt(f) {
     let redacted = 0;
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
       .map(function (l) {
-        RECEIPT_SECRET_PATTERNS.forEach(function (re) {
-          l = l.replace(re, function (m) { redacted += 1; return m.slice(0, 4) + '[redacted]'; });
-        });
+        const masked = maskReceiptLine(l);
+        redacted += masked.count;
+        l = masked.line;
         return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l;
       });
     if (redacted) {
