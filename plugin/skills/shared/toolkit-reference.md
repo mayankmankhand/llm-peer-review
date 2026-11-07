@@ -409,7 +409,7 @@ Host detection runs on three exact rows and nothing broader: it reads `git confi
 |---|---|
 | `Bash(git init *)`, `Bash(git add *)`, `Bash(git rm *)`, `Bash(git commit *)` | Initializing repos, staging files, committing work |
 | `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories. A force push, a mirror push, and a delete push still ask: see the ask rows below the table |
-| `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git merge *)`, `Bash(git stash *)` | Branch management, merging (`/tk:merge` brings a branch up to date with main and lands it on this machine), and stashing work in progress |
+| `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git merge *)`, `Bash(git revert *)`, `Bash(git stash *)` | Branch management, merging (`/tk:merge` brings a branch up to date with main and lands it on this machine), undoing a design round that lost its comparison (M15), and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
 | `Bash(command -v gh)`, `Bash(command -v glab)` | Host detection's fallback when the remote names neither github.com nor gitlab.com: which of the two CLIs is installed. Exact rows, so nothing else that starts with `command` is allowed |
 | `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |
