@@ -973,6 +973,52 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const honest = fillRun(fillStart('verify-fill-honest'), { noMatch: 'TODO' });
   check11('vacuous: a filled-in expect the saved output fails records its verdict as usual',
     honest.r.recorded && honest.r.recorded.R1 === 'FIXED' && honest.last.verdict === 'FIXED', JSON.stringify(honest).slice(0, 400));
+  // The bound of two fix rounds meets a rewritten check: in round 2 the kept row
+  // fails, a correct fix that keeps the old wording would have no round left, so the
+  // retry the mode prints must run, once, and never open a third fix.
+  w('src/c.js', c0);
+  const rw3 = rwStart('verify-rw-3');
+  rw3.go();
+  run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--mechanical', 'R1']);
+  const row2File = path.join(rw3.dir, 'recheck-2.json');
+  const go2 = () => {
+    spawnSync(process.execPath, [RUN_CHECKS, '--checks', row2File, '--out', path.join(rw3.dir, 'rc2')], { cwd: repo, encoding: 'utf8' });
+    return parse(run(['--verdicts', '--ledger', path.join(rw3.dir, 'ledger.json'), '--recheck', path.join(rw3.dir, 'rc2', 'results.json')])) || {};
+  };
+  fs.writeFileSync(row2File, JSON.stringify([Object.assign((readJson(row2File) || [])[0], { check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } })], null, 2) + '\n');
+  go2();
+  const round2 = go2();
+  const retry2 = (round2.next || []).find((n) => /--verify/.test(n.command || ''));
+  const judged2 = retry2 ? spawnSync('sh', ['-c', retry2.command], { cwd: repo, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' };
+  const third = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--judgment', 'R1']);
+  check11('fixer-rewrite: in round 2 the printed retry runs once and the next call is refused',
+    round2.recorded && round2.recorded.R1 === 'NOT FIXED' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
+    JSON.stringify({ round2, judged2: [judged2.status, String(judged2.stderr).slice(0, 200)], third: [third.status, third.stderr.slice(0, 160)] }));
+  // Lines added after a run's verdicts exist (M5's one generation, a split note):
+  // a verdict is keyed to an ID, so a line marked followup takes the next free number
+  // and moves nothing. The whole run stays in one file, one receipts folder and the
+  // one ledger the chain gate reads.
+  const fu = (name, severity, extra) => Object.assign(f('code', 'src/c.js', 1, 'src/c.js:fu-' + name, 'Should fix. ' + name + ' ships.', { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } }), { severity }, extra || {});
+  const fuFirst = [fu('first', 'warn'), fu('second', 'warn'), fu('third', 'suggest')];
+  const fuFile = jsonl(fuFirst.concat([fu('seeded', 'warn', { followup: true }), fu('later', 'block', { followup: true })]));
+  const fuOrder = (run([fuFile]).rows || []).map((m) => m.id + ' ' + m.key.replace('src/c.js:fu-', '')).join();
+  check11('followup: a line marked followup takes the next free number and moves no earlier ID',
+    fuOrder === 'R1 first,R2 second,R3 third,R4 seeded,R5 later', fuOrder);
+  const fuReceipts = path.join(sandbox, 'receipts-fu');
+  fs.mkdirSync(fuReceipts);
+  for (const n of [1, 2, 3, 4, 5]) fs.writeFileSync(path.join(fuReceipts, 'code-' + n + '.txt'), '1:// TODO: tidy\nexit 0\n');
+  const fuShards = run(['--shards', fuFile, '--receipts', fuReceipts, '--out', path.join(fuReceipts, 'followup'), '--drop', 'R1,R2,R3', '--root', repo]);
+  const fuBuilt = parse(fuShards) || {};
+  check11('followup: dropping the earlier IDs audits only the follow-up lines',
+    fuShards.status === 0 && (fuBuilt.shards || []).map((s) => s.ids.join()).join() === 'R4' && (fuBuilt.tier3 || {}).ids.join() === 'R5', fuShards.stdout.slice(0, 300) + fuShards.stderr.slice(0, 200));
+  const fuOut = path.join(sandbox, 'verify-fu');
+  fs.mkdirSync(fuOut);
+  run(['--verify', fuFile, '--receipts', fuReceipts, '--scope', scope, '--out', fuOut, '--root', repo, '--mechanical', 'R1,R2']);
+  const fuAgain = run(['--verify', fuFile, '--receipts', fuReceipts, '--scope', scope, '--out', fuOut, '--root', repo, '--mechanical', 'R4']);
+  const fuLedger = readJson(path.join(fuOut, 'ledger.json')) || { findings: {} };
+  check11('followup: a follow-up line is verified in the run\'s one ledger, with no ID renumbered',
+    fuAgain.status === 0 && Object.keys((parse(fuAgain) || {}).renumbered || {}).length === 0 && fuLedger.findings.R4 && fuLedger.findings.R4.key === 'src/c.js:fu-seeded' && fuLedger.findings.R1.key === 'src/c.js:fu-first',
+    fuAgain.stdout.slice(0, 300) + fuAgain.stderr.slice(0, 200));
   w('src/c.js', c0);
   const outOne = path.join(sandbox, 'verify-out-11-one');
   fs.mkdirSync(outOne);

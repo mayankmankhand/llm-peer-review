@@ -259,9 +259,12 @@ function mergeFindings(findings) {
     out.key = g.key;
     out.receipts = g.members.filter((m) => m.receipt !== undefined).map((m) => m.receipt);
     out.sources = g.members.slice();
-    merged.push({ out, rank: rankOf(primary), order: g.order });
+    merged.push({ out, rank: rankOf(primary), order: g.order, late: g.members.every((m) => m.followup === true) });
   }
-  merged.sort((a, b) => a.rank - b.rank || a.order - b.order);
+  // A line marked `followup` came after the run's verdicts (M5's one generation, or
+  // a split note): it takes the next free number in file order, so nothing already
+  // keyed to an older ID moves.
+  merged.sort((a, b) => (a.late - b.late) || (a.late ? 0 : a.rank - b.rank) || a.order - b.order);
   return merged.map((m, i) => Object.assign({ id: 'R' + (i + 1) }, m.out));
 }
 
@@ -1223,9 +1226,9 @@ function buildVerify(parsed, scope, opts) {
 
   const ledgerFile = path.join(opts.out, 'ledger.json');
   const ledger = readLedger(ledgerFile);
-  // A ledger entry follows its finding's key, not its position: a follow-up
-  // finding appended to the file (M5's one generation) sorts into the merge and
-  // shifts every ID after it, so each entry moves to the ID its key holds now.
+  // A ledger entry follows its finding's key, not its position: a line appended
+  // without the `followup` mark sorts into the merge and shifts every ID after it,
+  // so each entry moves to the ID its key holds now.
   // An entry whose key the merge no longer has is kept under `retired`, so no
   // record is lost; an entry from before keys were recorded stays where it is.
   const keyOf = new Map(merged.map((m) => [m.id, m.key]));
@@ -1246,7 +1249,12 @@ function buildVerify(parsed, scope, opts) {
   }
   ledger.findings = kept;
   if (Object.keys(retired).length) ledger.retired = retired;
-  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS);
+  // The one call past the bound: a fresh verifier on a round-2 fix whose rewritten
+  // check still failed. It judges the same fix, so M5's two fix rounds stand, and the
+  // round it records closes this door behind it.
+  const judgeRetry = (id) => lists.judgment.includes(id) && ledger.findings[id].round === MAX_ROUNDS
+    && ledger.findings[id].verdicts.some((v) => v.round === MAX_ROUNDS && /^check_changed/.test(v.reason || ''));
+  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgeRetry(id));
   if (exhausted.length) {
     const e = badInput('rounds_exhausted', null, exhausted.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5): revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
     e.ids = exhausted;
