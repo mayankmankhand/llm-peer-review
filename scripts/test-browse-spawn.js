@@ -330,6 +330,11 @@ const oneLine = (s) => String(s).replace(/\s+/g, ' ').slice(0, 240);
   const hurt = runServer({ baseUrl: 'http://127.0.0.1:9', actions: [{ type: 'goto', url: '/' }] }, '', { BROWSE_STUB_PAGE_ERROR: '1' });
   const keys = hurt.json ? Object.keys(hurt.json).join() : '';
   check('output: the page and its diagnostics print before the action results, so a cut preview shows them', keys === 'ok,url,title,errors,actions', oneLine(keys + ' ' + hurt.stdout));
+  // A noisy page's console has no count cap, so the reason a run stopped sits beside
+  // its status, where a cut preview still shows it (review 2026-11-07-133045, R26).
+  const stopped = runServer({ baseUrl: 'http://127.0.0.1:9', actions: [{ type: 'goto', url: '/' }, { type: 'click' }] }, '', { BROWSE_STUB_PAGE_ERROR: '1' });
+  const stoppedKeys = stopped.json ? Object.keys(stopped.json) : [];
+  check('output: a failed action names its reason right after the status', stoppedKeys[1] === 'failedAction' && stopped.json.ok === false && stopped.json.failedAction.type === 'click' && /target/.test(stopped.json.failedAction.error || ''), oneLine(stoppedKeys.join() + ' ' + stopped.stdout));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });

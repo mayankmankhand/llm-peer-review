@@ -31,10 +31,13 @@
  * Output (JSON to stdout):
  *   {
  *     "ok": true,
- *     "actions": [...],
+ *     "failedAction": {...},   (only when an action failed)
+ *     "url": "...",
+ *     "title": "...",
  *     "console": [...],
  *     "network": [...],
- *     "errors": [...]
+ *     "errors": [...],
+ *     "actions": [...]
  *   }
  *
  * Scope & Assumptions:
@@ -911,6 +914,11 @@ async function runSession(data) {
   // Page state and diagnostics print before the action results: a long result can
   // reach the reader as a cut preview of its first lines, which must still show them.
   const output = { ok: allOk };
+
+  // The reason a run stopped, beside its status: a noisy page's console has no count
+  // cap, so the action list can still fall past that cut.
+  const failed = actionResults.find((r) => !r.ok);
+  if (failed) output.failedAction = { type: failed.type, error: failed.error };
 
   // Include final page state if we navigated somewhere
   if (lastGoto) {
