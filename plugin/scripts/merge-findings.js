@@ -535,8 +535,8 @@ const VERIFY_HEADER = /^M3 verify shard: call (\d+), shard \d+ of \d+, ids ((?:R
 const byNumber = (a, b) => Number(a.slice(1)) - Number(b.slice(1));
 
 // The receipt file stem of each finding line, in input order: `<lens>-<n>`, where
-// <lens> is the finder that wrote the line (`inline` for a line with no
-// specialist, the orchestrator's own path) and <n> counts that lens's lines from
+// <lens> is the line's `specialist` (`inline` for a line with none) and <n> counts
+// that lens's lines from
 // 1. That is the id the runner gave each check when tier 1 ran it
 // (`.claude/skills/shared/report-format.md`, "Where the report is written").
 function receiptStems(findings) {

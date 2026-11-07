@@ -51,7 +51,7 @@ Then pick one of two modes:
 | Sub-agent | What it checks |
 |-----------|----------------|
 | **Code & Architecture** (`subagent_type=tk:review-code-finder`) | Security red flags, architectural soundness, obvious logic issues, performance risks |
-| **Design & Completeness** (`subagent_type=tk:review-plan-finder` only when a plan file exists; otherwise `general-purpose` carrying this row's charter minus plan alignment, and the summary says "plan alignment skipped (no plan file)") | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
+| **Design & Completeness** (`subagent_type=tk:review-plan-finder` only when a plan file exists, its prompt naming the plan this run settled on; otherwise `general-purpose` carrying this row's charter minus plan alignment, and the summary says "plan alignment skipped (no plan file)") | Plan alignment, feature gaps, scope drift, test coverage, docs updated |
 | **UX & Accessibility** (`subagent_type=tk:review-ux-finder`) | Usability quick-check, WCAG AA basics, error states, key user flows |
 | **Security** (`subagent_type=tk:review-security-finder`) | Secrets in code, injection, auth and unsafe sinks; quiet by rule when the change touches none of these |
 | **Operations** (`general-purpose`, this row's charter pasted in: no typed finder covers it) | Logging and monitoring, deployment readiness, rollback plan, config and migration safety |
@@ -106,7 +106,7 @@ After writing the markdown report, evaluate whether to also generate an HTML vie
 
 **When the gate fires, load the page rules now**, through the Skill tool: `Skill(tk:review-page)`, and render per them: the shell, the payload, the `--no-abs` decision and how the page reaches the user all live there.
 
-For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules) and omit `lenses`: a full check replaces the whole page. Include the `chips` array with the five sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Security, Operations) so the reader sees at a glance which domains were checked. Treat `/tk:review-full` as a multi-specialist run for chip purposes.
+For direct calls to this skill, pass `--name review --stable` to the helper (the standing page, per the page rules) and in the payload set `lenses` to the rows that ran (`["code", "completeness", "ux", "security", "operations"]` when all five did, as a single pass does, less any the page rules leave out), each finding's `specialist` to its row's token, and `reviewedFiles` to the changed files this run reviewed, leaving out any file only the docs check opened: that check looks for doc mismatches alone, so it says nothing about another row's finding on that file. The Design & Completeness row and the docs findings take `completeness`, never `plan`: a `plan` lens marks the plan's must-check findings resolved, and this run never re-reads them. A full check covers these five rows only, so the page carries every other open finding forward. Include the `chips` array with the five sub-domains this skill covers (Code & Architecture, Design & Completeness, UX & Accessibility, Security, Operations) so the reader sees at a glance which domains were checked. Treat `/tk:review-full` as a multi-specialist run for chip purposes.
 
 ### Staff Architect Check
 
