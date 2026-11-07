@@ -133,7 +133,7 @@ All four key on the branch's **cut point**, the commit it was cut from, which `/
 
 **How it lands.** It follows your repo's habit: a merge commit made on your machine (nothing is pushed), or the host's merge or squash through `gh` or `glab`, which asks first and is refused by the host if the PR moved after the checks. Rebase merges are not offered: a rebase leaves no landing commit to carry the record, so a rebase habit lands as a squash. With the host's merge it first waits, up to 90 seconds, until the host reports the PR mergeable, and when main moved on the host in the meantime it runs your tests once more on the new main before the next PR.
 
-**Open review findings.** A landed branch's review page stays its own. When it still has open findings, the line saying the PR landed ends with how many and the page's link; they are not moved onto main's page.
+**Open review findings.** A landed branch's review page stays its own. When it still has open findings, the line saying the PR landed ends with how many, the page's file on this machine and the link it was last published to, which can show an older copy. The findings are not moved onto main's page.
 
 **Landings made another way.** Each run first checks every landing since its last run, so a PR merged with the host's merge button is still checked, one step later. A squash made with the button is checked only when its PR carries the `Cut from:` line `/document` writes, and then only for other work it removed: a squash keeps no branch to compare its own lines against. A rebase made with the button is listed as not checkable, and a squash made with GitLab's button looks like an ordinary commit and is not seen.
 
