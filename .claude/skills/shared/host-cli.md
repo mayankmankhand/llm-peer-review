@@ -14,7 +14,7 @@ The toolkit runs on GitHub and GitLab. Nothing about the install differs by host
    - contains `gitlab.com` -> use `glab`
 3. Neither matches (self-hosted GitLab, GitHub Enterprise, or no `origin` remote). Fall back to whichever CLI is installed: run `command -v gh` and `command -v glab`, each as a Bash call of its own (M16; their two permission rows are exact, so `command -v gh glab` would ask):
    - exactly one installed -> use it
-   - both installed -> ask the user once, then reuse that answer for the rest of the session
+   - both installed -> ask the user once, then reuse that answer for the rest of the session; `merge-check.js` cannot ask, so `/merge` passes it the answer as `--host gh` or `--host glab`
    - neither installed -> stop, and tell the user to install `gh` or `glab`
 
 ## Invocation Table

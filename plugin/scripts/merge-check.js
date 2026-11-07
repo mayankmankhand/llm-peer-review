@@ -75,7 +75,9 @@
 //                                 lists what differs, what is left over (anything
 //                                 else uncommitted) and the other ignored files
 // Common: --main <ref> names the default branch (otherwise the remote's default
-// branch, else `main`, else `master`).
+// branch, else `main`, else `master`). --host gh|glab is the person's answer for
+// a remote that names neither host when both CLIs are installed: the script
+// cannot ask, so /merge passes it.
 //
 // Output: one JSON object on stdout; on stderr one plain line per flag and a
 // summary line. Exit 0 when nothing is flagged, 1 when anything is, 2 on a
@@ -102,7 +104,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>] [--host gh|glab]';
 
 class UsageError extends Error {}
 
@@ -616,14 +618,17 @@ function onPath(cmd) {
   });
 }
 // The host CLI, chosen the way .claude/skills/shared/host-cli.md says: the
-// origin remote's host by substring, else the one CLI that is installed.
+// origin remote's host by substring, else the one CLI that is installed, else
+// the answer the person gave, which /merge passes as --host.
+let HOST_ANSWER = null;
 function hostCli() {
   const url = String(gitTry(['config', '--get', 'remote.origin.url']) || '');
   if (url.includes('github.com')) return 'gh';
   if (url.includes('gitlab.com')) return 'glab';
   const have = ['gh', 'glab'].filter(onPath);
   if (have.length === 1) return have[0];
-  throw new UsageError(have.length ? 'both gh and glab are installed and the remote names neither host: pass --pr-body' : 'neither gh nor glab is installed: pass --pr-body');
+  if (have.length && HOST_ANSWER) return HOST_ANSWER;
+  throw new UsageError(have.length ? 'both gh and glab are installed and the remote names neither host: pass --host gh or --host glab' : 'neither gh nor glab is installed: pass --pr-body');
 }
 function readPr(n) {
   if (!/^\d+$/.test(String(n))) throw new UsageError('--pr takes a PR number');
@@ -1051,7 +1056,7 @@ function finish(result, flags, suppressed, notes) {
 }
 
 // ---- arguments ---------------------------------------------------------------------
-const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout', '--bring-home']);
+const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout', '--bring-home', '--host']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
 const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait']);
 function parseArgs(argv) {
@@ -1075,6 +1080,8 @@ function parseArgs(argv) {
 
 function main(argv) {
   const o = parseArgs(argv);
+  if (o['--host'] !== undefined && o['--host'] !== 'gh' && o['--host'] !== 'glab') throw new UsageError('--host takes gh or glab');
+  HOST_ANSWER = o['--host'] || null;
   const top = gitTry(['rev-parse', '--show-toplevel']);
   if (!top) throw new UsageError('not inside a git repository');
   TOP = top.trim();
