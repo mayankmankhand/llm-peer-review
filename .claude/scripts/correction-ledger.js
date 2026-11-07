@@ -121,6 +121,12 @@ const MAX_ASKED = 800;
 // toolkit stages, which the rollup's home verdict counts.
 const STAGES = ['explore', 'create-plan', 'execute', 'review', 'document', 'other', 'unknown'];
 const TOOLKIT_STAGES = ['explore', 'create-plan', 'execute', 'review', 'document'];
+// What starts a toolkit stage in a session: a typed command, in either spelling,
+// or the Skill call of a stage that was chained into. A review kind run on its
+// own, such as review-code, is the review stage.
+const STAGE_NAME = '(?:tk:)?(?:(' + TOOLKIT_STAGES.join('|') + ')|(review)-[a-z]+)';
+const STAGE_START_COMMAND = new RegExp('^/' + STAGE_NAME + '(?:\\s|$)');
+const STAGE_START_SKILL = new RegExp('^' + STAGE_NAME + '$');
 
 // Fix records and rates (#229). A fix lives in one of three homes; a toolkit fix
 // names the release that ships it; its label is a few words the user writes.
@@ -763,6 +769,7 @@ function scanExchanges(files, since) {
     let askedForLast = '';
     let pending = null;  // the latest interrupt no human text has answered yet
     let opened = false;  // whether this file's first human words have gone by
+    let stage = 'other'; // the toolkit stage this session started last, `other` before any
     for (let j = 0; j < lines.length; j++) {
       const line = lines[j].trim();
       if (!line) continue;
@@ -774,6 +781,10 @@ function scanExchanges(files, since) {
       if (entry.type === 'assistant') {
         const t = assistantText(entry);
         if (t) { lastAssistant = t; askedForLast = lastHuman; }
+        blocksOf(entry, 'tool_use').forEach(function (c) {
+          const chained = c.name === 'Skill' && c.input ? STAGE_START_SKILL.exec(c.input.skill) : null;
+          if (chained) stage = chained[1] || chained[2];
+        });
         continue;
       }
       if (entry.type !== 'user') continue;
@@ -800,11 +811,13 @@ function scanExchanges(files, since) {
       // is machine text: only its invocation names a request.
       const request = command ? commandRequest(entry) : (marker ? '' : text);
       if (request) lastHuman = request;
+      const typed = command ? STAGE_START_COMMAND.exec(request) : null;
+      if (typed) stage = typed[1] || typed[2];
       if (since && entry.timestamp && entry.timestamp < since) continue;
       if (marker) {
         // A second marker before any human text replaces the first: the
         // downstream case had two, two seconds apart, around one turn.
-        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant, asked: askedForLast };
+        pending = { at: entry.timestamp || null, file: files[i], assistant_said: lastAssistant, asked: askedForLast, stage: stage };
         continue;
       }
       if (command) {
@@ -842,6 +855,9 @@ function scanExchanges(files, since) {
         asked: truncate(askedForLast, MAX_ASKED),
         assistant_said: truncate(lastAssistant, 800),
         human_said: truncate(text, 1200),
+        // Read from the session, because one exchange cannot show it and the
+        // rollup's home verdict counts it. The extractor copies it onto the row.
+        stage: stage,
         kept: false,       // the scan's own bookkeeping, dropped by candidateOf()
         file: files[i]
       };
@@ -886,6 +902,7 @@ function scanExchanges(files, since) {
     best.exchange.after_interrupt = true;
     best.exchange.assistant_said = truncate(p.assistant_said, 800);
     best.exchange.asked = truncate(p.asked, MAX_ASKED);
+    best.exchange.stage = p.stage;
     best.exchange.kept = true;
   });
   return scan;
@@ -895,7 +912,7 @@ function scanExchanges(files, since) {
 function candidateOf(ex) {
   return {
     at: ex.at, session: ex.session, has_pushback_marker: ex.has_pushback_marker,
-    after_interrupt: ex.after_interrupt, asked: ex.asked, assistant_said: ex.assistant_said,
+    after_interrupt: ex.after_interrupt, stage: ex.stage, asked: ex.asked, assistant_said: ex.assistant_said,
     human_said: ex.human_said
   };
 }
