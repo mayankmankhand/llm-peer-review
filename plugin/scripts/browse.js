@@ -139,6 +139,17 @@ async function detectServer(ports) {
   return null;
 }
 
+// The port of a local baseUrl, or null for none or for another host.
+function localPortOf(baseUrl) {
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') return null;
+    return Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ── Server auto-start ──────────────────────────────────────────────────────
 
 // Track the auto-started child process for cleanup
@@ -897,10 +908,9 @@ async function runSession(data) {
   const allOk = actionResults.every((r) => r.ok);
   const lastGoto = actionResults.filter((r) => r.type === 'goto' && r.ok).pop();
 
-  const output = {
-    ok: allOk,
-    actions: actionResults,
-  };
+  // Page state and diagnostics print before the action results: a long result can
+  // reach the reader as a cut preview of its first lines, which must still show them.
+  const output = { ok: allOk };
 
   // Include final page state if we navigated somewhere
   if (lastGoto) {
@@ -912,6 +922,7 @@ async function runSession(data) {
   if (diagnostics.console.length > 0) output.console = diagnostics.console;
   if (diagnostics.network.length > 0) output.network = diagnostics.network;
   if (diagnostics.errors.length > 0) output.errors = diagnostics.errors;
+  output.actions = actionResults;
 
   return output;
 }
@@ -1049,9 +1060,14 @@ async function main() {
   // Server auto-start (opt-in only)
   if (data.autoStart === true) {
     try {
-      // First check if a server is already running
-      const existingPort = await detectServer();
-      if (existingPort) {
+      // The address the session named comes first: probing only the common ports
+      // tested another project's server on 3000 while this one answered elsewhere.
+      const namedPort = localPortOf(data.baseUrl);
+      const namedAnswers = namedPort !== null && (await checkPort(namedPort, CONFIG.portCheckTimeoutMs));
+      const existingPort = namedAnswers ? null : await detectServer();
+      if (namedAnswers) {
+        // data.baseUrl stands.
+      } else if (existingPort) {
         data.baseUrl = `http://localhost:${existingPort}`;
       } else {
         // No server found - start one

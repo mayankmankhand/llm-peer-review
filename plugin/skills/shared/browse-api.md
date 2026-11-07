@@ -72,13 +72,13 @@ If the app's dev server is not already running, you can request the script to st
 ```
 
 When `autoStart` is `true`, the script will:
-1. Check if `baseUrl` is reachable
-2. If not, run `npm run dev` (or the project's start command) in the background
-3. Wait for the server to become reachable (30s timeout)
+1. Check if `baseUrl` is reachable, then ports 3000, 3001, 5173, 8080 and 8888 in that order: the first that answers is used as `baseUrl`, and nothing is started
+2. If none answers, run `npm run dev` (or the project's start command) in the background
+3. Wait for one of those five ports to answer (30s timeout) and use it as `baseUrl`
 4. Proceed with the action sequence
 5. Stop the auto-started server when done (success or failure)
 
-If the server is already running, `autoStart` has no effect.
+So a server answering at `baseUrl` is the one tested. When `baseUrl` does not answer, or the session names none, the first of those ports that answers is tested instead, whichever project it belongs to, with `ok` true: check `url` and `title` in the output against this project. A server on any other port is found only through `baseUrl`.
 
 ## Output Format
 
@@ -89,17 +89,17 @@ The script returns JSON with per-action results plus diagnostics:
   "ok": true,
   "url": "http://localhost:3000/",
   "title": "My App",
-  "actions": [
-    { "type": "goto", "ok": true, "url": "http://localhost:3000/", "status": 200, "title": "My App" },
-    { "type": "screenshot", "ok": true, "path": "/tmp/browse-screenshot-1234567890.png" },
-    { "type": "text", "ok": true, "text": "Welcome to My App..." }
-  ],
   "console": [{ "type": "error", "text": "..." }],
   "network": [
     { "url": "/api/data", "status": 500, "method": "GET" },
     { "url": "/api/health", "method": "GET", "error": "net::ERR_CONNECTION_REFUSED" }
   ],
-  "errors": [{ "type": "pageerror", "text": "Uncaught TypeError: ..." }]
+  "errors": [{ "type": "pageerror", "text": "Uncaught TypeError: ..." }],
+  "actions": [
+    { "type": "goto", "ok": true, "url": "http://localhost:3000/", "status": 200, "title": "My App" },
+    { "type": "screenshot", "ok": true, "path": "/tmp/browse-screenshot-1234567890.png" },
+    { "type": "text", "ok": true, "text": "Welcome to My App..." }
+  ]
 }
 ```
 
@@ -109,4 +109,4 @@ The script returns JSON with per-action results plus diagnostics:
 - `network` - Failed network requests (4xx, 5xx, connection errors). Only present when there are issues.
 - `errors` - Uncaught page errors. Only present when there are issues.
 
-Always check `console`, `network`, and `errors` - they often reveal the root cause of visible UI bugs. Read the three counts from the JSON the script prints (M16): the lengths of its `console`, `network` and `errors` arrays, with `ok` true. All three empty and `ok` true is a clean session; any entry is one to read. The finder has no file-writing tool and needs none here: the JSON is already in the tool result.
+Always check `console`, `network`, and `errors` - they often reveal the root cause of visible UI bugs. Read the three counts from the JSON the script prints (M16): the lengths of its `console`, `network` and `errors` arrays, with `ok` true. All three empty or absent and `ok` true is a clean session; any entry is one to read. The finder has no file-writing tool and needs none here: the JSON is in the tool result, and the three arrays print before `actions`, so a long result cut to a preview still shows them: `actions` straight after `title` means none.
