@@ -1144,6 +1144,15 @@ function latestVerdict(f) {
   return inRound.length ? inRound[inRound.length - 1].verdict : null;
 }
 
+// Whether the record step left this finding's fix to one fresh verifier and that
+// call has not run yet: the round's latest verdict says so, and the call that runs
+// sets `judged` to the round, so each round has at most one.
+function judgeOpen(f) {
+  const inRound = (f.verdicts || []).filter((v) => v.round === f.round);
+  const latest = inRound[inRound.length - 1];
+  return Boolean(latest && latest.judge) && f.judged !== f.round;
+}
+
 // The scope session-init.js --scope saved: the starting snapshot, the pinned
 // end, and the untracked files as they stood, with their line counts.
 function readScope(file) {
@@ -1249,12 +1258,11 @@ function buildVerify(parsed, scope, opts) {
   }
   ledger.findings = kept;
   if (Object.keys(retired).length) ledger.retired = retired;
-  // The one call past the bound: a fresh verifier on a round-2 fix whose rewritten
-  // check still failed. It judges the same fix, so M5's two fix rounds stand, and the
-  // round it records closes this door behind it.
-  const judgeRetry = (id) => lists.judgment.includes(id) && ledger.findings[id].round === MAX_ROUNDS
-    && ledger.findings[id].verdicts.some((v) => v.round === MAX_ROUNDS && /^check_changed/.test(v.reason || ''));
-  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgeRetry(id));
+  // The call the record step prints when a recheck could not settle a fix: a fresh
+  // verifier on that same fix. It spends no fix round, so M5's two stand in either
+  // round, and it runs once (judgeOpen).
+  const judgingAgain = new Set(lists.judgment.filter((id) => ledger.findings[id] && judgeOpen(ledger.findings[id])));
+  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgingAgain.has(id));
   if (exhausted.length) {
     const e = badInput('rounds_exhausted', null, exhausted.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5): revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
     e.ids = exhausted;
@@ -1262,7 +1270,7 @@ function buildVerify(parsed, scope, opts) {
     throw e;
   }
   const call = ledger.calls + 1;
-  const roundOf = (id) => (ledger.findings[id] ? ledger.findings[id].round : 0) + 1;
+  const roundOf = (id) => (ledger.findings[id] ? ledger.findings[id].round : 0) + (judgingAgain.has(id) ? 0 : 1);
 
   // Recheck rows: one per source receipt, the id the page's receipt slot reads.
   const rechecks = [];
@@ -1377,7 +1385,7 @@ function buildVerify(parsed, scope, opts) {
     const f = ledger.findings[id] || (ledger.findings[id] = { key: keyOf.get(id), path: pathOf[id], round: 0, verdicts: [], rechecks: {} });
     f.key = keyOf.get(id);
     f.path = pathOf[id];
-    f.round += 1;
+    if (judgingAgain.has(id)) f.judged = f.round; else f.round += 1;
     if (!f.rechecks) f.rechecks = {};
     if (recheckRows[id]) {
       f.rechecks[String(f.round)] = recheckRows[id];
@@ -1573,8 +1581,13 @@ function recordVerdicts(file, verdicts, source, from, fail) {
 // the kept row goes back into the recheck file and is run again in the same round,
 // so a pass there is FIXED, and only a fail prints the judgment retry. A placeholder
 // row has no expect to hold it to, since writing one is the runner's job, so only
-// its command is held; an expect that the proof's saved output from before the fix
-// already meets proves nothing and records NOT VERIFIED with a vacuous_expect reason.
+// its command is held until its first honest run, which pins the expect it ran; an
+// expect that the proof's saved output from before the fix already meets proves
+// nothing and records NOT VERIFIED with a vacuous_expect reason. A pass on a filled-in
+// row records NOT VERIFIED with a filled_expect reason and prints the judgment retry,
+// because the fixer wrote what judged the fix (review 2026-11-04-080648 passed one that
+// really did fail before the fix, on a problem still there). Once that call has run,
+// its verifier has the round and the rows are skipped.
 function recordRechecks(opts, read, fail) {
   let ledger;
   try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
@@ -1587,12 +1600,13 @@ function recordRechecks(opts, read, fail) {
   const rewritten = [];
   const changedIds = [];
   const hollowIds = [];
+  const filledIds = [];
   const retryIds = [];
   const at = new Date().toISOString();
   for (const id of Object.keys(ledger.findings).sort(byNumber)) {
     const f = ledger.findings[id];
     const rowIds = f.rechecks && f.rechecks[String(f.round)];
-    if (!rowIds || !rowIds.length) continue;
+    if (!rowIds || !rowIds.length || f.judged === f.round) continue;
     const found = rowIds.map((r) => rows.get(r) || null);
     if (found.every((c) => c === null)) { notInResults.push(id); continue; }
     const missing = rowIds.filter((r, k) => found[k] === null);
@@ -1604,12 +1618,18 @@ function recordRechecks(opts, read, fail) {
     else if (refused.length) { verdict = 'NOT VERIFIED'; reason = 'the runner refused ' + refused.map((c) => c.id + ' (' + (c.detail || 'no detail') + ')').join('; '); }
     else if (changed.length) { verdict = 'NOT VERIFIED'; reason = 'check_changed: ' + changed.map((c) => c.kept.id + ' ran ' + rowText(c.ran) + ' where the verify step kept ' + rowText(c.kept)).join('; '); }
     else if (hollow.length) { verdict = 'NOT VERIFIED'; reason = 'vacuous_expect: ' + hollow.map((k) => k.id + ' passes on the saved output from before the fix (' + k.saved + ')').join('; '); }
-    else verdict = found.every((c) => c.verdict === 'pass') ? 'FIXED' : 'NOT FIXED';
+    else {
+      verdict = found.every((c) => c.verdict === 'pass') ? 'FIXED' : 'NOT FIXED';
+      const filled = pinFilled(f, rows);
+      if (verdict === 'FIXED' && filled.length) { verdict = 'NOT VERIFIED'; reason = 'filled_expect: ' + filled.join(', ') + ' passed an expect the fixer wrote, so a fresh verifier decides'; filledIds.push(id); }
+    }
     if (changed.length) { rewritten.push(...changed); changedIds.push(id); }
     if (hollow.length) hollowIds.push(id);
-    if (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || ''))) retryIds.push(id);
+    const judge = filledIds.includes(id) || (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || '')));
+    if (judge) retryIds.push(id);
     const entry = { round: f.round, verdict, source: 'recheck', from: opts.recheck, at };
     if (reason) entry.reason = reason;
+    if (judge) entry.judge = true;
     f.verdicts.push(entry);
     if (verdict === 'NOT VERIFIED') unverified.push(id); else recorded[id] = verdict;
   }
@@ -1617,19 +1637,21 @@ function recordRechecks(opts, read, fail) {
   // An unverified finding keeps its round, and what to do next is printed the
   // way --verify prints it (issue #272): fill the expect of each refused or
   // missing row, run the recheck file again, record again. A rewritten row needs
-  // no write: its kept row goes back into the file here.
+  // no write: its kept row goes back into the file here. A filled-in pass needs no
+  // rerun either: its next step is the verifier.
   const next = [];
-  const again = unverified.length ? recheckFileFor(opts.ledger, ledger, unverified) : null;
+  const stuck = unverified.filter((id) => !filledIds.includes(id));
+  const again = stuck.length ? recheckFileFor(opts.ledger, ledger, stuck) : null;
   if (again) {
     if (rewritten.length) restoreKept(again, rewritten.map((c) => c.kept));
-    const toFill = unverified.filter((id) => !changedIds.includes(id) && !hollowIds.includes(id));
+    const toFill = stuck.filter((id) => !changedIds.includes(id) && !hollowIds.includes(id));
     if (toFill.length) next.push({ do: 'write', ids: toFill, file: again, what: 'the expect each listed row must now satisfy, in place of its placeholder' });
     if (hollowIds.length) next.push({ do: 'write', ids: hollowIds, file: again, what: 'an expect the fix must satisfy and the saved output from before the fix does not already meet' });
     next.push({ do: 'run', command: 'node ' + shellWord(besideSelf('run-checks.js')) + ' --checks ' + shellWord(again) + ' --out ' + shellWord(path.dirname(opts.recheck)), record: 'node ' + shellWord(selfPath()) + ' --verdicts --ledger ' + shellWord(opts.ledger) + ' --recheck ' + shellWord(opts.recheck) });
   }
   if (retryIds.length && ledger.lastVerify) {
     const l = ledger.lastVerify;
-    next.push({ do: 'run', ids: retryIds, what: 'the kept check still fails after a rewrite, so a fresh verifier judges the fix', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
+    next.push({ do: 'run', ids: retryIds, what: 'the fixer rewrote or filled in the check that judged this fix, so a fresh verifier judges it', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
   }
   process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
 }
@@ -1661,6 +1683,19 @@ function compareKept(f, rows) {
     else if (filled && ran.verdict === 'pass' && metBeforeFix(ran.expect, kept.saved)) hollow.push(kept);
   }
   return { changed, hollow };
+}
+
+// A placeholder row's first honest run sets what the round holds it to, so a later
+// rerun can only change it as a rewrite. Returns the ids of the finding's filled-in
+// rows, pinned now or earlier.
+function pinFilled(f, rows) {
+  const filled = [];
+  for (const kept of (f.kept && f.kept[String(f.round)]) || []) {
+    const ran = rows.get(kept.id);
+    if (kept.expect === PLACEHOLDER_EXPECT && ran && ran.expect !== undefined) { kept.expect = ran.expect; kept.filled = true; }
+    if (kept.filled) filled.push(kept.id);
+  }
+  return filled;
 }
 
 // The kept rows back into the recheck file, so what runs next is what --verify

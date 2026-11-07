@@ -970,9 +970,38 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const hollow = fillRun(fillStart('verify-fill-hollow'), { noMatch: 'NOT-IN-THE-FILE' });
   check11('vacuous: a filled-in expect that the saved output already meets records NOT VERIFIED',
     (hollow.r.unverified || []).join() === 'R1' && hollow.last.verdict === 'NOT VERIFIED' && /^vacuous_expect/.test(hollow.last.reason || ''), JSON.stringify(hollow).slice(0, 400));
-  const honest = fillRun(fillStart('verify-fill-honest'), { noMatch: 'TODO' });
-  check11('vacuous: a filled-in expect the saved output fails records its verdict as usual',
-    honest.r.recorded && honest.r.recorded.R1 === 'FIXED' && honest.last.verdict === 'FIXED', JSON.stringify(honest).slice(0, 400));
+  // The fixer wrote that expect, so its pass settles nothing: review 2026-11-04-080648
+  // R12 passed one that really did fail before the fix, and only a fresh check found
+  // the problem still there. The finding goes to one fresh verifier in the same round.
+  const honestDir = fillStart('verify-fill-honest');
+  const honest = fillRun(honestDir, { noMatch: 'TODO' });
+  const honestRetry = (honest.r.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('filled: a filled-in expect that passes leaves the verdict to a fresh verifier',
+    (honest.r.unverified || []).join() === 'R1' && honest.last.verdict === 'NOT VERIFIED' && /^filled_expect/.test(honest.last.reason || '')
+      && (honest.r.next || []).length === 1 && honestRetry && /--judgment R1\b/.test(honestRetry.command) && !/--mechanical/.test(honestRetry.command),
+    JSON.stringify(honest).slice(0, 400));
+  const verifierSays = (dir, name, shard, text) => {
+    const said = path.join(dir, name);
+    fs.writeFileSync(said, text);
+    return fs.existsSync(shard) ? run(['--verdicts', shard, said, '--ledger', path.join(dir, 'ledger.json')]) : { status: null };
+  };
+  const honestJudged = honestRetry ? spawnSync('sh', ['-c', honestRetry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const honestRecorded = verifierSays(honestDir, 'said.txt', path.join(honestDir, 'verify-2-1.txt'), 'R1: FIXED\nthe TODO is gone\n');
+  const honestAgain = parse(run(['--verdicts', '--ledger', path.join(honestDir, 'ledger.json'), '--recheck', path.join(honestDir, 'rc', 'results.json')])) || {};
+  const honestLedger = readJson(path.join(honestDir, 'ledger.json')) || { findings: { R1: { verdicts: [] } } };
+  check11('filled: the fresh verifier decides in the same round, and the rows cannot speak after it',
+    honestJudged.status === 0 && honestRecorded.status === 0 && honestLedger.findings.R1.round === 1 && lastVerdict(honestLedger).verdict === 'FIXED' && !(honestAgain.next || []).length,
+    JSON.stringify(honestLedger.findings.R1).slice(0, 300));
+  // The first filled-in expect to run is the one the round answers to: after a failed
+  // recheck, a weaker one could otherwise replace it (review 2026-11-07-133045, R2).
+  w('src/c.js', c0);
+  const pinDir = fillStart('verify-fill-pin');
+  const pinFailed = fillRun(pinDir, { noMatch: 'TODO' });
+  const pinWeaker = fillRun(pinDir, { noMatch: 'ALSO-NOT-IN-THE-FILE' });
+  const pinRow = (readJson(path.join(pinDir, 'recheck-1.json')) || [])[0] || {};
+  check11('filled: the first filled-in expect to run is held, so a weaker one after a fail settles nothing',
+    pinFailed.last.verdict === 'NOT FIXED' && pinWeaker.last.verdict === 'NOT VERIFIED' && /^check_changed/.test(pinWeaker.last.reason || '') && JSON.stringify(pinRow.expect) === JSON.stringify({ noMatch: 'TODO' }),
+    JSON.stringify({ pinFailed: pinFailed.last, pinWeaker: pinWeaker.last, pinRow }).slice(0, 400));
   // The bound of two fix rounds meets a rewritten check: in round 2 the kept row
   // fails, a correct fix that keeps the old wording would have no round left, so the
   // retry the mode prints must run, once, and never open a third fix.
@@ -994,6 +1023,56 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('fixer-rewrite: in round 2 the printed retry runs once and the next call is refused',
     round2.recorded && round2.recorded.R1 === 'NOT FIXED' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
     JSON.stringify({ round2, judged2: [judged2.status, String(judged2.stderr).slice(0, 200)], third: [third.status, third.stderr.slice(0, 160)] }));
+  // A filled-in pass in round 2 still reaches its verifier, once (same review, a fresh
+  // check's note on R23: round 1 was the only round tested end to end).
+  w('src/c.js', c0);
+  const fill2 = fillStart('verify-fill-round2');
+  const fill2First = fillRun(fill2, { noMatch: 'TODO' });
+  run(['--verify', fillFile, '--receipts', rwReceipts, '--scope', scope, '--out', fill2, '--root', repo, '--mechanical', 'R1']);
+  w('src/c.js', 'module.exports = 1;\n');
+  const fill2Row = path.join(fill2, 'recheck-2.json');
+  fs.writeFileSync(fill2Row, JSON.stringify([Object.assign((readJson(fill2Row) || [])[0], { expect: { noMatch: 'TODO' } })], null, 2) + '\n');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', fill2Row, '--out', path.join(fill2, 'rc2')], { cwd: repo, encoding: 'utf8' });
+  const fill2Second = parse(run(['--verdicts', '--ledger', path.join(fill2, 'ledger.json'), '--recheck', path.join(fill2, 'rc2', 'results.json')])) || {};
+  const fill2Retry = (fill2Second.next || []).find((n) => /--verify/.test(n.command || ''));
+  const fill2Judged = fill2Retry ? spawnSync('sh', ['-c', fill2Retry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const fill2Again = run(['--verify', fillFile, '--receipts', rwReceipts, '--scope', scope, '--out', fill2, '--root', repo, '--judgment', 'R1']);
+  const fill2Ledger = readJson(path.join(fill2, 'ledger.json')) || { findings: { R1: {} } };
+  check11('filled: in round 2 a filled-in pass gets its one fresh verifier, and the next call is refused',
+    fill2First.last.verdict === 'NOT FIXED' && (fill2Second.unverified || []).join() === 'R1' && fill2Judged.status === 0 && fill2Ledger.findings.R1.round === 2 && fill2Again.status === 1 && /"error":"rounds_exhausted"/.test(fill2Again.stderr),
+    JSON.stringify({ fill2Second, judged: fill2Judged.status, again: [fill2Again.status, fill2Again.stderr.slice(0, 160)] }).slice(0, 400));
+  // The door past the bound opens only on a kept row that failed: a rewritten row the
+  // runner never reran leaves it shut (review 2026-11-07-133045, R1).
+  w('src/c.js', c0);
+  const rw4 = rwStart('verify-rw-4');
+  rw4.go();
+  run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw4.dir, '--root', repo, '--mechanical', 'R1']);
+  const row4File = path.join(rw4.dir, 'recheck-2.json');
+  fs.writeFileSync(row4File, JSON.stringify([Object.assign((readJson(row4File) || [])[0], { check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } })], null, 2) + '\n');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', row4File, '--out', path.join(rw4.dir, 'rc2')], { cwd: repo, encoding: 'utf8' });
+  run(['--verdicts', '--ledger', path.join(rw4.dir, 'ledger.json'), '--recheck', path.join(rw4.dir, 'rc2', 'results.json')]);
+  const unrun = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw4.dir, '--root', repo, '--judgment', 'R1']);
+  check11('fixer-rewrite: a rewritten row never rerun leaves the call past the bound shut',
+    unrun.status === 1 && /"error":"rounds_exhausted"/.test(unrun.stderr), JSON.stringify([unrun.status, unrun.stderr.slice(0, 200)]));
+  // A retry judges the same fix, so it spends no fix round: the next real fix is round
+  // 2, and only the one after that is refused (review 2026-11-07-133045, R25).
+  w('src/c.js', c0);
+  const rw5 = rwStart('verify-rw-5');
+  rw5.set({ check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } });
+  rw5.go();
+  const r5 = parse(rw5.go()) || {};
+  const retry5 = (r5.next || []).find((n) => /--verify/.test(n.command || ''));
+  const judged5 = retry5 ? spawnSync('sh', ['-c', retry5.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const round5 = rw5.ledger().findings.R1.round;
+  const said5 = path.join(rw5.dir, 'said.txt');
+  fs.writeFileSync(said5, 'R1: NOT FIXED\nstill there\n');
+  const shard5 = path.join(rw5.dir, 'verify-2-1.txt');
+  if (fs.existsSync(shard5)) run(['--verdicts', shard5, said5, '--ledger', path.join(rw5.dir, 'ledger.json')]);
+  const second5 = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw5.dir, '--root', repo, '--mechanical', 'R1']);
+  const third5 = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw5.dir, '--root', repo, '--mechanical', 'R1']);
+  check11('fixer-rewrite: a retry in round one spends no fix round',
+    judged5.status === 0 && round5 === 1 && second5.status === 0 && rw5.ledger().findings.R1.round === 2 && third5.status === 1 && /"error":"rounds_exhausted"/.test(third5.stderr),
+    JSON.stringify({ judged5: judged5.status, round5, second5: [second5.status, second5.stderr.slice(0, 160)], third5: third5.status }));
   // Lines added after a run's verdicts exist (M5's one generation, a split note):
   // a verdict is keyed to an ID, so a line marked followup takes the next free number
   // and moves nothing. The whole run stays in one file, one receipts folder and the
