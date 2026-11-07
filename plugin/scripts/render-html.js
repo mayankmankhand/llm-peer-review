@@ -1230,6 +1230,17 @@ const RECEIPT_SECRET_PATTERNS = [
   }
 ];
 
+// What the page hides and a push never blocks on, kept apart so the list above
+// stays the push checker's: a key held on one line, as a service account file does,
+// and a PGP block, which the shared pattern never named.
+const RECEIPT_ONLY_PATTERNS = [
+  { name: 'private-key-line', re: /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*/g }
+];
+// A private key's body is plain base64 no pattern can tell from other text, so
+// loadReceipt hides each line from a BEGIN line through its END line.
+const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
+const KEY_END = /-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
+
 // Masks one receipt line the way mask() in pre-push-check.js does: every
 // pattern reads the ORIGINAL line and marks the characters it hides (all but a
 // match's first 4 or, under a hide rule, the value alone), so one pattern's
@@ -1238,7 +1249,7 @@ const RECEIPT_SECRET_PATTERNS = [
 function maskReceiptLine(line) {
   const hidden = new Array(line.length).fill(false);
   let count = 0;
-  RECEIPT_SECRET_PATTERNS.forEach(function (p) {
+  RECEIPT_SECRET_PATTERNS.concat(RECEIPT_ONLY_PATTERNS).forEach(function (p) {
     for (const m of line.matchAll(p.re)) {
       const span = p.hide ? p.hide(m) : [m.index + 4, m.index + m[0].length];
       if (span[1] <= span[0]) continue;
@@ -1286,6 +1297,15 @@ function loadReceipt(f) {
   const r = f.receipt;
   if (!r || typeof r !== 'object') return;
 
+  // The page prints the check above its output, and a check for a hardcoded key
+  // often names that key, so the command is masked like its output, carried or not.
+  const typedCmd = r.cmd;
+  if (typeof r.cmd === 'string') {
+    const masked = maskReceiptLine(r.cmd);
+    r.cmd = masked.line;
+    if (masked.count) reviewNotes.push('receipt for ' + (f.id || '?') + ': ' + masked.count + ' secret-shaped token(s) redacted from its command before rendering');
+  }
+
   // A finding carried forward from the previous page arrives in rendered form:
   // its stdout is what the run that produced it read off disk, and there is no
   // file to re-read. The flag is renderer-set (the payload's copy is stripped
@@ -1325,7 +1345,7 @@ function loadReceipt(f) {
     // The runner saves raw stdout, but a wrapped capture may already carry the
     // command line. Rendering ours on top of theirs echoes it twice, which is
     // exactly what an unedited terminal dump looks like. Drop the duplicate.
-    if (lines.length && r.cmd && lines[0].replace(/^\$\s*/, '').trim() === String(r.cmd).trim()) {
+    if (lines.length && typedCmd && lines[0].replace(/^\$\s*/, '').trim() === String(typedCmd).trim()) {
       lines = lines.slice(1);
     }
     // The runner appends "exit N" as the file's last line. It is the machine's
@@ -1344,8 +1364,15 @@ function loadReceipt(f) {
       if (exitLine[1].trim()) lines[lines.length - 1] = exitLine[1]; else lines.pop();
     }
     let redacted = 0;
+    let inKey = false;
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
       .map(function (l) {
+        if (inKey) {
+          inKey = !KEY_END.test(l);
+          redacted += 1;
+          return '[redacted]';
+        }
+        inKey = KEY_BEGIN.test(l) && !KEY_END.test(l);
         const masked = maskReceiptLine(l);
         redacted += masked.count;
         l = masked.line;
@@ -1775,13 +1802,17 @@ function openFindingsWithLabels(data) {
 // file is in that list. One on an unreviewed file, or with no file to match,
 // is carried like one from a lens that did not run. Seeded must-check findings
 // are the exception while the plan lens runs: they are re-read from the plan
-// every orchestrated run, file or no file. A payload with `lenses` and no
+// every orchestrated run, file or no file. So is a finding with no file on a full
+// check: it looks at the project rather than a list of files and raises the finding
+// again if it still holds, so nothing else would ever end it. `completeness` and
+// `operations` are the rows only a full check sets. A payload with `lenses` and no
 // `reviewedFiles` (a project's own command written before the key) resolves by
 // lens alone, as before, and says so on stderr.
 function carryForward(data, prior) {
   if (!Array.isArray(data.lenses) || !data.lenses.length) return;
   const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
   const scoped = Array.isArray(data.reviewedFiles);
+  const fullCheck = lenses.indexOf('completeness') !== -1 || lenses.indexOf('operations') !== -1;
   // Said whenever the list is missing, before the previous page is even read:
   // this note is how a caller's missing list shows, so it cannot wait for a
   // finding that happens to resolve (review of the #219 cycle, R4).
@@ -1810,7 +1841,7 @@ function carryForward(data, prior) {
     let reason = ran ? null : 'lens';
     if (ran && scoped && !(isSeeded(specs) && lenses.indexOf('plan') !== -1)) {
       const rel = item.f.file && typeof item.f.file.relPath === 'string' ? normRelPath(item.f.file.relPath) : '';
-      if (!rel) reason = 'nofile';
+      if (!rel) { if (!fullCheck) reason = 'nofile'; }
       else if (!reviewed[rel]) reason = 'file';
     }
     if (!reason) return;
