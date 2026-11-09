@@ -104,6 +104,7 @@ The script returns JSON with per-action results plus diagnostics:
 ```
 
 - `ok` - `true` if all actions succeeded, `false` if any failed.
+- `failedAction` - The first failed action's `type` and `error`, printed right after `ok`. Only present when an action failed.
 - `actions` - Per-action results in the same order as the input.
 - `console` - Browser console messages (errors and warnings only). Only present when there are issues.
 - `network` - Failed network requests (4xx, 5xx, connection errors). Only present when there are issues.
