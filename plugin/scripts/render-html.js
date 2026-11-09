@@ -1231,10 +1231,28 @@ const RECEIPT_SECRET_PATTERNS = [
 ];
 
 // What the page hides and a push never blocks on, kept apart so the list above
-// stays the push checker's: a key held on one line, as a service account file does,
-// and a PGP block, which the shared pattern never named.
+// stays the push checker's. A blocked push stops someone and a hidden value costs
+// little, so these reach further: a key held on one line, as a service account file
+// does, and a PGP block, which the shared pattern never named; and any value after a
+// name holding a secret-sounding word (pass, password, pwd, secret, token, a word
+// ending in _key, credentials, cookie), in any case, quoted or not, with or without
+// spaces around = or :. An unquoted value that reads as code stays readable, so a
+// receipt showing `token = getToken();` still proves its point: one that starts with
+// $ or <, holds a bracket, or has a dot and no digit. The shell's PWD and OLDPWD
+// hold folders, not secrets. A value under 8 characters stays, as in the shared list.
 const RECEIPT_ONLY_PATTERNS = [
-  { name: 'private-key-line', re: /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*/g }
+  { name: 'private-key-line', re: /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*/g },
+  {
+    name: 'secret-named-value',
+    re: /((?<![\w.-])([\w.-]*?(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|[_-]key|credentials?|cookie)[\w.-]*)["']?\s*[:=]\s*)(?:(["'`])(?=(?:\\[\s\S]|(?!\3)[^\\]){8,})((?:\\[\s\S]|(?!\3)[^\\])*)\3?|(?![$<])(?!\S*[()[\]{}])(?=\S*[0-9]|[^\s.]*(?:\s|$))\S{8,})/gi,
+    // The value only: after the operator and any opening quote, up to the closing
+    // quote. Group 2 is the name, group 3 the quote, group 4 a quoted value.
+    hide: function (m) {
+      if (/^(?:old)?pwd$/i.test(m[2])) return [0, 0];
+      const start = m.index + m[1].length + (m[3] ? 1 : 0);
+      return [start, m[3] ? start + m[4].length : m.index + m[0].length];
+    }
+  }
 ];
 // A private key's body is plain base64 no pattern can tell from other text, so
 // loadReceipt hides each line from a BEGIN line through its END line.

@@ -1865,6 +1865,52 @@ function cycle162ReviewTests() {
   check('masker: a secret in the check command is hidden too',
     cmdKey.html.indexOf(fakeKey) === -1 && /^grep -n .*\[redacted\] src\/a\.js$/.test(cmdShown) && /redacted/.test(cmdKey.stderr), cmdShown);
 
+  // An environment file has no quotes, and only known key shapes were hidden
+  // (review 2026-11-07-133045, R6). Two tries each failed a fresh check on shapes
+  // it listed, so the owner asked for a third, judged on exactly those shapes.
+  // Code that only names a secret stays readable. A page keeps six lines.
+  const envFile = path.join(rdir, 'env.txt');
+  const envRun = function (lines) {
+    fs.writeFileSync(envFile, lines.join('\n') + '\nexit 0\n', 'utf-8');
+    const found = finds(island(run('env', { title: 'T', groups: [{ label: 'code', findings: [
+      finding('R1', { receipt: { cmd: 'grep KEY .env', stdoutFile: envFile } })] }] }).html))[0];
+    return found && found.receipt ? found.receipt.stdout : [];
+  };
+  const envCases = [
+    ['API_KEY=abcd1234efgh5678', 'API_KEY=[redacted]'],
+    ['DB_PASSWORD=hunter2hunter2', 'DB_PASSWORD=[redacted]'],
+    ['token: abcd1234efgh5678', 'token: [redacted]'],
+    ['SESSION_SECRET=onlylettershere', 'SESSION_SECRET=[redacted]'],
+    ['DB_PASSWORD=pa$$w0rd123456', 'DB_PASSWORD=[redacted]'],
+    ['SECRET=abc$defghijkl9', 'SECRET=[redacted]'],
+    ['DB_PASSWORD=ab<cdefgh12345', 'DB_PASSWORD=[redacted]'],
+    ['password=letmeinplease', 'password=[redacted]'],
+    ['api_key=abcdefghijkl', 'api_key=[redacted]'],
+    ['PRIVATE_KEY=abcdefghijkl', 'PRIVATE_KEY=[redacted]'],
+    ['SECRET_KEY = abcd1234efgh5678', 'SECRET_KEY = [redacted]'],
+    ["DB_PASSWORD=ab'cdefghijklmnop", 'DB_PASSWORD=[redacted]'],
+    ['DB_PASSWORD=ab"cdefghijklmnop', 'DB_PASSWORD=[redacted]'],
+    ['API_KEY=abc`defghijklmnop', 'API_KEY=[redacted]'],
+    ["DB_PASSWORD=abcdefghij'klmnop", 'DB_PASSWORD=[redacted]'],
+    ['secret_key=abcd1234efgh5678', 'secret_key=[redacted]'],
+    ['aws_secret_access_key = wJalrXUtnFEMI/K7MDENG', 'aws_secret_access_key = [redacted]'],
+    ['db_password_prod=hunter2hunter2', 'db_password_prod=[redacted]'],
+    ['SECRET_KEY="abcd1234efgh5678"', 'SECRET_KEY="[redacted]"'],
+    ["AWS_SECRET_ACCESS_KEY='abcd1234efgh'", "AWS_SECRET_ACCESS_KEY='[redacted]'"],
+    ['MY_TOKEN_V2="abcd1234efgh"', 'MY_TOKEN_V2="[redacted]"'],
+    ['PWD=/home/mayank/Projects', 'PWD=/home/mayank/Projects']
+  ];
+  const envMissed = [];
+  for (let i = 0; i < envCases.length; i += 6) {
+    const chunk = envCases.slice(i, i + 6);
+    const shown = envRun(chunk.map(function (c) { return c[0]; }));
+    chunk.forEach(function (c, k) { if (shown[k] !== c[1]) envMissed.push(c[0] + ' -> ' + shown[k]); });
+  }
+  check('masker: a value after a secret-sounding name is hidden in every listed shape, its name kept',
+    envMissed.length === 0, envMissed.join(' | '));
+  const codeLines = ['const token = getToken();', 'password: formData.password,', 'token = tokens[0];', 'MAX_TOKENS=4096', 'token=$API_TOKEN_2'];
+  check('masker: code that only names a secret stays readable', envRun(codeLines).join('|') === codeLines.join('|'), envRun(codeLines).join('|'));
+
   // A key's body is plain base64 no pattern can tell from other text, and a page
   // keeps six lines, enough for a short key whole (review 2026-11-07-133045, R7).
   const begin = ['-----BEGIN EC', 'PRIVATE KEY-----'].join(' ');
