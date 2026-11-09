@@ -457,7 +457,6 @@
 
 ## Issues 257, 258 and 259 (nothing lost, nothing unread)
 
-- **Before dispatching typed agents, confirm with `pwd` that the session sits in the repo root.**
 - **Make the before run each step's first command, before opening its files, even in a research step.**
 - **A bar met in substance only is a miss: write it as one in the outcomes, never as met with a note.**
 - **When a prompt adds a temporary worktree, give it the copy-and-install line its other worktrees get.**
@@ -519,7 +518,6 @@
 ## Issues 276 and 280 (the writing guide and everyday words)
 
 - **Run the probe that checks a behavior in the same change that alters it.**
-- **Never cd into a subfolder in a Bash call; start each call from the project root instead.**
 
 ## Issue 281 (the lessons read budget)
 
@@ -533,3 +531,11 @@
 ## Issues 284 to 286 (the folder push, landing conflicts, earlier notes)
 
 - **Resolve a folder as the tool using it will: tidying the text undoes link/.., but git follows the link.**
+
+## Harness report check (2026-11, the 2 November report)
+
+- **Drive a live Claude Code window through tmux before asking the owner to run a session by hand.**
+- **A throwaway home still uses the real login, so a practice session can publish pages to the owner's account.**
+- **Count a prompt rule's word cap before drafting an edit to it for the owner's approval.**
+- **Aim a seeded finding's proof at its claim, never at the absence of a word a guessed fix would add.**
+- **Before a pattern fix, get the shapes a fresh check will try and test all of them first.**
