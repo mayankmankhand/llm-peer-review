@@ -80,13 +80,15 @@ copied exactly from the flag's `keep` field. It may stand in the landing commit 
 
 ## Changelog placement
 
-In a worktree, `/tk:document` writes its changelog block to the branch's `CHANGELOG.md` as before and copies it into the PR body. When `/tk:merge` updates the branch, it takes main's `CHANGELOG.md` and re-inserts the block, as its own commit, before the line that `merge-check.js --changelog-place CHANGELOG.md <block file>` prints:
+In a worktree, `/tk:document` writes its changelog block to the branch's `CHANGELOG.md` as before and copies it into the PR body. When `/tk:merge` updates the branch, it takes main's `CHANGELOG.md` and re-inserts the block, as its own commit, with `merge-check.js --changelog-place CHANGELOG.md <block file> --write`, which makes the edit and prints the rule it used (without `--write` it only prints the line the block goes before). The first rule that fits decides:
 
+- a block that opens with an Unreleased heading "joins the Unreleased heading" when main's first `## ` section is the same Unreleased heading (case and square brackets aside): its heading is dropped and its entries go directly below main's, newest on top;
+- it "fills the empty Unreleased heading" when that section is an empty Unreleased heading with other text: the block takes its place;
 - a block that opens with its own `## ` heading goes directly above the file's first `## ` section, so the newest entry is on top and never inside a released version;
 - a block of bare entries goes directly below an `## Unreleased` heading;
 - with neither anchor, after the title and the blank lines under it.
 
-Rule 2 then confirms that every line of the block landed.
+Rule 2 then confirms that every line of the block landed. An Unreleased heading counts as landed for rules 1 and 2 while the landed changelog still has one, because the placement keeps exactly one.
 
 ## Generated files
 
