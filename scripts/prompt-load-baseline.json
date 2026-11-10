@@ -1,12 +1,12 @@
 {
   "note": "Words each prompt file loads, recorded by scripts/prompt-load.js --write-baseline. npm test warns when a row grows past this; refresh it after a deliberate change so later growth is measured from there.",
   "rows": {
-    "agents/audit-skeptic.md": 436,
+    "agents/audit-skeptic.md": 488,
     "agents/correction-extractor.md": 1069,
     "agents/decision-checker.md": 399,
     "agents/design-comparer.md": 183,
     "agents/design-critic.md": 227,
-    "agents/fix-verifier.md": 347,
+    "agents/fix-verifier.md": 382,
     "agents/index-mapper.md": 40,
     "agents/plan-critic.md": 544,
     "agents/review-browser-finder.md": 7070,
@@ -21,7 +21,7 @@
     "commands/ask-gpt.md": 7275,
     "commands/codebase-to-course.md": 1586,
     "commands/create-issue.md": 2016,
-    "commands/create-plan.md": 7915,
+    "commands/create-plan.md": 7918,
     "commands/document.md": 10802,
     "commands/execute.md": 6402,
     "commands/explore.md": 7504,
