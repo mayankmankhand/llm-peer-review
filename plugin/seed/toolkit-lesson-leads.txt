@@ -191,6 +191,7 @@ Before merging parallel helpers' outputs by a key, refuse any key that appears t
 Before pointing call sites at a link moved only at session start, test an update taken mid-session.
 Before running a step that reads the tree, count the edits that applied.
 Before running a step that reads the tree, count the edits that applied: three of nine edits in one batch missed their anchor, the mode wrote its shard without them, and the verifier had to judge a file the shard did not show.
+Before saying a check will not flag a change, read which commits the check compares.
 Before shipping a permission row with a leading wildcard, test which hostile commands it also allows.
 Before the bump, test an upgrade finding on a next-version scratch plugin, beside a control on the new text.
 Before trusting a check meant to tell a defect from its fix, run it on both and confirm the answers differ.
@@ -384,6 +385,7 @@ The review digest is one line per finding: a line that bundles a range of IDs fa
 The seeded rules file reaches plugin projects through C-7, not the seed history: C-15 never reads it.
 The self-modification guard also blocks adding a permission to `settings.local.json`, not just editing the running command.
 The self-modification guard blocks adding a permission to `settings.local.json`; ask the user to add it.
+The test gate shows a suite's lines only when it fails; guard an old case by its absence from the failure list.
 To find who approved a tool call, read its `permissionDecision` in the session log: the `source` says a person (`user_temporary`), a settings row (`config`) or a hook.
 To find who approved a tool call, read the `source` of its `permissionDecision` in the session log.
 To ignore what the default branch already has, compare content from the merge base, not commit ancestry.
