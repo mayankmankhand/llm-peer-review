@@ -600,6 +600,48 @@ section('the pocket fixture (#278)', () => {
   const capped = { file: 'server.js', line: 167, text: 'Should fix. The month view silently drops the older expenses, and its count and total leave them out.' };
   check('pocket: a finding that an edit silently drops the id is not the capped-list catch', !!kb && !QC.bugMatches(kb, lostId), lostId.text);
   check('pocket: a finding that the month view silently drops older expenses is the capped-list catch', !!kb && QC.bugMatches(kb, capped), capped.text);
+
+  // #299: the stored-script key against plain wordings it was never tuned on.
+  // wordings.jsonl was written by a fresh helper that saw only the bug's
+  // description and the finding rules, never this key's patterns or the run 1
+  // sentence below: 20 ways to say the bug, and 10 of Pocket's nearby problems
+  // (export formulas, the import and close overwrite, the month picker that
+  // needs scripts, raw export amounts) that must not count as it. Each is fed
+  // as a finding on server.js, the file the key ties the bug to. A failing case
+  // prints counts only, never a wording, so a run before the key change shows
+  // nothing to tune the key on. The bar (16 of 20, 0 of 10) was set before any
+  // result.
+  const xss = bugs.find(b => b.id === 'security-stored-xss');
+  let wordings = [];
+  try {
+    wordings = fs.readFileSync(path.join(dir, 'wordings.jsonl'), 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
+  } catch (e) { wordings = []; }
+  const ofKind = kind => wordings.filter(w => w && w.kind === kind && typeof w.text === 'string').map(w => ({ file: 'server.js', line: null, text: w.text }));
+  const held = ofKind('storedScript');
+  const nearby = ofKind('nearby');
+  const onFile = !!xss && xss.files.includes('server.js');
+  const heldCaught = xss ? held.filter(f => QC.bugMatches(xss, f)).length : 0;
+  const nearbyCaught = xss ? nearby.filter(f => QC.bugMatches(xss, f)).length : 0;
+  check('299: the stored-script key catches at least 16 of 20 held-out plain wordings',
+    onFile && held.length === 20 && heldCaught >= 16,
+    JSON.stringify({ onServerJs: onFile, wordings: held.length, caught: heldCaught }));
+  check('299: the stored-script key counts none of the 10 nearby wordings',
+    onFile && nearby.length === 10 && nearbyCaught === 0,
+    JSON.stringify({ onServerJs: onFile, wordings: nearby.length, caught: nearbyCaught }));
+
+  // The v8.0.18 run 1 miss itself (#299): its security reviewer's raw line,
+  // copied from that run's saved transcript (reports/quality-check/
+  // 2026-11-09-193221-review-ship-fit-d866966-pocket, the security finder's
+  // subagent log), through the same path a real run takes. The key's old
+  // patterns matched none of "raw page markup" or "stored scripts".
+  const run1 = {
+    severity: 'block', specialist: 'security', file: { relPath: 'server.js', line: 159 },
+    what: 'Blocks. Expense notes and categories now print as raw page markup, which leaks your expense data to stored scripts.',
+    context: 'Any site you visit can submit a hidden form to the add page and store a scripted note, because the app has no login or form tokens.',
+    fix: 'One line in the table-cell helper: escape its content and pass the action links separately. Ten minutes, or keep stored scripts running.',
+    key: 'server.js:expense-notes-and-categories-now-print-as',
+  };
+  check('299: the v8.0.18 run 1 wording of the stored-script bug is a catch', !!xss && QC.bugMatches(xss, QC.rawToMatchable(run1)), run1.what);
 });
 
 // #278: fixtures are folders under scripts/fixtures/quality-check/, chosen by
