@@ -18,11 +18,13 @@
 //   node merge-findings.js --verdicts --tier <2|3|verify> --ids R1,R2 <return file>...
 //                                     checks what the judges sent back (below)
 //   node merge-findings.js --verify <file or folder> --receipts <dir> --scope <scope.json> --out <dir>
-//                          [--mechanical R1,R5] [--judgment R2,R3] [--browser R7] [--end <sha>] [--root <dir>]
+//                          [--mechanical R1,R5] [--judgment R2,R3] [--browser R7] [--owner-try R6] [--end <sha>] [--root <dir>]
 //                                     writes the fix loop's recheck rows, verifier
 //                                     shards and ledger (issue #267; below); at
 //                                     least one ID flag, and `next` in its output
-//                                     says what consumes each file (issue #272)
+//                                     says what consumes each file (issue #272);
+//                                     --owner-try opens the one extra round the
+//                                     owner approved after two failed (issue #294)
 //   node merge-findings.js --verdicts <verify shard> <return file> --ledger <ledger.json>
 //   node merge-findings.js --verdicts --ledger <ledger.json> --recheck <results.json>
 //                                     records a verifier's return, or the checks
@@ -120,14 +122,17 @@
 // and a colon at the start of a line (markdown marks and indentation aside),
 // followed by one word of that tier's closed set: REFUTED or STANDS; tier 3 adds
 // DOWNGRADE Warn and DOWNGRADE Suggest; the verifier says FIXED or NOT FIXED. A
-// split: line belongs to the verdict above it. A line of prose after an ID and
+// split: line belongs to the verdict above it, and so does a masked: line, the
+// note M2 asks a skeptic for when another defect hides a true finding (issue
+// #295); neither decides anything. A line of prose after an ID and
 // a colon (an evidence list, say) is not a verdict and decides nothing; an
 // all-capitals word there (KEEP, KILL) is a verdict outside the set. stdout is one JSON object,
 // {tier, ids, ok, returns: [{file, problems}]}; a problem is a missing ID, an
 // extra ID, an unknown word (KEEP, KILL) or two lines that disagree for one ID,
 // and any problem makes ok false and the exit code 1, with nothing decided,
 // because M2 redispatches a malformed return rather than reading around it. When
-// ok, it adds verdicts (one per ID, in M2's words), splits, and for tier 3 the
+// ok, it adds verdicts (one per ID, in M2's words), splits and masked (each the
+// notes per ID, in the order the returns were given), and for tier 3 the
 // ballots per ID, the tally (two or more REFUTED kill as "REFUTED 2/3" or "3/3",
 // else two or more STANDS, else the higher DOWNGRADE; with two ballots, kill or
 // downgrade only when both agree; with one, the ID is listed as unaudited) and
@@ -651,6 +656,7 @@ function readReturn(text, ids, tier) {
   const problems = [];
   const decided = {};
   const splits = {};
+  const masked = {};
   const unknownIds = new Set();
   const proseIds = new Set();
   let last = null;
@@ -661,6 +667,16 @@ function readReturn(text, ids, tier) {
     const split = s.match(/^split:\s*(.*)$/i);
     if (split) {
       if (last) (splits[last] = splits[last] || []).push(split[1].trim());
+      waiting = null;
+      continue;
+    }
+    // A masked: line names the defect that hides the finding above it (M2). It
+    // is kept with that finding and decides nothing; one before any verdict has
+    // no finding to belong to. A label written in bold leaves its closing marks
+    // in front of the note, so those go.
+    const mask = s.match(/^masked:\s*(.*)$/i);
+    if (mask) {
+      if (last) (masked[last] = masked[last] || []).push(mask[1].replace(/^(?:\*\*|__|`|\*|_)+\s*/, '').trim());
       waiting = null;
       continue;
     }
@@ -702,7 +718,7 @@ function readReturn(text, ids, tier) {
     problems.push(proseIds.has(id) ? { kind: 'missing', id, note: 'named only in prose lines, never with a verdict word' } : { kind: 'missing', id });
   }
   problems.sort((a, b) => (a.line || Infinity) - (b.line || Infinity));
-  return { problems, decided, splits };
+  return { problems, decided, splits, masked };
 }
 
 // M2 tier 3's tally over the valid ballots, in M2's order. Three ballots: two or
@@ -735,8 +751,13 @@ function checkVerdicts(tier, ids, returns) {
   if (!out.ok) return out;
   const splits = {};
   for (const r of read) for (const [id, list] of Object.entries(r.splits)) splits[id] = (splits[id] || []).concat(list);
+  // The hidden-defect notes, per finding like the split notes: M2 has the runner
+  // copy each into the digest, and this is where it reads them (issue #295).
+  const masked = {};
+  for (const r of read) for (const [id, list] of Object.entries(r.masked)) masked[id] = (masked[id] || []).concat(list);
   out.verdicts = {};
   out.splits = splits;
+  out.masked = masked;
   if (String(tier) !== '3') {
     for (const id of ids) out.verdicts[id] = read[0].decided[id].verdict;
     return out;
@@ -872,7 +893,9 @@ function shardsMain(argv, fail) {
 
 const PLACEHOLDER_EXPECT = 'write the expect the fix must now satisfy';
 // Max 2 fix rounds per finding (M5). A third call for an ID is refused before
-// anything is written, naming the last green checkpoint to revert to.
+// anything is written, naming the last green checkpoint to revert to. The one
+// way past it is the owner's: --owner-try opens a single round 3 for a finding
+// whose two rounds read NOT FIXED, and marks it in the ledger (issue #294).
 const MAX_ROUNDS = 2;
 
 // The recheck expect, by M3's own inversion: a match becomes noMatch, a noMatch
@@ -924,6 +947,17 @@ function toolOf(words) {
   return git ? { tool: 'git ' + git.sub, args: git.args } : { tool: words[0], args: words.slice(1) };
 }
 const SEARCHES = ['grep', 'egrep', 'fgrep', 'rg', 'git grep'];
+// Whether everything a check prints starts as file text a search found: each
+// command fed by no pipe (the first of a pipe, and each one after &&, ; or ||)
+// is a search, so what follows it in its pipe (wc, head, cut) only reshapes
+// that text. A search fed by another command reads that command's output, not
+// a file of its own, and a check the runner's reader refuses is no search
+// (issue #288).
+function searchesFiles(check) {
+  const cmds = commandsOf(check);
+  if (!cmds) return false;
+  return cmds.filter((c) => c.from < 0).every((c) => SEARCHES.includes(toolOf(c.words).tool));
+}
 // A search's options, read the way the tool reads them: a long option by its
 // name, and a word with one dash as a run of letters, where a letter that
 // takes a value (-e, -f, -m, -A, -B, -C, and rg's -t, -g, -r) ends the run,
@@ -1220,6 +1254,11 @@ function buildVerify(parsed, scope, opts) {
   }
   const named = Object.keys(pathOf).sort(byNumber);
   if (!named.length) throw badInput('usage', null, 'name at least one ID under --mechanical, --judgment or --browser');
+  // The owner's extra try (issue #294) says how many rounds a finding may have,
+  // never how its fix is verified, so each ID it names takes a path flag too.
+  const ownerTry = Array.from(new Set(opts.ownerTry || [])).sort(byNumber);
+  const pathless = ownerTry.filter((id) => !pathOf[id]);
+  if (pathless.length) throw badInput('usage', null, '--owner-try names ' + pathless.join(', ') + ', which no path flag names in this call: name ' + (pathless.length === 1 ? 'it' : 'them') + ' under --mechanical, --judgment or --browser too');
   // A receipt that reads lines by number gives no recheck that follows its
   // text (issue #283): the mechanical path refuses the finding before anything
   // is written, and the error carries its IDs, which verifyMain turns into the
@@ -1262,9 +1301,31 @@ function buildVerify(parsed, scope, opts) {
   // verifier on that same fix. It spends no fix round, so M5's two stand in either
   // round, and it runs once (judgeOpen).
   const judgingAgain = new Set(lists.judgment.filter((id) => ledger.findings[id] && judgeOpen(ledger.findings[id])));
-  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgingAgain.has(id));
+  // M5's bound, and the one way past it (issue #294): a finding at the bound whose
+  // latest verdict is NOT FIXED gets one more round when the owner says so, named
+  // under --owner-try. The try is marked on the finding, so it opens once: a marked
+  // finding is refused whenever a call would open a round for it, with the flag or
+  // without. A call that opens no round (the fresh verifier call above) is no try:
+  // there the flag changes nothing on a marked finding, and is refused on an
+  // unmarked one, whose round is not decided yet.
+  const markedTry = (id) => Boolean(ledger.findings[id] && ledger.findings[id].ownerTry);
+  const failedAtBound = (id) => { const f = ledger.findings[id]; return Boolean(f) && f.round === MAX_ROUNDS && !judgingAgain.has(id) && latestVerdict(f) === 'NOT FIXED'; };
+  const early = ownerTry.filter((id) => !markedTry(id) && !failedAtBound(id));
+  if (early.length) {
+    const where = (id) => { const f = ledger.findings[id]; return id + ' is at round ' + (f ? f.round : 0) + ' of ' + MAX_ROUNDS + (f && latestVerdict(f) ? ', ' + latestVerdict(f) : ''); };
+    const e = badInput('owner_try_early', null, early.map(where).join('; ') + ': the owner\'s extra try opens only for a finding whose ' + MAX_ROUNDS + ' rounds both read NOT FIXED, so leave --owner-try out of this call; nothing was written');
+    e.ids = early;
+    throw e;
+  }
+  const opening = new Set(ownerTry.filter((id) => !markedTry(id)));
+  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgingAgain.has(id) && !opening.has(id));
   if (exhausted.length) {
-    const e = badInput('rounds_exhausted', null, exhausted.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5): revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
+    const said = [];
+    const plain = exhausted.filter((id) => !markedTry(id));
+    const used = exhausted.filter(markedTry);
+    if (plain.length) said.push(plain.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5)');
+    if (used.length) said.push(used.join(', ') + ' already had the owner\'s one extra try after ' + MAX_ROUNDS + ' rounds (M5)');
+    const e = badInput('rounds_exhausted', null, said.join('; ') + ': revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
     e.ids = exhausted;
     e.lastGreen = ledger.lastGreen;
     throw e;
@@ -1386,6 +1447,8 @@ function buildVerify(parsed, scope, opts) {
     f.key = keyOf.get(id);
     f.path = pathOf[id];
     if (judgingAgain.has(id)) f.judged = f.round; else f.round += 1;
+    // The owner's try, marked where it opened: its round and this call's number.
+    if (opening.has(id)) f.ownerTry = { round: f.round, call };
     if (!f.rechecks) f.rechecks = {};
     if (recheckRows[id]) {
       f.rechecks[String(f.round)] = recheckRows[id];
@@ -1396,7 +1459,7 @@ function buildVerify(parsed, scope, opts) {
     }
     rounds[id] = f.round;
   }
-  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds, renumbered };
+  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), ownerTry: Array.from(opening).sort(byNumber), diffFrom, untracked, rounds, renumbered };
 }
 
 // The script's own path and its sibling the checks runner, as the printed `next`
@@ -1455,7 +1518,10 @@ function verifyNext(built, opts) {
 
 // The same --verify call with the given IDs moved from --mechanical to
 // --judgment, printed as `retry` with a line_addressed refusal so the runner
-// runs it the way it runs the mode's next list (issue #283).
+// runs it the way it runs the mode's next list (issue #283). That refusal wrote
+// nothing, so an --owner-try the call carried is kept: its mark is not in the
+// ledger yet. The record step's retry is built from the saved call, which keeps
+// no --owner-try, because a fresh verifier call opens no round (issue #294).
 function retryCommand(file, opts, ids) {
   const moved = new Set(ids);
   const mechanical = opts.mechanical.filter((id) => !moved.has(id));
@@ -1463,19 +1529,20 @@ function retryCommand(file, opts, ids) {
   if (mechanical.length) words.push('--mechanical', mechanical.join(','));
   words.push('--judgment', opts.judgment.concat(ids).sort(byNumber).join(','));
   if (opts.browser.length) words.push('--browser', opts.browser.join(','));
+  if (opts.ownerTry && opts.ownerTry.length) words.push('--owner-try', opts.ownerTry.join(','));
   if (opts.end !== undefined) words.push('--end', opts.end);
   if (opts.rootGiven) words.push('--root', shellWord(opts.root));
   return words.join(' ');
 }
 
-// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--end <sha>] [--root <dir>]
+// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--owner-try <ids>] [--end <sha>] [--root <dir>]
 function verifyMain(argv, fail) {
-  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--end <sha>] [--root <dir>]; at least one ID flag';
+  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--owner-try <R-ids>] [--end <sha>] [--root <dir>]; at least one of the three path flags, and --owner-try only for IDs one of them names';
   const opts = {};
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (['--receipts', '--scope', '--out', '--mechanical', '--judgment', '--browser', '--end', '--root'].includes(a)) {
+    if (['--receipts', '--scope', '--out', '--mechanical', '--judgment', '--browser', '--owner-try', '--end', '--root'].includes(a)) {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith('--')) fail('usage', null, usage);
       opts[a.slice(2)] = v;
@@ -1488,6 +1555,8 @@ function verifyMain(argv, fail) {
     opts[k] = opts[k] === undefined ? [] : opts[k].split(',').map((s) => s.trim()).filter(Boolean);
     if (!opts[k].every((id) => /^R\d+$/.test(id))) fail('usage', null, '--' + k + ' takes R-ids, comma separated. ' + usage);
   }
+  opts.ownerTry = opts['owner-try'] === undefined ? [] : opts['owner-try'].split(',').map((s) => s.trim()).filter(Boolean);
+  if (!opts.ownerTry.every((id) => /^R\d+$/.test(id))) fail('usage', null, '--owner-try takes R-ids, comma separated. ' + usage);
   if (opts.end !== undefined && !/^[0-9a-f]{7,40}$/.test(opts.end)) fail('usage', null, '--end takes a commit id. ' + usage);
   opts.rootGiven = opts.root !== undefined;
   opts.root = opts.root || process.cwd();
@@ -1526,6 +1595,7 @@ function verifyMain(argv, fail) {
     needsExpect: built.needsExpect,
     shards: built.files.filter((f) => f.kind === 'shard').map((f) => ({ file: path.join(opts.out, f.name), ids: f.ids })),
     browser: built.browser,
+    ownerTry: built.ownerTry,
     diffFrom: built.diffFrom,
     untracked: built.untracked,
     ledger: { file: built.ledgerFile, rounds: built.rounds },
@@ -1588,6 +1658,16 @@ function recordVerdicts(file, verdicts, source, from, fail) {
 // because the fixer wrote what judged the fix (review 2026-11-04-080648 passed one that
 // really did fail before the fix, on a problem still there). Once that call has run,
 // its verifier has the round and the rows are skipped.
+//
+// A fail on a row the mode itself flipped from a file search (a match that became
+// a noMatch) settles nothing either: the searched text is still there, and a correct
+// fix can leave it in place (issue #288: a button that keeps its label while its
+// handler changes, a message that gained a sentence). When every failing row of a
+// finding is such a row, it records NOT VERIFIED with a text_kept reason and prints
+// the judgment retry, so a verifier reads the diff; a fix that truly failed reads NOT
+// FIXED there and the round is spent as before. Any other failing row (an exit code,
+// a row the runner filled in, text no search read from a file) keeps the finding NOT
+// FIXED outright.
 function recordRechecks(opts, read, fail) {
   let ledger;
   try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
@@ -1601,6 +1681,7 @@ function recordRechecks(opts, read, fail) {
   const changedIds = [];
   const hollowIds = [];
   const filledIds = [];
+  const keptTextIds = [];
   const retryIds = [];
   const at = new Date().toISOString();
   for (const id of Object.keys(ledger.findings).sort(byNumber)) {
@@ -1622,10 +1703,12 @@ function recordRechecks(opts, read, fail) {
       verdict = found.every((c) => c.verdict === 'pass') ? 'FIXED' : 'NOT FIXED';
       const filled = pinFilled(f, rows);
       if (verdict === 'FIXED' && filled.length) { verdict = 'NOT VERIFIED'; reason = 'filled_expect: ' + filled.join(', ') + ' passed an expect the fixer wrote, so a fresh verifier decides'; filledIds.push(id); }
+      const textKept = verdict === 'NOT FIXED' ? keptText(f, rows) : [];
+      if (textKept.length) { verdict = 'NOT VERIFIED'; reason = 'text_kept: ' + textKept.join(', ') + ' still find' + (textKept.length === 1 ? 's' : '') + ' the text the search matched before the fix, so a fresh verifier decides'; keptTextIds.push(id); }
     }
     if (changed.length) { rewritten.push(...changed); changedIds.push(id); }
     if (hollow.length) hollowIds.push(id);
-    const judge = filledIds.includes(id) || (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || '')));
+    const judge = filledIds.includes(id) || keptTextIds.includes(id) || (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || '')));
     if (judge) retryIds.push(id);
     const entry = { round: f.round, verdict, source: 'recheck', from: opts.recheck, at };
     if (reason) entry.reason = reason;
@@ -1638,9 +1721,10 @@ function recordRechecks(opts, read, fail) {
   // way --verify prints it (issue #272): fill the expect of each refused or
   // missing row, run the recheck file again, record again. A rewritten row needs
   // no write: its kept row goes back into the file here. A filled-in pass needs no
-  // rerun either: its next step is the verifier.
+  // rerun either, and neither does a search row whose text is still there: the
+  // next step for both is the verifier.
   const next = [];
-  const stuck = unverified.filter((id) => !filledIds.includes(id));
+  const stuck = unverified.filter((id) => !filledIds.includes(id) && !keptTextIds.includes(id));
   const again = stuck.length ? recheckFileFor(opts.ledger, ledger, stuck) : null;
   if (again) {
     if (rewritten.length) restoreKept(again, rewritten.map((c) => c.kept));
@@ -1651,7 +1735,7 @@ function recordRechecks(opts, read, fail) {
   }
   if (retryIds.length && ledger.lastVerify) {
     const l = ledger.lastVerify;
-    next.push({ do: 'run', ids: retryIds, what: 'the fixer rewrote or filled in the check that judged this fix, so a fresh verifier judges it', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
+    next.push({ do: 'run', ids: retryIds, what: 'the recheck could not settle this fix (the fixer rewrote or filled in its check, or a search still finds the text it matched before the fix), so a fresh verifier judges it', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
   }
   process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
 }
@@ -1683,6 +1767,20 @@ function compareKept(f, rows) {
     else if (filled && ran.verdict === 'pass' && metBeforeFix(ran.expect, kept.saved)) hollow.push(kept);
   }
   return { changed, hollow };
+}
+
+// The failing rows of one finding, when every one of them is a row the mode flipped
+// from a file search and the runner left as written: the text that search matched
+// before the fix is still there, which a correct fix can leave (issue #288). Empty
+// when any failing row is of another kind, or when the ledger kept no rows.
+function keptText(f, rows) {
+  const kept = new Map(((f.kept && f.kept[String(f.round)]) || []).map((k) => [k.id, k]));
+  const failing = ((f.rechecks && f.rechecks[String(f.round)]) || []).filter((r) => rows.get(r) && rows.get(r).verdict !== 'pass');
+  const flippedSearch = (r) => {
+    const k = kept.get(r);
+    return Boolean(k) && !k.filled && Boolean(k.expect) && typeof k.expect === 'object' && typeof k.expect.noMatch === 'string' && searchesFiles(k.check);
+  };
+  return failing.length && failing.every(flippedSearch) ? failing : [];
 }
 
 // A placeholder row's first honest run sets what the round holds it to, so a later

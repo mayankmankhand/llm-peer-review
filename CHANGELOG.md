@@ -4,18 +4,22 @@
 
 ## Unreleased
 
-<!-- At release: the prompt-load baseline also grew for agents/audit-skeptic.md (+52 words), agents/fix-verifier.md (+35) and commands/create-plan.md (+3). If this ships under a number other than 8.0.19, change it in the docs/TROUBLESHOOTING.md entry on a toolkit command that stops to ask. -->
+<!-- At release: re-record the prompt-load baseline (commands/review.md grew 12 words and skills/loop-rules/SKILL.md 86 with the approved edits). -->
 
-**Planning and reviews no longer stop to ask for your approval at the toolkit's own checks (#296, #297).** In default permission mode, `/tk:create-plan` asked once per plan at its check that the plan's files exist, and a review asked again each time the separate check of a fix ran your project's tests. Both now finish without asking, with no new permission rows.
+**A review no longer undoes a correct fix just because the fix kept the words its check searched for, and you can allow one more try at a fix (#288, #294, #295).** Three gaps in how `/tk:review` fixes findings and checks its own fixes are closed.
+
+### Added
+
+- **One more try, on your word.** When a fix has failed twice, the question you get now offers "try once more". Say yes and the review fixes that one finding a third time, records the round as yours in its log, and marks that finding's line in the review summary `(round 3, the owner's choice)`. It works once per finding, and only after two tries have really failed. Nothing opens a third try by itself, and if the third fails too, the fix is undone and you are asked again without that answer.
 
 ### Fixed
 
-- **`/tk:create-plan`.** The check that the files a plan names exist now runs inside the planner's existing check of its check lines, a command your project's permissions already allow, instead of a shell loop Claude Code could not check before it ran. One difference from the old loop: a path that points outside your project now shows as missing, even when the file exists there.
-- **Reviews.** The separate check of a fix, and the double-check that tries to knock down findings, no longer have shell access, so neither can start a test run partway through a review. Both judge from the proof output already in front of them, and can still open and search your files.
+- **Reviews: a fix that keeps the searched words.** A finding's proof is often a file search, and the recheck after the fix expects that search to come back empty. A correct fix can keep the words (a button that keeps its label while what it does changes), and such a fix used to read as failed, twice, and be undone. A failed recheck of that kind now goes to a fresh verifier, a separate helper that reads the change itself and decides. That costs one extra helper call and spends no fix try. A failing test, a failing build, and a recheck whose pass condition the fixing session wrote itself still fail outright.
+- **Reviews: hidden-defect notes are no longer dropped.** When the double-check finds that a true finding is hidden today by another defect, it says so in a note. The script that reads its reply now lists those notes for each finding, beside the notes it already kept, so the review summary can carry them.
 
 ### Why
 
-In the v8.0.18 practice run, a project set up with `/tk:setup` stopped once at the planner's path check and ten times during one review, where two fix checks ran the project's tests five times each. Every stop was on a toolkit step, not on anything the project asked for. Permission rows for test commands would have let every install run project code without asking, so the steps changed instead.
+A recheck that searches for words can tell that the words are still there, not whether the fix worked. Until now that was enough to fail a correct fix twice and undo it. In one trial on each side, the fresh verifier called a real fix that kept its wording fixed and a fake one not fixed. That is a spot check and not a rate, so issue #300 reads the real rate after ten reviews. The extra try was already happening by hand: an approved third try had no place in the review's log and was written into the second, which made the log wrong. The hidden-defect notes were being written and then lost one step later.
 
 <!-- At release: re-record the prompt-load baseline (commands/merge.md grew 166 words with the approved edits). -->
 
