@@ -72,7 +72,7 @@ Return **exactly one JSON object and nothing else**. No prose before or after, n
       "at": "<the candidate's `at` value, copied verbatim>",
       "session": "<the candidate's `session` value, copied verbatim>",
       "scope": "toolkit" | "project",
-      "stage": "<explore|create-plan|execute|review|document|other>",
+      "stage": "<the candidate's `stage` value, copied verbatim: explore|create-plan|execute|review|document|other>",
       "produced": "<what the assistant asserted or produced, one short sentence>",
       "correction": "<what the human said was wrong or wanted instead, one short sentence>",
       "trigger": "<what the human had asked for, one short sentence, or empty>",

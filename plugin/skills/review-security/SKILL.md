@@ -9,6 +9,8 @@ allowed-tools:
   - Agent
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js *)"
   - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/render-html.js)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js *)"
+  - "Bash(node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js)"
 ---
 
 # Security Review
@@ -30,6 +32,8 @@ Read the change like an attacker, not like an author.
 4. **Stay silent when there is nothing to find** - a security reviewer that cries wolf gets muted. See the gate below.
 
 </rules>
+
+**The change on a direct run.** Before the gate below, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --scope` (M16), adding any range you were given, and print its `scopeLine`: that scope is the change. In the candidate search below, `<base>` and `<end>` are `range.base` and `range.end`, and uncommitted work takes a second run of the same search with `HEAD` in place of `<base>..<end>`, the only run when `range` is null. No diff shows `uncommitted.untracked.files`, so search those with the pattern minus its `^\+.*` too; when `head.unborn` is true, skip the diffs and search `uncommitted.staged.files` that way as well. A `scopeLine` that does not start "Reviewing" means nothing was searched, not that the change is clean: say so and ask for a range to pass to `--scope`.
 
 !`cat "${CLAUDE_PLUGIN_ROOT}/skills/shared/criteria-security.md"`
 

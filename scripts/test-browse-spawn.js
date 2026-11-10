@@ -86,16 +86,17 @@ fs.writeFileSync(preload, [
   "      return values[sel] === undefined ? '' : values[sel];",
   '    },',
   '  });',
-  "  const page = { on: () => {}, goto: async () => ({ status: () => 200 }), waitForTimeout: async () => {}, title: async () => 'stub page', locator };",
+  "  const page = { on: (event, listener) => { if (event === 'pageerror' && process.env.BROWSE_STUB_PAGE_ERROR) listener(new Error('stub page error')); }, goto: async () => ({ status: () => 200 }), waitForTimeout: async () => {}, title: async () => 'stub page', locator };",
   '  return { newContext: async () => ({ newPage: async () => page }), close: async () => {} };',
   '}',
   '',
   '// Port probes: refused until the fake dev server starts, then port 3000 answers.',
   'let serverUp = false;',
+  "const livePorts = String(process.env.BROWSE_STUB_LIVE || '').split(',').filter(Boolean).map(Number);",
   'http.request = function (opts, onResponse) {',
   '  const req = new EventEmitter();',
   '  req.end = () => setImmediate(() => {',
-  "    if (serverUp && opts.port === 3000) onResponse({});",
+  "    if ((serverUp && opts.port === 3000) || livePorts.includes(opts.port)) onResponse({});",
   "    else req.emit('error', new Error('stub: connection refused'));",
   '  });',
   '  req.destroy = () => {};',
@@ -300,6 +301,40 @@ function runArgs(extraArgs, stdinText) {
 
   const help = runArgs(['--help']);
   check('--actions: --help names the argument and says the JSON sits in one pair of single quotes with no apostrophe inside', /--actions '<json>'/.test(help.stdout) && /one pair of single quotes/.test(help.stdout) && /keep\s+every apostrophe out of it/.test(help.stdout), help.stdout.slice(0, 900));
+}
+
+// --- 7. which server autoStart tests, and what a cut result still shows -----------
+console.log('\n7. named server and output order');
+function runServer(input, live, extraEnv) {
+  const log = path.join(sandbox, 'server-' + (++serverRuns) + '.jsonl');
+  fs.writeFileSync(log, '');
+  const env = Object.assign({}, process.env, { HOME: home, USERPROFILE: home, BROWSE_STUB_BROWSER: 'fake', BROWSE_STUB_LOG: log, BROWSE_STUB_PID_FILE: pidFile, BROWSE_STUB_LIVE: live, BROWSE_STUB_SPAWN: 'fake' }, extraEnv || {});
+  const r = spawnSync(process.execPath, ['--require', preload, SCRIPT], { cwd: project, env, input: JSON.stringify(input), encoding: 'utf8', timeout: 25000 });
+  let json = null;
+  try { json = JSON.parse(r.stdout); } catch (e) { json = null; }
+  const calls = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', json, calls };
+}
+let serverRuns = 0;
+const oneLine = (s) => String(s).replace(/\s+/g, ' ').slice(0, 240);
+{
+  const session = (extra) => Object.assign({ autoStart: true, projectDir: project, actions: [{ type: 'goto', url: '/' }] }, extra);
+  const named = runServer(session({ baseUrl: 'http://localhost:4000' }), '3000,4000');
+  check('autoStart: a baseUrl that answers is the server tested, ahead of the common ports, and nothing starts', named.json !== null && named.json.url === 'http://localhost:4000/' && spawns(named).length === 0, oneLine(named.stdout + named.stderr));
+  const offList = runServer(session({ baseUrl: 'http://127.0.0.1:4000' }), '4000');
+  check('autoStart: a baseUrl off the common ports is found, so no second server starts', offList.json !== null && offList.json.url === 'http://127.0.0.1:4000/' && spawns(offList).length === 0, oneLine(offList.stdout + offList.stderr));
+  const down = runServer(session({ baseUrl: 'http://localhost:5173' }), '3000');
+  check('autoStart: a baseUrl that does not answer falls back to the first common port that does', down.json !== null && down.json.url === 'http://localhost:3000/' && spawns(down).length === 0, oneLine(down.stdout + down.stderr));
+  const none = runServer(session({}), '5173');
+  check('autoStart: with no baseUrl the common ports are probed as before', none.json !== null && none.json.url === 'http://localhost:5173/' && spawns(none).length === 0, oneLine(none.stdout + none.stderr));
+  const hurt = runServer({ baseUrl: 'http://127.0.0.1:9', actions: [{ type: 'goto', url: '/' }] }, '', { BROWSE_STUB_PAGE_ERROR: '1' });
+  const keys = hurt.json ? Object.keys(hurt.json).join() : '';
+  check('output: the page and its diagnostics print before the action results, so a cut preview shows them', keys === 'ok,url,title,errors,actions', oneLine(keys + ' ' + hurt.stdout));
+  // A noisy page's console has no count cap, so the reason a run stopped sits beside
+  // its status, where a cut preview still shows it (review 2026-11-07-133045, R26).
+  const stopped = runServer({ baseUrl: 'http://127.0.0.1:9', actions: [{ type: 'goto', url: '/' }, { type: 'click' }] }, '', { BROWSE_STUB_PAGE_ERROR: '1' });
+  const stoppedKeys = stopped.json ? Object.keys(stopped.json) : [];
+  check('output: a failed action names its reason right after the status', stoppedKeys[1] === 'failedAction' && stopped.json.ok === false && stopped.json.failedAction.type === 'click' && /target/.test(stopped.json.failedAction.error || ''), oneLine(stoppedKeys.join() + ' ' + stopped.stdout));
 }
 
 fs.rmSync(sandbox, { recursive: true, force: true });

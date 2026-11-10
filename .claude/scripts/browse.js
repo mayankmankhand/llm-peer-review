@@ -31,10 +31,13 @@
  * Output (JSON to stdout):
  *   {
  *     "ok": true,
- *     "actions": [...],
+ *     "failedAction": {...},   (only when an action failed)
+ *     "url": "...",
+ *     "title": "...",
  *     "console": [...],
  *     "network": [...],
- *     "errors": [...]
+ *     "errors": [...],
+ *     "actions": [...]
  *   }
  *
  * Scope & Assumptions:
@@ -137,6 +140,17 @@ async function detectServer(ports) {
     if (alive) return port;
   }
   return null;
+}
+
+// The port of a local baseUrl, or null for none or for another host.
+function localPortOf(baseUrl) {
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname !== 'localhost' && u.hostname !== '127.0.0.1') return null;
+    return Number(u.port) || (u.protocol === 'https:' ? 443 : 80);
+  } catch (e) {
+    return null;
+  }
 }
 
 // ── Server auto-start ──────────────────────────────────────────────────────
@@ -897,10 +911,14 @@ async function runSession(data) {
   const allOk = actionResults.every((r) => r.ok);
   const lastGoto = actionResults.filter((r) => r.type === 'goto' && r.ok).pop();
 
-  const output = {
-    ok: allOk,
-    actions: actionResults,
-  };
+  // Page state and diagnostics print before the action results: a long result can
+  // reach the reader as a cut preview of its first lines, which must still show them.
+  const output = { ok: allOk };
+
+  // The reason a run stopped, beside its status: a noisy page's console has no count
+  // cap, so the action list can still fall past that cut.
+  const failed = actionResults.find((r) => !r.ok);
+  if (failed) output.failedAction = { type: failed.type, error: failed.error };
 
   // Include final page state if we navigated somewhere
   if (lastGoto) {
@@ -912,6 +930,7 @@ async function runSession(data) {
   if (diagnostics.console.length > 0) output.console = diagnostics.console;
   if (diagnostics.network.length > 0) output.network = diagnostics.network;
   if (diagnostics.errors.length > 0) output.errors = diagnostics.errors;
+  output.actions = actionResults;
 
   return output;
 }
@@ -1049,9 +1068,14 @@ async function main() {
   // Server auto-start (opt-in only)
   if (data.autoStart === true) {
     try {
-      // First check if a server is already running
-      const existingPort = await detectServer();
-      if (existingPort) {
+      // The address the session named comes first: probing only the common ports
+      // tested another project's server on 3000 while this one answered elsewhere.
+      const namedPort = localPortOf(data.baseUrl);
+      const namedAnswers = namedPort !== null && (await checkPort(namedPort, CONFIG.portCheckTimeoutMs));
+      const existingPort = namedAnswers ? null : await detectServer();
+      if (namedAnswers) {
+        // data.baseUrl stands.
+      } else if (existingPort) {
         data.baseUrl = `http://localhost:${existingPort}`;
       } else {
         // No server found - start one

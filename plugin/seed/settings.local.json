@@ -11,6 +11,7 @@
       "Bash(git branch *)",
       "Bash(git checkout *)",
       "Bash(git merge *)",
+      "Bash(git revert *)",
       "Bash(git stash *)",
       "Bash(git status *)",
       "Bash(git log *)",

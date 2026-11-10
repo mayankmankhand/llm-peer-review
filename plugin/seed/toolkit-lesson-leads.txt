@@ -144,6 +144,7 @@ A test that a timeout kills a child must bound the time too: while the orphan ho
 A test whose fixture is rejected by two code paths cannot detect either one breaking.
 A threshold checked after a stage writes must re-measure, not reuse a reading from before the write.
 A threshold checked after a stage writes must re-measure: the lessons cap read the startup size, so the cycle that pushed the index over the cap would have passed, and the review caught it.
+A throwaway home still uses the real login, so a practice session can publish pages to the owner's account.
 A token normalizer runs before the patterns that read the token: a stripper that removes trailing punctuation ate the closing bracket a function-name pattern needed, and only the fixture caught it.
 A top-level field list in a prompt reads as exhaustive - sub-field structure must be mentioned or it will be omitted.
 A tripwire on the owner's config must tell the owner's other sessions from the run: shared append-only logs grow while a test runs.
@@ -160,6 +161,7 @@ After a security fix, spend one adversarial round on it with a canary outside th
 After a security fix, spend one adversarial round on it with a canary outside the sandbox; the fixer's fixtures model only what the fixer imagined.
 After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.
 After moving text between files, sweep for "above", "below" and quoted heading names before calling it done.
+Aim a seeded finding's proof at its claim, never at the absence of a word a guessed fix would add.
 An agent file written mid-session is not dispatchable until the session reloads it.
 An agent with no `model:` line follows `CLAUDE_CODE_SUBAGENT_MODEL`; a role that must stay on the session model says `model: inherit`.
 An approval prompt is not a gate for a rare, costly action: both planted-key test pushes that asked were approved at the prompt, so a flagged push now blocks.
@@ -176,6 +178,7 @@ Ask a consequential choice in plain text, not as clickable options: an answer ca
 Ask what a change means for repos that already installed the last version, before writing the plan.
 Audit before converting.
 Auto-start lifecycle code is hard to verify without a real dev server.
+Before a pattern fix, get the shapes a fresh check will try and test all of them first.
 Before a prompt's new command ships, run it from the project root and check its shape against the allow rows.
 Before a script replaces a manual check, run both on the real file and compare.
 Before a script replaces a manual check, run both on the real file and compare: the new lessons check reported 18 missing write-ups where the old `grep | comm` found none, because a negated character class crossed a line end.
@@ -210,6 +213,7 @@ Check which read of a page is right against the page itself, not against the oth
 Commit by who verifies it: a revert a screenshot judge decides must only take changes a screenshot can show.
 Confirm a passing test case by grepping the test file for its name, not by the release gate's output.
 Copying a script and permitting it are two edits, and only the missing copy is loud.
+Count a prompt rule's word cap before drafting an edit to it for the owner's approval.
 Count a rule as already said only where every reader of the copy also reads the original.
 Cross-directory file references in skills use `` !`cat ...` `` dynamic injection syntax, not `!include`.
 Cross-platform mirrors can hide pre-existing gaps; audit before assuming a small change stays small.
@@ -222,6 +226,7 @@ Dispatch each role on the roster's model, never a familiar default; `session` is
 Don't micro-tag individual bullets.
 Don't state a cited past lesson as if it happened this session.
 Don't trust merged review severities without verifying the source lines.
+Drive a live Claude Code window through tmux before asking the owner to run a session by hand.
 Dry-running an upgrade on scratch copies of real projects finds defects that synthetic scenarios cannot.
 Editing the currently-running command file trips the harness self-modification guard.
 Emit JSON, let a script stamp the boilerplate - it is faster to generate and easier to verify.

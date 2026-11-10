@@ -1701,6 +1701,72 @@ function outsideRoots(dir, roots) {
   fs.rmSync(sb.root, { recursive: true, force: true });
 }
 
+// --- each candidate carries the stage its session was in -----------------------
+// The rollup's home verdict counts `stage`, and one exchange cannot show whether a
+// command was running, so the scan reads it from the session: a typed command in
+// either spelling, or the Skill call of a chained stage.
+{
+  const sb = makeSandbox('stage-scan');
+  const dir = path.join(sb.home, '.claude', 'projects', sb.proj.replace(/[/\\]/g, '-'));
+  fs.mkdirSync(dir, { recursive: true });
+  const at = function (min) { return new Date(Date.parse('2026-09-21T10:00:00.000Z') + min * 60000).toISOString(); };
+  const asst = function (t, skill) {
+    const content = [{ type: 'text', text: t }];
+    if (skill) content.push({ type: 'tool_use', id: 'call-' + skill, name: 'Skill', input: { skill: skill } });
+    return JSON.stringify({ type: 'assistant', message: { content: content } });
+  };
+  const user = function (t, min, sid) { return JSON.stringify({ type: 'user', timestamp: at(min), sessionId: sid, message: { content: t } }); };
+  const tag = function (name, value) { return '<' + name + '>' + value + '</' + name + '>'; };
+  const command = function (name, min, sid) {
+    return user(tag('command-message', name.slice(1)) + tag('command-name', name) + tag('command-args', 'issue 9'), min, sid);
+  };
+  fs.writeFileSync(path.join(dir, 's-loop.jsonl'), [
+    user('STAGE_NONE please rename the loader before anything else', 0, 's-loop'),
+    asst('Renamed it.'),
+    command('/tk:explore', 1, 's-loop'),
+    asst('Two options here.'),
+    user('STAGE_TYPED the second one, not the first', 2, 's-loop'),
+    asst('Plan written.', 'tk:create-plan'),
+    asst('Step 1 built.', 'tk:execute'),
+    user('STAGE_CHAINED that is the wrong file to change', 3, 's-loop'),
+    asst('Review finished.', 'review'),
+    command('/model', 4, 's-loop'),
+    user('STAGE_KEPT you missed the timeout path here', 5, 's-loop'),
+    asst('Rewriting the parser now.'),
+    user([{ type: 'text', text: '[Request interrupted by user]' }], 6, 's-loop')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 's-next.jsonl'), user('STAGE_LINKED read the whole file before changing it', 7, 's-next') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 's-kind.jsonl'), [
+    command('/document-api', 8, 's-kind'),
+    asst('Wrote the API page.'),
+    user('STAGE_LOOKALIKE that page is in the wrong folder', 9, 's-kind'),
+    command('/tk:review-code', 10, 's-kind'),
+    asst('One finding.'),
+    user('STAGE_REVIEW_KIND that finding is wrong, the guard is there', 11, 's-kind')
+  ].join('\n') + '\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 's-chat.jsonl'), [
+    user('please look over the settings page for me', 12, 's-chat'),
+    asst('Running the review.', 'tk:review-ux'),
+    user('STAGE_SKILL_KIND the contrast finding is wrong here', 13, 's-chat')
+  ].join('\n') + '\n', 'utf-8');
+  const stageOf = function (out, marker) {
+    const hit = out.candidates.filter(function (c) { return (c.human_said || '').indexOf(marker) !== -1; })[0];
+    return hit ? hit.stage : 'no candidate';
+  };
+  const all = JSON.parse(run(sb, ['--candidates', '--since', at(0)]));
+  check('a candidate before any stage command names no stage', stageOf(all, 'STAGE_NONE') === 'other', stageOf(all, 'STAGE_NONE'));
+  check('a candidate after a typed command names its stage, in the tk: spelling too', stageOf(all, 'STAGE_TYPED') === 'explore', stageOf(all, 'STAGE_TYPED'));
+  check('a candidate after a chained stage names it from the Skill call', stageOf(all, 'STAGE_CHAINED') === 'execute', stageOf(all, 'STAGE_CHAINED'));
+  check('a command that is no stage leaves the stage as it was', stageOf(all, 'STAGE_KEPT') === 'review', stageOf(all, 'STAGE_KEPT'));
+  check('a reply in the next session to an interrupt takes the interrupted session\'s stage', stageOf(all, 'STAGE_LINKED') === 'review', stageOf(all, 'STAGE_LINKED'));
+  const later = JSON.parse(run(sb, ['--candidates', '--since', at(2)]));
+  check('a stage typed before the window still names the candidates inside it', stageOf(later, 'STAGE_TYPED') === 'explore', stageOf(later, 'STAGE_TYPED'));
+  check('a review kind typed on its own is the review stage', stageOf(all, 'STAGE_REVIEW_KIND') === 'review', stageOf(all, 'STAGE_REVIEW_KIND'));
+  check('a review kind started through the Skill tool is the review stage', stageOf(all, 'STAGE_SKILL_KIND') === 'review', stageOf(all, 'STAGE_SKILL_KIND'));
+  check('a project command that only starts like a stage name is no stage', stageOf(all, 'STAGE_LOOKALIKE') === 'other', stageOf(all, 'STAGE_LOOKALIKE'));
+  fs.rmSync(sb.root, { recursive: true, force: true });
+}
+
 // --- issue #229: stage is checked against the extractor's list -------------------
 // `stage` is on the shareable whitelist, and was only trimmed to 40 characters: a
 // free-text channel through the projection, the hole `at` had before isoOrNull().

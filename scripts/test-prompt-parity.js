@@ -452,7 +452,6 @@ console.log('\n8. the writing rules (#276, #280)');
     'the log', 'the check before', 'moving on by itself', 'the starter copy', 'the practice project', 'the test rig', 'review type',
     'a side copy of the project', 'a saved checkpoint', 'undo'];
   const rulesText = read('.claude/rules/toolkit.md');
-  const rule6 = ruleLine(rulesText, 6, 'No em dashes or en dashes');
   const rule8 = ruleLine(rulesText, 8, 'Everyday words');
   const rule8Missing = [...EVERYDAY, 'the receipt row or the step\'s file list', 'Skill(writing)'].filter(s => !rule8.includes(s));
   check('276: Rule 8 in the rules seed names the sixteen everyday words', rule8 !== '' && rule8Missing.length === 0,
@@ -460,20 +459,79 @@ console.log('\n8. the writing rules (#276, #280)');
   const rule8Words = rule8.split(/\s+/).filter(Boolean).length;
   check('276: Rule 8 stays at or under 220 words', rule8Words > 0 && rule8Words <= 220, rule8Words + ' words');
 
-  // The manual restates the rules block, so its two lines must match the seed's.
-  const manualText = read('.claude/skills/shared/toolkit-reference.md');
-  const sameRules = (manual) => rule6 !== '' && rule8 !== ''
-    && ruleLine(manual, 6, 'No em dashes or en dashes') === rule6 && ruleLine(manual, 8, 'Everyday words') === rule8;
-  check('276: the manual\'s Rule 6 and Rule 8 match the rules seed word for word', sameRules(manualText),
-    'Rule 6 ' + (rule6 !== '' && ruleLine(manualText, 6, 'No em dashes or en dashes') === rule6 ? 'matches' : 'differs')
-      + ', Rule 8 ' + (rule8 !== '' && ruleLine(manualText, 8, 'Everyday words') === rule8 ? 'matches' : 'differs'));
+  // Every long-form copy of the eight always-on rules must match the rules seed
+  // word for word (harness report check, 2026-11-05). This case covered only the
+  // manual's Rules 6 and 8, and the manual's Rules 1 and 4 drifted unseen.
+  //   A long-form copy is a numbered line whose bold label is one of the eight,
+  //   in any .md file under the prompt folders of .claude/ (commands, skills,
+  //   agents, rules, toolkit), seed/ or docs/. It is compared from the label on,
+  //   because pair-debug numbers Rule 3 as "2.". Other parts of .claude/ are
+  //   never walked: the main copy keeps its side copies under .claude/worktrees/,
+  //   which would count every rule twice.
+  //   Left out on purpose: the seed itself, the short Rule 6 that the setup and
+  //   upgrade skills carry, and the generated plugin/ copies, where the build
+  //   scopes Rule 8's Skill(writing) to the plugin.
+  // The labels and each label's copy count are literals, never read from the
+  // files under test, so a new, lost or reworded copy fails this case.
+  const RULE_LABELS = ['Auto by default', 'Ask questions', 'Explain simply', 'Show your work',
+    'Use the Skill tool for /create-plan, /review, and /review-*', 'No em dashes or en dashes', 'Teach the why', 'Everyday words'];
+  const RULE_COPIES = { 'Auto by default': 1, 'Ask questions': 1, 'Explain simply': 13, 'Show your work': 1,
+    'Use the Skill tool for /create-plan, /review, and /review-*': 1, 'No em dashes or en dashes': 1, 'Teach the why': 1, 'Everyday words': 1 };
+  const SHORT_FORM = { 'No em dashes or en dashes': ['.claude/skills/setup/SKILL.md', '.claude/skills/upgrade/SKILL.md'] };
+  const RULES_SEED = '.claude/rules/toolkit.md';
+  const MANUAL = '.claude/skills/shared/toolkit-reference.md';
+  // The label a numbered line opens with, or undefined.
+  const labelOf = (line) => {
+    const num = /^\d+\. /.exec(line);
+    return num ? RULE_LABELS.find(label => line.startsWith('**' + label + '**', num[0].length)) : undefined;
+  };
+  const fromLabel = (line) => line.slice(line.indexOf('**'));
+  const seedRule = {};
+  for (const line of rulesText.split(/\r?\n/)) { const label = labelOf(line); if (label && !(label in seedRule)) seedRule[label] = fromLabel(line); }
+  const ruleFiles = [];
+  const walkRules = (dir) => {
+    if (!fs.existsSync(path.join(REPO, dir))) return;
+    for (const e of fs.readdirSync(path.join(REPO, dir), { withFileTypes: true })) {
+      const rel = path.posix.join(dir, e.name);
+      if (e.isDirectory()) walkRules(rel);
+      else if (e.name.endsWith('.md') && rel !== RULES_SEED) ruleFiles.push([rel, read(rel)]);
+    }
+  };
+  for (const d of ['.claude/commands', '.claude/skills', '.claude/agents', '.claude/rules', '.claude/toolkit', 'seed', 'docs']) walkRules(d);
+  // Copies that differ from the seed, and labels whose copy count moved.
+  const ruleCopies = (files) => {
+    const copies = Object.fromEntries(RULE_LABELS.map(label => [label, 0]));
+    const differs = [];
+    for (const [rel, text] of files) {
+      for (const line of text.split(/\r?\n/)) {
+        const label = labelOf(line);
+        if (!label || (SHORT_FORM[label] || []).includes(rel)) continue;
+        copies[label] += 1;
+        if (fromLabel(line) !== seedRule[label]) differs.push(rel + ' (' + label + ')');
+      }
+    }
+    const moved = RULE_LABELS.filter(label => copies[label] !== RULE_COPIES[label])
+      .map(label => label + ': ' + copies[label] + ' copies, expected ' + RULE_COPIES[label]);
+    return { differs, moved };
+  };
+  const notInSeed = RULE_LABELS.filter(label => !(label in seedRule));
+  const ruleNow = ruleCopies(ruleFiles);
+  check('276: every long-form copy of the eight rules matches the rules seed word for word',
+    notInSeed.length === 0 && ruleNow.differs.length === 0 && ruleNow.moved.length === 0,
+    [notInSeed.length ? 'not in the seed: ' + notInSeed.join(', ') : '', ruleNow.differs.length ? 'differs: ' + ruleNow.differs.join(', ') : '',
+      ruleNow.moved.join('; ')].filter(Boolean).join(' | '));
   // A project receives the plugin's emitted seed, where the build scopes the load to the plugin.
   const emitted8 = ruleLine(read('plugin/seed/rules-toolkit.md'), 8, 'Everyday words');
   check('276: the emitted plugin seed carries Rule 8 with Skill(tk:writing)',
     rule8 !== '' && emitted8 === rule8.replace('Skill(writing)', 'Skill(tk:writing)') && !emitted8.includes('Skill(writing)'),
     emitted8 ? emitted8.slice(0, 160) : 'no Rule 8 line in plugin/seed/rules-toolkit.md');
-  const mutatedManual = rule8 === '' ? manualText : manualText.replace(rule8, rule8.replace(/\bproof\b/, 'receipt'));
-  check('276: mutation: one changed word in the manual\'s Rule 8 trips the word-for-word check', mutatedManual !== manualText && !sameRules(mutatedManual));
+  // The mutation: one changed word in one copy must trip the check, in the
+  // manual (Rule 8) and in a copy outside it (review.md's Rule 3).
+  const mutateCopy = (rel, label) => ruleFiles.map(([r, text]) => [r, r !== rel ? text
+    : text.split(/\r?\n/).map(l => labelOf(l) === label ? l.replace(/\.$/, '') + ' changed.' : l).join('\n')]);
+  const trips = (rel, label) => ruleCopies(mutateCopy(rel, label)).differs.length > ruleNow.differs.length;
+  check('276: mutation: one changed word in any long-form rule copy trips the word-for-word check',
+    trips(MANUAL, 'Everyday words') && trips('.claude/commands/review.md', 'Explain simply'));
 
   // The plain block opens the exploration summary and the plan. The M14 shape
   // and the two stages that write it spell out its heading and five labels, so

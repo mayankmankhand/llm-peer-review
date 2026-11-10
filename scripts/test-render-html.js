@@ -1639,6 +1639,20 @@ function issue162Tests() {
     finds(island(sd2.html)).length === 1 && finds(island(sd2.html))[0].carried === true &&
     /with no file/.test(sd2.stderr), sd2.stderr.trim());
 
+  // A full check looks at the project, not a list of files, and raises a finding
+  // again if it still holds, so one with no file ends there or nowhere (review
+  // 2026-11-07-133045, R12). The two rows only a full check sets mark it.
+  ['operations', 'completeness'].forEach(function (row) {
+    run('full-' + row, page([finding('R1', { specialist: row }), finding('R2', { specialist: 'security' })]));
+    const full = island(run('full-' + row, page([], { lenses: [row, 'security'], reviewedFiles: ['a.js'] })).html);
+    check('a full check resolves a file-less finding in a row that ran (' + row + ')',
+      finds(full).length === 0 && /2 resolved/.test(full.sinceLast || ''), full.sinceLast);
+  });
+  run('full-carried', page([finding('R1', { specialist: 'plan' })]));
+  const fullOther = island(run('full-carried', page([], { lenses: ['operations'], reviewedFiles: ['a.js'] })).html);
+  check('a full check still carries a file-less finding from a row that did not run',
+    finds(fullOther).length === 1 && finds(fullOther)[0].carried === true, JSON.stringify(finds(fullOther)).slice(0, 200));
+
   // The seeded must-check items (review.md Phase 3) are re-read from the plan
   // on every orchestrated run, so the plan lens running is the evidence, file
   // or no file. Before #219 their tokens never matched any lens.
@@ -1757,6 +1771,166 @@ function cycle162ReviewTests() {
   check('a secret-shaped token in a receipt is redacted before it reaches the page',
     lk.html.indexOf(fakeKey) === -1 && /redacted/.test(finds(island(lk.html))[0].receipt.stdout.join('\n')) && /redacted/.test(lk.stderr),
     lk.stderr.trim());
+
+  // --- harness report check: the page masker carries all 15 push-checker patterns ---
+  // The masker had fallen to 8 of the push checker's 15 patterns, though its
+  // comment said to update both together. The names are pinned here as literals,
+  // never read from the code checked, so a pattern added to either list fails
+  // this until the other list and the samples below catch up.
+  const SECRET_NAMES = ['private-key-block', 'aws-access-key', 'github-token', 'openai-key',
+    'google-api-key', 'fal-key', 'slack-token', 'gitlab-pat', 'gitlab-token', 'npm-token',
+    'pypi-token', 'jwt', 'netrc-record', 'url-with-credentials', 'secret-assignment'];
+  const listNames = function (rel, decl) {
+    const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+    const start = src.indexOf(decl);
+    const end = start === -1 ? -1 : src.indexOf('\n];', start);
+    if (end === -1) return [];
+    return (src.slice(start, end).match(/name: ["'][a-z-]+["']/g) || []).map(function (s) { return s.slice(7, -1); });
+  };
+  const maskerNames = listNames('.claude/scripts/render-html.js', 'const RECEIPT_SECRET_PATTERNS = [');
+  const checkerNames = listNames('.claude/scripts/pre-push-check.js', 'const PATTERNS = [');
+  check('masker: the page masker and the push checker name the same 15 patterns',
+    maskerNames.join() === SECRET_NAMES.join() && checkerNames.join() === SECRET_NAMES.join(),
+    'page masker: ' + (maskerNames.join(', ') || 'no names') + ' | push checker: ' + checkerNames.join(', '));
+
+  // One sample per pattern, each assembled at run time from pieces, so this file
+  // carries nothing the push checker would flag (a fixture has to dodge every
+  // pattern in the scanner, not just its own). `hide` is the part of each sample
+  // that must not reach the page.
+  const SECRET_SAMPLES = {
+    'private-key-block': { text: ['-----BEGIN RSA', 'PRIVATE KEY-----'].join(' '), hide: 'RSA PRIVATE KEY' },
+    'aws-access-key': { text: ['AK', 'IAQWERTYUIOPASDFGH'].join(''), hide: 'QWERTYUIOPASDFGH' },
+    'github-token': { text: ['gh', 'p_', 'GithubBody', 'x'.repeat(26)].join(''), hide: 'GithubBody' },
+    'openai-key': { text: ['sk', 'OpenaiBody' + 'y'.repeat(20)].join('-'), hide: 'OpenaiBody' },
+    'google-api-key': { text: ['AI', 'za', 'GoogleBody', 'z'.repeat(25)].join(''), hide: 'GoogleBody' },
+    'fal-key': { text: ['0123abcd-4567-89ab-cdef-0123456789ab', 'fa1'.repeat(10) + 'fa'].join(':'), hide: 'fa1fa1fa1fa1' },
+    'slack-token': { text: ['xo', 'xb-', 'SlackBody', '1'.repeat(10)].join(''), hide: 'SlackBody' },
+    'gitlab-pat': { text: ['gl', 'pat-', 'GitlabPatBody', '2'.repeat(10)].join(''), hide: 'GitlabPatBody' },
+    'gitlab-token': { text: ['gl', 'dt-', 'GitlabDeployBody', '3'.repeat(8)].join(''), hide: 'GitlabDeployBody' },
+    'npm-token': { text: ['np', 'm_', 'NpmBody', '4'.repeat(29)].join(''), hide: 'NpmBody' },
+    'pypi-token': { text: ['py', 'pi-', 'PypiBody', '5'.repeat(10)].join(''), hide: 'PypiBody' },
+    'jwt': { text: ['ey' + 'JhJwtHeader00', 'ey' + 'JpJwtPayload00', 'JwtSignature00'].join('.'), hide: 'JwtPayload00' },
+    'netrc-record': { text: ['machine', 'example.com', 'login', 'alice', 'pass' + 'word', 'NetrcPass9'].join(' '), hide: 'NetrcPass9' },
+    'url-with-credentials': { text: ['https', '//alice:UrlPass77@example.com/x'].join(':'), hide: 'UrlPass77' },
+    'secret-assignment': { text: ['pass', 'word="AssignValue99"'].join(''), hide: 'AssignValue99' }
+  };
+  // A page keeps only the first 6 lines of a receipt, so the 15 samples travel
+  // three to a line: 5 lines, every one of them on the page, and each line also
+  // proves a second and third secret on one line are masked beside the first.
+  // The private key goes last, because everything after a BEGIN line is hidden.
+  const sampleOrder = SECRET_NAMES.slice(1).concat(SECRET_NAMES[0]);
+  const sampleLines = [];
+  for (let i = 0; i < sampleOrder.length; i += 3) {
+    sampleLines.push(sampleOrder.slice(i, i + 3).map(function (n) {
+      return SECRET_SAMPLES[n] ? SECRET_SAMPLES[n].text : 'no-sample-for-' + n;
+    }).join('  '));
+  }
+  const allSecrets = path.join(rdir, 'all-secrets.txt');
+  fs.writeFileSync(allSecrets, sampleLines.join('\n') + '\nexit 0\n', 'utf-8');
+  const as = run('allsecrets', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'grep -r KEY .', stdoutFile: allSecrets } })] }] });
+  const asFound = finds(island(as.html))[0];
+  const asOut = asFound && asFound.receipt ? asFound.receipt.stdout.join('\n') : '';
+  const leaked = SECRET_NAMES.filter(function (n) { return !SECRET_SAMPLES[n] || as.html.indexOf(SECRET_SAMPLES[n].hide) !== -1; });
+  check('masker: all 15 push-checker patterns are hidden on the page',
+    leaked.length === 0 && (asOut.match(/\[redacted\]/g) || []).length >= SECRET_NAMES.length,
+    'left readable, or with no sample: ' + (leaked.join(', ') || 'none') + ' | redacted runs: ' + (asOut.match(/\[redacted\]/g) || []).length);
+
+  // The names alone let a pattern change in one list and not the other (review
+  // 2026-11-07-133045, R27), so the two sources are held together too. The one
+  // difference is the masker's broader url-with-credentials, on purpose.
+  const listSources = function (rel, decl) {
+    const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+    const start = src.indexOf(decl);
+    const out = {};
+    src.slice(start, src.indexOf('\n];', start)).split(/\bname: ["']/).slice(1).forEach(function (chunk) {
+      const m = /^([a-z-]+)["'][\s\S]*?\bre: \/(.*)\/[a-z]*[, ]/.exec(chunk);
+      if (m) out[m[1]] = m[2];
+    });
+    return out;
+  };
+  const maskerSources = listSources('.claude/scripts/render-html.js', 'const RECEIPT_SECRET_PATTERNS = [');
+  const checkerSources = listSources('.claude/scripts/pre-push-check.js', 'const PATTERNS = [');
+  const sourcesDiffer = SECRET_NAMES.filter(function (n) { return !maskerSources[n] || maskerSources[n] !== checkerSources[n]; });
+  check('masker: the two lists hold the same patterns, the broader url-with-credentials apart',
+    sourcesDiffer.join() === 'url-with-credentials', 'differ: ' + sourcesDiffer.join(', '));
+
+  // The page prints the check above its output, and a check for a hardcoded key
+  // often names that key (review 2026-11-07-133045, R5).
+  const plainOut = path.join(rdir, 'plain.txt');
+  fs.writeFileSync(plainOut, 'src/a.js:3\nexit 0\n', 'utf-8');
+  const cmdKey = run('cmdkey', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'grep -n ' + fakeKey + ' src/a.js', stdoutFile: plainOut } })] }] });
+  const cmdShown = finds(island(cmdKey.html))[0].receipt.cmd || '';
+  check('masker: a secret in the check command is hidden too',
+    cmdKey.html.indexOf(fakeKey) === -1 && /^grep -n .*\[redacted\] src\/a\.js$/.test(cmdShown) && /redacted/.test(cmdKey.stderr), cmdShown);
+
+  // An environment file has no quotes, and only known key shapes were hidden
+  // (review 2026-11-07-133045, R6). Two tries each failed a fresh check on shapes
+  // it listed, so the owner asked for a third, judged on exactly those shapes.
+  // Code that only names a secret stays readable. A page keeps six lines.
+  const envFile = path.join(rdir, 'env.txt');
+  const envRun = function (lines) {
+    fs.writeFileSync(envFile, lines.join('\n') + '\nexit 0\n', 'utf-8');
+    const found = finds(island(run('env', { title: 'T', groups: [{ label: 'code', findings: [
+      finding('R1', { receipt: { cmd: 'grep KEY .env', stdoutFile: envFile } })] }] }).html))[0];
+    return found && found.receipt ? found.receipt.stdout : [];
+  };
+  const envCases = [
+    ['API_KEY=abcd1234efgh5678', 'API_KEY=[redacted]'],
+    ['DB_PASSWORD=hunter2hunter2', 'DB_PASSWORD=[redacted]'],
+    ['token: abcd1234efgh5678', 'token: [redacted]'],
+    ['SESSION_SECRET=onlylettershere', 'SESSION_SECRET=[redacted]'],
+    ['DB_PASSWORD=pa$$w0rd123456', 'DB_PASSWORD=[redacted]'],
+    ['SECRET=abc$defghijkl9', 'SECRET=[redacted]'],
+    ['DB_PASSWORD=ab<cdefgh12345', 'DB_PASSWORD=[redacted]'],
+    ['password=letmeinplease', 'password=[redacted]'],
+    ['api_key=abcdefghijkl', 'api_key=[redacted]'],
+    ['PRIVATE_KEY=abcdefghijkl', 'PRIVATE_KEY=[redacted]'],
+    ['SECRET_KEY = abcd1234efgh5678', 'SECRET_KEY = [redacted]'],
+    ["DB_PASSWORD=ab'cdefghijklmnop", 'DB_PASSWORD=[redacted]'],
+    ['DB_PASSWORD=ab"cdefghijklmnop', 'DB_PASSWORD=[redacted]'],
+    ['API_KEY=abc`defghijklmnop', 'API_KEY=[redacted]'],
+    ["DB_PASSWORD=abcdefghij'klmnop", 'DB_PASSWORD=[redacted]'],
+    ['secret_key=abcd1234efgh5678', 'secret_key=[redacted]'],
+    ['aws_secret_access_key = wJalrXUtnFEMI/K7MDENG', 'aws_secret_access_key = [redacted]'],
+    ['db_password_prod=hunter2hunter2', 'db_password_prod=[redacted]'],
+    ['SECRET_KEY="abcd1234efgh5678"', 'SECRET_KEY="[redacted]"'],
+    ["AWS_SECRET_ACCESS_KEY='abcd1234efgh'", "AWS_SECRET_ACCESS_KEY='[redacted]'"],
+    ['MY_TOKEN_V2="abcd1234efgh"', 'MY_TOKEN_V2="[redacted]"'],
+    ['PWD=/home/mayank/Projects', 'PWD=/home/mayank/Projects']
+  ];
+  const envMissed = [];
+  for (let i = 0; i < envCases.length; i += 6) {
+    const chunk = envCases.slice(i, i + 6);
+    const shown = envRun(chunk.map(function (c) { return c[0]; }));
+    chunk.forEach(function (c, k) { if (shown[k] !== c[1]) envMissed.push(c[0] + ' -> ' + shown[k]); });
+  }
+  check('masker: a value after a secret-sounding name is hidden in every listed shape, its name kept',
+    envMissed.length === 0, envMissed.join(' | '));
+  const codeLines = ['const token = getToken();', 'password: formData.password,', 'token = tokens[0];', 'MAX_TOKENS=4096', 'token=$API_TOKEN_2'];
+  check('masker: code that only names a secret stays readable', envRun(codeLines).join('|') === codeLines.join('|'), envRun(codeLines).join('|'));
+
+  // A key's body is plain base64 no pattern can tell from other text, and a page
+  // keeps six lines, enough for a short key whole (review 2026-11-07-133045, R7).
+  const begin = ['-----BEGIN EC', 'PRIVATE KEY-----'].join(' ');
+  const finish = ['-----END EC', 'PRIVATE KEY-----'].join(' ');
+  const keyFile = path.join(rdir, 'key.txt');
+  fs.writeFileSync(keyFile, [begin, 'KeyBodyLineOne', 'KeyBodyLineTwo', finish, 'after the key'].join('\n') + '\nexit 0\n', 'utf-8');
+  const keyShown = finds(island(run('keybody', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'cat key.pem', stdoutFile: keyFile } })] }] }).html))[0].receipt.stdout.join('\n');
+  check('masker: every line of a private key goes, and the line after it stays',
+    keyShown.indexOf('KeyBody') === -1 && keyShown.indexOf('after the key') !== -1, keyShown);
+  fs.writeFileSync(keyFile, '"private_key": "' + begin + '\\nKeyBodyInJson\\n' + finish + '\\n",\nexit 0\n', 'utf-8');
+  const jsonKey = finds(island(run('keyjson', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'cat sa.json', stdoutFile: keyFile } })] }] }).html))[0].receipt.stdout.join('\n');
+  check('masker: a key held on one line goes whole', jsonKey.indexOf('KeyBodyInJson') === -1, jsonKey);
+  const pgpBegin = ['-----BEGIN PGP', 'PRIVATE KEY BLOCK-----'].join(' ');
+  const pgpFinish = ['-----END PGP', 'PRIVATE KEY BLOCK-----'].join(' ');
+  fs.writeFileSync(keyFile, [pgpBegin, 'PgpBodyLine', pgpFinish, 'after the key'].join('\n') + '\nexit 0\n', 'utf-8');
+  const pgpKey = finds(island(run('keypgp', { title: 'T', groups: [{ label: 'code', findings: [
+    finding('R1', { receipt: { cmd: 'cat key.asc', stdoutFile: keyFile } })] }] }).html))[0].receipt.stdout.join('\n');
+  check('masker: a PGP private key block goes the same way', pgpKey.indexOf('PgpBodyLine') === -1 && pgpKey.indexOf('PGP PRIVATE') === -1 && pgpKey.indexOf('after the key') !== -1, pgpKey);
 
   fs.rmSync(dir, { recursive: true, force: true });
 }

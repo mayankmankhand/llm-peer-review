@@ -424,6 +424,35 @@ section('--pr reads the PR through the host CLI the remote names', () => {
   check('a PR number that is not a number is a usage error', mc(dir, ['--pr', '7;rm'], env).status === 2);
 });
 
+// A remote that names neither host, with both CLIs installed (self-hosted GitLab
+// or GitHub Enterprise): the script cannot ask, so /merge passes the person's
+// answer as --host, and every call that reads the host takes it, --wait too.
+section('--host carries the answer when the remote names neither host', () => {
+  const dir = newRepo('hostanswer');
+  write(dir, 'a.txt', 'a\n');
+  const head = commitAll(dir, 'M0');
+  const bin = path.join(sandbox, 'bin-hostanswer');
+  fs.mkdirSync(bin);
+  const body = 'S.\n\n## Decisions\n- D1\n';
+  const ghJson = JSON.stringify({ number: 7, title: 'T', body, headRefName: 'feat', headRefOid: head, state: 'OPEN', mergeable: 'MERGEABLE' });
+  const glJson = JSON.stringify({ iid: 8, title: 'G', description: body, source_branch: 'gfeat', sha: head, state: 'opened', detailed_merge_status: 'mergeable' });
+  for (const [name, json] of [['gh', ghJson], ['glab', glJson]]) {
+    write(bin, name, '#!/bin/sh\ncat <<\'EOF\'\n' + json + '\nEOF\n');
+    fs.chmodSync(path.join(bin, name), 0o755);
+  }
+  const env = Object.assign({}, ENV, { PATH: bin + path.delimiter + ENV.PATH });
+  g(dir, ['remote', 'add', 'origin', 'git@git.corp.example:x/y.git']);
+  const unanswered = mc(dir, ['--pr', '8'], env);
+  check('no answer: exit 2, and the error names --host', unanswered.status === 2 && /pass --host gh or --host glab/.test(unanswered.stderr), unanswered.stderr);
+  const viaGlab = mc(dir, ['--pr', '8', '--host', 'glab'], env);
+  check('--host glab reads the PR through glab', viaGlab.json && viaGlab.json.host === 'glab' && viaGlab.json.branch === 'gfeat' && viaGlab.json.decisions === '- D1', viaGlab.stdout + viaGlab.stderr);
+  const viaGh = mc(dir, ['--pr', '7', '--host', 'gh'], env);
+  check('--host gh reads the PR through gh', viaGh.json && viaGh.json.host === 'gh' && viaGh.json.branch === 'feat', viaGh.stdout + viaGh.stderr);
+  const waited = mc(dir, ['--wait', '--pr', '7', '--head', head, '--timeout', '1', '--host', 'gh'], env);
+  check('--wait takes the answer too, the one call --pr-body cannot stand in for', waited.status === 0 && waited.json && waited.json.ready === true && waited.json.host === 'gh', waited.stdout + waited.stderr);
+  check('--host takes only gh or glab', mc(dir, ['--pr', '8', '--host', 'svn'], env).status === 2);
+});
+
 // Issue #258 items 8 and 6: the Decisions part is its list lines only, so an
 // attribution line under the list is never read as a decision, and on GitLab
 // --pr prints the full reference a landing message names.

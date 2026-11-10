@@ -26,6 +26,8 @@ allowed-tools:
 
 **Model mode.** When this skill runs directly and fans out (the bigger-change path below), first run `node .claude/scripts/session-init.js --models`, adding `--mode <m>` when the arguments carry a `mode:<m>` word, and say "Models: <models.mode>" in one line; `models.perRole` gives each finder its model.
 
+**The rebuild count on a direct run.** When you work the Rebuilt render paths count below yourself, first run `node .claude/scripts/session-init.js --scope` (M16), adding any range you were given, and print its `scopeLine`. In that count, `<base>` and `<end>` are `range.base` and `range.end`, and uncommitted work takes a second run of the same count with `HEAD` in place of `<base>..<end>`, added to N, the only run when `range` is null. No diff shows `uncommitted.untracked.files`, so search those with the pattern minus its `^\+.*` too and add the hits to N; when `head.unborn` is true, skip the diffs and search `uncommitted.staged.files` that way as well. A `scopeLine` that does not start "Reviewing" means nothing was searched, not that no rebuild exists: say so and ask for a range to pass to `--scope`.
+
 !`cat .claude/skills/shared/criteria-code.md`
 
 ## Reading Budget

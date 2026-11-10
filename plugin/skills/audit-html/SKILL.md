@@ -50,7 +50,7 @@ When in doubt during the audit, defer to those definitions rather than guessing.
 
 ### 1. Gather the project's markdown
 
-Run `git ls-files '*.md' | grep -vE '^(\.claude/|plans/PLAN-|artifacts/|node_modules/)' | xargs wc -l` once, then the same listing piped into `xargs grep -c '^##'` and into `xargs grep -cE '✅|🟥|🟨|🟩|- \[x\]'` (M16): the three outputs give every tracked markdown file its line count, `##` heading count and progress-marker count, which is both the inventory and the numbers step 3 scores, with no command substitution, so default permission mode never stops; tracked files already honor `.gitignore`, and the pipe drops `.claude/` (prompt files, vetoed anyway), `plans/PLAN-*.md` (Claude-read) and `artifacts/` (already HTML territory). Outside a git repository, fall back to `Glob` over `**/*.md` with the same three exclusions plus the common build/output directories (`node_modules`, `.git`, `dist`, `build`, `out`, `coverage`, `.next`, `.nuxt`, `vendor`, `target`, `__pycache__`) and whatever else the project's `.gitignore` lists, since Glob does not auto-respect it.
+Run `git ls-files -z '*.md' ':!.claude' ':!plans/PLAN-*' ':!artifacts' ':!node_modules' | xargs -0 wc -l --` once, then the same listing piped into `xargs -0 grep -c '^##' --` and into `xargs -0 grep -cE '✅|🟥|🟨|🟩|- \[x\]' --` (M16): the three outputs give every tracked markdown file its line count, `##` heading count and progress-marker count, which is both the inventory and the numbers step 3 scores, with no command substitution, so default permission mode never stops; `-z`, `-0` and `--` keep an awkward name (spaces, an apostrophe, an accent, a leading dash) in one piece, tracked files already honor `.gitignore`, and the listing drops `.claude/` (prompt files, vetoed anyway), `plans/PLAN-*.md` (Claude-read) and `artifacts/` (already HTML territory). Outside a git repository, fall back to `Glob` over `**/*.md` with the same three exclusions plus the common build/output directories (`node_modules`, `.git`, `dist`, `build`, `out`, `coverage`, `.next`, `.nuxt`, `vendor`, `target`, `__pycache__`) and whatever else the project's `.gitignore` lists, since Glob does not auto-respect it.
 
 If the project has a `CODEBASE_MAP.md`, read it once for context on which files are "trackers" vs "docs" vs "self-description data" - that map already labels file purposes and saves re-deriving them.
 
@@ -59,10 +59,10 @@ If the project has a `CODEBASE_MAP.md`, read it once for context on which files 
 Before evaluating individual files, scan for projects that already render markdown to HTML:
 
 - `package.json` scripts containing `dashboard`, `render`, `html`, `docs:build`, `pages`
-- `.js` / `.ts` files that `readFileSync` a `.md` and call `.write` or `res.send` with HTML
+- `.js` / `.ts` / `.mjs` / `.cjs` files that `readFile` or `readFileSync` a `.md` and call `.write` or `res.send` with HTML
 - A `public/` or `dist/` folder with `.html` files whose names mirror `.md` files in the repo
 
-The first two are one command (M16): `grep -E '"(dashboard|render|html|docs:build|pages)"' package.json 2>/dev/null; grep -rlE 'readFileSync.*\.md' --include='*.js' --include='*.ts' . 2>/dev/null | grep -v node_modules`; no output means neither exists, and each line printed is a script or file to read before deciding.
+The first two are one command (M16): `grep -riE 'dashboard|render|html|docs:build|pages' --include=package.json --exclude-dir=node_modules . 2>/dev/null; grep -rl 'readFile' --include='*.js' --include='*.ts' --include='*.mjs' --include='*.cjs' . 2>/dev/null | grep -v node_modules | tr '\n' '\0' | xargs -0 grep -l '\.md' --`; no output means neither exists, and each line printed is a script or file to read before deciding, except a `package.json` line outside `scripts` (a dependency, the project's name), which does not count.
 
 If any of these exist, **stop the audit short**. Report the existing setup, do not propose building a new view, and offer two options:
 - Align the existing output with the toolkit visual tokens in `${CLAUDE_PLUGIN_ROOT}/skills/shared/html-look.md` (typography, color palette, severity badge colors)

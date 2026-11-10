@@ -10,10 +10,10 @@ The long manual: workflow, command table, plans, map, lessons, ledger, design, H
 
 <rules>
 
-1. **Auto by default** - The loop runs automatically per the shared fragment `.claude/skills/shared/hitl-loop.md`; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
+1. **Auto by default** - The loop runs automatically per the toolkit's `hitl-loop` and `hitl-stages` fragments (rules M1 to M17), which each loop stage either inlines or cites by path; a human is paged only per M1, stages hand off to each other automatically (M14), and two per-run opt-outs restore manual behavior: "report only" for auto-fixing (M10), "no chaining" for the stage handoff (M14)
 2. **Ask questions** - If something is unclear, ask before assuming
 3. **Explain simply** - Use plain English, avoid jargon. A rule or finding code (M3, C-21, R5) in anything written for me says in plain words what it is and what it means for me on its first mention, looked up in its own file rather than recalled; that sentence carries no file name, hash or code term, which belong in the receipt row or the step's file list
-4. **Show your work** - Tell me what you're doing and why
+4. **Show your work** - Tell me what you're doing and why. Before anything expected to take over a minute, say in one line what is coming, and answer every question I ask before moving on
 5. **Use the Skill tool for /create-plan, /review, and /review-*** - Never manually replicate these commands or skills. If the user says "create plan" or "review", invoke the appropriate command or skill via the Skill tool so the template is followed.
 6. **No em dashes or en dashes** - Never use em dashes or en dashes in any output (conversation, file writes, file edits), and use no spaced hyphen standing in for one: rewrite the sentence instead. Hyphens stay inside words and in fixed line formats that ask for them (the review summary line, `none - <reason>`, a bold label's list item like these rules). Quoted, dictated or locked text is never changed, even for a dash.
 7. **Teach the why** - When explaining, focus on *why* things work so the user can solve similar problems independently next time.
@@ -409,7 +409,7 @@ Host detection runs on three exact rows and nothing broader: it reads `git confi
 |---|---|
 | `Bash(git init *)`, `Bash(git add *)`, `Bash(git rm *)`, `Bash(git commit *)` | Initializing repos, staging files, committing work |
 | `Bash(git push *)`, `Bash(git pull *)`, `Bash(git fetch *)` | Syncing with remote repositories. A force push, a mirror push, and a delete push still ask: see the ask rows below the table |
-| `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git merge *)`, `Bash(git stash *)` | Branch management, merging (`/merge` brings a branch up to date with main and lands it on this machine), and stashing work in progress |
+| `Bash(git branch *)`, `Bash(git checkout *)`, `Bash(git merge *)`, `Bash(git revert *)`, `Bash(git stash *)` | Branch management, merging (`/merge` brings a branch up to date with main and lands it on this machine), undoing a design round that lost its comparison (M15), and stashing work in progress |
 | `Bash(git status *)`, `Bash(git log *)`, `Bash(git diff *)`, `Bash(git show *)` | Inspecting repo state and history |
 | `Bash(command -v gh)`, `Bash(command -v glab)` | Host detection's fallback when the remote names neither github.com nor gitlab.com: which of the two CLIs is installed. Exact rows, so nothing else that starts with `command` is allowed |
 | `Bash(git config --get remote.origin.url)`, `Bash(git remote add *)`, `Bash(git remote set-url *)` | Host detection and remote URLs. `git config --get remote.origin.url` is how commands detect whether this repo is on GitHub or GitLab, and it is the only `git config` call the toolkit makes, so the row allows exactly that read: any other `git config` command, one that changes a setting included, asks first |

@@ -14,7 +14,7 @@ The toolkit runs on GitHub and GitLab. Nothing about the install differs by host
    - contains `gitlab.com` -> use `glab`
 3. Neither matches (self-hosted GitLab, GitHub Enterprise, or no `origin` remote). Fall back to whichever CLI is installed: run `command -v gh` and `command -v glab`, each as a Bash call of its own (M16; their two permission rows are exact, so `command -v gh glab` would ask):
    - exactly one installed -> use it
-   - both installed -> ask the user once, then reuse that answer for the rest of the session
+   - both installed -> ask the user once, then reuse that answer for the rest of the session; `merge-check.js` cannot ask, so `/tk:merge` passes it the answer as `--host gh` or `--host glab`
    - neither installed -> stop, and tell the user to install `gh` or `glab`
 
 ## Invocation Table
@@ -25,11 +25,13 @@ Flags **and** output field names differ between hosts. Use the whole row, not ju
 |---|---|---|
 | Create issue | `gh issue create --title '<title>' --body-file <body-file> --label 'L'` | `glab issue create --title '<title>' --description-file <body-file> --label 'L'` |
 | Read issue | `gh issue view <N> --json title,body` -> fields `title`, `body` | `glab issue view <N> --output json` -> fields `title`, `description` |
-| Create PR / MR | `gh pr create --base main --title '<title>' --body-file <body-file>` | `glab mr create --target-branch main --title '<title>' --description-file <body-file>` |
+| Create PR / MR | `gh pr create --base <main> --title '<title>' --body-file <body-file>` | `glab mr create --target-branch <main> --title '<title>' --description-file <body-file>` |
 | Most recent PR / MR (URL) | `gh pr list --limit 1 --json number,url` -> field `url` | `glab mr list --per-page 1 --output json` -> field `web_url` |
 | Most recently merged | see the fenced block below | see the fenced block below |
 | Read PR / MR | `gh pr view <N> --json number,title,body,headRefName,headRefOid,state` -> fields `title`, `body`, `headRefName` (the branch), `headRefOid` (its head commit), `state` | `glab mr view <N> --output json` -> fields `iid`, `title`, `description`, `source_branch`, `sha`, `state` |
 | Merge PR / MR | `gh pr merge <N> --merge --match-head-commit <sha> --subject '<subject>' --body-file <body-file>`; a squash takes `--squash` in place of `--merge` | `glab mr merge <N> --sha <sha> --auto-merge=false --message '<message>'`; a squash adds `--squash` and takes `--squash-message '<message>'` in place of `--message` |
+
+`<main>` in the create row is the project's default branch: the `main` field that `node ${CLAUDE_PLUGIN_ROOT}/scripts/merge-check.js --style` prints (M16), without any `origin/` in front, because the host names a branch without its remote.
 
 **Every free-text argument in the two create rows and the merge row (title, label, subject, message, and the GitLab body in the fallback below) goes in single quotes, with each `'` inside the text written as `'\''`.** Single quotes expand nothing, so backticks and `$` reach the host exactly as written. Never double quotes: inside them the shell runs every markdown backtick span as a command and expands every `$`, and the host still exits 0 and posts the mangled text. Never `$(...)` either (not even `"$(cat <file>)"`): Claude Code asks for approval on any command substitution, even when the command itself is allowed (measured), so every issue and PR would stop and wait.
 

@@ -1191,21 +1191,98 @@ const RECEIPT_MAX_BYTES = 64 * 1024;
 // secrets will naturally grep for one; its receipt would then carry the key
 // onto a page that may be published. The pre-push tripwire never sees a
 // publish, so the same shapes it scans for are masked here before a line is
-// kept (review of the #162 cycle, R12). Mirrors PATTERNS in pre-push-check.js;
-// update both together. Global flags, so a second secret on one line is not
-// left readable beside the first. One deliberate difference: the URL pattern
-// below has no mailto:/tel: skip (issue #168). The tripwire skips those to stop
-// blocking pushes on mangled mail links; here over-masking one costs nothing.
+// kept (review of the #162 cycle, R12). The list mirrors PATTERNS in
+// pre-push-check.js, by the same 15 names in the same order, and
+// scripts/test-render-html.js holds the two together: a pattern added to either
+// fails that test until the other catches up. (It had drifted to 8 of 15 while
+// this comment only asked for both to be updated together.) Global flags, so a
+// second secret on one line is not left readable beside the first. Two
+// deliberate differences, both toward masking more:
+//   - url-with-credentials has no mailto:/tel: skip (issue #168). The tripwire
+//     skips those to stop blocking pushes on mangled mail links; here
+//     over-masking one costs nothing.
+//   - netrc-record masks everywhere. The tripwire steps aside in markdown
+//     files, where documentation shows such records; a receipt is a check's
+//     output, not a document, so there is no prose to spare.
+// secret-assignment carries the tripwire's hide rule, so only the value is
+// masked and the key name, the operator and both quotes stay readable.
 const RECEIPT_SECRET_PATTERNS = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g,
-  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
-  /\bAIza[0-9A-Za-z\-_]{35}\b/g,
-  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/gi,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
-  /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/gi
+  { name: 'private-key-block', re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  { name: 'aws-access-key', re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { name: 'github-token', re: /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g },
+  { name: 'openai-key', re: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'google-api-key', re: /\bAIza[0-9A-Za-z\-_]{35}\b/g },
+  { name: 'fal-key', re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/gi },
+  { name: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g },
+  { name: 'gitlab-pat', re: /\bglpat-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'gitlab-token', re: /\b(?:gldt|glrt|glsoat|glptt|glcbt)-[A-Za-z0-9_-]{20,}\b/g },
+  { name: 'npm-token', re: /\bnpm_[A-Za-z0-9]{36}\b/g },
+  { name: 'pypi-token', re: /\bpypi-[A-Za-z0-9_-]{16,}\b/g },
+  { name: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
+  { name: 'netrc-record', re: /\b(?:machine\s+[\w.-]+\s+(?:login\s+\S+\s+)?|login\s+\S+\s+)password\s+(?=\S*[0-9])\S{8,}/gi },
+  { name: 'url-with-credentials', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"]+:[^\s/:@'"]+@[^\s/]+/gi },
+  {
+    name: 'secret-assignment',
+    re: /((?:password|passwd|pwd|secret|token|api[_-]?key)["']?\s*[:=]\s*(["']))(?!(?:\$\{[a-z_]\w*\}|\$\{\{\s*[a-z_]\w*(?:\.[a-z_]\w*)*\s*\}\}|(?:[a-z]+[-_])*your(?:[-_][a-z]+)*)\2)(?=[^"']{8,}["']|(?:\\[\s\S]|(?!\2)[^\\]){8,}\2)(?:\\[\s\S]|(?!\2)[^\\])*(\2?)/gi,
+    // The value only: group 1 is the key through the opening quote and group 3
+    // the closing quote (empty when the line ends first).
+    hide: function (m) { return [m.index + m[1].length, m.index + m[0].length - m[3].length]; }
+  }
 ];
+
+// What the page hides and a push never blocks on, kept apart so the list above
+// stays the push checker's. A blocked push stops someone and a hidden value costs
+// little, so these reach further: a key held on one line, as a service account file
+// does, and a PGP block, which the shared pattern never named; and any value after a
+// name holding a secret-sounding word (pass, password, pwd, secret, token, a word
+// ending in _key, credentials, cookie), in any case, quoted or not, with or without
+// spaces around = or :. An unquoted value that reads as code stays readable, so a
+// receipt showing `token = getToken();` still proves its point: one that starts with
+// $ or <, holds a bracket, or has a dot and no digit. The shell's PWD and OLDPWD
+// hold folders, not secrets. A value under 8 characters stays, as in the shared list.
+const RECEIPT_ONLY_PATTERNS = [
+  { name: 'private-key-line', re: /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----.*/g },
+  {
+    name: 'secret-named-value',
+    re: /((?<![\w.-])([\w.-]*?(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|[_-]key|credentials?|cookie)[\w.-]*)["']?\s*[:=]\s*)(?:(["'`])(?=(?:\\[\s\S]|(?!\3)[^\\]){8,})((?:\\[\s\S]|(?!\3)[^\\])*)\3?|(?![$<])(?!\S*[()[\]{}])(?=\S*[0-9]|[^\s.]*(?:\s|$))\S{8,})/gi,
+    // The value only: after the operator and any opening quote, up to the closing
+    // quote. Group 2 is the name, group 3 the quote, group 4 a quoted value.
+    hide: function (m) {
+      if (/^(?:old)?pwd$/i.test(m[2])) return [0, 0];
+      const start = m.index + m[1].length + (m[3] ? 1 : 0);
+      return [start, m[3] ? start + m[4].length : m.index + m[0].length];
+    }
+  }
+];
+// A private key's body is plain base64 no pattern can tell from other text, so
+// loadReceipt hides each line from a BEGIN line through its END line.
+const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
+const KEY_END = /-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----/;
+
+// Masks one receipt line the way mask() in pre-push-check.js does: every
+// pattern reads the ORIGINAL line and marks the characters it hides (all but a
+// match's first 4 or, under a hide rule, the value alone), so one pattern's
+// rewrite never changes what the next one sees. Each hidden run prints as
+// [redacted]. Returns the masked line and how many matches it hid.
+function maskReceiptLine(line) {
+  const hidden = new Array(line.length).fill(false);
+  let count = 0;
+  RECEIPT_SECRET_PATTERNS.concat(RECEIPT_ONLY_PATTERNS).forEach(function (p) {
+    for (const m of line.matchAll(p.re)) {
+      const span = p.hide ? p.hide(m) : [m.index + 4, m.index + m[0].length];
+      if (span[1] <= span[0]) continue;
+      count += 1;
+      for (let i = span[0]; i < span[1]; i++) hidden[i] = true;
+    }
+  });
+  if (!count) return { line: line, count: 0 };
+  let out = '';
+  for (let i = 0; i < line.length; i++) {
+    if (!hidden[i]) out += line[i];
+    else if (i === 0 || !hidden[i - 1]) out += '[redacted]';
+  }
+  return { line: out, count: count };
+}
 
 // Returns null when the file may be read, else one short reason. The folder is
 // judged through realpath on both sides (underRoot), so a symlink inside it
@@ -1237,6 +1314,15 @@ function receiptFileProblem(p) {
 function loadReceipt(f) {
   const r = f.receipt;
   if (!r || typeof r !== 'object') return;
+
+  // The page prints the check above its output, and a check for a hardcoded key
+  // often names that key, so the command is masked like its output, carried or not.
+  const typedCmd = r.cmd;
+  if (typeof r.cmd === 'string') {
+    const masked = maskReceiptLine(r.cmd);
+    r.cmd = masked.line;
+    if (masked.count) reviewNotes.push('receipt for ' + (f.id || '?') + ': ' + masked.count + ' secret-shaped token(s) redacted from its command before rendering');
+  }
 
   // A finding carried forward from the previous page arrives in rendered form:
   // its stdout is what the run that produced it read off disk, and there is no
@@ -1277,7 +1363,7 @@ function loadReceipt(f) {
     // The runner saves raw stdout, but a wrapped capture may already carry the
     // command line. Rendering ours on top of theirs echoes it twice, which is
     // exactly what an unedited terminal dump looks like. Drop the duplicate.
-    if (lines.length && r.cmd && lines[0].replace(/^\$\s*/, '').trim() === String(r.cmd).trim()) {
+    if (lines.length && typedCmd && lines[0].replace(/^\$\s*/, '').trim() === String(typedCmd).trim()) {
       lines = lines.slice(1);
     }
     // The runner appends "exit N" as the file's last line. It is the machine's
@@ -1296,11 +1382,18 @@ function loadReceipt(f) {
       if (exitLine[1].trim()) lines[lines.length - 1] = exitLine[1]; else lines.pop();
     }
     let redacted = 0;
+    let inKey = false;
     const kept = lines.slice(0, REVIEW_CAPS.receiptLines)
       .map(function (l) {
-        RECEIPT_SECRET_PATTERNS.forEach(function (re) {
-          l = l.replace(re, function (m) { redacted += 1; return m.slice(0, 4) + '[redacted]'; });
-        });
+        if (inKey) {
+          inKey = !KEY_END.test(l);
+          redacted += 1;
+          return '[redacted]';
+        }
+        inKey = KEY_BEGIN.test(l) && !KEY_END.test(l);
+        const masked = maskReceiptLine(l);
+        redacted += masked.count;
+        l = masked.line;
         return l.length > REVIEW_CAPS.receiptCols ? l.slice(0, REVIEW_CAPS.receiptCols - 1) + '…' : l;
       });
     if (redacted) {
@@ -1727,13 +1820,17 @@ function openFindingsWithLabels(data) {
 // file is in that list. One on an unreviewed file, or with no file to match,
 // is carried like one from a lens that did not run. Seeded must-check findings
 // are the exception while the plan lens runs: they are re-read from the plan
-// every orchestrated run, file or no file. A payload with `lenses` and no
+// every orchestrated run, file or no file. So is a finding with no file on a full
+// check: it looks at the project rather than a list of files and raises the finding
+// again if it still holds, so nothing else would ever end it. `completeness` and
+// `operations` are the rows only a full check sets. A payload with `lenses` and no
 // `reviewedFiles` (a project's own command written before the key) resolves by
 // lens alone, as before, and says so on stderr.
 function carryForward(data, prior) {
   if (!Array.isArray(data.lenses) || !data.lenses.length) return;
   const lenses = data.lenses.map(function (l) { return String(l).toLowerCase().trim(); }).filter(Boolean);
   const scoped = Array.isArray(data.reviewedFiles);
+  const fullCheck = lenses.indexOf('completeness') !== -1 || lenses.indexOf('operations') !== -1;
   // Said whenever the list is missing, before the previous page is even read:
   // this note is how a caller's missing list shows, so it cannot wait for a
   // finding that happens to resolve (review of the #219 cycle, R4).
@@ -1762,7 +1859,7 @@ function carryForward(data, prior) {
     let reason = ran ? null : 'lens';
     if (ran && scoped && !(isSeeded(specs) && lenses.indexOf('plan') !== -1)) {
       const rel = item.f.file && typeof item.f.file.relPath === 'string' ? normRelPath(item.f.file.relPath) : '';
-      if (!rel) reason = 'nofile';
+      if (!rel) { if (!fullCheck) reason = 'nofile'; }
       else if (!reviewed[rel]) reason = 'file';
     }
     if (!reason) return;

@@ -448,6 +448,15 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('an all-capitals word outside the set is a problem even beside a valid verdict', keepBeside.status === 1 && /"word":"KEEP"/.test(keepBeside.stdout), keepBeside.stdout);
   const t2down = run(['--verdicts', shard, ret('R2: DOWNGRADE Warn\nR3: STANDS\nR4: STANDS\nR5: STANDS\nR6: STANDS\n')]);
   check('DOWNGRADE is not a tier 2 word', t2down.status === 1 && /"word":"DOWNGRADE"/.test(t2down.stdout), t2down.stdout);
+  // A judge keeps a true finding that another defect hides with one more line,
+  // `masked: <the defect>`. The reader takes it as prose: it decides nothing and
+  // stays in the saved return, so it can never turn into a verdict or a problem.
+  const masked = run(['--verdicts', shard, ret('R2: STANDS\nThe claim holds in the code.\nmasked: R6, the crash at app.js line 7 stops this handler\nR3: REFUTED\nR4: STANDS\nmasked: a null lookup stops the script\nR5: STANDS\nR6: STANDS\n')]);
+  const maskedRead = parse(masked) || {};
+  const maskedVerdicts = maskedRead.verdicts || {};
+  check('masked: a tier-2 return with a masked line keeps every verdict and reports no problem',
+    masked.status === 0 && maskedVerdicts.R2 === 'STANDS' && maskedVerdicts.R3 === 'REFUTED' && maskedVerdicts.R4 === 'STANDS' && maskedVerdicts.R5 === 'STANDS' && maskedVerdicts.R6 === 'STANDS'
+      && (maskedRead.returns || [{ problems: ['no returns'] }])[0].problems.length === 0, masked.stdout);
 
   // Tier 3: the tally in M2's order, the condition rule, and the two-ballot rule.
   const T3 = ['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3,R4'];
@@ -887,6 +896,209 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
       && nr[1].do === 'run' && nr[1].command === 'node ' + RUN_CHECKS + ' --checks ' + path.join(outWrite, 'recheck-1.json') + ' --out ' + rcOutWrite
       && nr[1].record === 'node ' + SCRIPT + ' --verdicts --ledger ' + path.join(outWrite, 'ledger.json') + ' --recheck ' + path.join(rcOutWrite, 'results.json'),
     recWrite.stderr + JSON.stringify(mRec).slice(0, 500));
+  // The fixer could rewrite the row that judges its fix. Review 2026-10-26-183019
+  // did: its recheck failed, the row was edited, and the edited row passed. The
+  // mode now keeps each row it writes, so a results row that ran something else
+  // proves nothing: the kept row runs again in the same round, and only its
+  // verdict counts. The finding here is a TODO the fix has not removed.
+  const c0 = '// TODO: tidy\nmodule.exports = 1;\n';
+  w('src/c.js', c0);
+  const rwFile = jsonl([f('code', 'src/c.js', 1, 'src/c.js:todo-rw', 'Should fix. A TODO ships.', { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } })]);
+  const rwReceipts = path.join(sandbox, 'receipts-rw');
+  fs.mkdirSync(rwReceipts);
+  fs.writeFileSync(path.join(rwReceipts, 'code-1.txt'), '1:// TODO: tidy\nexit 0\n');
+  // One fresh mode call, and a helper that runs the recheck file and records it.
+  const rwStart = (name, mode) => {
+    const dir = path.join(sandbox, name);
+    fs.mkdirSync(dir);
+    const started = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', dir, '--root', repo, mode || '--mechanical', 'R1']);
+    const results = path.join(dir, 'rc');
+    const go = () => {
+      spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-1.json'), '--out', results], { cwd: repo, encoding: 'utf8' });
+      return run(['--verdicts', '--ledger', path.join(dir, 'ledger.json'), '--recheck', path.join(results, 'results.json')]);
+    };
+    const rowFile = path.join(dir, 'recheck-1.json');
+    return { dir, started, go, rowFile, rows: () => readJson(rowFile) || [], set: (row) => fs.writeFileSync(rowFile, JSON.stringify([Object.assign((readJson(rowFile) || [])[0], row)], null, 2) + '\n'), ledger: () => readJson(path.join(dir, 'ledger.json')) || { findings: {} } };
+  };
+  const rw = rwStart('verify-rw');
+  const keptCheck = 'grep -n TODO src/c.js';
+  const firstRun = parse(rw.go()) || {};
+  // A plain fail with no rewrite prints no retry: the bound of two rounds does its job.
+  const plainFail = firstRun.recorded && firstRun.recorded.R1 === 'NOT FIXED' && !(firstRun.next || []).some((n) => /--judgment/.test(n.command || ''));
+  const rewound = rw.ledger();
+  rewound.findings.R1.verdicts = [];
+  fs.writeFileSync(path.join(rw.dir, 'ledger.json'), JSON.stringify(rewound));
+  rw.set({ check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } });
+  const edited = parse(rw.go()) || {};
+  const lastVerdict = (l) => { const v = l.findings.R1.verdicts; return v[v.length - 1] || {}; };
+  const editedVerdict = lastVerdict(rw.ledger());
+  const restored = rw.rows()[0] || {};
+  w('src/c.js', 'module.exports = 1;\n');
+  const kept = parse(rw.go()) || {};
+  const keptVerdict = lastVerdict(rw.ledger());
+  check11('fixer-rewrite: a rewritten recheck row records NOT VERIFIED and reruns the kept row',
+    plainFail && (edited.unverified || []).join() === 'R1' && editedVerdict.verdict === 'NOT VERIFIED' && /^check_changed/.test(editedVerdict.reason || '')
+      && editedVerdict.reason.includes('grep -n FIXME src/c.js') && editedVerdict.reason.includes(keptCheck)
+      && restored.check === keptCheck && JSON.stringify(restored.expect) === JSON.stringify({ noMatch: 'TODO' })
+      && (edited.next || []).some((n) => n.do === 'run' && /--checks/.test(n.command || '') && /--recheck/.test(n.record || ''))
+      && kept.recorded && kept.recorded.R1 === 'FIXED' && keptVerdict.verdict === 'FIXED' && rw.ledger().findings.R1.round === 1,
+    JSON.stringify({ plainFail, edited, editedVerdict, restored, kept, keptVerdict }));
+  w('src/c.js', c0);
+  const rw2 = rwStart('verify-rw-2');
+  rw2.set({ check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } });
+  rw2.go();
+  const stillFails = parse(rw2.go()) || {};
+  const retry = (stillFails.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('fixer-rewrite: a kept row that fails after a rewrite prints the judgment retry, for that finding only',
+    stillFails.recorded && stillFails.recorded.R1 === 'NOT FIXED' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
+    JSON.stringify(stillFails).slice(0, 400));
+  // A filled-in expect: the mode writes a placeholder because it cannot invert the
+  // proof, so the runner writes the expect. That is its job and no rewrite, but an
+  // expect the saved output from before the fix already meets proves nothing.
+  const fillFile = jsonl([f('code', 'src/c.js', 1, 'src/c.js:todo-fill', 'Should fix. A TODO ships.', { check: 'grep -n TODO src/c.js', expect: { lines: { min: 1 } } })]);
+  const fillStart = (name) => { const dir = path.join(sandbox, name); fs.mkdirSync(dir); run(['--verify', fillFile, '--receipts', rwReceipts, '--scope', scope, '--out', dir, '--root', repo, '--mechanical', 'R1']); return dir; };
+  const fillRun = (dir, expect) => {
+    const rowFile = path.join(dir, 'recheck-1.json');
+    const row = (readJson(rowFile) || [])[0];
+    fs.writeFileSync(rowFile, JSON.stringify([Object.assign(row, { expect })], null, 2) + '\n');
+    spawnSync(process.execPath, [RUN_CHECKS, '--checks', rowFile, '--out', path.join(dir, 'rc')], { cwd: repo, encoding: 'utf8' });
+    const r = parse(run(['--verdicts', '--ledger', path.join(dir, 'ledger.json'), '--recheck', path.join(dir, 'rc', 'results.json')])) || {};
+    const l = readJson(path.join(dir, 'ledger.json')) || { findings: {} };
+    return { r, last: lastVerdict(l) };
+  };
+  w('src/c.js', 'module.exports = 1;\n');
+  const hollow = fillRun(fillStart('verify-fill-hollow'), { noMatch: 'NOT-IN-THE-FILE' });
+  check11('vacuous: a filled-in expect that the saved output already meets records NOT VERIFIED',
+    (hollow.r.unverified || []).join() === 'R1' && hollow.last.verdict === 'NOT VERIFIED' && /^vacuous_expect/.test(hollow.last.reason || ''), JSON.stringify(hollow).slice(0, 400));
+  // The fixer wrote that expect, so its pass settles nothing: review 2026-11-04-080648
+  // R12 passed one that really did fail before the fix, and only a fresh check found
+  // the problem still there. The finding goes to one fresh verifier in the same round.
+  const honestDir = fillStart('verify-fill-honest');
+  const honest = fillRun(honestDir, { noMatch: 'TODO' });
+  const honestRetry = (honest.r.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('filled: a filled-in expect that passes leaves the verdict to a fresh verifier',
+    (honest.r.unverified || []).join() === 'R1' && honest.last.verdict === 'NOT VERIFIED' && /^filled_expect/.test(honest.last.reason || '')
+      && (honest.r.next || []).length === 1 && honestRetry && /--judgment R1\b/.test(honestRetry.command) && !/--mechanical/.test(honestRetry.command),
+    JSON.stringify(honest).slice(0, 400));
+  const verifierSays = (dir, name, shard, text) => {
+    const said = path.join(dir, name);
+    fs.writeFileSync(said, text);
+    return fs.existsSync(shard) ? run(['--verdicts', shard, said, '--ledger', path.join(dir, 'ledger.json')]) : { status: null };
+  };
+  const honestJudged = honestRetry ? spawnSync('sh', ['-c', honestRetry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const honestRecorded = verifierSays(honestDir, 'said.txt', path.join(honestDir, 'verify-2-1.txt'), 'R1: FIXED\nthe TODO is gone\n');
+  const honestAgain = parse(run(['--verdicts', '--ledger', path.join(honestDir, 'ledger.json'), '--recheck', path.join(honestDir, 'rc', 'results.json')])) || {};
+  const honestLedger = readJson(path.join(honestDir, 'ledger.json')) || { findings: { R1: { verdicts: [] } } };
+  check11('filled: the fresh verifier decides in the same round, and the rows cannot speak after it',
+    honestJudged.status === 0 && honestRecorded.status === 0 && honestLedger.findings.R1.round === 1 && lastVerdict(honestLedger).verdict === 'FIXED' && !(honestAgain.next || []).length,
+    JSON.stringify(honestLedger.findings.R1).slice(0, 300));
+  // The first filled-in expect to run is the one the round answers to: after a failed
+  // recheck, a weaker one could otherwise replace it (review 2026-11-07-133045, R2).
+  w('src/c.js', c0);
+  const pinDir = fillStart('verify-fill-pin');
+  const pinFailed = fillRun(pinDir, { noMatch: 'TODO' });
+  const pinWeaker = fillRun(pinDir, { noMatch: 'ALSO-NOT-IN-THE-FILE' });
+  const pinRow = (readJson(path.join(pinDir, 'recheck-1.json')) || [])[0] || {};
+  check11('filled: the first filled-in expect to run is held, so a weaker one after a fail settles nothing',
+    pinFailed.last.verdict === 'NOT FIXED' && pinWeaker.last.verdict === 'NOT VERIFIED' && /^check_changed/.test(pinWeaker.last.reason || '') && JSON.stringify(pinRow.expect) === JSON.stringify({ noMatch: 'TODO' }),
+    JSON.stringify({ pinFailed: pinFailed.last, pinWeaker: pinWeaker.last, pinRow }).slice(0, 400));
+  // The bound of two fix rounds meets a rewritten check: in round 2 the kept row
+  // fails, a correct fix that keeps the old wording would have no round left, so the
+  // retry the mode prints must run, once, and never open a third fix.
+  w('src/c.js', c0);
+  const rw3 = rwStart('verify-rw-3');
+  rw3.go();
+  run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--mechanical', 'R1']);
+  const row2File = path.join(rw3.dir, 'recheck-2.json');
+  const go2 = () => {
+    spawnSync(process.execPath, [RUN_CHECKS, '--checks', row2File, '--out', path.join(rw3.dir, 'rc2')], { cwd: repo, encoding: 'utf8' });
+    return parse(run(['--verdicts', '--ledger', path.join(rw3.dir, 'ledger.json'), '--recheck', path.join(rw3.dir, 'rc2', 'results.json')])) || {};
+  };
+  fs.writeFileSync(row2File, JSON.stringify([Object.assign((readJson(row2File) || [])[0], { check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } })], null, 2) + '\n');
+  go2();
+  const round2 = go2();
+  const retry2 = (round2.next || []).find((n) => /--verify/.test(n.command || ''));
+  const judged2 = retry2 ? spawnSync('sh', ['-c', retry2.command], { cwd: repo, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' };
+  const third = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--judgment', 'R1']);
+  check11('fixer-rewrite: in round 2 the printed retry runs once and the next call is refused',
+    round2.recorded && round2.recorded.R1 === 'NOT FIXED' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
+    JSON.stringify({ round2, judged2: [judged2.status, String(judged2.stderr).slice(0, 200)], third: [third.status, third.stderr.slice(0, 160)] }));
+  // A filled-in pass in round 2 still reaches its verifier, once (same review, a fresh
+  // check's note on R23: round 1 was the only round tested end to end).
+  w('src/c.js', c0);
+  const fill2 = fillStart('verify-fill-round2');
+  const fill2First = fillRun(fill2, { noMatch: 'TODO' });
+  run(['--verify', fillFile, '--receipts', rwReceipts, '--scope', scope, '--out', fill2, '--root', repo, '--mechanical', 'R1']);
+  w('src/c.js', 'module.exports = 1;\n');
+  const fill2Row = path.join(fill2, 'recheck-2.json');
+  fs.writeFileSync(fill2Row, JSON.stringify([Object.assign((readJson(fill2Row) || [])[0], { expect: { noMatch: 'TODO' } })], null, 2) + '\n');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', fill2Row, '--out', path.join(fill2, 'rc2')], { cwd: repo, encoding: 'utf8' });
+  const fill2Second = parse(run(['--verdicts', '--ledger', path.join(fill2, 'ledger.json'), '--recheck', path.join(fill2, 'rc2', 'results.json')])) || {};
+  const fill2Retry = (fill2Second.next || []).find((n) => /--verify/.test(n.command || ''));
+  const fill2Judged = fill2Retry ? spawnSync('sh', ['-c', fill2Retry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const fill2Again = run(['--verify', fillFile, '--receipts', rwReceipts, '--scope', scope, '--out', fill2, '--root', repo, '--judgment', 'R1']);
+  const fill2Ledger = readJson(path.join(fill2, 'ledger.json')) || { findings: { R1: {} } };
+  check11('filled: in round 2 a filled-in pass gets its one fresh verifier, and the next call is refused',
+    fill2First.last.verdict === 'NOT FIXED' && (fill2Second.unverified || []).join() === 'R1' && fill2Judged.status === 0 && fill2Ledger.findings.R1.round === 2 && fill2Again.status === 1 && /"error":"rounds_exhausted"/.test(fill2Again.stderr),
+    JSON.stringify({ fill2Second, judged: fill2Judged.status, again: [fill2Again.status, fill2Again.stderr.slice(0, 160)] }).slice(0, 400));
+  // The door past the bound opens only on a kept row that failed: a rewritten row the
+  // runner never reran leaves it shut (review 2026-11-07-133045, R1).
+  w('src/c.js', c0);
+  const rw4 = rwStart('verify-rw-4');
+  rw4.go();
+  run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw4.dir, '--root', repo, '--mechanical', 'R1']);
+  const row4File = path.join(rw4.dir, 'recheck-2.json');
+  fs.writeFileSync(row4File, JSON.stringify([Object.assign((readJson(row4File) || [])[0], { check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } })], null, 2) + '\n');
+  spawnSync(process.execPath, [RUN_CHECKS, '--checks', row4File, '--out', path.join(rw4.dir, 'rc2')], { cwd: repo, encoding: 'utf8' });
+  run(['--verdicts', '--ledger', path.join(rw4.dir, 'ledger.json'), '--recheck', path.join(rw4.dir, 'rc2', 'results.json')]);
+  const unrun = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw4.dir, '--root', repo, '--judgment', 'R1']);
+  check11('fixer-rewrite: a rewritten row never rerun leaves the call past the bound shut',
+    unrun.status === 1 && /"error":"rounds_exhausted"/.test(unrun.stderr), JSON.stringify([unrun.status, unrun.stderr.slice(0, 200)]));
+  // A retry judges the same fix, so it spends no fix round: the next real fix is round
+  // 2, and only the one after that is refused (review 2026-11-07-133045, R25).
+  w('src/c.js', c0);
+  const rw5 = rwStart('verify-rw-5');
+  rw5.set({ check: 'grep -n FIXME src/c.js', expect: { noMatch: 'FIXME' } });
+  rw5.go();
+  const r5 = parse(rw5.go()) || {};
+  const retry5 = (r5.next || []).find((n) => /--verify/.test(n.command || ''));
+  const judged5 = retry5 ? spawnSync('sh', ['-c', retry5.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const round5 = rw5.ledger().findings.R1.round;
+  const said5 = path.join(rw5.dir, 'said.txt');
+  fs.writeFileSync(said5, 'R1: NOT FIXED\nstill there\n');
+  const shard5 = path.join(rw5.dir, 'verify-2-1.txt');
+  if (fs.existsSync(shard5)) run(['--verdicts', shard5, said5, '--ledger', path.join(rw5.dir, 'ledger.json')]);
+  const second5 = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw5.dir, '--root', repo, '--mechanical', 'R1']);
+  const third5 = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw5.dir, '--root', repo, '--mechanical', 'R1']);
+  check11('fixer-rewrite: a retry in round one spends no fix round',
+    judged5.status === 0 && round5 === 1 && second5.status === 0 && rw5.ledger().findings.R1.round === 2 && third5.status === 1 && /"error":"rounds_exhausted"/.test(third5.stderr),
+    JSON.stringify({ judged5: judged5.status, round5, second5: [second5.status, second5.stderr.slice(0, 160)], third5: third5.status }));
+  // Lines added after a run's verdicts exist (M5's one generation, a split note):
+  // a verdict is keyed to an ID, so a line marked followup takes the next free number
+  // and moves nothing. The whole run stays in one file, one receipts folder and the
+  // one ledger the chain gate reads.
+  const fu = (name, severity, extra) => Object.assign(f('code', 'src/c.js', 1, 'src/c.js:fu-' + name, 'Should fix. ' + name + ' ships.', { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } }), { severity }, extra || {});
+  const fuFirst = [fu('first', 'warn'), fu('second', 'warn'), fu('third', 'suggest')];
+  const fuFile = jsonl(fuFirst.concat([fu('seeded', 'warn', { followup: true }), fu('later', 'block', { followup: true })]));
+  const fuOrder = (run([fuFile]).rows || []).map((m) => m.id + ' ' + m.key.replace('src/c.js:fu-', '')).join();
+  check11('followup: a line marked followup takes the next free number and moves no earlier ID',
+    fuOrder === 'R1 first,R2 second,R3 third,R4 seeded,R5 later', fuOrder);
+  const fuReceipts = path.join(sandbox, 'receipts-fu');
+  fs.mkdirSync(fuReceipts);
+  for (const n of [1, 2, 3, 4, 5]) fs.writeFileSync(path.join(fuReceipts, 'code-' + n + '.txt'), '1:// TODO: tidy\nexit 0\n');
+  const fuShards = run(['--shards', fuFile, '--receipts', fuReceipts, '--out', path.join(fuReceipts, 'followup'), '--drop', 'R1,R2,R3', '--root', repo]);
+  const fuBuilt = parse(fuShards) || {};
+  check11('followup: dropping the earlier IDs audits only the follow-up lines',
+    fuShards.status === 0 && (fuBuilt.shards || []).map((s) => s.ids.join()).join() === 'R4' && (fuBuilt.tier3 || {}).ids.join() === 'R5', fuShards.stdout.slice(0, 300) + fuShards.stderr.slice(0, 200));
+  const fuOut = path.join(sandbox, 'verify-fu');
+  fs.mkdirSync(fuOut);
+  run(['--verify', fuFile, '--receipts', fuReceipts, '--scope', scope, '--out', fuOut, '--root', repo, '--mechanical', 'R1,R2']);
+  const fuAgain = run(['--verify', fuFile, '--receipts', fuReceipts, '--scope', scope, '--out', fuOut, '--root', repo, '--mechanical', 'R4']);
+  const fuLedger = readJson(path.join(fuOut, 'ledger.json')) || { findings: {} };
+  check11('followup: a follow-up line is verified in the run\'s one ledger, with no ID renumbered',
+    fuAgain.status === 0 && Object.keys((parse(fuAgain) || {}).renumbered || {}).length === 0 && fuLedger.findings.R4 && fuLedger.findings.R4.key === 'src/c.js:fu-seeded' && fuLedger.findings.R1.key === 'src/c.js:fu-first',
+    fuAgain.stdout.slice(0, 300) + fuAgain.stderr.slice(0, 200));
+  w('src/c.js', c0);
   const outOne = path.join(sandbox, 'verify-out-11-one');
   fs.mkdirSync(outOne);
   const rOne = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', outOne, '--root', repo, '--judgment', 'R4']);

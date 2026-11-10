@@ -52,7 +52,7 @@ Based on their answer, gather the relevant context:
 
 - **Plan**: Read the plan file they specify
 - **Code**: Read the specific files mentioned, or use `git diff` for recent changes
-- **Branch**: Run `git diff main...HEAD` to get all branch changes
+- **Branch**: Run `node .claude/scripts/merge-check.js --style` (M16), then `git diff <main>...HEAD` with its `main` field as `<main>`, to get all branch changes
 - **Feature**: Ask which files are involved, then read them
 - **Other**: Ask clarifying questions until you understand the scope
 
