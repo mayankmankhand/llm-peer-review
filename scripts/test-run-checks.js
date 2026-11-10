@@ -1296,6 +1296,36 @@ section('15. plan mode: lint, before and after, tally (issue #231)', function ()
   fs.writeFileSync(outsidePlan, '- [ ] 🟥 **Step 1: Out** `[sequential]`\n  - Check: no target - none\n');
   const outside = run(['--plan', outsidePlan, '--lint']);
   check('plan mode reads only a plan inside the project', outside.status === 1 && /inside the project/.test(outside.stderr), one(outside.stdout + outside.stderr));
+
+  // Issue #296: the lint also lists the files a plan names that are not in the
+  // project, so /create-plan reads one list instead of running a shell loop
+  // (a loop Claude Code cannot check before it runs, so every plan asked for
+  // approval). The list is advisory: a step may name a file it is about to
+  // create, so a missing path is never a lint problem. Each case checks for the
+  // list first, so before the work the case is reported failed by name.
+  fs.mkdirSync(path.join(sandbox, 'outside'), { recursive: true });
+  fs.writeFileSync(path.join(sandbox, 'outside', 'kept.md'), 'outside the project\n');
+  write('plans/PLAN-paths.md', [
+    '# Paths plan', '', '## Tasks', '',
+    '- [ ] 🟥 **Step 1: Name some files** `[sequential]` → depends on: nothing',
+    '  - [ ] 🟥 Read `plans/PLAN-paths.md` and write `notes/absent.md`',
+    '  - [ ] 🟥 Edit `notes/absent.md` again, then read `../outside/kept.md`',
+    '  - Check: no target - names files only',
+    '',
+    '## Outcomes', '',
+  ].join('\n'));
+  const paths = run(['--plan', 'plans/PLAN-paths.md', '--lint']);
+  const missing = paths.json && Array.isArray(paths.json.missingPaths) ? paths.json.missingPaths : null;
+  const missingAs = (p) => (missing || []).filter((m) => m && m.path === p);
+  check('296: plan lint lists a path the plan names that is not in the project, with its line',
+    !!missing && missingAs('notes/absent.md').length === 1 && missingAs('notes/absent.md')[0].line === 6 && missingAs('plans/PLAN-paths.md').length === 0,
+    one(paths.stdout + paths.stderr));
+  check('296: a path outside the project counts as missing',
+    !!missing && missingAs('../outside/kept.md').length === 1 && missingAs('../outside/kept.md')[0].line === 7,
+    one(paths.stdout + paths.stderr));
+  check('296: a missing path is not a lint problem',
+    !!missing && paths.status === 0 && Array.isArray(paths.json.problems) && paths.json.problems.length === 0 && !!paths.json.summary && paths.json.summary.problems === 0,
+    one(paths.stdout + paths.stderr));
 });
 
 // --- 16. plan mode holds up: near misses, repeated steps, fences, links -------

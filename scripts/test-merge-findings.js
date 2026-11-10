@@ -457,6 +457,24 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('masked: a tier-2 return with a masked line keeps every verdict and reports no problem',
     masked.status === 0 && maskedVerdicts.R2 === 'STANDS' && maskedVerdicts.R3 === 'REFUTED' && maskedVerdicts.R4 === 'STANDS' && maskedVerdicts.R5 === 'STANDS' && maskedVerdicts.R6 === 'STANDS'
       && (maskedRead.returns || [{ problems: ['no returns'] }])[0].problems.length === 0, masked.stdout);
+  // Issue #295: the line still decides nothing, and it no longer stays behind in
+  // the saved return. The output lists each one under the finding whose verdict it
+  // follows, the way it lists split notes, so the runner copies them into the digest
+  // from the script's output instead of reading every return.
+  check('295: masked lines are listed under their findings',
+    JSON.stringify(maskedRead.masked) === JSON.stringify({ R2: ['R6, the crash at app.js line 7 stops this handler'], R4: ['a null lookup stops the script'] }) && JSON.stringify(maskedRead.splits) === '{}',
+    JSON.stringify(maskedRead.masked));
+  // M2 asks only a tier 2 skeptic for the line, but a tier 3 voter may write one,
+  // with markdown around the label; each voter's note is kept, in ballot order.
+  const masked3 = run(['--verdicts', '--tier', '3', '--ids', 'R1', ret('R1: STANDS\nthe claim holds\nmasked: R2, the guard above returns early\n'), ret('R1: STANDS\nreal\n- **masked:** the feature flag is off\n'), ret('R1: REFUTED\nnot shown\n')]);
+  const masked3Read = parse(masked3) || {};
+  check('295: a three-voter reply\'s masked line is listed too',
+    masked3.status === 0 && (masked3Read.verdicts || {}).R1 === 'STANDS' && JSON.stringify(masked3Read.masked) === JSON.stringify({ R1: ['R2, the guard above returns early', 'the feature flag is off'] }),
+    masked3.stdout);
+  const maskedFirst = run(['--verdicts', '--tier', 'verify', '--ids', 'R1', ret('masked: nothing stands above this line\nR1: FIXED\nthe line is gone\n')]);
+  const maskedFirstRead = parse(maskedFirst) || {};
+  check('295: a masked line before any verdict is left out',
+    maskedFirst.status === 0 && (maskedFirstRead.verdicts || {}).R1 === 'FIXED' && JSON.stringify(maskedFirstRead.masked) === '{}', maskedFirst.stdout);
 
   // Tier 3: the tally in M2's order, the condition rule, and the two-ballot rule.
   const T3 = ['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3,R4'];
@@ -908,10 +926,10 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   fs.mkdirSync(rwReceipts);
   fs.writeFileSync(path.join(rwReceipts, 'code-1.txt'), '1:// TODO: tidy\nexit 0\n');
   // One fresh mode call, and a helper that runs the recheck file and records it.
-  const rwStart = (name, mode) => {
+  const rwStart = (name, mode, file, receipts) => {
     const dir = path.join(sandbox, name);
     fs.mkdirSync(dir);
-    const started = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', dir, '--root', repo, mode || '--mechanical', 'R1']);
+    const started = run(['--verify', file || rwFile, '--receipts', receipts || rwReceipts, '--scope', scope, '--out', dir, '--root', repo, mode || '--mechanical', 'R1']);
     const results = path.join(dir, 'rc');
     const go = () => {
       spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-1.json'), '--out', results], { cwd: repo, encoding: 'utf8' });
@@ -923,8 +941,10 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const rw = rwStart('verify-rw');
   const keptCheck = 'grep -n TODO src/c.js';
   const firstRun = parse(rw.go()) || {};
-  // A plain fail with no rewrite prints no retry: the bound of two rounds does its job.
-  const plainFail = firstRun.recorded && firstRun.recorded.R1 === 'NOT FIXED' && !(firstRun.next || []).some((n) => /--judgment/.test(n.command || ''));
+  // A plain fail of a row the mode flipped from a file search settles nothing
+  // (issue #288): the text is still there, which a correct fix can leave, so the
+  // finding goes to a fresh verifier. The 288 cases below hold the whole path.
+  const plainFail = (firstRun.unverified || []).join() === 'R1' && !(firstRun.recorded || {}).R1 && (firstRun.next || []).some((n) => /--judgment R1\b/.test(n.command || ''));
   const rewound = rw.ledger();
   rewound.findings.R1.verdicts = [];
   fs.writeFileSync(path.join(rw.dir, 'ledger.json'), JSON.stringify(rewound));
@@ -950,8 +970,28 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const stillFails = parse(rw2.go()) || {};
   const retry = (stillFails.next || []).find((n) => /--verify/.test(n.command || ''));
   check11('fixer-rewrite: a kept row that fails after a rewrite prints the judgment retry, for that finding only',
-    stillFails.recorded && stillFails.recorded.R1 === 'NOT FIXED' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
+    (stillFails.unverified || []).join() === 'R1' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
     JSON.stringify(stillFails).slice(0, 400));
+  // Every rewrite case above uses a file search, which the kept-text path (#288)
+  // now sends to a verifier before the older branch can run. A receipt that reads
+  // the file whole is no search, so nothing catches its kept text: when its row
+  // was rewritten and the kept row then fails, the round's check_changed record
+  // is what still has to print the judgment retry.
+  const rdFile = jsonl([f('code', 'src/c.js', 1, 'src/c.js:todo-read', 'Should fix. A TODO ships.', { check: 'cat src/c.js', expect: { match: 'TODO' } })]);
+  const rdReceipts = path.join(sandbox, 'receipts-rd');
+  fs.mkdirSync(rdReceipts);
+  fs.writeFileSync(path.join(rdReceipts, 'code-1.txt'), c0 + 'exit 0\n');
+  const rd = rwStart('verify-rd', null, rdFile, rdReceipts);
+  rd.set({ expect: { noMatch: 'FIXME' } });
+  rd.go();
+  const rdEdited = lastVerdict(rd.ledger());
+  const rdFails = parse(rd.go()) || {};
+  const rdLast = lastVerdict(rd.ledger());
+  const rdRetry = (rdFails.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('fixer-rewrite: a kept row that is no file search and fails after a rewrite records NOT FIXED and prints the judgment retry',
+    /^check_changed/.test(rdEdited.reason || '') && (rdFails.recorded || {}).R1 === 'NOT FIXED' && rdLast.verdict === 'NOT FIXED' && rdLast.judge === true && !rdLast.reason
+      && rdRetry && rdRetry.do === 'run' && /--judgment R1\b/.test(rdRetry.command) && !/--mechanical/.test(rdRetry.command) && rdRetry.command.includes(rd.dir),
+    JSON.stringify({ rdEdited, rdLast, rdFails }).slice(0, 500));
   // A filled-in expect: the mode writes a placeholder because it cannot invert the
   // proof, so the runner writes the expect. That is its job and no rewrite, but an
   // expect the saved output from before the fix already meets proves nothing.
@@ -1021,7 +1061,7 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const judged2 = retry2 ? spawnSync('sh', ['-c', retry2.command], { cwd: repo, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' };
   const third = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--judgment', 'R1']);
   check11('fixer-rewrite: in round 2 the printed retry runs once and the next call is refused',
-    round2.recorded && round2.recorded.R1 === 'NOT FIXED' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
+    (round2.unverified || []).join() === 'R1' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
     JSON.stringify({ round2, judged2: [judged2.status, String(judged2.stderr).slice(0, 200)], third: [third.status, third.stderr.slice(0, 160)] }));
   // A filled-in pass in round 2 still reaches its verifier, once (same review, a fresh
   // check's note on R23: round 1 was the only round tested end to end).
@@ -1073,6 +1113,203 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('fixer-rewrite: a retry in round one spends no fix round',
     judged5.status === 0 && round5 === 1 && second5.status === 0 && rw5.ledger().findings.R1.round === 2 && third5.status === 1 && /"error":"rounds_exhausted"/.test(third5.stderr),
     JSON.stringify({ judged5: judged5.status, round5, second5: [second5.status, second5.stderr.slice(0, 160)], third5: third5.status }));
+  // Issue #288: a recheck the mode builds by flipping a file search fails whenever
+  // the searched text is still there, and a correct fix can leave it (a button that
+  // keeps its label, a message that gained a sentence). So that fail settles nothing:
+  // the finding is left to one fresh verifier, which reads the diff, in the same
+  // round. A row whose text is not a file search's, or one the runner filled in,
+  // still fails outright, and so does a finding with any other failing row.
+  w('src/c.js', c0);
+  const tk = rwStart('verify-288-kept');
+  const tkRun = parse(tk.go()) || {};
+  const tkLast = lastVerdict(tk.ledger());
+  const tkRetry = (tkRun.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('288: a failed flipped search row goes to a fresh verifier',
+    (tkRun.unverified || []).join() === 'R1' && !(tkRun.recorded || {}).R1 && tkLast.verdict === 'NOT VERIFIED' && /^text_kept: code-1-recheck-r1 /.test(tkLast.reason || '') && tkLast.judge === true
+      && (tkRun.next || []).length === 1 && tkRetry && tkRetry.do === 'run' && /--judgment R1\b/.test(tkRetry.command) && !/--mechanical/.test(tkRetry.command) && tkRetry.command.includes(tk.dir),
+    JSON.stringify({ tkRun, tkLast }));
+  // The retry judges the same fix: a FIXED reply settles round 1 and the rows
+  // cannot speak after it; a NOT FIXED reply spends the round, so the next fix is
+  // round 2 and the one after it is refused.
+  const tkJudged = tkRetry ? spawnSync('sh', ['-c', tkRetry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const tkSaid = verifierSays(tk.dir, 'said-fixed.txt', path.join(tk.dir, 'verify-2-1.txt'), 'R1: FIXED\nthe note now names its owner, which was the defect\n');
+  const tkAfter = tk.ledger();
+  const tkAgain = parse(tk.go()) || {};
+  const tk2 = rwStart('verify-288-kept-2');
+  const tk2Retry = ((parse(tk2.go()) || {}).next || []).find((n) => /--verify/.test(n.command || ''));
+  if (tk2Retry) spawnSync('sh', ['-c', tk2Retry.command], { cwd: repo, encoding: 'utf8' });
+  verifierSays(tk2.dir, 'said-not.txt', path.join(tk2.dir, 'verify-2-1.txt'), 'R1: NOT FIXED\nthe note is unchanged\n');
+  const tk2Round1 = tk2.ledger();
+  const tk2Verify = ['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', tk2.dir, '--root', repo, '--mechanical', 'R1'];
+  const tk2Second = run(tk2Verify);
+  const tk2Third = run(tk2Verify);
+  check11('288: the printed retry spends no round and its verdict lands in the same round',
+    tkJudged.status === 0 && tkSaid.status === 0 && tkAfter.findings.R1.round === 1 && lastVerdict(tkAfter).verdict === 'FIXED' && !(tkAgain.next || []).length && !(tkAgain.unverified || []).length
+      && tk2Round1.findings.R1.round === 1 && lastVerdict(tk2Round1).verdict === 'NOT FIXED' && tk2Second.status === 0 && tk2.ledger().findings.R1.round === 2 && tk2Third.status === 1 && /"error":"rounds_exhausted"/.test(tk2Third.stderr),
+    JSON.stringify({ judged: tkJudged.status, said: tkSaid.status, after: (tkAfter.findings.R1 || {}).round, last: lastVerdict(tkAfter).verdict, again: tkAgain, round1: lastVerdict(tk2Round1).verdict, second: tk2Second.status, third: tk2Third.status }));
+  // One mechanical finding from its own findings file and receipts folder, run
+  // through the checks runner and recorded once.
+  const lone = (name, findingRows, saved) => {
+    const dir = path.join(sandbox, name);
+    fs.mkdirSync(dir);
+    const rcpt = path.join(sandbox, name + '-receipts');
+    fs.mkdirSync(rcpt);
+    for (const stem of Object.keys(saved)) fs.writeFileSync(path.join(rcpt, stem + '.txt'), saved[stem]);
+    run(['--verify', jsonl(findingRows), '--receipts', rcpt, '--scope', scope, '--out', dir, '--root', repo, '--mechanical', 'R1']);
+    spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-1.json'), '--out', path.join(dir, 'rc')], { cwd: repo, encoding: 'utf8' });
+    const r = parse(run(['--verdicts', '--ledger', path.join(dir, 'ledger.json'), '--recheck', path.join(dir, 'rc', 'results.json')])) || {};
+    return { r, last: lastVerdict(readJson(path.join(dir, 'ledger.json')) || { findings: { R1: { verdicts: [] } } }) };
+  };
+  const todo = (specialist, key, receipt) => f(specialist, 'src/c.js', 1, 'src/c.js:' + key, 'Should fix. A TODO ships.', receipt);
+  const failsOutright = (x) => Boolean(x.r.recorded) && x.r.recorded.R1 === 'NOT FIXED' && x.last.verdict === 'NOT FIXED' && !(x.r.next || []).some((n) => /--judgment/.test(n.command || ''));
+  const SAVED_GREP = '1:// TODO: tidy\nexit 0\n';
+  const catProof = lone('verify-288-cat', [todo('code', 'todo-cat', { check: 'cat src/c.js', expect: { match: 'TODO' } })], { 'code-1': c0 + 'exit 0\n' });
+  const pipedProof = lone('verify-288-piped', [todo('code', 'todo-piped', { check: 'cat src/c.js | grep -n TODO', expect: { match: 'TODO' } })], { 'code-1': SAVED_GREP });
+  check11('288: a failed row whose text does not come from a file search still records NOT FIXED',
+    failsOutright(catProof) && failsOutright(pipedProof), JSON.stringify({ catProof, pipedProof }));
+  const filledFail = fillRun(fillStart('verify-288-filled'), { noMatch: 'TODO' });
+  check11('288: a failed row the runner filled in still records NOT FIXED', failsOutright(filledFail), JSON.stringify(filledFail));
+  // Two receipts on one finding: the search row and a row of another kind. Both
+  // failing is a fail outright; with the other row passing, the search row is the
+  // only one that failed, and the verifier decides.
+  const pair = (key) => [
+    todo('code', key, { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } }),
+    todo('security', key, { check: 'test -e src/c.done', expect: { exit: 1 } }),
+  ];
+  const pairSaved = { 'code-1': SAVED_GREP, 'security-1': 'exit 1\n' };
+  const bothFail = lone('verify-288-mixed', pair('todo-mixed'), pairSaved);
+  w('src/c.done', 'done\n');
+  const searchOnly = lone('verify-288-mixed-2', pair('todo-mixed-2'), pairSaved);
+  fs.rmSync(path.join(repo, 'src', 'c.done'));
+  check11('288: a finding with one search row and one other failing row records NOT FIXED',
+    failsOutright(bothFail) && (searchOnly.r.unverified || []).join() === 'R1' && /^text_kept: code-1-recheck-r1 /.test(searchOnly.last.reason || ''),
+    JSON.stringify({ bothFail, searchOnly }));
+  // The moved-line half of the issue shipped with #283: its own example inverts
+  // without the line number, so an edit above the line cannot pass the recheck.
+  const inv288 = mod.invertExpect({ match: '^1571:.*unmake' }, 'grep -n unmake src/board.js', 1571);
+  check11('288: the moved-line example from the issue drops its line number',
+    JSON.stringify(inv288) === JSON.stringify({ noMatch: '^[0-9]+:.*unmake' }), JSON.stringify(inv288));
+  // Issue #294: M5 bounds a finding at two fix rounds, and the page that follows can
+  // be answered with one more try. --owner-try opens exactly that: round 3, once,
+  // marked in the ledger as the owner's, for a finding whose two rounds both read
+  // NOT FIXED. Without the flag a third call is refused as before, and once the
+  // mark is there no call opens a fourth round.
+  w('src/c.js', c0);
+  const tryRun = (name) => {
+    const dir = path.join(sandbox, name);
+    fs.mkdirSync(dir);
+    const call = (extra, findings) => run(['--verify', findings || rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', dir, '--root', repo].concat(extra));
+    const say = (n, text) => verifierSays(dir, 'said-' + n + '.txt', path.join(dir, 'verify-' + n + '-1.txt'), text);
+    // Run recheck file n through the checks runner and record it.
+    const go = (n) => {
+      spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-' + n + '.json'), '--out', path.join(dir, 'rc' + n)], { cwd: repo, encoding: 'utf8' });
+      return parse(run(['--verdicts', '--ledger', path.join(dir, 'ledger.json'), '--recheck', path.join(dir, 'rc' + n, 'results.json')])) || {};
+    };
+    const retryOf = (rec) => (rec.next || []).find((n) => /--verify/.test(n.command || '')) || null;
+    const sh = (entry) => (entry ? spawnSync('sh', ['-c', entry.command], { cwd: repo, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' });
+    const ledgerNow = () => readJson(path.join(dir, 'ledger.json')) || { findings: {} };
+    const wrote = (name2) => fs.existsSync(path.join(dir, name2));
+    return { dir, call, say, go, retryOf, sh, ledger: ledgerNow, has: wrote };
+  };
+  const STILL = 'R1: NOT FIXED\nstill there\n';
+  const errorOf = (r) => { const m = /"error":"([a-z_]+)"/.exec(r.stderr || ''); return m ? m[1] : null; };
+  const USED = 'R1 already had the owner\'s one extra try after 2 rounds (M5)';
+  // Two judgment rounds, both NOT FIXED: calls 1 and 2.
+  const twoFailed = (name) => { const t = tryRun(name); t.call(['--judgment', 'R1']); t.say(1, STILL); t.call(['--judgment', 'R1']); t.say(2, STILL); return t; };
+  const o1 = twoFailed('verify-294-owner');
+  const plainThird = o1.call(['--judgment', 'R1']);
+  const beforeTry = o1.ledger().findings.R1 || {};
+  check11('294: a third call without the owner try is still refused',
+    plainThird.status === 1 && errorOf(plainThird) === 'rounds_exhausted' && plainThird.stderr.includes('R1 already had 2 rounds (M5): revert to the last green checkpoint') && !/owner/.test(plainThird.stderr)
+      && beforeTry.round === 2 && beforeTry.ownerTry === undefined && !o1.has('verify-3-1.txt') && o1.ledger().calls === 2,
+    plainThird.stderr);
+  const opened = o1.call(['--owner-try', 'R1', '--judgment', 'R1']);
+  const openedOut = parse(opened) || {};
+  const marked = o1.ledger().findings.R1 || {};
+  const shard3 = o1.has('verify-3-1.txt') ? fs.readFileSync(path.join(o1.dir, 'verify-3-1.txt'), 'utf8') : '';
+  check11('294: an owner try opens round 3 once and is marked in the ledger',
+    opened.status === 0 && shard3.includes('===== R1 (round 3) =====') && marked.round === 3 && JSON.stringify(marked.ownerTry) === JSON.stringify({ round: 3, call: 3 })
+      && (openedOut.ownerTry || []).join() === 'R1' && ((openedOut.ledger || {}).rounds || {}).R1 === 3 && o1.ledger().calls === 3,
+    opened.stderr + JSON.stringify({ ownerTry: openedOut.ownerTry, marked }));
+  o1.say(3, STILL);
+  const fourth = o1.call(['--owner-try', 'R1', '--judgment', 'R1']);
+  const fourthPlain = o1.call(['--judgment', 'R1']);
+  check11('294: a fourth call is refused even with the owner try',
+    [fourth, fourthPlain].every((r) => r.status === 1 && errorOf(r) === 'rounds_exhausted' && r.stderr.includes(USED)) && !o1.has('verify-4-1.txt') && o1.ledger().calls === 3 && o1.ledger().findings.R1.round === 3,
+    fourth.stderr + fourthPlain.stderr);
+  // The try opens only after two rounds both read NOT FIXED: not before any round,
+  // not after one, and not for a finding round 2 fixed.
+  const o2 = tryRun('verify-294-early');
+  const never = o2.call(['--owner-try', 'R1', '--judgment', 'R1']);
+  const neverWrote = o2.has('ledger.json') || o2.has('verify-1-1.txt');
+  o2.call(['--judgment', 'R1']); o2.say(1, STILL);
+  const afterOne = o2.call(['--owner-try', 'R1', '--judgment', 'R1']);
+  const callsAfterOne = o2.ledger().calls;
+  o2.call(['--judgment', 'R1']); o2.say(2, 'R1: FIXED\nthe note is gone\n');
+  const afterFixed = o2.call(['--owner-try', 'R1', '--judgment', 'R1']);
+  check11('294: an owner try before two rounds is refused and writes nothing',
+    [never, afterOne, afterFixed].every((r) => r.status === 1 && errorOf(r) === 'owner_try_early' && /"R1"/.test(r.stderr)) && !neverWrote && callsAfterOne === 1
+      && o2.ledger().calls === 2 && o2.ledger().findings.R1.round === 2 && o2.ledger().findings.R1.ownerTry === undefined && !o2.has('verify-3-1.txt'),
+    never.stderr + afterOne.stderr + afterFixed.stderr);
+  const noPathDir = path.join(sandbox, 'verify-294-nopath');
+  fs.mkdirSync(noPathDir);
+  const noPath = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', noPathDir, '--root', repo, '--owner-try', 'R4', '--judgment', 'R5']);
+  check11('294: an owner try for an ID with no path flag is refused',
+    noPath.status === 1 && errorOf(noPath) === 'usage' && /--owner-try names R4/.test(noPath.stderr) && !fs.existsSync(path.join(noPathDir, 'ledger.json')), noPath.stderr);
+  // R4's receipt reads a line by its number, so the mechanical path refuses it
+  // before anything is written (#283) and prints the same call under --judgment.
+  // The mark is not written yet, so that printed call keeps the flag.
+  const addrDir = path.join(sandbox, 'verify-294-addressed');
+  fs.mkdirSync(addrDir);
+  const addressed = run(['--verify', file, '--receipts', receipts, '--scope', scope, '--out', addrDir, '--root', repo, '--owner-try', 'R4', '--mechanical', 'R4']);
+  let addressedRetry = '';
+  try { addressedRetry = JSON.parse(addressed.stderr).retry || ''; } catch (e) { addressedRetry = ''; }
+  check11('294: the retry printed with a refusal that wrote nothing carries the owner try',
+    addressed.status === 1 && errorOf(addressed) === 'line_addressed' && /--judgment R4\b/.test(addressedRetry) && /--owner-try R4\b/.test(addressedRetry) && !fs.existsSync(path.join(addrDir, 'ledger.json')), addressed.stderr);
+  // The mechanical path to an owner's round 3 whose recheck is recorded and left to
+  // a fresh verifier (#288): two failed rounds, the try, and the round 3 recheck.
+  // On the way, the flag is refused while round 2's own verifier call is still open.
+  const mech3 = (name) => {
+    const t = tryRun(name);
+    t.call(['--mechanical', 'R1']);                                      // call 1, round 1
+    t.sh(t.retryOf(t.go(1)));                                            // call 2, the verifier's
+    t.say(2, STILL);
+    t.call(['--mechanical', 'R1']);                                      // call 3, round 2
+    const round2 = t.go(3);
+    const early = t.call(['--owner-try', 'R1', '--judgment', 'R1']);     // round 2 is not decided yet
+    t.sh(t.retryOf(round2));                                             // call 4
+    t.say(4, STILL);
+    const third = t.call(['--owner-try', 'R1', '--mechanical', 'R1']);   // call 5, round 3
+    const round3 = t.go(5);
+    return Object.assign(t, { early, third, round3 });
+  };
+  const mechA = mech3('verify-294-mech-a');
+  const aRetry = mechA.retryOf(mechA.round3);
+  const aJudged = mechA.sh(aRetry);
+  const aRow = ((readJson(path.join(mechA.dir, 'recheck-5.json')) || [])[0] || {}).id;
+  check11('294: the fresh verifier call past the bound still works in round 3',
+    mechA.third.status === 0 && aRow === 'code-1-recheck-r3' && (mechA.round3.unverified || []).join() === 'R1' && Boolean(aRetry) && !/--owner-try/.test(aRetry.command)
+      && aJudged.status === 0 && mechA.has('verify-6-1.txt') && mechA.ledger().findings.R1.round === 3 && mechA.ledger().calls === 6,
+    JSON.stringify({ third: [mechA.third.status, String(mechA.third.stderr).slice(0, 120)], aRow, round3: mechA.round3, judged: [aJudged.status, String(aJudged.stderr).slice(0, 120)] }));
+  const mechB = mech3('verify-294-mech-b');
+  const sameCall = mechB.call(['--owner-try', 'R1', '--judgment', 'R1']);   // only runs round 3's open verifier call
+  const sameOut = parse(sameCall) || {};
+  const afterSame = mechB.ledger().findings.R1 || {};
+  mechB.say(6, STILL);
+  const fourthTry = mechB.call(['--owner-try', 'R1', '--mechanical', 'R1']);
+  check11('294: a marked ID named under the owner try again opens no fourth round',
+    errorOf(mechB.early) === 'owner_try_early' && sameCall.status === 0 && (sameOut.ownerTry || []).length === 0 && afterSame.round === 3 && JSON.stringify(afterSame.ownerTry) === JSON.stringify({ round: 3, call: 5 }) && mechB.has('verify-6-1.txt')
+      && fourthTry.status === 1 && errorOf(fourthTry) === 'rounds_exhausted' && fourthTry.stderr.includes(USED) && mechB.ledger().findings.R1.round === 3,
+    JSON.stringify({ early: String(mechB.early.stderr).slice(0, 100), same: [sameCall.status, String(sameCall.stderr).slice(0, 100)], afterSame, fourthTry: String(fourthTry.stderr).slice(0, 140) }));
+  // The mark is part of the finding's ledger entry, so it follows the entry when a
+  // later finding sorts ahead of it and the IDs shift.
+  const lateOne = Object.assign(f('security', 'src/z.js', 1, 'src/z.js:late-294', 'Blocks. A late finding sorts first.', { check: 'cat src/z.js', expect: { exit: 0 } }), { severity: 'block' });
+  const rwRow = f('code', 'src/c.js', 1, 'src/c.js:todo-rw', 'Should fix. A TODO ships.', { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } });
+  const shifted = o1.call(['--judgment', 'R1'], jsonl([rwRow, lateOne]));
+  const shiftedOut = parse(shifted) || {};
+  check11('294: the owner mark follows a renumbered entry',
+    shifted.status === 0 && (shiftedOut.renumbered || {}).R1 === 'R2' && JSON.stringify((o1.ledger().findings.R2 || {}).ownerTry) === JSON.stringify({ round: 3, call: 3 }) && (o1.ledger().findings.R1 || {}).ownerTry === undefined,
+    shifted.stderr + JSON.stringify(shiftedOut.renumbered));
   // Lines added after a run's verdicts exist (M5's one generation, a split note):
   // a verdict is keyed to an ID, so a line marked followup takes the next free number
   // and moves nothing. The whole run stays in one file, one receipts folder and the

@@ -165,6 +165,19 @@ check('the helper exists where the sentence points', fs.existsSync(path.join(REP
   const m3Words = m3.split(/\s+/).filter(Boolean).length;
   check('the M3 bullet stays at or under 450 words (#272)', m3Words > 0 && m3Words <= 450, m3Words + ' words');
 }
+// R7 of the #288 review: the owner's one extra try (#294) is three things that
+// must stay in step. M5 tells the runner which answer the page offers and which
+// flag a yes adds, the script takes that flag, and the digest line carries the
+// mark. A rule edit that drops one of the three phrases fails here.
+{
+  const m5 = read('.claude/skills/shared/hitl-loop.md').split('\n').find((l) => l.startsWith('- **M5.')) || '';
+  const phrases = ['"try once more"', '`--owner-try <ID>`', "`(round 3, the owner's choice)`"];
+  const missing = phrases.filter((p) => !m5.includes(p));
+  const flagTaken = read('.claude/scripts/merge-findings.js').includes("'--owner-try'");
+  check('M5 names the owner\'s one extra try: the answer "try once more", the --owner-try flag the script takes, and the round 3 mark on the digest line (#294)',
+    m5.length > 0 && missing.length === 0 && flagTaken,
+    m5.length ? 'missing from M5: ' + (missing.join(', ') || 'nothing') + '; the script takes --owner-try: ' + flagTaken : 'no M5 paragraph found');
+}
 
 console.log('\n5. the merge parts (#232)');
 // /document writes the PR body parts, merge-rules.md defines them, and /merge
