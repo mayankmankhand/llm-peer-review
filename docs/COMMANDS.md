@@ -114,7 +114,7 @@ Full prompt: [`.claude/commands/review.md`](../.claude/commands/review.md)
 
 ### `/merge` - Land finished worktree PRs without losing work
 
-When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing one of them can quietly drop work it never saw, or its own work, and a squash merge hides the fix. `/merge 241 242` lands PR #241 and then PR #242, in the order you give, one at a time. For each one it brings the branch up to date with main and fixes the conflicts (the lessons files keep both sides, generated files are rebuilt, the changelog block goes back where new entries go), then lands it only when four checks pass:
+When several worktrees run at once, each branch is blind to what lands on main after it was cut. A conflict fixed while landing one of them can quietly drop work it never saw, or its own work, and a squash merge hides the fix. `/merge 241 242` lands PR #241 and then PR #242, in the order you give, one at a time. For each one it brings the branch up to date with main and fixes the conflicts (the lessons files keep both sides, generated files are rebuilt, the changelog block goes back where new entries go, under main's Unreleased heading rather than as a second one), then lands it only when four checks pass:
 
 - your tests (your `checks.json`, or `npm test` or `pytest`);
 - **nothing other work added after the cut is removed** (rule 1);

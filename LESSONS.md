@@ -539,3 +539,8 @@
 - **Count a prompt rule's word cap before drafting an edit to it for the owner's approval.**
 - **Aim a seeded finding's proof at its claim, never at the absence of a word a guessed fix would add.**
 - **Before a pattern fix, get the shapes a fresh check will try and test all of them first.**
+
+## Issue 298 (changelog placement)
+
+- **Before saying a check will not flag a change, read which commits the check compares.**
+- **The test gate shows a suite's lines only when it fails; guard an old case by its absence from the failure list.**

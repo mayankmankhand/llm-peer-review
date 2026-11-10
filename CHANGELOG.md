@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+<!-- At release: re-record the prompt-load baseline (commands/merge.md grew 166 words with the approved edits). -->
+
+**Landing a branch right after a release no longer leaves two Unreleased headings in the changelog (#298).** `/tk:merge` now places a branch's release-notes block with a script that writes the change itself, so the block joins or fills main's Unreleased heading instead of stacking a second one above it.
+
+### Fixed
+
+- **`/tk:merge`.** A changelog block that opens with an Unreleased heading joins main's Unreleased heading when the two read the same (case and square brackets aside), with its entries on top, and fills main's empty heading when they read differently. Headings with different titles still stack, as before. The script keeps the file's line endings, and each landing's line says where the block went.
+- **The landing check** no longer reports the heading a join drops, or main's empty heading a fill replaces, as lost work. Any other lost heading, and every entry under one, is still reported.
+
+### Why
+
+The v8.0.18 landing put its block above main's empty Unreleased heading and had to be fixed by hand, and with several branches landing one after another, each later landing would have stacked one more. A replay of that landing now gives the hand-fixed file byte for byte.
+
 ## v8.0.18 - Fresh Eyes, Fewer Breaks (2026-11-09)
 
 **A fix can no longer pass on a recheck its own session rewrote or filled in, review pages hide more secrets, and 24 things that could break another project are fixed.** A research report from 2 November was checked against the toolkit with five measured tests, and three of them changed how a review judges findings and checks its fixes. A sort of 36 suspected breaks kept 24, and all 24 are fixed here: 19 were seen happening in a throwaway project unlike this one, and 5 were read from the prompt or script.
