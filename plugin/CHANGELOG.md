@@ -1,5 +1,44 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.17, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.18, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.18 - Fresh Eyes, Fewer Breaks (2026-11-09)
+
+**A fix can no longer pass on a recheck its own session rewrote or filled in, review pages hide more secrets, and 24 things that could break another project are fixed.** A research report from 2 November was checked against the toolkit with five measured tests, and three of them changed how a review judges findings and checks its fixes. A sort of 36 suspected breaks kept 24, and all 24 are fixed here: 19 were seen happening in a throwaway project unlike this one, and 5 were read from the prompt or script.
+
+### Fixed
+
+- **Reviews.** `/tk:review-full` no longer erases open findings it never looked at: it names the rows it ran, so the review page carries every other open finding forward, and a finding with no file closes when its row runs again and does not raise it. On the review page, a reviewer that failed or could not check anything no longer marks its open findings resolved. The plan you chose reaches the plan reviewer. The code and security reviewers' file searches match real files, and a directly typed code or security review has a range to search. A small `/tk:review` that skips the reviewer fan-out still loads the rules it depends on and saves its proofs under the names the scripts look for. Reviewers now aim each proof at what a right fix changes, not at a word the fix keeps, and a finding whose right fix keeps the matched words goes to a fresh check of the fix instead of rerunning its own proof. A finding found while fixes are checked takes the next free number, so the numbers already in the review no longer shift.
+- **`/tk:document`.** It no longer removes the side copy of the project before it finishes, and no longer pushes a side copy's branch that was meant to stay on your machine. The PR it opens names your default branch instead of assuming `main`. A failed read of your corrections no longer marks those messages as read, and a brand-new repository gets its doc checks.
+- **`/tk:execute`.** An older plan with no check lines that reaches 100% now says why it stops before review and what to type, instead of failing a check it never explains.
+- **`/tk:merge`.** The PR text survives after the side copy is gone. On a project that lands through GitHub or GitLab, it reads the host's fresh copy of main. A remote that names neither GitHub nor GitLab, with both command-line tools installed, no longer stops with no way through: your answer passes to the script. When a landed branch still has open findings, its landing line points at the review page on your machine and gives the hosted link only as where it was last published.
+- **`/tk:ask-gpt` and `/tk:ask-gemini`.** Asking about a whole branch compares it with your default branch instead of assuming `main`.
+- **Pages.** Updating a page published in an earlier session can be refused until this session has viewed it. That refusal no longer counts as a failed publish: the session follows its message, then publishes the page it rendered.
+- **Browser checks.** Auto-start tests an `http://localhost` or `http://127.0.0.1` address your session names before the common ports. When that address does not answer, or the session names another kind of address, it tests the first common port that does, whatever app that is, so the browser reviewer and the design loop now check the page's address and title against your project. A session whose output is too long to show whole still shows the reason a step failed and the page's address and title, because they now come first, and its console and network errors come before the step results.
+- **Design.** Undoing a design round that lost its comparison no longer stops to ask, once `/tk:setup` has added its permission row (see Upgrading).
+- **`/tk:audit-html`** finds scripts that merely contain the word it searches for, async and `.mjs` generators, and file names with spaces or accents.
+- **The correction log** reads each correction's stage from the session instead of guessing it from one exchange, so new corrections no longer invent `execute` runs in the count that picks where a fix belongs. Corrections already in the log keep their old guess.
+- **The manual.** Its copies of Rule 1 (the loop runs by itself) and Rule 4 (show your work) match the always-on rules file again.
+
+### Changed
+
+- **Review pages hide more secrets.** The proof under each finding is masked with all 15 of the push guard's secret patterns (it had only 8). The command a check ran is masked as well as its output, every line of a private key goes (a key on one line and a PGP block too), and so does a value given with `=` or `:` to a name that holds a secret-sounding word (pass, password, pwd, secret, token, `_key` or `-key` anywhere in the name, credentials, cookie), quoted or not. Still shown: a name with no secret-sounding word, values under 8 characters (quote marks count), and, without quotes, a value after a name that is just `PWD` or `OLDPWD` or one that reads as code (a dot and no digit, a leading `$` or `<`, or a bracket). A finding carried over from a page made before this update keeps its old masking on its output.
+- **A recheck the fix's own session rewrote or filled in can no longer pass the fix by itself.** The review keeps each recheck it writes. A recheck that was rewritten proves nothing, so the kept one runs again, and if that fails, one fresh check of the fix decides. A recheck whose expected result the fixing session filled in is held to its first run, and a pass on it goes to a fresh check too. That extra look spends no fix round and happens once per round.
+- **A true finding survives the double-check when another bug hides it.** The double-check of Warns and Suggests no longer refutes a real finding only because a different defect stops its code from running today: it stands, with a note naming the hiding bug, and the note goes in the review summary. The three-vote double-check on Blocks is unchanged.
+- **The true part of a refuted finding becomes a finding.** When a double-checker refutes a finding but notes a part that is true, that part is now checked and fixed like any finding, once, instead of waiting in the summary. Direct reviews and the debates follow the same steps.
+
+### Upgrading
+
+- Everything but one permission row arrives with the plugin update.
+- Rerun `/tk:setup` to add that row, `Bash(git revert *)`, so undoing a lost design round does not stop to ask; `/tk:upgrade` lists it as missing until you do (C-9, the check that your permission rows match the shipped starter settings).
+- A copy-install for other editors gets the command, skill and script changes when you re-run `setup.sh` or `setup.ps1`, but not the new permission row.
+
+### Why
+
+The 2 November report proposed ideas for the loop, and measured tests decided what was built. Replaying 14 saved review runs found 2 FIXED verdicts on problems that were still there, each resting on a recheck the fixing session rewrote or filled in. The double-check refuted true findings that another bug hid in 3 of 5 runs, and in none of 5 with the new sentence, while a planted false finding was still refuted every time with it, 16 of 16. Of 20 notes the double-check had left about true parts, 5 stood on a fresh proof, and the owner would fix all 5. A recovery notice for sessions that Claude Code compresses failed its test and was not built; the fallback is #293. The review of this work raised 44 findings and fixed the 16 that survived its double-check.
+
+### Released under the catch-rate override (maintainer only)
+
+- Claude Code moved from 2.1.312 to 2.1.319 between v8.0.16's Pocket runs and this release's, so the release check called the comparison confounded. Scored with that change allowed, the verdict is PASS: no reliable catch was missed twice. Two were missed once each. In run 1 the review raised the stored-script bug as a Block, but in words the answer key's patterns do not match ("raw page markup", "stored scripts"). In run 2 the README order finding's proof used a pattern anchor that JavaScript does not read, so the double-check removed it. The browser bug, which comes and goes, was caught in 1 of 2 runs (2 of 3 before).
 
 ## v8.0.17 - Landings That Finish, Notes That Catch Up (2026-11-04)
 
