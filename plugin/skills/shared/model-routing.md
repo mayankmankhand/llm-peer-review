@@ -19,8 +19,8 @@ The pin lives in agent frontmatter under `${CLAUDE_PLUGIN_ROOT}/agents/`, never 
 |---|---|---|---|---|
 | `review-code-finder`, `review-ux-finder`, `review-copy-finder`, `review-security-finder`, `review-plan-finder`, `review-commands-finder` | opus | medium | Read, Grep, Glob | `/tk:review` Phase 2 dispatch; the direct-run fan-out of the matching `/review-<kind>` skill; `/tk:review-full` fans out to the code, plan, ux, and security finders |
 | `review-browser-finder`, `review-deps-finder` | opus | medium | Read, Grep, Glob, Bash | The same, with Bash because Browser QA drives `browse.js` and Dependency Security runs `npm audit`, `npm outdated`, `gh api` |
-| `audit-skeptic` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M2 tier 2 shards and tier 3 voters, every runner |
-| `fix-verifier` | inherit | high | Read, Grep, Glob, Bash (read-only use) | M3 judgment re-verification, every runner |
+| `audit-skeptic` | inherit | high | Read, Grep, Glob | M2 tier 2 shards and tier 3 voters, every runner |
+| `fix-verifier` | inherit | high | Read, Grep, Glob | M3 judgment re-verification, every runner |
 | `plan-critic` | inherit | high | Read | `/tk:create-plan` critic loop before the approval stop |
 | `design-critic` | inherit | high | Read | `/tk:execute` design steps (M15) |
 | `design-comparer` | inherit | high | Read | `/tk:execute` design steps: the side-by-side judge whose verdict keeps or reverts each round (M15) |

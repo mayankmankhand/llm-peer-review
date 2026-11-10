@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+<!-- At release: the prompt-load baseline also grew for agents/audit-skeptic.md (+52 words), agents/fix-verifier.md (+35) and commands/create-plan.md (+3). If this ships under a number other than 8.0.19, change it in the docs/TROUBLESHOOTING.md entry on a toolkit command that stops to ask. -->
+
+**Planning and reviews no longer stop to ask for your approval at the toolkit's own checks (#296, #297).** In default permission mode, `/tk:create-plan` asked once per plan at its check that the plan's files exist, and a review asked again each time the separate check of a fix ran your project's tests. Both now finish without asking, with no new permission rows.
+
+### Fixed
+
+- **`/tk:create-plan`.** The check that the files a plan names exist now runs inside the planner's existing check of its check lines, a command your project's permissions already allow, instead of a shell loop Claude Code could not check before it ran. One difference from the old loop: a path that points outside your project now shows as missing, even when the file exists there.
+- **Reviews.** The separate check of a fix, and the double-check that tries to knock down findings, no longer have shell access, so neither can start a test run partway through a review. Both judge from the proof output already in front of them, and can still open and search your files.
+
+### Why
+
+In the v8.0.18 practice run, a project set up with `/tk:setup` stopped once at the planner's path check and ten times during one review, where two fix checks ran the project's tests five times each. Every stop was on a toolkit step, not on anything the project asked for. Permission rows for test commands would have let every install run project code without asking, so the steps changed instead.
+
 <!-- At release: re-record the prompt-load baseline (commands/review.md grew 12 words and skills/loop-rules/SKILL.md 86 with the approved edits). -->
 
 **A review no longer undoes a correct fix just because the fix kept the words its check searched for, and you can allow one more try at a fix (#288, #294, #295).** Three gaps in how `/tk:review` fixes findings and checks its own fixes are closed.
