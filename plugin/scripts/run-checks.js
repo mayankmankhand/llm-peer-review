@@ -115,7 +115,15 @@
 //             with a key other than min and max, which a run would ignore), a
 //             command the guard would refuse (judged the same way a run
 //             judges it, without running it), a target whose before and after
-//             expects are the same (in any key order).
+//             expects are the same (in any key order). It also prints
+//             missingPaths (issue #296): each file path the plan names that is
+//             not a file in the project, with the line of its first mention.
+//             A path is a token of letters, digits, _ @ . - with at least one
+//             / and a file extension, the pattern /create-plan's shell loop
+//             used, so a root-level file such as package.json is not one; a
+//             path that resolves outside the project counts as missing. The
+//             list is advisory, never a problem: a step may name a file it is
+//             about to create.
 //   --phase   runs one step's checks with that phase's expects. It refuses
 //             (nothing runs) while that step, or the plan outside its steps,
 //             has a lint problem, re-runs a failure once (the --rerun-failures
@@ -1377,7 +1385,8 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  stdout            one JSON object: { checks: [{ id, verdict, exit, stdoutFile, detail, ms, slow, flaky }], summary, flags }\n'
   + '  exit code         0 when the checks file validated (verdicts are the result); 1 for a malformed file or a refused --out\n'
   + 'plan mode: node run-checks.js --plan <plan.md> (--lint | --tally | --step <N> --phase before|after [--timeout <ms>])\n'
-  + '  --lint            every check line in the plan that would not run, as problems\n'
+  + '  --lint            every check line in the plan that would not run, as problems; and missingPaths,\n'
+  + '                    each file path the plan names that is not in the project, with its line (advisory)\n'
   + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/\n'
   + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n'
   + 'history: node run-checks.js --history [--since <time>]\n'
@@ -2172,7 +2181,31 @@ function lintPlan(opts, cwd) {
     return { step: st.step, name: st.name, targets: st.targets.map((t) => t.id), guards: st.guards.map((g) => g.id), noTarget: st.noTarget };
   });
   problems.sort((x, y) => (x.line === null ? Infinity : x.line) - (y.line === null ? Infinity : y.line));
-  return { plan: plan.rel, steps: list, problems, summary: { steps: parsed.steps.length, problems: problems.length } };
+  return { plan: plan.rel, steps: list, problems, summary: { steps: parsed.steps.length, problems: problems.length },
+    missingPaths: missingPlanPaths(plan.text, plan.root) };
+}
+
+// The file paths a plan names that are not files in the project (issue #296),
+// as [{ path, line }] in line order, each path once at its first mention. The
+// pattern is the one /create-plan's shell loop used (a token with at least one
+// slash and a file extension), so the list matches what that loop printed; the
+// loop ran `test -e` from the project root, which a script can answer without
+// a command Claude Code would stop to approve. A path that resolves outside the
+// project counts as missing even when the file exists there: a plan's files
+// live in the project.
+const PLAN_PATH_RE = /[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)+\.[A-Za-z0-9]+/g;
+function missingPlanPaths(text, root) {
+  const seen = new Set();
+  const missing = [];
+  text.split(/\r?\n/).forEach((line, i) => {
+    for (const m of line.match(PLAN_PATH_RE) || []) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      const abs = path.resolve(root, m);
+      if (!isUnder(abs, root) || !fs.existsSync(abs)) missing.push({ path: m, line: i + 1 });
+    }
+  });
+  return missing;
 }
 
 function runPlanPhase(opts, cwd) {
