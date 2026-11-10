@@ -962,8 +962,10 @@ function analyzeRun(run, answers) {
   // folder-name check missed every call. The name counts only whole: no
   // letter, digit, `.`, `_` or `-` directly before it, and none after it but
   // an optional `.git`, so `someone/llm-peer-review.git` counts and
-  // `llm-peer-review-fork` does not (a plain \b would split on the `-`).
-  const THIS_REPO_RE = /(?<![A-Za-z0-9._-])llm-peer-review(?:\.git)?(?![A-Za-z0-9._-])/;
+  // `llm-peer-review-fork` does not (a plain \b would split on the `-`). Any
+  // letter case counts, since GitHub reads a repository name in any case
+  // (#292 review, R1).
+  const THIS_REPO_RE = /(?<![A-Za-z0-9._-])llm-peer-review(?:\.git)?(?![A-Za-z0-9._-])/i;
   const namesThisRepo = cmd => THIS_REPO_RE.test(cmd) || /answers\.json/.test(cmd);
   const buildDir = meta.paths && meta.paths.buildDir;
   const home = meta.paths && meta.paths.home;

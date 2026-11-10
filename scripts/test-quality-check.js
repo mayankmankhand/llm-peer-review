@@ -601,16 +601,20 @@ section('the pocket fixture (#278)', () => {
   check('pocket: a finding that an edit silently drops the id is not the capped-list catch', !!kb && !QC.bugMatches(kb, lostId), lostId.text);
   check('pocket: a finding that the month view silently drops older expenses is the capped-list catch', !!kb && QC.bugMatches(kb, capped), capped.text);
 
-  // #299: the stored-script key against plain wordings it was never tuned on.
-  // wordings.jsonl was written by a fresh helper that saw only the bug's
-  // description and the finding rules, never this key's patterns or the run 1
-  // sentence below: 20 ways to say the bug, and 10 of Pocket's nearby problems
-  // (export formulas, the import and close overwrite, the month picker that
-  // needs scripts, raw export amounts) that must not count as it. Each is fed
-  // as a finding on server.js, the file the key ties the bug to. A failing case
-  // prints counts only, never a wording, so a run before the key change shows
-  // nothing to tune the key on. The bar (16 of 20, 0 of 10) was set before any
-  // result.
+  // #299: the stored-script key against plain wordings a fresh helper wrote.
+  // wordings.jsonl was written by a helper that saw only the bug's description
+  // and the finding rules, never this key's patterns or the run 1 sentence
+  // below: 20 ways to say the bug, and 10 of Pocket's nearby problems (export
+  // formulas, the import and close overwrite, the month picker that needs
+  // scripts, raw export amounts) that must not count as it. Each is fed as a
+  // finding on server.js, the file the key ties the bug to. The bar (16 of 20,
+  // 0 of 10) was set before any result.
+  // They began held out and no longer are: the key's first score on the 20,
+  // before any was read, was 15; the five misses were then read and the key
+  // widened once to fit them (20 of 20). So this case guards against losing
+  // what the key reaches; it no longer measures how far the key reaches, and
+  // 15 of 20 is the measure (#299 review, R3). A new measure needs a new set
+  // the key has never seen. A failing case still prints counts only.
   const xss = bugs.find(b => b.id === 'security-stored-xss');
   let wordings = [];
   try {
@@ -622,9 +626,12 @@ section('the pocket fixture (#278)', () => {
   const onFile = !!xss && xss.files.includes('server.js');
   const heldCaught = xss ? held.filter(f => QC.bugMatches(xss, f)).length : 0;
   const nearbyCaught = xss ? nearby.filter(f => QC.bugMatches(xss, f)).length : 0;
-  check('299: the stored-script key catches at least 16 of 20 held-out plain wordings',
+  check('299: the stored-script key catches at least 16 of 20 helper-written plain wordings',
     onFile && held.length === 20 && heldCaught >= 16,
     JSON.stringify({ onServerJs: onFile, wordings: held.length, caught: heldCaught }));
+  // Before #299 the old key counted 1 of these 10, a spreadsheet-export
+  // wording, through its "raw ... note" pattern, so this case failed before
+  // the key change; that pattern now also needs a page word (#299 review, R12).
   check('299: the stored-script key counts none of the 10 nearby wordings',
     onFile && nearby.length === 10 && nearbyCaught === 0,
     JSON.stringify({ onServerJs: onFile, wordings: nearby.length, caught: nearbyCaught }));
@@ -642,6 +649,31 @@ section('the pocket fixture (#278)', () => {
     key: 'server.js:expense-notes-and-categories-now-print-as',
   };
   check('299: the v8.0.18 run 1 wording of the stored-script bug is a catch', !!xss && QC.bugMatches(xss, QC.rawToMatchable(run1)), run1.what);
+
+  // #299 review (R4): a finding about the planted month-menu bug (its script
+  // runs before the menu exists) must not also count as the stored-script bug.
+  // The new "script runs on the page" patterns credited three of these, and
+  // an older "script executes" pattern a fourth.
+  const monthMenu = [
+    "Should fix. The month menu's script runs before the menu exists, so picking a month does nothing on the page.",
+    'Blocks. The month switcher code runs in the page head before the list renders, so choosing a month never reloads.',
+    'Should fix. The script that handles the month list fires before the element is on the page, so the page never changes month.',
+    'Should fix. The month chooser script executes before the page body loads, so switching months silently does nothing.',
+  ];
+  const menuAsXss = xss ? monthMenu.filter(text => QC.bugMatches(xss, { file: 'server.js', line: null, text })) : monthMenu;
+  check('299: a month-menu finding is not counted as the stored-script bug', menuAsXss.length === 0, menuAsXss.join(' | '));
+
+  // #299 review (R14): the exclusions that keep Pocket's nearby problems out
+  // must not drop a true stored-script finding that merely mentions
+  // overwriting, importing or selecting something.
+  const plainCatches = [
+    'Blocks. A planted script in a note runs in the browser when the list page loads and can overwrite expenses.',
+    'Should fix. Notes from an imported file print as raw page markup, so a stored script runs in the list.',
+    'Blocks. A note holding a script tag runs whenever the user selects that month in the list.',
+    'Should fix. A stored note can run code in the report page and quietly overwrite the totals people see.',
+  ];
+  const missedCatches = xss ? plainCatches.filter(text => !QC.bugMatches(xss, { file: 'server.js', line: null, text })) : plainCatches;
+  check('299: a stored-script finding that mentions overwriting, importing or selecting is still a catch', missedCatches.length === 0, missedCatches.join(' | '));
 });
 
 // #278: fixtures are folders under scripts/fixtures/quality-check/, chosen by
@@ -2003,6 +2035,13 @@ async function asyncSection(name, fn) {
       bash('t_o2', 'gh gist view abc123'),
       bash('t_o3', 'gh repo clone someone/llm-peer-review-fork'),
     ] }));
+    // #292 review (R1): GitHub reads a repository name in any letter case, so
+    // the name must match whatever the case.
+    const mixedCase = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [bash('t_m1', 'gh repo clone someone/LLM-Peer-Review')] }));
+    check('292: a mixed-case name of this repository is flagged',
+      mixedCase.valid && mixedCase.warnings.includes('network-name:1'),
+      JSON.stringify({ warnings: mixedCase.warnings, network: mixedCase.network, reasons: mixedCase.reasons }));
+
     check('292: a GitHub CLI call about another repository is not flagged, contents path or not',
       otherRepo.valid && !otherRepo.warnings.some(w => /^network-name/.test(w)),
       JSON.stringify({ warnings: otherRepo.warnings, network: otherRepo.network, reasons: otherRepo.reasons }));
