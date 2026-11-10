@@ -926,10 +926,10 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   fs.mkdirSync(rwReceipts);
   fs.writeFileSync(path.join(rwReceipts, 'code-1.txt'), '1:// TODO: tidy\nexit 0\n');
   // One fresh mode call, and a helper that runs the recheck file and records it.
-  const rwStart = (name, mode) => {
+  const rwStart = (name, mode, file, receipts) => {
     const dir = path.join(sandbox, name);
     fs.mkdirSync(dir);
-    const started = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', dir, '--root', repo, mode || '--mechanical', 'R1']);
+    const started = run(['--verify', file || rwFile, '--receipts', receipts || rwReceipts, '--scope', scope, '--out', dir, '--root', repo, mode || '--mechanical', 'R1']);
     const results = path.join(dir, 'rc');
     const go = () => {
       spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-1.json'), '--out', results], { cwd: repo, encoding: 'utf8' });
@@ -972,6 +972,26 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('fixer-rewrite: a kept row that fails after a rewrite prints the judgment retry, for that finding only',
     (stillFails.unverified || []).join() === 'R1' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
     JSON.stringify(stillFails).slice(0, 400));
+  // Every rewrite case above uses a file search, which the kept-text path (#288)
+  // now sends to a verifier before the older branch can run. A receipt that reads
+  // the file whole is no search, so nothing catches its kept text: when its row
+  // was rewritten and the kept row then fails, the round's check_changed record
+  // is what still has to print the judgment retry.
+  const rdFile = jsonl([f('code', 'src/c.js', 1, 'src/c.js:todo-read', 'Should fix. A TODO ships.', { check: 'cat src/c.js', expect: { match: 'TODO' } })]);
+  const rdReceipts = path.join(sandbox, 'receipts-rd');
+  fs.mkdirSync(rdReceipts);
+  fs.writeFileSync(path.join(rdReceipts, 'code-1.txt'), c0 + 'exit 0\n');
+  const rd = rwStart('verify-rd', null, rdFile, rdReceipts);
+  rd.set({ expect: { noMatch: 'FIXME' } });
+  rd.go();
+  const rdEdited = lastVerdict(rd.ledger());
+  const rdFails = parse(rd.go()) || {};
+  const rdLast = lastVerdict(rd.ledger());
+  const rdRetry = (rdFails.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('fixer-rewrite: a kept row that is no file search and fails after a rewrite records NOT FIXED and prints the judgment retry',
+    /^check_changed/.test(rdEdited.reason || '') && (rdFails.recorded || {}).R1 === 'NOT FIXED' && rdLast.verdict === 'NOT FIXED' && rdLast.judge === true && !rdLast.reason
+      && rdRetry && rdRetry.do === 'run' && /--judgment R1\b/.test(rdRetry.command) && !/--mechanical/.test(rdRetry.command) && rdRetry.command.includes(rd.dir),
+    JSON.stringify({ rdEdited, rdLast, rdFails }).slice(0, 500));
   // A filled-in expect: the mode writes a placeholder because it cannot invert the
   // proof, so the runner writes the expect. That is its job and no rewrite, but an
   // expect the saved output from before the fix already meets proves nothing.
