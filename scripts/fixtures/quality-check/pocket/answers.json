@@ -96,6 +96,7 @@
           "note|category|cell|html|markup|page|row|report|list"
         ],
         [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
           "(script|html|markup) (inject|execut)"
         ],
         [
@@ -105,7 +106,48 @@
           "inject\\w*.{0,40}(html|script|markup|page)"
         ],
         [
-          "(raw|unsanitiz|unsanitis|not sanitiz)\\w*.{0,40}(html|note|category|input)"
+          "(raw|unsanitiz|unsanitis|not sanitiz)\\w*.{0,40}(html|note|category|input)",
+          "page|list|report|browser|html|markup|script"
+        ],
+        [
+          "(raw|unescaped|unsanitized|unsanitised|unfiltered)\\W+(\\w+\\W+){0,2}(markup|page code|html code)"
+        ],
+        [
+          "stored[- ](scripts?|xss|javascript|markup)\\b|scripted (notes?|categor\\w*|expenses?)"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "(script|markup|html|javascript|code)s?\\W+(\\w+\\W+){0,3}(runs?|ran|execut\\w*|fires?|fired)\\b",
+          "\\b(pages?|browser|list|report|tab|screen)\\b"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "(render\\w*|interpret\\w*|treat\\w*|print\\w*|shown?|display\\w*|output\\w*|insert\\w*|written|writes?|puts?)\\W+(\\w+\\W+){0,3}(as|into) (raw |live |real |page |executable |active )*(html|markup|page code|code|scripts?)\\b"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "(no longer|not|never|isn.t|aren.t|stops?|stopped|without|skips?|skipped|drops?|dropped|lost|loses|removes?|removed|bypass\\w*)\\W+(\\w+\\W+){0,2}(escap|sanitiz|sanitis|encod|clean|neutrali)\\w*",
+          "note|categor|page|markup|html|list|report|cell|row"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "(steal|hijack|take over|takes over|exfiltrat|siphon|impersonat)\\w*",
+          "(script|markup|html|javascript|code|note|categor)"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "\\b(runs?|ran|execut\\w*|fires?)\\W+(\\w+\\W+){0,3}(scripts?|code|javascript|markup)\\b",
+          "\\b(pages?|browser|list|report|tab|screen)\\b"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "\\b(stored|planted|malicious|crafted|booby[- ]trapped|hostile|poisoned|rigged|weaponi[sz]ed)\\W+(\\w+\\W+){0,1}(notes?|categor\\w*|expenses?|entr(y|ies))\\b",
+          "\\b(redraw\\w*|defac\\w*|fake|spoof\\w*|runs?|fires?|execut\\w*|leak\\w*|steal\\w*|hijack\\w*|takes? over)\\b"
+        ],
+        [
+          "^(?![\\s\\S]*\\b(spreadsheet|formula|csv|excel|export(ed|s)? (file|csv|cells?|columns?|amounts?|rows?)|(the|an?) export\\b|exports? (copies|writes|leaves|keeps|puts)|picker|dropdown|month (menu|switcher|chooser|selector|picker|dropdown)|(picking|choosing|switching|changing) (a |the )?months?|select (box|element|menu)|before the (\\w+ )?(menu|select|element|dom|body|list|page)( \\w+)? (exists|loads|renders|is (ready|there))|overwrit\\w* (what|the (data|file|changes|rows))|(server|in-memory|cached|running) (\\w+ )?(list|copy|server) overwrit\\w*|close[- ]month|archiv\\w*|import (command|script)|without (java)?scripts?|scripts? (are |is )?(off|disabled|turned off|blocked))\\b)",
+          "\\bscript tags?\\b|<script",
+          "\\b(notes?|categor\\w*|expenses?|stored|saved|form)\\b"
         ]
       ]
     },
