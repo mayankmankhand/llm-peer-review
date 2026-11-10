@@ -1530,6 +1530,24 @@ section('272. --chain <stage>: the countable part of M14', function () {
   write(repo, 'reports/receipts/y/ledger.json', JSON.stringify(ledgerOf(2, 'NOT FIXED', t(2))));
   const revert = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/y/ledger.json'], repo);
   check('--chain review fails on a round-2 NOT FIXED in the ledger', revert.json.pass === false && has(revert, 'ledger', /R1.*round 2/), JSON.stringify(revert.json.failed));
+  // #294: the owner's one extra try is round 3 in the ledger. A FIXED round 3
+  // passes like any settled finding, and a NOT FIXED one is an undo still open.
+  write(repo, 'reports/review-round3.md', report('- R1: FIXED (round 3, the owner\'s choice) - the secret is hidden on the page now\n'));
+  write(repo, 'reports/receipts/r3/ledger.json', JSON.stringify(ledgerOf(3, 'FIXED', t(2))));
+  const round3 = runScript(['--chain', 'review', '--report', 'reports/review-round3.md', '--ledger', 'reports/receipts/r3/ledger.json'], repo);
+  write(repo, 'reports/receipts/r3n/ledger.json', JSON.stringify(ledgerOf(3, 'NOT FIXED', t(2))));
+  const round3Red = runScript(['--chain', 'review', '--report', 'reports/review-round3.md', '--ledger', 'reports/receipts/r3n/ledger.json'], repo);
+  check('294: a round 3 FIXED passes the review hand-off and a round 3 NOT FIXED blocks it',
+    round3.json.pass === true && round3Red.json.pass === false && has(round3Red, 'ledger', /R1 NOT FIXED at round 3; the M5 revert/), JSON.stringify([round3.json.failed, round3Red.json.failed]));
+  // #288: a finding left to a fresh verifier has no decided verdict yet, so it
+  // blocks the hand-off until that verifier's reply is recorded.
+  const undecided = ledgerOf(1, 'NOT VERIFIED', t(2));
+  undecided.findings.R1.verdicts[0].reason = 'text_kept: code-1-recheck-r1 still finds the text the search matched before the fix, so a fresh verifier decides';
+  undecided.findings.R1.verdicts[0].judge = true;
+  write(repo, 'reports/receipts/u/ledger.json', JSON.stringify(undecided));
+  const waiting = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/u/ledger.json'], repo);
+  check('288: a finding left to a fresh verifier blocks the review hand-off until its verdict lands',
+    waiting.json.pass === false && has(waiting, 'ledger', /R1 is NOT VERIFIED in round 1/), JSON.stringify(waiting.json.failed));
   write(repo, 'reports/receipts/z/ledger.json', JSON.stringify(ledgerOf(1, 'FIXED', t(0))));
   const late = runScript(['--chain', 'review', '--report', 'reports/review-settled.md', '--ledger', 'reports/receipts/z/ledger.json'], repo);
   check('--chain review fails on fixes after the last checkpoint', late.json.pass === false && has(late, 'checkpoint', /checkpoint/), JSON.stringify(late.json.failed));

@@ -18,11 +18,13 @@
 //   node merge-findings.js --verdicts --tier <2|3|verify> --ids R1,R2 <return file>...
 //                                     checks what the judges sent back (below)
 //   node merge-findings.js --verify <file or folder> --receipts <dir> --scope <scope.json> --out <dir>
-//                          [--mechanical R1,R5] [--judgment R2,R3] [--browser R7] [--end <sha>] [--root <dir>]
+//                          [--mechanical R1,R5] [--judgment R2,R3] [--browser R7] [--owner-try R6] [--end <sha>] [--root <dir>]
 //                                     writes the fix loop's recheck rows, verifier
 //                                     shards and ledger (issue #267; below); at
 //                                     least one ID flag, and `next` in its output
-//                                     says what consumes each file (issue #272)
+//                                     says what consumes each file (issue #272);
+//                                     --owner-try opens the one extra round the
+//                                     owner approved after two failed (issue #294)
 //   node merge-findings.js --verdicts <verify shard> <return file> --ledger <ledger.json>
 //   node merge-findings.js --verdicts --ledger <ledger.json> --recheck <results.json>
 //                                     records a verifier's return, or the checks
@@ -872,7 +874,9 @@ function shardsMain(argv, fail) {
 
 const PLACEHOLDER_EXPECT = 'write the expect the fix must now satisfy';
 // Max 2 fix rounds per finding (M5). A third call for an ID is refused before
-// anything is written, naming the last green checkpoint to revert to.
+// anything is written, naming the last green checkpoint to revert to. The one
+// way past it is the owner's: --owner-try opens a single round 3 for a finding
+// whose two rounds read NOT FIXED, and marks it in the ledger (issue #294).
 const MAX_ROUNDS = 2;
 
 // The recheck expect, by M3's own inversion: a match becomes noMatch, a noMatch
@@ -1231,6 +1235,11 @@ function buildVerify(parsed, scope, opts) {
   }
   const named = Object.keys(pathOf).sort(byNumber);
   if (!named.length) throw badInput('usage', null, 'name at least one ID under --mechanical, --judgment or --browser');
+  // The owner's extra try (issue #294) says how many rounds a finding may have,
+  // never how its fix is verified, so each ID it names takes a path flag too.
+  const ownerTry = Array.from(new Set(opts.ownerTry || [])).sort(byNumber);
+  const pathless = ownerTry.filter((id) => !pathOf[id]);
+  if (pathless.length) throw badInput('usage', null, '--owner-try names ' + pathless.join(', ') + ', which no path flag names in this call: name ' + (pathless.length === 1 ? 'it' : 'them') + ' under --mechanical, --judgment or --browser too');
   // A receipt that reads lines by number gives no recheck that follows its
   // text (issue #283): the mechanical path refuses the finding before anything
   // is written, and the error carries its IDs, which verifyMain turns into the
@@ -1273,9 +1282,31 @@ function buildVerify(parsed, scope, opts) {
   // verifier on that same fix. It spends no fix round, so M5's two stand in either
   // round, and it runs once (judgeOpen).
   const judgingAgain = new Set(lists.judgment.filter((id) => ledger.findings[id] && judgeOpen(ledger.findings[id])));
-  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgingAgain.has(id));
+  // M5's bound, and the one way past it (issue #294): a finding at the bound whose
+  // latest verdict is NOT FIXED gets one more round when the owner says so, named
+  // under --owner-try. The try is marked on the finding, so it opens once: a marked
+  // finding is refused whenever a call would open a round for it, with the flag or
+  // without. A call that opens no round (the fresh verifier call above) is no try:
+  // there the flag changes nothing on a marked finding, and is refused on an
+  // unmarked one, whose round is not decided yet.
+  const markedTry = (id) => Boolean(ledger.findings[id] && ledger.findings[id].ownerTry);
+  const failedAtBound = (id) => { const f = ledger.findings[id]; return Boolean(f) && f.round === MAX_ROUNDS && !judgingAgain.has(id) && latestVerdict(f) === 'NOT FIXED'; };
+  const early = ownerTry.filter((id) => !markedTry(id) && !failedAtBound(id));
+  if (early.length) {
+    const where = (id) => { const f = ledger.findings[id]; return id + ' is at round ' + (f ? f.round : 0) + ' of ' + MAX_ROUNDS + (f && latestVerdict(f) ? ', ' + latestVerdict(f) : ''); };
+    const e = badInput('owner_try_early', null, early.map(where).join('; ') + ': the owner\'s extra try opens only for a finding whose ' + MAX_ROUNDS + ' rounds both read NOT FIXED, so leave --owner-try out of this call; nothing was written');
+    e.ids = early;
+    throw e;
+  }
+  const opening = new Set(ownerTry.filter((id) => !markedTry(id)));
+  const exhausted = named.filter((id) => ledger.findings[id] && ledger.findings[id].round >= MAX_ROUNDS && !judgingAgain.has(id) && !opening.has(id));
   if (exhausted.length) {
-    const e = badInput('rounds_exhausted', null, exhausted.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5): revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
+    const said = [];
+    const plain = exhausted.filter((id) => !markedTry(id));
+    const used = exhausted.filter(markedTry);
+    if (plain.length) said.push(plain.join(', ') + ' already had ' + MAX_ROUNDS + ' rounds (M5)');
+    if (used.length) said.push(used.join(', ') + ' already had the owner\'s one extra try after ' + MAX_ROUNDS + ' rounds (M5)');
+    const e = badInput('rounds_exhausted', null, said.join('; ') + ': revert to the last green checkpoint' + (ledger.lastGreen ? ', ' + ledger.lastGreen + ',' : ' (none recorded)') + ' and page; nothing was written');
     e.ids = exhausted;
     e.lastGreen = ledger.lastGreen;
     throw e;
@@ -1397,6 +1428,8 @@ function buildVerify(parsed, scope, opts) {
     f.key = keyOf.get(id);
     f.path = pathOf[id];
     if (judgingAgain.has(id)) f.judged = f.round; else f.round += 1;
+    // The owner's try, marked where it opened: its round and this call's number.
+    if (opening.has(id)) f.ownerTry = { round: f.round, call };
     if (!f.rechecks) f.rechecks = {};
     if (recheckRows[id]) {
       f.rechecks[String(f.round)] = recheckRows[id];
@@ -1407,7 +1440,7 @@ function buildVerify(parsed, scope, opts) {
     }
     rounds[id] = f.round;
   }
-  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), diffFrom, untracked, rounds, renumbered };
+  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), ownerTry: Array.from(opening).sort(byNumber), diffFrom, untracked, rounds, renumbered };
 }
 
 // The script's own path and its sibling the checks runner, as the printed `next`
@@ -1466,7 +1499,10 @@ function verifyNext(built, opts) {
 
 // The same --verify call with the given IDs moved from --mechanical to
 // --judgment, printed as `retry` with a line_addressed refusal so the runner
-// runs it the way it runs the mode's next list (issue #283).
+// runs it the way it runs the mode's next list (issue #283). That refusal wrote
+// nothing, so an --owner-try the call carried is kept: its mark is not in the
+// ledger yet. The record step's retry is built from the saved call, which keeps
+// no --owner-try, because a fresh verifier call opens no round (issue #294).
 function retryCommand(file, opts, ids) {
   const moved = new Set(ids);
   const mechanical = opts.mechanical.filter((id) => !moved.has(id));
@@ -1474,19 +1510,20 @@ function retryCommand(file, opts, ids) {
   if (mechanical.length) words.push('--mechanical', mechanical.join(','));
   words.push('--judgment', opts.judgment.concat(ids).sort(byNumber).join(','));
   if (opts.browser.length) words.push('--browser', opts.browser.join(','));
+  if (opts.ownerTry && opts.ownerTry.length) words.push('--owner-try', opts.ownerTry.join(','));
   if (opts.end !== undefined) words.push('--end', opts.end);
   if (opts.rootGiven) words.push('--root', shellWord(opts.root));
   return words.join(' ');
 }
 
-// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--end <sha>] [--root <dir>]
+// --verify <findings.jsonl or folder> --receipts <dir> --scope <scope.json> --out <dir> [--mechanical <ids>] [--judgment <ids>] [--browser <ids>] [--owner-try <ids>] [--end <sha>] [--root <dir>]
 function verifyMain(argv, fail) {
-  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--end <sha>] [--root <dir>]; at least one ID flag';
+  const usage = 'usage: node merge-findings.js --verify <findings.jsonl, or its folder> --receipts <receipts folder> --scope <scope.json> --out <folder> [--mechanical <R-ids>] [--judgment <R-ids>] [--browser <R-ids>] [--owner-try <R-ids>] [--end <sha>] [--root <dir>]; at least one of the three path flags, and --owner-try only for IDs one of them names';
   const opts = {};
   const positional = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (['--receipts', '--scope', '--out', '--mechanical', '--judgment', '--browser', '--end', '--root'].includes(a)) {
+    if (['--receipts', '--scope', '--out', '--mechanical', '--judgment', '--browser', '--owner-try', '--end', '--root'].includes(a)) {
       const v = argv[i + 1];
       if (v === undefined || v.startsWith('--')) fail('usage', null, usage);
       opts[a.slice(2)] = v;
@@ -1499,6 +1536,8 @@ function verifyMain(argv, fail) {
     opts[k] = opts[k] === undefined ? [] : opts[k].split(',').map((s) => s.trim()).filter(Boolean);
     if (!opts[k].every((id) => /^R\d+$/.test(id))) fail('usage', null, '--' + k + ' takes R-ids, comma separated. ' + usage);
   }
+  opts.ownerTry = opts['owner-try'] === undefined ? [] : opts['owner-try'].split(',').map((s) => s.trim()).filter(Boolean);
+  if (!opts.ownerTry.every((id) => /^R\d+$/.test(id))) fail('usage', null, '--owner-try takes R-ids, comma separated. ' + usage);
   if (opts.end !== undefined && !/^[0-9a-f]{7,40}$/.test(opts.end)) fail('usage', null, '--end takes a commit id. ' + usage);
   opts.rootGiven = opts.root !== undefined;
   opts.root = opts.root || process.cwd();
@@ -1537,6 +1576,7 @@ function verifyMain(argv, fail) {
     needsExpect: built.needsExpect,
     shards: built.files.filter((f) => f.kind === 'shard').map((f) => ({ file: path.join(opts.out, f.name), ids: f.ids })),
     browser: built.browser,
+    ownerTry: built.ownerTry,
     diffFrom: built.diffFrom,
     untracked: built.untracked,
     ledger: { file: built.ledgerFile, rounds: built.rounds },
