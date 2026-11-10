@@ -457,6 +457,24 @@ console.log('\n9. --verdicts checks each return against its IDs and the closed s
   check('masked: a tier-2 return with a masked line keeps every verdict and reports no problem',
     masked.status === 0 && maskedVerdicts.R2 === 'STANDS' && maskedVerdicts.R3 === 'REFUTED' && maskedVerdicts.R4 === 'STANDS' && maskedVerdicts.R5 === 'STANDS' && maskedVerdicts.R6 === 'STANDS'
       && (maskedRead.returns || [{ problems: ['no returns'] }])[0].problems.length === 0, masked.stdout);
+  // Issue #295: the line still decides nothing, and it no longer stays behind in
+  // the saved return. The output lists each one under the finding whose verdict it
+  // follows, the way it lists split notes, so the runner copies them into the digest
+  // from the script's output instead of reading every return.
+  check('295: masked lines are listed under their findings',
+    JSON.stringify(maskedRead.masked) === JSON.stringify({ R2: ['R6, the crash at app.js line 7 stops this handler'], R4: ['a null lookup stops the script'] }) && JSON.stringify(maskedRead.splits) === '{}',
+    JSON.stringify(maskedRead.masked));
+  // M2 asks only a tier 2 skeptic for the line, but a tier 3 voter may write one,
+  // with markdown around the label; each voter's note is kept, in ballot order.
+  const masked3 = run(['--verdicts', '--tier', '3', '--ids', 'R1', ret('R1: STANDS\nthe claim holds\nmasked: R2, the guard above returns early\n'), ret('R1: STANDS\nreal\n- **masked:** the feature flag is off\n'), ret('R1: REFUTED\nnot shown\n')]);
+  const masked3Read = parse(masked3) || {};
+  check('295: a three-voter reply\'s masked line is listed too',
+    masked3.status === 0 && (masked3Read.verdicts || {}).R1 === 'STANDS' && JSON.stringify(masked3Read.masked) === JSON.stringify({ R1: ['R2, the guard above returns early', 'the feature flag is off'] }),
+    masked3.stdout);
+  const maskedFirst = run(['--verdicts', '--tier', 'verify', '--ids', 'R1', ret('masked: nothing stands above this line\nR1: FIXED\nthe line is gone\n')]);
+  const maskedFirstRead = parse(maskedFirst) || {};
+  check('295: a masked line before any verdict is left out',
+    maskedFirst.status === 0 && (maskedFirstRead.verdicts || {}).R1 === 'FIXED' && JSON.stringify(maskedFirstRead.masked) === '{}', maskedFirst.stdout);
 
   // Tier 3: the tally in M2's order, the condition rule, and the two-ballot rule.
   const T3 = ['--verdicts', '--tier', '3', '--ids', 'R1,R2,R3,R4'];

@@ -122,14 +122,17 @@
 // and a colon at the start of a line (markdown marks and indentation aside),
 // followed by one word of that tier's closed set: REFUTED or STANDS; tier 3 adds
 // DOWNGRADE Warn and DOWNGRADE Suggest; the verifier says FIXED or NOT FIXED. A
-// split: line belongs to the verdict above it. A line of prose after an ID and
+// split: line belongs to the verdict above it, and so does a masked: line, the
+// note M2 asks a skeptic for when another defect hides a true finding (issue
+// #295); neither decides anything. A line of prose after an ID and
 // a colon (an evidence list, say) is not a verdict and decides nothing; an
 // all-capitals word there (KEEP, KILL) is a verdict outside the set. stdout is one JSON object,
 // {tier, ids, ok, returns: [{file, problems}]}; a problem is a missing ID, an
 // extra ID, an unknown word (KEEP, KILL) or two lines that disagree for one ID,
 // and any problem makes ok false and the exit code 1, with nothing decided,
 // because M2 redispatches a malformed return rather than reading around it. When
-// ok, it adds verdicts (one per ID, in M2's words), splits, and for tier 3 the
+// ok, it adds verdicts (one per ID, in M2's words), splits and masked (each the
+// notes per ID, in the order the returns were given), and for tier 3 the
 // ballots per ID, the tally (two or more REFUTED kill as "REFUTED 2/3" or "3/3",
 // else two or more STANDS, else the higher DOWNGRADE; with two ballots, kill or
 // downgrade only when both agree; with one, the ID is listed as unaudited) and
@@ -653,6 +656,7 @@ function readReturn(text, ids, tier) {
   const problems = [];
   const decided = {};
   const splits = {};
+  const masked = {};
   const unknownIds = new Set();
   const proseIds = new Set();
   let last = null;
@@ -663,6 +667,16 @@ function readReturn(text, ids, tier) {
     const split = s.match(/^split:\s*(.*)$/i);
     if (split) {
       if (last) (splits[last] = splits[last] || []).push(split[1].trim());
+      waiting = null;
+      continue;
+    }
+    // A masked: line names the defect that hides the finding above it (M2). It
+    // is kept with that finding and decides nothing; one before any verdict has
+    // no finding to belong to. A label written in bold leaves its closing marks
+    // in front of the note, so those go.
+    const mask = s.match(/^masked:\s*(.*)$/i);
+    if (mask) {
+      if (last) (masked[last] = masked[last] || []).push(mask[1].replace(/^(?:\*\*|__|`|\*|_)+\s*/, '').trim());
       waiting = null;
       continue;
     }
@@ -704,7 +718,7 @@ function readReturn(text, ids, tier) {
     problems.push(proseIds.has(id) ? { kind: 'missing', id, note: 'named only in prose lines, never with a verdict word' } : { kind: 'missing', id });
   }
   problems.sort((a, b) => (a.line || Infinity) - (b.line || Infinity));
-  return { problems, decided, splits };
+  return { problems, decided, splits, masked };
 }
 
 // M2 tier 3's tally over the valid ballots, in M2's order. Three ballots: two or
@@ -737,8 +751,13 @@ function checkVerdicts(tier, ids, returns) {
   if (!out.ok) return out;
   const splits = {};
   for (const r of read) for (const [id, list] of Object.entries(r.splits)) splits[id] = (splits[id] || []).concat(list);
+  // The hidden-defect notes, per finding like the split notes: M2 has the runner
+  // copy each into the digest, and this is where it reads them (issue #295).
+  const masked = {};
+  for (const r of read) for (const [id, list] of Object.entries(r.masked)) masked[id] = (masked[id] || []).concat(list);
   out.verdicts = {};
   out.splits = splits;
+  out.masked = masked;
   if (String(tier) !== '3') {
     for (const id of ids) out.verdicts[id] = read[0].decided[id].verdict;
     return out;
