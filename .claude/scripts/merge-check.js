@@ -344,14 +344,25 @@ const UNRELEASED = /^##\s+\[?unreleased\b/i;
 const isSection = (l) => /^##\s/.test(l);
 const headingKey = (l) => l.replace(/[[\]]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-// A changelog's Unreleased heading is a placeholder, never work. A landing
-// keeps one: the placement joins a branch's heading into main's, or fills
-// main's empty one (issue #298). So rules 1 and 2 count such a heading as
-// landed while the landed changelog still has one; the entries under it are
-// still counted line by line. `afterLines` reads the landed file only when
-// needed.
-function headingHeld(f, text, afterLines) {
-  return /^changelog/i.test(path.basename(f)) && UNRELEASED.test(text) && afterLines().some((l) => UNRELEASED.test(l));
+// Two Unreleased headings the changelog placement drops on purpose (issue
+// #298), which the rules count as landed. A join drops the branch's heading
+// because main keeps one with the same wording: rule 2 counts it as landed
+// while the landed changelog has that heading. A fill replaces main's empty
+// heading with the branch's: rule 1 counts it as landed when nothing but blank
+// lines stood under it and the landed changelog still has an Unreleased
+// heading. Any other lost heading, and every entry under one, is still
+// flagged. The file readers are thunks, so a file is read only when needed;
+// `at` is the 0-based index of the line under the heading in main's file.
+const isChangelog = (f) => /^changelog/i.test(path.basename(f));
+function headingJoined(f, text, afterLines) {
+  return isChangelog(f) && UNRELEASED.test(text) &&
+    afterLines().some((l) => UNRELEASED.test(l) && headingKey(l) === headingKey(text));
+}
+function headingFilled(f, text, beforeLines, at, afterLines) {
+  if (!isChangelog(f) || !UNRELEASED.test(text)) return false;
+  const lines = beforeLines();
+  for (let i = at; i < lines.length && !isSection(lines[i]); i++) if (lines[i].trim()) return false;
+  return afterLines().some((l) => UNRELEASED.test(l));
 }
 
 // Rule 1: each line the landing removes from main, blamed where it stood; flag
@@ -362,13 +373,18 @@ function ruleOne(c, excl, kept) {
   const attribute = makeAttributor(c.cut, c.before);
   for (const f of changedFiles(c.before, c.after, excl)) {
     let landed = null;
+    let prior = null;
     const afterLines = () => landed || (landed = fileLines(c.after, f));
+    const beforeLines = () => prior || (prior = fileLines(c.before, f));
     for (const h of hunks(c.before, c.after, f)) {
       if (h.oldCount === 0) continue;
-      for (const row of blame(c.before, f, h.oldStart, h.oldCount)) {
+      const rows = blame(c.before, f, h.oldStart, h.oldCount);
+      for (let j = 0; j < rows.length; j++) {
+        const row = rows[j];
         const text = keyText(row.text);
         if (!text.trim() || !row.sha || isAncestor(row.sha, c.cut)) continue;
-        if (headingHeld(f, text, afterLines)) continue;
+        // Row j is line h.oldStart + j (1-based), so the line under it is index h.oldStart + j.
+        if (headingFilled(f, text, beforeLines, h.oldStart + j, afterLines)) continue;
         if (isKept(kept(), row.sha, f, text)) { suppressed++; continue; }
         const flag = { rule: 1, file: f, line: text.trim(), addedBy: row.sha, addedIn: attribute(row.sha) };
         flag.keep = keepLine(flag);
@@ -437,7 +453,7 @@ function ruleTwo(c, excl, kept, notes) {
     }
     for (const [t, e] of added) {
       const missing = Math.min(e.count, (expected.get(t) || 0) - (after.get(t) || 0));
-      if (missing <= 0 || headingHeld(f, t, () => landed)) continue;
+      if (missing <= 0 || headingJoined(f, t, () => landed)) continue;
       const by = (blame(c.tip, f, e.firstLine, 1)[0] || {}).sha || c.tip;
       if (isKept(kept(), by, f, t)) { suppressed++; continue; }
       const flag = { rule: 2, file: f, line: t.trim(), addedBy: by, missing };
@@ -839,7 +855,7 @@ function changelogWrite(clFile, blockFile) {
   const f = readText(clFile);
   const p = placeBlock(f.lines, blockLines(blockFile));
   f.lines.splice(p.start, p.remove, ...p.insert);
-  fs.writeFileSync(clFile, (f.bom ? '﻿' : '') + f.lines.join(f.eol) + (f.finalNewline ? f.eol : ''));
+  fs.writeFileSync(clFile, (f.bom ? '\ufeff' : '') + f.lines.join(f.eol) + (f.finalNewline ? f.eol : ''));
   const out = { line: p.line, rule: p.rule };
   if (p.replaces) out.replaces = p.replaces;
   return Object.assign(out, { written: true });

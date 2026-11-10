@@ -873,6 +873,16 @@ section('298: an Unreleased block joins or fills main\'s heading, and --write pu
     fill.text === '# Changelog\n\n## Unreleased - New Things\n\n- y\n\n## v1.0.0\n',
     JSON.stringify(fill.json) + ' ' + JSON.stringify(fill.text));
 
+  // Different wording over a filled heading is never a join, either way round.
+  const bareOverTitled = place('# Changelog\n\n## Unreleased - Older\n\n- x\n\n## v1.0.0\n', '## Unreleased\n\n- y\n', true);
+  const titledOverBare = place('# Changelog\n\n## Unreleased\n\n- x\n\n## v1.0.0\n', '## Unreleased - New\n\n- y\n', true);
+  check('298: a bare block over a filled titled heading stacks above, and so does the reverse',
+    bareOverTitled.json && bareOverTitled.json.rule === 'above the first section' &&
+    bareOverTitled.text === '# Changelog\n\n## Unreleased\n\n- y\n\n## Unreleased - Older\n\n- x\n\n## v1.0.0\n' &&
+    titledOverBare.json && titledOverBare.json.rule === 'above the first section' &&
+    titledOverBare.text === '# Changelog\n\n## Unreleased - New\n\n- y\n\n## Unreleased\n\n- x\n\n## v1.0.0\n',
+    JSON.stringify([bareOverTitled.json, bareOverTitled.text, titledOverBare.json, titledOverBare.text]));
+
   // The three placements that do not change: the block goes before the line
   // the read-only answer names, with a blank line after it, as /merge used to
   // insert it by hand.
@@ -891,10 +901,10 @@ section('298: an Unreleased block joins or fills main\'s heading, and --write pu
   // A CRLF file with a byte order mark keeps both; `$'` and `$&` in the block
   // are written as typed (a text replace would splice the file into them); a
   // file with no final newline keeps having none.
-  const crlf = place('﻿# Changelog\r\n\r\n## Unreleased\r\n\r\n## v1.0.0\r\n', '## Unreleased\n\n- costs $\' and $& stay as typed\n', true);
+  const crlf = place('\ufeff# Changelog\r\n\r\n## Unreleased\r\n\r\n## v1.0.0\r\n', '## Unreleased\n\n- costs $\' and $& stay as typed\n', true);
   const noEol = place('# Changelog\n\n## Unreleased\n\n## v1.0.0', '## Unreleased\n\n- y', true);
   check('298: --write keeps CRLF, the byte order mark, the last newline and a dollar sign in the block',
-    crlf.text === '﻿# Changelog\r\n\r\n## Unreleased\r\n\r\n- costs $\' and $& stay as typed\r\n\r\n## v1.0.0\r\n' &&
+    crlf.text === '\ufeff# Changelog\r\n\r\n## Unreleased\r\n\r\n- costs $\' and $& stay as typed\r\n\r\n## v1.0.0\r\n' &&
     noEol.text === '# Changelog\n\n## Unreleased\n\n- y\n\n## v1.0.0',
     JSON.stringify([crlf.text, noEol.text]));
 
@@ -948,6 +958,32 @@ section('298: an Unreleased block joins or fills main\'s heading, and --write pu
     filledIn.text === '# Changelog\n\n## Unreleased - W\n\n- w: new thing\n\n## v1.1.0\n\n- second\n\n## v1.0.0\n\n- first\n' &&
     filledIn.lw.status === 0 && filledIn.lw.json && filledIn.lw.json.flagged === 0,
     JSON.stringify(filledIn.ins.json) + ' ' + JSON.stringify(filledIn.lw.json && filledIn.lw.json.flags) + ' ' + filledIn.lw.stderr);
+
+  // Only those two cases are exempt. A bad hand fix that keeps the branch's
+  // side drops another landing's titled block, heading and entry alike, while
+  // the branch's own Unreleased heading survives: both lines are still lost.
+  const lo = newRepo('changelog-298-lost');
+  write(lo, 'CHANGELOG.md', '# Changelog\n\n## v1.0.0\n\n- first\n');
+  commitAll(lo, 'M0');
+  const loCut = cut(lo, 'W');
+  write(lo, 'CHANGELOG.md', '# Changelog\n\n## Unreleased - Other\n\n- other thing\n\n## v1.0.0\n\n- first\n');
+  commitAll(lo, 'Another landing adds its titled block');
+  g(lo, ['checkout', '-q', 'W']);
+  write(lo, 'CHANGELOG.md', '# Changelog\n\n## Unreleased - W\n\n- w thing\n\n## v1.0.0\n\n- first\n');
+  commitAll(lo, 'W: its titled block');
+  const loTip = rev(lo, 'W');
+  g(lo, ['checkout', '-q', 'main']);
+  const loBefore = rev(lo, 'main');
+  if (!gTry(lo, ['merge', '--no-ff', '-q', '-m', 'Merge W', 'W']).ok) {
+    g(lo, ['checkout', '--theirs', '--', 'CHANGELOG.md']);
+    g(lo, ['add', '--', 'CHANGELOG.md']);
+    g(lo, ['commit', '-q', '--no-edit']);
+  }
+  const ll = landing(lo, { before: loBefore, after: rev(lo, 'main'), cut: loCut, tip: loTip });
+  const lost = flagLines(ll) || [];
+  check('298: a landing that drops another landing\'s titled Unreleased heading is still flagged',
+    ll.status === 1 && lost.includes('## Unreleased - Other') && lost.includes('- other thing'),
+    JSON.stringify(ll.json && ll.json.flags) + ' ' + ll.stderr);
 });
 
 section('generated paths: a broken generated.json is a note, and then nothing is skipped', () => {

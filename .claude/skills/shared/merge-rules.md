@@ -83,12 +83,12 @@ copied exactly from the flag's `keep` field. It may stand in the landing commit 
 In a worktree, `/document` writes its changelog block to the branch's `CHANGELOG.md` as before and copies it into the PR body. When `/merge` updates the branch, it takes main's `CHANGELOG.md` and re-inserts the block, as its own commit, with `merge-check.js --changelog-place CHANGELOG.md <block file> --write`, which makes the edit and prints the rule it used (without `--write` it only prints the line the block goes before). The first rule that fits decides:
 
 - a block that opens with an Unreleased heading "joins the Unreleased heading" when main's first `## ` section is the same Unreleased heading (case and square brackets aside): its heading is dropped and its entries go directly below main's, newest on top;
-- it "fills the empty Unreleased heading" when that section is an empty Unreleased heading with other text: the block takes its place;
+- it "fills the empty Unreleased heading" when that section has no entries under its Unreleased heading and the block's heading reads differently: the block takes its place;
 - a block that opens with its own `## ` heading goes directly above the file's first `## ` section, so the newest entry is on top and never inside a released version;
 - a block of bare entries goes directly below an `## Unreleased` heading;
 - with neither anchor, after the title and the blank lines under it.
 
-Rule 2 then confirms that every line of the block landed. An Unreleased heading counts as landed for rules 1 and 2 while the landed changelog still has one, because the placement keeps exactly one.
+Rule 2 then confirms that every line of the block landed. The two headings the placement drops count as landed: for rule 2, the branch's heading a join dropped, while main keeps one that reads the same; for rule 1, main's empty heading a fill replaced, while the landed changelog still has an Unreleased heading. Any other lost heading is still flagged.
 
 ## Generated files
 
