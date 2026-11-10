@@ -924,6 +924,17 @@ function toolOf(words) {
   return git ? { tool: 'git ' + git.sub, args: git.args } : { tool: words[0], args: words.slice(1) };
 }
 const SEARCHES = ['grep', 'egrep', 'fgrep', 'rg', 'git grep'];
+// Whether everything a check prints starts as file text a search found: each
+// command fed by no pipe (the first of a pipe, and each one after &&, ; or ||)
+// is a search, so what follows it in its pipe (wc, head, cut) only reshapes
+// that text. A search fed by another command reads that command's output, not
+// a file of its own, and a check the runner's reader refuses is no search
+// (issue #288).
+function searchesFiles(check) {
+  const cmds = commandsOf(check);
+  if (!cmds) return false;
+  return cmds.filter((c) => c.from < 0).every((c) => SEARCHES.includes(toolOf(c.words).tool));
+}
 // A search's options, read the way the tool reads them: a long option by its
 // name, and a word with one dash as a run of letters, where a letter that
 // takes a value (-e, -f, -m, -A, -B, -C, and rg's -t, -g, -r) ends the run,
@@ -1588,6 +1599,16 @@ function recordVerdicts(file, verdicts, source, from, fail) {
 // because the fixer wrote what judged the fix (review 2026-11-04-080648 passed one that
 // really did fail before the fix, on a problem still there). Once that call has run,
 // its verifier has the round and the rows are skipped.
+//
+// A fail on a row the mode itself flipped from a file search (a match that became
+// a noMatch) settles nothing either: the searched text is still there, and a correct
+// fix can leave it in place (issue #288: a button that keeps its label while its
+// handler changes, a message that gained a sentence). When every failing row of a
+// finding is such a row, it records NOT VERIFIED with a text_kept reason and prints
+// the judgment retry, so a verifier reads the diff; a fix that truly failed reads NOT
+// FIXED there and the round is spent as before. Any other failing row (an exit code,
+// a row the runner filled in, text no search read from a file) keeps the finding NOT
+// FIXED outright.
 function recordRechecks(opts, read, fail) {
   let ledger;
   try { ledger = readLedger(opts.ledger, true); } catch (e) { fail(e.error || 'bad_ledger', null, e.message); }
@@ -1601,6 +1622,7 @@ function recordRechecks(opts, read, fail) {
   const changedIds = [];
   const hollowIds = [];
   const filledIds = [];
+  const keptTextIds = [];
   const retryIds = [];
   const at = new Date().toISOString();
   for (const id of Object.keys(ledger.findings).sort(byNumber)) {
@@ -1622,10 +1644,12 @@ function recordRechecks(opts, read, fail) {
       verdict = found.every((c) => c.verdict === 'pass') ? 'FIXED' : 'NOT FIXED';
       const filled = pinFilled(f, rows);
       if (verdict === 'FIXED' && filled.length) { verdict = 'NOT VERIFIED'; reason = 'filled_expect: ' + filled.join(', ') + ' passed an expect the fixer wrote, so a fresh verifier decides'; filledIds.push(id); }
+      const textKept = verdict === 'NOT FIXED' ? keptText(f, rows) : [];
+      if (textKept.length) { verdict = 'NOT VERIFIED'; reason = 'text_kept: ' + textKept.join(', ') + ' still find' + (textKept.length === 1 ? 's' : '') + ' the text the search matched before the fix, so a fresh verifier decides'; keptTextIds.push(id); }
     }
     if (changed.length) { rewritten.push(...changed); changedIds.push(id); }
     if (hollow.length) hollowIds.push(id);
-    const judge = filledIds.includes(id) || (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || '')));
+    const judge = filledIds.includes(id) || keptTextIds.includes(id) || (verdict === 'NOT FIXED' && f.verdicts.some((v) => v.round === f.round && /^check_changed/.test(v.reason || '')));
     if (judge) retryIds.push(id);
     const entry = { round: f.round, verdict, source: 'recheck', from: opts.recheck, at };
     if (reason) entry.reason = reason;
@@ -1638,9 +1662,10 @@ function recordRechecks(opts, read, fail) {
   // way --verify prints it (issue #272): fill the expect of each refused or
   // missing row, run the recheck file again, record again. A rewritten row needs
   // no write: its kept row goes back into the file here. A filled-in pass needs no
-  // rerun either: its next step is the verifier.
+  // rerun either, and neither does a search row whose text is still there: the
+  // next step for both is the verifier.
   const next = [];
-  const stuck = unverified.filter((id) => !filledIds.includes(id));
+  const stuck = unverified.filter((id) => !filledIds.includes(id) && !keptTextIds.includes(id));
   const again = stuck.length ? recheckFileFor(opts.ledger, ledger, stuck) : null;
   if (again) {
     if (rewritten.length) restoreKept(again, rewritten.map((c) => c.kept));
@@ -1651,7 +1676,7 @@ function recordRechecks(opts, read, fail) {
   }
   if (retryIds.length && ledger.lastVerify) {
     const l = ledger.lastVerify;
-    next.push({ do: 'run', ids: retryIds, what: 'the fixer rewrote or filled in the check that judged this fix, so a fresh verifier judges it', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
+    next.push({ do: 'run', ids: retryIds, what: 'the recheck could not settle this fix (the fixer rewrote or filled in its check, or a search still finds the text it matched before the fix), so a fresh verifier judges it', command: retryCommand(l.file, Object.assign({}, l, { mechanical: [], judgment: [], browser: [] }), retryIds) });
   }
   process.stdout.write(JSON.stringify({ recorded, unverified, notInResults, ledger: opts.ledger, next }) + '\n');
 }
@@ -1683,6 +1708,20 @@ function compareKept(f, rows) {
     else if (filled && ran.verdict === 'pass' && metBeforeFix(ran.expect, kept.saved)) hollow.push(kept);
   }
   return { changed, hollow };
+}
+
+// The failing rows of one finding, when every one of them is a row the mode flipped
+// from a file search and the runner left as written: the text that search matched
+// before the fix is still there, which a correct fix can leave (issue #288). Empty
+// when any failing row is of another kind, or when the ledger kept no rows.
+function keptText(f, rows) {
+  const kept = new Map(((f.kept && f.kept[String(f.round)]) || []).map((k) => [k.id, k]));
+  const failing = ((f.rechecks && f.rechecks[String(f.round)]) || []).filter((r) => rows.get(r) && rows.get(r).verdict !== 'pass');
+  const flippedSearch = (r) => {
+    const k = kept.get(r);
+    return Boolean(k) && !k.filled && Boolean(k.expect) && typeof k.expect === 'object' && typeof k.expect.noMatch === 'string' && searchesFiles(k.check);
+  };
+  return failing.length && failing.every(flippedSearch) ? failing : [];
 }
 
 // A placeholder row's first honest run sets what the round holds it to, so a later

@@ -923,8 +923,10 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const rw = rwStart('verify-rw');
   const keptCheck = 'grep -n TODO src/c.js';
   const firstRun = parse(rw.go()) || {};
-  // A plain fail with no rewrite prints no retry: the bound of two rounds does its job.
-  const plainFail = firstRun.recorded && firstRun.recorded.R1 === 'NOT FIXED' && !(firstRun.next || []).some((n) => /--judgment/.test(n.command || ''));
+  // A plain fail of a row the mode flipped from a file search settles nothing
+  // (issue #288): the text is still there, which a correct fix can leave, so the
+  // finding goes to a fresh verifier. The 288 cases below hold the whole path.
+  const plainFail = (firstRun.unverified || []).join() === 'R1' && !(firstRun.recorded || {}).R1 && (firstRun.next || []).some((n) => /--judgment R1\b/.test(n.command || ''));
   const rewound = rw.ledger();
   rewound.findings.R1.verdicts = [];
   fs.writeFileSync(path.join(rw.dir, 'ledger.json'), JSON.stringify(rewound));
@@ -950,7 +952,7 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const stillFails = parse(rw2.go()) || {};
   const retry = (stillFails.next || []).find((n) => /--verify/.test(n.command || ''));
   check11('fixer-rewrite: a kept row that fails after a rewrite prints the judgment retry, for that finding only',
-    stillFails.recorded && stillFails.recorded.R1 === 'NOT FIXED' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
+    (stillFails.unverified || []).join() === 'R1' && retry && retry.do === 'run' && /--judgment R1\b/.test(retry.command) && !/--mechanical/.test(retry.command) && retry.command.includes(rw2.dir),
     JSON.stringify(stillFails).slice(0, 400));
   // A filled-in expect: the mode writes a placeholder because it cannot invert the
   // proof, so the runner writes the expect. That is its job and no rewrite, but an
@@ -1021,7 +1023,7 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const judged2 = retry2 ? spawnSync('sh', ['-c', retry2.command], { cwd: repo, encoding: 'utf8' }) : { status: null, stderr: 'no retry printed' };
   const third = run(['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', rw3.dir, '--root', repo, '--judgment', 'R1']);
   check11('fixer-rewrite: in round 2 the printed retry runs once and the next call is refused',
-    round2.recorded && round2.recorded.R1 === 'NOT FIXED' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
+    (round2.unverified || []).join() === 'R1' && judged2.status === 0 && fs.existsSync(path.join(rw3.dir, 'verify-3-1.txt')) && third.status === 1 && /"error":"rounds_exhausted"/.test(third.stderr),
     JSON.stringify({ round2, judged2: [judged2.status, String(judged2.stderr).slice(0, 200)], third: [third.status, third.stderr.slice(0, 160)] }));
   // A filled-in pass in round 2 still reaches its verifier, once (same review, a fresh
   // check's note on R23: round 1 was the only round tested end to end).
@@ -1073,6 +1075,82 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   check11('fixer-rewrite: a retry in round one spends no fix round',
     judged5.status === 0 && round5 === 1 && second5.status === 0 && rw5.ledger().findings.R1.round === 2 && third5.status === 1 && /"error":"rounds_exhausted"/.test(third5.stderr),
     JSON.stringify({ judged5: judged5.status, round5, second5: [second5.status, second5.stderr.slice(0, 160)], third5: third5.status }));
+  // Issue #288: a recheck the mode builds by flipping a file search fails whenever
+  // the searched text is still there, and a correct fix can leave it (a button that
+  // keeps its label, a message that gained a sentence). So that fail settles nothing:
+  // the finding is left to one fresh verifier, which reads the diff, in the same
+  // round. A row whose text is not a file search's, or one the runner filled in,
+  // still fails outright, and so does a finding with any other failing row.
+  w('src/c.js', c0);
+  const tk = rwStart('verify-288-kept');
+  const tkRun = parse(tk.go()) || {};
+  const tkLast = lastVerdict(tk.ledger());
+  const tkRetry = (tkRun.next || []).find((n) => /--verify/.test(n.command || ''));
+  check11('288: a failed flipped search row goes to a fresh verifier',
+    (tkRun.unverified || []).join() === 'R1' && !(tkRun.recorded || {}).R1 && tkLast.verdict === 'NOT VERIFIED' && /^text_kept: code-1-recheck-r1 /.test(tkLast.reason || '') && tkLast.judge === true
+      && (tkRun.next || []).length === 1 && tkRetry && tkRetry.do === 'run' && /--judgment R1\b/.test(tkRetry.command) && !/--mechanical/.test(tkRetry.command) && tkRetry.command.includes(tk.dir),
+    JSON.stringify({ tkRun, tkLast }));
+  // The retry judges the same fix: a FIXED reply settles round 1 and the rows
+  // cannot speak after it; a NOT FIXED reply spends the round, so the next fix is
+  // round 2 and the one after it is refused.
+  const tkJudged = tkRetry ? spawnSync('sh', ['-c', tkRetry.command], { cwd: repo, encoding: 'utf8' }) : { status: null };
+  const tkSaid = verifierSays(tk.dir, 'said-fixed.txt', path.join(tk.dir, 'verify-2-1.txt'), 'R1: FIXED\nthe note now names its owner, which was the defect\n');
+  const tkAfter = tk.ledger();
+  const tkAgain = parse(tk.go()) || {};
+  const tk2 = rwStart('verify-288-kept-2');
+  const tk2Retry = ((parse(tk2.go()) || {}).next || []).find((n) => /--verify/.test(n.command || ''));
+  if (tk2Retry) spawnSync('sh', ['-c', tk2Retry.command], { cwd: repo, encoding: 'utf8' });
+  verifierSays(tk2.dir, 'said-not.txt', path.join(tk2.dir, 'verify-2-1.txt'), 'R1: NOT FIXED\nthe note is unchanged\n');
+  const tk2Round1 = tk2.ledger();
+  const tk2Verify = ['--verify', rwFile, '--receipts', rwReceipts, '--scope', scope, '--out', tk2.dir, '--root', repo, '--mechanical', 'R1'];
+  const tk2Second = run(tk2Verify);
+  const tk2Third = run(tk2Verify);
+  check11('288: the printed retry spends no round and its verdict lands in the same round',
+    tkJudged.status === 0 && tkSaid.status === 0 && tkAfter.findings.R1.round === 1 && lastVerdict(tkAfter).verdict === 'FIXED' && !(tkAgain.next || []).length && !(tkAgain.unverified || []).length
+      && tk2Round1.findings.R1.round === 1 && lastVerdict(tk2Round1).verdict === 'NOT FIXED' && tk2Second.status === 0 && tk2.ledger().findings.R1.round === 2 && tk2Third.status === 1 && /"error":"rounds_exhausted"/.test(tk2Third.stderr),
+    JSON.stringify({ judged: tkJudged.status, said: tkSaid.status, after: (tkAfter.findings.R1 || {}).round, last: lastVerdict(tkAfter).verdict, again: tkAgain, round1: lastVerdict(tk2Round1).verdict, second: tk2Second.status, third: tk2Third.status }));
+  // One mechanical finding from its own findings file and receipts folder, run
+  // through the checks runner and recorded once.
+  const lone = (name, findingRows, saved) => {
+    const dir = path.join(sandbox, name);
+    fs.mkdirSync(dir);
+    const rcpt = path.join(sandbox, name + '-receipts');
+    fs.mkdirSync(rcpt);
+    for (const stem of Object.keys(saved)) fs.writeFileSync(path.join(rcpt, stem + '.txt'), saved[stem]);
+    run(['--verify', jsonl(findingRows), '--receipts', rcpt, '--scope', scope, '--out', dir, '--root', repo, '--mechanical', 'R1']);
+    spawnSync(process.execPath, [RUN_CHECKS, '--checks', path.join(dir, 'recheck-1.json'), '--out', path.join(dir, 'rc')], { cwd: repo, encoding: 'utf8' });
+    const r = parse(run(['--verdicts', '--ledger', path.join(dir, 'ledger.json'), '--recheck', path.join(dir, 'rc', 'results.json')])) || {};
+    return { r, last: lastVerdict(readJson(path.join(dir, 'ledger.json')) || { findings: { R1: { verdicts: [] } } }) };
+  };
+  const todo = (specialist, key, receipt) => f(specialist, 'src/c.js', 1, 'src/c.js:' + key, 'Should fix. A TODO ships.', receipt);
+  const failsOutright = (x) => Boolean(x.r.recorded) && x.r.recorded.R1 === 'NOT FIXED' && x.last.verdict === 'NOT FIXED' && !(x.r.next || []).some((n) => /--judgment/.test(n.command || ''));
+  const SAVED_GREP = '1:// TODO: tidy\nexit 0\n';
+  const catProof = lone('verify-288-cat', [todo('code', 'todo-cat', { check: 'cat src/c.js', expect: { match: 'TODO' } })], { 'code-1': c0 + 'exit 0\n' });
+  const pipedProof = lone('verify-288-piped', [todo('code', 'todo-piped', { check: 'cat src/c.js | grep -n TODO', expect: { match: 'TODO' } })], { 'code-1': SAVED_GREP });
+  check11('288: a failed row whose text does not come from a file search still records NOT FIXED',
+    failsOutright(catProof) && failsOutright(pipedProof), JSON.stringify({ catProof, pipedProof }));
+  const filledFail = fillRun(fillStart('verify-288-filled'), { noMatch: 'TODO' });
+  check11('288: a failed row the runner filled in still records NOT FIXED', failsOutright(filledFail), JSON.stringify(filledFail));
+  // Two receipts on one finding: the search row and a row of another kind. Both
+  // failing is a fail outright; with the other row passing, the search row is the
+  // only one that failed, and the verifier decides.
+  const pair = (key) => [
+    todo('code', key, { check: 'grep -n TODO src/c.js', expect: { match: 'TODO' } }),
+    todo('security', key, { check: 'test -e src/c.done', expect: { exit: 1 } }),
+  ];
+  const pairSaved = { 'code-1': SAVED_GREP, 'security-1': 'exit 1\n' };
+  const bothFail = lone('verify-288-mixed', pair('todo-mixed'), pairSaved);
+  w('src/c.done', 'done\n');
+  const searchOnly = lone('verify-288-mixed-2', pair('todo-mixed-2'), pairSaved);
+  fs.rmSync(path.join(repo, 'src', 'c.done'));
+  check11('288: a finding with one search row and one other failing row records NOT FIXED',
+    failsOutright(bothFail) && (searchOnly.r.unverified || []).join() === 'R1' && /^text_kept: code-1-recheck-r1 /.test(searchOnly.last.reason || ''),
+    JSON.stringify({ bothFail, searchOnly }));
+  // The moved-line half of the issue shipped with #283: its own example inverts
+  // without the line number, so an edit above the line cannot pass the recheck.
+  const inv288 = mod.invertExpect({ match: '^1571:.*unmake' }, 'grep -n unmake src/board.js', 1571);
+  check11('288: the moved-line example from the issue drops its line number',
+    JSON.stringify(inv288) === JSON.stringify({ noMatch: '^[0-9]+:.*unmake' }), JSON.stringify(inv288));
   // Lines added after a run's verdicts exist (M5's one generation, a split note):
   // a verdict is keyed to an ID, so a line marked followup takes the next free number
   // and moves nothing. The whole run stays in one file, one receipts folder and the
