@@ -1939,6 +1939,32 @@ async function asyncSection(name, fn) {
       cli.valid && cli.warnings.includes('network-name:1') && Array.isArray(cli.network) && cli.network.length === 1 && /llm-peer-review/.test(cli.network[0]),
       JSON.stringify({ warnings: cli.warnings, network: cli.network, reasons: cli.reasons }));
 
+    // #292: the repository is named by its fixed name, never by the folder the
+    // rig runs from, so these calls name neither an answer-key file nor a
+    // contents path: only the name itself can flag them. Run from a side copy
+    // (a folder named worktree-<n>), the old folder-name check missed all four,
+    // and it never looked at `gh release` at all. The name stays a literal here.
+    const anyFolder = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [
+      bash('t_f1', 'gh repo clone someone/llm-peer-review'),
+      bash('t_f2', 'gh api repos/someone/llm-peer-review/git/trees/main?recursive=1'),
+      bash('t_f3', 'gh release download -R someone/llm-peer-review'),
+      bash('t_f4', 'gh repo view someone/llm-peer-review.git'),
+    ] }));
+    check('292: a GitHub CLI call naming this repository is flagged from any folder',
+      anyFolder.valid && anyFolder.warnings.includes('network-name:4') && Array.isArray(anyFolder.network) && anyFolder.network.length === 4,
+      JSON.stringify({ warnings: anyFolder.warnings, network: anyFolder.network, reasons: anyFolder.reasons }));
+
+    // A contents read of another repository (the dependency lens's own kind of
+    // call), a gist, and a longer name that only starts with this one's.
+    const otherRepo = analyze(makeReviewRun({ caught: ['code-search-prefix'], mainTools: [
+      bash('t_o1', 'gh api repos/moment/moment/contents/package.json'),
+      bash('t_o2', 'gh gist view abc123'),
+      bash('t_o3', 'gh repo clone someone/llm-peer-review-fork'),
+    ] }));
+    check('292: a GitHub CLI call about another repository is not flagged, contents path or not',
+      otherRepo.valid && !otherRepo.warnings.some(w => /^network-name/.test(w)),
+      JSON.stringify({ warnings: otherRepo.warnings, network: otherRepo.network, reasons: otherRepo.reasons }));
+
     const lines = typeof QC.leakLines === 'function' ? QC.leakLines({ network: ['curl x'], pluginReads: ['p'], staleTmp: ['s'] }) : null;
     check('leakLines names the three lists',
       Array.isArray(lines) && lines.length === 3 && /^network: /.test(lines[0]) && /^plugin reads: /.test(lines[1]) && /^stale tmp reads: /.test(lines[2]) && QC.leakLines({}).length === 0,

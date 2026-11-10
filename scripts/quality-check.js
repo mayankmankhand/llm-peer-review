@@ -177,8 +177,9 @@
 // second invalid run, or a usage limit, pages the owner (M1). Three leak paths
 // are warnings, not reasons (#277): network-name (a Bash call naming github.com
 // or githubusercontent.com, where the fixture's answer key is public, or a
-// GitHub CLI call naming this repository, an answer-key file or a contents
-// endpoint), plugin-read (a finder's or judge's read of the build's
+// GitHub CLI call of any subcommand naming this repository, by its fixed name
+// and from any folder (#292), or an answer-key file), plugin-read (a finder's
+// or judge's read of the build's
 // skills/shared/model-routing.md, the shipped file that describes the
 // known-answer bug, or a search of a folder under the scratch home that holds
 // it) and stale-tmp (a read under a /tmp entry that existed at session start,
@@ -932,11 +933,12 @@ function analyzeRun(run, answers) {
   // runs show how often each fires before any of them voids a run.
   //   network-name: a Bash call that names GitHub, where the fixture's answer key
   //                 is public (harness2's own validation run saw a rollout fetch
-  //                 its rubric unprompted), or a GitHub CLI call that names this
-  //                 repository, an answer-key file or a contents endpoint: the
-  //                 same fetch by a road that names no domain (review, R13). A
-  //                 CLI call about some other repository, the dependency lens's
-  //                 own, is not flagged.
+  //                 its rubric unprompted), or a GitHub CLI call of any
+  //                 subcommand that names this repository or an answer-key
+  //                 file: the same fetch by a road that names no domain
+  //                 (review, R13). A CLI call about some other repository, the
+  //                 dependency lens's own, is not flagged, whatever path it
+  //                 reads (a contents read of another repository included).
   //   plugin-read:  a finder's or judge's read of the one shipped file that
   //                 describes the known-answer bug, or a search scoped to a
   //                 folder under the scratch home that holds it (review, R11).
@@ -952,9 +954,17 @@ function analyzeRun(run, answers) {
   // All three see a path reached through a shell command as well as through a
   // tool, since toolPaths yields /tmp paths from Bash (review, R11).
   const NETWORK_RE = /\b(?:[a-z0-9-]+\.)*github\.com\b|githubusercontent\.com/i;
-  const GH_CLI_RE = /\bgh\s+(?:api|repo|gist)\b/;
-  const repoName = path.basename(REPO);
-  const namesThisRepo = cmd => cmd.includes(repoName) || /answers\.json|\/contents\//.test(cmd);
+  // Any GitHub CLI subcommand: `gh release download` and `gh search` reach a
+  // repository's files as surely as `gh api` and `gh repo clone` do.
+  const GH_CLI_RE = /\bgh\s+[a-z]/;
+  // This repository by its fixed name, never by the folder the rig runs from
+  // (#292): a side copy sits in a folder named worktree-<n>, where the old
+  // folder-name check missed every call. The name counts only whole: no
+  // letter, digit, `.`, `_` or `-` directly before it, and none after it but
+  // an optional `.git`, so `someone/llm-peer-review.git` counts and
+  // `llm-peer-review-fork` does not (a plain \b would split on the `-`).
+  const THIS_REPO_RE = /(?<![A-Za-z0-9._-])llm-peer-review(?:\.git)?(?![A-Za-z0-9._-])/;
+  const namesThisRepo = cmd => THIS_REPO_RE.test(cmd) || /answers\.json/.test(cmd);
   const buildDir = meta.paths && meta.paths.buildDir;
   const home = meta.paths && meta.paths.home;
   const routingFile = buildDir ? path.join(buildDir, 'skills', 'shared', 'model-routing.md') : null;
