@@ -822,6 +822,134 @@ section('--changelog-place: above the first section, below Unreleased, or after 
   check('with neither anchor, after the title and its blank lines', c.line === 3 && c.rule === 'after the title', JSON.stringify(c));
 });
 
+// Issue #298: a block that opens with an Unreleased heading joins main's
+// Unreleased heading when the text is the same (case and square brackets
+// aside), or fills main's empty one when it is not, so a landing never leaves
+// two. --write makes the edit itself; the read-only answer stays as it was.
+section('298: an Unreleased block joins or fills main\'s heading, and --write puts it there', () => {
+  const dir = newRepo('changelog-298');
+  write(dir, 'a.txt', 'a\n');
+  commitAll(dir, 'M0');
+  const FIX = path.join(REPO, 'scripts', 'fixtures', 'merge-check');
+  const cl = path.join(sandbox, 'cl-298.md');
+  const blk = path.join(sandbox, 'blk-298.md');
+  // Place `block` in a changelog holding `main`: the read-only answer, or with
+  // writeIt the --write run; returns the answer and the file afterwards.
+  function place(main, block, writeIt) {
+    fs.writeFileSync(cl, main);
+    fs.writeFileSync(blk, block);
+    const r = mc(dir, ['--changelog-place', cl, blk].concat(writeIt ? ['--write'] : []));
+    return { status: r.status, json: r.json, text: fs.readFileSync(cl, 'utf8'), stderr: r.stderr };
+  }
+
+  // The v8.0.18 landing: main's changelog right after the v8.0.17 release
+  // (33b264a), the block /merge took from the branch's landing file, and the
+  // file that landing had to be fixed to by hand (af990ca), each cut to its top.
+  const before = fs.readFileSync(path.join(FIX, '298-main-before.md'), 'utf8');
+  const block = fs.readFileSync(path.join(FIX, '298-block.md'), 'utf8');
+  const landed = fs.readFileSync(path.join(FIX, '298-landed.md'), 'utf8');
+  const dry = place(before, block, false);
+  const wet = place(before, block, true);
+  check('298: the v8.0.18 landing replays byte for byte',
+    dry.json && dry.json.rule === 'joins the Unreleased heading' && dry.text === before &&
+    wet.status === 0 && wet.json && wet.json.written === true && wet.text === landed,
+    JSON.stringify(dry.json) + ' ' + JSON.stringify(wet.json) + ' ' + wet.stderr);
+
+  const filled = place('# Changelog\n\n## Unreleased\n\n### Fixed\n\n- older\n\n## v1.0.0\n', '## Unreleased\n\n### Fixed\n\n- newer\n', true);
+  check('298: a bare Unreleased block joins a filled Unreleased heading, newest on top',
+    filled.json && filled.json.rule === 'joins the Unreleased heading' &&
+    filled.text === '# Changelog\n\n## Unreleased\n\n### Fixed\n\n- newer\n\n### Fixed\n\n- older\n\n## v1.0.0\n',
+    JSON.stringify(filled.json) + ' ' + JSON.stringify(filled.text));
+
+  const pairs = [['## [Unreleased]', '## Unreleased'], ['## unreleased', '## Unreleased'], ['## Unreleased', '## [UNRELEASED]']];
+  const same = pairs.map((p) => place('# Changelog\n\n' + p[0] + '\n\n## 1.0.0\n', p[1] + '\n\n- y\n', true));
+  check('298: [Unreleased], Unreleased and unreleased count as the same heading',
+    same.every((r, n) => r.json && r.json.rule === 'joins the Unreleased heading' && r.text === '# Changelog\n\n' + pairs[n][0] + '\n\n- y\n\n## 1.0.0\n'),
+    JSON.stringify(same.map((r) => [r.json && r.json.rule, r.text])));
+
+  const fill = place('# Changelog\n\n## Unreleased\n\n## v1.0.0\n', '## Unreleased - New Things\n\n- y\n', true);
+  check('298: a titled block fills an empty bare Unreleased heading',
+    fill.json && fill.json.rule === 'fills the empty Unreleased heading' &&
+    fill.text === '# Changelog\n\n## Unreleased - New Things\n\n- y\n\n## v1.0.0\n',
+    JSON.stringify(fill.json) + ' ' + JSON.stringify(fill.text));
+
+  // The three placements that do not change: the block goes before the line
+  // the read-only answer names, with a blank line after it, as /merge used to
+  // insert it by hand.
+  const above = place('# Changelog\n\n<!-- a comment -->\n\n## Unreleased - Older\n\n- x\n\n## v1.0.0 - First\n', '## Unreleased - New\n\n- y\n', true);
+  const below = place('# Changelog\n\n## [Unreleased]\n\n### Added\n- old\n\n## [1.0.0]\n', '- new entry\n', true);
+  const title = place('# Changelog\n\nSome prose.\n', '- new entry\n', true);
+  check('298: --write writes the three old placements exactly',
+    above.json && above.json.rule === 'above the first section' &&
+    above.text === '# Changelog\n\n<!-- a comment -->\n\n## Unreleased - New\n\n- y\n\n## Unreleased - Older\n\n- x\n\n## v1.0.0 - First\n' &&
+    below.json && below.json.rule === 'below the Unreleased heading' &&
+    below.text === '# Changelog\n\n## [Unreleased]\n- new entry\n\n\n### Added\n- old\n\n## [1.0.0]\n' &&
+    title.json && title.json.rule === 'after the title' &&
+    title.text === '# Changelog\n\n- new entry\n\nSome prose.\n',
+    JSON.stringify([above.text, below.text, title.text]));
+
+  // A CRLF file with a byte order mark keeps both; `$'` and `$&` in the block
+  // are written as typed (a text replace would splice the file into them); a
+  // file with no final newline keeps having none.
+  const crlf = place('﻿# Changelog\r\n\r\n## Unreleased\r\n\r\n## v1.0.0\r\n', '## Unreleased\n\n- costs $\' and $& stay as typed\n', true);
+  const noEol = place('# Changelog\n\n## Unreleased\n\n## v1.0.0', '## Unreleased\n\n- y', true);
+  check('298: --write keeps CRLF, the byte order mark, the last newline and a dollar sign in the block',
+    crlf.text === '﻿# Changelog\r\n\r\n## Unreleased\r\n\r\n- costs $\' and $& stay as typed\r\n\r\n## v1.0.0\r\n' &&
+    noEol.text === '# Changelog\n\n## Unreleased\n\n- y\n\n## v1.0.0',
+    JSON.stringify([crlf.text, noEol.text]));
+
+  check('298: --write without --changelog-place is a usage error',
+    mc(dir, ['--write']).status === 2 && mc(dir, ['--since', 'HEAD', '--write']).status === 2);
+
+  // A branch cut before main had the empty heading. /merge updates it from
+  // main, puts main's whole changelog back, re-inserts the block with --write
+  // and commits that on its own; the landing check then reads the branch's own
+  // tip from before the update. The heading a join drops (rule 2) or a fill
+  // replaces (rule 1, which reads main's lines the landing removes) is not
+  // lost work. Returns the landed changelog, the --write answer and the check.
+  function landThrough(label, heading) {
+    const lr = newRepo('changelog-298-' + label);
+    write(lr, 'CHANGELOG.md', '# Changelog\n\n## v1.0.0\n\n- first\n');
+    commitAll(lr, 'M0');
+    const cutSha = cut(lr, 'W');
+    g(lr, ['checkout', '-q', 'W']);
+    write(lr, 'CHANGELOG.md', '# Changelog\n\n' + heading + '\n\n- w: new thing\n\n## v1.0.0\n\n- first\n');
+    commitAll(lr, 'W: its changelog block');
+    g(lr, ['checkout', '-q', 'main']);
+    write(lr, 'CHANGELOG.md', '# Changelog\n\n## Unreleased\n\n## v1.1.0\n\n- second\n\n## v1.0.0\n\n- first\n');
+    commitAll(lr, 'Release v1.1.0, leaving an empty Unreleased heading');
+    const ownTip = rev(lr, 'W');
+    const mainBefore = rev(lr, 'main');
+    g(lr, ['checkout', '-q', 'W']);
+    if (!gTry(lr, ['merge', '-q', '-m', 'Update W', 'main']).ok) {
+      g(lr, ['checkout', '--theirs', '--', 'CHANGELOG.md']);
+      g(lr, ['add', '--', 'CHANGELOG.md']);
+      g(lr, ['commit', '-q', '--no-edit']);
+    }
+    g(lr, ['checkout', 'main', '--', 'CHANGELOG.md']);
+    const wBlock = path.join(sandbox, 'blk-298-' + label + '.md');
+    fs.writeFileSync(wBlock, heading + '\n\n- w: new thing');
+    const ins = mc(lr, ['--changelog-place', 'CHANGELOG.md', wBlock, '--write']);
+    commitAll(lr, 'Re-insert the changelog block for W');
+    g(lr, ['checkout', '-q', 'main']);
+    g(lr, ['merge', '--no-ff', '-q', '-m', 'Merge W', 'W']);
+    const lw = landing(lr, { before: mainBefore, after: rev(lr, 'main'), cut: cutSha, tip: ownTip });
+    return { text: read(lr, 'CHANGELOG.md'), ins, lw };
+  }
+  const joined = landThrough('join', '## Unreleased');
+  check('298: a landing through --write is clean under rule 2 when the branch was cut before the empty heading',
+    joined.ins.json && joined.ins.json.rule === 'joins the Unreleased heading' &&
+    joined.text === '# Changelog\n\n## Unreleased\n\n- w: new thing\n\n## v1.1.0\n\n- second\n\n## v1.0.0\n\n- first\n' &&
+    joined.lw.status === 0 && joined.lw.json && joined.lw.json.flagged === 0,
+    JSON.stringify(joined.ins.json) + ' ' + JSON.stringify(joined.lw.json && joined.lw.json.flags) + ' ' + joined.lw.stderr);
+  const filledIn = landThrough('fill', '## Unreleased - W');
+  check('298: a titled block that fills the empty heading lands clean under rule 1',
+    filledIn.ins.json && filledIn.ins.json.rule === 'fills the empty Unreleased heading' &&
+    filledIn.text === '# Changelog\n\n## Unreleased - W\n\n- w: new thing\n\n## v1.1.0\n\n- second\n\n## v1.0.0\n\n- first\n' &&
+    filledIn.lw.status === 0 && filledIn.lw.json && filledIn.lw.json.flagged === 0,
+    JSON.stringify(filledIn.ins.json) + ' ' + JSON.stringify(filledIn.lw.json && filledIn.lw.json.flags) + ' ' + filledIn.lw.stderr);
+});
+
 section('generated paths: a broken generated.json is a note, and then nothing is skipped', () => {
   const { dir, landings } = buildAF('merge');
   write(dir, '.claude/toolkit/generated.json', '{ not json');

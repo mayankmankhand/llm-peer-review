@@ -62,8 +62,10 @@
 //                                 the status the host still reports
 //   --style [local-merge|host-merge|host-squash]
 //                                 the repo's landing habit; with a value, record it
-//   --changelog-place <changelog> <block>
-//                                 the line number a changelog block goes before
+//   --changelog-place <changelog> <block> [--write]
+//                                 the line number a changelog block goes before,
+//                                 and the rule that put it there; with --write,
+//                                 the script makes that edit in <changelog>
 //   --marker | --mark <sha>       read or write the last checked landing
 //   --bring-home <branch>         copy the records of the worktree that holds
 //                                 <branch> into the main copy (issue #266): the
@@ -104,7 +106,7 @@ const KEPT_LINE_RE = /^Kept on purpose: ([0-9a-f]{7,40}) (.+?): (.*)$/;
 const MARKER_RE = /^(?:<{7}|>{7}|\|{7})(?: |$)|^={7}$/;
 const HOST_COMMITTER = 'noreply@github.com';   // GitHub's web-flow committer on button merges
 const STYLE_SCAN = 50;                          // first-parent commits read to learn the habit
-const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>] [--host gh|glab]';
+const USAGE = 'usage: node merge-check.js --record-cut [<branch>] | --cut <branch> [--pr <N> | --pr-body <file>] | --pr <N> | --pr-body <file|-> | --landing --before <sha> --after <sha> --cut <sha> --tip <sha> [--kept <file>] | --since <ref> | --decisions --cut <sha> --tip <sha> --out <file> [--pr <N> | --pr-body <file>] | --wait --pr <N> --head <sha> [--timeout <seconds>] | --style [local-merge|host-merge|host-squash] | --changelog-place <changelog> <block> [--write] | --marker | --mark <sha> | --bring-home <branch>  [--main <ref>] [--host gh|glab]';
 
 class UsageError extends Error {}
 
@@ -337,6 +339,21 @@ function makeAttributor(cut, before) {
 // ---- the rules -------------------------------------------------------------------
 function keepLine(f) { return 'Kept on purpose: ' + f.addedBy.slice(0, 7) + ' ' + f.file + ': ' + f.line; }
 
+// Changelog headings, shared by the rules below and the changelog placement.
+const UNRELEASED = /^##\s+\[?unreleased\b/i;
+const isSection = (l) => /^##\s/.test(l);
+const headingKey = (l) => l.replace(/[[\]]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+// A changelog's Unreleased heading is a placeholder, never work. A landing
+// keeps one: the placement joins a branch's heading into main's, or fills
+// main's empty one (issue #298). So rules 1 and 2 count such a heading as
+// landed while the landed changelog still has one; the entries under it are
+// still counted line by line. `afterLines` reads the landed file only when
+// needed.
+function headingHeld(f, text, afterLines) {
+  return /^changelog/i.test(path.basename(f)) && UNRELEASED.test(text) && afterLines().some((l) => UNRELEASED.test(l));
+}
+
 // Rule 1: each line the landing removes from main, blamed where it stood; flag
 // it when the commit that wrote it is not reachable from the cut point.
 function ruleOne(c, excl, kept) {
@@ -344,11 +361,14 @@ function ruleOne(c, excl, kept) {
   let suppressed = 0;
   const attribute = makeAttributor(c.cut, c.before);
   for (const f of changedFiles(c.before, c.after, excl)) {
+    let landed = null;
+    const afterLines = () => landed || (landed = fileLines(c.after, f));
     for (const h of hunks(c.before, c.after, f)) {
       if (h.oldCount === 0) continue;
       for (const row of blame(c.before, f, h.oldStart, h.oldCount)) {
         const text = keyText(row.text);
         if (!text.trim() || !row.sha || isAncestor(row.sha, c.cut)) continue;
+        if (headingHeld(f, text, afterLines)) continue;
         if (isKept(kept(), row.sha, f, text)) { suppressed++; continue; }
         const flag = { rule: 1, file: f, line: text.trim(), addedBy: row.sha, addedIn: attribute(row.sha) };
         flag.keep = keepLine(flag);
@@ -406,7 +426,8 @@ function ruleTwo(c, excl, kept, notes) {
       }
     }
     if (!added.size) continue;
-    const after = counts(fileLines(c.after, f), false);
+    const landed = fileLines(c.after, f);
+    const after = counts(landed, false);
     let expected;
     if (auto && !auto.conflicted.has(f)) expected = counts(fileLines(auto.tree, f), true);
     else {
@@ -416,7 +437,7 @@ function ruleTwo(c, excl, kept, notes) {
     }
     for (const [t, e] of added) {
       const missing = Math.min(e.count, (expected.get(t) || 0) - (after.get(t) || 0));
-      if (missing <= 0) continue;
+      if (missing <= 0 || headingHeld(f, t, () => landed)) continue;
       const by = (blame(c.tip, f, e.firstLine, 1)[0] || {}).sha || c.tip;
       if (isKept(kept(), by, f, t)) { suppressed++; continue; }
       const flag = { rule: 2, file: f, line: t.trim(), addedBy: by, missing };
@@ -728,27 +749,100 @@ function style(mainRef, value) {
   return { style: s, source: 'history', counts: n, scanned: list.length };
 }
 
-// Where a changelog block goes (merge-rules.md): a block that opens with its
-// own `## ` heading goes directly above the file's first `## ` section, so the
-// newest entry is on top and never inside a released version; a block of bare
-// entries goes directly below an `## Unreleased` heading; with neither anchor,
-// after the title and the blank lines under it.
-function changelogPlace(clFile, blockFile) {
-  const lines = fs.readFileSync(clFile, 'utf8').replace(/\r\n/g, '\n').split('\n');
-  const block = fs.readFileSync(blockFile, 'utf8').replace(/\r\n/g, '\n').split('\n');
-  const first = block.find((l) => l.trim()) || '';
-  const isSection = (l) => /^##\s/.test(l);
+// Where a changelog block goes (merge-rules.md). A block that opens with an
+// Unreleased heading, when the file's first `## ` section is one too: it joins
+// that heading when the two read the same (case, square brackets and spacing
+// aside), its own heading dropped and its entries directly below main's,
+// newest on top; it fills that heading when the section is empty and the text
+// differs (a release leaves `## Unreleased` empty, issue #298). Otherwise a
+// block that opens with its own `## ` heading goes directly above the file's
+// first `## ` section, so the newest entry is on top and never inside a
+// released version; a block of bare entries goes directly below an
+// `## Unreleased` heading; with neither anchor, after the title and the blank
+// lines under it. The three older rules insert the block before `line` with a
+// blank line after it, as /merge used to by hand. UNRELEASED, isSection and
+// headingKey are defined with the rules above.
+
+// A text file as lines, with what writing it back must keep: a byte order
+// mark, CRLF line ends (when the file has any) and the final newline.
+function readText(file) {
+  let text = fs.readFileSync(file, 'utf8');
+  const bom = text.charCodeAt(0) === 0xfeff;
+  if (bom) text = text.slice(1);
+  const eol = /\r\n/.test(text) ? '\r\n' : '\n';
+  text = text.replace(/\r\n/g, '\n');
+  const finalNewline = text.endsWith('\n');
+  const lines = text.split('\n');
+  if (finalNewline) lines.pop();
+  return { lines, bom, eol, finalNewline };
+}
+
+// The block's lines without the blank lines around it.
+function blockLines(blockFile) {
+  const lines = readText(blockFile).lines;
+  let a = 0;
+  let b = lines.length;
+  while (a < b && !lines[a].trim()) a++;
+  while (b > a && !lines[b - 1].trim()) b--;
+  return lines.slice(a, b);
+}
+
+// The one decision both modes share: the answer (`line`, `rule`, and
+// `replaces` when a fill takes the place of main's heading) and the edit that
+// --write splices in (`start`, `remove`, `insert`).
+function placeBlock(lines, block) {
+  const first = block[0] || '';
+  const before = (n, rule) => ({ line: n + 1, rule, start: n, remove: 0, insert: block.concat(['']) });
   if (isSection(first)) {
     const i = lines.findIndex(isSection);
-    if (i >= 0) return { line: i + 1, rule: 'above the first section' };
+    if (i >= 0) {
+      if (UNRELEASED.test(first) && UNRELEASED.test(lines[i])) {
+        let end = i + 1;
+        while (end < lines.length && !isSection(lines[end])) end++;
+        let k = i + 1;
+        while (k < end && !lines[k].trim()) k++;
+        if (headingKey(first) === headingKey(lines[i])) {
+          // Main's heading line stays; the blank lines under it give way to
+          // the block's entries with one blank line on each side.
+          const body = block.slice(1);
+          while (body.length && !body[0].trim()) body.shift();
+          const insert = [''].concat(body, k < lines.length ? [''] : []);
+          return { line: k + 1, rule: 'joins the Unreleased heading', start: i + 1, remove: k - (i + 1), insert };
+        }
+        if (k === end) {
+          return { line: i + 1, rule: 'fills the empty Unreleased heading', replaces: end - i, start: i, remove: end - i, insert: block.concat(end < lines.length ? [''] : []) };
+        }
+      }
+      return before(i, 'above the first section');
+    }
   } else {
-    const u = lines.findIndex((l) => /^##\s+\[?unreleased\b/i.test(l));
-    if (u >= 0) return { line: u + 2, rule: 'below the Unreleased heading' };
+    const u = lines.findIndex((l) => UNRELEASED.test(l));
+    if (u >= 0) return before(u + 1, 'below the Unreleased heading');
   }
   const t = lines.findIndex((l) => /^#\s/.test(l));
   let at = t >= 0 ? t + 1 : 0;
   while (at < lines.length && !lines[at].trim()) at++;
-  return { line: at + 1, rule: 'after the title' };
+  return before(at, 'after the title');
+}
+
+// The read-only answer: where the block goes, and by which rule.
+function changelogPlace(clFile, blockFile) {
+  const p = placeBlock(readText(clFile).lines, blockLines(blockFile));
+  const out = { line: p.line, rule: p.rule };
+  if (p.replaces) out.replaces = p.replaces;
+  return out;
+}
+
+// --write: make that edit in the file. The lines are spliced, never passed
+// through String.replace, so a `$'` or `$&` in a block lands as typed.
+function changelogWrite(clFile, blockFile) {
+  const f = readText(clFile);
+  const p = placeBlock(f.lines, blockLines(blockFile));
+  f.lines.splice(p.start, p.remove, ...p.insert);
+  fs.writeFileSync(clFile, (f.bom ? '﻿' : '') + f.lines.join(f.eol) + (f.finalNewline ? f.eol : ''));
+  const out = { line: p.line, rule: p.rule };
+  if (p.replaces) out.replaces = p.replaces;
+  return Object.assign(out, { written: true });
 }
 
 // ---- bringing a worktree's records home (issue #266) -------------------------------
@@ -1058,7 +1152,7 @@ function finish(result, flags, suppressed, notes) {
 // ---- arguments ---------------------------------------------------------------------
 const VALUE_FLAGS = new Set(['--before', '--after', '--cut', '--tip', '--kept', '--since', '--main', '--pr', '--pr-body', '--mark', '--out', '--head', '--timeout', '--bring-home', '--host']);
 const OPTIONAL_VALUE_FLAGS = new Set(['--record-cut', '--style']);
-const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait']);
+const BARE_FLAGS = new Set(['--landing', '--marker', '--decisions', '--wait', '--write']);
 function parseArgs(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
@@ -1080,6 +1174,7 @@ function parseArgs(argv) {
 
 function main(argv) {
   const o = parseArgs(argv);
+  if (o['--write'] && !o['--changelog-place']) throw new UsageError('--write goes with --changelog-place');
   if (o['--host'] !== undefined && o['--host'] !== 'gh' && o['--host'] !== 'glab') throw new UsageError('--host takes gh or glab');
   HOST_ANSWER = o['--host'] || null;
   const top = gitTry(['rev-parse', '--show-toplevel']);
@@ -1088,7 +1183,8 @@ function main(argv) {
   const notes = [];
   if (o['--changelog-place']) {
     const [cl, block] = o['--changelog-place'];
-    return finish(Object.assign({ mode: 'changelog-place' }, changelogPlace(path.resolve(cl), path.resolve(block))), [], 0, notes);
+    const place = o['--write'] ? changelogWrite : changelogPlace;
+    return finish(Object.assign({ mode: 'changelog-place' }, place(path.resolve(cl), path.resolve(block))), [], 0, notes);
   }
   if (o['--wait']) {
     const r = waitMergeable(o);
