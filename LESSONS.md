@@ -544,3 +544,10 @@
 
 - **Before saying a check will not flag a change, read which commits the check compares.**
 - **The test gate shows a suite's lines only when it fails; guard an old case by its absence from the failure list.**
+
+## Issues 292 and 299 (the test rig from a side copy)
+
+- **Name the repository in a check by a fixed name, never by its folder: a side copy's folder is worktree-<n>.**
+- **Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.**
+- **An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.**
+- **A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.**

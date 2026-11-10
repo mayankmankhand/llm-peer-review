@@ -58,6 +58,7 @@ A guard keyed on commit ancestry must survive squash and rebase landings.
 A guard keyed on commit ancestry must survive squash and rebase landings: both rewrite the commit, so "is it in my history" never turns true and the guarded item never closes.
 A guard reading shell text needs a hostile case for every place a command can start, not just wrappers.
 A guard that judges one text and runs another is a bypass by construction: execute the tokens you judged.
+A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.
 A headless lead that schedules a wake-up stays alive until it fires, and its printed cost then covers only the last turn: run headless leads with `--disallowedTools ScheduleWakeup`.
 A headless session inherits the user's extra working folders, so acceptEdits there can edit the repo: start it with `--setting-sources project,local` and prove the fence with a probe that tries the forbidden write.
 A judge validated on the fallback agent is not validated as shipped: the fallback's extra tools let it compare bytes instead of looking.
@@ -171,6 +172,7 @@ An audit with only pass and kill discards correct findings that carry the wrong 
 An end-to-end test harness must isolate every global registry a session touches, not only the plugin it loads.
 An everyday test command cannot be the release gate, because the gate's version checks fail on purpose between releases.
 An exclusion applied to one arm of a comparison must apply to the other arm too.
+An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.
 An inherited CSS property belongs on the shared root, not copied into each file.
 An inline read of a missing file is not an empty string: Claude Code inserts its own "no output" note, so label every optional read.
 Ask a consequential choice in plain text the owner answers in words, never as clickable options.
@@ -297,6 +299,7 @@ Measure a new inline command form in a real default-mode session before building
 Measure how each reader is cut before choosing how a file gets read: the Read tool returned the 35 KB lessons index whole where a Bash `cat` is cut to a 2 KB preview, and `sed` line ranges would have asked for permission every cycle.
 Moving text verbatim between files keeps its links but breaks its prose pointers: sweep for "above", "below" and quoted heading names before calling the move done.
 Mutation-testing a group of assertions is not mutation-testing each assertion.
+Name the repository in a check by a fixed name, never by its folder: a side copy's folder is worktree-<n>.
 Name what a cut keeps by its place in the file, not by what that place usually holds.
 Narrowing an agent's tools changes behavior: first check what every caller dispatching through it runs.
 Never cd into a subfolder in a Bash call: the shell keeps that folder for the next call, so the project's relative paths miss; start each call from the project root instead.
@@ -309,6 +312,7 @@ Numbers quoted in release notes mid-cycle go stale; fill counts in the last veri
 On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.
 On the standing review page, name fixed findings by what changed, not by number.
 On the standing review page, name fixed findings by what changed, not by number: carried findings are renumbered and can reuse this run's numbers.
+Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.
 Parse tool output with state and explicit decoding, never by prefix alone: content impersonates structure.
 Patch a workflow you will resume by appending work after its existing calls, never by inserting it.
 Per-session temp file paths solve concurrent-tab collisions; session-ID recovery needs to handle the multi-tab case.

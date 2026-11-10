@@ -4,6 +4,18 @@
 
 ## Unreleased
 
+**The test rig's leak warning works from a side copy, and Pocket's answer key credits a plainly worded stored-script catch (#292, #299).** Both are maintainer tooling; the one shipped file that changes is the starter lessons list.
+
+### Fixed
+
+- **Maintainer only: the network warning in `scripts/quality-check.js` no longer depends on the folder the rig runs from (#292).** It named this repository by the folder's name, so a practice run in a side copy (a folder named `worktree-<n>`) could clone or read the repository through the GitHub CLI with no warning. It now uses the fixed name `llm-peer-review`, matched whole and in any letter case, looks at every `gh` subcommand (`gh release download` and `gh search` included), and no longer flags a `/contents/` read of another repository. A re-check of the nine saved Pocket runs found no fetch the old check had missed.
+- **Maintainer only: Pocket's answer key credits the stored-script bug in plain words (#299).** v8.0.18's run 1 caught the bug as a Block in words the key did not know ("raw page markup", "stored scripts"), so it scored as a miss. The key gains plain-consequence patterns, each guarded against Pocket's nearby problems (export cells that run as formulas, the server overwriting what the import and close-month scripts wrote, the month menu that needs scripts), and its old "raw ... note" pattern now also needs a page word, because it credited a spreadsheet-export finding. A fresh helper wrote 20 plain wordings of the bug and 10 of the nearby problems (`scripts/fixtures/quality-check/pocket/wordings.jsonl`): the old key caught 8 of the 20 and 1 of the 10; the new patterns caught 15 of 20 on the first score and none of the 10, then 20 of 20 after one change made from the five misses, so the test that holds them guards reach rather than measuring it. Re-checking all nine saved Pocket runs moved exactly one catch, run 1's, and lost none; v8.0.18 re-scores at 2 of 2 on the bug, still PASS. Each saved run keeps its old result beside it as `analysis.before-292-299.json`.
+- **The starter lessons list carries the two lessons the #298 cycle added**, so the seed-history suite passes again and `/tk:upgrade` recognizes those two lessons as the toolkit's own.
+
+### Why
+
+When the next release changes the review path, its catch-rate check compares against v8.0.18's two Pocket runs. With run 1's catch scored as a miss, the stored-script bug read 1 of 2 there and counted as noise rather than a reliable catch; it now reads 2 of 2, so a release that loses it in both runs fails the check.
+
 <!-- At release: re-record the prompt-load baseline (commands/merge.md grew 166 words with the approved edits). -->
 
 **Landing a branch right after a release no longer leaves two Unreleased headings in the changelog (#298).** `/tk:merge` now places a branch's release-notes block with a script that writes the change itself, so the block joins or fills main's Unreleased heading instead of stacking a second one above it.
