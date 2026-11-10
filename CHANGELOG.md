@@ -4,6 +4,23 @@
 
 ## Unreleased
 
+<!-- At release: re-record the prompt-load baseline (commands/review.md grew 12 words and skills/loop-rules/SKILL.md 86 with the approved edits). -->
+
+**A review no longer undoes a correct fix just because the fix kept the words its check searched for, and you can allow one more try at a fix (#288, #294, #295).** Three gaps in how `/tk:review` fixes findings and checks its own fixes are closed.
+
+### Added
+
+- **One more try, on your word.** When a fix has failed twice, the question you get now offers "try once more". Say yes and the review fixes that one finding a third time, records the round as yours in its log, and marks that finding's line in the review summary `(round 3, the owner's choice)`. It works once per finding, and only after two tries have really failed. Nothing opens a third try by itself, and if the third fails too, the fix is undone and you are asked again without that answer.
+
+### Fixed
+
+- **Reviews: a fix that keeps the searched words.** A finding's proof is often a file search, and the recheck after the fix expects that search to come back empty. A correct fix can keep the words (a button that keeps its label while what it does changes), and such a fix used to read as failed, twice, and be undone. A failed recheck of that kind now goes to a fresh verifier, a separate helper that reads the change itself and decides. That costs one extra helper call and spends no fix try. A failing test, a failing build, and a recheck whose pass condition the fixing session wrote itself still fail outright.
+- **Reviews: hidden-defect notes are no longer dropped.** When the double-check finds that a true finding is hidden today by another defect, it says so in a note. The script that reads its reply now lists those notes for each finding, beside the notes it already kept, so the review summary can carry them.
+
+### Why
+
+A recheck that searches for words can tell that the words are still there, not whether the fix worked. Until now that was enough to fail a correct fix twice and undo it. In one trial on each side, the fresh verifier called a real fix that kept its wording fixed and a fake one not fixed. That is a spot check and not a rate, so issue #300 reads the real rate after ten reviews. The extra try was already happening by hand: an approved third try had no place in the review's log and was written into the second, which made the log wrong. The hidden-defect notes were being written and then lost one step later.
+
 <!-- At release: re-record the prompt-load baseline (commands/merge.md grew 166 words with the approved edits). -->
 
 **Landing a branch right after a release no longer leaves two Unreleased headings in the changelog (#298).** `/tk:merge` now places a branch's release-notes block with a script that writes the change itself, so the block joins or fills main's Unreleased heading instead of stacking a second one above it.
