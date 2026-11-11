@@ -2,6 +2,29 @@
 
 <!-- The "What's new since v4.3.3" rollup lives at the BOTTOM of this file. When cutting a release, add the new "## vX.Y.Z" section right below this comment and extend that rollup paragraph with one sentence for the new version. -->
 
+## Unreleased
+
+**`/tk:setup` and `/tk:upgrade` now stop with one plain line when they are started somewhere they cannot work, and the upgrade's two run-once checks reach the projects that never got them (#289, #291).**
+
+### Fixed
+
+- **`/tk:upgrade`: the two run-once checks reach every project.** Two of the upgrade's checks promise to run once per project: Claude Code's prompt audit of your own instruction files (C-13), and a question about how much text your own prompt files load up front (C-20). A project set up fresh on a check's version or later, or moved from a copy-install that new, never got it, because the upgrade only ran a check newer than the version the project was last audited at. Such a project now gets each one on its next upgrade, once. The upgrade's summary names them (`2 run-once check(s) owed [C-13, C-20]`), and its closing stamp records them in `.claude/.toolkit-state.json` as `onceDone`, so neither runs again and a finding you decline does not come back.
+- **`/tk:setup` and `/tk:upgrade`: a plain stop in a side copy.** Started in a side copy of a project (a git worktree), the upgrade ran from a copy that keeps its own record of the permission rows you declined and of the findings already ruled out, and that has none of the files git ignores. It asked again what you had settled and still marked the project as audited, and setup wrote a second settings file there. Both now stop with one line that names the main copy, and read and change nothing. The version notice at the start of a session in a side copy names the main copy too.
+- **`/tk:setup` and `/tk:upgrade`: a plain stop for a project kept below the top of a bigger repository.** Both treat a repository's top folder as the project. With the toolkit's files in a subfolder, the upgrade read the top folder instead and found nothing of yours, and setup would have written a second install at the top. Both now stop with one line that names the two folders, and the install guide gives the two ways out. An earlier fix for the upgrade's earlier-notes offer in such a project had changed nothing (#291).
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks. Run `/tk:upgrade` in each project's main copy, at the top folder of its repository; [Where to run setup and the upgrade](docs/INSTALL.md#where-to-run-setup-and-the-upgrade) says what the stop line means.
+- A project that began on 7.5.0 or later gets Claude Code's prompt audit of its own instruction files on this upgrade, and one that began on 8.0.7 or later also gets the prompt-size question. The audit takes a few minutes, and every edit it proposes waits for your tick on the upgrade's approval page.
+- A project whose state file was never saved to git has no record of the version it began on, so it gets both checks once more, even if it had them before.
+- A copy-install for other editors is not affected: it has no `/tk:upgrade`, and its own installer is unchanged.
+
+### Why
+
+The upgrade decided what to run from one number, the version a project was last audited at. That works for a check about the toolkit's own text, and it fails for a check that promises one run per project, because a project that starts after the check arrived is never behind it. The run-once checks now have a record of their own.
+
+Every toolkit script takes a repository's top folder as the project, and some records are kept per working copy, outside git. Supporting a side copy or a subfolder would mean changing all of them, so setup and the upgrade now say where to run instead of running in the wrong place.
+
 ## v8.0.19 - Fewer Stops, Fairer Rechecks (2026-11-10)
 
 **A review no longer undoes a correct fix just because the fix kept the words its check searched for, you can allow one more try at a fix, and planning and reviews no longer stop to ask for your approval at two of the toolkit's own checks (#288, #294, #295, #296, #297, #298).** A failed recheck of a file search now goes to a fresh verifier, which reads the change itself and decides, without spending a fix try. `/tk:merge` keeps one Unreleased heading in the changelog when several branches land after a release. Two maintainer tools are fixed as well (#292, #299).
