@@ -1794,6 +1794,42 @@ section("290 accept: the owner's yes, and the count of misses and repairs (issue
     refusedE.status === 1 && beforeE.status === 0 && (beforeE.byId.n || {}).verdict === 'pass' && same
       && afterE.status === 0 && (afterE.byId.n || {}).verdict === 'pass' && se.status === 'proved' && se.repaired === true,
     one(JSON.stringify(se) + ' ' + refusedE.stderr));
+
+  // The miss record's own guards (review of #290). A link where the step's
+  // folder should be stops the record before anything is written through it.
+  const elsewhere = path.join(sandbox, 'elsewhere-a290f');
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.mkdirSync(path.join(proj, 'reports', 'checks', 'PLAN-a290f'), { recursive: true });
+  try { fs.symlinkSync(elsewhere, stepDir('PLAN-a290f')); } catch (e) { /* exists */ }
+  write('a290f.txt', 'one\none\n');
+  const linked = run(planWith('PLAN-a290f', [target('a290f.txt')]).concat(['--phase', 'after']));
+  check('290 miss record: a link at the step folder is refused and nothing is written through it',
+    linked.status === 1 && /The miss was not recorded: \S+ is a link or not a folder/.test(linked.stderr) && fs.readdirSync(elsewhere).length === 0,
+    one(linked.stderr));
+
+  // A miss file the runner did not write for this step is named in the tally's
+  // notes and never counted: bad JSON, no valid time, another plan, a link.
+  write('a290g.txt', 'one\n');
+  const pg = planWith('PLAN-a290g', [target('a290g.txt')]);
+  run(pg.concat(['--phase', 'before']));
+  write('a290g.txt', 'one\none\n');
+  run(pg.concat(['--phase', 'after']));
+  const missFile = path.join(stepDir('PLAN-a290g'), 'missed.json');
+  const tallyG = () => firstStep(run(['--plan', 'plans/PLAN-a290g.md', '--tally']));
+  const withMiss = (text) => { fs.rmSync(missFile, { force: true }); fs.writeFileSync(missFile, text); return tallyG(); };
+  const badJson = withMiss('{"plan": ');
+  const noTime = withMiss(JSON.stringify({ plan: 'plans/PLAN-a290g.md', step: '1', at: 'never' }));
+  const otherPlan = withMiss(JSON.stringify({ plan: 'plans/PLAN-other.md', step: '1', at: new Date().toISOString() }));
+  fs.rmSync(missFile, { force: true });
+  fs.writeFileSync(path.join(sandbox, 'miss-a290g.json'), JSON.stringify({ plan: 'plans/PLAN-a290g.md', step: '1', at: new Date().toISOString() }));
+  fs.symlinkSync(path.join(sandbox, 'miss-a290g.json'), missFile);
+  const viaLink = tallyG();
+  const uncounted = (s, why) => s.status === 'proved' && s.missed === undefined && s.repaired === undefined
+    && (s.notes || []).indexOf('the miss record cannot count: ' + why) !== -1;
+  check("290 miss record: a miss file that is not the runner's own is named in the tally's notes and never counted",
+    uncounted(badJson, 'missed.json is not valid JSON') && uncounted(noTime, 'missed.json has no valid time (at)')
+      && uncounted(otherPlan, 'missed.json was written for another plan or step') && uncounted(viaLink, 'missed.json is a link or not a file'),
+    one(JSON.stringify([badJson, noTime, otherPlan, viaLink])));
 });
 
 // --- 290. a green after run names the next step's before command (issue #290)
