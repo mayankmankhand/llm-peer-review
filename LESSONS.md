@@ -396,7 +396,6 @@
 
 - **Never share a standing page that closes findings by file between branches.**
 - **Run a reviewer's suggested fix in a scratch case before applying it.**
-- **After adding a lesson lead, rebuild `seed/toolkit-lesson-leads.txt` with `scripts/seed-history.js`.**
 
 ## Issue 241 (check a claim at its source)
 

@@ -617,6 +617,7 @@
   - Repeat on 2026-10-28, in the #281 documentation step: the lessons commit added two leads without the rebuild, and the next full test run failed its leads-list check until the list was rebuilt with `--leads` alone.
   - Repeat on 2026-11-08, in the harness report check's /document: five new leads went into the index and the seed-history suite failed until the list was rebuilt. The suite is the check that catches it, so nothing shipped wrong.
   - Repeat on 2026-11-10, in the #298 `/document` (`f575d8a`): two new leads went into the index without the rebuild, and the #296/#297 Verify step's full run failed the leads-list check on a branch that touched neither file. Fourth incident, so the owner was offered an automatic check.
+  - Retired from the index on 2026-11-11, on the owner's word: #301 moved the check to release runs, so a new lead no longer fails an everyday test run; `npm test` prints an `info lesson list` line, and the release check's `lesson list` line fails a release until release step 1 rebuilds the list. Receipt: commit 95b3872.
 
 ## Issue 241 (check a claim at its source)
 
