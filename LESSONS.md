@@ -551,3 +551,8 @@
 - **Once you read a held-out set's misses to fix against them, it is no longer held out: the first score is the measure.**
 - **An exclusion list of bare words also drops true matches that use them; exclude the nearby problem's own phrases.**
 - **A guard that reads a file its own step creates has no before state: aim it at a file that exists, or make it a target.**
+
+## Issues 289 and 291 (run-once checks and the wrong-folder stop)
+
+- **No character filter makes a name safe to print into text a model reads: print no name, or a fixed phrase.**
+- **`git worktree list` names the main copy first only when that entry holds a `.git`; test it before sending anyone there.**

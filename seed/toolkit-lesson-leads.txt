@@ -307,6 +307,7 @@ Never cd into a subfolder in a Bash call; start each call from the project root 
 Never interpolate shell variables into inline `node -e` strings.
 Never share a standing page that closes findings by file between branches.
 Never write a literal HTML comment as an example inside an HTML comment.
+No character filter makes a name safe to print into text a model reads: print no name, or a fixed phrase.
 Normalize an id an agent returns before a gate matches it: asked for a bare id, agents return the id with a gloss.
 Numbers quoted in release notes mid-cycle go stale; fill counts in the last verify step.
 On a pass the release gate prints one line per suite and no case names: confirm a passing case with a grep of the test file, not the gate's output.
@@ -464,6 +465,7 @@ XML tags in prompts are a real thing, not just hype.
 `failglob` beats `nullglob`, so a nullglob guard does not stop an empty-directory abort.
 `for i in "${!array[@]}"` is the idiomatic Bash way to iterate parallel indexed arrays.
 `gh pr list --state merged --limit 1` sorts by CREATION date, not merge date.
+`git worktree list` names the main copy first only when that entry holds a `.git`; test it before sending anyone there.
 `npm test -- --suites X` still runs the plugin build check: a step that edits a file under `.claude/` rebuilds `plugin/` before its after run, or every suite reads red.
 `plugin update` follows a pointer that `marketplace update` moves; one without the other is a no-op.
 `session` in the model roster means your own model's alias: dispatching finders one tier down under mode best silently downgrades the review; read the roster's value, never a familiar default.
