@@ -1806,6 +1806,13 @@ section("290 accept: the owner's yes, and the count of misses and repairs (issue
   check('290 miss record: a link at the step folder is refused and nothing is written through it',
     linked.status === 1 && /The miss was not recorded: \S+ is a link or not a folder/.test(linked.stderr) && fs.readdirSync(elsewhere).length === 0,
     one(linked.stderr));
+  // The tally reads nothing through that link either: a miss file planted on
+  // its far side is never counted, and the link is named in the step's notes.
+  fs.writeFileSync(path.join(elsewhere, 'missed.json'), JSON.stringify({ plan: 'plans/PLAN-a290f.md', step: '1', at: new Date().toISOString() }));
+  const linkedTally = firstStep(run(['--plan', 'plans/PLAN-a290f.md', '--tally']));
+  check('290 miss record: the tally names a link at the step folder and counts no miss through it',
+    linkedTally.missed === undefined && (linkedTally.notes || []).some((n) => /^the miss record cannot count: \S+ is a link or not a folder$/.test(n)),
+    one(JSON.stringify(linkedTally)));
 
   // A miss file the runner did not write for this step is named in the tally's
   // notes and never counted: bad JSON, no valid time, another plan, a link.
