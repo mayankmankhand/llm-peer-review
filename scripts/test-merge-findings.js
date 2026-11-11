@@ -695,6 +695,10 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
       && /keep\.txt/.test(s1) && !s1.includes('keep me') && /img\.bin/.test(s1)
       && (m1.untracked || {}).new && m1.untracked.new.join() === 'img.bin,new.txt,src/a.test.js' && m1.untracked.changed.join() === 'notes.txt' && m1.untracked.unchanged.join() === 'keep.txt' && m1.untracked.binary.join() === 'img.bin',
     JSON.stringify(m1.untracked) + s1.slice(-500));
+  // #302 item 2 added ignored files to the shards; a call whose findings cite
+  // only tracked files must write exactly what it wrote before.
+  check11('a verify call that cites no ignored file writes no ignored-file section and no ignored field',
+    r1.status === 0 && !('ignored' in m1) && !/file git ignores/.test(s1) && !/file git ignores/.test(s2), JSON.stringify(Object.keys(m1)));
 
   // Verdicts: a verifier's return against the first shard, recorded under round 1,
   // then the checks runner's results recorded for the mechanical findings.
@@ -820,6 +824,121 @@ console.log('\n11. --verify writes the recheck rows, the verify shards and the l
   const mechOnly = run(['--verify', file2, '--receipts', receipts, '--scope', scope2, '--out', out2, '--root', repo2, '--mechanical', 'R1']);
   check11('an empty diff with a judgment ID refuses with empty_diff and writes nothing; a mechanical-only call proceeds',
     empty.status === 1 && /"error":"empty_diff"/.test(empty.stderr) && writtenByEmpty === 0 && mechOnly.status === 0 && fs.existsSync(path.join(out2, 'recheck-1.json')), 'mechanical only: ' + mechOnly.stderr + mechOnly.stdout.slice(0, 200) + ' | empty: ' + empty.stderr);
+
+  // #302 item 2: a fix to a file git ignores (the plan file, in the v8.0.19
+  // practice run) reached no verifier, because git diff and the untracked list
+  // never show such a file, so the mode refused with empty_diff and the review
+  // asked the user. A cited ignored file that changed after the review started is
+  // now shown whole. Every file time below is set explicitly against the scope's
+  // generatedAt, so no case depends on how fast the test runs.
+  {
+    const repo3 = path.join(sandbox, 'verify-11-ignored');
+    fs.mkdirSync(repo3);
+    const g3 = (args) => spawnSync('git', ['-C', repo3, '-c', 'user.email=t@example.invalid', '-c', 'user.name=t', '-c', 'commit.gpgsign=false'].concat(args), { encoding: 'utf8' });
+    const w3 = (rel, text) => { fs.mkdirSync(path.dirname(path.join(repo3, rel)), { recursive: true }); fs.writeFileSync(path.join(repo3, rel), text); };
+    g3(['init', '-q']);
+    w3('.gitignore', 'plans/\nreports/\n.env*.local\n');
+    w3('src/app.js', 'run();\n');
+    g3(['add', '-A']); g3(['commit', '-q', '-m', 'reviewed tree']);
+    const head3 = g3(['rev-parse', 'HEAD']).stdout.trim();
+    const STARTED = Date.parse('2026-11-10T12:00:00.000Z');
+    const touch3 = (rel, offsetSeconds) => { const t = new Date(STARTED + offsetSeconds * 1000); fs.utimesSync(path.join(repo3, rel), t, t); };
+    const scopeIgnored = (name, withStart) => scopeFile(name, Object.assign(withStart ? { generatedAt: new Date(STARTED).toISOString() } : {},
+      { range: { base: head3, end: head3 }, uncommitted: { baseline: null, untracked: { files: [], added: 0, deleted: 0 } } }));
+    const scopeStart = scopeIgnored('scope-11-ignored.json', true);
+    const scopeNoStart = scopeIgnored('scope-11-ignored-nostart.json', false);
+    const receipts3 = path.join(sandbox, 'receipts-11-ignored');
+    fs.mkdirSync(receipts3);
+    for (let i = 1; i <= 5; i++) fs.writeFileSync(path.join(receipts3, 'plan-' + i + '.txt'), 'saved output of plan-' + i + '\nexit 0\n');
+    const outIg = (name) => { const d = path.join(sandbox, 'verify-out-11-' + name); fs.mkdirSync(d); return d; };
+    const shardIn = (dir) => { const p = path.join(dir, 'verify-1-1.txt'); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''; };
+    const fileIg = jsonl([f('plan', 'plans/PLAN-x.md', 3, 'plans/PLAN-x.md:ticked', 'Should fix. The plan ticks the skipped browser check as done.', { check: "grep -n 'x] Browser check' plans/PLAN-x.md", expect: { match: 'Browser' } })]);
+    const VI = (scopePath, outDir) => ['--verify', fileIg, '--receipts', receipts3, '--scope', scopePath, '--out', outDir, '--root', repo3, '--judgment', 'R1'];
+
+    // The fix lands in the ignored plan a minute after the review started.
+    w3('plans/PLAN-x.md', '# Plan\n\n- [ ] Browser check (skipped: no browser in this run)\n');
+    touch3('plans/PLAN-x.md', 60);
+    const oFix = outIg('ignored-fix');
+    const rFix = run(VI(scopeStart, oFix));
+    const mFix = parse(rFix) || {};
+    const sFix = shardIn(oFix);
+    check11('a judgment fix to a file git ignores reaches the verifier whole and is not refused as empty_diff',
+      rFix.status === 0 && /===== file git ignores, cited by R1: plans\/PLAN-x\.md \(/.test(sFix) && sFix.includes('- [ ] Browser check (skipped: no browser in this run)') && /starting content was not captured/.test(sFix)
+        && sFix.includes('===== end ignored file: plans/PLAN-x.md =====')
+        && mFix.ignored && JSON.stringify(mFix.ignored.shown) === '["plans/PLAN-x.md"]' && JSON.stringify(mFix.ignored.notShown) === '[]',
+      rFix.stderr + rFix.stdout.slice(0, 300));
+
+    // Not changed since the review started, or no start time in the scope: an
+    // ignored file is no fix on its own, exactly as before.
+    touch3('plans/PLAN-x.md', -60);
+    const rSame = run(VI(scopeStart, outIg('ignored-same')));
+    touch3('plans/PLAN-x.md', 60);
+    const rNoStart = run(VI(scopeNoStart, outIg('ignored-nostart')));
+    touch3('plans/PLAN-x.md', -60);
+    w3('src/app.js', 'run();\nstop();\n');
+    const oSameTracked = outIg('ignored-same-tracked');
+    const rSameTracked = run(VI(scopeStart, oSameTracked));
+    const mSameTracked = parse(rSameTracked) || {};
+    const oNoStartTracked = outIg('ignored-nostart-tracked');
+    touch3('plans/PLAN-x.md', 60);
+    const rNoStartTracked = run(VI(scopeNoStart, oNoStartTracked));
+    const mNoStartTracked = parse(rNoStartTracked) || {};
+    check11('a cited ignored file not changed since the review started does not lift the empty_diff refusal',
+      rSame.status === 1 && /"error":"empty_diff"/.test(rSame.stderr) && rNoStart.status === 1 && /"error":"empty_diff"/.test(rNoStart.stderr)
+        && rSameTracked.status === 0 && !shardIn(oSameTracked).includes('Browser check (skipped') && rNoStartTracked.status === 0 && !shardIn(oNoStartTracked).includes('Browser check (skipped'),
+      rSame.stderr + ' | ' + rNoStart.stderr + ' | ' + rSameTracked.stderr + ' | ' + rNoStartTracked.stderr);
+    check11('an unchanged cited ignored file, or one with no review start to compare, is listed as not shown with its reason',
+      (mSameTracked.ignored || {}).shown && mSameTracked.ignored.shown.length === 0 && JSON.stringify(mSameTracked.ignored.notShown) === JSON.stringify([{ path: 'plans/PLAN-x.md', why: 'not changed since the review started' }])
+        && (mNoStartTracked.ignored || {}).notShown && JSON.stringify(mNoStartTracked.ignored.notShown) === JSON.stringify([{ path: 'plans/PLAN-x.md', why: 'the scope has no review start time to compare with' }]),
+      JSON.stringify(mSameTracked.ignored || null) + JSON.stringify(mNoStartTracked.ignored || null));
+    w3('src/app.js', 'run();\n');
+
+    // Never shown, whatever their time: a path outside the project, a link (never
+    // followed), a binary, a file in the mode's own output folder, a never-push file.
+    fs.writeFileSync(path.join(sandbox, 'outside.md'), 'outside the project\n');
+    fs.symlinkSync(path.join(sandbox, 'outside.md'), path.join(repo3, 'plans', 'link.md'));
+    fs.writeFileSync(path.join(repo3, 'plans', 'blob.bin'), Buffer.from([0x89, 0x50, 0x00, 0x47, 0x0a]));
+    w3('reports/receipts/run/own.md', 'a record the mode wrote itself\n');
+    w3('.env.local', 'API_KEY=never-shown-value\n');
+    for (const rel of ['plans/blob.bin', 'reports/receipts/run/own.md', '.env.local']) touch3(rel, 60);
+    touch3('plans/PLAN-x.md', -60);
+    const cite = (rel, n) => f('plan', rel, 1, rel + ':k' + n, 'Should fix. Finding ' + n + ' about ' + rel + '.', { check: 'test -e src/app.js', expect: { exit: 0 } });
+    const fileNever = jsonl([cite('../outside.md', 1), cite('plans/link.md', 2), cite('plans/blob.bin', 3), cite('reports/receipts/run/own.md', 4), cite('.env.local', 5)]);
+    const outOwn = path.join(repo3, 'reports', 'receipts', 'run');
+    const VN = ['--verify', fileNever, '--receipts', receipts3, '--scope', scopeStart, '--out', outOwn, '--root', repo3, '--judgment', 'R1,R2,R3,R4,R5'];
+    const rNeverOnly = run(VN);
+    w3('src/app.js', 'run();\nstop();\n');
+    const rNever = run(VN);
+    const mNever = parse(rNever) || {};
+    const sNever = shardIn(outOwn);
+    const whyOf = (p) => ((((mNever.ignored || {}).notShown) || []).find((x) => x.path === p) || {}).why || '';
+    check11('a cited ignored file outside the project, behind a link, binary, inside the output folder or on the never-push list is never shown',
+      rNeverOnly.status === 1 && /"error":"empty_diff"/.test(rNeverOnly.stderr) && rNever.status === 0 && mNever.ignored && mNever.ignored.shown.length === 0
+        && /outside the project/.test(whyOf('../outside.md')) && /link/.test(whyOf('plans/link.md')) && /binary/.test(whyOf('plans/blob.bin'))
+        && /output folder/.test(whyOf('reports/receipts/run/own.md')) && /never-push/.test(whyOf('.env.local'))
+        && !sNever.includes('outside the project\n') && !sNever.includes('never-shown-value') && !sNever.includes('a record the mode wrote itself'),
+      rNeverOnly.stderr + ' | ' + rNever.stderr + JSON.stringify(mNever.ignored || null));
+    w3('src/app.js', 'run();\n');
+
+    // The never-push names are a copy of the tripwire's lists, because
+    // pre-push-check.js runs when it is required. Each list is read from its own
+    // `const NAME = [` to the next `];`, with // comments stripped first (a comment
+    // in the list quotes "push anyway"), and the parser must find names it knows
+    // are there, so a broken parser fails rather than comparing two empty lists.
+    const tripwire = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'scripts', 'pre-push-check.js'), 'utf8');
+    const listIn = (name) => {
+      const m = new RegExp('const ' + name + ' = \\[([\\s\\S]*?)\\];').exec(tripwire);
+      if (!m) return null;
+      const code = m[1].split('\n').map((l) => l.replace(/\/\/.*$/, '')).join('\n');
+      return Array.from(code.matchAll(/"([^"]+)"/g), (x) => x[1]);
+    };
+    const tripPaths = listIn('NEVER_PUSH_PATHS');
+    const tripNames = listIn('NEVER_PUSH_BASENAMES');
+    check11('the never-push names match the tripwire lists',
+      Array.isArray(tripPaths) && Array.isArray(tripNames) && tripPaths.includes('.claude/settings.local.json') && tripNames.includes('.env.local') && tripNames.includes('_netrc') && !tripNames.includes('push anyway')
+        && JSON.stringify(mod.NEVER_PUSH_PATHS) === JSON.stringify(tripPaths) && JSON.stringify(mod.NEVER_PUSH_BASENAMES) === JSON.stringify(tripNames),
+      JSON.stringify({ tripPaths, tripNames, copyPaths: mod.NEVER_PUSH_PATHS, copyNames: mod.NEVER_PUSH_BASENAMES }));
+  }
 
   // The guards --shards already keeps: an existing file, a missing receipt, a bare call.
   const out3 = path.join(sandbox, 'verify-out-11-taken');

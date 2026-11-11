@@ -1196,7 +1196,11 @@ function readScope(file) {
   const untracked = u.untracked && Array.isArray(u.untracked.files) ? u.untracked.files.filter((f) => f && typeof f.path === 'string') : [];
   const baseline = typeof u.baseline === 'string' && /^[0-9a-f]{7,40}$/.test(u.baseline) ? u.baseline : null;
   const end = parsed && parsed.range && typeof parsed.range.end === 'string' && parsed.range.end !== '' ? parsed.range.end : null;
-  return { baseline, end, untracked };
+  // When the review started (#302 item 2): session-init stamps every scope it
+  // writes with generatedAt, and a file git ignores counts as part of the fixes
+  // only when it changed after that. No stamp, no start time: none counts.
+  const started = parsed && typeof parsed.generatedAt === 'string' ? Date.parse(parsed.generatedAt) : NaN;
+  return { baseline, end, untracked, startedAt: Number.isFinite(started) ? started : null };
 }
 
 // An untracked file now, counted the way session-init counts one for the
@@ -1228,6 +1232,72 @@ function untrackedNow(root, outDir) {
     files.push(countedFile(root, rel));
   }
   return files;
+}
+// The tripwire's never-push names (.claude/scripts/pre-push-check.js), copied
+// because that script runs when it is required; scripts/test-merge-findings.js
+// holds this copy to the tripwire's source text. A file under one of these
+// names may hold secrets, so the verify mode never copies it into a shard.
+const NEVER_PUSH_PATHS = ['.claude/settings.local.json'];
+const NEVER_PUSH_BASENAMES = [
+  '.env', '.env.local',
+  'correction-ledger.jsonl', 'correction-heartbeat.jsonl',
+  'correction-rollup.json', 'correction-axial-map.json',
+  'correction-fixes.jsonl', 'correction-backfill.jsonl',
+  'correction-rows.json', 'correction-backfill-rows.json',
+  '.netrc', '_netrc',
+];
+// The files git ignores that the judgment findings cite (#302 item 2). git diff
+// and the untracked list never show such a file, so a fix to one (the plan
+// file, in the v8.0.19 practice run) reached no verifier and the mode refused
+// it with empty_diff. Each cited path is judged in this order:
+//   - a path whose text leaves the project is never read, and is listed;
+//   - a missing file, and one git does not ignore, adds no entry: the diff or
+//     the untracked list already shows a tracked or untracked file;
+//   - a link is never followed; a file whose real location leaves the project,
+//     a file in the mode's own output folder, a never-push name and a binary
+//     are never read into a shard; each is listed with its reason;
+//   - a file not changed since the review started (the scope's generatedAt),
+//     or with no start time to compare, is listed too, and never counts as a fix.
+// What is left is shown whole, since its starting content was never captured.
+// Returns null when no cited path is ignored or outside the project, so a call
+// that cites none writes exactly what it wrote before.
+function ignoredCited(root, outDir, ids, byId, startedAt) {
+  const inside = (p, dir) => p === dir || p.startsWith(dir + path.sep);
+  const rootAbs = path.resolve(root);
+  const rootReal = fs.realpathSync(rootAbs);
+  let outReal = path.resolve(outDir);
+  try { outReal = fs.realpathSync(outReal); } catch (e) { /* not made yet: its own path */ }
+  const citedBy = new Map();
+  for (const id of ids) {
+    const m = byId.get(id);
+    const rel = m && m.file && typeof m.file.relPath === 'string' ? m.file.relPath.trim() : '';
+    if (!rel) continue;
+    if (!citedBy.has(rel)) citedBy.set(rel, []);
+    citedBy.get(rel).push(id);
+  }
+  const shown = [];
+  const notShown = [];
+  for (const [rel, citing] of citedBy) {
+    const abs = path.resolve(rootAbs, rel);
+    if (!inside(abs, rootAbs)) { notShown.push({ path: rel, why: 'outside the project, never read' }); continue; }
+    let st;
+    try { st = fs.lstatSync(abs); } catch (e) { continue; }
+    if (git(rootAbs, ['check-ignore', '-q', '--', path.relative(rootAbs, abs)]).status !== 0) continue;
+    if (st.isSymbolicLink()) { notShown.push({ path: rel, why: 'a link, never followed' }); continue; }
+    if (!st.isFile()) continue;
+    let real;
+    try { real = fs.realpathSync(abs); } catch (e) { continue; }
+    if (!inside(real, rootReal)) { notShown.push({ path: rel, why: 'outside the project, never read' }); continue; }
+    if (inside(real, outReal)) { notShown.push({ path: rel, why: "in the verify mode's own output folder" }); continue; }
+    const relReal = path.relative(rootReal, real).split(path.sep).join('/');
+    if (NEVER_PUSH_PATHS.includes(relReal) || NEVER_PUSH_BASENAMES.includes(path.basename(real))) { notShown.push({ path: rel, why: 'a never-push file, which may hold secrets' }); continue; }
+    const buf = fs.readFileSync(real);
+    if (buf.subarray(0, 8000).includes(0)) { notShown.push({ path: rel, why: 'binary' }); continue; }
+    if (startedAt === null) { notShown.push({ path: rel, why: 'the scope has no review start time to compare with' }); continue; }
+    if (st.mtimeMs <= startedAt) { notShown.push({ path: rel, why: 'not changed since the review started' }); continue; }
+    shown.push({ path: rel, ids: citing, content: buf.toString('utf8') });
+  }
+  return shown.length || notShown.length ? { shown, notShown } : null;
 }
 function fixesDiff(root, sha) {
   const r = git(root, ['diff', '--no-color', '--no-ext-diff', sha]);
@@ -1376,6 +1446,7 @@ function buildVerify(parsed, scope, opts) {
   const files = [];
   let diffFrom = null;
   let untracked = null;
+  let ignored = null;
   const judgment = lists.judgment.slice().sort(byNumber);
   if (judgment.length) {
     if (scope.baseline) diffFrom = { kind: 'baseline', sha: scope.baseline };
@@ -1391,7 +1462,10 @@ function buildVerify(parsed, scope, opts) {
     const unchanged = known.filter((f) => !changed.includes(f));
     const binaries = now.filter((f) => f.binary);
     untracked = { new: fresh.map((f) => f.path), changed: changed.map((f) => f.path), unchanged: unchanged.map((f) => f.path), binary: binaries.map((f) => f.path) };
-    if (diff.trim() === '' && fresh.length === 0 && changed.length === 0) {
+    const cited = ignoredCited(opts.root, opts.out, judgment, byId, scope.startedAt);
+    const ignoredShown = cited ? cited.shown : [];
+    if (cited) ignored = { shown: ignoredShown.map((f) => f.path), notShown: cited.notShown };
+    if (diff.trim() === '' && fresh.length === 0 && changed.length === 0 && ignoredShown.length === 0) {
       const e = badInput('empty_diff', null, 'nothing after the starting point (' + diffFrom.kind + ' ' + diffFrom.sha + ') changed in the tree, so there is no fix to verify; check that the fix landed in this repository, and that the snapshot was not taken after it');
       e.from = diffFrom;
       throw e;
@@ -1411,8 +1485,14 @@ function buildVerify(parsed, scope, opts) {
       trailer.push(f.content.endsWith('\n') ? f.content.slice(0, -1) : f.content);
       trailer.push('===== end untracked file: ' + f.path + ' =====');
     }
+    for (const f of ignoredShown) {
+      trailer.push('===== file git ignores, cited by ' + f.ids.join(', ') + ': ' + f.path + ' (changed since the review started; git does not track it, so its starting content was not captured: judge it whole) =====');
+      trailer.push(f.content.endsWith('\n') ? f.content.slice(0, -1) : f.content);
+      trailer.push('===== end ignored file: ' + f.path + ' =====');
+    }
     trailer.push('Untracked when the review started, line count unchanged, not shown: ' + (unchanged.length ? unchanged.map((f) => f.path).join(', ') : 'none') + '.');
     trailer.push('Binary untracked files, not shown: ' + (binaries.length ? binaries.map((f) => f.path).join(', ') : 'none') + '.');
+    if (cited && cited.notShown.length) trailer.push('Files git ignores that a finding cites, not shown: ' + cited.notShown.map((x) => x.path + ' (' + x.why + ')').join(', ') + '.');
     const section = (m) => {
       const parts = ['===== ' + m.id + ' (round ' + roundOf(m.id) + ') ====='];
       for (const src of m.sources) {
@@ -1459,7 +1539,7 @@ function buildVerify(parsed, scope, opts) {
     }
     rounds[id] = f.round;
   }
-  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), ownerTry: Array.from(opening).sort(byNumber), diffFrom, untracked, rounds, renumbered };
+  return { call, files, ledger, ledgerFile, needsExpect, browser: lists.browser.slice().sort(byNumber), ownerTry: Array.from(opening).sort(byNumber), diffFrom, untracked, ignored, rounds, renumbered };
 }
 
 // The script's own path and its sibling the checks runner, as the printed `next`
@@ -1598,6 +1678,9 @@ function verifyMain(argv, fail) {
     ownerTry: built.ownerTry,
     diffFrom: built.diffFrom,
     untracked: built.untracked,
+    // Only when a judgment finding cites a file git ignores (#302 item 2), so a
+    // call that cites none prints exactly what it printed before.
+    ...(built.ignored ? { ignored: built.ignored } : {}),
     ledger: { file: built.ledgerFile, rounds: built.rounds },
     renumbered: built.renumbered,
     next: verifyNext(built, opts),
@@ -1892,5 +1975,5 @@ function verdictsMain(argv, fail) {
   if (!out.ok) process.exitCode = 1;
 }
 
-module.exports = { stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, locusLabel, parsePatch, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, M3_INSTRUCTION, VERIFY_HEADER, invertExpect, readsLinesByNumber, readScope, readLedger, buildVerify, main };
+module.exports = { NEVER_PUSH_PATHS, NEVER_PUSH_BASENAMES, stableFindingKey, parseLines, mergeFindings, contractWarning, citationCheck, citationWarnings, locusLabel, parsePatch, receiptStems, buildShards, readReturn, tallyBlock, checkVerdicts, TIER2_INSTRUCTION, TIER3_INSTRUCTION, M3_INSTRUCTION, VERIFY_HEADER, invertExpect, readsLinesByNumber, readScope, readLedger, buildVerify, main };
 if (require.main === module) main(process.argv.slice(2));
