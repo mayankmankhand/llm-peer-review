@@ -1005,7 +1005,7 @@ write(repo, 'README.md', '# app\n');
 commitAll(repo, 'init');
 run(repo, pluginRoot);
 // A real project's state after /tk:upgrade on a migrated install: all four fields set.
-const seeded = Object.assign(JSON.parse(read(repo, '.claude/.toolkit-state.json')), { previousVersion: '6.3.3', at: '2026-01-01T00:00:00.000Z', custom: 'kept' });
+const seeded = Object.assign(JSON.parse(read(repo, '.claude/.toolkit-state.json')), { previousVersion: '6.3.3', at: '2026-01-01T00:00:00.000Z', custom: 'kept', onceDone: ['C-13', 'C-20'] });
 write(repo, '.claude/.toolkit-state.json', JSON.stringify(seeded, null, 2) + '\n');
 let snap = treeSnapshot(repo);
 r = run(repo, newerRoot, ['--dry-run']);
@@ -1014,6 +1014,8 @@ r = run(repo, newerRoot);
 let rerun = JSON.parse(read(repo, '.claude/.toolkit-state.json'));
 check('a newer plugin raises version and at', r.status === 0 && rerun.version === '7.1.0' && rerun.at !== '2026-01-01T00:00:00.000Z', JSON.stringify(rerun));
 check('a newer plugin leaves auditedVersion, auditedAt and previousVersion alone', rerun.auditedVersion === '7.0.0' && rerun.auditedAt === seeded.auditedAt && rerun.previousVersion === '6.3.3' && rerun.custom === 'kept' && rerun.path === 'plugin', JSON.stringify(rerun));
+// The run-once checks' done record (issue #289) is the upgrade's to write: a setup re-run keeps it as it is.
+check('289: a setup re-run keeps the done record', JSON.stringify(rerun.onceDone) === '["C-13","C-20"]', JSON.stringify(rerun));
 // #203: this run DID change something, it raised the recorded version, so the
 // stale-plugin line must not fire. It is the worst case for that line: the run
 // straight after a plugin update, where "your plugin may be older than the

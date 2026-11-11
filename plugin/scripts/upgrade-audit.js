@@ -715,6 +715,42 @@ function startedAt(project, state) {
   const version = referenceVersion(firstState);
   return version === null ? { none: 'the first committed ' + STATE_REL + ' records no usable version' } : { version };
 }
+// ---- run-once checks (issue #289) ----------------------------------------------------
+// An entry marked `Runs: once` promises one run per project. The version range
+// alone cannot keep that promise: a fresh setup records the project as audited
+// at the running version, and a migration from a newer copy-install starts its
+// range above the entry, so on a project that began at or after the entry's
+// version the range never crosses it. The state file's `onceDone` list is the
+// record of the entries a project has had; the stamp writes it.
+const ONCE_KEY = 'onceDone';
+// The ids the done record holds. It is read as data: anything that is not a
+// convention id is dropped, so a crafted value is never printed or matched.
+function onceDoneIds(state) {
+  const list = state && typeof state === 'object' && Array.isArray(state[ONCE_KEY]) ? state[ONCE_KEY] : [];
+  return list.filter(x => typeof x === 'string' && /^C-\d+$/.test(x));
+}
+const byConventionNumber = (a, b) => Number(a.slice(2)) - Number(b.slice(2));
+// Which run-once entries a run lists. `skip` holds the ones the record says are
+// done: they are never listed again, even when a lowered record makes the range
+// cross them a second time. `owed` holds the ones the range does not reach
+// (`afterFrom` is the range's own test) that the project never had: it began at
+// or after their version, or it left no record of where it began, in which case
+// each runs once more rather than never. A project that began before an entry
+// and was audited past it crossed that entry in an earlier upgrade's range.
+// `startedAt` is asked only when an entry needs it, since it runs git.
+function onceSelection(all, state, project, afterFrom) {
+  const done = new Set(onceDoneIds(state));
+  const skip = new Set(all.filter(c => c.once && done.has(c.id)).map(c => c.id));
+  let began = null;
+  const owed = new Set();
+  for (const c of all) {
+    if (!c.once || skip.has(c.id) || afterFrom(c)) continue;
+    if (began === null) began = startedAt(project, state);
+    if (began.none !== undefined || (began.version !== null && compareVersions(c.since, began.version) <= 0)) owed.add(c.id);
+  }
+  return { skip, owed };
+}
+
 // The adoption record's sections: the normal ones (from, to) and the earlier
 // read's, when one is recorded.
 function adoptionSections(P) {
@@ -946,7 +982,7 @@ function parseConventions(text) {
   let cur = null;
   for (const raw of text.split(/\r?\n/)) {
     const h = /^###\s+(C-\d+):\s*(.+?)\s*$/.exec(raw);
-    if (h) { cur = { id: h[1], title: h[2], since: '0.0.0', always: false, scope: 'prompt-files', detector: 'regex', severity: 'warn', patterns: [], fix: '' }; out.push(cur); continue; }
+    if (h) { cur = { id: h[1], title: h[2], since: '0.0.0', always: false, once: false, scope: 'prompt-files', detector: 'regex', severity: 'warn', patterns: [], fix: '' }; out.push(cur); continue; }
     if (!cur) continue;
     const b = /^-\s+\*\*([A-Za-z ]+):\*\*\s*(.*)$/.exec(raw);
     if (!b) continue;
@@ -954,7 +990,10 @@ function parseConventions(text) {
     if (key === 'since') cur.since = val;
     // `Runs: every upgrade` exempts a convention from the range filter: a check
     // that must hold after every update, whatever version the project came from.
-    else if (key === 'runs') cur.always = /^every upgrade\b/i.test(val);
+    // `Runs: once` marks a check that promises one run per project (issue #289):
+    // it is also listed when the project began at or after its version and the
+    // state file's done record does not hold it (see onceSelection).
+    else if (key === 'runs') { cur.always = /^every upgrade\b/i.test(val); cur.once = /^once\b/i.test(val); }
     else if (key === 'scope') cur.scope = val;
     else if (key === 'detector') cur.detector = val;
     // `Severity` is what a regex detector's findings carry: warn (the default)
@@ -2004,10 +2043,24 @@ function main() {
     }
     // The end of a clean /tk:upgrade: this project is now audited up to the
     // plugin version, so the next run's range starts here.
-    const next = Object.assign({}, state || {}, { version: toVersion, auditedVersion: toVersion, auditedAt: new Date().toISOString() });
+    // The run-once checks' done record (issue #289). A clean upgrade leaves no
+    // run-once entry up to the plugin's version outstanding: the audit listed
+    // it for this run (in range or owed), or the record already held it, or the
+    // project crossed it in an earlier upgrade's range. So every such entry is
+    // recorded, the last kind too, which keeps a project whose history is lost
+    // later from being asked again. An entry this run listed is recorded even
+    // when its check could not be run, because the rule is one try per project.
+    // An unreadable conventions file adds nothing and keeps what the record has.
+    const had = onceDoneIds(state);
+    let onceNow = [];
+    try { onceNow = parseConventions(fs.readFileSync(conventionsPath, 'utf8')).filter(c => c.once && validVersion(c.since) !== null && compareVersions(c.since, toVersion) <= 0).map(c => c.id); } catch (e) { onceNow = []; }
+    const onceDone = [...new Set(had.concat(onceNow))].sort(byConventionNumber);
+    const newlyDone = onceDone.filter(id => had.indexOf(id) === -1);
+    const next = Object.assign({}, state || {}, { version: toVersion, auditedVersion: toVersion, auditedAt: new Date().toISOString() }, onceDone.length ? { [ONCE_KEY]: onceDone } : {});
     fs.mkdirSync(path.dirname(P(STATE_REL)), { recursive: true });
     fs.writeFileSync(P(STATE_REL), JSON.stringify(next, null, 2) + '\n');
     console.error('upgrade-audit: stamped ' + STATE_REL + ' as audited up to ' + toVersion);
+    if (newlyDone.length) console.error('upgrade-audit: recorded ' + newlyDone.length + ' run-once check(s) as done: ' + newlyDone.join(', '));
     // A rules file whose text is the shipped seed's is current (C-7 does not
     // report it), so its stamp follows the audit. One whose text differs keeps
     // its stamp, and C-7 reports it again on the next upgrade.
@@ -2047,7 +2100,11 @@ function main() {
   for (const c of all) if (validVersion(c.since) === null) { console.error('upgrade-audit: bad Since in ' + c.id); process.exit(1); }
   for (const c of all) if (c.severity !== 'warn' && c.severity !== 'suggest') { console.error('upgrade-audit: bad Severity in ' + c.id + ': ' + c.severity + ' (warn or suggest)'); process.exit(1); }
   const afterFrom = (c) => fromVersion === null || compareVersions(c.since, fromVersion) > 0;
-  const inRange = all.filter(c => (c.always || afterFrom(c)) && compareVersions(c.since, toVersion) <= 0);
+  // A run-once entry the project is owed is listed whatever the range, and one
+  // its record says is done is never listed (issue #289; see onceSelection).
+  const once = onceSelection(all, state, project, afterFrom);
+  const inRange = all.filter(c => (c.always || afterFrom(c) || once.owed.has(c.id)) && !once.skip.has(c.id) && compareVersions(c.since, toVersion) <= 0);
+  const owedIds = inRange.filter(c => once.owed.has(c.id)).map(c => c.id);
 
   // Inventory: everything the project owns in the toolkit folders, plus CLAUDE.md
   // and (for C-11, issue #179) the other files its sessions read.
@@ -2834,7 +2891,7 @@ function main() {
   for (const f of reported) process.stdout.write(JSON.stringify(callBacks ? withCallBack(f, from, toVersion) : f) + '\n');
   const start = fromVersion || (unusableRecord ? 'start (the recorded version is unusable)' : 'start');
   for (const n of notes) console.error('upgrade-audit: ' + n);
-  console.error('upgrade-audit: ' + reported.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s); ' + suppressed + ' suppressed by the refuted record');
+  console.error('upgrade-audit: ' + reported.length + ' candidate finding(s); ' + inRange.length + ' of ' + all.length + ' convention(s) in range ' + start + ' -> ' + toVersion + (inRange.length ? ' [' + inRange.map(c => c.id).join(', ') + ']' : '') + (owedIds.length ? '; ' + owedIds.length + ' run-once check(s) owed [' + owedIds.join(', ') + ']' : '') + '; ' + promptFiles.length + ' project-owned prompt file(s); ' + suppressed + ' suppressed by the refuted record');
   // Zero findings over an empty range is the run that reads the same whether
   // the plugin is current or five releases behind: the range is measured
   // against the INSTALLED plugin and never against the latest release (#203).
@@ -2845,7 +2902,8 @@ function main() {
   // would call those different from `7.1.0` and so stay silent on exactly the
   // empty range this line exists for. compareVersions returns null when either
   // value is unusable, which is never 0, so it carries the old guard too.
-  if (reported.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
+  // A run-once check still owed is work this run has, so the line stays out.
+  if (reported.length === 0 && owedIds.length === 0 && compareVersions(fromVersion, toVersion) === 0) {
     console.error('upgrade-audit: nothing changed here. If you expected it to, the plugin itself may be older than the latest release: ' + PLUGIN_UPDATE_STEPS + '.');
   }
   // Last, so it is the line a reader sees: these receipts will not pass the
