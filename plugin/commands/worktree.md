@@ -53,7 +53,7 @@ Then record the branch's cut point, the commit it was cut from: `node ${CLAUDE_P
 
 ### Step 5: Install dependencies
 
-Install host project deps; toolkit deps depend on how the toolkit is installed. Decide every install and copy step here and in Step 6 by command (M16): `W=.claude/worktrees/worktree-N; for p in $W/package.json $W/.claude/scripts/package.json .env.local $W/.env.local CODEBASE_MAP.md $W/CODEBASE_MAP.md; do test -e "$p" && echo "present $p" || echo "absent $p"; done` prints one `present` or `absent` line per file, in the order the steps read them.
+Install host project deps; toolkit deps depend on how the toolkit is installed. Decide every install and copy step here and in Step 6 by command (M16): `W=.claude/worktrees/worktree-N; for p in $W/package.json $W/.claude/scripts/package.json .env.local $W/.env.local CODEBASE_MAP.md $W/CODEBASE_MAP.md .claude/settings.local.json $W/.claude/settings.local.json; do test -e "$p" && echo "present $p" || echo "absent $p"; done` prints one `present` or `absent` line per file, in the order the steps read them.
 
 1. **Host project deps** - if `package.json` exists at the worktree root, run: `npm install --prefix .claude/worktrees/worktree-N`. Skip if there is no host package.json.
 2. **Toolkit deps** - two cases:
@@ -78,6 +78,13 @@ Copy `CODEBASE_MAP.md` from the main repo root into the worktree root the same w
   automatically via /tk:index (one-time, may take a minute).
 - If it already exists in the worktree, skip (don't overwrite).
 
+Copy `.claude/settings.local.json` from the main repo into the worktree the same way, so the worktree keeps the permission rows the main copy already allows. Git ignores that file, so a new worktree starts without it, and `/tk:setup` runs in the main copy only (it stops in a worktree), so nothing else writes it there. Make the folder first, as a call of its own, then copy:
+`mkdir -p .claude/worktrees/worktree-N/.claude`
+`cp .claude/settings.local.json .claude/worktrees/worktree-N/.claude/settings.local.json`
+
+- If `.claude/settings.local.json` does not exist in the main repo, skip and note it.
+- If it already exists in the worktree, skip (don't overwrite).
+
 ### Step 7: Print summary
 
 </procedure>
@@ -95,6 +102,7 @@ Your side copy of the project is ready!
   Toolkit npm:  plugin - nothing to install (or: installed / failed - run manually / skipped - no .claude/scripts/package.json)
   .env:         copied (or: skipped - not found / already exists)
   Map:          copied (or: skipped - not found / already exists)
+  Settings:     copied (or: skipped - not found / already exists)
   Cut:          <short sha> recorded (or: not recorded - <why>)
 
 Next steps:

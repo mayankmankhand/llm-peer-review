@@ -6,6 +6,12 @@
 
 **`/tk:setup` and `/tk:upgrade` now stop with one plain line when they are started somewhere they cannot work, and the upgrade's two run-once checks reach the projects that never got them (#289, #291).**
 
+<!-- At release: re-record the prompt-load baseline (skills/upgrade/SKILL.md, skills/shared/conventions.md, skills/shared/toolkit-reference.md and commands/worktree.md grew with approved edits). No review prompt changed, so no catch-rate runs are owed. -->
+
+### Changed
+
+- **`/tk:worktree` copies your settings file into the new side copy.** `.claude/settings.local.json` holds the toolkit's permission rows, and git ignores it, so a new side copy started without it and Claude asked again there for what the main copy already allows. Setup used to be the way to write one there, and setup now runs in the main copy only. The command copies the file from the main copy when the side copy has none, and never overwrites one that is there.
+
 ### Fixed
 
 - **`/tk:upgrade`: the two run-once checks reach every project.** Two of the upgrade's checks promise to run once per project: Claude Code's prompt audit of your own instruction files (C-13), and a question about how much text your own prompt files load up front (C-20). A project set up fresh on a check's version or later, or moved from a copy-install that new, never got it, because the upgrade only ran a check newer than the version the project was last audited at. Such a project now gets each one on its next upgrade, once. The upgrade's summary names them (`2 run-once check(s) owed [C-13, C-20]`), and its closing stamp records them in `.claude/.toolkit-state.json` as `onceDone`, so neither runs again and a finding you decline does not come back.
