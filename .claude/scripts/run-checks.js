@@ -157,6 +157,12 @@
 //             ahead: the miss is still kept, and results.json carries the words
 //             as ownerAccepts. The flag is refused (exit 1) without words, on
 //             any run but an after run, and on a step its before record proves.
+//             A green after run (every target passed; every guard passed, or
+//             had already failed in the before run) adds `next` to the printed
+//             object, never to results.json: the next step in plan order with
+//             a target or a guard, its name, and the command for its before
+//             run, naming this runner by the path it was run from and carrying
+//             the run's --timeout. There is none after the last such step.
 //   --tally   reads each step's two results.json files and gives each step a
 //             status: proved (every target passed its before expect and its
 //             after expect without a flake, every guard that passed before
@@ -1418,7 +1424,8 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '  --lint            every check line in the plan that would not run, as problems; and missingPaths,\n'
   + '                    each file path the plan names that is not in the project, with its line (advisory)\n'
   + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/;\n'
-  + '                    an after run is refused, nothing run, when the step\'s before record cannot prove it\n'
+  + '                    an after run is refused, nothing run, when the step\'s before record cannot prove it;\n'
+  + '                    a green after run also prints next: the next step\'s before command\n'
   + '  --owner-accepts   with --phase after, on the owner\'s word only: run a refused after phase, recording their words\n'
   + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem; misses and repairs counted\n'
   + 'history: node run-checks.js --history [--since <time>]\n'
@@ -2288,7 +2295,45 @@ function runPlanPhase(opts, cwd) {
   const outDir = freshRecordDir(recordRel(plan.base, st.step, opts.phase), cwd);
   const extra = { plan: plan.rel, step: st.step, phase: opts.phase };
   if (accepted !== null) extra.ownerAccepts = accepted;
-  return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, extra);
+  const result = runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, extra);
+  // A green after run names the next step's before command (issue #290): both
+  // of this repo's skipped before runs began right after a step's checkpoint,
+  // which is where this line is read. Green is every target passing and every
+  // guard passing or already failing before the work. It goes on the printed
+  // object only, after results.json is saved: a pointer, not evidence.
+  if (opts.phase === 'after') {
+    const broken = brokenBefore(plan, st, cwd);
+    const green = result.checks.every((c) => c.verdict === 'pass' || (c.role === 'guard' && broken.indexOf(c.id) !== -1));
+    const following = parsed.steps.slice(parsed.steps.indexOf(st) + 1).find((s) => s.targets.length || s.guards.length);
+    if (green && following) {
+      result.next = { step: following.step, name: following.name,
+        command: 'node ' + shellWord(selfPath()) + ' --plan ' + shellWord(plan.rel) + ' --step ' + following.step + ' --phase before --timeout ' + opts.timeout };
+    }
+  }
+  return result;
+}
+
+// The ids of a step's guards already failing in its before record (issue
+// #290), which a green after run may still show failing; none without a
+// before record that counts.
+function brokenBefore(plan, st, cwd) {
+  const before = readRecord(cwd, recordRel(plan.base, st.step, 'before'), { plan: plan.rel, step: st.step, phase: 'before' });
+  return before && before.rec ? judgeBefore(st, before.rec).broken : [];
+}
+
+// This runner as it was run (issue #290): relative to the folder it runs in
+// when it sits inside it, else absolute, so a printed command reruns this
+// same copy, a plugin's or a project's. A path in a printed command is quoted
+// only when the shell would split or expand it, so the common case reads the
+// way the rule shows it. Both as merge-findings.js names its scripts.
+function selfPath() {
+  const abs = path.resolve(process.argv[1]);
+  const rel = path.relative(process.cwd(), abs);
+  return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : abs;
+}
+function shellWord(p) {
+  const s = String(p);
+  return /^[A-Za-z0-9_@%+=:,.\/-]+$/.test(s) ? s : singleQuote(s);
 }
 
 // Why a step's before record cannot prove it (issue #290), read exactly as

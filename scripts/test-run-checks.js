@@ -1796,6 +1796,64 @@ section("290 accept: the owner's yes, and the count of misses and repairs (issue
     one(JSON.stringify(se) + ' ' + refusedE.stderr));
 });
 
+// --- 290. a green after run names the next step's before command (issue #290)
+// Both of this repo's skipped before runs began right after a step's checkpoint,
+// so a green after run prints `next`: the next step in plan order that has a
+// target or a guard, and the exact command for its before run, naming the
+// runner by the path it was run from. results.json never carries it: it is a
+// pointer for the session, not evidence.
+section('290 next: a green after run names the next step\'s before command (issue #290)', function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const json = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const target = (file) => '  - Check target `n`: `grep -c one ' + file + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`';
+  write('plans/PLAN-n290.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: First** `[sequential]`', target('n290a.txt'), '',
+    '- [ ] 🟥 **Step 2: Notes** `[sequential]`', '  - Check: no target - docs only', '',
+    '- [ ] 🟥 **Step 3: Third** `[sequential]`', target('n290c.txt'), ''].join('\n'));
+  const np = (n, phase) => ['--plan', 'plans/PLAN-n290.md', '--step', n, '--phase', phase, '--timeout', '600000'];
+  write('n290a.txt', 'one\n');
+  run(np('1', 'before'));
+  write('n290a.txt', 'one\none\n');
+  const a1 = run(np('1', 'after'));
+  const nx = a1.json && a1.json.next ? a1.json.next : {};
+  const saved = json(path.join(proj, 'reports', 'checks', 'PLAN-n290', 'step-1', 'after', 'results.json'));
+  // A guard already failing before the work does not keep a run from green.
+  write('plans/PLAN-n290b.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Broken guard** `[sequential]`', target('n290b.txt'), '  - Check guard `w`: `grep -c keep n290w.txt` - `{"match": "^1$"}`', '',
+    '- [ ] 🟥 **Step 2: After it** `[sequential]`', target('n290b2.txt'), ''].join('\n'));
+  write('n290b.txt', 'one\n');
+  write('n290w.txt', 'nope\n');
+  run(['--plan', 'plans/PLAN-n290b.md', '--step', '1', '--phase', 'before']);
+  write('n290b.txt', 'one\none\n');
+  const b1 = run(['--plan', 'plans/PLAN-n290b.md', '--step', '1', '--phase', 'after']);
+  check('290 next: a green after run names the next step with checks and its before command',
+    a1.status === 0 && nx.step === '3' && nx.name === 'Third' && / --plan plans\/PLAN-n290\.md --step 3 --phase before /.test(String(nx.command))
+      && !!saved && saved.next === undefined && b1.status === 0 && !!b1.json && !!b1.json.next && b1.json.next.step === '2',
+    one(a1.stdout + ' | ' + b1.stdout + b1.stderr));
+
+  write('n290c.txt', 'one\n');
+  run(np('3', 'before'));
+  write('n290c.txt', 'one\none\n');
+  const a3 = run(np('3', 'after'));
+  check('290 next: the last step with checks prints no next',
+    a3.status === 0 && !!a3.json && (a3.byId.n || {}).verdict === 'pass' && a3.json.next === undefined,
+    one(a3.stdout + a3.stderr));
+
+  write('plans/PLAN-n290d.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: No work** `[sequential]`', target('n290d.txt'), '',
+    '- [ ] 🟥 **Step 2: Later** `[sequential]`', target('n290d2.txt'), ''].join('\n'));
+  write('n290d.txt', 'one\n');
+  run(['--plan', 'plans/PLAN-n290d.md', '--step', '1', '--phase', 'before']);
+  const d1 = run(['--plan', 'plans/PLAN-n290d.md', '--step', '1', '--phase', 'after']);
+  check('290 next: an after run that is not green prints no next',
+    d1.status === 0 && !!d1.json && (d1.byId.n || {}).verdict === 'fail' && d1.json.next === undefined,
+    one(d1.stdout + d1.stderr));
+
+  check('290 next: the command names the runner by the path it was run from',
+    /^node /.test(String(nx.command)) && String(nx.command).indexOf(SCRIPT) !== -1 && / --timeout 600000$/.test(String(nx.command)),
+    one(JSON.stringify(nx)));
+});
+
 // --- 248. the full test step's history (issue #248) ---------------------------
 // A full test run used to keep its time only in the folder it wrote, so a suite
 // that doubled in five days raised nothing. A --full run appends one row to the
