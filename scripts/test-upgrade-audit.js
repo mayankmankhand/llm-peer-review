@@ -4056,6 +4056,35 @@ console.log('\n13. a run-once check is owed once (issue #289)');
   const redone = run289(REDONE, [], noSkip.path);
   check('289: the tests bite: a script without the owed term lists neither check, and one without the done term lists a recorded check again',
     noOwed.applied && noSkip.applied && r.status === 0 && /8\.0\.19 -> 8\.0\.20 \[C-7\]; /.test(r.stderr) && redone.status === 0 && /7\.4\.0 -> 8\.0\.20 \[C-7, C-13, C-20, C-21\]; /.test(redone.stderr), said289(r) + ' || ' + said289(redone));
+
+  // The shipped files say the same as the script (issues #289 and #291). The
+  // real conventions file marks exactly the two checks that promise one run per
+  // project, and with it a project set up fresh is owed both. The upgrade skill
+  // is held, section by section, to the words the script prints; they are
+  // written here as literals and checked against both files, so the skill and
+  // the script cannot drift apart unnoticed.
+  const realBlocks = read(REAL_CONVENTIONS).replace(/\r\n/g, '\n').split(/\n(?=### C-\d+: )/).filter(b => /^### C-\d+: /.test(b));
+  const markedOnce = realBlocks.filter(b => /^- \*\*Runs:\*\* once$/m.test(b)).map(b => /^### (C-\d+): /.exec(b)[1]);
+  const FRESH_REAL = projectAt('fresh-real', [stateAt('8.0.19')]);
+  r = spawnSync('node', [SCRIPT, '--project', FRESH_REAL, '--plugin-root', NEXT, '--conventions', REAL_CONVENTIONS], { encoding: 'utf8' });
+  check('289: the shipped conventions mark C-13 and C-20 run-once and no other entry',
+    markedOnce.join(',') === 'C-13,C-20' && r.status === 0 && /; 2 run-once check\(s\) owed \[C-13, C-20\]; /.test(r.stderr), markedOnce.join(',') + ' | ' + said289(r));
+  const skillText = read(path.join(REPO, '.claude', 'skills', 'upgrade', 'SKILL.md')).replace(/\r\n/g, '\n');
+  const scriptText = read(SCRIPT);
+  // A step of the skill: from its heading to the next heading of the same level.
+  const stepOf = (heading) => { const a = skillText.indexOf('\n### ' + heading); if (a < 0) return ''; const b = skillText.indexOf('\n### ', a + 5); return skillText.slice(a, b < 0 ? skillText.length : b); };
+  const OWED_WORDS = ' run-once check(s) owed [';
+  const DONE_WORDS = ' run-once check(s) as done: ';
+  const STOP_WORDS = 'upgrade-audit: wrong folder:';
+  const s1 = stepOf('1. Audit for candidates'), s3 = stepOf('3. Judge the manual conventions'), s3b = stepOf('3b. Run the prompt audit (C-13)'), s7 = stepOf('7. Stamp');
+  check('289: the upgrade skill runs each run-once check the script lists, in range or owed',
+    scriptText.includes(OWED_WORDS) && scriptText.includes(DONE_WORDS) && s1.includes('run-once check(s) owed [C-13, C-20]') && /an owed run-once check/.test(s1)
+      && /owed as a run-once check/.test(s3) && /owed as a run-once check/.test(s3b) && s7.includes('onceDone') && s7.includes('run-once check(s) as done: C-13, C-20')
+      && !skillText.includes('on the upgrade that brings C-13'),
+    [s1.includes('run-once check(s) owed [C-13, C-20]'), /an owed run-once check/.test(s1), /owed as a run-once check/.test(s3), /owed as a run-once check/.test(s3b), s7.includes('onceDone'), s7.includes('run-once check(s) as done: C-13, C-20')].join(','));
+  check('291: the upgrade skill relays the stop line and ends the run',
+    scriptText.includes("'" + STOP_WORDS + " '") && s1.includes('`' + STOP_WORDS + '`') && /main copy/.test(s1) && /top folder/.test(s1) && /relay that line[^.]*and stop/.test(s1),
+    [s1.includes('`' + STOP_WORDS + '`'), /main copy/.test(s1), /top folder/.test(s1), /relay that line[^.]*and stop/.test(s1)].join(','));
 }
 }
 
