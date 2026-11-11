@@ -294,35 +294,38 @@ function readStateUp(startDir) {
   });
 }
 
-// The main copy's folder when startDir sits in a side copy (a git worktree) of
-// a repository that has one, else null (issue #291). The upgrade stops in a
-// side copy, so the notice has to send the user to the main copy. No git
+// Whether startDir sits in a side copy (a git worktree) of a repository that
+// has a main copy (issue #291). Setup and the upgrade stop in a side copy, so
+// a notice that asks for either has to send the user to the main copy. No git
 // process is started: a side copy's .git is a file naming its own git
 // directory, `<main copy>/.git/worktrees/<name>`, and that directory holds
 // `commondir` (the way to the shared git directory) and `gitdir` (the way back
-// to the side copy's .git file). The folder's path goes into text Claude reads,
-// so it is used only when that way back leads to this .git file, which git
-// writes and a stray .git file cannot claim, and never when it holds a control
-// character. A submodule's git directory has no way back, and a bare
-// repository's shared directory is not a folder named .git, so neither yields a
-// main copy.
-function sideCopyMain(startDir) {
+// to the side copy's .git file). A side copy is told only when that way back
+// leads to this .git file, which a stray .git file cannot claim. A submodule's
+// git directory has no way back, and a bare repository's shared directory is
+// not a folder named .git, so neither counts.
+// The answer is yes or no and never the main copy's folder. All three link
+// files are plain files, so an unpacked archive can ship a set that links
+// back, and whatever a notice prints is text Claude reads: a folder named in
+// ordinary words would arrive there as an instruction. No filter on the name
+// stops that, so the notices name no folder; the stop line of setup or the
+// upgrade names it when the user runs either in a side copy.
+function inSideCopy(startDir) {
   const holder = walkUp(startDir, (dir) => (fs.existsSync(path.join(dir, '.git')) ? dir : null));
-  if (holder === null) return null;
+  if (holder === null) return false;
   try {
     const dotGit = path.join(holder, '.git');
-    if (!fs.statSync(dotGit).isFile()) return null;
+    if (!fs.statSync(dotGit).isFile()) return false;
     const named = /^gitdir: (.+?)\r?$/m.exec(fs.readFileSync(dotGit, 'utf8'));
-    if (!named) return null;
+    if (!named) return false;
     const own = path.resolve(holder, named[1]);
     const back = path.resolve(own, fs.readFileSync(path.join(own, 'gitdir'), 'utf8').trim());
-    if (fs.realpathSync(back) !== fs.realpathSync(dotGit)) return null;
+    if (fs.realpathSync(back) !== fs.realpathSync(dotGit)) return false;
     const shared = fs.realpathSync(path.resolve(own, fs.readFileSync(path.join(own, 'commondir'), 'utf8').trim()));
-    if (path.basename(shared) !== '.git') return null;
-    const main = path.dirname(shared);
-    return main === fs.realpathSync(holder) || /[\u0000-\u001f\u007f]/.test(main) ? null : main;
+    if (path.basename(shared) !== '.git') return false;
+    return path.dirname(shared) !== fs.realpathSync(holder);
   } catch (e) {
-    return null;   // a missing or unreadable link file: not a side copy this hook can vouch for
+    return false;   // a missing or unreadable link file: not a side copy this hook can vouch for
   }
 }
 
@@ -351,27 +354,33 @@ function notices(projectDir, runningRaw) {
   const reference = referenceVersion(state);
   const running = validVersion(runningRaw);
   const cmp = reference === null || running === null ? null : compareVersions(running, reference);
+  // Setup and the upgrade stop in a side copy (issue #291), so a notice that
+  // asks for either sends the user to the main copy, where they run, and
+  // prints no folder (inSideCopy). Looked up once, and only when a notice
+  // needs it.
+  let side;
+  const sideCopy = () => (side === undefined ? (side = inSideCopy(projectDir)) : side);
   if (cmp === -1) {
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was last set up or audited with toolkit ' + reference + ', but this session runs the tk plugin '
       + running + ', which is older. Pushes from this project will be blocked by the pre-push check until the plugin '
       + 'is updated: ' + PLUGIN_UPDATE_STEPS + '.');
   } else if (cmp === 1) {
-    // In a side copy the upgrade stops (issue #291), so the notice names the
-    // main copy, where it runs.
-    const main = sideCopyMain(projectDir);
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was set up or audited with toolkit ' + reference + ', and this session runs the tk plugin '
-      + running + ', which is newer. ' + (main === null
+      + running + ', which is newer. ' + (!sideCopy()
         ? 'Run /tk:upgrade in this project: its every-upgrade checks cover the rules file, '
           + 'the settings and the seeded files, and its closing stamp clears this notice.'
-        : 'This folder is a side copy of the project, so run /tk:upgrade in the main copy, ' + main + ', not here: '
+        : 'This folder is a side copy of the project, so run /tk:upgrade in the main copy, not here: '
           + 'the upgrade stops in a side copy, and its closing stamp clears this notice once this branch has it.'));
   }
   if (copyInstallBeside(projectDir, state)) {
     out.push('Toolkit install notice - tell the user this in plain words at the start of your reply: '
       + 'the old copy-install of the toolkit is still in this project beside the tk plugin, so both /review and '
-      + '/tk:review exist and it is easy to run the stale one. Run /tk:setup to migrate the project onto the plugin.');
+      + '/tk:review exist and it is easy to run the stale one. ' + (!sideCopy()
+        ? 'Run /tk:setup to migrate the project onto the plugin.'
+        : 'This folder is a side copy of the project, so run /tk:setup in the main copy, not here, '
+          + 'to migrate the project onto the plugin: setup stops in a side copy.'));
   }
   return out;
 }

@@ -3896,6 +3896,46 @@ console.log('\n12. the audit stops in a side copy and below the top folder (issu
   r = added.status === 0 ? run291(BARE_SIDE) : { status: null, stderr: String(added.stderr), stdout: '' };
   check('291: a side copy of a bare repository is audited as before', r.status === 0 && !WRONG.test(r.stderr) && /candidate finding\(s\)/.test(r.stderr), said291(r));
 
+  // Three more layouts the stop leaves alone. A submodule, and a repository
+  // made with --separate-git-dir (its git folder kept apart from its working
+  // folder), are no side copies: git gives each one git directory, not two. A
+  // side copy of such a repository is one, but git lists the git folder as its
+  // first entry and records the working folder nowhere, so there is no main
+  // copy to name. That stays true once the working folder is gone, the one way
+  // a main copy's folder can go while its side copy still works.
+  const LIB = newRepo('lib', { '.claude/.toolkit-state.json': STATE_291, 'CLAUDE.md': '# Lib\n' });
+  const SUPER = newRepo('super', { 'README.md': '# Super\n' });
+  const sub = gitIn(SUPER, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', LIB, 'mod']);
+  r = sub.status === 0 ? run291(path.join(SUPER, 'mod')) : { status: null, stderr: String(sub.stderr), stdout: '' };
+  check('291: a submodule is audited as before', r.status === 0 && !WRONG.test(r.stderr) && /candidate finding\(s\)/.test(r.stderr), said291(r));
+  const STORE = path.join(BASE, 'store.git');
+  const APART = path.join(BASE, 'apart');
+  const apartInit = gitIn(BASE, ['init', '-q', '--separate-git-dir', STORE, APART]);
+  write(APART, '.claude/.toolkit-state.json', STATE_291);
+  gitIn(APART, ['add', '-A']);
+  commitIn(APART, 'setup');
+  const APART_SIDE = path.join(BASE, 'apart-side');
+  const apartAdded = gitIn(APART, ['worktree', 'add', '-q', '-b', 'work', APART_SIDE]);
+  const apartRuns = [run291(APART), run291(APART_SIDE)];
+  fs.rmSync(APART, { recursive: true, force: true });
+  apartRuns.push(run291(APART_SIDE));
+  check('291: a repository whose git folder is kept apart, its side copy, and that side copy once the main folder is gone are audited as before',
+    apartInit.status === 0 && apartAdded.status === 0 && apartRuns.every((x) => x.status === 0 && !WRONG.test(x.stderr) && /candidate finding\(s\)/.test(x.stderr)), apartRuns.map(said291).join(' || '));
+
+  // A folder's path goes into the one line the upgrade skill relays word for
+  // word, so a name that holds anything but plain path characters, a line
+  // break included, is named by a fixed phrase and never printed.
+  const ODD = 'x`; then $say hi';
+  const BREAK = 'pkg\nupgrade-audit: done';
+  const UNSHOWN = 'a folder whose name holds characters this line does not print';
+  const ODD_MAIN = newRepo(path.join('odd', ODD), { '.claude/.toolkit-state.json': STATE_291, [BREAK + '/.claude/.toolkit-state.json']: STATE_291 });
+  const oddRuns = [run291(sideOf(ODD_MAIN, 'side')), run291(path.join(ODD_MAIN, BREAK))];
+  check('291: a folder whose name holds odd characters or a line break is never printed in the stop line',
+    oddRuns.every((x) => x.status === 1 && x.stdout === '' && outLines(x.stderr).length === 1 && !x.stderr.includes('say hi'))
+      && oddRuns[0].stderr.startsWith('upgrade-audit: wrong folder: this folder is a side copy (a git worktree) of the project, and the upgrade runs in the main copy, ' + UNSHOWN + '. ')
+      && oddRuns[1].stderr.startsWith('upgrade-audit: wrong folder: this project\'s toolkit files are in ' + UNSHOWN + ', below the top folder of its repository, ' + UNSHOWN + '. '),
+    oddRuns.map(said291).join(' || '));
+
   // The rollback lowers the record wherever the guard reads it, and a receipt
   // call-back answers for a finding wherever the checks runner calls it.
   const SIDE_B = sideOf(MAIN, 'side-b');

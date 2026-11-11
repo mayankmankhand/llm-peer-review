@@ -2051,6 +2051,54 @@ console.log('\n7. setup stops in a side copy and below the top folder (issue #29
   r = run(path.join(bare, 'work'), pluginRoot, ['--dry-run']);
   check('291: setup in a side copy of a bare repository runs as before', r.status === 0 && !WRONG.test(r.out) && /Install type: /.test(r.out), brief(r));
 
+  // An install from before the manifest is told by VERSION beside the review
+  // command, or by the old stamp in the rules file (copyInstallMarkers). Kept
+  // below the top folder it is stopped like the other two, or setup would read
+  // the top as fresh and seed a second install there. A subfolder with a
+  // review command of its own and neither mark is no install, so a first setup
+  // started there still seeds the top.
+  const OLD_STAMP = '# Toolkit Rules\n\n<!-- Toolkit version: 5.4.0 | Managed by LLM Peer Review. Do not edit - changes will be overwritten on update. -->\n';
+  const older = repoWith({ 'tool/VERSION': '5.4.0\n', 'tool/.claude/commands/review.md': '# Review\n', 'README.md': '# Older\n' });
+  const oldest = repoWith({ 'tool/.claude/rules/toolkit.md': OLD_STAMP, 'README.md': '# Oldest\n' });
+  const olderBefore = [treeSnapshot(older), treeSnapshot(oldest)];
+  const olderRuns = [older, oldest].map(top => ({ x: run(path.join(top, 'tool'), pluginRoot), top }));
+  check('291: setup stops where an install from before the manifest sits below the top folder, and writes nothing',
+    olderRuns.every(c => c.x.status === 1 && oneLine(c.x)
+      && c.x.out.startsWith('setup-project: wrong folder: toolkit files are in ' + real(path.join(c.top, 'tool')) + ', below the top folder of this repository, ' + real(c.top) + '. '))
+      && treeSnapshot(older) === olderBefore[0] && treeSnapshot(oldest) === olderBefore[1] && !exists(older, '.claude') && !exists(oldest, '.claude') && noBackup(older) && noBackup(oldest),
+    olderRuns.map(c => brief(c.x)).join(' || '));
+  const ownReview = repoWith({ 'app/.claude/commands/review.md': '# Our review\n', 'README.md': '# Own\n' });
+  r = run(path.join(ownReview, 'app'), pluginRoot);
+  check('291: a subfolder with a review command of its own and no old-install mark is not stopped',
+    r.status === 0 && !WRONG.test(r.out) && /Install type: fresh install/.test(r.out) && exists(ownReview, '.claude/rules/toolkit.md'), brief(r));
+
+  // A folder's path goes into the one line the setup skill relays word for
+  // word, so a name that holds anything but plain path characters, a line
+  // break included, is named by a fixed phrase and never printed.
+  const oddHome = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-291-odd-'));
+  made.push(oddHome);
+  const BREAK = 'pkg\nsetup-project: done';
+  const UNSHOWN = 'a folder whose name holds characters this line does not print';
+  const oddMain = path.join(oddHome, 'x`; then $say hi');
+  fs.mkdirSync(oddMain);
+  initRepo(oddMain);
+  write(oddMain, '.claude/.toolkit-state.json', STATE_291);
+  write(oddMain, BREAK + '/.claude/.toolkit-state.json', STATE_291);
+  commitAll(oddMain, 'init');
+  const oddRuns = [run(sideOf(oddMain, 'side'), pluginRoot, ['--dry-run']), run(path.join(oddMain, BREAK), pluginRoot, ['--dry-run'])];
+  check('291: a folder whose name holds odd characters or a line break is never printed in the stop line',
+    oddRuns.every(x => x.status === 1 && oneLine(x) && !x.out.includes('say hi'))
+      && oddRuns[0].out.startsWith('setup-project: wrong folder: this folder is a side copy (a git worktree) of the project, and setup runs in the main copy, ' + UNSHOWN + '. ')
+      && oddRuns[1].out.startsWith('setup-project: wrong folder: toolkit files are in ' + UNSHOWN + ', below the top folder of this repository, ' + UNSHOWN + '. '),
+    oddRuns.map(brief).join(' || '));
+
+  // Setup's stop reaches the user through the setup skill's exit-code step: an
+  // exit-1 message is relayed and the run stops. The skill names no stop of its
+  // own, so this case holds the rule the stop rests on.
+  const setupSkill = fs.readFileSync(path.resolve(__dirname, '..', '.claude', 'skills', 'setup', 'SKILL.md'), 'utf8');
+  check('291: the setup skill relays an exit-1 message and stops, which is how the stop line reaches the user',
+    /^ *- \*\*1, error\.\*\* Relay the message and stop\./m.test(setupSkill), 'the exit-code step no longer says to relay an exit-1 message and stop');
+
   for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
 }
 
