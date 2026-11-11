@@ -707,9 +707,10 @@ function startedAt(project, state) {
   const first = log ? log.split('\n')[0] : '';
   if (!/^[0-9a-f]{40,64}$/.test(first)) return { none: 'no record of the version this project began on: ' + STATE_REL + ' has no previousVersion and no committed history' };
   let firstState = null;
-  // `<commit>:./<path>` names the file relative to the folder git runs in, as
-  // `git log -- <path>` above does; a bare `<commit>:<path>` is read from the
-  // repository's top, and misses a project kept in a subfolder of it.
+  // Both git calls run in the project folder, which main() takes from the
+  // repository's top folder, so `./<path>` here and the path given to `git log`
+  // above name the same file. A project kept below the top folder never gets
+  // this far: main() stops there first (issue #291).
   try { firstState = JSON.parse(git(['show', first + ':./' + STATE_REL], project)); } catch (e) { firstState = null; }
   const version = referenceVersion(firstState);
   return version === null ? { none: 'the first committed ' + STATE_REL + ' records no usable version' } : { version };
@@ -1869,6 +1870,52 @@ function marketplaceNamesToolkit(projectDir) {
   return plugins.some((p) => p && typeof p === 'object' && p.name === 'tk');
 }
 
+// >>> wrong folder stop (issue #291) >>>
+// Byte-identical in setup-project.js and upgrade-audit.js, from this marker to
+// the closing one (scripts/test-upgrade-audit.js compares the two). Setup and
+// the upgrade take the repository's top folder as the project, so there are
+// two places neither can work, and each script stops there before it reads or
+// writes anything:
+//   - a side copy (a git worktree). It keeps its own offered-rows and refuted
+//     records, and it lacks the files git ignores (the migration record, the
+//     backups, often the settings file), so a run there asks again what the
+//     main copy settled and skips what it cannot see. git's own answer decides:
+//     a folder's git directory differs from the repository's common one only in
+//     a linked worktree, never in a submodule or in a repository whose git
+//     directory sits elsewhere. The main copy is the first entry git lists; a
+//     bare repository has none, and a main copy whose folder is gone cannot be
+//     opened, so neither is a stop: there is nowhere to send the user.
+//   - a project kept below the top folder. The walk goes from the folder the
+//     run started in up to, but not including, the top folder, and stops at the
+//     first folder that holds one of `markers`. It never searches downward, so
+//     a fixture or a backup under the starting folder is not a hit.
+// Returns { side: <main copy> }, { below: <folder>, top: <top folder> } or null.
+function wrongFolder(start, top, markers) {
+  const real = (p) => { try { return fs.realpathSync(p); } catch (e) { return null; } };
+  const topReal = real(top);
+  if (topReal === null) return null;
+  const gitDir = git(['rev-parse', '--git-dir'], topReal);
+  const commonDir = git(['rev-parse', '--git-common-dir'], topReal);
+  const mine = gitDir ? real(path.resolve(topReal, gitDir)) : null;
+  const shared = commonDir ? real(path.resolve(topReal, commonDir)) : null;
+  if (mine !== null && shared !== null && mine !== shared) {
+    const first = (git(['worktree', 'list', '--porcelain'], topReal) || '').split(/\r?\n\r?\n/)[0].split(/\r?\n/);
+    const named = first.find(l => l.startsWith('worktree '));
+    const main = named && !first.includes('bare') ? real(named.slice('worktree '.length)) : null;
+    if (main !== null && main !== topReal) return { side: main };
+  }
+  const startReal = real(start);
+  const rel = startReal === null ? '' : path.relative(topReal, startReal);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  for (let i = parts.length; i >= 1; i--) {
+    const dir = path.join(topReal, ...parts.slice(0, i));
+    if (markers.some(m => { try { return fs.statSync(path.join(dir, m)).isFile(); } catch (e) { return false; } })) return { below: dir, top: topReal };
+  }
+  return null;
+}
+// <<< wrong folder stop <<<
+
 function main() {
   const opts = parseArgs(process.argv.slice(2));
   const cwd = opts.project ? path.resolve(opts.project) : process.cwd();
@@ -1877,6 +1924,21 @@ function main() {
   // The source tree the plugin is built from is not a project: nothing here is
   // audited, stamped or rolled back, and the skill relays this line.
   if (marketplaceNamesToolkit(project)) { console.error('upgrade-audit: this is the toolkit\'s own repository (its marketplace file names the toolkit); nothing to audit.'); process.exit(1); }
+  // Nor is a folder the audit cannot work from (issue #291; see wrongFolder): a
+  // side copy, or a project kept below the repository's top folder. The audit,
+  // the release-notes reads and the stamp stop there with one line. The
+  // rollback and the receipt call-back are run by other steps from wherever the
+  // record or the finding is, so they are not stopped. The line names no
+  // command, because the plugin build rewrites command names only in prompts.
+  if (opts.rollbackTo === null && opts.receipt === null) {
+    const wrong = wrongFolder(cwd, project, [STATE_REL]);
+    if (wrong !== null) {
+      console.error('upgrade-audit: wrong folder: ' + (wrong.side
+        ? 'this folder is a side copy (a git worktree) of the project, and the upgrade runs in the main copy, ' + wrong.side + '. Open that folder and run it there. Nothing was read or changed here.'
+        : 'this project\'s toolkit files are in ' + wrong.below + ', below the top folder of its repository, ' + wrong.top + '. Setup and the upgrade work only from a repository\'s top folder, so nothing was read or changed. See "Where to run setup and the upgrade" in the toolkit\'s install guide.'));
+      process.exit(1);
+    }
+  }
   if (opts.rollbackTo !== null) { rollbackRecord(P, opts.rollbackTo); return; }
   const pluginRoot = path.resolve(opts.pluginRoot || path.join(__dirname, '..'));
   const conventionsPath = opts.conventions || path.join(pluginRoot, 'skills', 'shared', 'conventions.md');

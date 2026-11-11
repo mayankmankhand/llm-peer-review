@@ -294,6 +294,38 @@ function readStateUp(startDir) {
   });
 }
 
+// The main copy's folder when startDir sits in a side copy (a git worktree) of
+// a repository that has one, else null (issue #291). The upgrade stops in a
+// side copy, so the notice has to send the user to the main copy. No git
+// process is started: a side copy's .git is a file naming its own git
+// directory, `<main copy>/.git/worktrees/<name>`, and that directory holds
+// `commondir` (the way to the shared git directory) and `gitdir` (the way back
+// to the side copy's .git file). The folder's path goes into text Claude reads,
+// so it is used only when that way back leads to this .git file, which git
+// writes and a stray .git file cannot claim, and never when it holds a control
+// character. A submodule's git directory has no way back, and a bare
+// repository's shared directory is not a folder named .git, so neither yields a
+// main copy.
+function sideCopyMain(startDir) {
+  const holder = walkUp(startDir, (dir) => (fs.existsSync(path.join(dir, '.git')) ? dir : null));
+  if (holder === null) return null;
+  try {
+    const dotGit = path.join(holder, '.git');
+    if (!fs.statSync(dotGit).isFile()) return null;
+    const named = /^gitdir: (.+?)\r?$/m.exec(fs.readFileSync(dotGit, 'utf8'));
+    if (!named) return null;
+    const own = path.resolve(holder, named[1]);
+    const back = path.resolve(own, fs.readFileSync(path.join(own, 'gitdir'), 'utf8').trim());
+    if (fs.realpathSync(back) !== fs.realpathSync(dotGit)) return null;
+    const shared = fs.realpathSync(path.resolve(own, fs.readFileSync(path.join(own, 'commondir'), 'utf8').trim()));
+    if (path.basename(shared) !== '.git') return null;
+    const main = path.dirname(shared);
+    return main === fs.realpathSync(holder) || /[\u0000-\u001f\u007f]/.test(main) ? null : main;
+  } catch (e) {
+    return null;   // a missing or unreadable link file: not a side copy this hook can vouch for
+  }
+}
+
 // Whether the old copy-install still sits in this project: the nearest folder
 // from startDir upward with any copy-install marker (see copyInstallMarkers,
 // shared with setup-project.js) has a manifest, or has VERSION beside
@@ -325,10 +357,16 @@ function notices(projectDir, runningRaw) {
       + running + ', which is older. Pushes from this project will be blocked by the pre-push check until the plugin '
       + 'is updated: ' + PLUGIN_UPDATE_STEPS + '.');
   } else if (cmp === 1) {
+    // In a side copy the upgrade stops (issue #291), so the notice names the
+    // main copy, where it runs.
+    const main = sideCopyMain(projectDir);
     out.push('Toolkit version notice - tell the user this in plain words at the start of your reply: '
       + 'this project was set up or audited with toolkit ' + reference + ', and this session runs the tk plugin '
-      + running + ', which is newer. Run /tk:upgrade in this project: its every-upgrade checks cover the rules file, '
-      + 'the settings and the seeded files, and its closing stamp clears this notice.');
+      + running + ', which is newer. ' + (main === null
+        ? 'Run /tk:upgrade in this project: its every-upgrade checks cover the rules file, '
+          + 'the settings and the seeded files, and its closing stamp clears this notice.'
+        : 'This folder is a side copy of the project, so run /tk:upgrade in the main copy, ' + main + ', not here: '
+          + 'the upgrade stops in a side copy, and its closing stamp clears this notice once this branch has it.'));
   }
   if (copyInstallBeside(projectDir, state)) {
     out.push('Toolkit install notice - tell the user this in plain words at the start of your reply: '

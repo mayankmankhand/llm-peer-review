@@ -164,7 +164,7 @@ function finish() {
 // a part that needs another's fixture builds it the same way (recordedCaseDir).
 const PARTS = {
   1: ['0', '1', '2', '3', '3b', '4', '4b', '4c', '4d', '4e', '4f', '4g', '4h', '4i', '4j'],
-  2: ['4k', '7d', '9b'],
+  2: ['4k', '7d', '9b', '12'],
   3: ['4l', '4m', '4n', '4o', '5', '6', '7', '7b', '7c', '8', '9', '10', '11', '11b', '11c', '11d', '11e', '11f'],
   4: ['9c', '9d', '9e', '9f', '9g', '9h', '9i', '9j'],
 };
@@ -3804,6 +3804,130 @@ console.log('\n11f. a call-back another release wrote runs nothing: the link mov
   // A version that differs only by a suffix is another build too.
   const beta = c1 ? sessionRun(SMALL, c1.receipt.check.split(' ').slice(2).map(w => (w === '7.1.0' ? '7.1.0-beta.1' : w))) : null;
   check('  and a call-back naming 7.1.0-beta.1 is not run by the 7.1.0 build either (exit 3)', !!beta && beta.status === 3 && /not run: .*7\.1\.0-beta\.1/.test(beta.stderr) && beta.stdout === '', beta && beta.status + ' ' + beta.stderr);
+}
+}
+if (OWN('12')) {
+
+// --- 12. the audit stops where it cannot work (issue #291) --------------------------------
+// The audit takes the repository's top folder as the project. A side copy (a
+// git worktree) keeps its own local records and lacks the files git ignores,
+// and a project kept below the top folder would be read from the wrong folder.
+// So the audit, the release-notes reads and the stamp stop there with one line
+// and write nothing. The rollback and the receipt call-back are run from other
+// steps, so they are not stopped, and neither is a side copy of a bare
+// repository, which has no main copy to send the user to.
+console.log('\n12. the audit stops in a side copy and below the top folder (issue #291)');
+{
+  const BASE = path.join(TMP, 'wrong-folder');
+  const STATE_291 = JSON.stringify({ version: '7.0.0', auditedVersion: '7.0.0', path: 'plugin', previousVersion: null }, null, 2) + '\n';
+  const real = (p) => fs.realpathSync(p);
+  const newRepo = (name, files) => {
+    const dir = path.join(BASE, name);
+    fs.mkdirSync(dir, { recursive: true });
+    gitIn(dir, ['init', '-q']);
+    for (const rel of Object.keys(files)) write(dir, rel, files[rel]);
+    gitIn(dir, ['add', '-A']);
+    commitIn(dir, 'setup');
+    return dir;
+  };
+  // A side copy where Claude Code puts one, or null when git could not make it.
+  const sideOf = (repo, name) => {
+    const dir = path.join(repo, '.claude', 'worktrees', name);
+    return gitIn(repo, ['worktree', 'add', '-q', '-b', name, dir]).status === 0 ? dir : null;
+  };
+  // Every file under dir with a hash of its bytes, the git directory aside.
+  const snapshot = (dir) => {
+    const out = [];
+    (function walk(abs, rel) {
+      for (const e of fs.readdirSync(abs, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        if (e.name === '.git') continue;
+        const r2 = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) walk(path.join(abs, e.name), r2);
+        else out.push(r2 + ' ' + crypto.createHash('sha256').update(fs.readFileSync(path.join(abs, e.name))).digest('hex'));
+      }
+    })(dir, '');
+    return out.join('\n');
+  };
+  const WRONG = /^upgrade-audit: wrong folder: /m;
+  const BUILT = path.join(PLUGIN, 'scripts', 'upgrade-audit.js');
+  const run291 = (proj, args, script) => spawnSync('node', [script || SCRIPT, '--project', proj, '--plugin-root', PLUGIN, '--conventions', REAL_CONVENTIONS].concat(args || []), { encoding: 'utf8' });
+  // One short line per run, so a failing case keeps its name in the release gate's tail.
+  const said291 = (x) => x.status + ' | ' + String(x.stderr).replace(/\s+/g, ' ').slice(0, 110) + ' | ' + String(x.stdout).replace(/\s+/g, ' ').slice(0, 40);
+
+  // A side copy: one line that names the main copy, and nothing written.
+  const MAIN = newRepo('main', { '.claude/.toolkit-state.json': STATE_291, 'CLAUDE.md': '# Project\n' });
+  const SIDE = sideOf(MAIN, 'side');
+  const mainBefore = snapshot(MAIN);
+  let r = run291(SIDE);
+  check('291: the audit stops in a side copy, names the main copy and writes nothing',
+    SIDE !== null && r.status === 1 && r.stdout === '' && outLines(r.stderr).length === 1
+      && r.stderr.startsWith('upgrade-audit: wrong folder: this folder is a side copy (a git worktree) of the project, and the upgrade runs in the main copy, ' + real(MAIN) + '. ')
+      && snapshot(MAIN) === mainBefore, said291(r));
+  r = run291(MAIN);
+  check('291: the main copy of that project is audited as before', r.status === 0 && !WRONG.test(r.stderr) && /candidate finding\(s\)/.test(r.stderr), said291(r));
+
+  // A project kept below the top folder, started in its own folder or deeper.
+  const BIG = newRepo('big', { 'app/.claude/.toolkit-state.json': STATE_291, 'app/src/index.js': '// app\n', 'README.md': '# Big\n' });
+  const APP = path.join(BIG, 'app');
+  const bigBefore = snapshot(BIG);
+  const below = [APP, path.join(APP, 'src')].map((d) => run291(d));
+  check('291: the audit stops where the state file sits below the top folder, and writes nothing',
+    below.every((x) => x.status === 1 && x.stdout === '' && outLines(x.stderr).length === 1
+      && x.stderr.startsWith('upgrade-audit: wrong folder: this project\'s toolkit files are in ' + real(APP) + ', below the top folder of its repository, ' + real(BIG) + '. '))
+      && snapshot(BIG) === bigBefore && !fs.existsSync(path.join(BIG, '.claude')), below.map(said291).join(' || '));
+  const TOP = newRepo('top-state', { '.claude/.toolkit-state.json': STATE_291, 'docs/guide.md': '# Guide\n' });
+  r = run291(path.join(TOP, 'docs'));
+  check('291: from a subfolder of a project whose state file is at the top, the audit runs as before', r.status === 0 && !WRONG.test(r.stderr) && /candidate finding\(s\)/.test(r.stderr), said291(r));
+
+  // The other runs that read or write the record stop the same way.
+  const EARLIER_OUT = path.join(BASE, 'earlier-out.md');
+  const variants = [['--release-notes'], ['--release-notes', '--earlier', '--out', EARLIER_OUT], ['--stamp']];
+  const stops = [SIDE, APP].map((d) => variants.map((a) => run291(d, a)));
+  check('291: the release-notes reads and the stamp stop the same way',
+    stops.every((rs) => rs.every((x) => x.status === 1 && x.stdout === '' && WRONG.test(x.stderr) && outLines(x.stderr).length === 1))
+      && !fs.existsSync(EARLIER_OUT) && read(path.join(SIDE, '.claude', '.toolkit-state.json')) === STATE_291 && snapshot(BIG) === bigBefore,
+    stops.map((rs) => rs.map(said291).join(' ; ')).join(' || '));
+
+  // A bare repository has no main copy, so its side copy is the only place to run.
+  const BARE = path.join(BASE, 'bare.git');
+  const cloned = gitIn(BASE, ['clone', '-q', '--bare', MAIN, BARE]);
+  const BARE_SIDE = path.join(BASE, 'bare-side');
+  const added = cloned.status === 0 ? gitIn(BARE, ['worktree', 'add', '-q', '-b', 'work', BARE_SIDE]) : cloned;
+  r = added.status === 0 ? run291(BARE_SIDE) : { status: null, stderr: String(added.stderr), stdout: '' };
+  check('291: a side copy of a bare repository is audited as before', r.status === 0 && !WRONG.test(r.stderr) && /candidate finding\(s\)/.test(r.stderr), said291(r));
+
+  // The rollback lowers the record wherever the guard reads it, and a receipt
+  // call-back answers for a finding wherever the checks runner calls it.
+  const SIDE_B = sideOf(MAIN, 'side-b');
+  const rb = spawnSync('node', [SCRIPT, '--project', SIDE_B, '--rollback-to', '6.9.0'], { encoding: 'utf8' });
+  const rc = run291(SIDE, ['--receipt', '0'.repeat(16), '--release', '7.1.0']);
+  check('291: the rollback and the receipt call-back still run in a side copy',
+    SIDE_B !== null && rb.status === 0 && /rolled back/.test(rb.stderr) && !WRONG.test(rb.stderr) && JSON.parse(read(path.join(SIDE_B, '.claude', '.toolkit-state.json'))).auditedVersion === '6.9.0'
+      && rc.status === 1 && /no finding of this run has the receipt ID/.test(rc.stderr) && !WRONG.test(rc.stderr), said291(rb) + ' || ' + said291(rc));
+
+  // The refusal for the toolkit's own repository comes first, so this
+  // repository answers the same from a side copy as from its main copy.
+  const OWN_REPO = newRepo('own', { '.claude-plugin/marketplace.json': JSON.stringify({ name: 'llm-peer-review', plugins: [{ name: 'tk' }] }), '.claude/.toolkit-state.json': STATE_291 });
+  const OWN_SIDE = sideOf(OWN_REPO, 'side');
+  r = run291(OWN_SIDE);
+  check('291: the toolkit\'s own repository still gets its own refusal in a side copy',
+    OWN_SIDE !== null && r.status === 1 && /^upgrade-audit: this is the toolkit's own repository/.test(r.stderr) && !WRONG.test(r.stderr), said291(r));
+
+  // The copy the plugin ships behaves the same.
+  r = run291(SIDE, [], BUILT);
+  const builtBelow = run291(APP, [], BUILT);
+  check('291: the built plugin copy stops the same way',
+    r.status === 1 && r.stderr.includes('wrong folder: this folder is a side copy') && r.stderr.includes(real(MAIN))
+      && builtBelow.status === 1 && builtBelow.stderr.includes('wrong folder: this project\'s toolkit files are in ' + real(APP)), said291(r) + ' || ' + said291(builtBelow));
+
+  // The stop is one block, kept the same in both scripts that carry it.
+  const WF_OPEN = '// >>> wrong folder stop (issue #291) >>>';
+  const WF_CLOSE = '// <<< wrong folder stop <<<';
+  const wfBlock = (text) => { const a = text.indexOf(WF_OPEN); const b = text.indexOf(WF_CLOSE); return a < 0 || b < a || text.indexOf(WF_OPEN, a + 1) >= 0 ? null : text.slice(a, b + WF_CLOSE.length).replace(/\r\n/g, '\n'); };
+  const wfAudit = wfBlock(read(SCRIPT));
+  const wfSetup = wfBlock(read(path.join(REPO, '.claude', 'scripts', 'setup-project.js')));
+  check('291: the wrong-folder block, markers included, is byte for byte the one in setup-project.js',
+    wfAudit !== null && wfSetup !== null && wfAudit === wfSetup && /function wrongFolder\(/.test(wfAudit), wfAudit === null ? 'no block in upgrade-audit.js' : wfSetup === null ? 'no block in setup-project.js' : 'the copies differ');
 }
 }
 

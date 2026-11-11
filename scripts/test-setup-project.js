@@ -1986,6 +1986,72 @@ r = run(repo, pluginRoot);
 check('an unreadable marketplace file names nothing, so the project is seeded normally', r.status === 0 && /Install type: fresh install/.test(r.out) && exists(repo, '.claude/rules/toolkit.md'), r.status + ' ' + r.out);
 fs.rmSync(repo, { recursive: true, force: true });
 
+// Setup takes the repository's top folder as the project (issue #291). In a
+// side copy (a git worktree) it would seed and write permission rows into a
+// copy that keeps its own local records, and started in a project kept below
+// the top folder it would seed a second install at the top. So it stops in
+// both with exit 1 and one line, before it reads or writes anything. A first
+// setup in a folder that holds no toolkit files still seeds the top folder,
+// and a side copy of a bare repository, which has no main copy, is not stopped.
+// The same block lives in upgrade-audit.js; scripts/test-upgrade-audit.js is
+// where the two copies are compared.
+console.log('\n7. setup stops in a side copy and below the top folder (issue #291)');
+{
+  const WRONG = /^setup-project: wrong folder: /m;
+  const real = (p) => fs.realpathSync(p);
+  const STATE_291 = JSON.stringify({ version: '7.0.0', auditedVersion: '7.0.0', path: 'plugin', previousVersion: null }, null, 2) + '\n';
+  const made = [];
+  const repoWith = (files) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-291-'));
+    made.push(dir);
+    initRepo(dir);
+    for (const rel of Object.keys(files)) write(dir, rel, files[rel]);
+    commitAll(dir, 'init');
+    return dir;
+  };
+  const sideOf = (main, name) => { const dir = path.join(main, '.claude', 'worktrees', name); git(main, ['worktree', 'add', '-q', '-b', name, dir]); return dir; };
+  const oneLine = (x) => x.out.split('\n').filter(Boolean).length === 1;
+  const noBackup = (dir) => !fs.readdirSync(dir).some(n => n.startsWith('.toolkit-backup-'));
+  // One short line per run, so a failing case keeps its name in the release gate's tail.
+  const brief = (x) => x.status + ' ' + x.out.replace(/\s+/g, ' ').slice(0, 110);
+
+  const main = repoWith({ '.claude/.toolkit-state.json': STATE_291, 'CLAUDE.md': '# Project\n' });
+  const side = sideOf(main, 'side');
+  let before = treeSnapshot(main);
+  const sideRuns = [[], ['--dry-run'], ['--force']].map(a => run(side, pluginRoot, a));
+  check('291: setup stops in a side copy, names the main copy and writes nothing',
+    sideRuns.every(x => x.status === 1 && oneLine(x)
+      && x.out.startsWith('setup-project: wrong folder: this folder is a side copy (a git worktree) of the project, and setup runs in the main copy, ' + real(main) + '. '))
+      && treeSnapshot(main) === before && noBackup(main) && noBackup(side), sideRuns.map(brief).join(' || '));
+  r = run(main, pluginRoot, ['--dry-run']);
+  check('291: the main copy of that project is set up as before', r.status === 0 && !WRONG.test(r.out) && /Install type: already on the plugin/.test(r.out), brief(r));
+
+  const big = repoWith({ 'app/.claude/.toolkit-state.json': STATE_291, 'app/src/index.js': '// app\n', 'README.md': '# Big\n' });
+  const old = repoWith({ 'tool/.claude/.toolkit-manifest.json': JSON.stringify({ toolkitVersion: '6.3.3', files: {} }) + '\n', 'README.md': '# Old\n' });
+  const belowBefore = [treeSnapshot(big), treeSnapshot(old)];
+  const belowRuns = [[path.join(big, 'app'), path.join(big, 'app'), big], [path.join(big, 'app', 'src'), path.join(big, 'app'), big], [path.join(old, 'tool'), path.join(old, 'tool'), old]]
+    .map(([start, sub, top]) => ({ x: run(start, pluginRoot), sub, top }));
+  check('291: setup stops where a state file or a copy-install manifest sits below the top folder, and writes nothing',
+    belowRuns.every(c => c.x.status === 1 && oneLine(c.x)
+      && c.x.out.startsWith('setup-project: wrong folder: toolkit files are in ' + real(c.sub) + ', below the top folder of this repository, ' + real(c.top) + '. '))
+      && treeSnapshot(big) === belowBefore[0] && treeSnapshot(old) === belowBefore[1] && !exists(big, '.claude') && !exists(old, '.claude') && noBackup(big) && noBackup(old),
+    belowRuns.map(c => brief(c.x)).join(' || '));
+
+  const plain = repoWith({ 'app/src/index.js': '// app\n', 'README.md': '# Plain\n' });
+  r = run(path.join(plain, 'app'), pluginRoot);
+  check('291: a first setup started in a folder of a bigger repository seeds the top folder as before',
+    r.status === 0 && !WRONG.test(r.out) && /Install type: fresh install/.test(r.out) && exists(plain, '.claude/rules/toolkit.md') && !exists(plain, 'app/.claude'), brief(r));
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'setup-291-bare-'));
+  made.push(bare);
+  git(bare, ['clone', '-q', '--bare', main, path.join(bare, 'repo.git')]);
+  git(path.join(bare, 'repo.git'), ['worktree', 'add', '-q', '-b', 'work', path.join(bare, 'work')]);
+  r = run(path.join(bare, 'work'), pluginRoot, ['--dry-run']);
+  check('291: setup in a side copy of a bare repository runs as before', r.status === 0 && !WRONG.test(r.out) && /Install type: /.test(r.out), brief(r));
+
+  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+}
+
 fs.rmSync(pluginRoot, { recursive: true, force: true });
 console.log('');
 if (failures.length === 0) { console.log(passed + ' checks passed.\n'); process.exit(0); }
