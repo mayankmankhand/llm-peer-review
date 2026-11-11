@@ -151,7 +151,12 @@
 //             The skipped before run used to surface only at the tally, after
 //             the work was committed, when the step could no longer be proved;
 //             refused here, the work is still uncommitted and the step can be
-//             repaired by taking its before run with the work set aside.
+//             repaired by taking its before run with the work set aside. When
+//             the work cannot be set aside the owner decides, and on their word
+//             --owner-accepts '<their words>' lets the refused after run go
+//             ahead: the miss is still kept, and results.json carries the words
+//             as ownerAccepts. The flag is refused (exit 1) without words, on
+//             any run but an after run, and on a step its before record proves.
 //   --tally   reads each step's two results.json files and gives each step a
 //             status: proved (every target passed its before expect and its
 //             after expect without a flake, every guard that passed before
@@ -171,7 +176,12 @@
 //             are older checks, a finding for review (M17). A step with a before
 //             record but no after record that counts (an after run its before
 //             record could not prove writes none) still gets the before
-//             record's own reasons, so the tally says why. The plan's
+//             record's own reasons, so the tally says why. A step with a miss
+//             record names its time (`missed`), and `repaired: true` once a
+//             before record newer than the miss proves the step; summary.missed
+//             and summary.repaired count them. An after record carrying the
+//             owner's words adds the reason "the owner accepted it unproved at
+//             the step: <words>", and the step stays unproved. The plan's
 //             problems outside any step are listed, and summary.problems
 //             counts them.
 // Full runs (issue #248). A full test run that doubled in five days raised
@@ -1409,14 +1419,15 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + '                    each file path the plan names that is not in the project, with its line (advisory)\n'
   + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/;\n'
   + '                    an after run is refused, nothing run, when the step\'s before record cannot prove it\n'
-  + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n'
+  + '  --owner-accepts   with --phase after, on the owner\'s word only: run a refused after phase, recording their words\n'
+  + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem; misses and repairs counted\n'
   + 'history: node run-checks.js --history [--since <time>]\n'
   + '  --history         what the full test step cost: runs, skipped, totalMs, latestMs, baselineMs, grew\n'
   + '  --since           only the runs that started at or after this time (ISO, e.g. 2026-10-15T01:00:00Z)\n';
 
 function parseArgs(argv) {
   const opts = { checks: '', out: '', timeout: DEFAULT_TIMEOUT_MS, rerunFailures: false, help: false,
-    plan: '', lint: false, tally: false, step: '', phase: '', full: false, noSkip: false, history: false, since: '' };
+    plan: '', lint: false, tally: false, step: '', phase: '', full: false, noSkip: false, history: false, since: '', ownerAccepts: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
@@ -1430,6 +1441,7 @@ function parseArgs(argv) {
     else if (a === '--tally') opts.tally = true;
     else if (a === '--step') opts.step = argv[++i] || '';
     else if (a === '--phase') opts.phase = argv[++i] || '';
+    else if (a === '--owner-accepts') opts.ownerAccepts = argv[++i] === undefined ? '' : argv[i];
     else if (a === '--checks') opts.checks = argv[++i] || '';
     else if (a === '--out') opts.out = argv[++i] || '';
     else if (a === '--timeout') {
@@ -2247,14 +2259,26 @@ function runPlanPhase(opts, cwd) {
   // anything runs or the after folder is cleared, and the miss is kept
   // (issue #290). The work is still uncommitted here, so the step can still be
   // repaired; found later by the tally, after the commit, it could not.
+  let accepted = null;
   if (opts.phase === 'after' && (st.targets.length || st.guards.length)) {
     const reasons = beforeRefusal(plan, st, cwd);
-    if (reasons.length) {
+    if (reasons.length && opts.ownerAccepts == null) {
       const beforeFile = path.join(recordRel(plan.base, st.step, 'before'), 'results.json');
       throw new Error('step ' + st.step + "'s before record cannot prove it, so its after run was refused and nothing ran: "
         + reasons.join('; ') + ' (' + beforeFile + '). ' + recordMiss(plan, st, reasons, cwd)
-        + " Repair it at the step: set the step's work aside, take its before run, put the work back, then run after again.");
+        + " Repair it at the step: set the step's work aside, take its before run, put the work back, then run after again."
+        + " Only when the work cannot be set aside does the owner decide; on their word to accept it unproved, run after again with --owner-accepts '<their words>'.");
     }
+    if (reasons.length) {
+      // The owner accepted the step unproved: the miss is still kept, and
+      // their words ride on the after record, where the tally names them.
+      recordMiss(plan, st, reasons, cwd);
+      accepted = opts.ownerAccepts.trim();
+    } else if (opts.ownerAccepts != null) {
+      throw new Error('--owner-accepts is only for a step its before record cannot prove, and step ' + st.step + "'s before record proves it: run after without it");
+    }
+  } else if (opts.ownerAccepts != null) {
+    throw new Error('--owner-accepts is only for an after run of a step with a target or a guard, and step ' + st.step + ' has neither');
   }
   // A before run also holds each target's output against its after expect,
   // which must not hold yet (`notYet`, see attempt).
@@ -2262,7 +2286,9 @@ function runPlanPhase(opts, cwd) {
     notYet: opts.phase === 'before' ? t.after.value : undefined }))
     .concat(st.guards.map((g) => ({ id: g.id, check: g.check, expect: g.expect.value, role: 'guard' })));
   const outDir = freshRecordDir(recordRel(plan.base, st.step, opts.phase), cwd);
-  return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, { plan: plan.rel, step: st.step, phase: opts.phase });
+  const extra = { plan: plan.rel, step: st.step, phase: opts.phase };
+  if (accepted !== null) extra.ownerAccepts = accepted;
+  return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, extra);
 }
 
 // Why a step's before record cannot prove it (issue #290), read exactly as
@@ -2298,6 +2324,24 @@ function recordMiss(plan, st, reasons, cwd) {
     if (e.code !== 'EEXIST') return notKept(e.message);
   }
   return 'The miss is kept in ' + path.join(rel, 'missed.json') + '.';
+}
+
+// A step's miss record (issue #290): null when there is none, { why } when a
+// file is there but cannot count (a link on its path, not a file, not a record
+// with a valid time, or written for another plan or step), else { at }.
+function readMiss(cwd, plan, st) {
+  const rel = path.join('reports', 'checks', plan.base, 'step-' + st.step);
+  const bad = linkOnRecordPath(cwd, rel);
+  if (bad) return { why: bad + ' is a link or not a folder' };
+  const file = path.join(cwd, rel, 'missed.json');
+  let s;
+  try { s = fs.lstatSync(file); } catch (e) { return null; }
+  if (!s.isFile()) return { why: 'missed.json is a link or not a file' };
+  let m;
+  try { m = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return { why: 'missed.json is not valid JSON' }; }
+  if (m === null || typeof m !== 'object' || typeof m.at !== 'string' || isNaN(Date.parse(m.at))) return { why: 'missed.json has no valid time (at)' };
+  if (String(m.plan) !== plan.rel || String(m.step) !== st.step) return { why: 'missed.json was written for another plan or step' };
+  return { at: m.at };
 }
 
 // A phase's results.json: null when the phase never ran, { why } when a file
@@ -2421,12 +2465,13 @@ function tallyPlan(opts, cwd) {
   // the summary too: a caller that reads only the counts still sees them.
   const problems = parsed.problems.map((p) => ({ step: null, line: p.line, problem: p.problem }));
   if (!parsed.steps.length) problems.push({ step: null, line: null, problem: 'no step lines found (a step line reads - [ ] 🟥 **Step N: name**)' });
-  const summary = { steps: parsed.steps.length, proved: 0, unproved: 0, noTarget: 0, missing: 0, problem: 0, flaky: 0, slow: 0, problems: problems.length };
+  const summary = { steps: parsed.steps.length, proved: 0, unproved: 0, noTarget: 0, missing: 0, problem: 0, flaky: 0, slow: 0, problems: problems.length, missed: 0, repaired: 0 };
   const out = parsed.steps.map((st) => {
     const row = { step: st.step, name: st.name, status: '', reasons: [], notes: [], flaky: [], slow: [], brokenBefore: [] };
     const want = (phase) => ({ plan: plan.rel, step: st.step, phase });
     const before = readRecord(cwd, recordRel(plan.base, st.step, 'before'), want('before'));
     const after = readRecord(cwd, recordRel(plan.base, st.step, 'after'), want('after'));
+    const miss = readMiss(cwd, plan, st);
     for (const r of [before, after]) {
       for (const c of (r && r.rec ? r.rec.checks : [])) {
         if (c.flaky && row.flaky.indexOf(c.id) === -1) row.flaky.push(c.id);
@@ -2457,12 +2502,27 @@ function tallyPlan(opts, cwd) {
           row.brokenBefore.push(...b.broken);
           row.notes.push(...b.notes);
         }
+        // The owner accepted the step unproved at the step (#290): their words
+        // ride on its after record and are named here, and it stays unproved.
+        if (after && after.rec && typeof after.rec.ownerAccepts === 'string') row.reasons.push('the owner accepted it unproved at the step: ' + after.rec.ownerAccepts);
       }
       if (st.noTarget !== null) {
         row.reason = st.noTarget;
         row.status = row.reasons.length ? 'unproved' : 'noTarget';
       } else {
         row.status = row.reasons.length ? 'unproved' : 'proved';
+      }
+    }
+    // A refused after run left a miss record (#290): the row names its time,
+    // and the miss counts as repaired once a before record newer than it
+    // proves the step.
+    if (miss && miss.why) row.notes.push('the miss record cannot count: ' + miss.why);
+    else if (miss) {
+      row.missed = miss.at;
+      summary.missed++;
+      if ((row.status === 'proved' || row.status === 'noTarget') && before && before.rec && Date.parse(before.rec.at) > Date.parse(miss.at)) {
+        row.repaired = true;
+        summary.repaired++;
       }
     }
     summary[row.status]++;
@@ -2480,7 +2540,7 @@ function main(argv) {
   if (opts.help) { process.stdout.write(USAGE); return; }
   const cwd = process.cwd();
   if (opts.history) {
-    if (opts.checks || opts.out || opts.plan || opts.full || opts.lint || opts.tally || opts.step || opts.phase || opts.rerunFailures) {
+    if (opts.checks || opts.out || opts.plan || opts.full || opts.lint || opts.tally || opts.step || opts.phase || opts.rerunFailures || opts.ownerAccepts !== null) {
       fail('--history takes only --since');
     }
     let since = null;
@@ -2504,11 +2564,18 @@ function main(argv) {
     if (phaseRun && (!STEP_ARG_RE.test(opts.step) || (opts.phase !== 'before' && opts.phase !== 'after'))) {
       fail('--step takes a step number such as 3 or 5a, and --phase takes before or after');
     }
+    // --owner-accepts carries the owner's words onto an after run its step's
+    // before record cannot prove (issue #290): only there, and only with words.
+    if (opts.ownerAccepts !== null) {
+      if (!phaseRun || opts.phase !== 'after') fail("--owner-accepts goes only with --step <N> --phase after, on the owner's word");
+      if (opts.ownerAccepts.trim() === '') fail("--owner-accepts needs the owner's words, single-quoted");
+    }
     let result;
     try { result = opts.lint ? lintPlan(opts, cwd) : opts.tally ? tallyPlan(opts, cwd) : runPlanPhase(opts, cwd); } catch (e) { fail(e.message); }
     process.stdout.write(JSON.stringify(result) + '\n');
     return;
   }
+  if (opts.ownerAccepts !== null) fail('--owner-accepts goes only with --plan <plan.md> --step <N> --phase after');
   if (!opts.checks || !opts.out) fail('--checks and --out are both required\n' + USAGE.trimEnd());
   let checks;
   try { checks = loadChecks(opts.checks); } catch (e) { fail(e.message); }

@@ -1690,6 +1690,112 @@ section('290 refuse: an after run its before record cannot prove is refused (iss
     one(JSON.stringify(agree)));
 });
 
+// --- 290. the owner's yes, and the count of misses and repairs (issue #290) ---
+// A refused after run is repaired at the step when the session can put the
+// work aside; when it cannot, the owner decides, and --owner-accepts records
+// their words on the after run while the step stays unproved. The tally counts
+// each miss and each miss a later before run repaired. The last case walks the
+// whole repair through the real runner and the sandbox's git.
+section("290 accept: the owner's yes, and the count of misses and repairs (issue #290)", function () {
+  const one = (x) => String(x).replace(/\s+/g, ' ').slice(0, 300);
+  const stepDir = (base) => path.join(proj, 'reports', 'checks', base, 'step-1');
+  const json = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
+  const firstStep = (r) => (r.json && Array.isArray(r.json.steps) ? r.json.steps : []).find((s) => String(s.step) === '1') || {};
+  const planWith = (base, lines) => {
+    write('plans/' + base + '.md', ['## Tasks', '', '- [ ] 🟥 **Step 1: Case** `[sequential]`'].concat(lines).concat(['']).join('\n'));
+    return ['--plan', 'plans/' + base + '.md', '--step', '1'];
+  };
+  const target = (file) => '  - Check target `n`: `grep -c one ' + file + '` - before `{"match": "^1$"}` - after `{"match": "^2$"}`';
+
+  // The owner accepts a step whose before run was skipped.
+  const words = 'keep it, the build was done in the design tool';
+  write('a290a.txt', 'one\none\n');
+  const pa = planWith('PLAN-a290a', [target('a290a.txt')]);
+  const aa = run(pa.concat(['--phase', 'after', '--owner-accepts', words]));
+  const aRec = json(path.join(stepDir('PLAN-a290a'), 'after', 'results.json'));
+  check("290 accept: owner-accepts runs a refused after phase and records the owner's words",
+    aa.status === 0 && !!aa.byId.n && aa.byId.n.verdict === 'pass' && !!aRec && aRec.ownerAccepts === words && !!json(path.join(stepDir('PLAN-a290a'), 'missed.json')),
+    one(aa.stdout + aa.stderr));
+
+  // The flag is for a refused step only, with words, on an after run.
+  write('a290b.txt', 'one\n');
+  const pb = planWith('PLAN-a290b', [target('a290b.txt')]);
+  run(pb.concat(['--phase', 'before']));
+  write('a290b.txt', 'one\none\n');
+  const ab = run(pb.concat(['--phase', 'after', '--owner-accepts', 'not needed']));
+  const noWords = run(pa.concat(['--phase', 'after', '--owner-accepts', '  ']));
+  const onBefore = run(pb.concat(['--phase', 'before', '--owner-accepts', 'too soon']));
+  check('290 accept: owner-accepts on a step its before record proves exits 1',
+    ab.status === 1 && /proves it/.test(ab.stderr) && !fs.existsSync(path.join(stepDir('PLAN-a290b'), 'after'))
+      && noWords.status === 1 && /words/.test(noWords.stderr) && onBefore.status === 1 && /--phase after/.test(onBefore.stderr),
+    one([ab.stderr, noWords.stderr, onBefore.stderr].join(' | ')));
+
+  // The tally keeps the accepted step unproved and says what the owner said.
+  const ta = firstStep(run(['--plan', 'plans/PLAN-a290a.md', '--tally']));
+  check("290 accept: the tally keeps an accepted step unproved with the owner's words in its reasons",
+    ta.status === 'unproved' && String(ta.reasons).indexOf('the owner accepted it unproved at the step: ' + words) !== -1,
+    one(JSON.stringify(ta)));
+
+  // A miss repaired by a later before run: the work was done first, the after
+  // run refused, the work set aside, the before run taken, the work put back.
+  write('a290c.txt', 'one\none\n');
+  const pc = planWith('PLAN-a290c', [target('a290c.txt')]);
+  const missC = run(pc.concat(['--phase', 'after']));
+  write('a290c.txt', 'one\n');
+  run(pc.concat(['--phase', 'before']));
+  write('a290c.txt', 'one\none\n');
+  run(pc.concat(['--phase', 'after']));
+  const sc = firstStep(run(['--plan', 'plans/PLAN-a290c.md', '--tally']));
+  check('290 tally: a miss repaired by a later before run is proved and counted as repaired',
+    missC.status === 1 && sc.status === 'proved' && sc.repaired === true && typeof sc.missed === 'string' && !isNaN(Date.parse(sc.missed)),
+    one(JSON.stringify(sc)));
+
+  // Three steps: one missed and repaired, one missed and left, one in order.
+  write('plans/PLAN-a290d.md', ['## Tasks', '',
+    '- [ ] 🟥 **Step 1: Repaired** `[sequential]`', target('a290d1.txt'), '',
+    '- [ ] 🟥 **Step 2: Missed** `[sequential]`', target('a290d2.txt'), '',
+    '- [ ] 🟥 **Step 3: In order** `[sequential]`', target('a290d3.txt'), ''].join('\n'));
+  const pd = (n, phase) => ['--plan', 'plans/PLAN-a290d.md', '--step', n, '--phase', phase];
+  write('a290d1.txt', 'one\none\n');
+  run(pd('1', 'after'));
+  write('a290d1.txt', 'one\n');
+  run(pd('1', 'before'));
+  write('a290d1.txt', 'one\none\n');
+  run(pd('1', 'after'));
+  write('a290d2.txt', 'one\none\n');
+  run(pd('2', 'after'));
+  write('a290d3.txt', 'one\n');
+  run(pd('3', 'before'));
+  write('a290d3.txt', 'one\none\n');
+  run(pd('3', 'after'));
+  const td = run(['--plan', 'plans/PLAN-a290d.md', '--tally']);
+  const sum = td.json && td.json.summary ? td.json.summary : {};
+  check('290 tally: the summary counts misses and repairs',
+    sum.missed === 2 && sum.repaired === 1 && sum.proved === 2 && sum.unproved === 1,
+    one(JSON.stringify(sum)));
+
+  // The whole repair through git: the step's work is uncommitted, so the file's
+  // last committed version is the state the before run should have seen.
+  write('a290e.txt', 'one\n');
+  git(['add', 'a290e.txt']);
+  git(['commit', '-qm', 'a290e base']);
+  const pe = planWith('PLAN-a290e', [target('a290e.txt')]);
+  write('a290e.txt', 'one\none\n');
+  const refusedE = run(pe.concat(['--phase', 'after']));
+  const aside = path.join(sandbox, 'aside-a290e.txt');
+  fs.copyFileSync(path.join(proj, 'a290e.txt'), aside);
+  git(['checkout', 'HEAD', '--', 'a290e.txt']);
+  const beforeE = run(pe.concat(['--phase', 'before']));
+  fs.copyFileSync(aside, path.join(proj, 'a290e.txt'));
+  const same = fs.readFileSync(aside, 'utf8') === read('a290e.txt');
+  const afterE = run(pe.concat(['--phase', 'after']));
+  const se = firstStep(run(['--plan', 'plans/PLAN-a290e.md', '--tally']));
+  check('290 repair: setting the work aside, the before run, the work back and the after run prove the step',
+    refusedE.status === 1 && beforeE.status === 0 && (beforeE.byId.n || {}).verdict === 'pass' && same
+      && afterE.status === 0 && (afterE.byId.n || {}).verdict === 'pass' && se.status === 'proved' && se.repaired === true,
+    one(JSON.stringify(se) + ' ' + refusedE.stderr));
+});
+
 // --- 248. the full test step's history (issue #248) ---------------------------
 // A full test run used to keep its time only in the folder it wrote, so a suite
 // that doubled in five days raised nothing. A --full run appends one row to the
