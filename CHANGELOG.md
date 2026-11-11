@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-<!-- At release: re-record the prompt-load baseline (commands/execute.md grew 420 words and skills/loop-rules/SKILL.md 168 with the approved edits). -->
+<!-- At release: re-record the prompt-load baseline (commands/execute.md grew 437 words and skills/loop-rules/SKILL.md 168 with the approved edits, the review's three included). -->
 
 **A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself (#290).** Before, nothing noticed until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved.
 
@@ -14,13 +14,12 @@
 
 ### Added
 
-- **The next step's first command.** When a step's after run passes, the checks runner now names the exact command for the next step's before run, so the session starts the next step with its check rather than its work.
+- **The next step's before command.** When a step's after run passes, the checks runner now names the exact command for the next step's before run, so the session starts the next step with its check rather than its work.
 
 ### Upgrading
 
 - Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks.
 - A command of your own that runs a step's after check (`run-checks.js --plan <plan> --step <N> --phase after`) now meets the same refusal when that step has no before run that proves it. Run the step's before check before its work, as `/tk:execute` does.
-- In default permission mode, a repair may stop to ask before comparing the files (`cmp`) or moving a new file aside, two commands the toolkit's permission rows do not cover. A repair happens only after a missed before check.
 - A copy-install for other editors gets the changed `/execute` command, loop rules and checks runner when you re-run `setup.sh` or `setup.ps1`.
 
 ### Why
