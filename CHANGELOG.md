@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+<!-- At release: re-record the prompt-load baseline (commands/review.md grew 21 words with the approved edit). The review path changed, so the catch-rate line asks for two Pocket runs on the new path, or the override with its written reason. -->
+
 ### Fixed
 
 - **Reviews: reading a plan's must-check list no longer stops for your approval (#302).** In default permission mode, every review that checks a plan stopped to ask before reading the plan's must-check list, because the read was a quoted text-search command. The review now reads the list through the toolkit's startup script (`session-init.js --must-check`), which your permission rows already allow, and gets the same lines: compared on 131 plans, every one matched.
