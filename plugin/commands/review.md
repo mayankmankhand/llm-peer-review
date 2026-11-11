@@ -151,7 +151,7 @@ The role, the criteria, the review lens and the single-pass contract live in the
 
 ### Phase 3: Synthesize
 
-**Seed the must-check items**. List the `## Must-check for review` section (M14) of the plan the Plan Compliance row selects with `sed -n '/^## Must-check for review/,/^## /p' plans/<plan>.md` (M16); no output means the plan has no section and seeds nothing. Each `[plan]`, `[design]`, `[interaction]` and `[check]` line becomes one finding, added before dedup so a finder that raised the same gap corroborates it rather than duplicating it:
+**Seed the must-check items**. List the `## Must-check for review` section (M14) of the plan the Plan Compliance row selects with `node ${CLAUDE_PLUGIN_ROOT}/scripts/session-init.js --must-check plans/<plan>.md` (M16): it prints the section's `lines` verbatim, `found` false means the plan has no section and seeds nothing, and an `error` field means the plan could not be read, which goes under "What I could not check". Each `[plan]`, `[design]`, `[interaction]` and `[check]` line becomes one finding, added before dedup so a finder that raised the same gap corroborates it rather than duplicating it:
 
 - `severity`: `warn`. The item already survived a fresh judge's read, and a Block needs a user harm the orchestrator cannot assert on that judge's behalf.
 - `specialist`: `plan-critic`, `design-critic`, `interaction-pass`, or `check-first` for a `[check]` line.
