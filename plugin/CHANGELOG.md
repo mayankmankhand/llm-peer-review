@@ -1,5 +1,49 @@
 # Release notes
-The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.18, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+The released blocks of the toolkit's CHANGELOG.md from v6.0.0 up to this plugin's version, 8.0.19, newest first, copied when the plugin was built; `/tk:upgrade` reads them against the version a project last recorded.
+
+## v8.0.19 - Fewer Stops, Fairer Rechecks (2026-11-10)
+
+**A review no longer undoes a correct fix just because the fix kept the words its check searched for, you can allow one more try at a fix, and planning and reviews no longer stop to ask for your approval at two of the toolkit's own checks (#288, #294, #295, #296, #297, #298).** A failed recheck of a file search now goes to a fresh verifier, which reads the change itself and decides, without spending a fix try. `/tk:merge` keeps one Unreleased heading in the changelog when several branches land after a release. Two maintainer tools are fixed as well (#292, #299).
+
+### Added
+
+- **One more try, on your word.** When a fix has failed twice, the question you get now offers "try once more". Say yes and the review fixes that one finding a third time, records the round as yours in its log, and marks that finding's line in the review summary `(round 3, the owner's choice)`. It works once per finding, and only after two tries have really failed. Nothing opens a third try by itself, and if the third fails too, the fix is undone and you are asked again without that answer.
+
+### Fixed
+
+- **Reviews: a fix that keeps the searched words.** A finding's proof is often a file search, and the recheck after the fix expects that search to come back empty. A correct fix can keep the words (a button that keeps its label while what it does changes), and such a fix used to read as failed, twice, and be undone. A failed recheck of that kind now goes to a fresh verifier, a separate helper that reads the change itself and decides. That costs one extra helper call and spends no fix try. A failing test, a failing build, and a recheck whose pass condition the fixing session wrote itself still fail outright.
+- **Reviews: hidden-defect notes are no longer dropped.** When the double-check finds that a true finding is hidden today by another defect, it says so in a note. The script that reads its reply now lists those notes for each finding, beside the notes it already kept, so the review summary can carry them.
+- **Reviews.** The separate check of a fix, and the double-check that tries to knock down findings, no longer have shell access, so neither can start a test run partway through a review. Both judge from the proof output already in front of them, and can still open and search your files.
+- **`/tk:create-plan`.** The check that the files a plan names exist now runs inside the planner's existing check of its check lines, a command your project's permissions already allow, instead of a shell loop Claude Code could not check before it ran. One difference from the old loop: a path that points outside your project now shows as missing, even when the file exists there.
+- **`/tk:merge`.** A changelog block that opens with an Unreleased heading joins main's Unreleased heading when the two read the same (case and square brackets aside), with its entries on top, and fills main's empty heading when they read differently. Headings with different titles still stack, as before. The script keeps the file's line endings, and each landing's line says where the block went.
+- **The landing check** no longer reports the heading a join drops, or main's empty heading a fill replaces, as lost work. Any other lost heading, and every entry under one, is still reported.
+- **The starter lessons list carries the six lessons added since v8.0.18**, so `/tk:upgrade` recognizes them as the toolkit's own.
+- **Maintainer only: the network warning in `scripts/quality-check.js` no longer depends on the folder the rig runs from (#292).** It named this repository by the folder's name, so a practice run in a side copy (a folder named `worktree-<n>`) could clone or read the repository through the GitHub CLI with no warning. It now uses the fixed name `llm-peer-review`, matched whole and in any letter case, looks at every `gh` subcommand (`gh release download` and `gh search` included), and no longer flags a `/contents/` read of another repository. A re-check of the nine saved Pocket runs found no fetch the old check had missed.
+- **Maintainer only: Pocket's answer key credits the stored-script bug in plain words (#299).** v8.0.18's run 1 caught the bug as a Block in words the key did not know ("raw page markup", "stored scripts"), so it scored as a miss. The key gains plain-consequence patterns, each guarded against Pocket's nearby problems (export cells that run as formulas, the server overwriting what the import and close-month scripts wrote, the month menu that needs scripts), and its old "raw ... note" pattern now also needs a page word, because it credited a spreadsheet-export finding. A fresh helper wrote 20 plain wordings of the bug and 10 of the nearby problems (`scripts/fixtures/quality-check/pocket/wordings.jsonl`): the old key caught 8 of the 20 and 1 of the 10; the new patterns caught 15 of 20 on the first score and none of the 10, then 20 of 20 after one change made from the five misses, so the test that holds them guards reach rather than measuring it. Re-checking all nine saved Pocket runs moved exactly one catch, run 1's, and lost none; v8.0.18 re-scores at 2 of 2 on the bug, still PASS. Each saved run keeps its old result beside it as `analysis.before-292-299.json`.
+
+### Upgrading
+
+- Everything arrives with the plugin update, with no setup step, no new permission rows and no new upgrade checks.
+- A copy-install for other editors gets the changed commands, agents, skills and scripts when you re-run `setup.sh` or `setup.ps1`.
+
+### Why
+
+A recheck that searches for words can tell that the words are still there, not whether the fix worked. Until now that was enough to fail a correct fix twice and undo it. In one trial on each side, the fresh verifier called a real fix that kept its wording fixed and a fake one not fixed. That is a spot check and not a rate, so issue #300 reads the real rate after ten reviews. The extra try was already happening by hand: an approved third try had no place in the review's log and was written into the second, which made the log wrong. The hidden-defect notes were being written and then lost one step later.
+
+In the v8.0.18 practice run, a project set up with `/tk:setup` stopped once at the planner's path check and ten times during one review, where two fix checks ran the project's tests five times each. Every stop was on a toolkit step, not on anything the project asked for. Permission rows for test commands would have let every install run project code without asking, so the steps changed instead.
+
+The v8.0.18 landing put its block above main's empty Unreleased heading and had to be fixed by hand, and with several branches landing one after another, each later landing would have stacked one more. A replay of that landing now gives the hand-fixed file byte for byte.
+
+Maintainer only: this release changes the review path, so its catch-rate check compares against v8.0.18's two Pocket runs. With run 1's catch scored as a miss, the stored-script bug read 1 of 2 there and counted as noise rather than a reliable catch; it now reads 2 of 2, so a release that loses it in both runs fails the check.
+
+### Notes
+
+- Before this release, one full cycle ran in default permission mode on a throwaway project, with the same task as the v8.0.18 practice run. The planner's check that a plan's files exist asked nothing (it asked once in v8.0.18), and the separate check of a fix and the double-check started no test run (ten stops in v8.0.18).
+- One toolkit step still asked in that run: the review's read of a plan's must-check list. A fix to a file git ignores, such as a plan, also could not reach the separate check of the fix, so the review asked whether to accept it on its own check. Neither is new in this release.
+
+### Released under the catch-rate override (maintainer only)
+
+- Claude Code moved from 2.1.319 to 2.1.322 between v8.0.18's Pocket runs and this release's, so the release check called the comparison confounded. Scored with that change allowed, the verdict is PASS: all seven reliable catches were caught in both runs. The two that come and go are not scored. The browser bug was caught in 0 of 2 runs (1 of 2 before): run 1 did not raise it, and run 2 raised it and removed it when its proof failed. The README order finding was caught in 1 of 2 runs (1 of 2 before).
 
 ## v8.0.18 - Fresh Eyes, Fewer Breaks (2026-11-09)
 
