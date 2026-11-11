@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-<!-- At release: re-record the prompt-load baseline (commands/execute.md grew 437 words and skills/loop-rules/SKILL.md 168 with the approved edits, the review's three included). -->
+<!-- At release: re-record the prompt-load baseline (commands/execute.md grew 465 words and skills/loop-rules/SKILL.md 168 with the approved edits, the review's four included). -->
 
 **A skipped check before a plan step's work is now caught at that step, while the work is not yet committed, and `/tk:execute` repairs it there by itself (#290).** Before, nothing noticed until the hand-off to `/tk:review` at the end of the build, when the step was already committed and could never be proved.
 
