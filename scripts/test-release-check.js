@@ -69,9 +69,20 @@ function commitAll(repo, msg) { git(repo, ['add', '-A']); git(repo, ['commit', '
 // Every folder the gate is pointed at, so the end of the run can prove none of
 // them is this repository (the default suite set includes this file).
 const gateTargets = [];
+// The environment every gate and hook run of this suite starts from: this
+// process's own, minus every TK_RELEASE_ setting the gate reads (the catch-rate
+// override, the suite timeout). A release run under the override sets it for
+// the whole gate, which runs this suite, and every case here that expects a
+// failing catch rate then passed instead (#302 item 3). A case that tests one
+// of those settings passes it in explicitly.
+function baseEnv() {
+  const env = Object.assign({}, process.env);
+  for (const key of Object.keys(env)) if (key.startsWith('TK_RELEASE_')) delete env[key];
+  return env;
+}
 function run(repo, args, env) {
   gateTargets.push(repo);
-  const r = spawnSync('node', [SCRIPT, '--repo', repo, ...args], { encoding: 'utf8', env: Object.assign({}, process.env, env || {}) });
+  const r = spawnSync('node', [SCRIPT, '--repo', repo, ...args], { encoding: 'utf8', env: Object.assign(baseEnv(), env || {}) });
   return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
 }
 // The one output line for a named check, e.g. line(out, 'version bump').
@@ -947,6 +958,24 @@ function releaseRepo(version, tag, opt) {
   r = run(repo, ['--skip-suites'], { TK_RELEASE_CATCH_OVERRIDE: '' });
   check('an empty TK_RELEASE_CATCH_OVERRIDE is no override', r.status === 1 && isFail(r.out, 'catch rate') && !/TK_RELEASE_CATCH_OVERRIDE is set/.test(r.out), detail(r.out));
 
+  // #302 item 3: the gate runs this suite makes must not inherit a release
+  // setting from whoever runs the suite. The v8.0.19 release ran the whole gate
+  // with TK_RELEASE_CATCH_OVERRIDE set, and every case above that expects a
+  // failing catch rate passed instead, so the gate failed its own suite. The
+  // variable is set on this process here, the way a caller's shell sets it,
+  // and the caller's own value is put back in a finally, so a failing run
+  // cannot leak it into the cases after this one.
+  const callerOverride = process.env.TK_RELEASE_CATCH_OVERRIDE;
+  process.env.TK_RELEASE_CATCH_OVERRIDE = 'set by the caller, not by this case';
+  try {
+    r = run(repo, ['--skip-suites']);
+  } finally {
+    if (callerOverride === undefined) delete process.env.TK_RELEASE_CATCH_OVERRIDE;
+    else process.env.TK_RELEASE_CATCH_OVERRIDE = callerOverride;
+  }
+  check('gate runs inside this suite ignore a TK_RELEASE_ variable set by the caller',
+    r.status === 1 && isFail(r.out, 'catch rate') && !/TK_RELEASE_CATCH_OVERRIDE is set/.test(r.out), detail(r.out));
+
   write(repo, 'scripts/quality-check.js', 'module.exports = { PATH_FILES: { review: /^commands\\/review\\.md$/ } };\n');
   r = run(repo, ['--skip-suites']);
   check('a harness without the three exports fails the check rather than passing it silently',
@@ -973,7 +1002,7 @@ commitAll(stubDir, 'stubs');
 git(stubDir, ['commit', '-q', '--allow-empty', '-m', 'later']);
 const STUB_OLD = git(stubDir, ['rev-parse', 'HEAD~1']);
 function hookEnv(log, extra) {
-  return Object.assign({}, process.env, {
+  return Object.assign(baseEnv(), {
     HOOK_LOG: log, TK_PRE_PUSH_CHECK: path.join(stubDir, 'tripwire.js'), TK_RELEASE_CHECK: path.join(stubDir, 'release.js'),
   }, extra || {});
 }
