@@ -982,6 +982,64 @@ function releaseRepo(version, tag, opt) {
     r.status === 1 && isFail(r.out, 'catch rate') && /the harness could not be read \(reviewPathHash is not exported\)$/.test(cr(r.out)), detail(r.out));
 }
 
+// --- 8. lesson list (issue #301) -----------------------------------------------------
+// The starter lesson list (seed/toolkit-lesson-leads.txt) ships with a release
+// and reaches no one before it, so the gate checks it on release runs only: the
+// commit each pushed ref points at must list every bold lead of its own
+// LESSONS.md. An everyday run (--tests-only) prints an info line and never
+// fails, so a new lesson never turns `npm test` red between releases. Each
+// scratch release repo below commits its lessons in order and tags the last
+// commit v1.1.0, so every other release check passes and only this line decides.
+{
+  const lessonsText = (leads) => '# Lessons Learned (Index)\n\n## What I Learned\n\n' + leads.map((l) => '- **' + l + '**\n').join('');
+  const listText = (leads) => '# Bold leads, one per line.\n' + leads.map((l) => l + '\n').join('');
+  function lessonRepo(commits) {
+    const repo = releaseRepo('1.1.0', null);
+    for (const c of commits) {
+      write(repo, 'LESSONS.md', lessonsText(c.leads));
+      if (c.listed) write(repo, 'seed/toolkit-lesson-leads.txt', listText(c.listed));
+      commitAll(repo, 'lessons');
+    }
+    git(repo, ['tag', 'v1.1.0']);
+    return repo;
+  }
+  const ll = (out) => line(out, 'lesson list');
+  const info = (out) => out.split('\n').find((l) => /^ {2}info lesson list - /.test(l)) || '';
+  const lessonDetail = (out) => ll(out) || info(out) || summaryLine(out);
+
+  const stale = lessonRepo([{ leads: ['Alpha lead.', 'Beta lead.'], listed: ['Alpha lead.'] }]);
+  let r = run(stale, ['--skip-suites']);
+  check('a release run fails the lesson list and names node scripts/seed-history.js',
+    r.status === 1 && isFail(r.out, 'lesson list') && /Beta lead/.test(ll(r.out)) && !/Alpha lead/.test(ll(r.out)) && /node scripts\/seed-history\.js/.test(ll(r.out)) && (r.out.match(/^ {2}FAIL /mg) || []).length === 1, lessonDetail(r.out));
+  r = run(stale, ['--skip-suites', '--tests-only']);
+  check('a tests-only run prints an info lesson list line and still passes',
+    r.status === 0 && ll(r.out) === '' && /Beta lead/.test(info(r.out)) && !/Alpha lead/.test(info(r.out)), lessonDetail(r.out));
+
+  const listed = lessonRepo([{ leads: ['Alpha lead.', 'Beta lead.'], listed: ['Alpha lead.', 'Beta lead.'] }]);
+  r = run(listed, ['--skip-suites']);
+  check('a release run passes the lesson list when every lead is listed',
+    r.status === 0 && isOk(r.out, 'lesson list') && /HEAD: /.test(ll(r.out)), lessonDetail(r.out));
+
+  // The gate reads the commit a pushed ref points at, never the commits between:
+  // a lesson can land between releases without a rebuild, and only a tip whose
+  // list is behind fails.
+  const rebuilt = lessonRepo([
+    { leads: ['Alpha lead.', 'Beta lead.'], listed: ['Alpha lead.'] },
+    { leads: ['Alpha lead.', 'Beta lead.'], listed: ['Alpha lead.', 'Beta lead.'] },
+  ]);
+  r = run(rebuilt, ['--skip-suites']);
+  check('a release run passes the lesson list on a tip that rebuilt the list after an older commit added a lead',
+    r.status === 0 && isOk(r.out, 'lesson list'), lessonDetail(r.out));
+
+  // A repository that ships no starter list (any project but this toolkit) gets
+  // no line at all, on either kind of run.
+  const none = lessonRepo([{ leads: ['Alpha lead.'], listed: null }]);
+  const release = run(none, ['--skip-suites']);
+  const everyday = run(none, ['--skip-suites', '--tests-only']);
+  check('a repo with no starter lesson list prints no lesson list line',
+    release.status === 0 && everyday.status === 0 && !/lesson list/.test(release.out) && !/lesson list/.test(everyday.out), lessonDetail(release.out + everyday.out));
+}
+
 // --- hook routing ------------------------------------------------------------------
 const stubDir = tmp('release-hook-stubs-');
 // The tripwire stub records its arguments and the stdin it received, one JSON

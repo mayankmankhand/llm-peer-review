@@ -178,8 +178,13 @@ const fiveShipped = readmeShipped.get(sb.hashLines(['## The five files']));
 const sixShipped = readmeShipped.get(sb.hashLines(['## The six files']));
 check('a block is history once a release shipped it: the five-files heading is v7.4.0\'s, and the six-files heading is v7.6.0\'s exactly when the file\'s own tag range reaches v7.6.0 (it reads to v' + historyUpper + ')', !!fiveShipped && fiveShipped.release === 'v7.4.0' && (versionAtLeast(historyUpper, '7.6.0') ? (!!sixShipped && sixShipped.release === 'v7.6.0') : !sixShipped), JSON.stringify({ upper: historyUpper, five: fiveShipped && fiveShipped.release, six: sixShipped && sixShipped.release }));
 const shippedLeads = read(path.join(REPO, 'seed', 'toolkit-lesson-leads.txt')).split('\n').filter(l => l && !l.startsWith('#'));
-const ownLeads = sb.lessonBullets(sb.normalizeLines(read(path.join(REPO, 'LESSONS.md')))).filter(b => b.lead);
-check('seed/toolkit-lesson-leads.txt carries every lead of the toolkit\'s own index (' + shippedLeads.length + ' leads, ' + ownLeads.length + ' in the index now)', shippedLeads.length >= 140 && ownLeads.length > 0 && ownLeads.every(b => shippedLeads.some(l => sb.leadKey(l) === sb.leadKey(b.lead))), ownLeads.filter(b => !shippedLeads.some(l => sb.leadKey(l) === sb.leadKey(b.lead))).map(b => b.lead).join(' | '));
+// Whether the list holds each lead of the toolkit's own index is a release
+// question, not an everyday one: the list reaches no project before a release,
+// and release step 1 rebuilds it. The release gate's `lesson list` line checks
+// it on release runs (scripts/release-check.js, check 8, issue #301); here it
+// failed the next full run after every new lesson. What stays here is the list's
+// own shape: it still holds the toolkit's leads, and none of them is blank.
+check('seed/toolkit-lesson-leads.txt still holds the toolkit\'s leads (' + shippedLeads.length + ')', shippedLeads.length >= 140, String(shippedLeads.length));
 check('no shipped lead is blank once its closing period is set aside (a blank pattern would match every line)', shippedLeads.every(l => sb.leadKey(l) !== ''));
 
 console.log('');
