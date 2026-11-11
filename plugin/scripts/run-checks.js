@@ -136,6 +136,22 @@
 //             also held against its after expect: one that already meets it
 //             fails ("it already meets its after expect"), not retried,
 //             because a pass after the work would then prove nothing (M17).
+//             An after phase of a step with a target or a guard first reads
+//             the step's before record the way --tally reads it (issue #290):
+//             when that record cannot prove the step (none, one that cannot
+//             count, a target that did not show its stated failure, a row that
+//             ran another command, expect or role than the plan names now), the
+//             run is refused with nothing run, the after folder untouched, and
+//             one line on stderr naming each reason and the record. The refusal
+//             keeps a record of the miss in reports/checks/<plan file name>/
+//             step-<N>/missed.json (plan, step, time, reasons), written through
+//             a path with no link on it like every record; a later refusal of
+//             the same step keeps the first. A guard already failing before the
+//             work is never a refusal: it is an older check, listed as before.
+//             The skipped before run used to surface only at the tally, after
+//             the work was committed, when the step could no longer be proved;
+//             refused here, the work is still uncommitted and the step can be
+//             repaired by taking its before run with the work set aside.
 //   --tally   reads each step's two results.json files and gives each step a
 //             status: proved (every target passed its before expect and its
 //             after expect without a flake, every guard that passed before
@@ -152,7 +168,10 @@
 //             command recorded (an older runner's) is matched by its id, and
 //             the step's `notes` say so. A flaky guard and a guard already
 //             failing before are listed, not counted against the step: they
-//             are older checks, a finding for review (M17). The plan's
+//             are older checks, a finding for review (M17). A step with a before
+//             record but no after record that counts (an after run its before
+//             record could not prove writes none) still gets the before
+//             record's own reasons, so the tally says why. The plan's
 //             problems outside any step are listed, and summary.problems
 //             counts them.
 // Full runs (issue #248). A full test run that doubled in five days raised
@@ -194,8 +213,9 @@
 // The plan must be a regular file inside the project, read through realpath.
 // Exit 0 once the plan was read (the statuses and problems are the result);
 // exit 1, with one line on stderr, for a plan outside the project, unreadable
-// or not a regular file, an unknown step, a lint problem (phase runs), a link
-// on the record path, or a bad argument.
+// or not a regular file, an unknown step, a lint problem (phase runs), an after
+// run its step's before record cannot prove, a link on the record path, or a
+// bad argument.
 //
 // Exit code 0 whenever the checks file validated, fails and errors included:
 // the verdicts are the result. Exit 1, with one line on stderr and nothing run
@@ -1387,7 +1407,8 @@ const USAGE = 'usage: node run-checks.js --checks <file.json> --out <dir> [--tim
   + 'plan mode: node run-checks.js --plan <plan.md> (--lint | --tally | --step <N> --phase before|after [--timeout <ms>])\n'
   + '  --lint            every check line in the plan that would not run, as problems; and missingPaths,\n'
   + '                    each file path the plan names that is not in the project, with its line (advisory)\n'
-  + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/\n'
+  + '  --step --phase    run one step\'s checks with that phase\'s expects into reports/checks/<plan>/step-<N>/<phase>/;\n'
+  + '                    an after run is refused, nothing run, when the step\'s before record cannot prove it\n'
   + '  --tally           each step: proved, unproved (with reasons), noTarget, missing or problem\n'
   + 'history: node run-checks.js --history [--since <time>]\n'
   + '  --history         what the full test step cost: runs, skipped, totalMs, latestMs, baselineMs, grew\n'
@@ -2222,6 +2243,19 @@ function runPlanPhase(opts, cwd) {
     throw new Error((parsed.problems.length ? 'the plan' : 'step ' + st.step) + ' has lint problems, so nothing ran (fix the plan, then run --lint): '
       + problems.map((p) => 'line ' + p.line + ': ' + p.problem).join('; '));
   }
+  // An after run its step's before record cannot prove is refused before
+  // anything runs or the after folder is cleared, and the miss is kept
+  // (issue #290). The work is still uncommitted here, so the step can still be
+  // repaired; found later by the tally, after the commit, it could not.
+  if (opts.phase === 'after' && (st.targets.length || st.guards.length)) {
+    const reasons = beforeRefusal(plan, st, cwd);
+    if (reasons.length) {
+      const beforeFile = path.join(recordRel(plan.base, st.step, 'before'), 'results.json');
+      throw new Error('step ' + st.step + "'s before record cannot prove it, so its after run was refused and nothing ran: "
+        + reasons.join('; ') + ' (' + beforeFile + '). ' + recordMiss(plan, st, reasons, cwd)
+        + " Repair it at the step: set the step's work aside, take its before run, put the work back, then run after again.");
+    }
+  }
   // A before run also holds each target's output against its after expect,
   // which must not hold yet (`notYet`, see attempt).
   const checks = st.targets.map((t) => ({ id: t.id, check: t.check, expect: opts.phase === 'before' ? t.before.value : t.after.value, role: 'target',
@@ -2229,6 +2263,41 @@ function runPlanPhase(opts, cwd) {
     .concat(st.guards.map((g) => ({ id: g.id, check: g.check, expect: g.expect.value, role: 'guard' })));
   const outDir = freshRecordDir(recordRel(plan.base, st.step, opts.phase), cwd);
   return runAll(checks, { timeout: opts.timeout, rerunFailures: true }, cwd, outDir, { plan: plan.rel, step: st.step, phase: opts.phase });
+}
+
+// Why a step's before record cannot prove it (issue #290), read exactly as
+// --tally reads that record: none, one that cannot count, or judgeBefore's
+// reasons. An empty list means the after run may go ahead.
+function beforeRefusal(plan, st, cwd) {
+  const before = readRecord(cwd, recordRel(plan.base, st.step, 'before'), { plan: plan.rel, step: st.step, phase: 'before' });
+  if (!before) return ['no before record'];
+  if (before.why) return ['the before record cannot count: ' + before.why];
+  return judgeBefore(st, before.rec).reasons;
+}
+
+// Keep a record of a refused after run beside the step's phase folders
+// (issue #290): reports/checks/<plan>/step-<N>/missed.json holds the plan,
+// step, time and reasons, so the tally counts misses and their repairs without
+// the session having to report them. The first miss is kept: the file is made
+// only when absent ('wx', which also never follows a link planted at its
+// name), and like every record it is written only through a path with no link
+// on it. Returns the sentence the refusal adds; a miss that could not be kept
+// is named there instead of stopping the refusal.
+function recordMiss(plan, st, reasons, cwd) {
+  const rel = path.join('reports', 'checks', plan.base, 'step-' + st.step);
+  const notKept = (why) => 'The miss was not recorded: ' + why + '.';
+  const bad = linkOnRecordPath(cwd, rel);
+  if (bad) return notKept(bad + ' is a link or not a folder');
+  const abs = path.join(cwd, rel);
+  try {
+    fs.mkdirSync(abs, { recursive: true });
+    const root = realpathOrNull(cwd);
+    if (linkOnRecordPath(cwd, rel) || !root || realpathOrNull(abs) !== path.join(root, rel)) return notKept(rel + ' is a link or not a folder');
+    fs.writeFileSync(path.join(abs, 'missed.json'), JSON.stringify({ plan: plan.rel, step: st.step, at: new Date().toISOString(), reasons }) + '\n', { flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'EEXIST') return notKept(e.message);
+  }
+  return 'The miss is kept in ' + path.join(rel, 'missed.json') + '.';
 }
 
 // A phase's results.json: null when the phase never ran, { why } when a file
@@ -2266,42 +2335,79 @@ function drifted(row, check, expect, role) {
   return row.check !== check || canonical(row.expect) !== canonical(expect) || (row.role !== undefined && row.role !== role);
 }
 
+// A record's rows by id. A Map, so an id such as "constructor" or "__proto__"
+// is never read off a plain object's prototype as a result that never ran.
+const rowsById = (rec) => new Map(rec.checks.map((c) => [c.id, c]));
+const changedReason = (kind, id, phase) => kind + " '" + id + "' ran a different command, expect or role " + phase + ' than the plan names now (run the phase again)';
+const flakeNote = (c) => (c.flaky ? ', flaky' : '');
+// The note for a record whose rows name no command (an older runner wrote
+// them), or null.
+function bareNote(st, rows, phase) {
+  const bare = st.targets.concat(st.guards).filter((c) => rows.has(c.id) && rows.get(c.id).check === undefined).map((c) => c.id);
+  return bare.length ? 'the ' + phase + ' record names no command for ' + bare.join(', ') + ' (an older runner wrote it), so those are matched by id alone' : null;
+}
+
+// The before half of a step's judgment (issue #290). --tally and an after
+// run's refusal both read a before record through this one function, so a step
+// the after run refuses is always unproved in the tally for the same reason.
+// For each check, by id: `reason`, why its before row cannot count (no row, a
+// row that ran another command, expect or role than the plan names now, or a
+// target that did not show its stated failure), or null; and `broken`, a guard
+// whose row failed, an older check already failing before the work that is
+// listed and never counted against the step. `reasons` holds every reason in
+// plan order, targets first, and `broken` the ids of those guards.
+function judgeBefore(st, before) {
+  const rows = rowsById(before);
+  const out = { byId: new Map(), reasons: [], broken: [], notes: [] };
+  const note = bareNote(st, rows, 'before');
+  if (note) out.notes.push(note);
+  const judge = (kind, c, expect) => {
+    const row = rows.get(c.id);
+    let reason = null;
+    let broken = false;
+    if (!row) reason = kind + " '" + c.id + "' has no before result";
+    else if (drifted(row, c.check, expect, kind)) reason = changedReason(kind, c.id, 'before');
+    else if (row.verdict !== 'pass') {
+      if (kind === 'target') reason = "target '" + c.id + "' did not show its stated failure before (" + row.verdict + flakeNote(row) + ')';
+      else broken = true;
+    }
+    out.byId.set(c.id, { reason, broken });
+    if (reason) out.reasons.push(reason);
+    if (broken) out.broken.push(c.id);
+  };
+  for (const t of st.targets) judge('target', t, t.before.value);
+  for (const g of st.guards) judge('guard', g, g.expect.value);
+  return out;
+}
+
 // Judge one step's two records into row.reasons, row.brokenBefore and
 // row.notes: each target showed its stated failure before and passed after,
 // each guard that passed before passed after, every row ran what the plan
-// names now, and the before run is older than the after run.
+// names now, and the before run is older than the after run. The before half
+// is judgeBefore's; the reasons keep their order, each target's before reason
+// beside its after reason.
 function judgeRecords(st, before, after, row) {
   const reasons = row.reasons;
-  // A Map, so an id such as "constructor" or "__proto__" is never read off a
-  // plain object's prototype as a result that never ran.
-  const byId = (rec) => new Map(rec.checks.map((c) => [c.id, c]));
-  const recorded = { before: byId(before), after: byId(after) };
-  for (const phase of ['before', 'after']) {
-    const bare = st.targets.concat(st.guards).filter((c) => recorded[phase].has(c.id) && recorded[phase].get(c.id).check === undefined).map((c) => c.id);
-    if (bare.length) row.notes.push('the ' + phase + ' record names no command for ' + bare.join(', ') + ' (an older runner wrote it), so those are matched by id alone');
-  }
-  const b = recorded.before;
-  const a = recorded.after;
-  const changed = (kind, id, phase) => kind + " '" + id + "' ran a different command, expect or role " + phase + ' than the plan names now (run the phase again)';
-  const flake = (c) => (c.flaky ? ', flaky' : '');
+  const b = judgeBefore(st, before);
+  const a = rowsById(after);
+  row.notes.push(...b.notes);
+  const afterNote = bareNote(st, a, 'after');
+  if (afterNote) row.notes.push(afterNote);
   for (const t of st.targets) {
-    const bt = b.get(t.id);
+    const bt = b.byId.get(t.id);
     const at = a.get(t.id);
-    if (!bt) reasons.push("target '" + t.id + "' has no before result");
-    else if (drifted(bt, t.check, t.before.value, 'target')) reasons.push(changed('target', t.id, 'before'));
-    else if (bt.verdict !== 'pass') reasons.push("target '" + t.id + "' did not show its stated failure before (" + bt.verdict + flake(bt) + ')');
+    if (bt.reason) reasons.push(bt.reason);
     if (!at) reasons.push("target '" + t.id + "' has no after result");
-    else if (drifted(at, t.check, t.after.value, 'target')) reasons.push(changed('target', t.id, 'after'));
-    else if (at.verdict !== 'pass') reasons.push("target '" + t.id + "' did not pass after (" + at.verdict + flake(at) + ')');
+    else if (drifted(at, t.check, t.after.value, 'target')) reasons.push(changedReason('target', t.id, 'after'));
+    else if (at.verdict !== 'pass') reasons.push("target '" + t.id + "' did not pass after (" + at.verdict + flakeNote(at) + ')');
   }
   for (const g of st.guards) {
-    const bg = b.get(g.id);
+    const bg = b.byId.get(g.id);
     const ag = a.get(g.id);
-    if (!bg) { reasons.push("guard '" + g.id + "' has no before result"); continue; }
-    if (drifted(bg, g.check, g.expect.value, 'guard')) { reasons.push(changed('guard', g.id, 'before')); continue; }
-    if (bg.verdict !== 'pass') { row.brokenBefore.push(g.id); continue; }
+    if (bg.reason) { reasons.push(bg.reason); continue; }
+    if (bg.broken) { row.brokenBefore.push(g.id); continue; }
     if (!ag) reasons.push("guard '" + g.id + "' has no after result");
-    else if (drifted(ag, g.check, g.expect.value, 'guard')) reasons.push(changed('guard', g.id, 'after'));
+    else if (drifted(ag, g.check, g.expect.value, 'guard')) reasons.push(changedReason('guard', g.id, 'after'));
     else if (ag.verdict !== 'pass' && !ag.flaky) reasons.push("guard '" + g.id + "' failed after");
   }
   if (!(Date.parse(before.at) < Date.parse(after.at))) reasons.push('the before record is not older than the after record');
@@ -2342,6 +2448,15 @@ function tallyPlan(opts, cwd) {
           else if (r.why) row.reasons.push('the ' + phase + ' record cannot count: ' + r.why);
         }
         if (before && before.rec && after && after.rec) judgeRecords(st, before.rec, after.rec, row);
+        else if (before && before.rec) {
+          // No after record that counts: an after run its before record could
+          // not prove writes none (#290), so the before record's own reasons
+          // say why the step is unproved.
+          const b = judgeBefore(st, before.rec);
+          row.reasons.push(...b.reasons);
+          row.brokenBefore.push(...b.broken);
+          row.notes.push(...b.notes);
+        }
       }
       if (st.noTarget !== null) {
         row.reason = st.noTarget;
@@ -2409,5 +2524,8 @@ function main(argv) {
 
 // fingerprint is also the toolkit repo's release gate's (issue #249): one
 // definition of "the same files" for a skipped test run and a reused pass.
-module.exports = { tokenize, guardCheck, rebuildCommand, decide, canonical, drifted, ALLOW, main, parsePlan, fingerprint };
+// readPlan, judgeBefore, beforeRefusal and tallyPlan let a replay judge real
+// records with nothing run and nothing written (issue #290).
+module.exports = { tokenize, guardCheck, rebuildCommand, decide, canonical, drifted, ALLOW, main, parsePlan, fingerprint,
+  readPlan, judgeBefore, beforeRefusal, tallyPlan };
 if (require.main === module) main(process.argv.slice(2));
