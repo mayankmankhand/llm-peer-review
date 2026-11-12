@@ -164,6 +164,109 @@ else {
   check('every relative link and anchor in the docs resolves', broken.length === 0, broken.length + ' broken: ' + broken.join('; '));
 }
 
+// ---- upgrade-check counts (issue #306) -------------------------------------------
+
+// Three docs say in words how many upgrade checks run on every upgrade and how
+// many run once. Nothing else ties those words to the conventions file, so they
+// went stale whenever a check's schedule moved (#305 left "ten" and "two"
+// behind). The counts come from the `- **Runs:**` line inside each `### C-<n>:`
+// block only: the format template near the top of conventions.md matches the
+// same pattern, and a plain search counts it too (12 and 5 for 11 and 4).
+function conventionCounts(text) {
+  const blocks = text.split(/^### /m).slice(1).filter(b => /^C-\d+:/.test(b));
+  return {
+    every: blocks.filter(b => /^- \*\*Runs:\*\*\s*every upgrade\b/m.test(b)).length,
+    once: blocks.filter(b => /^- \*\*Runs:\*\*\s*once\b/m.test(b)).length,
+  };
+}
+
+// The count phrases, found by their wording rather than their line number, so
+// an edit above them does not break the test. Each must occur exactly once in
+// its file: a phrase that is missing (the sentence was reworded) or doubled
+// fails by its name, so a count can never drop out of the check unnoticed.
+// Deliberately not a scan of every doc: AGENT-SETUP.md's v8.0.20 notes say
+// "two run-once checks" as history, which is true of that release.
+const COUNT_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+const COUNT_PHRASES = [
+  { file: 'docs/CONVENTIONS.md', kind: 'every', name: '"<n> checks run on every upgrade"', re: /\b([A-Za-z]+|\d+) checks run on every upgrade\b/g },
+  { file: 'docs/CONVENTIONS.md', kind: 'once', name: '"<n> are run-once checks"', re: /\b([A-Za-z]+|\d+) are run-once checks\b/g },
+  { file: 'docs/CONVENTIONS.md', kind: 'once', name: '"The <n> run-once checks above"', re: /\bThe ([A-Za-z]+|\d+) run-once checks above\b/g },
+  { file: 'docs/INSTALL.md', kind: 'every', name: '"<n> of its checks run on every upgrade"', re: /\b([A-Za-z]+|\d+) of its checks run on every upgrade\b/g },
+  { file: 'docs/INSTALL.md', kind: 'once', name: '"and the <n> run-once checks:"', re: /\band the ([A-Za-z]+|\d+) run-once checks:/g },
+  { file: 'AGENT-SETUP.md', kind: 'every', name: '"<n> of its checks run on every upgrade"', re: /\b([A-Za-z]+|\d+) of its checks run on every upgrade\b/g },
+];
+
+// One string per problem, each starting `<file>:<line>:` (a wrong count) or
+// `<file>: count phrase not found|found N times` (a lost or doubled phrase).
+function docCountProblems(texts, counts) {
+  const problems = [];
+  for (const p of COUNT_PHRASES) {
+    const text = texts[p.file] || '';
+    const hits = [...text.matchAll(p.re)];
+    if (hits.length !== 1) {
+      problems.push(p.file + ': count phrase ' + (hits.length === 0 ? 'not found' : 'found ' + hits.length + ' times') + ': ' + p.name);
+      continue;
+    }
+    const word = hits[0][1];
+    const said = /^\d+$/.test(word) ? Number(word) : COUNT_WORDS.indexOf(word.toLowerCase());
+    if (said !== counts[p.kind]) {
+      const line = text.slice(0, hits[0].index).split('\n').length;
+      problems.push(p.file + ':' + line + ': says "' + word + '" ' + (p.kind === 'every' ? 'every-upgrade' : 'run-once') +
+        ' checks, but conventions.md marks ' + counts[p.kind]);
+    }
+  }
+  return problems;
+}
+
+(function upgradeCountCases() {
+  const CONV = '.claude/skills/shared/conventions.md';
+  const DOCS = ['docs/CONVENTIONS.md', 'docs/INSTALL.md', 'AGENT-SETUP.md'];
+  const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const REAL_CASE = '306: the upgrade-check counts in the docs match the conventions file';
+  let counts, texts;
+  try {
+    counts = conventionCounts(read(CONV));
+    texts = {};
+    for (const rel of DOCS) texts[rel] = read(rel);
+  } catch (e) {
+    check(REAL_CASE, false, 'could not read the files: ' + e.message);
+    return;
+  }
+  const real = docCountProblems(texts, counts);
+  check(REAL_CASE,
+    counts.every > 0 && counts.once > 0 && real.length === 0,
+    'conventions.md: ' + counts.every + ' every upgrade, ' + counts.once + ' once; ' + real.join('; '));
+
+  // Each count phrase changed in turn, in an in-memory copy of its doc: every
+  // one must be reported with its file and line, so no phrase's anchor can rot
+  // into a pattern that matches nothing while the case stays green.
+  const SAMPLES = [
+    ['docs/CONVENTIONS.md', /Eleven(?= checks run on every upgrade)/],
+    ['docs/CONVENTIONS.md', /Four(?= are run-once checks)/],
+    ['docs/CONVENTIONS.md', /four(?= run-once checks above)/],
+    ['docs/INSTALL.md', /Eleven(?= of its checks run on every upgrade)/],
+    ['docs/INSTALL.md', /four(?= run-once checks:)/],
+    ['AGENT-SETUP.md', /eleven(?= of its checks run on every upgrade)/],
+  ];
+  const missed = [];
+  for (const [rel, re] of SAMPLES) {
+    const m = re.exec(texts[rel]);
+    if (!m) { missed.push(rel + ': no sample sentence ' + re); continue; }
+    const line = texts[rel].slice(0, m.index).split('\n').length;
+    const copy = Object.assign({}, texts, { [rel]: texts[rel].replace(re, 'nineteen') });
+    const found = docCountProblems(copy, counts);
+    if (!found.some(p => p.startsWith(rel + ':' + line + ':'))) missed.push(rel + ':' + line + ' not reported (got: ' + (found.join('; ') || 'nothing') + ')');
+  }
+  check('306: a doc copy with one count changed fails, naming the file and line', missed.length === 0, missed.join('; '));
+
+  // A reworded sentence must not pass silently: a copy without one phrase
+  // fails by the phrase's name.
+  const gone = Object.assign({}, texts, { 'AGENT-SETUP.md': texts['AGENT-SETUP.md'].replace(/of its checks run on every upgrade/, 'of its checks run each time') });
+  const lost = docCountProblems(gone, counts);
+  check('306: a doc copy without a count phrase fails by the phrase\'s name', lost.some(p => /^AGENT-SETUP\.md: count phrase not found/.test(p)), lost.join('; ') || 'nothing reported');
+})();
+
 // ---- summary -------------------------------------------------------------------
 
 console.log('');
