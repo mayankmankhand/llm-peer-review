@@ -264,6 +264,7 @@ Hold a cheaper model to a known-answer case taken from a real miss; an easy fixt
 Hybrid approach beats all-or-nothing.
 In `git status --porcelain -z`, a rename's old name follows when either column says R, so check both.
 In `git status --porcelain -z`, the old name of a rename follows whichever column says R: an intent-to-add file renamed in the working tree shows ` R`, and checking only the first column garbles the next path.
+In a numbered step, put an explanation after the step's last action, never between two actions.
 In a scripted edit, pass `String.replace` a function: a `$'` in the new text splices the rest of the file in.
 In an unattended run, one denied call can make the model skip a later, different call without trying it; tell test sessions to judge each call on its own.
 In this shell `grep` is ugrep, which reads a `$` inside a pattern as an anchor: grep for literal text with a `$` using `-F`.
