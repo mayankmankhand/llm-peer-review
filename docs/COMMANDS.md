@@ -137,6 +137,8 @@ All four key on the branch's **cut point**, the commit it was cut from, which `/
 
 **Landings made another way.** Each run first checks every landing since its last run, so a PR merged with the host's merge button is still checked, one step later. A squash made with the button is checked only when its PR carries the `Cut from:` line `/document` writes, and then only for other work it removed: a squash keeps no branch to compare its own lines against. A rebase made with the button is listed as not checkable, and a squash made with GitLab's button looks like an ordinary commit and is not seen.
 
+**The map, after a landing.** Once a run has landed something and your local main holds it, `/merge` checks the codebase map. When the map is missing or 10 or more commits behind, it asks you once whether to refresh it with `/index`, which runs several helpers at once. When a host landing leaves your local main behind until you pull, it asks nothing and says to run `/index` after the pull. `/document` no longer refreshes the map, because it runs before the work lands, usually in a worktree.
+
 It is human-triggered and never chained into: which PR lands first is your call.
 
 Full prompt: [`.claude/commands/merge.md`](../.claude/commands/merge.md) | Rules: [`.claude/skills/shared/merge-rules.md`](../.claude/skills/shared/merge-rules.md)
@@ -203,7 +205,7 @@ Full guide: [`.claude/skills/writing/SKILL.md`](../.claude/skills/writing/SKILL.
 
 ### `/index` - the codebase map
 
-Writes `CODEBASE_MAP.md`, a short map of the project that `/explore`, `/create-plan` and `/pair-debug` read so they know where things live. Each module in the map lists the files it covers on a `**Files:**` line. `/document` refreshes the map when it is 10 or more commits behind.
+Writes `CODEBASE_MAP.md`, a short map of the project that `/explore`, `/create-plan` and `/pair-debug` read so they know where things live. Each module in the map lists the files it covers on a `**Files:**` line. `/explore`, `/create-plan` and `/pair-debug` refresh the map on their own when it is missing or 10 or more commits behind, and `/merge` asks whether to refresh it after a landing; `/document` does not touch it.
 
 Once a map exists, `/index` refreshes it rather than rebuilding it. It asks git which files changed since the commit the map was made at, sends only the modules that cover those files, plus any new files, to a helper, and copies every other part of the map across unchanged. On this repository a refresh took one helper and about an eighth of the tokens of a full rebuild. `/index full` rebuilds the whole map.
 

@@ -21,7 +21,7 @@ Machine:  /execute -> per step: its check fails first, then passes (M17)
                       red after 2 rounds -> revert to last green -> page (M5)
           /document (receipts, M8) -> commit per logical unit
           -> pre-push tripwire (M11) -> push -> PR
-          -> /index if 10+ commits behind (M12)
+Human:    /merge -> /index on your yes if 10+ commits behind (M12)
 Human:    pages only (M1): outside-the-repo facts, intent reversals,
           tripwire hits, exhausted fix rounds
 Chaining: automatic per M14; "no chaining" runs one stage and stops
@@ -43,7 +43,7 @@ Opt-out:  "report only" on any run restores report-first behavior for that run (
 | `/peer-review` | **Human-triggered, never chained into, auto-processed** | It is itself an audit step: evaluating external feedback against the codebase. The human filtering it used to require is exactly what M2 mechanizes; page criterion M1 still applies to what survives. |
 | `/merge` | **Human-triggered, never chained into, auto-checked** | Which PR lands first, and whether a removed line is kept on purpose, are the human's calls (issue #232: a conflict fix made while landing one of several parallel branches dropped work it never saw, and a squash hid it). Updating the branch, fixing its conflicts and the four checks (tests, rules 1 to 3 keyed on the recorded cut point) run on their own. Any flag, failing check or contradiction stops that PR before it lands and pages (M1); a landing on the host leaves the machine and asks first (M9). |
 | `/document` | **Auto, chained, receipts required** | Documentation updates are mechanical, but generated bookkeeping drifts from reality (E1: plans marked done for unbuilt work in 5 projects). Every claim of work done carries a receipt (M8). Commit and push run per M4 and M11. |
-| `/index` | **Auto, conditional** | Pure generation from the codebase. Runs when `CODEBASE_MAP.md` is 10+ commits behind (M12); skipped otherwise. |
+| `/index` | **Auto, conditional** | Pure generation from the codebase. Runs on its own at the start of `/explore`, `/create-plan` and `/pair-debug` when `CODEBASE_MAP.md` is missing or 10+ commits behind, and on your yes at the close of `/merge` (M12); skipped otherwise. |
 | `/pair-debug` | **Human** | Debugging is interactive by nature: the bug report, reproduction knowledge, and "that is not what I saw" judgment live with the user. Investigation stays a conversation; fixes that come out of it flow through M3 and M6. |
 
 **Trigger is not the same as gate.** A verdict of **Human** means a human changes the outcome at that stage, not that a human must type the command. The two were fused in the original table, which is why every transition stayed manual even after #147 made the loop auto. M14 separates them: `/explore` and `/pair-debug` are typed, plan approval is the gate, the debates and directly-typed `/review-*` runs stay human-triggered, and the four M14 transitions chain.
@@ -114,7 +114,7 @@ Saying "report only" on any invocation restores report-first behavior for that r
 Push runs automatically after a pre-push check, hardened into a script by #149 (`.claude/scripts/pre-push-check.js`): a per-commit secret scan of what the push's destination lacks (per-commit because an added-then-removed secret is invisible in the endpoint diff yet still publishes in history; from 7.2.0 the call names the destination as `<remote> <ref>`, because scanning HEAD's upstream missed commits whenever a push went to a different branch, #178), a never-push file check, and a settings diff (from #243, only of what the push adds over the remote's default branch: a change carried in from that branch was reviewed when it landed there, and re-alarming on it trained the override reflex). Silent when clean; a hit blocks the push and pages (E1: personal data sat tracked for weeks; a credential exposure forced a history rewrite; subagents silently added permission grants caught only by a human pre-commit diff). The prose checks remain the fallback when the script is absent or errors.
 
 **M12. `/index` refresh trigger.**
-`/index` runs automatically when `CODEBASE_MAP.md` is 10 or more commits behind HEAD, and is skipped otherwise. Single-commit drift is noise.
+`CODEBASE_MAP.md` is refreshed when it is missing or 10 or more commits behind HEAD, and the refresh is skipped otherwise. Single-commit drift is noise. `/explore`, `/create-plan` and `/pair-debug` read the map, so they run `/index` automatically at their start. `/merge` asks once at its close whether to run it, after a landing has put new work on main. `/document` never runs it (#303): it runs before the work lands, mostly in a side copy, where a refreshed map describes work main does not have yet and is deleted with the side copy.
 
 **M13. Scope of the rewrite.**
 This map governs the toolkit's rules files and skills (the 17 files in #147). The user-level `~/CLAUDE.md` outside this repo stays conservative: projects without the toolkit's audit-and-verify machinery keep report-first. Toolkit projects get the new behavior through the toolkit's own rules files, delivered by the normal update path.

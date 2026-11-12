@@ -18,7 +18,7 @@ Machine:  /execute -> per step: its check fails first, then passes (M17)
                       red after 2 rounds -> revert to last green -> page (M5)
           /document (receipts, M8) -> commit per logical unit
           -> pre-push tripwire (M11) -> push -> PR
-          -> /index if 10+ commits behind (M12)
+Human:    /merge -> /index on your yes if 10+ commits behind (M12)
 Human:    pages only (M1) + always-ask actions (M9)
 Chaining: automatic per M14; "no chaining" runs one stage and stops
 Opt-out:  "report only" on any run restores report-first for that run (M10)

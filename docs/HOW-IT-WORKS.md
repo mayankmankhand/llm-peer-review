@@ -81,7 +81,7 @@ More: [How key commands work](COMMANDS.md#how-key-commands-work).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/diagrams/document-dark.svg">
-  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, running index when the map is missing or stale; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR, or saves its text for merge; writes the cycle page of what changed and why; and ends the line." width="719">
+  <img src="images/diagrams/document-light.svg" alt="Inside document: it follows review; updates README, CLAUDE.md, CHANGELOG, lessons and the design profile, leaving the map for merge to offer once the work lands; keeps a correction ledger of what you corrected on your machine, saving nothing until you accept it; commits; in a worktree pushes and opens a PR, or saves its text for merge; writes the cycle page of what changed and why; and ends the line." width="719">
 </picture>
 
 - **The docs catch up with the code:** README, CLAUDE.md, the changelog, the lessons file and the design profile.
@@ -168,7 +168,7 @@ One note on the toolkit's own tests: in October 2026 its maintainers ran measure
 | `/tk:create-plan` | Turn an explored idea into a step plan with status tracking |
 | `/tk:execute` | Build it step by step against the plan |
 | `/tk:review` | See what changed and run the right reviewers |
-| `/tk:document` | Bring the docs, lessons and map up to date after shipping |
+| `/tk:document` | Bring the docs and lessons up to date after shipping |
 | `/tk:merge` | Land finished worktree pull requests in your order, with proof nothing was lost |
 | `/tk:worktree` | Work on features in parallel, or keep an experiment apart |
 | `/tk:index` | Build or rebuild `CODEBASE_MAP.md` |
